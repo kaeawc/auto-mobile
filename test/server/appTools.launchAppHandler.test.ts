@@ -54,6 +54,25 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     appTools.clear();
   });
 
+  test("awaits pre-arm at the registered launch hook before launching", async () => {
+    const order: string[] = [];
+    appTools.configure("launchApp", {
+      prearmNetwork: async (selected, args) => {
+        expect(selected.deviceId).toBe(device.deviceId);
+        expect(args.appId).toBe(appId);
+        order.push("watch");
+      },
+      createLaunchApp: () => ({
+        execute: async () => {
+          order.push("launch");
+          return { success: true, packageName: appId, observation: observationForApp(appId) };
+        },
+      }),
+    });
+    await ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, { appId });
+    expect(order).toEqual(["watch", "launch"]);
+  });
+
   test("an already-foreground app is a success with alreadyForeground, not an error", async () => {
     stubLaunch({
       success: true,

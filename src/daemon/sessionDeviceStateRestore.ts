@@ -296,6 +296,17 @@ export class SessionDeviceStateRestore {
     return this.teardown.drainReleaseTeardown(sessionId, session, operation, options);
   }
 
+  hasPendingIme(deviceId: string): boolean {
+    return this.teardown.hasPendingIme(deviceId);
+  }
+
+  restorePendingImeForRebind(
+    deviceId: string,
+    mayRestore: () => boolean,
+  ): Promise<{ pending: null }> {
+    return this.teardown.restorePendingImeForRebind(deviceId, mayRestore);
+  }
+
   runUnderTeardownShield(
     start: () => Promise<readonly ReleaseTeardownStage[]>,
     /** Aborts the shield early: the release was forced and no longer holds the device (#11058). */
@@ -322,8 +333,16 @@ export class SessionDeviceStateRestore {
   beginIosAppNetworkRule(
     session: Session,
     target: { udid: string; bundleId: string },
+    options?: { watch?: boolean },
   ): IosAppNetworkRuleCommandContext {
-    return this.network.beginIosAppNetworkRule(session, target);
+    return this.network.beginIosAppNetworkRule(session, target, options);
+  }
+
+  releaseIosAppWatchFor(
+    session: Session,
+    target: { udid: string; bundleId: string },
+  ): Promise<void> {
+    return this.network.releaseIosAppWatchFor(session, target);
   }
 
   prepareIosAppNetworkReset(

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run the opt-in headless browser check of the prototype web page's reference
-# specs (#16346) in Chromium, Firefox and WebKit (#16459), and the chromeless
-# web still against the Android renderer's goldens in Chromium (#16534).
+# specs (#16346) in Chromium, Firefox and WebKit (#16459), and the
+# web still against Android and iOS renderer goldens in Chromium (#16534, #16535),
+# and un-padded inlined image boxes against their layout golden in Chromium (#17716).
 #
 #   bash scripts/prototype/web-screenshots.sh                    # every engine
 #   bash scripts/prototype/web-screenshots.sh --engine chromium  # only Chromium
@@ -13,18 +14,20 @@
 # The integration lane discovers the tests but skips them; this runner enables
 # them. Every engine runs the behavioural assertions; only Chromium is compared
 # with (or, with --update, rewrites) the goldens, and only Chromium runs the
-# Android parity check. It needs the browsers the pinned playwright-core can
+# Android and iOS parity checks. It needs the browsers the pinned playwright-core can
 # launch: install them once with
 # `node_modules/.bin/playwright-core install --only-shell chromium firefox webkit`
 # (add --with-deps on a fresh Linux host). On a mismatch the actual screenshots
 # and pixel diffs land in AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT (default
 # scratch/prototype-web-screenshots); Firefox and WebKit captures go to its
-# firefox/ and webkit/ subdirectories, Android parity captures to android-parity/.
+# firefox/ and webkit/ subdirectories, Android and iOS parity captures to android-parity/ and ios-parity/.
 
 set -euo pipefail
 
 readonly PAGE_TEST="test/features/prototype/web/webScreenshots.integration.test.ts"
+readonly IOS_PARITY_TEST="test/features/prototype/web/webIosParity.integration.test.ts"
 readonly PARITY_TEST="test/features/prototype/web/webAndroidParity.integration.test.ts"
+readonly IMAGE_LAYOUT_TEST="test/features/prototype/web/webImageLayout.integration.test.ts"
 
 usage() {
   cat <<'EOF'
@@ -39,8 +42,11 @@ webkit; repeatable) limits the run to those engines; the default is all three.
 When Chromium runs, it also renders each spec that has an Android golden
 chromeless and fails when it differs from that golden in more pixels than its
 budget in test/fixtures/prototype-web/android-parity-budgets.json allows.
+It also compares the iOS-skinned still with the cropped iPhone 16 viewer goldens
+using test/fixtures/prototype-web/ios-parity-budgets.json (Chromium only),
+and un-padded inlined image boxes with test/fixtures/prototype-web/image-layout-golden.json.
 
---update rewrites the web goldens and lowers each parity budget to what was
+--update rewrites the web goldens (and the image layout golden) and lowers each parity budget to what was
 measured. A budget only rises with --allow-grow.
 EOF
 }
@@ -89,7 +95,7 @@ fi
 
 tests=("${PAGE_TEST}")
 if [[ -z "${engines}" || ",${engines}," == *",chromium,"* ]]; then
-  tests+=("${PARITY_TEST}")
+  tests+=("${PARITY_TEST}" "${IOS_PARITY_TEST}" "${IMAGE_LAYOUT_TEST}")
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

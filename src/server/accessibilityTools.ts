@@ -4,7 +4,10 @@ import { z } from "zod/v4";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
 import { ActionableError, BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import { TalkBackToggle } from "../features/accessibility/TalkBackToggle";
+import {
+  TALKBACK_PROMPT_SETTLE_MS,
+  TalkBackToggle,
+} from "../features/accessibility/TalkBackToggle";
 import { VoiceOverToggle } from "../features/accessibility/VoiceOverToggle";
 import {
   FeatureFlagService,
@@ -20,7 +23,7 @@ import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContex
 
 /** The only daemon read these handlers make: the session that records screen-reader state. */
 type SessionManagerSource = Pick<DaemonContext, "sessionManager">;
-import type { ScreenReaderToggleOptions } from "../models/AccessibilityResult";
+import type { ScreenReaderToggleOptions, TalkBackResult } from "../models/AccessibilityResult";
 import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
 import { runSessionScreenReaderMutation } from "./sessionScreenReader";
 import { createAccessibilityAuditTool } from "./accessibilityAuditTool";
@@ -112,43 +115,57 @@ async function toggleRecordingPreviousState<
   );
 }
 
+/** The toggle's result as the tool's response; an unsupported or unread state is an error. */
+function talkBackToggleResponse(talkback: TalkBackResult) {
+  if (!talkback.supported) {
+    throw new ActionableError(talkback.reason ?? "TalkBack toggle is not supported on this device");
+  }
+  if (talkback.currentState === undefined) {
+    throw new ActionableError(talkback.reason ?? "could not determine TalkBack state after toggle");
+  }
+  const enabled = talkback.currentState;
+  const service = enabled ? ("talkback" as const) : ("unknown" as const);
+  return createStructuredToolResponse({
+    enabled,
+    service,
+    ...(!talkback.applied && talkback.reason !== undefined ? { reason: talkback.reason } : {}),
+    ...(talkback.warning !== undefined ? { warning: talkback.warning } : {}),
+    ...(talkback.blockingPrompt !== undefined ? { blockingPrompt: talkback.blockingPrompt } : {}),
+  });
+}
+
+/** What the request contributes to a toggle: the session source and the abort signal. */
+interface AccessibilityRequest {
+  daemon: SessionManagerSource;
+  signal?: AbortSignal;
+}
+
 async function toggleTalkBackAccessibility(
   device: BootedDevice,
   args: AccessibilityArgs,
   requestedEnabled: boolean,
-  daemon: SessionManagerSource,
+  { daemon, signal }: AccessibilityRequest,
 ) {
   try {
-    const toggle = new TalkBackToggle(device);
+    // A prompt TalkBack raises a few seconds after enabling must reach this result (#17668);
+    // a cancelled request stops waiting for it (#17674).
+    const toggle = new TalkBackToggle(device, null, undefined, {
+      promptSettleMs: TALKBACK_PROMPT_SETTLE_MS,
+      signal,
+    });
     const talkback = await toggleRecordingPreviousState(
       device,
       args,
       (options) => toggle.toggle(requestedEnabled, options),
       daemon,
     );
-    if (!talkback.supported) {
-      throw new ActionableError(
-        talkback.reason ?? "TalkBack toggle is not supported on this device",
-      );
-    }
-    if (talkback.currentState === undefined) {
-      throw new ActionableError(
-        talkback.reason ?? "could not determine TalkBack state after toggle",
-      );
-    }
-    const enabled = talkback.currentState;
-    const service = enabled ? ("talkback" as const) : ("unknown" as const);
-    return createStructuredToolResponse({
-      enabled,
-      service,
-      ...(!talkback.applied && talkback.reason !== undefined ? { reason: talkback.reason } : {}),
-      ...(talkback.warning !== undefined ? { warning: talkback.warning } : {}),
-      ...(talkback.blockingPrompt !== undefined ? { blockingPrompt: talkback.blockingPrompt } : {}),
-    });
+    return talkBackToggleResponse(talkback);
   } catch (error) {
-    throw error instanceof ActionableError
-      ? error
-      : toActionableError(error, `Failed to toggle accessibility services`);
+    // A cancelled request keeps its abort error (and any device-loss carrier) unwrapped.
+    if (error instanceof ActionableError || signal?.aborted) {
+      throw error;
+    }
+    throw toActionableError(error, `Failed to toggle accessibility services`);
   }
 }
 
@@ -156,12 +173,13 @@ async function handleAndroidAccessibility(
   device: BootedDevice,
   args: AccessibilityArgs,
   daemon: SessionManagerSource,
+  signal?: AbortSignal,
 ) {
   if (args.voiceover !== undefined) {
     throw new ActionableError("VoiceOver is not supported on Android devices");
   }
   if (args.talkback !== undefined) {
-    return await toggleTalkBackAccessibility(device, args, args.talkback, daemon);
+    return await toggleTalkBackAccessibility(device, args, args.talkback, { daemon, signal });
   }
 
   // Read the device's TalkBack state fresh. No feature flags are passed: they steer how the
@@ -240,11 +258,11 @@ const createAccessibilityTool = (daemon: SessionManagerSource) =>
   defineDeviceTool({
     name: "accessibility",
     description:
-      "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
+      "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, waits up to 4 s for a blocking system prompt (ending sooner once the screen is stable and TalkBack has no runtime permission left to request) and reports it in warning and blockingPrompt when detected: kind runtime-permission for a permission prompt (TalkBack's or another app's), system-dialog for a SystemUI or framework dialog activity; AutoMobile does not dismiss it. Use observe, then tapOn to answer or dismiss it. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
     input: accessibilityInput,
-    handler: async (device, args) => {
+    handler: async (device, args, _progress, signal) => {
       if (device.platform === "android") {
-        return await handleAndroidAccessibility(device, args, daemon);
+        return await handleAndroidAccessibility(device, args, daemon, signal);
       }
       if (device.platform === "ios") {
         return await handleIosAccessibility(device, args, daemon);

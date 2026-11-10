@@ -14,6 +14,20 @@ export interface PrototypeIconSymbolData {
   unmapped: readonly string[];
 }
 
+/** Retain honest mappings for allowed names; derive the fallback partition from the contract. */
+export function narrowPrototypeIconSymbols(
+  table: PrototypeIconSymbolData,
+): PrototypeIconSymbolData {
+  const names = contract.definitions.iconName.values;
+  return {
+    ...table,
+    mapped: Object.fromEntries(
+      names.filter((name) => table.mapped[name]).map((name) => [name, table.mapped[name]]),
+    ),
+    unmapped: names.filter((name) => !table.mapped[name]),
+  };
+}
+
 /** Compile the canonical table in contract order; the dylib has no resource bundle. */
 export function renderPrototypeIconSymbolData(table: PrototypeIconSymbolData): string {
   const lines = contract.definitions.iconName.values.map((name) => {
@@ -75,23 +89,33 @@ export function renderPrototypeIconSymbolDoc(table: PrototypeIconSymbolData): st
 }
 
 if (import.meta.main) {
+  const narrowed = narrowPrototypeIconSymbols(table);
   const outputs = [
+    {
+      url: new URL("../../schemas/prototype-ios-icon-symbols.json", import.meta.url),
+      rendered: JSON.stringify(narrowed, null, 2) + "\n",
+    },
     {
       url: new URL(
         "../../ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
         import.meta.url,
       ),
-      rendered: renderPrototypeIconSymbolData(table),
+      rendered: renderPrototypeIconSymbolData(narrowed),
     },
     {
       url: new URL("../../ios/prototype-agent/ICON-SYMBOLS.md", import.meta.url),
-      rendered: renderPrototypeIconSymbolDoc(table),
+      rendered: renderPrototypeIconSymbolDoc(narrowed),
     },
   ];
   for (const { url, rendered } of outputs) {
     if (!process.argv.includes("--check")) {
       writeFileSync(url, rendered);
-    } else if (readFileSync(url, "utf8") !== rendered) {
+    } else if (
+      url.pathname.endsWith(".json")
+        ? JSON.stringify(JSON.parse(readFileSync(url, "utf8"))) !==
+          JSON.stringify(JSON.parse(rendered))
+        : readFileSync(url, "utf8") !== rendered
+    ) {
       console.error(`${url.pathname} is stale; regenerate with this script.`);
       process.exitCode = 1;
     }

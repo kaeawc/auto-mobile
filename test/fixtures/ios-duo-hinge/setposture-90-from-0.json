@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "automobile/routedSessionUuid": "dd21a14d-9e9f-452a-9c42-ed1bd22765e8"
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"message\":\"Set hinge angle to 90 degrees; device reports posture unknown (The runner accepted the hinge angle, but the active iPhone Duo panel could not be determined.)\",\"posture\":\"unknown\",\"postureReason\":\"The runner accepted the hinge angle, but the active iPhone Duo panel could not be determined.\",\"hingeAngle\":90,\"display\":{\"key\":\"0\",\"role\":\"unknown\",\"posture\":\"unknown\",\"generation\":2},\"locked\":false,\"observedHingeAngle\":90}"
+    }
+  ],
+  "structuredContent": {
+    "message": "Set hinge angle to 90 degrees; device reports posture unknown (The runner accepted the hinge angle, but the active iPhone Duo panel could not be determined.)",
+    "posture": "unknown",
+    "postureReason": "The runner accepted the hinge angle, but the active iPhone Duo panel could not be determined.",
+    "hingeAngle": 90,
+    "display": {
+      "key": "0",
+      "role": "unknown",
+      "posture": "unknown",
+      "generation": 2
+    },
+    "locked": false,
+    "observedHingeAngle": 90
+  }
+}

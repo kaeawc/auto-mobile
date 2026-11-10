@@ -77,6 +77,7 @@ function harness(
     return { success: true };
   };
   const executor = new DefaultSendKeysCommandExecutor(android, h.adbFactory, observer, {
+    pendingImeRestores: h.pendingImeRestores,
     timer,
     textClient: h.client,
     inputKey: {

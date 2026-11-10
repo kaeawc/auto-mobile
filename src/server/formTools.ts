@@ -34,6 +34,7 @@ const fieldSpecSchema = z
     value: z.string().optional().describe("Text/dropdown value"),
     selected: z.boolean().optional().describe("Checkbox/toggle state"),
   })
+  .strict()
   .refine((data) => data.value !== undefined || data.selected !== undefined, {
     message: "Provide either value (for text/dropdown) or selected (for checkbox/toggle)",
   });

@@ -23,6 +23,14 @@ require_pinned_swiftlint_version() {
     return 0
   fi
 
+  if [[ -z "$found" ]] && command -v swiftlint >/dev/null 2>&1; then
+    # An installed binary that reports no version usually failed to start (for
+    # example a missing shared library, #17777); show why instead of 'none'.
+    local version_output version_status=0
+    version_output="$(swiftlint version 2>&1)" || version_status=$?
+    echo -e "${RED:-}SwiftLint at $(command -v swiftlint) reported no version (exit ${version_status}). Its output:${NC:-}" >&2
+    echo "${version_output:-<no output>}" >&2
+  fi
   echo -e "${RED:-}SwiftLint version mismatch: found '${found:-none}', this repo pins '${SWIFTLINT_VERSION}'.${NC:-}" >&2
   echo -e "${RED:-}A different SwiftLint version can rewrite committed Swift sources differently, so refusing to apply fixes.${NC:-}" >&2
   echo -e "${RED:-}Install the pinned version: bash scripts/swiftlint/install_swiftlint.sh${NC:-}" >&2

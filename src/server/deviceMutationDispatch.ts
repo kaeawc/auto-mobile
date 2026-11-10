@@ -23,7 +23,6 @@ export function invokeRecordedInternalTool(
     const pinnedHandler = sessionDisplayPinnedHandler({
       name: tool.name,
       schema: tool.schema,
-      traits: tool,
       handler: journaledDeviceHandler(tool.name, tool.deviceAwareHandler, mutationRecording),
     });
     return pinnedHandler(targetDevice, markedArgs, progress, signal);

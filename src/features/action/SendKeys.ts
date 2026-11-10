@@ -8,7 +8,7 @@ import {
   isSemanticKey,
   validateImeKeyEventsText,
 } from "./sendkeys/SendKeysSupport";
-import { TargetFocus } from "./sendkeys/TargetFocus";
+import { TargetFocus, withBlockingPromptHint } from "./sendkeys/TargetFocus";
 import { TargetState } from "./sendkeys/TargetState";
 import { CommandRunner } from "./sendkeys/CommandRunner";
 import {
@@ -35,7 +35,7 @@ import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { deferTerminalScreenshot } from "../../utils/PostActionCaptureContext";
+import { captureOrDeferTerminalScreenshot } from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { RealObserveScreen } from "../observe/ObserveScreen";
@@ -86,6 +86,7 @@ export {
   segmentGraphemes,
 } from "./sendkeys/AndroidTypingConstants";
 import type { ProgressCallback } from "./BaseVisualChange";
+import type { BlockingSystemPrompt } from "../../models/BlockingSystemPrompt";
 import type { ActionCall } from "./ActionCall";
 
 export const SEND_KEYS_TYPING_MODES = [
@@ -231,11 +232,14 @@ export interface SendKeysResult extends BaseActionResult {
   warning?: string;
   /** Observed editor/keyboard state changes after Android IME typing and restoration. */
   warnings?: string[];
+  /** Android: a system window holding focus over the app when focusing the target failed. */
+  blockingPrompt?: BlockingSystemPrompt;
 }
 
 export interface SendKeysFailure {
   index: number;
   error: string;
+  blockingPrompt?: BlockingSystemPrompt;
 }
 
 export interface SendKeysCommandExecution {
@@ -716,9 +720,9 @@ export class SendKeys {
     const captureObservation = async (observation: ObserveResult) => {
       if (
         capture &&
-        !deferTerminalScreenshot(observation, (chosen, requestSignal) =>
+        !(await captureOrDeferTerminalScreenshot(observation, (chosen, requestSignal) =>
           capture(undefined, { signal: requestSignal ?? signal, observation: chosen }),
-        )
+        ))
       ) {
         await capture(undefined, { signal, observation });
       }
@@ -756,7 +760,7 @@ export class SendKeys {
         routing.container !== undefined || routing.selectionStrategy !== undefined
           ? undefined
           : await observe();
-      return this.buildResult([], focusFailure, observation);
+      return this.buildResult([], this.withBlockingPrompt(focusFailure, observation), observation);
     }
     const execution: SendKeysCommandExecution =
       preflight ?? (await this.executeCommands(commands, progress, signal, routing));
@@ -875,6 +879,16 @@ export class SendKeys {
       }
     }
     return undefined;
+  }
+
+  /** Android: name a system window covering the app instead of suggesting a scroll (#17669). */
+  private withBlockingPrompt(
+    failure: SendKeysFailure,
+    observation: ObserveResult | undefined,
+  ): SendKeysFailure {
+    return this.device.platform === "android"
+      ? withBlockingPromptHint(failure, observation)
+      : failure;
   }
 
   private focusTarget(

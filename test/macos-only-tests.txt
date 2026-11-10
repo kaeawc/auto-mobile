@@ -23,7 +23,10 @@
 
 # --- portable: path has an iOS token but the test needs no iOS host --------------
 
+portable test/utils/ios/carPlayScreenPower.test.ts                       # JSON contract and injected exec only; no host processes
+
 # Source, workflow and script scans read repository files and run no iOS code.
+portable test/features/prototype/web/webIosParity*.test.ts               # Chromium/file-based parity checks; no iOS host commands
 portable test/lint/**                                                    # source-scan guards over src/ and scripts
 portable test/scripts/**                                                 # workflow, script and generator checks that read repo files
 portable test/doctor/iosExecResultConsolidation.test.ts                  # AST scan of the doctor source
@@ -83,6 +86,7 @@ portable test/features/action/DragAndDropIos.test.ts                     # route
 portable test/features/action/InputText.iosImeAction.test.ts             # asserts Android failure reporting too
 portable test/features/action/IosClearEntryPoints.test.ts                # asserts Android ClearText keeps acknowledgement-only clearing
 portable test/features/action/IosSelectionScreenSize.test.ts             # tapAny geometry for iOS and Android
+portable test/features/action/iosTypedTextMissingBaseline.test.ts      # pure typed-text comparison and sendKeys executor over fakes
 portable test/features/action/TapOnElement.iosCachedResolution.test.ts   # Android failure text stays byte-identical
 portable test/features/action/TapOnElement.iosClippedTargetOwnership.test.ts # PIN cases for Android dispatch
 portable test/features/action/SetUIState.iosSafariEmptyValue.test.ts      # SetUIState fakes plus committed captures; no iOS host needed

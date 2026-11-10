@@ -8,6 +8,9 @@ import { loadJobSteps, loadJobs, loadWorkflow, stepNamed } from "../helpers/work
 const OWNER = "github.event.pull_request.user.login == 'kaeawc'";
 const SAME_REPO = "github.event.pull_request.head.repo.full_name == github.repository";
 const POOLS_ENABLED = "vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true'";
+// Per-run fallback (#17580): a pool leaves the Mac only on an explicit "hosted".
+const SMALL_ROUTED = "needs.mac-pool-routing.outputs.small != 'hosted'";
+const HEAVY_ROUTED = "needs.mac-pool-routing.outputs.heavy != 'hosted'";
 const SMALL_LABEL = 'fromJSON(\'["self-hosted","automobile-mac"]\')';
 const HEAVY_LABEL = 'fromJSON(\'["self-hosted","automobile-mac-heavy"]\')';
 const ORIGINAL_SELF_HOSTED_JOBS = ["build-desktop-app", "installer-minimal", "swift-code-coverage"];
@@ -54,7 +57,7 @@ describe("root SPM toolchain floor workflow", () => {
       // Same switch as the moved jobs, so turning it off sends every Mac job to
       // a hosted runner instead of leaving these queued with no runner (#11580).
       expect(jobs[name]?.["runs-on"]).toContain(
-        `${SAME_REPO} && ${POOLS_ENABLED}) && ${SMALL_LABEL}`,
+        `${SAME_REPO} && ${POOLS_ENABLED} && ${SMALL_ROUTED}) && ${SMALL_LABEL}`,
       );
     }
     expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("matrix.os == 'macos-latest'");
@@ -67,7 +70,8 @@ describe("root SPM toolchain floor workflow", () => {
   test("runs SwiftLint on Linux with the SHA-256 verified pinned binary (#17581)", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
     expect(jobs["swiftlint"]?.name).toBe("SwiftLint");
-    expect(jobs["swiftlint"]?.["runs-on"]).toBe("ubuntu-latest");
+    // 0.57.0 links libicuuc.so.74/libxml2.so.2, absent on Ubuntu 26.04 (#17777).
+    expect(jobs["swiftlint"]?.["runs-on"]).toBe("ubuntu-24.04");
     const lint = loadJobSteps(".github/workflows/pull_request.yml", "swiftlint");
     const install = stepNamed(lint, "Install pinned SwiftLint (Linux, SHA-256 verified)");
     const run = stepNamed(lint, "Run SwiftLint (fail on error-severity rules)");
@@ -85,10 +89,13 @@ describe("root SPM toolchain floor workflow", () => {
     expect(heavy.sort()).toEqual([...HEAVY_LANE_JOBS, "ios-device-webrtc"].sort());
     for (const name of [...SMALL_POOL_JOBS, ...HEAVY_LANE_JOBS]) {
       const runsOn = String(jobs[name]?.["runs-on"]);
-      const label = HEAVY_LANE_JOBS.includes(name) ? HEAVY_LABEL : SMALL_LABEL;
-      // The rollout switch keeps jobs off pools that are not registered yet.
+      const heavyLane = HEAVY_LANE_JOBS.includes(name);
+      const label = heavyLane ? HEAVY_LABEL : SMALL_LABEL;
+      const routed = heavyLane ? HEAVY_ROUTED : SMALL_ROUTED;
+      // The rollout switch keeps jobs off pools that are not registered yet, and
+      // the per-run routing moves them off a pool with no online runner.
       expect(runsOn).toBe(
-        `\${{ (${OWNER} && ${SAME_REPO} && ${POOLS_ENABLED}) && ${label} || ${FALLBACK[name]} }}`,
+        `\${{ (${OWNER} && ${SAME_REPO} && ${POOLS_ENABLED} && ${routed}) && ${label} || ${FALLBACK[name]} }}`,
       );
     }
     for (const name of HEAVY_LANE_JOBS) {
@@ -107,8 +114,48 @@ describe("root SPM toolchain floor workflow", () => {
   test("never imports signing certificates on the self-hosted Mac", () => {
     const env = loadJobs(".github/workflows/pull_request.yml")["ios-swift-packages"]?.env;
     for (const key of ["IOS_SIGNING_ENABLED", "MACOS_SIGNING_ENABLED"]) {
-      expect(String(env?.[key])).toContain(`!(${OWNER} && ${SAME_REPO} && ${POOLS_ENABLED})`);
+      expect(String(env?.[key])).toContain(
+        `!(${OWNER} && ${SAME_REPO} && ${POOLS_ENABLED} && ${SMALL_ROUTED})`,
+      );
     }
+  });
+
+  test("every Mac pool job reads the fail-open per-run pool routing (#17580)", () => {
+    const jobs = loadJobs(".github/workflows/pull_request.yml");
+    const macJobs = [
+      ...ORIGINAL_SELF_HOSTED_JOBS,
+      ...SMALL_POOL_JOBS,
+      ...HEAVY_LANE_JOBS,
+      "ios-device-webrtc",
+    ];
+    for (const name of macJobs) {
+      const needs = jobs[name]?.needs;
+      expect(Array.isArray(needs) ? needs : [needs], name).toContain("mac-pool-routing");
+      const runsOn = String(jobs[name]?.["runs-on"]);
+      expect(runsOn, name).toContain(
+        runsOn.includes("automobile-mac-heavy") ? HEAVY_ROUTED : SMALL_ROUTED,
+      );
+      // A cancelled or failed routing job must not skip a required Mac check:
+      // always() runs the job anyway and an empty output keeps it self-hosted.
+      expect(String(jobs[name]?.if), name).toStartWith(
+        "always() && !cancelled() && needs.detect-changes.result == 'success'",
+      );
+    }
+    const routing = jobs["mac-pool-routing"];
+    expect(routing?.["runs-on"]).toBe("ubuntu-latest");
+    // It holds MAC_RUNNER_READ_TOKEN, so it must not inherit workflow write scopes.
+    expect(routing?.permissions).toEqual({ contents: "read" });
+    // A skipped or failed routing job would skip every Mac job that needs it.
+    expect(routing?.if).toBeUndefined();
+    expect(routing?.needs).toBeUndefined();
+    const steps = routing?.steps ?? [];
+    expect(steps.length).toBeGreaterThan(0);
+    for (const step of steps) {
+      expect(step["continue-on-error"], step.name).toBe(true);
+    }
+    const route = stepNamed(steps, "Route Mac pools");
+    expect(route?.run).toBe("bash scripts/ci/mac-pool-routing.sh");
+    expect(route?.env?.MAC_RUNNER_READ_TOKEN).toBe("${{ secrets.MAC_RUNNER_READ_TOKEN }}");
   });
 
   test("moved iOS jobs isolate their home and select Xcode per runner kind", () => {

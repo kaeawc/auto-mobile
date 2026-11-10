@@ -16,7 +16,12 @@ export interface SourceMapOptions {
   includeDependencySources?: boolean;
 }
 
-/** Main historically rewrites only index.js.map; stripping applies to every emitted map. */
+/**
+ * Stripping applies to every emitted map. Otherwise only index.js.map gets
+ * dependency trimming: a `splitting` chunk can hold code from any entrypoint
+ * (e.g. the worker's adm-zip), so every chunk map, like the worker's, keeps all of
+ * its sources for debugging (#17706).
+ */
 export function selectSourceMaps(
   emittedPaths: readonly string[],
   indexMapPath: string,

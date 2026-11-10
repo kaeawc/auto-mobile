@@ -155,6 +155,8 @@ The app closes its modules after all renderers using them detach.
 
 ## Shrinking (R8)
 
+Specs accept the [allowed prototype icons](prototype-icons.md), including all five Material styles.
+
 Android icons named in a spec are looked up by reflection, which R8 cannot see. The library ships no
 consumer keep rule for them, because one would retain all of `material-icons-extended` (about 3 MB
 of dex) in every app that embeds a prototype. An app that minifies and renders icons by name adds the
@@ -256,6 +258,30 @@ subscription to a URI with `revision=` is never notified again.
 To compare design alternatives, show each under its own id with the same `variant` group, for
 example `variant: {group: "checkout", label: "Compact"}`. The web page of any of them offers every
 alternative in the group by its label. The device keeps showing whichever was shown last.
+
+### Export the web page to a file
+
+To host the page, attach it to a CI run or send it to someone without a device, call the
+`exportPrototypeWeb` tool. It is off by default: enable it with `setToolEnabled` (see [Dynamic tools](dynamic-tools.md)). It needs no
+device. It writes the same bytes the `automobile:prototype/<id>/web` resource returns for the same
+parameters (no network access, the same Content Security Policy) and returns the file's details
+instead of the HTML.
+
+| Parameter                                      | Meaning                                                                                                                                                                                                                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                                           | The shown prototype's id. Required.                                                                                                                                                                                                                          |
+| `frame`, `revision`, `variant`, `mcpSessionId` | As for the resource above.                                                                                                                                                                                                                                   |
+| `outputPath`                                   | An absolute `.html` file path, or a directory (an existing one, or a path ending in `/`); any other path is refused. Defaults to `prototype-web/` in the AutoMobile data directory. In a directory the file is named `<id>-<frame>-r<revision>-<hash>.html`. |
+| `overwrite`                                    | `true` replaces an existing file with different content; a symlink at `outputPath` is replaced, not written through. Without it the call is refused and nothing is written. A file that already holds the same bytes is left as it is.                       |
+
+The result is `{path, sha256, bytes, frame, revision, variants, rendererVersion}`: `sha256` is the
+hash of the written file and matches the resource's `_meta.sha256`. The page already offers every
+variant in its group, so one file covers the whole set.
+
+Errors name what to change: an unknown id lists the known prototypes, a revision older than the
+kept 20 names the oldest kept one, an unknown frame lists the valid frames, and a relative or
+unwritable `outputPath` asks for a writable absolute path, and a file path that does not end in
+`.html` asks for an `.html` file or a directory.
 
 ## Embed envelope
 

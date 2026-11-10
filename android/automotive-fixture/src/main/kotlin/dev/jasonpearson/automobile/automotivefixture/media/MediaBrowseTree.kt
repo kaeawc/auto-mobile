@@ -28,6 +28,21 @@ class MediaBrowseTree(val root: MediaNode) {
   /** The playable item for an id, or null when the id is unknown or names a browsable node. */
   fun playable(mediaId: String): MediaNode? = byId[mediaId]?.takeUnless { it.isBrowsable }
 
+  /**
+   * The first playable item, in tree order, whose title or subtitle contains [query] (ignoring
+   * case). A blank query means "play anything", so it returns the first playable item.
+   */
+  fun search(query: String?): MediaNode? {
+    val playables = playablesOf(root)
+    if (query.isNullOrBlank()) return playables.firstOrNull()
+    return playables.firstOrNull {
+      it.title.contains(query, ignoreCase = true) || it.subtitle.contains(query, ignoreCase = true)
+    }
+  }
+
+  private fun playablesOf(node: MediaNode): List<MediaNode> =
+    if (node.isBrowsable) node.children.flatMap { playablesOf(it) } else listOf(node)
+
   private fun MutableMap<String, MediaNode>.index(node: MediaNode) {
     put(node.mediaId, node)
     node.children.forEach { index(it) }

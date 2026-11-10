@@ -133,8 +133,14 @@ Every other tool refuses a watch before doing anything, with:
 - `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. Only
   elements wholly on screen match, including notification action buttons. Only `action: "tap"`
   is supported. The notification permission prompt scrolls: use `rotateCrown` to bring `Allow`
-  wholly into view before selecting it with `tapOn`.
-- `tapAt` takes absolute coordinates in points.
+  wholly into view before selecting it with `tapOn`. When the Smart Stack is open and the host
+  app is not foreground, `tapOn` matches a widget's exact text or cell identifier on the watch face.
+  Only cards wholly on screen match: text that only an off-screen widget shows is refused, with a
+  hint to scroll the Smart Stack first.
+- `tapAt` takes absolute coordinates in points, including for widgets when the Smart Stack is open.
+  Tapping a widget with `tapOn` or `tapAt` opens its host app, so the normal tools work afterwards.
+  While the Smart Stack is open, `observe` returns `hierarchyUnavailable` and no hierarchy fields.
+  On the plain watch face without the Smart Stack, both tap tools are unchanged.
 - `swipeOn` swipes in a direction. With `lookFor` it swipes until an exact `text` or `elementId`
   is on screen, up to `maxSwipes` (default 10, maximum 100). Each `lookFor` step is a short, slow drag (about
   one row on a list) so consecutive reads overlap and nearby targets are not skipped. Coordinates
@@ -149,16 +155,23 @@ Every other tool refuses a watch before doing anything, with:
   `observe` between turns. A turn smaller than one step of the focused control (for example `0.1`
   on that control) may not register and fails like a rotation at the limit; when `delta` is
   between -1 and 1 the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
-  [Dynamic Tools](dynamic-tools.md)). When the view hierarchy is
-  identical before and after a rotation, it may touch an unoccupied interior point to wake crown
-  routing, avoiding navigation and controls. It retries once only when the same focused control's
-  accessible value is also unchanged and the wake leaves the screen and focus unchanged. Without
-  a safe touch point or a comparable value, or if the retry still changes nothing, it fails with an
-  error. A wake without a retry prepares routing for the next command. No view may hold crown focus,
-  or the content may already be at its limit. Tap the view that should receive the crown, then observe
-  before trying again: a change that is not accessible may already have taken effect.
-  Verification is skipped when a stable hierarchy cannot be read. `observe` after rotating to confirm
-  the app responded.
+  [Dynamic Tools](dynamic-tools.md)). When the same focused control has a readable accessible value
+  before and after a rotation, that value must change for success. Otherwise, any screen hierarchy
+  change counts as success. When no focused value is readable, an unrelated update, such as a status
+  label, can satisfy this condition; success does not confirm that the crown moved the control.
+  Without a readable focused value, it first touches an interior point clear of elements in the
+  accessibility hierarchy to wake crown routing, then rotates. Content absent from that hierarchy,
+  such as a canvas that handles taps, can still receive the wake touch. To avoid this, tap the control
+  that should respond first. If nothing changes, it may wake again and retry once; this requires a stable screen
+  and an unchanged readable focused value, both preserved by the wake. Without a safe touch point it
+  rotates without waking; after an initial wake, it never repeats the turn without a comparable value.
+  If it still changes nothing or a safe retry is unavailable, it fails. Without a stable hierarchy,
+  it compares the focused value from the last pre-rotation observation with the same control after rotating,
+  without waking or retrying; if either value or the post-rotation snapshot is unavailable, verification is skipped.
+  Use `observe` after rotating to confirm the app responded. Retry
+  only if `observe` confirms the turn had no effect: if the first turn changed the control but
+  verification failed, retrying can overshoot. Tap the control that should respond to the Digital
+  Crown before retrying `rotateCrown`.
 
   ```json
   { "name": "rotateCrown", "arguments": { "platform": "watchos", "delta": 2 } }

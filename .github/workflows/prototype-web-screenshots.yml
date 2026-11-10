@@ -11,7 +11,9 @@ name: "Prototype Web Screenshots (Advisory)"
 # top-level non-.diff PNGs over the goldens (see docs/design-docs/prototype-web-renderer.md).
 # The same run renders each spec with an Android golden chromeless and compares it
 # with that golden under a per-golden pixel budget (#16534); those screenshots and
-# diffs are under android-parity/ in the same artifact.
+# diffs are under android-parity/ in the same artifact. The iOS-skinned still is
+# compared with cropped iPhone 16 viewer goldens (#16535), under ios-parity/.
+# Un-padded inlined image boxes are compared with their layout golden (#17716).
 on:
   pull_request:
     paths:
@@ -19,6 +21,11 @@ on:
       - "src/features/visual/VisualDiff.ts"
       - "test/features/prototype/web/webScreenshot*"
       - "test/features/prototype/web/webAndroidParity*"
+      - "test/features/prototype/web/webIosParity*"
+      - "test/features/prototype/web/webImageLayout*"
+      - "ios/prototype-agent/Goldens/**"
+      - "scripts/prototype/ios-golden-specs.ts"
+      - "scripts/ios/prototype-record-goldens.sh"
       - "android/control-proxy/src/test/resources/screenshots/prototype/**"
       - "test/fixtures/prototype-spec/valid/**"
       - "test/fixtures/prototype-web/**"

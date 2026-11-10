@@ -19,6 +19,12 @@ interface TapAtGestureOptions {
   layer?: HierarchyLayer;
   /** Stylus instead of a finger (Android 12+, tap and long press only; #13081). */
   pointer?: PointerOption;
+  /**
+   * Internal: what absolute x/y mean. `screenshot` (default, the public tapAt tool) maps Android
+   * XR home-space screenshot pixels onto the app panel; `native` is view-hierarchy space (an
+   * element centre from observe), dispatched without XR panel mapping. Absent from the schema.
+   */
+  pointSpace?: "native" | "screenshot";
 }
 
 export type TapAtOptions = TapAtGestureOptions &

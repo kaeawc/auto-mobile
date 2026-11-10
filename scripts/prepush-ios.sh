@@ -10,8 +10,9 @@ usage() {
 Usage: scripts/prepush-ios.sh
 
 Runs the pinned SwiftFormat lint, SwiftLint, XCTestRunner build, and its
-simulator-free XCTestRunnerTests subset. CtrlProxy source changes also compile
-the Xcode UI test runner. ProtoViewer package or build-script changes also run
+simulator-free XCTestRunnerTests subset, plus CtrlProxy watch policy tests on
+every run. CtrlProxy source changes also compile the Xcode UI test runner.
+ProtoViewer package or build-script changes also run
 simulator-free prototype-agent tests and compile the app. Run it from any directory.
 PREPUSH_IOS_SKIP_PROTOVIEWER=1 skips both ProtoViewer checks (partial attestation)
 for hosts without the iphonesimulator SDK.
@@ -126,6 +127,7 @@ attestation_note=""
 attestation_lint=pass
 attestation_runner=skip
 attestation_protoviewer=skip
+attestation_watch=skip
 if [[ "${PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD:-0}" == 1 ]]; then
   attestation_scope=partial
   attestation_note="CtrlProxy runner build disabled"
@@ -188,6 +190,30 @@ if [[ ${EXECUTED_TESTS} -eq 0 ]]; then
   exit 1
 fi
 
+# Keep the shared watch runner unit suite from silently disappearing or shrinking.
+WATCH_POLICY_MIN_TESTS=60
+echo "Testing simulator-free CtrlProxy watch policy"
+if test_output="$(cd "${project_root}/ios/control-proxy" && swift test -Xswiftc -warnings-as-errors \
+  --filter CtrlProxyWatchPolicyTests 2>&1)"; then
+  test_rc=0
+else
+  test_rc=$?
+fi
+echo "${test_output}"
+executed_test_count "${test_output}"
+if [[ ${test_rc} -ne 0 ]]; then
+  exit "${test_rc}"
+fi
+if [[ ${EXECUTED_TESTS} -eq 0 ]]; then
+  echo "prepush-ios.sh: CtrlProxyWatchPolicyTests filter executed 0 tests; check the --filter expression" >&2
+  exit 1
+fi
+if [[ ${EXECUTED_TESTS} -lt ${WATCH_POLICY_MIN_TESTS} ]]; then
+  echo "prepush-ios.sh: CtrlProxyWatchPolicyTests filter executed ${EXECUTED_TESTS} tests; expected at least ${WATCH_POLICY_MIN_TESTS}" >&2
+  exit 1
+fi
+attestation_watch=pass
+
 if [[ "${ctrl_proxy_sources_changed}" == true && "${PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD:-0}" != 1 ]]; then
   attestation_runner=pass
   echo "Compiling CtrlProxy iOS UI test runner for changed Sources"
@@ -216,4 +242,4 @@ if [[ "${protoviewer_changed}" == true && "${PREPUSH_IOS_SKIP_PROTOVIEWER:-0}" !
   "${project_root}/scripts/ios/protoviewer-build.sh" "${project_root}/scratch/protoviewer-prepush"
   attestation_protoviewer=pass
 fi
-"${project_root}/scripts/ci/record-attestations.sh" ios "${attestation_options[@]}" --scope "$attestation_scope" --scope-note "$attestation_note" "SwiftFormat=${attestation_lint}:0" "SwiftLint=${attestation_lint}:0" "CtrlProxy runner build=${attestation_runner}:0" "ProtoViewer build/tests=${attestation_protoviewer}:0" 'XCTestRunner build/tests and API baseline=pass:0' || true
+"${project_root}/scripts/ci/record-attestations.sh" ios "${attestation_options[@]}" --scope "$attestation_scope" --scope-note "$attestation_note" "SwiftFormat=${attestation_lint}:0" "SwiftLint=${attestation_lint}:0" "CtrlProxy runner build=${attestation_runner}:0" "ProtoViewer build/tests=${attestation_protoviewer}:0" "CtrlProxy watch policy tests=${attestation_watch}:0" 'XCTestRunner build/tests and API baseline=pass:0' || true

@@ -1,7 +1,7 @@
 import { tvosPress, unsupportedTvosAction } from "../tvos/TvosActions";
 import { watchPress, unsupportedWatchAction } from "../watch/WatchActions";
 import { isIosAppSwitcherVisible } from "../observe/ios/AppSwitcherSnapshotClassifier";
-import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
+import { invalidateIosLockAfterPress } from "./iosLockAfterPress";
 import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
@@ -24,7 +24,6 @@ import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBack
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
 import { holdDurationOf, prepareAndroidKeyevent, rejectUnsupportedHold } from "./androidKeyHold";
 import {
-  acceptAndroidHomeAlreadyOnLauncher,
   acceptIosHomeAlreadyOnSpringboard,
   acceptVerifiedAlreadyOpenSwitcher,
   isIosHomePressOnSpringboard,
@@ -48,6 +47,13 @@ import { isRotaryButton, RotaryInput, type RotaryButton } from "./RotaryInput";
 import type { DeviceTraits } from "../../utils/android-cmdline-tools/deviceTraits";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { retryBackOnTemplateHost, type TemplateHostBackTapClient } from "./carAppTemplateBack";
+import {
+  displayOf,
+  inputOnDisplay,
+  pressButtonDisplay,
+  acceptHomeAlreadyOnLauncher,
+  type PressButtonDisplayResolver,
+} from "./pressButtonDisplay";
 
 /** iOS hardware buttons that only some devices have, pressed via XCUIDevice.Button (#14100). */
 const IOS_OPTIONAL_HARDWARE_BUTTONS: ReadonlySet<string> = new Set(["action", "camera"]);
@@ -89,6 +95,8 @@ export interface PressButtonCall extends ActionCall {
   steps?: number;
   /** Hold the button down this long (ms): a long press of D-pad center on Android. */
   durationMs?: number;
+  /** Android panel key, role or `active` to press on and verify (#17643); default display if omitted. */
+  display?: string;
 }
 
 /** A dispatched press whose outcome was never confirmed: replaying it could apply it twice. */
@@ -112,6 +120,7 @@ export type PressButtonCollaborators = DisplayFenceDependencies &
   PressButtonCtrlProxyOverrides & {
     simctl?: Pick<SimCtl, "executeCommandArgs">;
     holdRequest?: DispatchedRequestHold;
+    displayResolver?: PressButtonDisplayResolver;
   };
 
 /** Per-press dispatch inputs threaded through the platform helpers (#11835). */
@@ -126,6 +135,8 @@ interface PressDispatchOptions {
   durationMs?: number;
   /** iOS Home: the pre-press tree was the App Switcher, which arms HomeScreen's second press (#17201). */
   appSwitcherWasOpen?: boolean;
+  /** Android logical display for `input -d` (#17643); undefined keeps the default routing. */
+  displayId?: number;
 }
 
 export class PressButton extends BaseVisualChange {
@@ -136,6 +147,7 @@ export class PressButton extends BaseVisualChange {
   private readonly templateBackTapClient?: TemplateHostBackTapClient;
   private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
   private readonly holdRequest?: DispatchedRequestHold;
+  private readonly displayResolver?: PressButtonDisplayResolver;
 
   constructor(
     device: BootedDevice,
@@ -147,6 +159,7 @@ export class PressButton extends BaseVisualChange {
     this.device = device;
     this.simctl = collaborators.simctl ?? new SimCtlClient(device);
     this.holdRequest = collaborators.holdRequest;
+    this.displayResolver = collaborators.displayResolver;
     this.iosLockStateInvalidator = collaborators.iosLockStateInvalidator;
     this.globalActionClient = collaborators.globalActionClient;
     this.frameContextClient = collaborators.frameContextClient;
@@ -225,6 +238,15 @@ export class PressButton extends BaseVisualChange {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     const durationMs = holdDurationOf(progressOrCall);
     rejectUnsupportedHold(this.device.platform, button, durationMs);
+    const { key: display, displayId } = await pressButtonDisplay(
+      this.device,
+      displayOf(progressOrCall),
+      {
+        adb: this.adb,
+        resolver: this.displayResolver,
+        signal,
+      },
+    );
     if (this.device.platform === "tvos") {
       if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
         unsupportedTvosAction("remote press with steps");
@@ -262,9 +284,11 @@ export class PressButton extends BaseVisualChange {
       progress,
       signal,
       perf,
+      display,
     };
     let startedOnFallbackSpringboard = false;
     let pressSucceeded = false;
+    let launcherVerified = false;
     let verifiedAlreadyOpen = false;
     let prePress: ObserveResult | undefined;
     const result = await this.observedInteraction(async (previousObservation) => {
@@ -284,6 +308,7 @@ export class PressButton extends BaseVisualChange {
           : this.press(button, {
               signal,
               durationMs,
+              displayId,
               appSwitcherWasOpen:
                 this.device.platform === "ios" &&
                 button.toLowerCase() === "home" &&
@@ -297,19 +322,20 @@ export class PressButton extends BaseVisualChange {
             }),
       );
       pressSucceeded = pressed.success;
+      // Only a default-display Home checks the launcher foreground (#17643).
+      launcherVerified = pressed.success && displayId === undefined;
       verifiedAlreadyOpen &&= pressed.success;
       return pressed;
     }, options);
     acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
     acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
-    acceptAndroidHomeAlreadyOnLauncher(result, {
-      platform: this.device.platform,
-      button,
-      pressSucceeded,
-    });
+    await acceptHomeAlreadyOnLauncher(
+      { button, displayId, pressSucceeded, launcherVerified, result, observation: prePress },
+      { device: this.device, adb: this.adb, timer: this.timer, signal },
+    );
     return retryBackOnTemplateHost(
       result,
-      { platform: this.device.platform, button, pressSucceeded, prePress, options },
+      { platform: this.device.platform, button, pressSucceeded, prePress, options, displayId },
       {
         tapClient: () => this.templateBackTapClient ?? this.defaultCtrlProxyClient(),
         observedInteraction: (block, interactionOptions) =>
@@ -364,6 +390,7 @@ export class PressButton extends BaseVisualChange {
       onRecentAppsRoute,
       durationMs,
       appSwitcherWasOpen,
+      displayId,
     }: {
       timeoutMs?: number;
       frameContext?: string;
@@ -373,10 +400,12 @@ export class PressButton extends BaseVisualChange {
       /** Android only: hold the key down this long (long press of select). */
       durationMs?: number;
       appSwitcherWasOpen?: boolean;
+      displayId?: number;
     } = {},
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
     let dispatched = false;
+    let pressed: PressButtonResult | undefined;
     const markDispatch = () => {
       if (!dispatched) {
         dispatched = true;
@@ -392,16 +421,17 @@ export class PressButton extends BaseVisualChange {
             signal,
             onDispatch: markDispatch,
             durationMs,
+            displayId,
           });
         case "ios":
-          return await this.executeiOSButtonPress(button, {
+          return (pressed = await this.executeiOSButtonPress(button, {
             timeoutMs,
             frameContext,
             signal,
             onDispatch: markDispatch,
             onRecentAppsRoute,
             appSwitcherWasOpen,
-          });
+          }));
         default:
           throw unsupportedPlatformError(this.device.platform, "press buttons");
       }
@@ -419,9 +449,7 @@ export class PressButton extends BaseVisualChange {
         error: `Failed to press button: ${errorMessage(error)}`,
       };
     } finally {
-      if (this.device.platform === "ios") {
-        (this.iosLockStateInvalidator ?? getIosLockStateCache()).invalidate(this.device.deviceId);
-      }
+      invalidateIosLockAfterPress(this.iosLockStateInvalidator, this.device, button, pressed);
       if (isNavigationPressButton(button)) {
         this.windowCacheInvalidator.invalidate(this.device, true);
       }
@@ -451,7 +479,7 @@ export class PressButton extends BaseVisualChange {
     button: string,
     dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
-    const { timeoutMs, frameContext, signal, onDispatch, durationMs } = dispatch;
+    const { timeoutMs, frameContext, signal, onDispatch, durationMs, displayId } = dispatch;
     const normalized = button.toLowerCase();
     if (IOS_OPTIONAL_HARDWARE_BUTTONS.has(normalized)) {
       return unsupportedIosButtonResult(
@@ -486,14 +514,19 @@ export class PressButton extends BaseVisualChange {
     if ("refusal" in keyevent) {
       return keyevent.refusal;
     }
-    const globalActionResult = await this.tryAndroidGlobalAction(
-      { button, normalized, keyCode },
-      deadlineMs,
-      { frameContext, signal, onDispatch },
-    );
+    // A global action has no display routing, so a targeted display goes straight to `input -d`.
+    const globalActionResult =
+      displayId === undefined
+        ? await this.tryAndroidGlobalAction({ button, normalized, keyCode }, deadlineMs, {
+            frameContext,
+            signal,
+            onDispatch,
+          })
+        : undefined;
     if (globalActionResult) {
       return globalActionResult;
     }
+    const argv = inputOnDisplay(keyevent.argv, displayId);
 
     // Fail fast if the (optional) deadline was fully consumed by the global-action
     // attempt or frame-context validation above. Passing 0 to executeCommand would arm NO timeout (the
@@ -522,7 +555,7 @@ export class PressButton extends BaseVisualChange {
         adbBudget,
         (fenced, dispatched) =>
           Promise.resolve().then(() =>
-            this.adb.execute(keyevent.argv, {
+            this.adb.execute(argv, {
               timeoutMs: adbBudget,
               noRetry: true,
               signal: combineWithAmbientAbort(fenced),
@@ -563,7 +596,11 @@ export class PressButton extends BaseVisualChange {
       throw error;
     }
 
-    return this.androidKeyPressOutcome(button, keyCode, durationMs, { deadlineMs, signal });
+    return this.androidKeyPressOutcome(button, keyCode, durationMs, {
+      deadlineMs,
+      signal,
+      displayId,
+    });
   }
 
   /** The dispatched keyevent's result; a Home press is verified against the launcher first. */
@@ -571,7 +608,11 @@ export class PressButton extends BaseVisualChange {
     button: string,
     keyCode: number,
     durationMs: number | undefined,
-    { deadlineMs, signal }: { deadlineMs: number | undefined; signal: AbortSignal | undefined },
+    {
+      deadlineMs,
+      signal,
+      displayId,
+    }: { deadlineMs: number | undefined; signal: AbortSignal | undefined; displayId?: number },
   ): Promise<PressButtonResult> {
     // "home" is verified end-to-end (issue #6147): neither the accessibility
     // global action above nor this ADB keyevent are trustworthy on their own
@@ -583,8 +624,11 @@ export class PressButton extends BaseVisualChange {
     // the leftover and hand it to verification (which shares it across getActive,
     // launcher lookup, and retries) rather than letting getActive fall back to
     // its 5s default and overrun the keyed device-input op (issue #6289).
+    // The launcher check reads the default display's foreground; a Home sent to another display is
+    // verified by the visual-change check on that display instead (#17643).
     if (
       button.toLowerCase() === "home" &&
+      displayId === undefined &&
       !(await this.verifyAndroidHomeForeground({
         signal,
         timeoutMs: this.remainingMs(deadlineMs),

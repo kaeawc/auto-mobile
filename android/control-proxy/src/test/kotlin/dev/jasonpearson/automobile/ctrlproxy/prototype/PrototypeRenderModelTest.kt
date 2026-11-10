@@ -108,12 +108,12 @@ class PrototypeRenderModelTest {
         .jsonObject
         .getValue("values")
         .jsonArray
-    assertTrue(names.size > 2000)
+    assertEquals(300, names.size)
     for ((index, name) in names.withIndex()) {
       val content = name.jsonPrimitive.content
       assertNotNull(content, prototypeIcon(content))
       // Every name loads filled; styles share the class layout, so a sample of names covers them.
-      if (index % 40 != 0) continue
+      if (index % 10 != 0) continue
       for (variant in listOf("outlined", "rounded", "sharp", "twoTone")) {
         assertNotNull("$content/$variant", prototypeIcon(content, variant))
       }

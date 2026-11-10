@@ -212,6 +212,12 @@ nothing at runtime drives a browser.
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
+- **Image layout.** `test/fixtures/prototype-web/image-layout-golden.json` holds the image, parent
+  and image-layer boxes of un-padded inlined images (fill, fixed, wrapped and weighted, in rows and
+  columns, each `contentScale`), from `getBoundingClientRect` in layout px from the fixture root (so
+  the frame's host-dependent fit scale drops out), measured from the renderer before the padded
+  content box; Chromium must reproduce them within 0.05 px. `--update`
+  rewrites it, only for a deliberate layout change.
 - **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
   without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens, and
   `--engine <chromium|firefox|webkit>` (repeatable) limits the engines. It needs the browser builds
@@ -256,6 +262,32 @@ fullscreen, because the goldens draw the root and theme without the window's pla
   keeps the case table, the skip list and the budget keys in step with the golden directory.
 - **Output.** `<golden>.png` and, when any pixel differs, `<golden>.diff.png` go to
   `android-parity/` under the output directory, uploaded with the page check's artifact.
+
+## iOS parity check
+
+`webIosParityCases.ts` reuses the Android parity specs and content-only transforms, with a
+reasoned skip list for content-sized floating captures and host chrome. The standalone viewer
+recorder, `bash scripts/ios/prototype-record-goldens.sh <simulator-udid>`, requires an already
+booted iPhone 16 and the app built by `scripts/ios/prototype-viewer-build.sh`. It installs a fresh
+viewer per case, loads the emitted spec through `Documents/prototype/`, and sets light or dark
+appearance before launch. It refuses the CI iPhone, clears its status override and restores light
+appearance on exit. Optional `--viewer`, `--out` and golden names select the app, destination and cases.
+
+- **Geometry.** Goldens in `ios/prototype-agent/Goldens/iphone-16/` are the full 1179×2556 pixel
+  screenshot of the 393×852 pt screen at 3×, with the status bar pinned to 9:41. The viewer draws
+  content from the top edge under the status bar, so nothing is cropped; the comparison ignores the
+  clock and the signal/battery glyph rects, which the simulator draws over the content. The emitter
+  `scripts/prototype/ios-golden-specs.ts` writes content-only specs and `cases.json` with the
+  shared pixel geometry and case modes. The recorder checks the screenshot size.
+- **Rendering.** Chromium draws the `iphone-16` still with its iOS skin and safe-area environment
+  in a bare document. CSS removes the frame padding, background and corner radii; the whole
+  screen is clipped at 3×. Only the screen default font is pinned to DejaVu Sans.
+- **Budgets and output.** `test/fixtures/prototype-web/ios-parity-budgets.json` uses the Android
+  check's 0.1 pixel distance, runner allowance and `--update` / `--allow-grow` policy. Budgets are
+  measured with `--update` after recording. Directory-dependent unit tests require
+  complete case coverage, exact PNG sizes and matching budget keys. The opt-in advisory
+  `Prototype Web Screenshots` workflow runs both parity checks in Chromium and uploads iOS
+  captures and diffs under `ios-parity/`. Golden paths are exempt from LFS so checkout reads PNGs.
 
 ## Still renderer
 
@@ -431,7 +463,7 @@ the host, so the page's script only switches between views it was given and neve
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
   Compose parent does around a `fillMaxSize` child. In an Android frame an icon draws its Material Icons
-  glyph (the set Compose's `material-icons-extended` bundles, read from the Apache-2.0
+  glyph (the contract's curated subset of Compose's `material-icons-extended`, read from the Apache-2.0
   `@material-design-icons/svg` package) as inline SVG in a 24 px box, in its `variant`'s style, else
   `filled` as Android falls back, and tinted by `currentColor` or its style `color`. Only the
   glyphs a still draws are read and inlined. The still takes its glyph source as an option, so it
@@ -509,9 +541,12 @@ the host, so the page's script only switches between views it was given and neve
   a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` binds its asset id (a
   light/dark pair picks the mode's side, then placeholders bind as text does); without a slot for it
   it draws a `surfaceVariant` placeholder, at least 48 px on each axis the node does not fix in dp,
-  with reason `assetNotInlined`. With one, the placeholder
-  colour and an `aspect-ratio` on an axis it leaves to wrap read the slot's `-bg` and `-ar`, and it
-  holds an image layer (the slot's image as a centred background, `contain`, `cover` or
+  with reason `assetNotInlined`. With one, the placeholder colour reads the slot's `-bg`, and its
+  layers sit in a content box: with no padding it covers the node, which keeps the `-ar`
+  `aspect-ratio` on an axis it leaves to wrap (so a weighted share carries it to the other axis,
+  as before the content box existed); with padding (safe-area insets included) it is an in-flow
+  child inside the padding that carries the ratio and the 48 px minimum. A zeroed row child's box
+  drops its inline padding, so its draw and minimums take none out either. The layers are an image layer (the slot's image as a centred background, `contain`, `cover` or
   `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
   `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
   shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint

@@ -23,6 +23,7 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyC
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeSimctl } from "../fakes/FakeSimctl";
+import { FakeDevicectlDisplayInfoSource } from "../fakes/FakeDevicectlDisplayInfoSource";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -239,7 +240,10 @@ describe("device state tools", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     networkFilterBridge.setState("not_installed");
-    registerUtilityTools({ networkFilterBridge });
+    registerUtilityTools({
+      networkFilterBridge,
+      iosDisplayInfoSource: new FakeDevicectlDisplayInfoSource(),
+    });
     for (const name of ["getDeviceState", "setDeviceState"]) {
       const tool = ToolRegistry.getTool(name)!;
       const handler = tool.deviceAwareHandler!;

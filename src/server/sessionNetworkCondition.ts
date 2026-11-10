@@ -1,3 +1,9 @@
+import { logger } from "../utils/logger";
+import {
+  IosAppNetworkRuleClient,
+  IOS_APP_NETWORK_RULE_LEASE_MS,
+} from "../features/networkFilter/IosAppNetworkRuleClient";
+import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
 import type { SessionManager } from "../daemon/sessionManager";
 import type { IosAppNetworkRuleCommandContext } from "../features/networkFilter/IosAppNetworkRuleClient";
 import {
@@ -203,6 +209,11 @@ export async function runSessionNetworkMutation<T>(
         if (iosPlan) {
           // iOS publishes its own slot (with the rule's owner generation and
           // revision) before the command; a reset only borrows ownership.
+          // A launch watch requests no impairment, so an explicit rule for
+          // another app replaces it rather than being refused.
+          if (iosPlan.action === "apply") {
+            await sessionManager.releaseIosAppWatchFor(session, iosPlan.target);
+          }
           iosRule =
             iosPlan.action === "apply"
               ? sessionManager.beginIosAppNetworkRule(session, iosPlan.target)
@@ -251,5 +262,79 @@ export async function runSessionNetworkMutation<T>(
       sessionManager.scheduleNetworkConditionExpiry(session, expiresInSeconds, generation);
     }
     return result;
+  });
+}
+
+/** Pre-arm only at the launch hook. Reuse the session's leased, fenced rule slot. */
+export async function prearmSessionAppNetwork(
+  manager: SessionManager | undefined,
+  target: SessionNetworkTarget,
+  bundleId: string,
+  bridge: NetworkFilterBridge,
+): Promise<void> {
+  if (!manager || !target.sessionUuid) {
+    return;
+  }
+  const session = manager.getSession(target.sessionUuid);
+  if (!session || session.assignedDevice !== target.deviceId) {
+    return;
+  }
+  await manager.runNetworkConditionMutationExclusive(target.sessionUuid, async () => {
+    const status = await bridge.status();
+    if (
+      status.state !== "ready" ||
+      status.contractVersion !== 5 ||
+      !manager.isAdmittedForAutomation(session) ||
+      session.assignedDevice !== target.deviceId
+    ) {
+      return;
+    }
+    await manager.trackSessionSetup(session, async () => {
+      const client = new IosAppNetworkRuleClient(bridge);
+      const existing = session.cacheData.networkCondition?.iosAppRule;
+      if (existing) {
+        const installed = status.rules?.find(
+          (rule) =>
+            rule.owner === session.sessionId &&
+            rule.ownerGeneration === existing.ownerGeneration &&
+            rule.target.bundleId === existing.bundleId &&
+            rule.target.simulator.udid.toUpperCase() === existing.udid.toUpperCase(),
+        );
+        // A launch must preserve an active impairment. Watches follow the app under test.
+        if (installed) {
+          if (installed.condition !== "watch") {
+            return;
+          }
+          if (existing.bundleId === bundleId && existing.udid === target.deviceId) {
+            return;
+          }
+        }
+        const reset = manager.prepareIosAppNetworkReset(session, existing);
+        if ((await client.reset(reset.rule)).kind !== "reset") {
+          return;
+        }
+        manager.finishIosAppNetworkReset(session, reset.rule);
+      }
+      const context = manager.beginIosAppNetworkRule(
+        session,
+        { udid: target.deviceId, bundleId },
+        { watch: true },
+      );
+      const result = await client.applyWatch(
+        context.rule,
+        IOS_APP_NETWORK_RULE_LEASE_MS,
+        context.nextRevision,
+      );
+      if (result.kind === "applied") {
+        manager.confirmIosAppNetworkRule(session, context.rule);
+      } else {
+        logger.warn(
+          `[network-filter] Launch watch for ${bundleId} was not confirmed: ${result.kind}`,
+        );
+        if (result.kind !== "failed" || result.rolledBack) {
+          manager.finishIosAppNetworkReset(session, context.rule);
+        }
+      }
+    });
   });
 }

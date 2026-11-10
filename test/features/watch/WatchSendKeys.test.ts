@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   WATCH_FOCUS_WAIT_DELAYS_MS,
   watchSendKeys,
 } from "../../../src/features/watch/WatchSendKeys";
 import { WatchRunnerError } from "../../../src/features/watch/WatchRunnerError";
+import type { WatchCommand } from "../../../src/features/watch/WatchRunnerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { watchRunners } from "../../../src/features/watch/WatchRunnerRegistry";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
@@ -56,6 +58,7 @@ test.each<SendKeysSelector>([{ elementId: "ctrlproxy-crown" }, { text: "CtrlProx
     );
     expect(result.success).toBe(true);
     expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
       { type: "hierarchy" },
       { type: "tap", identifier: "ctrlproxy-crown" },
       { type: "type", text: "hello" },
@@ -194,6 +197,7 @@ test.each([
       release();
     }
     expect(fake.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+      { type: "face", op: "dump" },
       { type: "tap", identifier: "watch-text-field" },
       { type: "type", text: "CD" },
     ]);
@@ -230,10 +234,68 @@ test("text selector reaches a labeled field by its value through the value child
     release();
   }
   expect(fake.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+    { type: "face", op: "dump" },
     // The field and its value child share an identifier, so the tap falls back to coordinates.
     { type: "tap", x: 50, y: 20 },
     { type: "type", text: "CD" },
   ]);
+});
+
+/** Returns the captured host-foreground face dump, so the preflight finds no open Smart Stack. */
+class HostForegroundClient extends FakeWatchRunnerClient {
+  override async request(
+    command: WatchCommand,
+    signal?: AbortSignal,
+    options?: Parameters<FakeWatchRunnerClient["request"]>[2],
+  ): Promise<unknown> {
+    const result = await super.request(command, signal, options);
+    return command.type === "face" && command.op === "dump" ? hostForegroundDump : result;
+  }
+}
+const hostForegroundDump = readFileSync(
+  new URL("../../fixtures/watch/fixture-face-dump-host-foreground.txt", import.meta.url),
+  "utf8",
+);
+const faceDumps = (fake: FakeWatchRunnerClient) =>
+  fake.commands.filter((command) => command.type === "face" && command.op === "dump").length;
+const fiveKeys: SendKeysCommand[] = [..."hello"].map((text) => ({ action: "type", text }));
+
+test("a 5-key sendKeys with a selector runs the Smart Stack preflight once (#17803)", async () => {
+  const fake = new HostForegroundClient();
+  const release = watchRunners.register("watch-five-keys", fake);
+  try {
+    const result = await watchSendKeys("watch-five-keys", fiveKeys, {
+      elementId: "ctrlproxy-crown",
+    });
+    expect(result).toMatchObject({ success: true, completedCommands: 5 });
+  } finally {
+    release();
+  }
+  expect(faceDumps(fake)).toBe(1);
+  expect(fake.commands).toEqual([
+    { type: "face", op: "dump" },
+    { type: "hierarchy" },
+    { type: "tap", identifier: "ctrlproxy-crown" },
+    ...[..."hello"].map((text): WatchCommand => ({ type: "type", text })),
+  ]);
+});
+
+test("a 5-key sendKeys into the focused field runs no preflight", async () => {
+  expect(await watchSendKeys(device.deviceId, fiveKeys)).toMatchObject({ success: true });
+  expect(faceDumps(client)).toBe(0);
+});
+
+test("each sendKeys call reads the face afresh; nothing is cached across calls", async () => {
+  const fake = new HostForegroundClient();
+  const release = watchRunners.register("watch-two-calls", fake);
+  try {
+    for (const call of [1, 2]) {
+      await watchSendKeys("watch-two-calls", fiveKeys, { elementId: "ctrlproxy-crown" });
+      expect(faceDumps(fake)).toBe(call);
+    }
+  } finally {
+    release();
+  }
 });
 
 /** Refuses type until the keyboard sheet opens, the way the runner does before focus lands. */

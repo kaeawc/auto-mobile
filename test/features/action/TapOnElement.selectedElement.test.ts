@@ -416,7 +416,7 @@ test("tap and long-press promotion choose the same nearest ordinary clickable an
   expect(longPressSelection.matchedElement?.bounds).toEqual(labelBounds);
 });
 
-test("nested promotion chooses the nearest eligible ancestor and honors resource ID", async () => {
+test("nested promotion chooses the nearest eligible ancestor even without a resource ID (#17667)", async () => {
   const { ResolverElementSelector } =
     await import("../../../src/features/utility/ResolverElementSelector");
   const hierarchy = {
@@ -443,8 +443,10 @@ test("nested promotion chooses the nearest eligible ancestor and honors resource
   expect(tap.resolveTapTargetElement(matched, hierarchy, "tap", false).element.bounds).toEqual(
     innerBounds,
   );
-  expect(tap.resolveTapTargetElement(matched, hierarchy, "tap", true).element["resource-id"]).toBe(
-    "app:id/outer",
+  // Under TalkBack the id-less inner owner still wins; walking on to the outer row would
+  // activate a different control.
+  expect(tap.resolveTapTargetElement(matched, hierarchy, "tap", true).element.bounds).toEqual(
+    innerBounds,
   );
   expect(
     tap.resolveTapTargetElement(matched, hierarchy, "longPress", false).element["resource-id"],
@@ -454,5 +456,5 @@ test("nested promotion chooses the nearest eligible ancestor and honors resource
   ).toEqual(innerBounds);
   expect(
     tap.resolveTapTargetElement(matched, hierarchy, "longPress", true).element["resource-id"],
-  ).toBe("app:id/outer");
+  ).toBeUndefined();
 });

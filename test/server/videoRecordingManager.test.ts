@@ -969,6 +969,35 @@ describe("videoRecordingManager", () => {
     expect((await fakeRepository.getRecording(active.recordingId))?.transitions).toEqual(
       metadata.transitions,
     );
+    expect(metadata.warnings).toEqual([
+      'Android recording kept capturing panel "11" (inner, 200x300) after the active display changed to panel "22" (cover, 100x200) at 1250ms; frames after 1250ms are cropped or letterboxed to the recorded 200x300 size. Stop the recording before setPosture or a fold and start a new one after it to capture the new panel at its full size.',
+    ]);
+  });
+
+  test("recording a chosen non-active panel adds no transition warning (#17753)", async () => {
+    const foldable: BootedDevice = {
+      deviceId: "recording-foldable",
+      platform: "android",
+      name: "Foldable",
+      displays: {
+        panels: [
+          { key: "11", role: "inner", sizePx: { width: 200, height: 300 } },
+          { key: "22", role: "cover", sizePx: { width: 100, height: 200 } },
+        ],
+        postures: ["opened", "closed"],
+      },
+    };
+    await setVideoRecordingManagerDependencies({
+      resolveAndroidDisplay: async () => ({
+        panel: { key: "22", role: "cover" },
+        physicalId: "22",
+        activePanel: { key: "11", role: "inner" },
+      }),
+    });
+    const active = await startVideoRecording({ device: foldable });
+    const { metadata } = await stopVideoRecording(active.recordingId);
+    expect(metadata.transitions).toHaveLength(1);
+    expect(metadata.warnings).toBeUndefined();
   });
 
   test("same-panel rotation and posture pushes create no display transition", async () => {

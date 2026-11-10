@@ -5,11 +5,8 @@ import type { PrototypeSpecRevisionSource } from "../prototypeSpecRevisions";
 import { prototypeEmbedGlyphs } from "./prototypeEmbedGlyphs";
 import { materialIconGlyphs } from "./materialIconGlyphs";
 import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
-import {
-  prototypeRevisionFilter,
-  prototypeVariantIds,
-  shownRevision,
-} from "./prototypeWebResource";
+import { prototypeRevisionFilter, shownRevision } from "./prototypeWebResource";
+import { prototypeVariantIds } from "./prototypeVariantIds";
 
 /** The envelope's `format`, so an embedder can tell it from a bare spec. */
 export const PROTOTYPE_EMBED_FORMAT = "automobile-prototype-embed";

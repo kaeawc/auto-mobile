@@ -46,6 +46,7 @@ import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/
 import { DELETE_KEYEVENT_CHUNK_SIZE } from "../../../src/features/action/ClearText";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { DevicePendingImeRestores } from "../../../src/features/action/sendkeys/PendingImeRestore";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
@@ -608,7 +609,8 @@ describe("SendKeys", () => {
       androidDevice,
       createAdbFactory(adb),
       observer,
-      { textClient: textClient.client, timer },
+      // A fresh registry: the AutoMobile IME stays recorded after a call until release (#16428).
+      { textClient: textClient.client, timer, pendingImeRestores: new DevicePendingImeRestores() },
     );
     return { executor, timer, textClient, adb };
   }

@@ -1,0 +1,18 @@
+== fixture type 3
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=3 configActionPending=false provider=ComponentInfo{dev.jasonpearson.automobile.wearfixture/dev.jasonpearson.automobile.wearfixture.complication.FixtureComplicationService} isEnabled=true
+== fixture type 5
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{dev.jasonpearson.automobile.wearfixture/dev.jasonpearson.automobile.wearfixture.complication.FixtureComplicationService} isEnabled=true
+== fixture type 4
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{dev.jasonpearson.automobile.wearfixture/dev.jasonpearson.automobile.wearfixture.complication.FixtureComplicationService} isEnabled=true
+== fixture type 9
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{dev.jasonpearson.automobile.wearfixture/dev.jasonpearson.automobile.wearfixture.complication.FixtureComplicationService} isEnabled=true
+== fixture type 1
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{dev.jasonpearson.automobile.wearfixture/dev.jasonpearson.automobile.wearfixture.complication.FixtureComplicationService} isEnabled=true
+== fixture type 6
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{dev.jasonpearson.automobile.wearfixture/dev.jasonpearson.automobile.wearfixture.complication.FixtureComplicationService} isEnabled=true

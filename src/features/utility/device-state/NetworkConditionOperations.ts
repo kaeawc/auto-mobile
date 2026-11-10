@@ -543,6 +543,7 @@ export class NetworkConditionOperations {
           profile: "offline",
           appliedProfile: "offline",
           acknowledged: true,
+          ...(result.existingFlows ? { warning: `Existing flows: ${result.existingFlows}.` } : {}),
           rule: {
             appId: rule.bundleId,
             profile: "offline",

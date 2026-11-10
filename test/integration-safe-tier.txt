@@ -97,6 +97,7 @@ test/daemon/socketServerToolCapabilities.integration.test.ts | safe | tmpdir soc
 test/daemon/socketTasksRelay.integration.test.ts | safe | tmpdir socket L281, in-process dispatcher, DaemonClient.isAvailable spied, hermetic fixture device boundary
 test/daemon/statelessMcpHttpModern.integration.test.ts | safe | real SDK HTTP, listen, MRTR and task device-choice handlers with captured Request/Response, in-memory task store and bus, hermetic tool/device-manager fakes and FakeTimer; no network listener or database resolution
 test/daemon/telemetryPushSocketServer.integration.test.ts | safe | FakeSocket, FakeTimer, in-memory singleton DB
+test/daemon/terminalReleaseJournal.realDisk.integration.test.ts | safe | real nodeTerminalReleaseJournalFileSystem over private mkdtemp directories removed afterwards L19 L58
 test/daemon/videoStreamSocketServer.integration.test.ts | safe | mkdtemp socket dir L144, fake H264 capture source and timer
 test/db/DatabaseHealthProbe.integration.test.ts | safe | temp sqlite file, fake worker; /tmp path L164 is a string only
 test/db/accessibilityBaselineRepository.integration.test.ts | safe | in-memory DB
@@ -205,6 +206,8 @@ test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded 
 test/features/prototype/web/prototypeEmbedGlyphsCoverage.integration.test.ts | safe | renders read-only repo fixtures in process with a recording fake glyph source; no writes, ports or shared paths
 test/features/prototype/web/webAndroidParity.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes parity budgets or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
 test/features/prototype/web/webImageEncoding.integration.test.ts | safe | encodes in-memory images with sharp and reads only a committed fixture; no paths, processes or network
+test/features/prototype/web/webImageLayout.integration.test.ts | unsafe | launches headless Chromium via playwright-core and can rewrite its committed golden; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
+test/features/prototype/web/webIosParity.integration.test.ts | unsafe | opt-in headless Chromium parity capture; writes scratch/ screenshots and may update budgets
 test/features/prototype/web/webScreenshots.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes goldens or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
 test/features/screen-stream/ScreenCaptureHelperProvider.integration.test.ts | safe | fake downloader/checksum/timer; cache in tmpdir L36/L49
 test/features/shared/GenericThresholdManager.integration.test.ts | safe | createTestDatabase; static threshold calculation only L220
@@ -229,6 +232,7 @@ test/integration/webrtcDeviceCaptureLoad.integration.test.ts | unsafe | execFile
 test/lint/avdManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string fixtures L52
 test/lint/devicectlExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; devicectl calls are string literals L132
 test/lint/hostDefaultsExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string literals L63
+test/lint/lazyFeatureModules.integration.test.ts | safe | parses src files via readFileSync and oxc-parser; spawns nothing L52
 test/lint/macOsOnlyTestClassification.integration.test.ts | safe | parses test and src files via readFileSync and the TypeScript API; spawns nothing L15
 test/lint/oxlintConfigScoping.integration.test.ts | unsafe | Bun.spawnSync runs one real oxlint over fixtures in the shared repo scratch/ tree (skipped on win32) L67
 test/lint/sdkManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; sdkmanager calls are string literals L174
@@ -261,6 +265,7 @@ test/server/plainReadToolSessionActivity.integration.test.ts | safe | hermetic f
 test/server/planExecutionOrchestrator.integration.test.ts | unsafe | DevicePool built without deviceManager (default real one) L298
 test/server/planReleaseTransportBindingTeardown.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L37
 test/server/planTools.executePlanThrow.integration.test.ts | safe | executePlan and startVideoRecording spied to reject L29/L32
+test/server/prototypeWebExportFiles.integration.test.ts | safe | real NodePrototypeWebExportFiles over a private mkdtemp directory removed afterwards L31
 test/server/proxyServerListChanged.integration.test.ts | safe | FakeDaemonClient/FakeDaemonManager; isAvailable mocked L20/L25/L44
 test/server/proxyServerTransportFailure.integration.test.ts | safe | fake client/manager; DaemonClient("/unused") never connects L288
 test/server/resources/read.integration.test.ts | unsafe | unlinks files in hardcoded /tmp/auto-mobile/observe_results L68/L72

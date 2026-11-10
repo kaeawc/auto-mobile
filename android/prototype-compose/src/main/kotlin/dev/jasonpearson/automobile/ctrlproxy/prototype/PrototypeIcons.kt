@@ -10,15 +10,16 @@ import java.util.concurrent.ConcurrentHashMap
  * Resolves a contract icon name (snake_case, e.g. `alarm_add`) to a bundled Material icon.
  *
  * The names are closed by the `iconName` definition in `schemas/prototype-spec-contract.json`,
- * which lists exactly the icons in `androidx.compose.material:material-icons-extended`. Each icon
+ * which lists the curated subset of `androidx.compose.material:material-icons-extended`. Each icon
  * is a top-level extension property compiled to a static getter on `<Pascal>Kt` in the package for
  * its style, so it is found by reflection instead of a 2,000-branch `when`.
  *
  * R8 cannot see reflective uses, so an app that shrinks and renders icons by name must keep the
- * icon package itself (`-keep class androidx.compose.material.icons.** { *; }`). This library ships
- * no such consumer rule: it would retain every extended icon (about 3 MB of dex) in every embedding
- * app (#14149). A valid name that resolves in no style was most likely stripped, so it is logged
- * once at warn level. Unknown names keep the neutral placeholder (`null`).
+ * contract's `<Pascal>Kt` classes and public static getters in each style. CtrlProxy generates
+ * those rules from the contract enum at build time. This library ships no consumer keep rule, so
+ * embedding apps choose their own retention policy (#14149). A valid name that resolves in no style
+ * was most likely stripped, so it is logged once at warn level. Unknown names keep the neutral
+ * placeholder (`null`).
  */
 internal fun prototypeIcon(name: String?, variant: String? = null): ImageVector? {
   if (name == null || !ICON_NAME.matches(name)) return null
@@ -72,6 +73,8 @@ private fun load(style: IconStyle, name: String): ImageVector? =
     ?: if (style != IconStyle.FILLED) loadStyle(IconStyle.FILLED, name) else null
 
 private fun loadStyle(style: IconStyle, name: String): ImageVector? {
+  // Keep this derivation and ICON_NAME identical to build-logic's PrototypeIconRules. The
+  // contract-wide JVM test exercises these reflected getters in every style.
   val pascal = name.split('_').joinToString("") { it.replaceFirstChar(Char::uppercase) }
   return try {
     val owner = Class.forName("androidx.compose.material.icons.${style.packageName}.${pascal}Kt")

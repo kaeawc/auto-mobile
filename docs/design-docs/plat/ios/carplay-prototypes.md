@@ -17,20 +17,18 @@ needs a different rendering path.
 
 ## Options considered
 
-| Option                                    | Fidelity                                       | Spec impact                                                                                                  | Constraints                                                                                                                                                                                                        | Test strategy                                                                | Maintenance                                         |
-| ----------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- | --------------------------------------------------- |
-| 1. Mock on the phone screen               | Low: CarPlay-styled look, not the real system  | New template-shaped nodes in the shared vocabulary, across the TS, Kotlin and Swift validators and renderers | None beyond the existing agent                                                                                                                                                                                     | Existing renderer tests at CarPlay screen sizes                              | Three renderers must track Apple's template styling |
-| 2. Real templates in a prototype host app | High: real `CPTemplate`s on the CarPlay screen | A template-only spec subset that maps to `CPTemplate` types; most node kinds are refused                     | New host app with a CarPlay scene and a CarPlay entitlement; the simulator's CarPlay window has no headless attach and closed-window captures time out (#14925); local-signing entitlement behaviour is unmeasured | Needs Simulator.app with the CarPlay window open, so no Linux or headless CI | New host, entitlement and signing upkeep per Xcode  |
-| 3. Defer                                  | n/a                                            | None                                                                                                         | None                                                                                                                                                                                                               | None                                                                         | None                                                |
+| Option                                    | Fidelity                                       | Spec impact                                                                                                  | Constraints                                                                                                                                                                                                 | Test strategy                                                                | Maintenance                                         |
+| ----------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------- |
+| 1. Mock on the phone screen               | Low: CarPlay-styled look, not the real system  | New template-shaped nodes in the shared vocabulary, across the TS, Kotlin and Swift validators and renderers | None beyond the existing agent                                                                                                                                                                              | Existing renderer tests at CarPlay screen sizes                              | Three renderers must track Apple's template styling |
+| 2. Real templates in a prototype host app | High: real `CPTemplate`s on the CarPlay screen | A template-only spec subset that maps to `CPTemplate` types; most node kinds are refused                     | New host app with a CarPlay scene and a CarPlay entitlement; headless screen power-on uses private CoreSimulator APIs and captures remain black (#17561); local-signing entitlement behaviour is unmeasured | Needs Simulator.app with the CarPlay window open, so no Linux or headless CI | New host, entitlement and signing upkeep per Xcode  |
+| 3. Defer                                  | n/a                                            | None                                                                                                         | None                                                                                                                                                                                                        | None                                                                         | None                                                |
 
 ## Why defer
 
-- Option 2's prerequisites are open. #14925 found that the CarPlay screen is listed by
-  `simctl io enumerate` even with its window closed, that `screenshot`/`recordVideo` with
-  `--display=wireless0` time out while it is closed, and that only the Simulator.app menu
-  (I/O > External Displays > CarPlay) opens it. Whether a locally signed app with a CarPlay
-  entitlement connects in the simulator, and whether XCUITest can see template elements, are not
-  yet measured.
+- Option 2's prerequisites are open. The CarPlay screen is listed by `simctl io enumerate` while
+  powered off. The headless helper can power it on, but captures remain black (#17561). Whether a
+  locally signed app with a CarPlay entitlement connects in the simulator, and whether XCUITest can
+  see template elements, are not yet measured.
 - Option 1 grows the shared spec vocabulary in all three renderers for a mock that never exercises
   CarPlay itself, before there is a known user of it.
 - #14924's observation work (inventory, screenshots, video, SDK template tree) is the prerequisite
@@ -39,7 +37,13 @@ needs a different rendering path.
 ## Current behaviour
 
 A spec cannot target CarPlay: `display` is refused on iOS, and the agent's window is only ever on the
-phone screen. No CarPlay-specific nodes exist in the spec.
+phone screen. No CarPlay-specific nodes exist in the spec. The `ios/carplay-power` helper can report
+screens or power on the screen with `screenType == 2` for a booted simulator, optionally enabling
+CarPlay first. It checks private CoreSimulator selectors, waits for callbacks, and re-enumerates to
+verify power state; unavailable APIs produce actionable errors. The injectable TypeScript bridge
+uses `AUTOMOBILE_CARPLAY_POWER_HELPER_PATH`. Its JSON includes screen dimensions and power state;
+CarPlay enablement is unknown (`null`) unless this invocation enabled it. Powering the screen does
+not resolve black capture frames (#17561) or add observation, interaction, or prototype support.
 
 ## Revisit when
 

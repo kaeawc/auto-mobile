@@ -58,6 +58,9 @@ export interface ToolSelectionProfileRegistry {
   /** Live compact-metadata override; absence uses the effective daemon default. */
   setActionsCompactMetadata(profileUuid: string, enabled: boolean): void;
   getActionsCompactMetadata(profileUuid: string): boolean | undefined;
+  /** Live full-prototype-schema request (#17723); absence uses the daemon's own default. */
+  setPrototypeFullSchema(profileUuid: string, enabled: boolean): void;
+  getPrototypeFullSchema(profileUuid: string): boolean | undefined;
 }
 
 /**
@@ -131,6 +134,14 @@ export class PersistentToolSelectionProfileRegistry
 
   getActionsCompactMetadata(profileUuid: string): boolean | undefined {
     return this.memory.getActionsCompactMetadata(profileUuid);
+  }
+
+  setPrototypeFullSchema(profileUuid: string, enabled: boolean): void {
+    this.memory.setPrototypeFullSchema(profileUuid, enabled);
+  }
+
+  getPrototypeFullSchema(profileUuid: string): boolean | undefined {
+    return this.memory.getPrototypeFullSchema(profileUuid);
   }
 
   async load(): Promise<void> {

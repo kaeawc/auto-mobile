@@ -211,6 +211,27 @@ was sent but its result never arrived, the press reports `code: "indeterminate_o
 `retryable: false`: observe before pressing again, because the screen may already have gone back. Other
 screens are unchanged.
 
+## Secondary displays
+
+To drive an app on another display, such as a passenger screen, pass `display` (a panel key, a role or
+`active`) to `observe`, `tapOn` and `pressButton`. You can also pin it once for the session with
+`setActiveDevice` `display`. An explicit `display` overrides the pin. `pressButton` sends the key to that
+display and checks that display for the visual change. For `pressButton`, `active` is the focused display
+(the one the latest `observe` without `display` or a pin read; before any such read, the display that
+holds input focus, or the main display when focus is unknown), not the display you last observed
+explicitly. An explicit `active` overrides the pin like any other `display`. A `back` that finds a Car App Library template
+there taps the host's Back control on the same display. A `home` that changes nothing because that
+display already shows its launcher succeeds, as it does on the default display. System actions (such
+as `lock` or `quick_settings`) and rotary input still act device-wide; `display` only picks the display
+that is checked. The session pin does not apply to `lock`, `power`, `power_dialog`, `volume_up`,
+`volume_down` or rotary buttons: they act on the whole device, so they work even when the pinned display
+is gone. Without `display` or a pin, `pressButton` presses on the default display as before. `display`
+on `pressButton` is Android only.
+
+On an emulator, create the extra display as public: the last field of `-multidisplay` must be `1`, for
+example `-multidisplay 1,1280,720,160,1`. Android accessibility does not track a private virtual display
+(`0`), so it has no view hierarchy and `observe` refuses it.
+
 ## Not supported
 
 - Android Auto projection and the Desktop Head Unit; see [Android Auto and the Desktop Head Unit](android-auto.md).

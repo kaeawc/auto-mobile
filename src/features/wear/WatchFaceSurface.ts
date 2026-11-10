@@ -3,6 +3,10 @@ import { errorMessage } from "../../models/describeUnknownError";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
+import {
+  COMPLICATION_PROVIDER_ACTION,
+  type ComplicationProviderLister,
+} from "./ComplicationProviders";
 import { DEBUG_SURFACE_ACTION, parseBroadcastOutput, type ParsedBroadcast } from "./WearSurface";
 import {
   parseWatchFaces,
@@ -15,8 +19,10 @@ import {
 /**
  * Watch face and complication changes over DEBUG_SURFACE (#17520 classic faces, #17545 WFF).
  * `result=1` only means the receiver accepted the request: a provider that does not support the
- * requested type leaves the slot empty with the same reply, so a change is reported as applied
- * only once `dumpsys wear_service` shows it.
+ * requested type is ignored with the same reply (the slot keeps what it showed, #17521), so a
+ * change is reported as applied only once `dumpsys wear_service` shows it. setComplication checks
+ * the provider against `query-services` before sending, and both complication actions read the
+ * slot first so a request the slot already showed is reported `unchanged`, not applied.
  */
 export const WATCH_FACE_ACTIONS = [
   "setWatchFace",
@@ -43,6 +49,8 @@ export const WATCH_FACE_ERRORS = [
   "watch_face_not_switched",
   "missing_argument",
   "not_applied",
+  "provider_not_found",
+  "unsupported_type",
   "unknown_reply",
 ] as const;
 export type WatchFaceError = (typeof WATCH_FACE_ERRORS)[number];
@@ -93,6 +101,9 @@ export interface SetComplicationRequest extends ComplicationRequest {
   type: number;
 }
 
+/** `unchanged`: the slot already showed the request before the broadcast. */
+export type WatchFaceChange = "applied" | "unchanged";
+
 export interface WatchFaceChangeResult {
   success: boolean;
   action: WatchFaceAction;
@@ -100,6 +111,8 @@ export interface WatchFaceChangeResult {
   broadcastResult: FaceBroadcast;
   /** True only when a `dumpsys wear_service` readback showed the change. */
   applied: boolean;
+  /** Complication actions with a pre-send readback: whether the broadcast changed the slot. */
+  change?: WatchFaceChange;
   /** Mirrors `applied`: the readback is the verification. */
   verified: boolean;
   favoriteId?: number;
@@ -126,6 +139,7 @@ export interface WatchFaceSurface {
 export interface WatchFaceSurfaceDeps {
   adb: AdbCommandRunner & WearServiceAdb;
   timer: Timer;
+  providers: ComplicationProviderLister;
 }
 
 /** A single readback took 0.4 s typically and 2.8 s at worst over 20 measured runs. */
@@ -146,8 +160,10 @@ const ERROR_REASONS: Record<WatchFaceError, string> = {
   watch_face_not_switched:
     "No watch face was switched by setWatchFace, so there is nothing to unset.",
   missing_argument: "The broadcast was missing a required argument or had conflicting ones.",
-  not_applied:
-    "The broadcast was accepted but dumpsys wear_service did not show the change. For a complication, the provider may not support the requested type.",
+  not_applied: "The broadcast was accepted but dumpsys wear_service did not show the change.",
+  provider_not_found: `The provider is not a complication data source on this device (none of the services answering ${COMPLICATION_PROVIDER_ACTION}).`,
+  unsupported_type:
+    "The broadcast was accepted but the slot kept its previous provider and type: the provider does not support the requested complication type. Pass a type the data source declares in its SUPPORTED_TYPES.",
   unknown_reply: "The broadcast reply was not recognized.",
 };
 
@@ -159,6 +175,8 @@ interface Attempt {
   extras: string;
   check: Check;
   applied: string;
+  /** Complication actions: the slot to read before sending and the line that satisfies it. */
+  slot?: { id: number; matches: (line: ComplicationSlot) => boolean };
 }
 
 export class AdbWatchFaceSurface implements WatchFaceSurface {
@@ -199,13 +217,15 @@ export class AdbWatchFaceSurface implements WatchFaceSurface {
   ): Promise<WatchFaceChangeResult> {
     const { watchFace, slot, type, provider } = request;
     const expected = componentName(provider);
+    const matches = (line: ComplicationSlot) => line.type === type && line.provider === expected;
     return this.attempt(
       {
         action: "setComplication",
         requested: { watchFace, slot, type, provider },
         extras: `--ecn component ${provider} ${faceExtra(splitFace(watchFace))} --ei slot ${slot} --ei type ${type}`,
-        check: slotCheck(slot, (line) => line.type === type && line.provider === expected),
+        check: slotCheck(slot, matches),
         applied: `Slot ${slot} shows ${provider} with type ${type}.`,
+        slot: { id: slot, matches },
       },
       signal,
     );
@@ -221,46 +241,58 @@ export class AdbWatchFaceSurface implements WatchFaceSurface {
         action: "unsetComplication",
         requested: { watchFace, slot, provider },
         extras: `--ecn component ${provider} ${faceExtra(splitFace(watchFace))} --ei slot ${slot}`,
-        check: slotCheck(slot, (line) => line.provider === null),
+        check: slotCheck(slot, emptySlot),
         applied: `Slot ${slot} is empty.`,
+        slot: { id: slot, matches: emptySlot },
       },
       signal,
     );
   }
 
   private async attempt(attempt: Attempt, signal?: AbortSignal): Promise<WatchFaceChangeResult> {
-    const { action, requested } = attempt;
-    const refused = refuseBeforeSend(requested.watchFace);
+    const refused =
+      refuseBeforeSend(attempt.requested.watchFace) ?? (await this.refuseProvider(attempt, signal));
     if (refused) {
-      return failure(attempt, refused, "The request was refused before sending.");
+      return failure(
+        attempt,
+        refused.reply,
+        "The request was refused before sending.",
+        refused.reason,
+      );
     }
-    const reply = classifyFaceBroadcast(await this.broadcast(action, attempt.extras, signal));
+    const before = attempt.slot ? await this.read(signal) : undefined;
+    const reply = classifyFaceBroadcast(
+      await this.broadcast(attempt.action, attempt.extras, signal),
+    );
     if (!reply.accepted) {
       return failure(attempt, reply, "The watch refused the change.");
     }
     const readback = await this.readBack(attempt.check, reply, signal);
-    const applied = readback !== undefined && attempt.check(readback, reply);
+    return verdict(attempt, reply, readback, before);
+  }
+
+  /** setComplication only: the provider must be one of the device's complication data sources. */
+  private async refuseProvider(
+    attempt: Attempt,
+    signal?: AbortSignal,
+  ): Promise<Refusal | undefined> {
+    const { provider } = attempt.requested;
+    if (attempt.action !== "setComplication" || provider === undefined) {
+      return undefined;
+    }
+    const wanted = componentName(provider);
+    const providers = await this.deps.providers.list(signal);
+    if (providers.some((candidate) => candidate.component === wanted)) {
+      return undefined;
+    }
+    const available = providers.map((candidate) => candidate.component);
     return {
-      success: applied,
-      action,
-      requested,
-      broadcastResult: reply,
-      applied,
-      verified: applied,
-      ...(reply.favoriteId !== undefined ? { favoriteId: reply.favoriteId } : {}),
-      ...(readback !== undefined ? { readback } : {}),
-      ...(applied ? {} : { error: "not_applied" as const }),
-      message: applied
-        ? `${attempt.applied} Confirmed by dumpsys wear_service.`
-        : "The broadcast was accepted, but dumpsys wear_service did not show the change.",
-      ...(applied
-        ? {}
-        : {
-            reason:
-              readback === undefined
-                ? "dumpsys wear_service could not be read to confirm the change."
-                : ERROR_REASONS.not_applied,
-          }),
+      reply: { code: null, accepted: false, error: "provider_not_found" },
+      reason:
+        `'${provider}' is not a complication data source on this device. ` +
+        (available.length > 0
+          ? `Use one of: ${available.join(", ")}.`
+          : `No complication data sources are installed; install an app with a service for ${COMPLICATION_PROVIDER_ACTION}.`),
     };
   }
 
@@ -373,14 +405,112 @@ function slotCheck(slot: number, matches: (line: ComplicationSlot) => boolean): 
     );
 }
 
-function refuseBeforeSend(watchFace: string | undefined): FaceBroadcast | undefined {
+const emptySlot = (line: ComplicationSlot) => line.provider === null;
+
+/** The slot as the given favorite shows it, when the reading has that favorite and slot. */
+function slotOf(
+  reading: WatchFaceObservation | undefined,
+  favoriteId: number | null | undefined,
+  slot: number,
+): ComplicationSlot | undefined {
+  return reading?.favorites
+    .find((favorite) => favorite.favoriteId === favoriteId)
+    ?.slots.find((line) => line.slot === slot);
+}
+
+function sameSlot(a: ComplicationSlot | undefined, b: ComplicationSlot | undefined): boolean {
+  return a !== undefined && b !== undefined && a.type === b.type && a.provider === b.provider;
+}
+
+/**
+ * The pre-send slot of the favorite the reply names; undefined without a pre-send read or when
+ * the reply changed favorite, since then the slots are not comparable.
+ */
+function baselineSlot(
+  attempt: Attempt,
+  before: WatchFaceObservation | undefined,
+  reply: FaceBroadcast,
+): ComplicationSlot | undefined {
+  const favoriteId = before?.activeFace.favoriteId;
+  if (!attempt.slot || favoriteId !== reply.favoriteId) {
+    return undefined;
+  }
+  return slotOf(before, favoriteId, attempt.slot.id);
+}
+
+interface Outcome {
+  applied: boolean;
+  change?: WatchFaceChange;
+  error?: "not_applied" | "unsupported_type";
+}
+
+function outcome(
+  attempt: Attempt,
+  reply: FaceBroadcast,
+  readback: WatchFaceObservation | undefined,
+  before: WatchFaceObservation | undefined,
+): Outcome {
+  const baseline = baselineSlot(attempt, before, reply);
+  if (readback !== undefined && attempt.check(readback, reply)) {
+    if (baseline === undefined) {
+      return { applied: true };
+    }
+    return { applied: true, change: attempt.slot?.matches(baseline) ? "unchanged" : "applied" };
+  }
+  const after = attempt.slot ? slotOf(readback, reply.favoriteId, attempt.slot.id) : undefined;
+  // The slot kept what it showed although that was not the request: the type was ignored.
+  const ignored = attempt.action === "setComplication" && sameSlot(baseline, after);
+  return { applied: false, error: ignored ? "unsupported_type" : "not_applied" };
+}
+
+const OUTCOME_MESSAGES: Record<WatchFaceChange | "failed", (applied: string) => string> = {
+  applied: (applied) => `${applied} Confirmed by dumpsys wear_service.`,
+  unchanged: (applied) =>
+    `${applied} It already did before the broadcast, so nothing changed (dumpsys wear_service).`,
+  failed: () => "The broadcast was accepted, but dumpsys wear_service did not show the change.",
+};
+
+function verdict(
+  attempt: Attempt,
+  reply: FaceBroadcast,
+  readback: WatchFaceObservation | undefined,
+  before: WatchFaceObservation | undefined,
+): WatchFaceChangeResult {
+  const { applied, change, error } = outcome(attempt, reply, readback, before);
+  const unreadable = "dumpsys wear_service could not be read to confirm the change.";
+  return {
+    success: applied,
+    action: attempt.action,
+    requested: attempt.requested,
+    broadcastResult: reply,
+    applied,
+    ...(change ? { change } : {}),
+    verified: applied,
+    ...(reply.favoriteId !== undefined ? { favoriteId: reply.favoriteId } : {}),
+    ...(readback !== undefined ? { readback } : {}),
+    ...(error ? { error, reason: readback === undefined ? unreadable : ERROR_REASONS[error] } : {}),
+    message: OUTCOME_MESSAGES[applied ? (change ?? "applied") : "failed"](attempt.applied),
+  };
+}
+
+interface Refusal {
+  reply: FaceBroadcast;
+  reason?: string;
+}
+
+function refuseBeforeSend(watchFace: string | undefined): Refusal | undefined {
   if (watchFace !== undefined && splitFace(watchFace).className === PLACEHOLDER_CLASS) {
-    return { code: null, accepted: false, error: "invalid_face_id" };
+    return { reply: { code: null, accepted: false, error: "invalid_face_id" } };
   }
   return undefined;
 }
 
-function failure(attempt: Attempt, reply: FaceBroadcast, message: string): WatchFaceChangeResult {
+function failure(
+  attempt: Attempt,
+  reply: FaceBroadcast,
+  message: string,
+  detail?: string,
+): WatchFaceChangeResult {
   const error = reply.error ?? "unknown_reply";
   return {
     success: false,
@@ -392,10 +522,11 @@ function failure(attempt: Attempt, reply: FaceBroadcast, message: string): Watch
     error,
     message,
     reason:
-      error === "unknown_reply" && reply.code !== null
+      detail ??
+      (error === "unknown_reply" && reply.code !== null
         ? `Unexpected broadcast reply result=${reply.code}${reply.data !== undefined ? `, data="${reply.data}"` : ""}.`
         : error === "unknown_reply"
           ? "The broadcast printed no result; the debug receiver may be missing on this build."
-          : ERROR_REASONS[error],
+          : ERROR_REASONS[error]),
   };
 }

@@ -24,7 +24,7 @@ import { readImeEditorState } from "./ImeEditorState";
 import type { AndroidModeTyper } from "./AndroidModeTyper";
 import { A11yTyper } from "./A11yTyper";
 import { EventOnlyTyper } from "./EventOnlyTyper";
-import { PasswordRouting } from "./PasswordRouting";
+import { PasswordRouting, noteAutoA11yFallback } from "./PasswordRouting";
 import { createSendKeysTextClient } from "./CtrlProxyTextClient";
 import {
   caughtErrorCodeFields,
@@ -207,7 +207,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             this.session.imeUserId = undefined;
           },
         },
-        this.timer,
         dependencies.pendingImeRestores,
       );
     this.imeRestore = new ImeRestore({
@@ -315,6 +314,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private createPasswordRouting(): PasswordRouting {
     return new PasswordRouting({
       platform: () => this.device.platform,
+      formFactor: () => this.device.formFactor,
       observer: { execute: (options) => this.observer.execute(options) },
       targetLayer: () => this.targetLayer,
       resolveMode: (requestedMode) => this.resolveMode(requestedMode),
@@ -471,6 +471,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             });
       this.recordCaretState(result);
       redactPasswordTypeResult(result, command.text, routing.passwordField === true);
+      noteAutoA11yFallback(result, routing.imeFallbackKeyboard);
       return {
         ...baseResult,
         success: result.success,

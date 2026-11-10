@@ -49,24 +49,37 @@ lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
+# The signature table with its two pattern fields lowercased, loaded once per
+# process by one awk pass. Lowercasing each row with a `tr` subshell inside the
+# match loop cost two forks per row per failed job, so the classifier (and its
+# BATS file) slowed linearly as known-flakes.txt grew (#17778). Verdict and note
+# keep their original case. awk's tolower, not bash 4's ${var,,}, keeps this
+# bash-3.2 safe.
+_signatures_lc=""
+_signatures_lc_ready=""
+load_signatures_lc() {
+  [[ -n "$_signatures_lc_ready" ]] && return 0
+  _signatures_lc="$(awk 'BEGIN { FS = OFS = "|" } $1 != "" && substr($1, 1, 1) != "#" { $1 = tolower($1); $2 = tolower($2); print }' "$SIGNATURES")"
+  _signatures_lc_ready="yes"
+  return 0
+}
+
 match_signature() {
   local job_name="$1"
   local annotation_text="$2"
   local job_lc annotation_lc job_pattern message_pattern verdict note
   job_lc="$(lowercase "$job_name")"
   annotation_lc="$(lowercase "$annotation_text")"
+  load_signatures_lc
 
   while IFS='|' read -r job_pattern message_pattern verdict note; do
     [[ -n "$job_pattern" ]] || continue
-    [[ "$job_pattern" == \#* ]] && continue
-    job_pattern="$(lowercase "$job_pattern")"
-    message_pattern="$(lowercase "$message_pattern")"
     # shellcheck disable=SC2053 # Signature fields are glob patterns; quoting would change classifier matches.
     if [[ "$job_lc" == $job_pattern && "$annotation_lc" == $message_pattern ]]; then
       printf '%s — %s' "$verdict" "$note"
       return 0
     fi
-  done < "$SIGNATURES"
+  done <<< "$_signatures_lc"
 
   printf '%s' 'UNKNOWN — no signature match, investigate'
 }
@@ -337,6 +350,7 @@ fetch_artifact_logs() {
   printf '%s' "$artifact_text"
 }
 
+load_signatures_lc
 failed_count=0
 while IFS=$'\t' read -r job_id job_name steps; do
   [[ -n "$job_id" ]] || continue

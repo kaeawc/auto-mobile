@@ -194,6 +194,11 @@ struct PrototypeContractValidator {
         guard let name = rule["name"]?.stringValue, let target = definitions[name] else {
             throw Self.invalid(path, "Unknown embedded contract reference")
         }
+        if name == "iconName", let targetFields = target.objectFields,
+           !Self.primitive(value, rule: targetFields)
+        {
+            throw Self.invalid(path, Self.iconNameError(value, rule: targetFields))
+        }
         let depthLimits = [
             "container": limits["MAX_PROTOTYPE_SELECTOR_DEPTH"],
             "condition": limits["MAX_PROTOTYPE_CONDITION_DEPTH"],

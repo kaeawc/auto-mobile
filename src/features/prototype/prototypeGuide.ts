@@ -47,13 +47,15 @@ import { MAX_PROTOTYPE_SPEC_REVISIONS } from "./prototypeSpecRevisions";
 import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
 import { renderPlatformDrivingTools } from "./prototypePlatformDrivingTools";
 
-/** Resource URIs served by the prototype authoring guide. */
-export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
-export const PROTOTYPE_ICONS_TEMPLATE = "automobile:prototype/icons{?query}";
-export const PROTOTYPE_ICONS_URI = "automobile:prototype/icons";
+import { ICON_LOOKUP_LIMIT, PROTOTYPE_ICONS_URI } from "./prototypeGuideUris";
 
-/** Maximum icon names returned by one lookup. */
-export const ICON_LOOKUP_LIMIT = 100;
+export {
+  ICON_LOOKUP_LIMIT,
+  PROTOTYPE_GUIDE_URI,
+  PROTOTYPE_ICONS_TEMPLATE,
+  PROTOTYPE_ICONS_URI,
+  PROTOTYPE_SPEC_SCHEMA_URI,
+} from "./prototypeGuideUris";
 
 interface Rule {
   kind: string;
@@ -233,7 +235,7 @@ function renderWebPreview(): string {
   return [
     "## Web preview and alternatives",
     "",
-    `Read \`automobile:prototype/<id>/web\` for a shown prototype as one self-contained HTML page: the prototype in a device frame with rotate, zoom, a variant switcher and its revision history. Optional \`frame\` (a device frame id; default the showing platform's), \`revision\` (default the latest) and \`variant\`. Revision 1 is the first acknowledged show; each later show of the id and each landed patch adds one; device state edits do not. The last ${MAX_PROTOTYPE_SPEC_REVISIONS} revisions per id are kept. Subscribe to the URI without parameters to hear every new revision.`,
+    `Read \`automobile:prototype/<id>/web\` for a shown prototype as one self-contained HTML page: the prototype in a device frame with rotate, zoom, a variant switcher and its revision history. Optional \`frame\` (a device frame id; default the showing platform's), \`revision\` (default the latest) and \`variant\`. Revision 1 is the first acknowledged show; each later show of the id and each landed patch adds one; device state edits do not. The last ${MAX_PROTOTYPE_SPEC_REVISIONS} revisions per id are kept. Subscribe to the URI without parameters to hear every new revision. The \`exportPrototypeWeb\` tool writes the same page to an HTML file and returns its path and sha256.`,
     "",
     "To present design alternatives side by side, show each under its own id with `variant: {group, label}` using one `group` (host-side only; the device shows whatever was shown last). The web page of any id in the group offers every alternative by `label`. Describe them in chat and ask the user which they prefer.",
   ].join("\n");

@@ -1,4 +1,5 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
+import { lazyFeatureModule, type LazyFeatureModule } from "../utils/lazyFeatureModule";
 import {
   assertMayControl,
   subscriptionKindForIdentity,
@@ -77,6 +78,24 @@ export interface WebRtcStreamSocketServerDependencies {
   observerReleases?: ObserverReleaseSource;
 }
 
+/** What the server reads from `./webrtcStreamManager` once it has loaded. */
+export type WebRtcStreamManagerModule = Pick<
+  typeof import("./webrtcStreamManager"),
+  | "startWebRtcStream"
+  | "stopWebRtcStream"
+  | "stopWebRtcStreamAsOwner"
+  | "releaseWebRtcStreamOwnLeases"
+  | "getWebRtcStreamControlContext"
+  | "listWebRtcStreams"
+  | "getWebRtcStreamDescriptor"
+  | "waitForWebRtcStreamReadiness"
+  | "reconcileWebRtcStreamsForDeviceOwnership"
+  | "stopAllWebRtcStreams"
+  | "getWebRtcSubscriptionKind"
+  | "getWebRtcStreamDeviceIds"
+  | "endWebRtcStreamsForDevice"
+>;
+
 interface WebRtcRequestContext {
   deps: WebRtcStreamSocketServerDependencies;
   request: WebRtcStreamSocketRequest;
@@ -108,10 +127,10 @@ const WEBRTC_STREAM_PURPOSE = "to start a WebRTC stream";
 /**
  * Lazily import the stream manager (which pulls in werift) only when a request
  * actually arrives, so the daemon does not load the heavy WebRTC stack at boot.
+ * The first load's latency is logged (#17709).
  */
-function loadManager() {
-  return import("./webrtcStreamManager");
-}
+export const webrtcStreamManagerModule: LazyFeatureModule<WebRtcStreamManagerModule> =
+  lazyFeatureModule("WebRTC", () => import("./webrtcStreamManager"));
 
 function defaultOwnershipChanges(): DeviceOwnershipChanges | null {
   return defaultDaemonContext.sessionManager() ?? null;
@@ -179,6 +198,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   private resolvedDeps: WebRtcStreamSocketServerDependencies | null = null;
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
+  private readonly managerModule: LazyFeatureModule<WebRtcStreamManagerModule>;
   private removeOwnershipListener: (() => void) | null = null;
   private readonly removeListeners: Array<() => void> = [];
   private readonly viewerControlRejections = new Set<string>();
@@ -191,6 +211,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
    * @param deps - Injected stream collaborators (defaults to the daemon's)
    * @param options.authenticator - Request authenticator
    * @param options.admissionGate - Device admission gate
+   * @param options.managerModule - Lazily imported stream manager backing the default deps
    */
   constructor(
     socketPath: string = getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG),
@@ -202,12 +223,19 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
         allowObserverSessions: true,
       }),
       admissionGate = daemonDeviceAdmissionGate,
-    }: { authenticator?: StreamSocketAuthenticator; admissionGate?: DeviceAdmissionGate } = {},
+      managerModule = webrtcStreamManagerModule,
+    }: {
+      authenticator?: StreamSocketAuthenticator;
+      admissionGate?: DeviceAdmissionGate;
+      /** Where the default collaborators are loaded from when `deps` is not injected. */
+      managerModule?: LazyFeatureModule<WebRtcStreamManagerModule>;
+    } = {},
   ) {
     super(socketPath, timer, "WebRtcStream");
     this.injectedDeps = deps;
     this.authenticator = authenticator;
     this.admissionGate = admissionGate;
+    this.managerModule = managerModule;
   }
 
   protected bypassesRequestChain(request: WebRtcStreamSocketRequest): boolean {
@@ -363,7 +391,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       return this.injectedDeps;
     }
     if (!this.resolvedDeps) {
-      const manager = await loadManager();
+      const manager = await this.managerModule.load();
       this.resolvedDeps = {
         resolveDevice: defaultResolveDevice,
         startStream: manager.startWebRtcStream,

@@ -3,6 +3,8 @@ import type { ObserveScreen } from "./interfaces/ObserveScreen";
 import { Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { combineAbortSignals } from "../../utils/AbortContext";
+import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 
@@ -16,11 +18,28 @@ export interface ObservePollOptions {
   /** Physical panel for every capture in this poll. */
   display?: string;
   /**
-   * Hard budget in ms. Mandatory: the loop stops scheduling polls once elapsed
-   * time reaches it. Poll sleeps are capped at the remaining budget; terminal
-   * work may outlive the loop budget, so `waitMs` can still exceed `timeoutMs`.
+   * Budget in ms. Mandatory: the loop stops scheduling polls once elapsed
+   * time reaches it. Poll sleeps are capped at the remaining budget. Without
+   * {@link hardBudget}, an in-flight read and the terminal work may outlive the
+   * budget, so `waitMs` can exceed `timeoutMs`.
    */
   timeoutMs: number;
+  /**
+   * Extra budget in ms granted on top of {@link timeoutMs}, read live before
+   * every budget decision (#17749). The settle gate grants it only while a
+   * ticking or blinking node is the sole change between reads, so confirming
+   * the tick fits; it returns 0 otherwise. Default: no extension.
+   */
+  budgetExtensionMs?: () => number;
+  /**
+   * Make {@link timeoutMs} a hard cap (#17670): race every poll read, the
+   * terminal back-stack read and the reconciliation capture against the
+   * remaining budget, abort a read the budget cuts off, and start no poll with
+   * less than {@link HARD_BUDGET_MIN_POLL_READ_MS} left (such a read can only
+   * return a stale cache). A first read the budget cuts off throws, since there
+   * is no capture to return. The embedded settle gate opts in; off by default.
+   */
+  hardBudget?: boolean;
   /** Poll interval in ms between observations. */
   pollMs: number;
   signal?: AbortSignal;
@@ -92,6 +111,76 @@ export interface ObservePollOutcome {
   stopped: boolean;
   /** Why the loop produced this observation. */
   terminalReason: "matched" | "screen_off" | "timeout";
+}
+
+/** The loop's current budget: {@link ObservePollOptions.timeoutMs} plus any live extension. */
+function pollBudgetMs(options: ObservePollOptions): number {
+  return options.timeoutMs + Math.max(0, options.budgetExtensionMs?.() ?? 0);
+}
+
+/** Under a hard budget, no poll read starts with less than this many ms left (#17670). */
+export const HARD_BUDGET_MIN_POLL_READ_MS = 100;
+
+const BUDGET_EXPIRED: unique symbol = Symbol("observe-poll-budget-expired");
+type BudgetExpired = typeof BUDGET_EXPIRED;
+/**
+ * The hard budget cut off the terminal reconciliation: either the back-stack read
+ * itself, or the confirming capture after the back stack disagreed (#17692).
+ */
+const RECONCILIATION_UNCONFIRMED: unique symbol = Symbol("observe-poll-reconciliation-unconfirmed");
+
+/**
+ * Race one device read against the remaining hard budget. When the budget wins,
+ * the read is aborted at once rather than at its own next abort check, and
+ * {@link BUDGET_EXPIRED} is returned. A spent budget starts no read; the
+ * deadline is inclusive, so a read may still start with exactly 0 ms left and
+ * has that last millisecond to land.
+ */
+async function raceReadAgainstBudget<T>(
+  read: (signal: AbortSignal | undefined) => Promise<T>,
+  {
+    timer,
+    remainingMs,
+    signal,
+    label,
+  }: { timer: Timer; remainingMs: number; signal?: AbortSignal; label: string },
+): Promise<T | BudgetExpired> {
+  if (remainingMs < 0) {
+    return BUDGET_EXPIRED;
+  }
+  const controller = new AbortController();
+  const expired = new Error(`${label} exceeded the remaining ${remainingMs}ms budget`);
+  try {
+    // The deadline is inclusive: a read that lands exactly as the budget runs out still counts.
+    return await raceWithDeadline(() => read(combineAbortSignals(signal, controller.signal)), {
+      timer,
+      timeoutMs: remainingMs + 1,
+      signal,
+      label,
+      timeoutError: () => expired,
+    });
+  } catch (error) {
+    if (error !== expired) {
+      throw error;
+    }
+    // The budget firing is the expected end of a slow read; the caller falls back to earlier evidence.
+    controller.abort(new DOMException(expired.message, "TimeoutError"));
+    logger.debug(`[ObservePoll] ${expired.message}; aborted the read`);
+    return BUDGET_EXPIRED;
+  }
+}
+
+/** Whether the loop, holding `lastCapture`, must finish on its timeout path instead of polling. */
+function isPollBudgetSpent(
+  options: ObservePollOptions,
+  remainingMs: number,
+  lastCapture: PollCapture | undefined,
+): lastCapture is PollCapture {
+  return (
+    lastCapture !== undefined &&
+    (remainingMs <= 0 ||
+      (options.hardBudget === true && remainingMs < HARD_BUDGET_MIN_POLL_READ_MS))
+  );
 }
 
 /**
@@ -353,7 +442,7 @@ function revalidateTerminalMatch(
   outcome.terminalReason = "timeout";
   // Publish the newest full-pipeline capture only on a terminal outcome.
   // Embedded settle instead resumes with admissible evidence while time remains.
-  if (options.resumeOnTerminalMismatch && timer.now() - start < options.timeoutMs) {
+  if (options.resumeOnTerminalMismatch && timer.now() - start < pollBudgetMs(options)) {
     return {
       kind: "resume",
       outcome,
@@ -373,6 +462,7 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
     cachedAt?: number,
   ): Promise<PollFinalizationResult> => {
     const refreshed = await reconcileTerminalCapture(observeScreen, timer, options, {
+      start,
       observation: outcome.observation,
       minTimestamp: nextPollMinTimestamp(
         freshnessState.hasPostInvocationEvidence,
@@ -380,11 +470,20 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
         freshnessState.enteringReference,
       ),
     });
-    if (refreshed) {
+    // Terminal reads spend time on every path, including one the budget cut off.
+    outcome.waitMs = timer.now() - start;
+    if (refreshed === RECONCILIATION_UNCONFIRMED) {
+      // The budget cut off the reconciliation before it confirmed this capture:
+      // the match is not proven, so do not report it. A screen-off or timeout
+      // outcome keeps its reason.
+      if (outcome.stopped) {
+        outcome.stopped = false;
+        outcome.terminalReason = "timeout";
+      }
+    } else if (refreshed) {
       const original = outcome.observation;
       outcome.observation = refreshed.observation;
       outcome.polls++;
-      outcome.waitMs = timer.now() - start;
       generation = refreshed.generation;
       cachedAt = refreshed.cachedAt;
       canProcessRecomposition = isCompleteFreshCapture(refreshed.observation);
@@ -409,7 +508,7 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
       await awaitFinalizationWhilePollIsLive(
         workPromise,
         timer,
-        options.timeoutMs - (timer.now() - start),
+        pollBudgetMs(options) - (timer.now() - start),
         options.signal,
       );
     } else {
@@ -428,7 +527,13 @@ async function capturePoll(
     minTimestamp,
     timeoutMs,
     readBackStackEachPoll = options.readBackStackEachPoll,
-  }: { minTimestamp: number; timeoutMs?: number; readBackStackEachPoll?: boolean },
+    signal = options.signal,
+  }: {
+    minTimestamp: number;
+    timeoutMs?: number;
+    readBackStackEachPoll?: boolean;
+    signal?: AbortSignal;
+  },
 ): Promise<PollCapture> {
   const generation = observeScreen.captureCacheGeneration?.();
   const cachedAt = timer.now();
@@ -439,7 +544,7 @@ async function capturePoll(
     timeoutMs,
     skipWaitForFresh: options.skipWaitForFresh ?? false,
     requireFreshExtraction: options.requireFreshExtraction,
-    signal: options.signal,
+    signal,
     // Polls defer evidence and persistence until the selected terminal capture.
     skipScreenshot: true,
     skipStaleWindowRecovery: true,
@@ -452,34 +557,71 @@ async function capturePoll(
   return { observation, generation, cachedAt };
 }
 
-/** Terminal work may outlive the loop budget, but never cancellation. */
+/**
+ * Run one terminal read: under a hard budget it is raced against the remaining
+ * budget (and aborted when the budget wins); otherwise only cancellation bounds it.
+ */
+function terminalRead<T>(
+  read: (signal: AbortSignal | undefined) => Promise<T>,
+  timer: Timer,
+  options: ObservePollOptions,
+  { start, label }: { start: number; label: string },
+): Promise<T | BudgetExpired> {
+  if (options.hardBudget) {
+    return raceReadAgainstBudget(read, {
+      timer,
+      remainingMs: pollBudgetMs(options) - (timer.now() - start),
+      signal: options.signal,
+      label,
+    });
+  }
+  return raceWithDeadline(() => read(options.signal), { timer, signal: options.signal, label });
+}
+
+/** Terminal work may outlive a soft loop budget, but never a hard one or cancellation. */
 async function reconcileTerminalCapture(
   observeScreen: PollingObserveScreen,
   timer: Timer,
   options: ObservePollOptions,
-  { observation, minTimestamp }: { observation: ObserveResult; minTimestamp: number },
-): Promise<PollCapture | undefined> {
+  {
+    start,
+    observation,
+    minTimestamp,
+  }: { start: number; observation: ObserveResult; minTimestamp: number },
+): Promise<PollCapture | typeof RECONCILIATION_UNCONFIRMED | undefined> {
   if (options.readBackStackEachPoll || !observeScreen.collectDeferredBackStack) {
     return undefined;
   }
-  const disagrees = await raceWithDeadline(
-    () => observeScreen.collectDeferredBackStack!(observation, { signal: options.signal }),
-    { timer, signal: options.signal, label: "Observe poll terminal back stack" },
+  const disagrees = await terminalRead(
+    (signal) => observeScreen.collectDeferredBackStack!(observation, { signal }),
+    timer,
+    options,
+    { start, label: "Observe poll terminal back stack" },
   );
   throwIfAborted(options.signal);
+  if (disagrees === BUDGET_EXPIRED) {
+    // A back-stack read the budget cut off never confirmed the capture's activity.
+    return RECONCILIATION_UNCONFIRMED;
+  }
   if (!disagrees) {
     return undefined;
   }
   try {
-    // No exhausted remaining budget: use execute's normal capture timeout,
-    // while the outer race (like the terminal read) is bounded only by abort.
-    const capture = await raceWithDeadline(
-      () =>
-        capturePoll(observeScreen, timer, options, { minTimestamp, readBackStackEachPoll: true }),
-      { timer, signal: options.signal, label: "Observe poll attribution reconciliation" },
+    // No per-read timeout: use execute's normal capture timeout, while the
+    // outer race is bounded by the hard budget when set, else only by abort.
+    const capture = await terminalRead(
+      (signal) =>
+        capturePoll(observeScreen, timer, options, {
+          minTimestamp,
+          readBackStackEachPoll: true,
+          signal,
+        }),
+      timer,
+      options,
+      { start, label: "Observe poll attribution reconciliation" },
     );
     throwIfAborted(options.signal);
-    return capture;
+    return capture === BUDGET_EXPIRED ? RECONCILIATION_UNCONFIRMED : capture;
   } catch (error) {
     throwIfAborted(options.signal);
     logger.warn(
@@ -488,6 +630,43 @@ async function reconcileTerminalCapture(
     );
     return undefined;
   }
+}
+
+/**
+ * Take the next poll, raced against the remaining budget when it is hard. A read
+ * the budget cuts off yields the last capture to finish on; with none yet, it throws.
+ */
+async function readNextPoll(
+  observeScreen: PollingObserveScreen,
+  timer: Timer,
+  options: ObservePollOptions,
+  {
+    start,
+    minTimestamp,
+    lastCapture,
+  }: { start: number; minTimestamp: number; lastCapture?: PollCapture },
+): Promise<{ capture: PollCapture } | { expired: PollCapture }> {
+  const remainingMs = pollBudgetMs(options) - (timer.now() - start);
+  const timeoutMs = Math.max(1, remainingMs);
+  if (!options.hardBudget) {
+    return {
+      capture: await capturePoll(observeScreen, timer, options, { minTimestamp, timeoutMs }),
+    };
+  }
+  const capture = await raceReadAgainstBudget(
+    (signal) => capturePoll(observeScreen, timer, options, { minTimestamp, timeoutMs, signal }),
+    { timer, remainingMs, signal: options.signal, label: "Observe poll read" },
+  );
+  throwIfAborted(options.signal);
+  if (capture !== BUDGET_EXPIRED) {
+    return { capture };
+  }
+  if (!lastCapture) {
+    throw new ActionableError(
+      `Observe poll read did not finish within its ${pollBudgetMs(options)}ms budget`,
+    );
+  }
+  return { expired: lastCapture };
 }
 
 /**
@@ -553,27 +732,32 @@ export async function pollObserveUntil(
     freshnessState,
   );
 
+  const finishOnTimeout = async (capture: PollCapture): Promise<ObservePollOutcome> => {
+    const { capture: timeoutCapture, canProcessRecomposition } = selectTimeoutCapture(
+      capture,
+      newestTrustworthyCapture,
+    );
+    return (
+      await finalize(
+        {
+          observation: timeoutCapture.observation,
+          polls,
+          waitMs: timer.now() - start,
+          stopped: false,
+          terminalReason: "timeout",
+        },
+        canProcessRecomposition,
+        timeoutCapture.generation,
+        timeoutCapture.cachedAt,
+      )
+    ).outcome;
+  };
+  const remainingMs = (): number => pollBudgetMs(options) - (timer.now() - start);
+
   while (true) {
     throwIfAborted(options.signal);
-    if (lastCapture && timer.now() - start >= options.timeoutMs) {
-      const { capture, canProcessRecomposition } = selectTimeoutCapture(
-        lastCapture,
-        newestTrustworthyCapture,
-      );
-      return (
-        await finalize(
-          {
-            observation: capture.observation,
-            polls,
-            waitMs: timer.now() - start,
-            stopped: false,
-            terminalReason: "timeout",
-          },
-          canProcessRecomposition,
-          capture.generation,
-          capture.cachedAt,
-        )
-      ).outcome;
+    if (isPollBudgetSpent(options, remainingMs(), lastCapture)) {
+      return finishOnTimeout(lastCapture);
     }
 
     const minTimestamp = nextPollMinTimestamp(
@@ -581,14 +765,19 @@ export async function pollObserveUntil(
       freshnessState.deviceFloor,
       freshnessState.enteringReference,
     );
-    const capture = await capturePoll(observeScreen, timer, options, {
+    const read = await readNextPoll(observeScreen, timer, options, {
+      start,
       minTimestamp,
-      timeoutMs: Math.max(1, options.timeoutMs - (timer.now() - start)),
+      lastCapture,
     });
+    throwIfAborted(options.signal);
+    if ("expired" in read) {
+      return finishOnTimeout(read.expired);
+    }
+    const { capture } = read;
     const { observation, generation: cacheGeneration, cachedAt: cacheStartedAt } = capture;
     polls++;
     lastCapture = capture;
-    throwIfAborted(options.signal);
 
     const { isAdmissibleEvidence, isPostInvocation } = recordPollFreshness(
       observation,
@@ -656,7 +845,7 @@ export async function pollObserveUntil(
         timer.sleep(
           Math.min(
             Math.max(1, options.pollMs),
-            Math.max(0, options.timeoutMs - (timer.now() - start)),
+            Math.max(0, pollBudgetMs(options) - (timer.now() - start)),
           ),
         ),
         options.signal,
@@ -668,29 +857,14 @@ export async function pollObserveUntil(
       previous = observation;
     }
 
-    if (timer.now() - start >= options.timeoutMs) {
-      const { capture: timeoutCapture, canProcessRecomposition } = selectTimeoutCapture(
-        capture,
-        newestTrustworthyCapture,
-      );
-      return (
-        await finalize(
-          {
-            observation: timeoutCapture.observation,
-            polls,
-            waitMs: timer.now() - start,
-            stopped: false,
-            terminalReason: "timeout",
-          },
-          canProcessRecomposition,
-          timeoutCapture.generation,
-          timeoutCapture.cachedAt,
-        )
-      ).outcome;
+    if (remainingMs() <= 0) {
+      return finishOnTimeout(capture);
     }
 
     await awaitWhileRequestIsLive(
-      timer.sleep(Math.min(options.pollMs, Math.max(0, options.timeoutMs - (timer.now() - start)))),
+      timer.sleep(
+        Math.min(options.pollMs, Math.max(0, pollBudgetMs(options) - (timer.now() - start))),
+      ),
       options.signal,
     );
   }

@@ -11,12 +11,14 @@ async function main(): Promise<void> {
       app: { type: "string" },
       widget: { type: "string" },
       steps: { type: "string" },
+      attempts: { type: "string" },
+      "retry-delay-ms": { type: "string" },
     },
   });
   const port = Number(values.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535 || !values.app || !values.widget) {
     throw new ActionableError(
-      "Usage: --port <1-65535> --app <name> --widget <name> [--steps <0-100>]",
+      "Usage: --port <1-65535> --app <name> --widget <name> [--steps <0-100>] [--attempts <1-5>] [--retry-delay-ms <0-120000>]",
     );
   }
   const client = new WebSocketWatchRunnerClient(`ws://127.0.0.1:${port}/ws`);
@@ -24,6 +26,9 @@ async function main(): Promise<void> {
     const result = await addWatchSmartStackWidget(client, {
       appName: values.app,
       widgetName: values.widget,
+      maxAttempts: values.attempts === undefined ? undefined : Number(values.attempts),
+      retryDelayMs:
+        values["retry-delay-ms"] === undefined ? undefined : Number(values["retry-delay-ms"]),
       galleryStepsFromBottom: values.steps === undefined ? undefined : Number(values.steps),
     });
     console.log(JSON.stringify(result));

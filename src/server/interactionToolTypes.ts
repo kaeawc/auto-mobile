@@ -54,6 +54,8 @@ export interface TapOnArgs {
     textAny?: string[];
     accessibilityLink?: string;
   };
+  /** Match `selector.text` exactly (case-insensitive) instead of falling back to a substring. */
+  exactText?: boolean;
   sibling?: boolean;
   container?: ElementContainerSelector;
   selectionStrategy?: ElementSelectionStrategy;
@@ -68,6 +70,8 @@ export interface TapOnArgs {
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
   ensureChecked?: boolean;
+  /** Embedded-observation settle budget; read by the shared settle gate, not the handler. */
+  settleTimeoutMs?: number;
   subtext?: {
     text: string;
     occurrence?: number;

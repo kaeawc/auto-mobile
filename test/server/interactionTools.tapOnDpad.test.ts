@@ -112,6 +112,14 @@ describe("tapOn keeps touching when", () => {
     expect(touchTaps).toHaveLength(1);
   });
 
+  test("exactText needs the touch path's exact match, which the D-pad resolver lacks (#17782)", async () => {
+    const { deps, fallback, touchTaps } = harness(false);
+    await tapOnHandler(tv, args({ selector: { text: "Remove" }, exactText: true }), { deps });
+    expect(fallback.probes).toBe(0);
+    expect(fallback.taps).toEqual([]);
+    expect(touchTaps).toMatchObject([{ text: "Remove", exactText: true }]);
+  });
+
   test("the device is not Android", async () => {
     const { deps, fallback, touchTaps } = harness(false);
     await tapOnHandler({ ...tv, platform: "ios" }, args({ selector: { text: "Movies" } }), {

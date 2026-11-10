@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   AdbWatchFaceSurface,
   READBACK_ATTEMPTS,
@@ -7,6 +9,11 @@ import {
   classifyFaceBroadcast,
   componentName,
 } from "../../../src/features/wear/WatchFaceSurface";
+import {
+  parseComplicationProviders,
+  type ComplicationProvider,
+  type ComplicationProviderLister,
+} from "../../../src/features/wear/ComplicationProviders";
 import { DEBUG_SURFACE_ACTION, parseBroadcastOutput } from "../../../src/features/wear/WearSurface";
 import { parseWatchFaces } from "../../../src/features/wear/wearServiceDumpsys";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -27,6 +34,26 @@ const DAY_AND_DATE =
   "com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService";
 const BROADCAST = `shell am broadcast -a ${DEBUG_SURFACE_ACTION} --es operation`;
 
+const FIXTURE_PROVIDER =
+  "dev.jasonpearson.automobile.wearfixture/dev.jasonpearson.automobile.wearfixture.complication.FixtureComplicationService";
+const HEART_RATE =
+  "com.google.android.clockwork.emulator.complication.datasource/com.google.android.clockwork.emulator.complication.datasource.PlaceholderHeartRateProviderService";
+/** The whole Offhand capture as-is: slot 11 empty (`type=1 provider=null`). */
+const EMPTY_SLOT = "";
+
+/** #17521 `query-services` capture, taken before the wear-fixture APK was installed. */
+const CAPTURED_PROVIDERS = parseComplicationProviders(
+  readFileSync(
+    path.join(
+      import.meta.dir,
+      "../../fixtures/wear/surface/complication-providers-query-services.txt",
+    ),
+    "utf8",
+  ),
+);
+const fixtureProvider = (label: string) =>
+  capturedSection("complication-fixture-provider.txt", label);
+const heartRate = (label: string) => capturedSection("complication-heart-rate.txt", label);
 const failures = (label: string) => capturedSection("watchface-failures.txt", label);
 const roundtrip = (label: string) => capturedSection("watchface-roundtrip.txt", label);
 const complicationRuns = capturedRuns("complication-set-unset-x10.txt");
@@ -67,12 +94,24 @@ class FakeWatchAdb {
   }
 }
 
+class FakeProviderLister implements ComplicationProviderLister {
+  calls = 0;
+  constructor(public providers: ComplicationProvider[]) {}
+
+  async list(): Promise<ComplicationProvider[]> {
+    this.calls++;
+    return this.providers;
+  }
+}
+
 let adb: FakeWatchAdb;
 let timer: FakeTimer;
-const surface = () => new AdbWatchFaceSurface({ adb, timer });
+let providers: FakeProviderLister;
+const surface = () => new AdbWatchFaceSurface({ adb, timer, providers });
 
 beforeEach(() => {
   adb = new FakeWatchAdb();
+  providers = new FakeProviderLister(CAPTURED_PROVIDERS);
   timer = new FakeTimer();
   timer.enableAutoAdvance();
 });
@@ -228,7 +267,7 @@ describe("AdbWatchFaceSurface", () => {
   test("setComplication on a WFF face is applied when the slot shows the provider and type", async () => {
     const [set] = complicationRuns;
     adb.replies = [set?.reply ?? ""];
-    adb.readbacks = [set?.readback ?? ""];
+    adb.readbacks = [EMPTY_SLOT, set?.readback ?? ""];
     const request = { watchFace: OFFHAND, slot: 11, type: 5, provider: BATTERY };
     const result = await surface().setComplication(request);
     expect(adb.commands).toEqual([
@@ -237,17 +276,18 @@ describe("AdbWatchFaceSurface", () => {
     expect(result).toMatchObject({
       success: true,
       applied: true,
+      change: "applied",
       favoriteId: 1,
       requested: request,
     });
   });
 
   test.each(["wrong type 1 (EMPTY) for battery on slot 11", "unsupported type 9 for battery"])(
-    "captured %s: accepted but the slot stays empty, so not_applied",
+    "captured %s: accepted but the empty slot stays empty, so unsupported_type",
     async (label) => {
       const [reply = "", readback = ""] = failures(label);
       adb.replies = [reply];
-      adb.readbacks = [readback];
+      adb.readbacks = [EMPTY_SLOT, readback];
       const type = label.includes("type 9") ? 9 : 1;
       const result = await surface().setComplication({
         watchFace: OFFHAND,
@@ -256,11 +296,12 @@ describe("AdbWatchFaceSurface", () => {
         provider: BATTERY,
       });
       expect(result.broadcastResult.accepted).toBe(true);
-      expect(result).toMatchObject({ success: false, applied: false, error: "not_applied" });
+      expect(result).toMatchObject({ success: false, applied: false, error: "unsupported_type" });
+      expect(result.change).toBeUndefined();
     },
   );
 
-  test("a slot the face does not have is slot_out_of_range without a readback", async () => {
+  test("a slot the face does not have is slot_out_of_range with only the pre-send read", async () => {
     adb.replies = [failures("slot 99")[0] ?? ""];
     const result = await surface().setComplication({
       watchFace: OFFHAND,
@@ -270,7 +311,7 @@ describe("AdbWatchFaceSurface", () => {
     });
     expect(result).toMatchObject({ success: false, error: "slot_out_of_range" });
     expect(result.reason).toMatch(/no complication slot/);
-    expect(adb.reads).toBe(0);
+    expect(adb.reads).toBe(1);
   });
 
   test("a classic face goes through --ecn watchface for set-complication", async () => {
@@ -307,7 +348,11 @@ describe("AdbWatchFaceSurface", () => {
   test("unsetComplication is applied when the slot reads back empty", async () => {
     const unset = complicationRuns[1];
     adb.replies = [unset?.reply ?? ""];
-    adb.readbacks = [complicationRuns[0]?.readback ?? "", unset?.readback ?? ""];
+    adb.readbacks = [
+      complicationRuns[0]?.readback ?? "",
+      complicationRuns[0]?.readback ?? "",
+      unset?.readback ?? "",
+    ];
     const result = await surface().unsetComplication({
       watchFace: OFFHAND,
       slot: 11,
@@ -316,8 +361,8 @@ describe("AdbWatchFaceSurface", () => {
     expect(adb.commands).toEqual([
       `${BROADCAST} unset-complication --ecn component ${BATTERY} --es watchFaceId ${OFFHAND} --ei slot 11`,
     ]);
-    expect(result).toMatchObject({ success: true, applied: true });
-    expect(adb.reads).toBe(2);
+    expect(result).toMatchObject({ success: true, applied: true, change: "applied" });
+    expect(adb.reads).toBe(3);
   });
 
   test("unsetWatchFace confirms the reply's favorite is active again", async () => {
@@ -335,11 +380,151 @@ describe("AdbWatchFaceSurface", () => {
     expect(result).toMatchObject({ success: false, error: "watch_face_not_switched" });
   });
 
+  test("unsetComplication on a slot that was already empty is unchanged", async () => {
+    adb.replies = [complicationRuns[1]?.reply ?? ""];
+    adb.readbacks = [EMPTY_SLOT, complicationRuns[1]?.readback ?? ""];
+    const result = await surface().unsetComplication({
+      watchFace: OFFHAND,
+      slot: 11,
+      provider: BATTERY,
+    });
+    expect(result).toMatchObject({ success: true, applied: true, change: "unchanged" });
+  });
+
   test("abort stops the readback poll", async () => {
     adb.replies = [roundtrip("com.google.wear.superficial")[0] ?? ""];
     adb.readbacks = [roundtrip("set offhand")[1] ?? ""];
     const controller = new AbortController();
     controller.abort();
     await expect(surface().setWatchFace(SUPERFICIAL, controller.signal)).rejects.toThrow();
+  });
+});
+
+describe("setComplication provider check and change detection (#17521 captures)", () => {
+  const request = (type: number, provider = FIXTURE_PROVIDER) => ({
+    watchFace: OFFHAND,
+    slot: 11,
+    type,
+    provider,
+  });
+  const withFixtureInstalled = () => {
+    providers.providers = [
+      ...CAPTURED_PROVIDERS,
+      ...parseComplicationProviders(
+        `      name=dev.jasonpearson.automobile.wearfixture.complication.FixtureComplicationService\n      packageName=dev.jasonpearson.automobile.wearfixture\n`,
+      ),
+    ];
+  };
+
+  test("the captured query-services list parses to its 14 services, without ApplicationInfo rows", () => {
+    expect(CAPTURED_PROVIDERS).toHaveLength(14);
+    expect(CAPTURED_PROVIDERS.map((p) => p.component)).toContain(BATTERY);
+    expect(CAPTURED_PROVIDERS.map((p) => p.component)).toContain(HEART_RATE);
+    expect(CAPTURED_PROVIDERS.some((p) => p.className.endsWith("ContactsApplication"))).toBe(false);
+  });
+
+  test("a provider that is not a data source fails before anything is sent", async () => {
+    const result = await surface().setComplication(request(3));
+    expect(result).toMatchObject({ success: false, applied: false, error: "provider_not_found" });
+    expect(result.reason).toContain(BATTERY);
+    expect(adb.commands).toEqual([]);
+    expect(adb.reads).toBe(0);
+  });
+
+  test("with no data sources the refusal says to install one", async () => {
+    providers.providers = [];
+    const result = await surface().setComplication(request(5, BATTERY));
+    expect(result).toMatchObject({ error: "provider_not_found" });
+    expect(result.reason).toMatch(/No complication data sources are installed/);
+  });
+
+  test("unsetComplication does not list providers", async () => {
+    adb.replies = [complicationRuns[1]?.reply ?? ""];
+    adb.readbacks = [EMPTY_SLOT];
+    await surface().unsetComplication({ watchFace: OFFHAND, slot: 11, provider: FIXTURE_PROVIDER });
+    expect(providers.calls).toBe(0);
+  });
+
+  test("fixture type 3 onto the empty slot is applied", async () => {
+    withFixtureInstalled();
+    const [reply = "", readback = ""] = fixtureProvider("fixture type 3");
+    adb.replies = [reply];
+    adb.readbacks = [EMPTY_SLOT, readback];
+    const result = await surface().setComplication(request(3));
+    expect(result).toMatchObject({ success: true, applied: true, change: "applied" });
+  });
+
+  test("fixture type 5 over type 3 is applied", async () => {
+    withFixtureInstalled();
+    const [reply = "", readback = ""] = fixtureProvider("fixture type 5");
+    adb.replies = [reply];
+    adb.readbacks = [fixtureProvider("fixture type 3")[1] ?? "", readback];
+    expect(await surface().setComplication(request(5))).toMatchObject({ change: "applied" });
+  });
+
+  test("fixture type 5 when the slot already shows type 5 is unchanged, not applied", async () => {
+    withFixtureInstalled();
+    const [reply = "", readback = ""] = fixtureProvider("fixture type 5");
+    adb.replies = [reply];
+    adb.readbacks = [readback, readback];
+    const result = await surface().setComplication(request(5));
+    expect(result).toMatchObject({ success: true, applied: true, change: "unchanged" });
+    expect(result.message).toMatch(/nothing changed/);
+  });
+
+  test.each(["fixture type 4", "fixture type 9", "fixture type 1", "fixture type 6"])(
+    "captured %s is ignored and the slot keeps type 5, so unsupported_type",
+    async (label) => {
+      withFixtureInstalled();
+      const [reply = "", readback = ""] = fixtureProvider(label);
+      adb.replies = [reply];
+      adb.readbacks = [fixtureProvider("fixture type 5")[1] ?? "", readback];
+      const result = await surface().setComplication(request(Number(label.split(" ").at(-1))));
+      expect(result.broadcastResult.accepted).toBe(true);
+      expect(result).toMatchObject({ success: false, applied: false, error: "unsupported_type" });
+      expect(result.reason).toMatch(/SUPPORTED_TYPES/);
+      expect(result.readback?.favorites[0]?.slots[0]).toEqual({
+        slot: 11,
+        type: 5,
+        provider: FIXTURE_PROVIDER,
+      });
+    },
+  );
+
+  test("heart-rate type 5 over its type 3 is unsupported_type; type 6 is applied", async () => {
+    adb.replies = [
+      heartRate("heart-rate type 5")[0] ?? "",
+      heartRate("heart-rate type 6")[0] ?? "",
+    ];
+    adb.readbacks = [
+      heartRate("heart-rate type 3")[1] ?? "",
+      heartRate("heart-rate type 5")[1] ?? "",
+    ];
+    const ignored = await surface().setComplication(request(5, HEART_RATE));
+    expect(ignored.error).toBe("unsupported_type");
+    adb.reads = 0;
+    adb.readbacks = [
+      heartRate("heart-rate type 5")[1] ?? "",
+      heartRate("heart-rate type 6")[1] ?? "",
+    ];
+    const applied = await surface().setComplication(request(6, HEART_RATE));
+    expect(applied).toMatchObject({ success: true, change: "applied" });
+  });
+
+  test("a slot that changed to something other than the request is not_applied", async () => {
+    withFixtureInstalled();
+    adb.replies = [fixtureProvider("fixture type 3")[0] ?? ""];
+    adb.readbacks = [EMPTY_SLOT, heartRate("heart-rate type 3")[1] ?? ""];
+    expect((await surface().setComplication(request(3))).error).toBe("not_applied");
+  });
+
+  test("without a readable pre-send slot, an apply carries no change verdict", async () => {
+    withFixtureInstalled();
+    const [reply = "", readback = ""] = fixtureProvider("fixture type 3");
+    adb.replies = [reply];
+    adb.readbacks = [new Error("device offline"), readback];
+    const result = await surface().setComplication(request(3));
+    expect(result).toMatchObject({ success: true, applied: true });
+    expect(result.change).toBeUndefined();
   });
 });

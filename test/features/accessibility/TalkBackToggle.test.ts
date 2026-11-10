@@ -2,6 +2,9 @@ import type { AccessibilityService } from "../../../src/ctrlProxy/accessibility/
 import { DefaultAccessibilityDetector } from "../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  TALKBACK_PROMPT_SETTLE_MS,
+  TALKBACK_PROMPT_SETTLE_POLL_MS,
+  TALKBACK_PROMPT_STABLE_READS,
   TalkBackToggle,
   isTalkBackRuntimePermissionPrompt,
 } from "../../../src/features/accessibility/TalkBackToggle";
@@ -332,6 +335,324 @@ describe("TalkBackToggle", () => {
       } finally {
         foreground.mockRestore();
         debug.mockRestore();
+      }
+    });
+  });
+
+  describe("late runtime prompt settle window (#17668)", () => {
+    const PROMPT = {
+      packageName: "com.google.android.permissioncontroller",
+      userId: 0,
+      activityName:
+        "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+    };
+    const HOME = { packageName: "com.example.home", userId: 0 };
+    const settled = () =>
+      new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
+        promptSettleMs: TALKBACK_PROMPT_SETTLE_MS,
+        secureSettings: fakeSecureSettings,
+        dialogProbe: fakeProbe,
+      });
+
+    test("a prompt that appears about 3 s after enabling is reported", async () => {
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      // The immediate read, then five 500 ms polls of the app before the prompt shows.
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      for (let read = 0; read < 6; read++) {
+        foreground.mockResolvedValueOnce(HOME);
+      }
+      foreground.mockResolvedValue(PROMPT);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await settled().toggle(true);
+        expect(result).toMatchObject({
+          supported: true,
+          applied: true,
+          currentState: true,
+          blockingPrompt: {
+            kind: "runtime-permission",
+            package: PROMPT.packageName,
+            activity: PROMPT.activityName,
+          },
+          warning: expect.stringContaining("Nothing was tapped"),
+        });
+        expect(foreground).toHaveBeenCalledTimes(7);
+        expect(fakeTimer.getSleepHistory()).toEqual([500, 500, 500, 500, 500, 500]);
+        expect(fakeAdb.getCommandCalls().filter((c) => c.command.includes("input"))).toEqual([]);
+      } finally {
+        foreground.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    test("no prompt within the window keeps the plain result and stops at the bound", async () => {
+      fakeAdb.setForegroundApp(HOME);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      try {
+        const result = await settled().toggle(true);
+        expect(result).toEqual({ supported: true, applied: true, currentState: true });
+        expect(foreground).toHaveBeenCalledTimes(1 + TALKBACK_PROMPT_SETTLE_MS / 500);
+        expect(fakeTimer.getSleepHistory().reduce((sum, ms) => sum + ms, 0)).toBe(
+          TALKBACK_PROMPT_SETTLE_MS,
+        );
+      } finally {
+        foreground.mockRestore();
+      }
+    });
+
+    test("a prompt already on screen is reported without waiting", async () => {
+      fakeAdb.setForegroundApp(PROMPT);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await settled().toggle(true);
+        expect(result.blockingPrompt?.package).toBe(PROMPT.packageName);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("disabling and an unconfirmed enable do not wait", async () => {
+      fakeAdb.setForegroundApp(HOME);
+      fakeDetector.enqueueDetectMethodResults("talkback", "unknown");
+      expect((await settled().toggle(false)).applied).toBe(true);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+
+      fakeDetector.reset();
+      fakeDetector.enqueueDetectMethodResults(
+        "unknown",
+        "unknown",
+        "unknown",
+        "unknown",
+        "unknown",
+      );
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect((await settled().toggle(true)).applied).toBe(false);
+        // Only the immediate read; the dialog and confirmation waits are the only sleeps.
+        expect(foreground).toHaveBeenCalledTimes(1);
+        expect(fakeTimer.getSleepHistory()).toEqual([500, 500, 500, 500, 500, 500]);
+      } finally {
+        foreground.mockRestore();
+        warn.mockRestore();
+      }
+    });
+  });
+
+  describe("settle window ends early or on abort (#17674)", () => {
+    const PROMPT = {
+      packageName: "com.google.android.permissioncontroller",
+      userId: 0,
+      activityName:
+        "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+    };
+    const HOME = { packageName: "com.example.home", userId: 0, activityName: ".Main" };
+    const talkBackPackageDump = (notifications: string) => `Packages:
+  Package [com.google.android.marvin.talkback] (1a2b3c):
+    userId=10123
+    requested permissions:
+      android.permission.POST_NOTIFICATIONS
+    User 0: ceDataInode=1234 installed=true
+      runtime permissions:
+        android.permission.POST_NOTIFICATIONS: ${notifications}
+`;
+    const stubNotificationPermission = (notifications: string) =>
+      fakeAdb.setCommandResponse(
+        "dumpsys package com.google.android.marvin.talkback",
+        makeExecResult(talkBackPackageDump(notifications)),
+      );
+    const settled = (timer: FakeTimer = fakeTimer, signal?: AbortSignal) =>
+      new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer,
+        promptSettleMs: TALKBACK_PROMPT_SETTLE_MS,
+        signal,
+        secureSettings: fakeSecureSettings,
+        dialogProbe: fakeProbe,
+      });
+
+    test("no prompt possible and a stable screen ends the window early", async () => {
+      stubNotificationPermission("granted=true, flags=[ USER_SET ]");
+      fakeAdb.setForegroundApp(HOME);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      try {
+        const result = await settled().toggle(true);
+        expect(result).toEqual({ supported: true, applied: true, currentState: true });
+        // The immediate read, then the stable polls; well short of the 4 s bound.
+        expect(foreground).toHaveBeenCalledTimes(1 + TALKBACK_PROMPT_STABLE_READS);
+        expect(fakeTimer.getSleepHistory()).toEqual(
+          Array(TALKBACK_PROMPT_STABLE_READS).fill(TALKBACK_PROMPT_SETTLE_POLL_MS),
+        );
+      } finally {
+        foreground.mockRestore();
+      }
+    });
+
+    test("a permission denied as fixed cannot prompt, so the window ends early", async () => {
+      stubNotificationPermission("granted=false, flags=[ USER_SET|USER_FIXED ]");
+      fakeAdb.setForegroundApp(HOME);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const result = await settled().toggle(true);
+      expect(result.blockingPrompt).toBeUndefined();
+      expect(fakeTimer.getSleepHistory().length).toBe(TALKBACK_PROMPT_STABLE_READS);
+    });
+
+    test("a changing screen keeps watching until it is stable", async () => {
+      stubNotificationPermission("granted=true, flags=[ USER_SET ]");
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      foreground
+        .mockResolvedValueOnce(HOME)
+        .mockResolvedValueOnce(HOME)
+        .mockResolvedValueOnce({ ...HOME, activityName: ".Splash" });
+      foreground.mockResolvedValue(HOME);
+      try {
+        await settled().toggle(true);
+        // Polls: HOME, .Splash, HOME, HOME — the last two agree.
+        expect(fakeTimer.getSleepHistory().length).toBe(4);
+      } finally {
+        foreground.mockRestore();
+      }
+    });
+
+    test("a pending permission keeps the window open for a prompt about 3 s later", async () => {
+      stubNotificationPermission("granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED ]");
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      for (let read = 0; read < 6; read++) {
+        foreground.mockResolvedValueOnce(HOME);
+      }
+      foreground.mockResolvedValue(PROMPT);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await settled().toggle(true);
+        expect(result.blockingPrompt).toEqual({
+          kind: "runtime-permission",
+          package: PROMPT.packageName,
+          activity: PROMPT.activityName,
+        });
+        expect(fakeTimer.getSleepHistory()).toEqual([500, 500, 500, 500, 500, 500]);
+      } finally {
+        foreground.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    test("another app's permission prompt in a window that could end early is still reported (#17693)", async () => {
+      stubNotificationPermission("granted=true, flags=[ USER_SET ]");
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      // The immediate read, then one poll; the prompt lands before a second stable read.
+      foreground.mockResolvedValueOnce(HOME).mockResolvedValueOnce(HOME);
+      foreground.mockResolvedValue(PROMPT);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await settled().toggle(true);
+        expect(result.blockingPrompt).toEqual({
+          kind: "runtime-permission",
+          package: PROMPT.packageName,
+          activity: PROMPT.activityName,
+        });
+        // TalkBack has nothing left to request, so the warning does not call it TalkBack's.
+        expect(result.warning).toContain("another app raised it");
+        expect(result.warning).not.toContain("Android Accessibility Suite");
+        expect(fakeTimer.getSleepHistory()).toEqual([500, 500]);
+      } finally {
+        foreground.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    test.each([
+      ["android", "com.android.internal.app.ResolverActivity"],
+      [
+        "com.android.systemui",
+        "com.android.systemui.mediaprojection.MediaProjectionPermissionActivity",
+      ],
+    ])(
+      "a %s dialog activity is reported as a system-dialog, not a stable screen (#17693)",
+      async (packageName, activityName) => {
+        stubNotificationPermission("granted=true, flags=[ USER_SET ]");
+        fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+        const foreground = spyOn(fakeAdb, "getForegroundApp");
+        foreground.mockResolvedValueOnce(HOME);
+        // Repeated identical reads would otherwise end the window as a stable screen.
+        foreground.mockResolvedValue({ packageName, userId: 0, activityName });
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await settled().toggle(true);
+          expect(result).toMatchObject({
+            applied: true,
+            blockingPrompt: { kind: "system-dialog", package: packageName, activity: activityName },
+            warning: expect.stringContaining("pressButton back"),
+          });
+          expect(fakeTimer.getSleepHistory()).toEqual([500]);
+          expect(fakeAdb.getCommandCalls().filter((c) => c.command.includes("input"))).toEqual([]);
+        } finally {
+          foreground.mockRestore();
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test("a pending TalkBack permission keeps the TalkBack prompt warning", async () => {
+      stubNotificationPermission("granted=false, flags=[ ]");
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      foreground.mockResolvedValueOnce(HOME);
+      foreground.mockResolvedValue(PROMPT);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await settled().toggle(true);
+        expect(result.warning).toContain("Android Accessibility Suite");
+      } finally {
+        foreground.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    test("an unreadable permission state keeps the full window", async () => {
+      fakeAdb.setCommandResponse(
+        "dumpsys package com.google.android.marvin.talkback",
+        makeExecResult(""),
+      );
+      fakeAdb.setForegroundApp(HOME);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      await settled().toggle(true);
+      expect(fakeTimer.getSleepHistory().reduce((sum, ms) => sum + ms, 0)).toBe(
+        TALKBACK_PROMPT_SETTLE_MS,
+      );
+    });
+
+    test("aborting the request stops the settle wait", async () => {
+      stubNotificationPermission("granted=false, flags=[ ]");
+      fakeAdb.setForegroundApp(HOME);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const manualTimer = new FakeTimer();
+      const controller = new AbortController();
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      try {
+        const pending = settled(manualTimer, controller.signal).toggle(true);
+        const outcome = pending.then(
+          () => "resolved",
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
+        for (let turn = 0; turn < 50 && manualTimer.getPendingSleepCount() === 0; turn++) {
+          await Promise.resolve();
+        }
+        expect(manualTimer.getPendingSleepCount()).toBe(1);
+        const readsBeforeAbort = foreground.mock.calls.length;
+        controller.abort();
+        expect(await outcome).toBe("Operation cancelled");
+        manualTimer.advanceTime(TALKBACK_PROMPT_SETTLE_MS);
+        await Promise.resolve();
+        expect(foreground.mock.calls.length).toBe(readsBeforeAbort);
+      } finally {
+        foreground.mockRestore();
       }
     });
   });

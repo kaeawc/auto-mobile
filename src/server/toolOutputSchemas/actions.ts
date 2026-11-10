@@ -78,6 +78,16 @@ const sendKeysErrorCodeSchema = z
 export const sendKeysResultSchema = z
   .object({
     warnings: z.array(z.string()).optional(),
+    blockingPrompt: z
+      .object({
+        kind: z.enum(["runtime-permission", "system-dialog"]),
+        package: z.string(),
+        activity: z.string().optional(),
+      })
+      .optional()
+      .describe(
+        "Android, on a focus failure: a system window (permission prompt, SystemUI or framework dialog) holds focus over the app. Answer or dismiss it, then retry; scrolling will not help.",
+      ),
     errorCode: sendKeysErrorCodeSchema.optional(),
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),

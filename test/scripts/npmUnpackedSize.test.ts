@@ -47,6 +47,9 @@ test("rejects missing or malformed manifests rather than silently skipping the a
   }
 });
 
+/** Fixture modules carry no chunk imports. */
+const noImports = (): string => "";
+
 const runtimeFiles = REQUIRED_PACKED_RUNTIME_ASSETS.map((path) => ({
   path: path.endsWith("/") ? `${path}migration.ts` : path,
   size: 1,
@@ -55,6 +58,7 @@ const evaluate = (actual: number, warnHeadroomBytes?: number) =>
   evaluateUnpackedSize({
     unpackedBytes: actual,
     files: runtimeFiles,
+    readModule: noImports,
     thresholds: {
       unpackedBytes: 1000,
       ...(warnHeadroomBytes === undefined ? {} : { warnHeadroomBytes }),
@@ -79,6 +83,7 @@ test("headroom is cap minus actual and percent rounded to one decimal, including
     evaluateUnpackedSize({
       unpackedBytes: 2000,
       files: runtimeFiles,
+      readModule: noImports,
       thresholds: { unpackedBytes: 3000 },
     }).results.unpackedSize.headroomPercent,
   ).toBe(33.3);
@@ -86,6 +91,7 @@ test("headroom is cap minus actual and percent rounded to one decimal, including
     evaluateUnpackedSize({
       unpackedBytes: 0,
       files: runtimeFiles,
+      readModule: noImports,
       thresholds: { unpackedBytes: 0 },
     }).results.unpackedSize.headroomPercent,
   ).toBe(0);
@@ -124,6 +130,7 @@ test("largest files sort by descending size and ascending path, truncate without
   const report = evaluateUnpackedSize({
     unpackedBytes: 1001,
     files,
+    readModule: noImports,
     thresholds: { unpackedBytes: 1000 },
   });
   expect(report.package.largestFiles).toEqual(
@@ -167,6 +174,7 @@ test("asset violations still fail below the cap and show contributors", () => {
   const report = evaluateUnpackedSize({
     unpackedBytes: 100,
     files: [{ path: "schemas/tool-definitions.json", size: 100 }],
+    readModule: noImports,
     thresholds: { unpackedBytes: 1000 },
   });
   expect(report.passed).toBe(false);
@@ -210,6 +218,7 @@ test("cap keeps over 1 MiB of headroom on the measured size and rejects re-packe
     evaluateUnpackedSize({
       unpackedBytes: measuredTrimmed,
       files: runtimeFiles,
+      readModule: noImports,
       thresholds: thresholds.thresholds,
     }).passed,
   ).toBe(true);
@@ -217,6 +226,7 @@ test("cap keeps over 1 MiB of headroom on the measured size and rejects re-packe
     evaluateUnpackedSize({
       unpackedBytes: measuredUntrimmed,
       files: runtimeFiles,
+      readModule: noImports,
       thresholds: thresholds.thresholds,
     }).passed,
   ).toBe(false);
@@ -228,4 +238,17 @@ test("parses npm pack JSON preceded by lifecycle stdout noise", () => {
   const parsed = parsePackOutput(`/home/runner/work/dist/build-info.json\n${json}\n`);
   expect(parsed.name).toBe("p");
   expect(parsed.unpackedBytes).toBe(20);
+});
+
+test("an unpruned bundled declaration fails the benchmark like a missing asset", () => {
+  const report = evaluateUnpackedSize({
+    unpackedBytes: 10,
+    files: [...runtimeFiles, { path: "node_modules/zod/index.d.ts", size: 1 }],
+    thresholds: { unpackedBytes: 1000 },
+    readModule: noImports,
+  });
+  expect(report.passed).toBe(false);
+  expect(report.violations).toEqual([
+    "Unpruned bundled type-declarations file: node_modules/zod/index.d.ts",
+  ]);
 });

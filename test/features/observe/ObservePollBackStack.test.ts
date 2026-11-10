@@ -47,7 +47,8 @@ function createHarness(
       receivedAt: timer.now(),
       hierarchy: {
         node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          // `changing` moves the node: a node whose text alone changes is masked (#17670).
+          bounds: { left: 0, top: options.changing ? captures : 0, right: 1080, bottom: 1920 },
           text: options.changing ? String(captures) : "stable",
         },
       },

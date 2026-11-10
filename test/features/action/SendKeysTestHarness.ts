@@ -357,6 +357,8 @@ export function createSendKeysCaptureHarness(
     lastRenderedObservation: () => frame("before", 0),
     displayTransitions: transitions,
     executor: new DefaultSendKeysCommandExecutor(android, h.adbFactory, observer, {
+      // The AutoMobile IME stays recorded until release (#16428); keep it out of the global registry.
+      pendingImeRestores: h.pendingImeRestores,
       textClient: h.client,
       inputKey: { press: async () => ({ success: true }) },
       timer,

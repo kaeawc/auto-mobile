@@ -1,4 +1,5 @@
 import { ZodError, type ZodIssue } from "zod/v4";
+import { formatShapeHint, topLevelKeysHint } from "./toolParamShapeHint";
 
 // Provenance of a flattened issue relative to the OUTERMOST `z.union` it came from
 // — the union that actually discriminates the caller's shape. A field that fails in
@@ -370,6 +371,32 @@ function sendKeysShapeHint(flattenedIssues: ReadonlyArray<FlattenedIssue>): stri
   return needsShape ? SEND_KEYS_SHAPE : undefined;
 }
 
+// The commands hint is about 150 characters, so the keys line beside it lists
+// fewer keys than the generic hint to keep the whole hint near 250 (#17675).
+const SEND_KEYS_MAX_KEYS_LISTED = 5;
+
+// Unknown top-level keys the commands hint does not explain: a command field is
+// covered by it, but an unrelated key still needs the allowed keys (#17680).
+function sendKeysUnknownTopLevelKeys(flattenedIssues: ReadonlyArray<FlattenedIssue>): string[] {
+  const keys = flattenedIssues.flatMap(({ issue }) =>
+    issue.path.length === 0 && isUnrecognizedKeys(issue) ? issue.keys.map(String) : [],
+  );
+  return [...new Set(keys)].filter((name) => !SEND_KEYS_COMMAND_FIELDS.has(name));
+}
+
+function sendKeysHintWithKeys(
+  commandsHint: string,
+  schema: unknown,
+  flattenedIssues: ReadonlyArray<FlattenedIssue>,
+): string {
+  const keysHint = topLevelKeysHint(
+    schema,
+    sendKeysUnknownTopLevelKeys(flattenedIssues),
+    SEND_KEYS_MAX_KEYS_LISTED,
+  );
+  return keysHint ? `${commandsHint}. ${keysHint}` : commandsHint;
+}
+
 function formatSelectorIssue(
   issue: ZodIssue,
   toolName: string,
@@ -717,9 +744,21 @@ export function formatToolParamError(
     }
   }
 
+  // The sendKeys commands hint (#16893) already names the command shape and its
+  // variants, so it replaces the generic shape hint rather than repeating it.
+  // An unknown top-level key it does not explain still gets the allowed keys.
   const sendKeysHint = toolName === "sendKeys" ? sendKeysShapeHint(flattenedIssues) : undefined;
-  if (sendKeysHint) {
-    hints.push(sendKeysHint);
+  const shapeHint =
+    sendKeysHint !== undefined
+      ? sendKeysHintWithKeys(sendKeysHint, schema, flattenedIssues)
+      : formatShapeHint(
+          toolName,
+          schema,
+          selectedIssues.map(({ issue }) => issue),
+          rawInput,
+        );
+  if (shapeHint) {
+    hints.push(shapeHint);
   }
 
   const issueSummary = issues.join("; ");

@@ -317,24 +317,30 @@ The watch accepts a request before applying it, so each action reads `dumpsys we
 for up to about 5 s and sets `applied: true` (and `verified: true`) only when the change shows
 there. Results carry `requested`, `broadcastResult` (`code`, `data`, `accepted`, `favoriteId`),
 `favoriteId`, the last `readback` (`activeFace`, `favorites` and `ambient`, as `watchFace` reports
-them), and on failure a typed `error` with a `reason`:
+them), and on failure a typed `error` with a `reason`. `setComplication` and `unsetComplication`
+also read the slot before sending: a successful result carries `change: "unchanged"` when the slot
+already showed the request, and `change: "applied"` when the broadcast changed it (no `change`
+when the slot could not be read first).
 
-| `error`                   | Meaning and what to do                                                                     |
-| ------------------------- | ------------------------------------------------------------------------------------------ |
-| `not_applied`             | Accepted but not shown, typically a `type` the provider does not support: try another type |
-| `face_not_installed`      | No such face package (or class): check the name                                            |
-| `slot_out_of_range`       | The face has no such slot, or it is not the active face: `setWatchFace` first              |
-| `invalid_face_id`         | A `_placeholder_` class: pass a resource-only face as its bare package                     |
-| `unsupported_face`        | The fallback face has no slots: set another face first                                     |
-| `debug_surface_disabled`  | The debug receiver is off on this build: enable developer options and retry                |
-| `watch_face_not_switched` | `unsetWatchFace` with nothing to revert                                                    |
-| `missing_argument`        | The watch rejected the extras it was sent                                                  |
-| `unknown_reply`           | A reply this release does not know: check `broadcastResult`                                |
+| `error`                   | Meaning and what to do                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider_not_found`      | `provider` is not a complication data source on the device; nothing was sent. `reason` names the installed ones                                   |
+| `unsupported_type`        | Accepted but ignored: the slot kept its previous provider and type, so the provider does not support `type`. Pass a type the data source declares |
+| `not_applied`             | Accepted but the slot does not show the request (and changed to something else), or the readback was unreadable                                   |
+| `face_not_installed`      | No such face package (or class): check the name                                                                                                   |
+| `slot_out_of_range`       | The face has no such slot, or it is not the active face: `setWatchFace` first                                                                     |
+| `invalid_face_id`         | A `_placeholder_` class: pass a resource-only face as its bare package                                                                            |
+| `unsupported_face`        | The fallback face has no slots: set another face first                                                                                            |
+| `debug_surface_disabled`  | The debug receiver is off on this build: enable developer options and retry                                                                       |
+| `watch_face_not_switched` | `unsetWatchFace` with nothing to revert                                                                                                           |
+| `missing_argument`        | The watch rejected the extras it was sent                                                                                                         |
+| `unknown_reply`           | A reply this release does not know: check `broadcastResult`                                                                                       |
 
 - Slots belong to the active face, so set the face before its complications. List its slot ids
   with `watchFace` (the active favorite's `slots`).
-- The tool does not check that `provider` is a complication data source before sending; list
-  them with `adb shell cmd package query-services -a android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST`.
+- `setComplication` checks `provider` against the device's complication data sources before
+  sending. It cannot check `type` first, because the device does not list each source's supported
+  types; an unsupported type is reported as `unsupported_type` after the readback.
 - The broadcasts and readbacks were measured on a Wear OS 7 emulator; the tool itself is
   unverified on a device.
 

@@ -4,6 +4,7 @@
 #
 # Usage:
 #   ./scripts/update-tool-definitions.sh
+#   ./scripts/update-tool-definitions.sh --no-stage
 #
 
 set -euo pipefail
@@ -32,6 +33,11 @@ echo "Generating tool definitions..."
 # Otherwise generation after `bun run format` immediately recreates formatting
 # drift that the CI formatter gate would reject.
 (cd "${PROJECT_ROOT}" && bunx oxfmt schemas/tool-definitions.json)
+
+if [[ "${1:-}" == "--no-stage" ]]; then
+  echo "Generated schemas/tool-definitions.json without staging."
+  exit 0
+fi
 
 if git -C "${PROJECT_ROOT}" diff --quiet -- schemas/tool-definitions.json; then
   echo "schemas/tool-definitions.json is up to date."

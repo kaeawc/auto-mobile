@@ -1,3 +1,5 @@
+import type { IosRequestedHingeAngleStore } from "../../device/DuoHingeLayout";
+import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { IosRunnerLocationClient } from "./LocationOperations";
 import type { BootedDevice, ExecResult } from "../../../models";
 import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
@@ -172,6 +174,9 @@ export interface IosSimulatorClient {
 }
 
 export interface DeviceStateDependencies {
+  iosDisplayInfoSource?: DevicectlDisplayInfoSource;
+  /** The last hinge angle setPosture requested per iPhone Duo; defaults to the daemon-wide store. */
+  iosHingeAngleStore?: Pick<IosRequestedHingeAngleStore, "requested">;
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorClient | null;
   timer?: Timer;

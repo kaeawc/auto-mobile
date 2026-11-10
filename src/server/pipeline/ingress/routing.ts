@@ -28,6 +28,7 @@ import {
   resolveActionsCompactMetadata,
   resolveToolResultsNoStructuredContent,
   rememberActionsCompactMetadata,
+  rememberPrototypeFullSchema,
   rememberToolResultsNoStructuredContent,
 } from "./connectionPresentation";
 import type { Platform } from "../../../models";
@@ -334,6 +335,11 @@ export function resolveConnectionPresentation(
     toolSelectionProfileRegistry,
     connectionProfileUuid,
     isSetToolEnabled ? context.requestedActionsCompactMetadata : undefined,
+  );
+  rememberPrototypeFullSchema(
+    toolSelectionProfileRegistry,
+    connectionProfileUuid,
+    isSetToolEnabled ? context.requestedPrototypeFullSchema : undefined,
   );
   return {
     connectionProfileUuid,

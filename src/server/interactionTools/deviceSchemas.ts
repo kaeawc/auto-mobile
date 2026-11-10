@@ -147,6 +147,12 @@ export const pressButtonInput = z.object({
     .describe(
       `Hold select (D-pad center) down this long in ms (${PRESS_HOLD_MIN_MS}-${PRESS_HOLD_MAX_MS}) for a long press; Android API 35+ only.`,
     ),
+  display: z
+    .string()
+    .optional()
+    .describe(
+      "Target panel key, role, or active; Android only. Sends the key to that display and checks it for the visual change",
+    ),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on
   // its own.
@@ -154,12 +160,14 @@ export const pressButtonInput = z.object({
   ...responseShapeControlFields,
 });
 
-const systemTrayNotificationSchema = z.object({
-  title: z.string().optional().describe("Notification title to match"),
-  body: z.string().optional().describe("Notification body to match"),
-  appId: z.string().optional().describe("App package ID to match"),
-  tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)"),
-});
+const systemTrayNotificationSchema = z
+  .object({
+    title: z.string().optional().describe("Notification title to match"),
+    body: z.string().optional().describe("Notification body to match"),
+    appId: z.string().optional().describe("App package ID to match"),
+    tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)"),
+  })
+  .strict();
 
 const systemTraySchemaBase = z
   .object({

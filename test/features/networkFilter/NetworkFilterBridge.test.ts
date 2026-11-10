@@ -5,7 +5,7 @@ import {
   DEFAULT_NETWORK_FILTER_CONTROLLER_PATH,
   ExecNetworkFilterBridge,
   ExpiringControllerVersionMemory,
-  NETWORK_FILTER_CONTRACT_VERSION,
+  NETWORK_FILTER_SHAPING_CONTRACT_VERSION as NETWORK_FILTER_CONTRACT_VERSION,
   NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
   NETWORK_FILTER_MAX_MANAGED_SIMULATORS,
   createManagedSimulatorLister,
@@ -77,6 +77,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
 
   const bridge = () =>
     new ExecNetworkFilterBridge({
+      contractVersion: 4,
       versionMemory: new ExpiringControllerVersionMemory(),
       executor: new DefaultHostCommandExecutor(exec.exec),
       controllerPath: CONTROLLER,
@@ -318,14 +319,14 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
 
   test("a contract version mismatch is unavailable with a reinstall step", async () => {
     const line = JSON.parse(fixture("ready"));
-    exec.succeed(`${JSON.stringify({ ...line, version: 5 })}\n`);
+    exec.succeed(`${JSON.stringify({ ...line, version: 6 })}\n`);
 
     const status = await bridge().status();
 
     expect(status.state).toBe("unavailable");
-    expect(status.contractVersion).toBe(5);
-    expect(status.detail).toContain("contract version 5");
-    expect(status.detail).toContain(`expects versions 3 and ${NETWORK_FILTER_CONTRACT_VERSION}`);
+    expect(status.contractVersion).toBe(6);
+    expect(status.detail).toContain("contract version 6");
+    expect(status.detail).toContain("expects versions 3, 4 and 5");
     expect(status.detail).toContain(NETWORK_FILTER_INSTALL_COMMAND);
     expect(warn).toHaveBeenCalledTimes(1);
   });

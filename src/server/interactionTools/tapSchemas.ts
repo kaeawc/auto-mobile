@@ -19,6 +19,10 @@ import {
   responseShapeControlFields,
   withJsonSchemaOverride,
 } from "../../utils/schemaHelpers";
+import {
+  EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS,
+  EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
+} from "../embeddedObservationSettleBudget";
 import { coordinatePointInputSchema, validateCoordinateRange } from "../coordinateRangeValidation";
 import { imageRelativePointSchema } from "../imageRelativePointSchema";
 import type { TapOnArgs } from "../interactionToolTypes";
@@ -39,9 +43,19 @@ function validateLongPressDuration(
 }
 
 function validateTapOnSelectionSchema(
-  value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy" | "sibling" | "selector">,
+  value: Pick<
+    TapOnArgs,
+    "ensureChecked" | "action" | "selectionStrategy" | "sibling" | "selector" | "exactText"
+  >,
   ctx: z.RefinementCtx,
 ): void {
+  if (value.exactText === true && (value.selector.text === undefined || value.sibling)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "exactText requires a text selector and cannot be combined with sibling",
+      path: ["exactText"],
+    });
+  }
   if (value.ensureChecked !== undefined && (value.action ?? "tap") !== "tap") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -76,6 +90,12 @@ export const tapOnSchema = withJsonSchemaOverride(
         selector: tapOnSelectorSchema,
         display: z.string().optional().describe("Target panel key, role, or active"),
         layer: hierarchyLayerSchema.optional(),
+        exactText: z
+          .boolean()
+          .optional()
+          .describe(
+            "Require selector.text to equal the element's text or content-desc (case-insensitive); no substring fallback",
+          ),
         sibling: z
           .boolean()
           .optional()
@@ -142,6 +162,7 @@ export const tapOnSchema = withJsonSchemaOverride(
               .optional()
               .describe("Polling duration (ms, default: 1500)"),
           })
+          .strict()
           .optional()
           .describe("Poll for element before tapping"),
         preTapStability: z
@@ -153,6 +174,15 @@ export const tapOnSchema = withJsonSchemaOverride(
           .optional()
           .describe("Retry once if the view hierarchy is unchanged after tap"),
         ensureTap: z.boolean().optional().describe("Enable preTapStability and retryIfNoChange"),
+        settleTimeoutMs: z
+          .number()
+          .int()
+          .min(0)
+          .max(EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS)
+          .optional()
+          .describe(
+            `Post-tap settle wait (ms, default ${EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS}, max ${EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS}); 0 skips it. An unsettled screen returns observation.settled:false.`,
+          ),
         ensureChecked: z
           .boolean()
           .optional()
@@ -282,7 +312,7 @@ export const tapAtSchema = withJsonSchemaOverride(
     }),
   (js) => {
     js.description =
-      "Tap, long press, or double tap a screen point. Bare x/y use platform-native observe coordinates; image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop.";
+      "Tap, long press, or double tap a screen point. Bare x/y use platform-native observe coordinates, except on Android XR home-space, where they are screenshot pixels inside an app panel; XR observe node bounds stay in panel-window space and are not screenshot coordinates. image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop.";
   },
 );
 
@@ -340,6 +370,7 @@ export const tapAnySchema = withJsonSchemaOverride(
               .optional()
               .describe("Polling duration (ms, default: 1500)"),
           })
+          .strict()
           .optional()
           .describe("Poll for clickable element before tapping"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is

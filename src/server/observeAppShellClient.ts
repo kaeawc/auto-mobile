@@ -105,6 +105,17 @@ function shellBoxOf(node: Record<string, unknown>): ShellBox | null {
 
 /** Walks any nesting of objects and arrays, collecting every node that carries valid bounds. */
 function shellCollectBoxes(root: unknown): { boxes: ShellBox[]; truncated: boolean } {
+  return shellCollectWith(root, shellBoxOf);
+}
+
+/**
+ * The capped walk behind [shellCollectBoxes]: collects every node [boxOf] accepts. The interactive
+ * picker (#17767) passes its own [boxOf].
+ */
+function shellCollectWith(
+  root: unknown,
+  boxOf: (node: Record<string, unknown>) => ShellBox | null,
+): { boxes: ShellBox[]; truncated: boolean } {
   const boxes: ShellBox[] = [];
   const pending: Array<{ value: unknown; depth: number }> = [{ value: root, depth: 0 }];
   let truncated = false;
@@ -119,7 +130,7 @@ function shellCollectBoxes(root: unknown): { boxes: ShellBox[]; truncated: boole
       truncated = true;
       continue;
     }
-    const box = Array.isArray(value) ? null : shellBoxOf(value as Record<string, unknown>);
+    const box = Array.isArray(value) ? null : boxOf(value as Record<string, unknown>);
     if (box) {
       boxes.push(box);
     }
@@ -342,6 +353,7 @@ export const OBSERVE_SHELL_CLIENT_FUNCTIONS: readonly ((...args: never[]) => unk
   shellBoundsOf,
   shellLabelOf,
   shellBoxOf,
+  shellCollectWith,
   shellCollectBoxes,
   shellImageUri,
   shellPayloadOf,
@@ -356,5 +368,14 @@ export const OBSERVE_SHELL_CLIENT_FUNCTIONS: readonly ((...args: never[]) => unk
   shellBoot,
 ];
 
-export { shellBoot, shellBoundsOf, shellCollectBoxes, shellImageUri, shellModelOf, shellRender };
+export {
+  shellBoot,
+  shellBoundsOf,
+  shellCollectBoxes,
+  shellCollectWith,
+  shellImageUri,
+  shellLabelOf,
+  shellModelOf,
+  shellRender,
+};
 export type { ShellBox, ShellDocument, ShellMessageEvent, ShellModel, ShellNode, ShellWindow };

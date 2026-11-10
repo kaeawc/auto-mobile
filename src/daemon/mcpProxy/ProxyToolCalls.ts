@@ -19,6 +19,7 @@ import {
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
+  INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
 } from "../wire/constants";
 import {
@@ -303,6 +304,7 @@ export class ProxyToolCalls {
     delete callerArgs[DAEMON_ONE_SHOT_CLI_PARAM];
     delete callerArgs[INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM];
     delete callerArgs[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM];
+    delete callerArgs[INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM];
     // The acceptance controls are configuration of the dedicated harness proxy,
     // never client-provided tool arguments. Remove both before routing so a
     // caller cannot forge or override that configuration.

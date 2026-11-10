@@ -94,7 +94,7 @@ public final class ProbeService: NSObject, ProbeBridge {
             let data = try JSONEncoder().encode(
                 probe.snapshot(
                     managedSimulators: simulators, rules: rules.activeRules(), version: version,
-                    shapingActivity: version == 4 ? shapingActivity?() : nil
+                    shapingActivity: version >= 4 ? shapingActivity?() : nil
                 )
             )
             lock.lock()
@@ -129,7 +129,9 @@ public final class ProbeService: NSObject, ProbeBridge {
             return
         }
         let result: NetworkRuleResult
-        if version == 3, let condition = decoded.condition, condition != .offline {
+        if (version == 3 && decoded.condition != nil && decoded.condition != .offline) ||
+            (version < 5 && decoded.condition == .watch)
+        {
             result = NetworkRuleResult(outcome: .invalidCommand)
             lock.unlock()
         } else {
@@ -137,7 +139,14 @@ public final class ProbeService: NSObject, ProbeBridge {
             lock.unlock()
             onRulesChanged?()
         }
-        guard let data = try? JSONEncoder().encode(result) else {
+        let readback = NetworkRuleResult(
+            outcome: result.outcome, installedRevision: result.installedRevision,
+            leaseRemainingMilliseconds: result.leaseRemainingMilliseconds,
+            shaping: result.shaping, rejection: result.rejection,
+            existingFlows: version >= 5 && decoded.kind == .apply && decoded.condition == .offline
+                ? rules.existingFlows(for: decoded) : nil
+        )
+        guard let data = try? JSONEncoder().encode(readback) else {
             reply(nil, "Unable to encode network rule result")
             return
         }

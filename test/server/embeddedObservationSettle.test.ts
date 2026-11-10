@@ -529,11 +529,12 @@ describe("embedded settle on a still Android frame (#9579)", () => {
       settled: true,
     },
     {
-      name: "never stable",
+      // A label whose text alone ticks is masked from its third consecutive change (#17670, #17692).
+      name: "ticking label",
       label: (n: number) => `Frame ${n}`,
-      extractions: 6,
-      elapsed: 1000,
-      settled: false,
+      extractions: 4,
+      elapsed: 530,
+      settled: true,
     },
     {
       name: "explicit display",
@@ -592,11 +593,7 @@ describe("embedded settle on a still Android frame (#9579)", () => {
       expect(result.observation.freshness?.verified).toBe(true);
       expect(result.observation.display?.key).toBe("0");
       expect(h.timer.now() - started).toBe(scenario.elapsed);
-      expect(h.timer.getSleepHistory()).toEqual(
-        scenario.settled
-          ? Array(scenario.extractions - 1).fill(150)
-          : [150, 150, 150, 150, 150, 130],
-      );
+      expect(h.timer.getSleepHistory()).toEqual(Array(scenario.extractions - 1).fill(150));
       expect(h.displayIds).toEqual(Array(scenario.extractions).fill(routed ? 0 : undefined));
       expect(warning).not.toHaveBeenCalled();
     } finally {
@@ -704,9 +701,11 @@ describe("embedded settle on a still Android frame (#9579)", () => {
       settleObserve: settleFor(fake, timer),
     });
     expect(result.settled).toBe(false);
-    expect(fake.getExecuteCallCount()).toBe(7);
-    expect(timer.now()).toBe(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
-    expect(timer.getSleepHistory()).toEqual([75, 150, 150, 150, 150, 150, 150, 25]);
+    // The 25ms left after the sixth read is too little for a fresh read, so no
+    // seventh poll starts under the hard budget (#17670).
+    expect(fake.getExecuteCallCount()).toBe(6);
+    expect(timer.now()).toBe(975);
+    expect(timer.getSleepHistory()).toEqual([75, 150, 150, 150, 150, 150, 150]);
   });
 
   test("the action frame alone cannot prove stability even if sync returns it", async () => {
@@ -904,13 +903,15 @@ describe("settleEmbeddedObservation (#6866)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
-    // A ticking label: never two structurally-equal consecutive reads.
+    // A label that moves every read: never two structurally-equal consecutive
+    // reads. (A label whose text alone ticks is masked and settles, #17670.)
     fake.setObserveResult((index) =>
       obs(
         {
           class: "android.widget.TextView",
           "resource-id": "android:id/clock",
           text: `0:0${index}`,
+          bounds: { left: 0, top: index, right: 100, bottom: 50 + index },
         },
         20 + index * 10,
       ),
@@ -1265,7 +1266,7 @@ describe("settleEmbeddedObservation adoption guard (#6866)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
-    // A ticking clock: never two structurally-equal reads, but every read is a
+    // A moving clock: never two structurally-equal reads, but every read is a
     // genuine post-action capture. The newest one beats the half-inflated tree
     // the action holds, so the gate hands it back — honestly unsettled.
     fake.setObserveResult((index) =>
@@ -1274,6 +1275,7 @@ describe("settleEmbeddedObservation adoption guard (#6866)", () => {
           class: "android.widget.TextView",
           "resource-id": "android:id/clock",
           text: `0:0${index}`,
+          bounds: { left: 0, top: index, right: 100, bottom: 50 + index },
         },
         20 + index * 10,
       ),
@@ -1322,7 +1324,13 @@ describe("settleEmbeddedObservation abort fence (#9880)", () => {
 
   function tickingClock(index: number): ObserveResult {
     return obs(
-      { class: "android.widget.TextView", "resource-id": "android:id/clock", text: `0:0${index}` },
+      {
+        class: "android.widget.TextView",
+        "resource-id": "android:id/clock",
+        text: `0:0${index}`,
+        // Moving, so it never settles: a clock whose text alone ticks is masked (#17670).
+        bounds: { left: 0, top: index, right: 100, bottom: 50 + index },
+      },
       20 + index * 10,
     );
   }

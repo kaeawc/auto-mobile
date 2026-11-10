@@ -77,7 +77,7 @@ export function imeEditorWarnings(before: ImeEditorState, observation: ObserveRe
   }
   return changes.length
     ? [
-        `After IME typing, ${changes.join(" and ")}. Inspect the field before retrying to avoid duplicate text; refocus and use visible key taps if needed.`,
+        `After IME typing, ${changes.join(" and ")}. Inspect the field before retrying to avoid duplicate text; let any pending keyboard restore finish first (another tool call or a few idle seconds completes it), then refocus the field and retry with mode "a11y" without keyboardProfile (a11y does not switch the keyboard), or use visible key taps if needed.`,
       ]
     : [];
 }

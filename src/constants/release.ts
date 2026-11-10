@@ -107,6 +107,23 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.92",
+    apkSha256: "dc53aff0d1859dfa6ce0c664e43c37ae80c49915dbe7fcc45dc4e2a7a015f863",
+    ipaSha256: "4cb0a3dcfb87bddb4f5c8d7fc2ce2c2a48dc26a11107f420db02aa10c0e84de0",
+    protoViewerApkSha256: "c4263f5562d57eca70494848740228590bb744ad35ed7580b81172d1cb2aba18",
+    runnerSha256: "786e5c8f9add807ac4fd0a12078ce4c5afb47b65b2acf3993fcd32d51dafc032",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
+    screenCaptureHelperSha256: "c3bf53fd1dc363ed4ecdc1bc493217af81a976b5185ee16eb50e5ab6e1dc6a34",
+    audioLoopbackHelperSha256: "c67731e6c3e5c0f1587db09965e16a6bc2562240bbc123123abddfea3814c36c",
+    tvosRunnerSha256: "4689dc1d1d5befec48fb023c1d3d6ba47784c1fd5f25b6cc34d5eb56a598d783",
+    prototypeAgentSha256: "cb235e9641245d26e8095d7ac256851fb92349f30b51dc190e2e46330296da2e",
+    prototypeViewerSha256: "549c64d1fcda565bf9a4adb1599fa61df01981cea528b83911aae442ec3d7119",
+    networkFilterSha256: "ef11d70d6f3c954f30e67965b8fc1857039ba5da25aa60c57904f07346123990",
+    lmkPressureArm64Sha256: "0de62ea4977e1b1be2f7fe2b646319c7988a7df89398a56caa90a0febb7a681c",
+    lmkPressureX8664Sha256: "37a5194393e58b4e715382ff1a81d7e47ad4311307c8a2ea4e6ed76f9f1210fa",
+  },
+  {
     version: "0.0.91",
     apkSha256: "a7dff5a6fbef0b931e1be15e83e422f39df0cc6cc161c41f01f2328372076949",
     ipaSha256: "3eeb0b9c28b6e26095af6df2556b780538d43a9926c408aa5cb5142c1f7b6320",
@@ -725,11 +742,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "152c3a1d5ac621a9b68fc2cc470934408c513e680b40308c41f552734a1edcc3",
-  ipaSha256: "8a2e526d7137d791935d0cd2adb91202e25cfc5f63e30a0c839d0568d49b046d",
+  apkSha256: "2f69bcc42dea6a9a4646d25096be58033e8f41e5a6720be382d6e1c46fa5c26c",
+  ipaSha256: "641bbe2576567e43f25c8303e395b9714024cc4a18eba3d33314569c9381fa6a",
   runnerSha256Target: "xctest",
   videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
-  runnerSha256: "a63c40d01b2c8af183b69ead1d2ea148095aa521a08b1707789524a61db51693",
+  runnerSha256: "67ac5a7964f6a673d3dbb8f73b2a9ecef9c60fe5a45ad582b1545d94b981cde4",
 };
 
 /**

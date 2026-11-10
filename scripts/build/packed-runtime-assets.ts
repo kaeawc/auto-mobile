@@ -1,3 +1,6 @@
+import { findMissingBundleModules, type PackedModuleReader } from "./bundle-module-graph";
+import { PRUNE_CLASSES } from "../release/trim-bundled-deps";
+
 /** Trailing slashes require a non-empty directory in npm's POSIX file manifest. */
 export const REQUIRED_PACKED_RUNTIME_ASSETS: readonly string[] = [
   "dist/src/index.js",
@@ -8,6 +11,14 @@ export const REQUIRED_PACKED_RUNTIME_ASSETS: readonly string[] = [
   "dist/vendor/libwebp/win32-x64/cwebp.exe",
   "dist/vendor/libwebp/win32-x64/dwebp.exe",
 ];
+
+/**
+ * Bundle entrypoints whose module graph must be fully packed. With `splitting`
+ * they import hashed `dist/src/chunk-*.js` files that no static list can name.
+ */
+export const PACKED_BUNDLE_ENTRYPOINTS: readonly string[] = REQUIRED_PACKED_RUNTIME_ASSETS.filter(
+  (entry) => entry.startsWith("dist/src/") && entry.endsWith(".js"),
+);
 
 export const FORBIDDEN_PACKED_ASSETS: readonly string[] = [
   "schemas/tool-definitions.json",
@@ -38,8 +49,16 @@ export function findMissingPackedAssets(
   );
 }
 
-export function findPackedAssetViolations(packedPaths: readonly string[]): string[] {
+export function findPackedAssetViolations(
+  packedPaths: readonly string[],
+  readModule: PackedModuleReader,
+): string[] {
   const missing = findMissingPackedAssets(packedPaths, REQUIRED_PACKED_RUNTIME_ASSETS);
+  const missingModules = findMissingBundleModules(
+    packedPaths,
+    PACKED_BUNDLE_ENTRYPOINTS,
+    readModule,
+  );
   const forbidden = FORBIDDEN_PACKED_ASSETS.filter((entry) => packedPaths.includes(entry));
   const forbiddenPrefixed = packedPaths.filter((entry) =>
     FORBIDDEN_PACKED_PREFIXES.some((prefix) => entry.startsWith(prefix)),
@@ -49,6 +68,47 @@ export function findPackedAssetViolations(packedPaths: readonly string[]): strin
     ...sourceMaps.map((entry) => `Forbidden packed source map: ${entry}`),
     ...forbiddenPrefixed.map((entry) => `Forbidden packed asset: ${entry}`),
     ...missing.map((entry) => `Missing runtime asset: ${entry}`),
+    ...missingModules,
     ...forbidden.map((entry) => `Forbidden packed asset: ${entry}`),
+  ];
+}
+
+/**
+ * Byte budget for the bundled node_modules after the prepack prune (#17686). The pruned
+ * closure is ~2.28 MB; an unpruned one (~8.2 MB) or a regression that stops pruning
+ * docs/tests/browser builds (~2.7 MB) fails it. Raise it only for new runtime code.
+ */
+export const BUNDLED_NODE_MODULES_MAX_BYTES = 2_500_000;
+
+/** Declarations and maps are never runtime-loaded, so the prune always removes them. */
+const INERT_PRUNE_CLASSES = PRUNE_CLASSES.filter((pruneClass) => pruneClass.runtimeInert);
+
+export function findBundledDependencyViolations(
+  files: readonly { path: string; size: number }[],
+  maxBytes = BUNDLED_NODE_MODULES_MAX_BYTES,
+): string[] {
+  const bundled = files.filter((file) => file.path.startsWith("node_modules/"));
+  const bytes = bundled.reduce((sum, file) => sum + file.size, 0);
+  const inert = bundled.flatMap((file) => {
+    const basename = file.path.split("/").at(-1)!;
+    const pruneClass = INERT_PRUNE_CLASSES.find((candidate) =>
+      candidate.matches({
+        packageName: "",
+        relative: basename,
+        directories: [],
+        basename,
+        hasDist: false,
+        browserTargets: new Set(),
+      }),
+    );
+    return pruneClass ? [`Unpruned bundled ${pruneClass.id} file: ${file.path}`] : [];
+  });
+  return [
+    ...inert,
+    ...(bytes > maxBytes
+      ? [
+          `Bundled node_modules ${bytes} bytes exceeds ${maxBytes} bytes; run the pack with AUTOMOBILE_TRIM_BUNDLED_DEPS=true and check scripts/release/trim-bundled-deps.ts list`,
+        ]
+      : []),
   ];
 }

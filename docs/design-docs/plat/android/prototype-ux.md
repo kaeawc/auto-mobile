@@ -116,6 +116,26 @@ scalar unions have explicit Kotlin serializers; only arbitrary emit payloads kee
 integer fields normalize decimal/exponent spellings before Kotlin decoding (`100.0` and `1e2` both mean
 100). The protocol module has no API-dump task; its artifact includes the contract resource.
 
+### Advertised spec schema
+
+The Zod spec converts to a JSON Schema of about 56k tokens, almost all of the `prototype` tool
+definition. `tools/list` therefore advertises a terse `spec`: the top-level fields with their JSON types,
+the required list, `additionalProperties: false` and the root node type names, with no `$ref` or
+`$defs`, because strict clients reject references in tool input schemas. The full schema is the
+`automobile:prototype/spec-schema` resource (a standalone draft-07 document whose recursive `$ref`s point
+at its own root), built on first read. `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` inlines that schema in `spec`
+instead, with its references rebased to `#/properties/spec`. The proxy reads the flag for its cold list
+built from `schemas/tool-definitions.json` and sends `true` on its connection presentation profile
+(`__autoMobilePrototypeFullSchema` on the profile's `setToolEnabled` write), so the daemon inlines the
+schema in that connection's `tools/list` even when the daemon process itself runs without the flag. The
+daemon's own flag sets the default for every connection; a client cannot opt a flagged daemon back to
+the terse form, because only `true` is forwarded and absence means no preference. Either way the server
+validates with `validatePrototypeSpec`, so the advertised form never changes what is accepted.
+Per-action tools would not shrink the definition: `show`, `save`, `share` and `screenMap` take the whole
+spec, and `patch` `replaceNode` takes any node, so each would carry the same node schema. The
+`publish` `frame` is checked with `z.json()` but advertised as `{}`, because `z.json()` converts to a
+recursive `$defs` pair.
+
 ## Data model (#11673)
 
 `data` is an optional top-level plain JSON object, agent-owned and read-only on the device (objects, arrays,
@@ -1007,14 +1027,15 @@ this should move onto the #15249 keyframes engine when it is available.
 
 ## Icons and images
 
-Built-in names are the 2,075 icons of `material-icons-extended` in snake_case (`home`, `alarm_add`); the
-closed list is the `iconName` definition in `schemas/prototype-spec-contract.json`, shared by both
-validators. The renderer already ships that library, so the set adds only the list (about 10 KB). An icon
+Built-in names are a curated set of 300 Material icons in snake_case (`home`, `alarm_add`); the
+sorted source is `schemas/prototype-icon-names.json`, which generates the `iconName` definition in
+`schemas/prototype-spec-contract.json` shared by all validators. CtrlProxy's generated R8 rules
+retain only those names in all five styles from `material-icons-extended`. An icon
 node may set `variant` (`filled` default, `outlined`, `rounded`, `sharp`, `twoTone`); nav items are always
 filled. Material Symbols names without a counterpart and symbol `weight` / `fill` axes (which need a bundled
 variable font) are unavailable. Custom text fonts ship as host-uploaded assets (see "Custom fonts").
 
-Unknown names reject the spec. Images are ID-based (#9301): `{type: "image", asset: "opaque-id"}` and nav
+Unknown names reject the spec at the offending field with close substring suggestions and an allowed-icon lookup URI. Images are ID-based (#9301): `{type: "image", asset: "opaque-id"}` and nav
 `image: "opaque-id"`. Existence is not validated at spec level; a missing asset renders a placeholder and is
 reported in `missingAssets`. Bytes, MIME types, URLs, cache paths and screenshot handles are not spec
 properties.
@@ -1483,10 +1504,11 @@ Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpe
   runs (`{item}`/`{index}` were bound to the row when the repeat was instantiated) and must match
   the route's declarations exactly after resolution; otherwise the action leaves the stack
   unchanged. Popping restores the entry below with its own params.
-- `{route.name}` binds the top screen's subtree, and its onEnter/onBack lists when they run, to the
-  top entry's params: text renders the value, a whole-placeholder operand keeps its type, and a
-  whole data-pointer segment takes the value escaped per RFC 6901. Binding happens before `/data`
-  resolution; `{index}` is left for the repeat that owns it. Hidden screens are not bound.
+- `{route.name}` binds each screen's subtree in the stack path to that screen's topmost entry's
+  params, and its onEnter/onBack lists to the entry's params when they run: text renders the value,
+  a whole-placeholder operand keeps its type, and a whole data-pointer segment takes the value
+  escaped per RFC 6901. Binding happens before `/data` resolution; `{index}` is left for the repeat
+  that owns it. Screens outside the path are not bound.
 - `screen_changed` is emitted once per navigation when the top screen, depth or top params change,
   with `params` beside `screen` and `depth` only when the top entry has params. The new top screen's
   onEnter runs after that event. Each stack's first screen also enters once per show (not on a

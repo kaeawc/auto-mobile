@@ -17,7 +17,7 @@ Add the JUnit runner to the module that owns the tests:
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.91")
+    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.92")
 }
 ```
 
@@ -34,7 +34,7 @@ Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), 
 For a Swift package manifest, use the released package:
 
 ```swift
-.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.91")
+.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.92")
 ```
 
 `from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
@@ -301,14 +301,36 @@ enable the default-off `accessibility` tool for the current MCP connection:
 
 Call `accessibility` with `talkback: true` on Android or `voiceover: true` on
 iOS, run the flow, and disable it afterward. Enabling TalkBack may leave a system
-runtime permission prompt covering the screen. The result reports it through
-`warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected;
-AutoMobile does not dismiss it. Use `observe` to inspect it, then `tapOn` to
-answer the allow or deny button, or set a `systemAlerts` policy to answer
-permission prompts around each interaction. The default-off debug tool
+runtime permission prompt covering the screen, sometimes a few seconds after the
+setting changes. The call waits up to 4 seconds for a system prompt, ending sooner once the
+screen is stable and TalkBack has no runtime permission left to request, and reports it through
+`warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected:
+`runtime-permission` for a permission prompt (TalkBack's own or another app's) and
+`system-dialog` for a SystemUI or framework dialog activity. AutoMobile does not dismiss it.
+Use `observe` to inspect it, then `tapOn` to answer the allow or deny button (or dismiss the
+dialog), or set a `systemAlerts` policy to answer permission prompts around each interaction. On Android, when `sendKeys` cannot
+focus its field because a system window (permission prompt, SystemUI or
+framework dialog) holds focus over the app, the failure reports that window in
+`blockingPrompt` (`kind`, `package`) and says to dismiss it rather than scroll. The default-off debug tool
 `accessibilityFocus` sets focus on Android (TalkBack) and iOS (VoiceOver).
 iOS requires VoiceOver enabled and the AutoMobile in-app SDK in the foreground
 app; focus read-back is unavailable. Clearing focus is supported only on Android.
+With VoiceOver on, iOS can hold or swallow a tap. When a `tapOn`, `tapAny` or
+`tapAt` tap times out with VoiceOver on, the error says the outcome is
+indeterminate (the tap may or may not have run, so it is not retried
+automatically) and names VoiceOver. Call `observe` to see whether the tap took
+effect; if it did not, call `accessibility` with `voiceover: false`, then retry.
+With TalkBack on, `tapOn` activates the nearest clickable owner of the matched
+element: by accessibility action when the owner has a stable id, otherwise by a
+TalkBack focus and double tap at the owner's center. Success does not prove the
+intended control responded, so the result's `warnings` flag two cases: the
+activated element's bounds do not contain the matched element's bounds (a
+different control may have been activated; not reported for `action: "focus"`),
+and the tap or double tap reported success but the screen did not change (moving
+TalkBack focus counts as a change; not reported for `action: "focus"` once the
+field's focus is verified). Each
+warning names the elements and gives the matched element's center. Call
+`observe`; if the intended control did not respond, call `tapAt` at that center.
 Check text alternatives, content descriptions or accessibility labels,
 focus order, contrast, and tap-target size as part of the assertions; support
 for toggling services varies by device type and OS version.
@@ -319,12 +341,12 @@ Use one release version for the test runner and the AutoMobile CLI. Restart a
 shared daemon so it receives the pin, then check the environment before tests:
 
 ```bash
-export AUTOMOBILE_VERSION=0.0.91
-bunx @kaeawc/auto-mobile@0.0.91 --daemon restart
-bunx @kaeawc/auto-mobile@0.0.91 --cli doctor
+export AUTOMOBILE_VERSION=0.0.92
+bunx @kaeawc/auto-mobile@0.0.92 --daemon restart
+bunx @kaeawc/auto-mobile@0.0.92 --cli doctor
 ```
 
-Replace `0.0.91` with the version used by your test runner dependency.
+Replace `0.0.92` with the version used by your test runner dependency.
 
 `--cli doctor` reports the status of AutoMobile on each booted Android device,
 including whether the accessibility service is installed and up to date. It is

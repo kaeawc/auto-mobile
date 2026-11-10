@@ -30,8 +30,15 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import type {
+  IosVoiceOverDetector,
+  VoiceOverStateClient,
+} from "../accessibility/interfaces/IosVoiceOverDetector";
+import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
+import { withVoiceOverTimeoutContextIfOn } from "./tapIosVoiceOver";
 import { withStaleDisplay } from "../observe/StaleDisplayError";
 import { isAdoptableCapture } from "../observe/isAdoptableCapture";
 import {
@@ -122,6 +129,9 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
   dispatchIosDoubleTap?: typeof dispatchIosDoubleTap;
   invalidateIosCache?: () => void;
+  /** Read only after an iOS tap times out, to add VoiceOver guidance (#17626). */
+  iosVoiceOverDetector?: Pick<IosVoiceOverDetector, "isVoiceOverEnabled">;
+  iosVoiceOverStateClient?: VoiceOverStateClient;
   lastRenderedObservation?: RenderedObservationReader;
   snapshotReferences?: SnapshotReferenceStore;
   /** Stylus routes and device facts; the defaults use instrumentation or root-only uinput and live device facts. */
@@ -145,6 +155,44 @@ function resolveTalkBackDependencies(
   };
 }
 
+/** The runner may still be busy with the timed-out press; the state is usually cached. */
+const TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS = 1000;
+
+/** iOS VoiceOver state for timeout guidance; only a confirmed-on probe counts. */
+function iosVoiceOverProbe(
+  device: BootedDevice,
+  {
+    detector,
+    stateClient,
+    featureFlags,
+    timer,
+  }: {
+    detector: Pick<IosVoiceOverDetector, "isVoiceOverEnabled">;
+    stateClient: () => VoiceOverStateClient;
+    featureFlags: FeatureFlagReader;
+    timer: Timer;
+  },
+): () => Promise<boolean> {
+  return () => {
+    // The request timeout starts only after a reconnect, so bound the whole probe here.
+    const controller = new AbortController();
+    return raceWithDeadline(
+      () =>
+        detector.isVoiceOverEnabled(device.deviceId, stateClient(), {
+          featureFlags,
+          timeoutMs: TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS,
+          signal: controller.signal,
+        }),
+      {
+        timer,
+        timeoutMs: TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS,
+        label: "tapAt VoiceOver probe",
+        onTimeout: () => controller.abort(),
+      },
+    );
+  };
+}
+
 /** Tap one absolute point in the native coordinate space reported by observe. */
 export class TapAtCoordinate extends BaseVisualChange {
   private readonly androidClient: CoordinateTapClient & {
@@ -154,6 +202,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly iosClient: IosCoordinateTapClient;
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
+  private readonly isIosVoiceOverOn: () => Promise<boolean>;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly stylusRoutes: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
   private readonly snapshotReferences: SnapshotReferenceStore;
@@ -173,7 +222,8 @@ export class TapAtCoordinate extends BaseVisualChange {
     rejectTvosTouch(device.platform, "tapAt");
     this.androidClient =
       dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
-    this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
+    const liveIosClient = () => IOSCtrlProxyClient.getInstance(device);
+    this.iosClient = dependencies.iosClient ?? liveIosClient();
     this.iosDoubleTap = dependencies.dispatchIosDoubleTap ?? dispatchIosDoubleTap;
     this.iosCoordinateTap = dependencies.dispatchIosCoordinateTap ?? dispatchIosCoordinateTap;
     this.invalidateIosCache =
@@ -187,6 +237,12 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.timer,
       new DefaultTalkBackNavigationDriverFactory(this.adbFactory),
     );
+    this.isIosVoiceOverOn = iosVoiceOverProbe(device, {
+      detector: dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector,
+      stateClient: () => dependencies.iosVoiceOverStateClient ?? liveIosClient(),
+      featureFlags: talkBack.featureFlags,
+      timer: this.timer,
+    });
     this.androidTalkBack = new AndroidCoordinateTalkBack({
       target: this,
       androidClient: this.androidClient,
@@ -283,7 +339,13 @@ export class TapAtCoordinate extends BaseVisualChange {
           });
         }
         onDispatchCompleted?.();
-        return { success: true, x: resolved.x, y: resolved.y, action };
+        return {
+          success: true,
+          x: resolved.x,
+          y: resolved.y,
+          action,
+          ...(resolved.xrPanel ? { xrPanel: resolved.xrPanel } : {}),
+        };
       },
       {
         changeExpected: false,
@@ -473,7 +535,13 @@ export class TapAtCoordinate extends BaseVisualChange {
               throw unsupportedPlatformError(this.device.platform, "tap at coordinates");
           }
 
-          return { success: true, x: resolved.x, y: resolved.y, action };
+          return {
+            success: true,
+            x: resolved.x,
+            y: resolved.y,
+            action,
+            ...(resolved.xrPanel ? { xrPanel: resolved.xrPanel } : {}),
+          };
         },
         {
           changeExpected: false,
@@ -594,13 +662,10 @@ export class TapAtCoordinate extends BaseVisualChange {
   ): Promise<number> {
     const { transitionRevision, onTapDelivered, signal } = context;
     this.assertDisplayRevisionCurrent(transitionRevision);
-    const dispatch = options.action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap;
-    await dispatch(this.iosClient, point, {
+    await this.dispatchIosCoordinateTap(options.action, point, {
       durationMs: tapDurationMs(options, "ios"),
       frameContext,
-      options: {
-        signal,
-      },
+      signal,
     });
     try {
       onTapDelivered();
@@ -612,6 +677,20 @@ export class TapAtCoordinate extends BaseVisualChange {
     } finally {
       this.invalidateIosCacheSafely();
     }
+  }
+
+  /** One iOS coordinate gesture; a timeout with VoiceOver on names the remedy. */
+  private async dispatchIosCoordinateTap(
+    action: TapAtOptions["action"],
+    point: { x: number; y: number },
+    request: { durationMs: number; frameContext?: string; signal?: AbortSignal },
+  ): Promise<void> {
+    const { durationMs, frameContext, signal } = request;
+    const dispatch = action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap;
+    await withVoiceOverTimeoutContextIfOn(
+      () => dispatch(this.iosClient, point, { durationMs, frameContext, options: { signal } }),
+      this.isIosVoiceOverOn,
+    );
   }
 
   private invalidateIosCacheSafely(): void {
@@ -834,15 +913,11 @@ export class TapAtCoordinate extends BaseVisualChange {
             : `tap ${point.x} ${point.y}`;
         await this.dispatchAndroidDisplayGesture(point, duration, command, context);
       } else if (this.device.platform === "ios") {
-        await (action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap)(
-          this.iosClient,
-          point,
-          {
-            durationMs: duration,
-            frameContext: observation.viewHierarchy?.frameContext,
-            options: { signal },
-          },
-        );
+        await this.dispatchIosCoordinateTap(action, point, {
+          durationMs: duration,
+          frameContext: observation.viewHierarchy?.frameContext,
+          signal,
+        });
         context.onTapDelivered();
         if (action === "doubleTap") {
           context.onTapDelivered();

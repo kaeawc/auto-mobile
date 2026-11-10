@@ -142,6 +142,8 @@ export interface ObserveDiff {
   screenshotCaptureSource?: "device" | "observation-cache";
   screenshotCapturedAt?: string;
   screenshotAgeMs?: number;
+  screenshotHierarchyLagMs?: number;
+  screenshotHierarchyMismatch?: boolean;
   screenshotFreshFailure?: { code: string; message: string; retryable: boolean };
   screenshotFormat?: "png" | "jpeg" | "webp";
   screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";

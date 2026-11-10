@@ -15,7 +15,7 @@ import {
 import { type IosCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
 import { type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { type Timer } from "../../utils/SystemTimer";
-import { POSTURE_PANEL_ROLES, type DisplayPanel } from "../../models/DisplayPanel";
+import { POSTURE_PANEL_ROLES, isPhysicalPanel, type DisplayPanel } from "../../models/DisplayPanel";
 import { type DisplayTransitionSink } from "../observe/DisplayTransition";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -26,6 +26,7 @@ import { logger } from "../../utils/logger";
 import { displayInventoryOutcome } from "../../models/DeviceInfo";
 import { type PostureKeyguardDismisserFactory } from "./PostureKeyguardRestore";
 import { type AndroidHingeAngleConsole } from "./AndroidHingeAngleConsole";
+import { type IosRequestedHingeAngleStore } from "./DuoHingeLayout";
 
 export const HINGE_ANGLE_MIN_DEGREES = 0;
 
@@ -89,11 +90,13 @@ export interface SetPostureDependencies {
   timer?: Timer;
   transitionSink?: DisplayTransitionSink;
   keyguardDismisserFactory?: PostureKeyguardDismisserFactory;
+  /** Remembers requested iPhone Duo hinge angles for getDeviceState's half_opened report. */
+  iosHingeAngleStore?: IosRequestedHingeAngleStore;
 }
 
-const IOS_POSTURE_POLL_INTERVAL_MS = 250;
+export const IOS_POSTURE_POLL_INTERVAL_MS = 250;
 
-const IOS_POSTURE_TIMEOUT_MS = 3000;
+export const IOS_POSTURE_TIMEOUT_MS = 3000;
 
 export const ANDROID_POSTURE_POLL_INTERVAL_MS = 250;
 
@@ -183,6 +186,20 @@ export function devicectlConfirmsIosPanel(
     return matches?.length === 1 && matches[0].role === expectedRole;
   }
   return display.name === (expectedRole === "cover" ? "LCD" : "LCD-1");
+}
+
+/** The single inner or cover panel devicectl reports active, or undefined when ambiguous. */
+export function findActiveIosPanel(
+  displays: DevicectlDisplayInfo[],
+  panels: DisplayPanel[] | undefined,
+): DisplayPanel | undefined {
+  const physical = panels?.filter(isPhysicalPanel) ?? [];
+  return physical.find(
+    (candidate) =>
+      (candidate.role === "inner" || candidate.role === "cover") &&
+      physical.filter((panel) => panel.role === candidate.role).length === 1 &&
+      devicectlConfirmsIosPanel(displays, physical, candidate.role),
+  );
 }
 
 export async function observeIosPosture(

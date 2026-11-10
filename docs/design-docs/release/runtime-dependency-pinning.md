@@ -16,7 +16,8 @@ resolvable. A fixed release must resolve a fixed graph.
 
 ## Why the graph is small
 
-`build.ts` bundles the server into a single `dist/src/index.js`, externalizing
+`build.ts` bundles the server into `dist/src/index.js` plus code-split
+`dist/src/chunk-*.js` siblings, externalizing
 **only** the image backends it loads from `node_modules` at runtime — the `jimp`
 family (`jimp`, `@jimp/core`) and the `sharp` family (`sharp` + the platform
 `@img/sharp-*` binaries). One more package is a runtime dependency without being
@@ -29,7 +30,7 @@ is a separate runtime-graph change.
 The server uses the `zod/v4` subpath exported by **`zod@3.25.76`**. It remains
 bundled into `dist/`, while the exact root package is also published so every
 Jimp `zod: ^3.23.8` edge resolves to the same pinned version. Every other
-inlined package (`werift`, the MCP SDK, …) is not needed at install time and
+inlined package (`werift`, the MCP SDK, `@anthropic-ai/sdk`, …) is not needed at install time and
 lives in `devDependencies`; consumers never install them, which is what removed
 the `@peculiar/asn1-*` install path entirely.
 
@@ -66,6 +67,29 @@ maps are excluded from the tarball (unused at runtime). The unpacked-size guard 
 pack and is capped at 20,132,659 bytes (16 MiB + 20%; #9571, #12457); a pack with source maps restored
 (23,061,125 bytes) fails, and an untrimmed pack is larger still.
 
+Code splitting (#17683) lets startup parse only the chunks it loads; code behind a
+dynamic `import()` stays unparsed until first use. Chunks are hashed siblings of
+`index.js`, so `import.meta.url`-relative lookups still resolve from `dist/src`.
+The roots derivation scans each chunk the way it scans `index.js`. Because chunk
+names cannot be listed statically, the packed-asset guard (unpacked-size benchmark
+and artifact identity) walks every relative `import`/`import()`/`import.meta.require`
+from the packed entrypoints and fails on any target missing from the tarball. ESM
+evaluates a module's own body only after all of its static imports, so `build.ts`
+also lists the Bun runtime guard and the launcher-pid capture (#11041) as
+entrypoints. That gives each one its own dependency-free chunk. The build then
+fails unless `index.js` imports those chunks first, in that order.
+
+Feature-gated modules stay off that startup path: the prototype tool's runtime and
+resource readers, the in-process MCP client, the Claude vision client (`@anthropic-ai/sdk`)
+and the WebRTC publisher (`werift`) are imported on first use through
+`src/utils/lazyFeatureModule.ts`, which logs each first load's latency. Their tools,
+resources and schemas are still registered at startup, so `tools/list` and
+`resources/list` are unchanged. A failed import is not memoized: the call that hit it
+gets an `ActionableError` and the next call imports again. Prototype resource-update
+notifications need only the revision store, never the readers, so a failed reader import
+cannot drop one. `test/lint/lazyFeatureModules.integration.test.ts`
+fails if a static import pulls one back onto the startup path.
+
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:
 
@@ -76,11 +100,24 @@ manifest) and enforced by:
 
 ## CI pack trimming
 
-The prepack hook moves unused sources, declarations, maps, tests, docs and
-verified browser-only files out of the bundled production dependency closure.
-Runtime entry points, wildcard export prefixes, package metadata, README and
-license files stay intact. Postpack restores the original bytes; the next enabled
-prepack also restores any backup left by an interrupted pack.
+The prepack hook moves files out of the bundled production dependency closure
+only when they belong to a class in the `PRUNE_CLASSES` allowlist
+(`scripts/release/trim-bundled-deps.ts`): declarations, source maps, tests,
+docs/markdown, TypeScript sources, `src/` beside a built `dist/`, browser-only
+builds (`browser` field and `browser` export-condition targets, `dist/browser/`,
+UMD) and CI/build tooling config. Bun and Node never resolve the `browser`
+condition. Package metadata and legal notices (LICENSE, NOTICE, COPYING, PATENTS,
+AUTHORS) are never removed. Runtime entry points and wildcard export prefixes are
+protected, except that declarations and maps are pruned inside wildcard prefixes
+because nothing loads them. A candidate that any retained JS file names literally
+stays. `trim-bundled-deps.ts list` prints each candidate with its class. Postpack
+restores the original bytes; the next enabled prepack also restores any backup
+left by an interrupted pack.
+
+The unpacked-size benchmark also enforces a byte budget for the packed
+`node_modules/` (`BUNDLED_NODE_MODULES_MAX_BYTES` in
+`scripts/build/packed-runtime-assets.ts`) and fails on any packed bundled
+declaration or map, so a pack that skipped or weakened the prune fails.
 
 `AUTOMOBILE_TRIM_BUNDLED_DEPS=true` enables trimming; `false` disables it.
 Otherwise trimming runs only with `CI=true` or `CI=1`. Local `npm pack` is

@@ -60,7 +60,7 @@ PBX
   mock_bin="${BATS_TEST_TMPDIR}/bin"
   repo_root="${BATS_TEST_DIRNAME}/../.."
   mkdir -p "${fixture}/scripts/swiftformat" "${fixture}/scripts/swiftlint" \
-    "${fixture}/scripts/ios" "${fixture}/ios/XCTestRunner" "${mock_bin}"
+    "${fixture}/scripts/ios" "${fixture}/ios/XCTestRunner" "${fixture}/ios/control-proxy" "${mock_bin}"
   mkdir -p "${fixture}/scripts/lib"
   cp "${repo_root}/scripts/lib/spotlight-exclude.sh" "${fixture}/scripts/lib/"
   cp "${repo_root}/scripts/prepush-ios.sh" "${fixture}/scripts/prepush-ios.sh"
@@ -96,7 +96,11 @@ LINT
 if [[ ${1:-} == test && ${2:-} == list ]]; then
   echo 'XCTestRunnerTests.ExampleTests/testExample'
 elif [[ ${1:-} == test ]]; then
-  echo 'Executed 1 tests, with 0 failures (0 unexpected)'
+  if [[ "$PWD" == */control-proxy ]]; then
+    echo 'Executed 68 tests, with 0 failures (0 unexpected)'
+  else
+    echo 'Executed 1 tests, with 0 failures (0 unexpected)'
+  fi
 fi
 SWIFT
   chmod +x "${mock_bin}"/*

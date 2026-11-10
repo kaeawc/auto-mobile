@@ -8,8 +8,16 @@ with a counter button, a Crown value, and rows in a scroll view. The runner's
 press-and-drag gestures, directional swipes, and text dumps. The Smart Stack
 widget driver (`scripts/watch/addSmartStackWidget.ts`) uses a calibrated gallery position (steps from the bottom, default
 one) and the first widget preview; app and widget display names verify the
-resulting cell identifier. Header and cell polling each allow ten dumps separated
-by 250 ms. A successful gesture alone does not establish widget presence.
+resulting cell identifier. The face can leave both name fields empty; such a cell
+verifies only as the one cell added since that attempt's header dump (every earlier
+cell id still present, the count up by exactly one) whose labels hold the app name. Home is lossy and non-idempotent, so opening the stack
+allows three home/swipe-up rounds, each polling the header up to four times. Cell
+verification allows ten dumps; failed verification retries the whole flow up to
+`maxAttempts` (default three, range 1–5; script option `--attempts`), waiting
+`retryDelayMs` between attempts (default 20000 ms, integer range 0–120000;
+`--retry-delay-ms`) for gallery indexing after installation. Polls settle
+for 250 ms between dumps. Header failures, errors, and cancellation stop the flow.
+A successful gesture alone does not establish widget presence.
 
 ## Capability boundary
 

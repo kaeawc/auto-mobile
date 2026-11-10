@@ -70,6 +70,7 @@ const context: CallContext = {
   requestOneShotCli: false,
   requestedToolResultsNoStructuredContent: undefined,
   requestedActionsCompactMetadata: undefined,
+  requestedPrototypeFullSchema: undefined,
   requestTimeoutMs: undefined,
   requestDeadlineMs: undefined,
   requestLiveDeadlineKey: undefined,

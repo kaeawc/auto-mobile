@@ -9,47 +9,69 @@ final class SimulatorHighlightTests: XCTestCase {
         SimulatorOverlayTarget(windowID: id, processID: 1, frame: .zero, title: title)
     }
 
-    func testSelectsDuoPanelBySourceAspectRatio() throws {
-        // Panel dimensions are from issue #17048, not a live capture.
-        let cover = CGSize(width: 466, height: 678)
-        let inner = CGSize(width: 951, height: 669)
-        let candidates = [target(1), target(2), target(3, title: "another device")]
-        for (source, expectedID) in [(cover, UInt32(1)), (inner, UInt32(2))] {
-            let selected = try SimulatorDisplayGeometry.find(
-                deviceName: "mt-duo-0090b",
-                sourceSize: source,
-                candidates: candidates,
-                displayFrame: { window in
-                    XCTAssertNotEqual(window.windowID, 3)
-                    return CGRect(origin: .zero, size: window.windowID == 1 ? cover : inner)
-                }
-            )
-            XCTAssertEqual(selected.windowID, expectedID)
+    // Duo capture 2026-11-10. Candidates are ordered front-to-back.
+    private var duoCandidates: [SimulatorOverlayTarget] {
+        [
+            SimulatorOverlayTarget(
+                windowID: 12988, processID: 1,
+                frame: CGRect(x: 101, y: 47, width: 678, height: 971), title: "l17048c Duo"
+            ),
+            SimulatorOverlayTarget(
+                windowID: 12987, processID: 1,
+                frame: CGRect(x: 72, y: 62, width: 534, height: 778), title: "l17048c Duo"
+            ),
+            SimulatorOverlayTarget(
+                windowID: 12932, processID: 1,
+                frame: CGRect(x: 22, y: 53, width: 456, height: 971), title: "AutoMobile CI iPhone (26.5)"
+            ),
+        ]
+    }
+
+    private func duoDisplayFrame(_ window: SimulatorOverlayTarget) -> CGRect? {
+        switch window.windowID {
+        case 12988: return CGRect(x: 130.5, y: 121, width: 615.5, height: 875.0)
+        case 12987: return CGRect(x: 104, y: 138, width: 466, height: 678)
+        case 12932:
+            XCTFail("The CI iPhone must be excluded by title before querying its display frame")
+            return CGRect(x: 49.5, y: 133, width: 401.5, height: 873)
+        default: return nil
         }
     }
 
-    func testSelectsInnerPanelDrawnInOtherOrientation() throws {
-        // These measurements come from the Duo capture on 2026-11-05 (scratch/ax-dump-simulator-app.txt), not a
-        // hand-written guess.
-        let candidates = [target(1), target(2)]
-        for (source, expectedID) in [
-            (CGSize(width: 951, height: 669), UInt32(1)),
-            (CGSize(width: 466, height: 678), UInt32(2)),
-        ] {
-            let selected = try SimulatorDisplayGeometry.find(
-                deviceName: "mt-duo-0090b",
-                sourceSize: source,
-                candidates: candidates,
-                displayFrame: { window in
-                    CGRect(
-                        origin: .zero,
-                        size: window.windowID == 1
-                            ? CGSize(width: 615, height: 875)
-                            : CGSize(width: 466, height: 678)
-                    )
-                }
-            )
-            XCTAssertEqual(selected.windowID, expectedID)
+    func testSelectsDuoPanelBySourceAspectRatioInEitherWindowOrder() throws {
+        for candidates in [duoCandidates, Array(duoCandidates.reversed())] {
+            for (source, expectedID) in [
+                (CGSize(width: 951, height: 669), UInt32(12988)),
+                (CGSize(width: 466, height: 678), UInt32(12987)),
+            ] {
+                let selected = try SimulatorDisplayGeometry.find(
+                    deviceName: "l17048c Duo",
+                    sourceSize: source,
+                    candidates: candidates,
+                    displayFrame: duoDisplayFrame
+                )
+                XCTAssertEqual(selected.windowID, expectedID)
+            }
+        }
+    }
+
+    func testDuoFallsBackToFocusedPanelWhenSourceCannotChoose() throws {
+        let sizes: [CGSize?] = [
+            nil, .zero, CGSize(width: -1, height: 1), CGSize(width: CGFloat.infinity, height: 1),
+            CGSize(width: CGFloat.nan, height: 1), CGSize(width: 1, height: 1),
+            // Both panel errors are within 2%, but less than 0.005 apart.
+            CGSize(width: 1000, height: 1440),
+        ]
+        for candidates in [duoCandidates, Array(duoCandidates.reversed())] {
+            for size in sizes {
+                let selected = try SimulatorDisplayGeometry.find(
+                    deviceName: "l17048c Duo",
+                    sourceSize: size,
+                    candidates: candidates,
+                    displayFrame: duoDisplayFrame
+                )
+                XCTAssertEqual(selected.windowID, candidates.first { $0.title == "l17048c Duo" }?.windowID)
+            }
         }
     }
 
@@ -121,14 +143,11 @@ final class SimulatorHighlightTests: XCTestCase {
         XCTAssertEqual(oriented.sourceHeight, bounds.sourceHeight)
     }
 
-    func testMultipleWindowsWithoutSourceSizeRemainAmbiguous() {
+    func testDuplicateWindowsWithoutSourceSizeRemainAmbiguous() {
         XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
             deviceName: "mt-duo-0090b",
             candidates: [target(1), target(2)],
-            displayFrame: { _ in
-                XCTFail("Missing source size must not query display geometry")
-                return nil
-            }
+            displayFrame: { _ in CGRect(x: 0, y: 0, width: 233, height: 339) }
         )) { error in
             XCTAssertTrue(error is OverlayError)
             XCTAssertTrue(String(describing: error).contains("found 2"))
@@ -145,6 +164,48 @@ final class SimulatorHighlightTests: XCTestCase {
         )) { error in
             XCTAssertTrue(String(describing: error).contains("found 2"))
         }
+    }
+
+    func testThreeWindowsCannotUseFocusedPanelFallback() {
+        for source: CGSize? in [nil, CGSize(width: 1000, height: 1440)] {
+            XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
+                deviceName: "mt-duo-0090b",
+                sourceSize: source,
+                candidates: [target(1), target(2), target(3)],
+                displayFrame: { window in
+                    CGRect(x: 0, y: 0, width: 1000, height: window.windowID == 1 ? 1420 : 1460)
+                }
+            )) { error in
+                XCTAssertTrue(String(describing: error).contains("found 3"))
+            }
+        }
+    }
+
+    func testFocusedPanelFallbackRequiresTwoValidDistinctDisplayFrames() {
+        for second: CGRect? in [
+            nil, .zero, CGRect(x: 0, y: 0, width: CGFloat.infinity, height: 1),
+            CGRect(x: 0, y: 0, width: 100, height: 200.5),
+        ] {
+            XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
+                deviceName: "mt-duo-0090b",
+                candidates: [target(1), target(2)],
+                displayFrame: { $0.windowID == 1 ? CGRect(x: 0, y: 0, width: 100, height: 200) : second }
+            )) { error in
+                XCTAssertTrue(String(describing: error).contains("found 2"))
+            }
+        }
+    }
+
+    func testSourceAspectSkipsUnavailableDisplayFrames() throws {
+        let selected = try SimulatorDisplayGeometry.find(
+            deviceName: "mt-duo-0090b",
+            sourceSize: CGSize(width: 466, height: 678),
+            candidates: [target(1), target(2), target(3)],
+            displayFrame: { window in
+                window.windowID == 2 ? CGRect(x: 0, y: 0, width: 466, height: 678) : nil
+            }
+        )
+        XCTAssertEqual(selected.windowID, 2)
     }
 
     func testNoMatchingWindowThrows() {
@@ -189,6 +250,31 @@ final class SimulatorHighlightTests: XCTestCase {
             }
         )
         XCTAssertEqual(selected.windowID, 1)
+    }
+
+    func testNearestAspectWinsWhenBothWindowsAreWithinTolerance() throws {
+        let selected = try SimulatorDisplayGeometry.find(
+            deviceName: "mt-duo-0090b",
+            sourceSize: CGSize(width: 1000, height: 1400),
+            candidates: [target(1), target(2)],
+            displayFrame: { window in
+                CGRect(x: 0, y: 0, width: 1000, height: window.windowID == 1 ? 1420 : 1400)
+            }
+        )
+        XCTAssertEqual(selected.windowID, 2, "The clear source match takes precedence over focus")
+    }
+
+    func testSmallAspectLeadCannotResolveDuplicateWindows() {
+        XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
+            deviceName: "mt-duo-0090b",
+            sourceSize: CGSize(width: 1000, height: 1400),
+            candidates: [target(1), target(2)],
+            displayFrame: { window in
+                CGRect(x: 0, y: 0, width: 1000, height: window.windowID == 1 ? 1400 : 1405)
+            }
+        )) { error in
+            XCTAssertTrue(String(describing: error).contains("found 2"))
+        }
     }
 
     func testUnavailableOrMismatchedDisplayFramesDoNotSelectAWindow() {

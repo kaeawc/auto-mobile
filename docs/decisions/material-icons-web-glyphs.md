@@ -9,14 +9,14 @@ version.
 ## Decision
 
 In an Android frame the prototype web still draws each icon with the Material Icons glyph Compose
-draws: the contract's `iconName` list is exactly the `material-icons-extended` set, and this
+draws: the contract's `iconName` list is a curated 300-name subset of `material-icons-extended`, and this
 package ships the same icons as one 24 x 24 SVG per name in the filled, outlined, round, sharp and
 two-tone styles. A server-only reader, which the page builder injects into the still renderer
 so the renderer keeps no Node builtins for its browser bundle (#16451), reads one file per glyph
 drawn (through `import.meta.resolve`, so
 nothing is bundled and the release roots derivation pins the package), parses it with `xml2js`
 (already used in `src/`) into the shapes it allows, and caches it. A page therefore carries only
-the glyphs it draws. About 20 contract names (deprecated Compose-only icons) have no file and keep
+the glyphs it draws. A retained name without a package glyph (a deprecated Compose-only icon) keeps
 the placeholder with reason `iconMissing`.
 
 ## Alternatives checked

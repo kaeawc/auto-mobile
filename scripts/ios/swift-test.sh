@@ -78,6 +78,7 @@ TESTABLE_PACKAGES=(
     "screen-capture"
     "network-filter"
     "audio-loopback"
+    "carplay-power"
 )
 
 # Total tests executed in a `swift test` transcript.

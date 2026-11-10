@@ -1,0 +1,56 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"message\":\"Read device state\",\"success\":true,\"deviceId\":\"B69265BC-8D32-4056-ADB0-58010D6899AA\",\"platform\":\"ios\",\"displays\":{\"panels\":[{\"key\":\"primary-1\",\"role\":\"inner\",\"sizePx\":{\"width\":2007,\"height\":2853},\"scale\":3},{\"key\":\"primary\",\"role\":\"cover\",\"sizePx\":{\"width\":1398,\"height\":2034},\"scale\":3}],\"postures\":[\"closed\",\"half_opened\",\"opened\"],\"current\":{\"posture\":\"closed\",\"postureSource\":\"inferred_from_active_panel\",\"activePanel\":{\"key\":\"primary\",\"role\":\"cover\"}}},\"doNotDisturb\":{\"supported\":false,\"capability\":\"unsupported\",\"error\":\"Do Not Disturb cannot be read or set on an iOS simulator: Do Not Disturb is owned by the private donotdisturbd Focus daemon, which holds the state in its own store and resets the legacy com.apple.donotdisturb.enabled notification — so that notification neither reflects nor controls the real Focus state. iOS exposes no public API to read or set Focus / Do Not Disturb. Set it manually in the simulator, or via a Shortcuts automation.\"},\"connectivity\":{\"supported\":false,\"error\":\"Device connectivity toggles cannot be read on iOS: Airplane mode, Wi-Fi, Bluetooth and Location have no simctl or devicectl read verb. A simulator shares the host's network stack (so its Wi-Fi/Bluetooth state is the Mac's, not the device's), and `simctl status_bar override` only paints the status bar without changing real connectivity. Read these from Settings on the device instead.\"},\"unsupported\":[\"doNotDisturb\",\"connectivity\"]}"
+    }
+  ],
+  "structuredContent": {
+    "message": "Read device state",
+    "success": true,
+    "deviceId": "B69265BC-8D32-4056-ADB0-58010D6899AA",
+    "platform": "ios",
+    "displays": {
+      "panels": [
+        {
+          "key": "primary-1",
+          "role": "inner",
+          "sizePx": {
+            "width": 2007,
+            "height": 2853
+          },
+          "scale": 3
+        },
+        {
+          "key": "primary",
+          "role": "cover",
+          "sizePx": {
+            "width": 1398,
+            "height": 2034
+          },
+          "scale": 3
+        }
+      ],
+      "postures": ["closed", "half_opened", "opened"],
+      "current": {
+        "posture": "closed",
+        "postureSource": "inferred_from_active_panel",
+        "activePanel": {
+          "key": "primary",
+          "role": "cover"
+        }
+      }
+    },
+    "doNotDisturb": {
+      "supported": false,
+      "capability": "unsupported",
+      "error": "Do Not Disturb cannot be read or set on an iOS simulator: Do Not Disturb is owned by the private donotdisturbd Focus daemon, which holds the state in its own store and resets the legacy com.apple.donotdisturb.enabled notification — so that notification neither reflects nor controls the real Focus state. iOS exposes no public API to read or set Focus / Do Not Disturb. Set it manually in the simulator, or via a Shortcuts automation."
+    },
+    "connectivity": {
+      "supported": false,
+      "error": "Device connectivity toggles cannot be read on iOS: Airplane mode, Wi-Fi, Bluetooth and Location have no simctl or devicectl read verb. A simulator shares the host's network stack (so its Wi-Fi/Bluetooth state is the Mac's, not the device's), and `simctl status_bar override` only paints the status bar without changing real connectivity. Read these from Settings on the device instead."
+    },
+    "unsupported": ["doNotDisturb", "connectivity"]
+  },
+  "success": true
+}

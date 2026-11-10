@@ -115,11 +115,59 @@ describe("pickAndroidSystemImage XR selection (#16838)", () => {
         pickAndroidSystemImage([image(36, "google_apis")], { formFactor }, "x64"),
       );
 
-      expect(message).toContain(`system-images;android-<api>;${tag};x86_64`);
+      const api = formFactor === "xr-headset" ? 34 : 36;
+      expect(message).toContain(
+        `sdkmanager --channel=3 --install "system-images;android-${api};${tag};x86_64"`,
+      );
       expect(message).toContain("--channel=3");
       expect(message).toContain("does not download system images");
     },
   );
+
+  it("a headset request with minOsVersion 35 says no XR image is in range instead of suggesting API 34", () => {
+    const message = thrownMessage(() =>
+      pickAndroidSystemImage(
+        [image(34, "google-xr")],
+        { formFactor: "xr-headset", minOsVersion: "35" },
+        "x64",
+      ),
+    );
+
+    expect(message).toContain("No Android XR headset system image is available in the requested");
+    expect(message).toContain("API 34 (google-xr)");
+    expect(message).toContain("Widen minOsVersion/maxOsVersion");
+    expect(message).not.toContain("--install");
+  });
+
+  it("a glasses request with maxOsVersion below 36 says no XR image is in range", () => {
+    const message = thrownMessage(() =>
+      pickAndroidSystemImage(
+        [image(34, "google_apis")],
+        { formFactor: "xr-glasses", maxOsVersion: "35" },
+        "x64",
+      ),
+    );
+
+    expect(message).toContain("No Android XR glasses system image is available in the requested");
+    expect(message).toContain("API 36 (ai-glasses)");
+    expect(message).toContain("Widen minOsVersion/maxOsVersion");
+    expect(message).not.toContain("--install");
+  });
+
+  it("an in-range headset request still names the exact install command", () => {
+    const message = thrownMessage(() =>
+      pickAndroidSystemImage(
+        [image(36, "google_apis")],
+        { formFactor: "xr-headset", minOsVersion: "34", maxOsVersion: "34" },
+        "x64",
+      ),
+    );
+
+    expect(message).toContain(
+      'sdkmanager --channel=3 --install "system-images;android-34;google-xr;x86_64"',
+    );
+    expect(message).not.toContain("Widen");
+  });
 
   it("requires.playStore on a headset picks only a Play XR image", () => {
     const images = [image(34, "google-xr"), image(34, "android-xr-preview-playstore")];

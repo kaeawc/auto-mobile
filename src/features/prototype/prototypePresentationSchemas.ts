@@ -1,17 +1,18 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { z } from "zod";
-import contract from "../../../schemas/prototype-spec-contract.json";
+import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { pointerSchema, stateKeySchema } from "./prototypeActionValues";
 import { createEffectSchema } from "./prototypeEffectsSchema";
 
-// Icon names are the closed list of Material icons the Android renderer bundles
-// (androidx material-icons-extended); the shared contract is the single source.
-export const iconNames: ReadonlySet<string> = new Set(contract.definitions.iconName.values);
+export { iconNames } from "./prototypeIconNames";
 
-export const iconNameSchema = z.string().refine((name) => iconNames.has(name), {
-  message: "Unknown prototype icon name",
-});
+export const iconNameSchema = z.string().refine(
+  (name) => iconNames.has(name),
+  (name) => ({
+    message: prototypeIconNameError(name),
+  }),
+);
 
 export const iconVariantSchema = z.enum(["filled", "outlined", "rounded", "sharp", "twoTone"]);
 

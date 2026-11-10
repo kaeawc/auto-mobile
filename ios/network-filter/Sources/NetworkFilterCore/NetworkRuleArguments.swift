@@ -39,7 +39,7 @@ public enum NetworkRuleArguments {
 
     /// Version-3 error text stays byte-compatible with the pre-negotiation controller.
     public static func usage(for version: Int) -> String {
-        version == 3 ? legacyUsage : usage
+        version == 3 ? legacyUsage : (version >= 5 ? usage + " [--watch-only true]" : usage)
     }
 
     private static let shapingFlags: Set<String> = [
@@ -91,7 +91,8 @@ public enum NetworkRuleArguments {
         if kind != .reset {
             valueFlags.insert("--lease-ms")
         }
-        if kind == .apply, version == 4 { valueFlags.formUnion(shapingFlags) }
+        if kind == .apply, version >= 4 { valueFlags.formUnion(shapingFlags) }
+        if kind == .apply, version >= 5 { valueFlags.insert("--watch-only") }
         while let flag = remaining.popFirst() {
             if kind == .apply, version == 3, shapingFlags.contains(flag) {
                 throw NetworkRuleArgumentError.shapingNeedsVersionFour
@@ -119,6 +120,12 @@ public enum NetworkRuleArguments {
     }
 
     private static func condition(_ values: [String: String]) throws -> NetworkRuleCommandCondition {
+        if let watch = values["--watch-only"] {
+            guard watch == "true", shapingFlags.isDisjoint(with: values.keys) else {
+                throw NetworkRuleArgumentError.invalidValue(flag: "--watch-only", value: watch)
+            }
+            return .watch
+        }
         guard !shapingFlags.isDisjoint(with: values.keys) else { return .offline }
         let lossFlag = "--packet-loss-percent"
         let lossText = values[lossFlag] ?? "0"

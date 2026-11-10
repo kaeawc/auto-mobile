@@ -72,6 +72,101 @@ class CaptureReplayClient extends FakeTvosRunnerClient {
   }
 }
 
+class SettingsReplayClient extends FakeTvosRunnerClient {
+  private position: number;
+  private readonly snapshots;
+
+  constructor(start: number) {
+    const capture: { snapshots: unknown[] } = JSON.parse(
+      readFileSync(
+        path.join(
+          import.meta.dir,
+          "../../fixtures/tvos-xcuitest/tvos-runner-hierarchy-settings-focus-down.json",
+        ),
+        "utf8",
+      ),
+    );
+    const snapshots = capture.snapshots.map((snapshot) => new FakeTvosRunnerClient(snapshot).tree);
+    super(snapshots[start]);
+    this.snapshots = snapshots;
+    this.position = start;
+  }
+
+  override async request(
+    command: TvosCommand,
+    signal?: AbortSignal,
+    options?: Parameters<FakeTvosRunnerClient["request"]>[2],
+  ): Promise<unknown> {
+    const result = await super.request(command, signal, options);
+    if (command.type === "request_press_button") {
+      this.position = Math.min(this.position + 1, this.snapshots.length - 1);
+    }
+    return result;
+  }
+
+  override async hierarchy(signal?: AbortSignal) {
+    await super.hierarchy(signal);
+    return this.snapshots[this.position];
+  }
+}
+
+test.each([
+  [1, "Accessibility", 1],
+  [2, "Accessibility", 0],
+  [3, "Developer", 2],
+] as const)("replays Settings from snapshot %d to %s", async (start, text, moves) => {
+  unregister();
+  const replay = new SettingsReplayClient(start);
+  unregister = tvosRunners.register(deviceId, replay);
+  const result = await tvosTapOn(deviceId, { action: "tap", text });
+  expect(result.success).toBe(true);
+  expect(result.element?.text).toBe(text);
+  expect(result.element?.class).toBe("75");
+  expect(result.element?.focused).toBe("true");
+  expect(replay.commands).toEqual([
+    hierarchy,
+    ...Array.from({ length: moves }, () => [press("down"), hierarchy]).flat(),
+    press("select"),
+  ]);
+});
+
+test("Settings focus animation labels do not occupy extra index slots", async () => {
+  unregister();
+  const replay = new SettingsReplayClient(2);
+  unregister = tvosRunners.register(deviceId, replay);
+  await expect(
+    tvosTapOn(deviceId, { action: "tap", text: "Accessibility", index: 1 }, undefined, {
+      maxSearchMoves: 0,
+    }),
+  ).rejects.toThrow("No tvOS element matched after searching 0 focus moves");
+  expect(replay.commands).toEqual([hierarchy]);
+});
+
+test("index counts matching owners once while preserving label ranking", async () => {
+  for (const button of client.buttons.filter((button) =>
+    ["B01", "B02"].includes(button["resource-id"]),
+  )) {
+    button.text = "Repeated";
+    const label = {
+      ...button,
+      "resource-id": "",
+      className: "48",
+      focused: "false",
+      bounds: {
+        left: button.bounds.left + 5,
+        top: button.bounds.top + 5,
+        right: button.bounds.left + 15,
+        bottom: button.bounds.top + 15,
+      },
+      node: [],
+    };
+    button.node = [label, structuredClone(label)];
+  }
+  const result = await tvosTapOn(deviceId, { action: "tap", text: "Repeated", index: 1 });
+  expect(result.element?.["resource-id"]).toBe("B02");
+  expect(client.commands).toEqual([hierarchy, press("right"), hierarchy, press("select")]);
+});
+
 test("keeps the ranked target when focus enlarges it in captured hierarchies", async () => {
   unregister();
   const replay = new CaptureReplayClient();

@@ -143,9 +143,12 @@ nav:
       - "SDK capabilities": using/sdk-capabilities.md
       - "Hackathon demo kit": using/hackathon.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
+      - "Prototype icons": using/prototype-icons.md
       - "Installing ProtoViewer (Android)": using/protoviewer-install.md
       - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
+      - "tapAt": using/tap-at.md
+      - "swipeOn": using/swipe-on.md
       - "Navigation graph": using/navigation-graph.md
       - "Device condition fixtures": using/device-condition.md
       - "Android Automotive OS": using/android-automotive.md
@@ -244,6 +247,7 @@ nav:
       - "MCP SDK v2 adoption survey": design-docs/mcp/sdk-v2-adoption-survey.md
       - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
       - "Live observe App shell": design-docs/mcp/observe-app-shell.md
+      - "Interactive observe App": design-docs/mcp/observe-app-interactive.md
       - "Build source revision": design-docs/mcp/build-source-revision.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md

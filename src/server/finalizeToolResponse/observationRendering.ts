@@ -81,6 +81,8 @@ export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "screenshotCaptureSource",
   "screenshotCapturedAt",
   "screenshotAgeMs",
+  "screenshotHierarchyLagMs",
+  "screenshotHierarchyMismatch",
   "screenshotFreshFailure",
   "screenshotFormat",
   "screenshotMimeType",

@@ -259,6 +259,32 @@ describe("picker protocol", () => {
   });
 });
 
+describe("multi-display picker taps", () => {
+  test("a tap picked from a secondary-display observe targets that display", () => {
+    const secondary = toolResult({
+      deviceId: "emulator-5554",
+      display: { key: "2", role: "external" },
+      viewHierarchy: hierarchy,
+    });
+    const win = new FakeShellWindow();
+    const doc = new FakeShellDocument();
+    new Function("window", "document", observeAppShellScript("interactive"))(win, doc);
+    win.deliver({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: secondary });
+    const picks = doc.canvas.children.find((child) => child.attributes.get("id") === "picks")!
+      .children as FakeShellNode[];
+    picks[1].click();
+    doc.node("tap").click();
+    const params = win.posted.at(-1)!.message.params as { arguments: unknown };
+    expect(params.arguments).toEqual({
+      selector: { elementId: "app:id/ok" },
+      selectionStrategy: "unique",
+      deviceId: "emulator-5554",
+      display: "2",
+    });
+    expect(tapOnSchema.safeParse(params.arguments).success).toBe(true);
+  });
+});
+
 describe("ambiguous selectors", () => {
   const rows = toolResult({
     viewHierarchy: {

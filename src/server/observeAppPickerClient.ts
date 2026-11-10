@@ -53,6 +53,8 @@ interface PickerState {
   nextId: number;
   pending: Map<number, string>;
   deviceId: string;
+  /** Panel key of the delivered observation (`structuredContent.display.key`), or "". */
+  display: string;
 }
 
 /**
@@ -150,6 +152,10 @@ function pickerDecorate(doc: PickerDocument, state: PickerState, params: unknown
     | Record<string, unknown>
     | undefined;
   state.deviceId = typeof structured?.deviceId === "string" ? structured.deviceId : "";
+  // Taps must go to the panel the user picked from: without `display`, tapOn acts on the
+  // default panel of a multi-display device.
+  const display = structured?.display as Record<string, unknown> | undefined;
+  state.display = typeof display?.key === "string" ? display.key : "";
   if (!canvas || targets.length === 0) {
     return;
   }
@@ -173,12 +179,16 @@ function pickerTapRequest(
   target: PickerTarget,
   id: number,
   deviceId: string,
+  display = "",
 ): Record<string, unknown> {
   // "unique" makes the server refuse rather than tap the first of several matches, covering
   // elements this result did not show (e.g. off-screen rows).
   const args: Record<string, unknown> = { selector: target.selector, selectionStrategy: "unique" };
   if (deviceId) {
     args.deviceId = deviceId;
+  }
+  if (display) {
+    args.display = display;
   }
   return { jsonrpc: "2.0", id, method: "tools/call", params: { name: "tapOn", arguments: args } };
 }
@@ -192,7 +202,7 @@ function pickerTap(win: ShellWindow, doc: PickerDocument, state: PickerState): v
   }
   const id = state.nextId++;
   state.pending.set(id, target.label || JSON.stringify(target.selector));
-  win.parent.postMessage(pickerTapRequest(target, id, state.deviceId), "*");
+  win.parent.postMessage(pickerTapRequest(target, id, state.deviceId, state.display), "*");
   if (status) {
     status.textContent = "Asked the host to tap…";
   }
@@ -228,7 +238,13 @@ function pickerOnReply(doc: PickerDocument, state: PickerState, message: Record<
  */
 function pickerBoot(win: ShellWindow, doc: PickerDocument): void {
   shellBoot(win, doc);
-  const state: PickerState = { selected: null, nextId: 1000, pending: new Map(), deviceId: "" };
+  const state: PickerState = {
+    selected: null,
+    nextId: 1000,
+    pending: new Map(),
+    deviceId: "",
+    display: "",
+  };
   doc.getElementById("tap")?.addEventListener("click", () => pickerTap(win, doc, state));
   win.addEventListener("message", (event: ShellMessageEvent) => {
     const message = event.data as Record<string, unknown> | null;

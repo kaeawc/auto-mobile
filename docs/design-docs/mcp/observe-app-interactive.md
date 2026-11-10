@@ -37,6 +37,8 @@ The selector is the element's `resource-id` as `{ elementId }`, or else its text
 description as `{ text }` (the `text` selector matches both). An element with neither is drawn but
 cannot be picked. When the delivered result carries a `deviceId`, it goes into the arguments, so
 the tap goes to the device that was observed and not to whatever device is active at that moment.
+Likewise the observed panel key (`display.key`) goes in as `display`, so on a multi-display device
+the tap is routed to the panel the element was picked from and not to the default panel.
 
 A selector only names an element, not one occurrence of it. When two visible elements share a
 selector (for example, one Remove button per list row), the panel shows the selector but leaves the
@@ -54,7 +56,8 @@ guessing if more matches exist than the delivered result showed. The request is:
     "arguments": {
       "selector": { "elementId": "app:id/ok" },
       "selectionStrategy": "unique",
-      "deviceId": "emulator-5554"
+      "deviceId": "emulator-5554",
+      "display": "0"
     }
   }
 }

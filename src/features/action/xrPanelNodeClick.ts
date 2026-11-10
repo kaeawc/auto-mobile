@@ -13,6 +13,7 @@ import {
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import type { DisplayFenceOption } from "./BaseVisualChange";
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
+import { findTapTargetNode } from "./tapTargetSupport";
 
 type VerifiedNodeTarget = {
   selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
@@ -22,6 +23,11 @@ type VerifiedNodeTarget = {
 type XrNodeClickOptions = DisplayFenceOption & {
   resolvedHierarchy?: ViewHierarchyResult;
   onTalkBackActivation?: () => void;
+  /**
+   * Set only for container-scoped selections: resolves the requested container in the
+   * click's hierarchy so ancestor activation never leaves it (as TapTargetResolver does).
+   */
+  resolveContainer?: (hierarchy: ViewHierarchyResult) => Element | undefined;
 };
 
 export function xrCoordinateError(): ActionableError {
@@ -68,13 +74,20 @@ function xrNodeClickSelector(
     throw xrCoordinateError();
   }
 
-  return xrAncestorClickSelector(element, entries, uniqueSelector);
+  const container = options.resolveContainer?.(hierarchy);
+  const containerEntry = container ? findTapTargetNode(entries, container) : undefined;
+  const containerIndex = containerEntry ? entries.indexOf(containerEntry) : -1;
+  return xrAncestorClickSelector(element, entries, uniqueSelector, {
+    scoped: options.resolveContainer !== undefined,
+    containerIndex,
+  });
 }
 
 function xrAncestorClickSelector(
   element: Element,
   entries: readonly SearchableEntry[],
   uniqueSelector: (candidate: Element) => VerifiedNodeTarget | undefined,
+  scope: { scoped: boolean; containerIndex: number },
 ): VerifiedNodeTarget {
   // Bind the label to one captured source before following actual parent links.
   // A view-id locates a captured node; it is never sent as a native action selector.
@@ -92,7 +105,17 @@ function xrAncestorClickSelector(
   if (new Set(targets.map((entry) => entry.source)).size !== 1) {
     throw xrCoordinateError();
   }
+  const ancestors: number[] = [];
   for (let at = targets[0].parentIndex; at !== undefined; at = entries[at].parentIndex) {
+    ancestors.push(at);
+  }
+  // A container-scoped selection may only activate an owner strictly inside the
+  // container; an unresolved container or one off the label's parent chain refuses.
+  const boundary = scope.scoped ? ancestors.indexOf(scope.containerIndex) : ancestors.length;
+  if (boundary < 0) {
+    throw xrCoordinateError();
+  }
+  for (const at of ancestors.slice(0, boundary)) {
     const ancestor = entries[at];
     const bounds = ancestor.bounds;
     if (

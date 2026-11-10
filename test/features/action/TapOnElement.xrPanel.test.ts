@@ -263,6 +263,43 @@ describe("XR panel-space tap routing", () => {
     });
   }
 
+  for (const mode of ["owner-outside-container", "owner-inside-container"] as const) {
+    test(`container-scoped Settings ancestor click: ${mode}`, async () => {
+      const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+      const { nodes, label, frame, row } = settingsTarget(tree);
+      Object.assign(row.source, { "unique-id": "settings-connected-row" });
+      // Scope to the label's own frame (its only clickable owner, the row, is outside
+      // it) or to the list that contains the row. Unique ids keep the scope unambiguous.
+      const elementId = `com.android.settings:id/${mode}`;
+      const scope = mode === "owner-outside-container" ? frame : nodes[row.parentIndex!];
+      Object.assign(scope.source, { "resource-id": elementId });
+      const current = settingsTarget(tree);
+      const { tap, service, adb } = setup();
+      const result = tap.executeAndroidTap("tap", point, 0, {
+        element: { ...current.label.properties, bounds: label.bounds! },
+        isTalkBackEnabled: false,
+        options: { action: "tap", resolvedHierarchy: tree, container: { elementId } },
+      });
+      if (mode === "owner-inside-container") {
+        await result;
+        expect(service.getNodeActionHistory()).toMatchObject([
+          {
+            action: "click",
+            expectedBounds: current.row.bounds,
+            selector: { uniqueId: "settings-connected-row" },
+          },
+        ]);
+      } else {
+        await expect(result).rejects.toThrow(
+          /XR panel coordinate space.*not tappable screen coordinates.*tapAt/,
+        );
+        expect(service.getNodeActionHistory()).toHaveLength(0);
+      }
+      expect(service.getTapHistory()).toHaveLength(0);
+      expect(adb.getAllCommands()).toHaveLength(0);
+    });
+  }
+
   test("guards the direct coordinate dispatch seam on XR too", async () => {
     const { tap, service, adb } = setup();
     await expect(

@@ -168,7 +168,13 @@ export class TapGestureDispatcher {
         action,
         element,
         signal,
-        options,
+        options: options?.container
+          ? {
+              ...options,
+              resolveContainer: (hierarchy) =>
+                this.host.finder().resolveContainerElement(hierarchy, options),
+            }
+          : options,
       });
       return undefined;
     }

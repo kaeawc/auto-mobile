@@ -10,6 +10,8 @@ import {
 } from "../../../../src/features/action/sendkeys/ImeCommitTyper";
 import type { AndroidImeSpan } from "../../../../src/features/action/sendkeys/ImeSpan";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { AUTO_MOBILE_IME_ID } from "../../../../src/features/action/AndroidImeCatalog";
+import { keyboardToRestore } from "../../../../src/features/action/sendkeys/ImeCommitTyper";
 
 function harness() {
   const timer = new FakeTimer();
@@ -73,7 +75,11 @@ function harness() {
   const restoration: ImeCommitRestoration = {
     pinImeUser: async () => ({ success: true }),
     readDefaultIme: async () => ({ success: true, imeId: "keyboard/.Ime" }),
-    readCommitImeEnabled: async () => ({ success: true, enabled: true }),
+    readCommitImeEnabled: async () => ({
+      success: true,
+      enabled: true,
+      enabledImeIds: ["keyboard/.Ime", AUTO_MOBILE_IME_ID],
+    }),
     pinnedImeCatalog: () => ({ readSubtype: async () => ({ id: 7 }) }),
     checkKeyboardProfileSupport: async () => ({ success: true }),
     setRequestedKeyboardProfile: async () => ({ success: true }),
@@ -278,6 +284,42 @@ describe("ImeCommitTyper", () => {
       error: expect.stringContaining("known caret"),
     });
     expect(calls).toEqual([{ acquire: true, signal: undefined }]);
+  });
+
+  test("never records the AutoMobile IME as the keyboard to restore; the first other enabled IME stands in (#17768)", async () => {
+    const { typer, span, restoration } = harness();
+    span.snapshot = undefined;
+    const subtypeReads: string[] = [];
+    restoration.readDefaultIme = async () => ({ success: true, imeId: AUTO_MOBILE_IME_ID });
+    restoration.readCommitImeEnabled = async () => ({
+      success: true,
+      enabled: true,
+      enabledImeIds: [AUTO_MOBILE_IME_ID, "com.google.android.inputmethod.latin/.LatinIME"],
+    });
+    restoration.pinnedImeCatalog = () => ({
+      readSubtype: async (imeId) => {
+        subtypeReads.push(imeId);
+        return { id: 3 };
+      },
+    });
+    expect(await typer.type({ text: "a", operation: "insert" })).toMatchObject({ success: true });
+    // `span.snapshot` is narrowed to undefined above; the typer filled it in.
+    expect(span).toMatchObject({
+      snapshot: {
+        prior: "com.google.android.inputmethod.latin/.LatinIME",
+        wasEnabled: true,
+        priorSubtype: { id: 3 },
+      },
+    });
+    expect(subtypeReads).toEqual(["com.google.android.inputmethod.latin/.LatinIME"]);
+  });
+
+  test("keyboardToRestore keeps a real prior keyboard and the AutoMobile IME only without another", () => {
+    expect(keyboardToRestore("keyboard/.Ime", [AUTO_MOBILE_IME_ID, "other/.Ime"])).toBe(
+      "keyboard/.Ime",
+    );
+    expect(keyboardToRestore(null, ["other/.Ime"])).toBeNull();
+    expect(keyboardToRestore(AUTO_MOBILE_IME_ID, [AUTO_MOBILE_IME_ID])).toBe(AUTO_MOBILE_IME_ID);
   });
 
   test("restores through the current host callback outside a span, then clears the pinned user", async () => {

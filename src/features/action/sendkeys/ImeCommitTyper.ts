@@ -366,12 +366,12 @@ export class ImeCommitTyper implements AndroidModeTyper {
     if (!priorResult.success) {
       return priorResult;
     }
-    const prior = priorResult.imeId;
     const enabledResult = await this.restoration.readCommitImeEnabled();
     this.host.checkAbort(signal);
     if (!enabledResult.success) {
       return enabledResult;
     }
+    const prior = keyboardToRestore(priorResult.imeId, enabledResult.enabledImeIds);
     const priorSubtype = await this.restoration
       .pinnedImeCatalog()
       .readSubtype(prior ?? AUTO_MOBILE_IME_ID, signal);
@@ -911,4 +911,30 @@ export function imeTraceResultFields(
     return {};
   }
   return { imeTrace: lines };
+}
+
+/**
+ * The keyboard a session must restore. The AutoMobile IME is never recorded as the prior one: it is
+ * still selected only when an earlier daemon died mid-session (#17768), so restoring it would
+ * leave the user's keyboard replaced. The first other enabled IME stands in for it; with none,
+ * the AutoMobile IME stays recorded and restore leaves it selected.
+ */
+export function keyboardToRestore(
+  current: string | null,
+  enabledImeIds: readonly string[],
+): string | null {
+  if (current !== AUTO_MOBILE_IME_ID) {
+    return current;
+  }
+  const fallback = enabledImeIds.find((id) => id !== AUTO_MOBILE_IME_ID);
+  if (fallback === undefined) {
+    logger.warn(
+      "[SendKeys] The AutoMobile IME is already selected and no other IME is enabled; it stays selected after the session",
+    );
+    return current;
+  }
+  logger.warn(
+    `[SendKeys] The AutoMobile IME was left selected (likely by an earlier daemon); ${fallback} will be restored after the session`,
+  );
+  return fallback;
 }

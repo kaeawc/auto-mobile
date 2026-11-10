@@ -1,3 +1,5 @@
+import type { BackoffPolicy } from "../../src/utils/Backoff";
+import { fixedBackoff } from "../../src/utils/Backoff";
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, test, spyOn } from "bun:test";
 import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
@@ -310,6 +312,8 @@ class FakeIosManager implements ReadinessIosManager {
 function createService(
   options: {
     timer?: FakeTimer;
+    androidHealthProbeBackoff?: BackoffPolicy;
+    ctrlProxyUnresponsiveAfterRestartFailMs?: number;
     iosSetupMaxAttempts?: number;
     androidManager?: FakeAndroidManager;
     androidClient?: FakeReadinessClient;
@@ -352,6 +356,8 @@ function createService(
     iosClient,
     service: new RunnerReadinessService({
       timer,
+      androidHealthProbeBackoff: options.androidHealthProbeBackoff,
+      ctrlProxyUnresponsiveAfterRestartFailMs: options.ctrlProxyUnresponsiveAfterRestartFailMs,
       iosSetupMaxAttempts: options.iosSetupMaxAttempts,
       iosPostSetupRestartMinFailedProbes: options.iosPostSetupRestartMinFailedProbes,
       getAndroidFrameworkReadiness: options.getAndroidFrameworkReadiness,
@@ -2850,6 +2856,112 @@ describe("RunnerReadinessService", () => {
     expect(timer.now()).toBeLessThanOrEqual(2_500);
   });
 
+  test("backs off failed Android health probes and fails promptly after one restart", async () => {
+    const client = new FakeReadinessClient();
+    client.healthResults = [];
+    const manager = new FakeAndroidManager();
+    let restartedAt = -1;
+    const { service, timer } = createService({ androidClient: client, androidManager: manager });
+    manager.onRestart = () => {
+      restartedAt = timer.now();
+    };
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 420_000,
+        readinessTimeoutMs: 420_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(timer.getSleepHistory().slice(0, 7)).toEqual([250, 500, 1000, 2000, 4000, 4000, 4000]);
+    expect(client.healthCalls).toBeLessThan(30);
+    expect(manager.restartCalls).toBe(1);
+    expect(restartedAt).toBeGreaterThanOrEqual(0);
+    expect(timer.now() - restartedAt).toBeGreaterThanOrEqual(90_000);
+    expect(timer.now() - restartedAt).toBeLessThanOrEqual(94_000);
+    expect(timer.now()).toBeLessThan(100_000);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    const failure = error as RunnerReadinessError;
+    expect(failure.deadlineExhausted).toBe(false);
+    expect(failure.message).toContain("connected but not answering hierarchy requests");
+    expect(failure.message).toContain("XR home environment");
+    expect(failure.message).toContain("Retry device acquisition, or kill and restart the device");
+  });
+
+  test("resets Android probe backoff on disconnect and succeeds on a later probe", async () => {
+    const client = new FakeReadinessClient();
+    client.healthResults = [false, false, false, false, false, true];
+    client.onHealth = async () => {
+      if (client.healthCalls === 4) {
+        client.connected = false;
+      }
+    };
+    const { service, timer } = createService({ androidClient: client });
+    const request = {
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    };
+    await service.ensureReady(request);
+    expect(timer.getSleepHistory()).toEqual([250, 500, 1000, 250]);
+    timer.clearHistory();
+    client.healthResults = [false, false, true];
+    await service.ensureReady(request);
+    expect(timer.getSleepHistory()).toEqual([250]);
+  });
+
+  test("restarts the post-restart unresponsive clock after disconnection", async () => {
+    const client = new FakeReadinessClient();
+    client.healthResults = [];
+    const manager = new FakeAndroidManager();
+    const { service, timer } = createService({
+      androidClient: client,
+      androidManager: manager,
+      androidHealthProbeBackoff: fixedBackoff(1000),
+      ctrlProxyUnresponsiveAfterRestartFailMs: 3000,
+    });
+    client.onHealth = async () => {
+      if (client.healthCalls === 5) {
+        client.connected = false;
+      }
+    };
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 420_000,
+        readinessTimeoutMs: 420_000,
+      })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect(timer.now()).toBe(7000);
+    expect(client.connectionCalls).toBe(1);
+    expect(manager.restartCalls).toBe(1);
+  });
+
+  test("uses the injected Android backoff and post-restart failure budget", async () => {
+    const client = new FakeReadinessClient();
+    client.healthResults = [];
+    const { service, timer } = createService({
+      androidClient: client,
+      androidHealthProbeBackoff: fixedBackoff(1000),
+      ctrlProxyUnresponsiveAfterRestartFailMs: 3000,
+    });
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 420_000,
+        readinessTimeoutMs: 420_000,
+      })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect(timer.getSleepHistory()).toEqual([1000, 1000, 1000, 1000]);
+    expect(timer.now()).toBe(4000);
+  });
+
   // Issue #7533: a connected-but-unresponsive CtrlProxy (WebSocket open,
   // hierarchy requests failing) was polled until the budget ran out with no
   // recovery at all -- the Android steady-state loop only rebound a
@@ -2889,10 +3001,10 @@ describe("RunnerReadinessService", () => {
     const client = new FakeReadinessClient();
     client.connected = true;
     // index 0: ensureAndroidReadyAttempt's own fast-path probe (fails).
-    // indices 1-12: the steady-state loop's probes over ~3s (250ms apart)
+    // indices 1-4: the steady-state loop's probes over 1.75s with backoff
     // all fail -- comfortably inside the 5s post-rebind grace period.
-    // index 13: the service finally answers.
-    client.healthResults = [false, ...Array(12).fill(false), true];
+    // index 5: the service finally answers.
+    client.healthResults = [false, ...Array(4).fill(false), true];
     const { service } = createService({ androidManager: manager, androidClient: client });
 
     await service.ensureReady({

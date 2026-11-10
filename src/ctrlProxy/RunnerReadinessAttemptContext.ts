@@ -72,6 +72,8 @@ export interface ReadinessAttemptContext extends RunnerReadinessRequest {
    * mirroring iOS's single `forceRestart` between "connected" and "healthy".
    */
   ctrlProxyProcessRestartAttempted: boolean;
+  /** Continuous connected-but-unresponsive interval after the process restart. */
+  ctrlProxyUnresponsiveSinceMs: number | null;
   /**
    * When the last successful accessibility-service rebind completed, so
    * escalation to a full process restart can wait out

@@ -1,4 +1,12 @@
+import { exponentialBackoff } from "../utils/Backoff";
+
 export const READINESS_RETRY_DELAY_MS = 250;
+export const CTRL_PROXY_READINESS_BACKOFF = exponentialBackoff({
+  initialDelayMs: READINESS_RETRY_DELAY_MS,
+  multiplier: 2,
+  maxDelayMs: 4_000,
+});
+export const CTRL_PROXY_UNRESPONSIVE_AFTER_RESTART_FAIL_MS = 90_000;
 
 export const IOS_RUNNER_SETUP_MAX_ATTEMPTS = 3;
 

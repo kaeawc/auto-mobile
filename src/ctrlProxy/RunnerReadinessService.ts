@@ -1,6 +1,8 @@
 import { runIosRunnerSetup } from "./runIosRunnerSetup";
 import {
   READINESS_RETRY_DELAY_MS,
+  CTRL_PROXY_READINESS_BACKOFF,
+  CTRL_PROXY_UNRESPONSIVE_AFTER_RESTART_FAIL_MS,
   CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS,
   RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS,
   CTRL_PROXY_REBIND_RECOVERY_POLL_MS,
@@ -77,6 +79,7 @@ export class RunnerReadinessService {
       ctrlProxyAccessibilityRebindAttempted: false,
       lastConnectedRecoveryMs: Number.NEGATIVE_INFINITY,
       ctrlProxyProcessRestartAttempted: false,
+      ctrlProxyUnresponsiveSinceMs: null,
       lastSuccessfulRebindMs: Number.NEGATIVE_INFINITY,
       failedHealthProbesSinceRecovery: 0,
     };
@@ -575,6 +578,7 @@ export class RunnerReadinessService {
     // Provisioning is done; open the steady-state health window now so a long
     // cold launch above did not consume it (#5376).
     this.phases.startHealthWindow(context);
+    let failedHealthProbes = 0;
     let attempts = 0;
     let connected = client.isConnected();
     let phase: RunnerReadinessPhase = connected ? "runner-health" : "runner-connect";
@@ -587,6 +591,8 @@ export class RunnerReadinessService {
       attempts++;
       connected = client.isConnected();
       if (!connected) {
+        failedHealthProbes = 0;
+        context.ctrlProxyUnresponsiveSinceMs = null;
         phase = "runner-connect";
         await this.rebindUnhealthyAndroidAccessibilityService(
           context,
@@ -603,18 +609,11 @@ export class RunnerReadinessService {
       }
       if (connected) {
         phase = "runner-health";
-        const ready = await this.phases.runPhase(context, phase, attempts, {
-          operation: () => client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
-        });
-        if (ready) {
+        if (await this.probeResponsiveClient(context, client, attempts, androidManager)) {
+          failedHealthProbes = 0;
           return;
         }
-        await this.recoverConnectedButUnresponsiveAndroid(
-          context,
-          androidManager,
-          client,
-          attempts,
-        );
+        failedHealthProbes++;
       }
       if (
         context.device.platform === "android" &&
@@ -626,10 +625,45 @@ export class RunnerReadinessService {
 
       const remaining = this.phases.remainingForPhase(context, "runner-health");
       if (remaining > 0) {
-        await this.dependencies.timer.sleep(Math.min(READINESS_RETRY_DELAY_MS, remaining));
+        const delay = this.healthProbeRetryDelay(context, connected, failedHealthProbes);
+        await this.dependencies.timer.sleep(Math.min(delay, remaining));
       }
     }
     await this.failUnresponsiveClient(context, client, phase, { attempts });
+  }
+
+  private healthProbeRetryDelay(
+    context: ReadinessAttemptContext,
+    connected: boolean,
+    failedHealthProbes: number,
+  ): number {
+    if (context.device.platform !== "android" || !connected) {
+      return READINESS_RETRY_DELAY_MS;
+    }
+    return (
+      this.dependencies.androidHealthProbeBackoff ?? CTRL_PROXY_READINESS_BACKOFF
+    ).delayForAttempt(failedHealthProbes);
+  }
+
+  private async probeResponsiveClient(
+    context: ReadinessAttemptContext,
+    client: ReadinessClient,
+    attempts: number,
+    androidManager?: ReadinessAndroidManager,
+  ): Promise<boolean> {
+    if (context.device.platform === "android" && context.ctrlProxyProcessRestartAttempted) {
+      context.ctrlProxyUnresponsiveSinceMs ??= this.dependencies.timer.now();
+    }
+    const ready = await this.phases.runPhase(context, "runner-health", attempts, {
+      operation: () => client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
+    });
+    if (ready) {
+      context.ctrlProxyUnresponsiveSinceMs = null;
+      return true;
+    }
+    await this.recoverConnectedButUnresponsiveAndroid(context, androidManager, client, attempts);
+    await this.failPersistentlyUnresponsiveAndroid(context, client, attempts);
+    return false;
   }
 
   private async replaceClosedAndroidClient(
@@ -766,8 +800,36 @@ export class RunnerReadinessService {
     const restarted = await this.phases.runPhase(context, "runner-health", attempts, {
       operation: () => manager.forceRestartProcess!(),
     });
+    context.ctrlProxyUnresponsiveSinceMs = this.dependencies.timer.now();
     if (restarted) {
       client.resetConnectionBudget?.();
+    }
+  }
+
+  private async failPersistentlyUnresponsiveAndroid(
+    context: ReadinessAttemptContext,
+    client: ReadinessClient,
+    attempts: number,
+  ): Promise<void> {
+    if (!client.isConnected()) {
+      context.ctrlProxyUnresponsiveSinceMs = null;
+      return;
+    }
+    const since = context.ctrlProxyUnresponsiveSinceMs;
+    const limit =
+      this.dependencies.ctrlProxyUnresponsiveAfterRestartFailMs ??
+      CTRL_PROXY_UNRESPONSIVE_AFTER_RESTART_FAIL_MS;
+    if (
+      context.device.platform === "android" &&
+      since !== null &&
+      this.dependencies.timer.now() - since >= limit
+    ) {
+      await this.failUnresponsiveClient(context, client, "runner-health", {
+        attempts,
+        deadlineExhausted: false,
+        detail:
+          "CtrlProxy accessibility service is connected but not answering hierarchy requests after a process restart. On Android XR, a window such as the XR home environment may not answer accessibility interaction. Retry device acquisition, or kill and restart the device.",
+      });
     }
   }
 
@@ -812,7 +874,11 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     client: ReadinessClient,
     phase: RunnerReadinessPhase,
-    { attempts, deadlineExhausted = true }: { attempts: number; deadlineExhausted?: boolean },
+    {
+      attempts,
+      deadlineExhausted = true,
+      detail,
+    }: { attempts: number; deadlineExhausted?: boolean; detail?: string },
   ): Promise<never> {
     const isForwardingLeaseConflict =
       phase === "runner-connect" &&
@@ -831,8 +897,8 @@ export class RunnerReadinessService {
         ? await this.runnerConnectFailureDiagnostic(context)
         : await this.runnerHealthFailureDiagnostic(context, phase);
     this.phases.fail(context, phase, attempts, {
-      detail: `${this.unresponsiveClientRecoveryNote(context, phase)}${diagnostic}`,
-      deadlineExhausted: true,
+      detail: `${detail ?? this.unresponsiveClientRecoveryNote(context, phase)}${diagnostic}`,
+      deadlineExhausted,
     });
   }
 

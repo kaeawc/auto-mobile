@@ -176,6 +176,24 @@ describe("exportPrototypeWeb (#17720)", () => {
     );
   });
 
+  test("a file target must end in .html; a directory path may end in a separator", async () => {
+    for (const outputPath of ["/out/page.txt", "/out/page", "/out/page.html.bak"]) {
+      await expect(exportWeb({ id: "checkout", outputPath })).rejects.toThrow(
+        `outputPath "${outputPath}" is neither an .html file nor a directory`,
+      );
+    }
+    files.written.set("/out/notes.txt", new Uint8Array([1]));
+    await expect(
+      exportWeb({ id: "checkout", outputPath: "/out/notes.txt", overwrite: true }),
+    ).rejects.toThrow("end a file path in .html");
+    expect(files.writes).toBe(0);
+
+    const upper = await exportWeb({ id: "checkout", outputPath: "/out/PAGE.HTML" });
+    expect(upper.path).toBe("/out/PAGE.HTML");
+    const intoNewDirectory = await exportWeb({ id: "checkout", outputPath: "/out/new/" });
+    expect(path.dirname(intoNewDirectory.path)).toBe(path.join("/out", "new"));
+  });
+
   test("unknown id, evicted or unknown revision and unknown frame are actionable", async () => {
     await expect(exportWeb({ id: "missing" })).rejects.toThrow('Unknown prototype "missing"');
     await expect(exportWeb({ id: "checkout", revision: "9" })).rejects.toThrow(

@@ -1,4 +1,4 @@
-import { xrSwipeBounds } from "../../xr/xrPanelSpace";
+import { withXrPoseWarning, xrSwipeBounds } from "../../xr/xrPanelSpace";
 import { rejectTvosTouch } from "../../tvos/TvosActions";
 import { watchSwipeOn } from "../../watch/WatchActions";
 import { iosWebScrollIntoView } from "./IosSdkWebScrollIntoView";
@@ -674,7 +674,7 @@ export class SwipeOn extends BaseVisualChange {
     const result: SwipeOnResult = await this.observedInteraction(
       async (observation, fence) => {
         previous = observation;
-        const swipe = await block(observation, fence);
+        const swipe = await withXrPoseWarning(this.device.platform, block, observation, fence);
         swipeEndedAtMs = sdkRoutes ? this.timer.now() : undefined;
         return swipe;
       },

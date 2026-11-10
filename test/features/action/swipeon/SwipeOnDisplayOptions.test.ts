@@ -576,11 +576,18 @@ test("XR explicit-display screen swipes use the app panel bounds", async () => {
   for (const y of [leg.y1, leg.y2]) {
     expect(y).toBeWithin(48, 1328);
   }
+  expect(result.warning).toContain("assume the app panel is in its default pose");
+});
+
+const xrObservation = (observation: ObserveResult): ObserveResult => ({
+  ...observation,
+  screenSize: { width: 2560, height: 2558 },
+  backStack: xrBackStack(),
 });
 
 test("XR explicit-display edge swipes refuse before input", async () => {
   const h = harness({
-    observationFor: ({ observation }) => ({ ...observation, backStack: xrBackStack() }),
+    observationFor: ({ observation }) => xrObservation(observation),
   });
   const result = await h.action.execute({
     direction: "right",
@@ -595,7 +602,7 @@ test("XR explicit-display edge swipes refuse before input", async () => {
 test("XR explicit-display container swipes retain their selected bounds", async () => {
   const h = harness({
     observationFor: ({ observation }) =>
-      tree({ observation: { ...observation, backStack: xrBackStack() }, nodes: [real] }),
+      tree({ observation: xrObservation(observation), nodes: [real] }),
   });
   const result = await h.action.execute({
     direction: "up",
@@ -610,4 +617,64 @@ test("XR explicit-display container swipes retain their selected bounds", async 
   for (const y of [leg.y1, leg.y2]) {
     expect(y).toBeWithin(70, 170);
   }
+});
+
+test("XR display container-element swipes resolve before the fromEdge panel refusal", () => {
+  const h = harness();
+  const observation = tree({
+    observation: xrObservation(frame({ key: "external" })),
+    nodes: [real],
+  });
+  const element = {
+    bounds: { left: 40, top: 70, right: 140, bottom: 170 },
+    "resource-id": "real",
+    scrollable: true,
+  };
+  const resolved = h.action["androidDisplay"]["resolveDisplaySwipeCoordinates"]({
+    options: { direction: "up", fromEdge: "bottom" },
+    decision: { element },
+    observation,
+  });
+  expect(resolved.targetType).toBe("element");
+  for (const y of [resolved.y1, resolved.y2]) {
+    expect(y).toBeWithin(70, 170);
+  }
+  expect(resolved.warning).toContain("assume the app panel is in its default pose");
+});
+
+const twoPanelXrObservation = (observation: ObserveResult): ObserveResult => {
+  const xr = xrObservation(observation);
+  const settings = xr.backStack!.tasks.find((task) => task.id === 6)!;
+  xr.backStack!.tasks.push({ ...settings, id: 7, packageName: "com.example.second" });
+  return xr;
+};
+
+test("XR explicit-display lookFor searches carry the default-pose warning", async () => {
+  const h = harness({
+    foundAfter: 1,
+    observationFor: ({ observation }) => xrObservation(observation),
+  });
+  const result = await h.action.execute({
+    direction: "up",
+    display: "external",
+    lookFor: { text: "Found" },
+  });
+  expect(result).toMatchObject({ success: true, found: true });
+  expect(result.warning).toContain("assume the app panel is in its default pose");
+  expect(h.legs()).toHaveLength(1);
+});
+
+test("XR explicit-display lookFor refuses before input when two app panels are open", async () => {
+  const h = harness({
+    foundAfter: 1,
+    observationFor: ({ observation }) => twoPanelXrObservation(observation),
+  });
+  const result = await h.action.execute({
+    direction: "up",
+    display: "external",
+    lookFor: { text: "Found" },
+  });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("2 app panels are open");
+  expect(h.legs()).toHaveLength(0);
 });

@@ -148,6 +148,7 @@ for (const point of [
         displayX: fake.androidDispatches[0].x,
         displayY: fake.androidDispatches[0].y,
       },
+      warning: expect.stringContaining("assume the app panel is in its default pose"),
     });
   });
 }
@@ -199,6 +200,7 @@ test("non-XR freeform tasks preserve absolute coordinates", async () => {
   expect(result.success).toBe(true);
   expect(fake.androidDispatches[0]).toMatchObject({ x: 551, y: 1175 });
   expect(result.xrPanel).toBeUndefined();
+  expect(result.warning).toBeUndefined();
 });
 
 test("XR records screenshot coordinates for replay without mapping twice", async () => {
@@ -278,4 +280,29 @@ test("XR public tapAt with the same numbers still treats them as screenshot pixe
   expect(fake.androidDispatches).toHaveLength(1);
   expect(fake.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
   expect(screenshot.xrPanel).toMatchObject({ taskId: 6, displayX: 262, displayY: 442 });
+});
+
+test("XR tapAt refuses before dispatch when two app panels are open", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  const backStack = xrBackStack();
+  const settings = backStack.tasks.find((task) => task.id === 6)!;
+  backStack.tasks.push({ ...settings, id: 7, packageName: "com.example.second" });
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack });
+  const result = await fake.tapAt.execute({ x: 553, y: 1178 });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("2 app panels are open");
+  expect(result.error).toContain("Close the other app panels");
+  expect(fake.androidDispatches).toHaveLength(0);
+});
+
+test("XR tapAt refuses before dispatch when the panel cannot fit the default pose", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  const backStack = xrBackStack();
+  const settings = backStack.tasks.find((task) => task.id === 6)!;
+  settings.bounds = { left: 0, top: 0, right: 2560, bottom: 2558 };
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack });
+  const result = await fake.tapAt.execute({ x: 1280, y: 1400 });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("does not fit the screenshot at the default pose");
+  expect(fake.androidDispatches).toHaveLength(0);
 });

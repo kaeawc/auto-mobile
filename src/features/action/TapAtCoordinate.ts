@@ -345,6 +345,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           y: resolved.y,
           action,
           ...(resolved.xrPanel ? { xrPanel: resolved.xrPanel } : {}),
+          ...(resolved.warning ? { warning: resolved.warning } : {}),
         };
       },
       {
@@ -541,6 +542,7 @@ export class TapAtCoordinate extends BaseVisualChange {
             y: resolved.y,
             action,
             ...(resolved.xrPanel ? { xrPanel: resolved.xrPanel } : {}),
+            ...(resolved.warning ? { warning: resolved.warning } : {}),
           };
         },
         {

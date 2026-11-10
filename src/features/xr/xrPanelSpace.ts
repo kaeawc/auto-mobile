@@ -2,6 +2,7 @@ import type {
   BackStackInfo,
   BootedDevice,
   ElementBounds,
+  ObserveResult,
   SwipeOnOptions,
   TaskInfo,
 } from "../../models";
@@ -41,7 +42,11 @@ export function detectXrPanel(
   if (!hasXrSystemUi(backStack)) {
     return undefined;
   }
-  const panel = backStack.tasks.find((task): task is XrPanel => {
+  return { panel: appPanels(backStack)[0] ?? null };
+}
+
+function appPanels(backStack: BackStackInfo): XrPanel[] {
+  return backStack.tasks.filter((task): task is XrPanel => {
     const bounds = task.bounds;
     return (
       !!task.packageName &&
@@ -53,7 +58,78 @@ export function detectXrPanel(
       bounds.bottom > bounds.top
     );
   });
-  return { panel: panel ?? null };
+}
+
+export const XR_DEFAULT_POSE_WARNING =
+  "Android XR coordinates assume the app panel is in its default pose (not moved or scaled). If the panel was moved or scaled, the gesture lands on the wrong spot: keep the panel in its default position, or reopen the app to restore it, then observe again before retrying.";
+
+/** Cheap pre-dispatch signals that the default pose cannot hold; undefined when none fires. */
+function nonDefaultPoseReason(
+  backStack: BackStackInfo,
+  panel: XrPanel | null,
+  screenshot: Size,
+): string | undefined {
+  const panels = appPanels(backStack);
+  if (panels.length > 1) {
+    return `${panels.length} app panels are open (${panels.map((p) => p.packageName).join(", ")}), and only one can sit at the default pose. Close the other app panels, observe again, and retry.`;
+  }
+  const rect = panel && panelRectInScreenshot(panel, screenshot);
+  if (
+    rect &&
+    (rect.left < 0 ||
+      rect.top < 0 ||
+      rect.right > screenshot.width ||
+      rect.bottom > screenshot.height)
+  ) {
+    return `the ${panel.packageName} panel (${panel.bounds.right - panel.bounds.left}x${panel.bounds.bottom - panel.bounds.top}) does not fit the screenshot at the default pose. Restore the panel to its default size and position, observe again, and retry.`;
+  }
+  return undefined;
+}
+
+/**
+ * XR default-pose check for Android coordinate gestures. Undefined means non-XR; otherwise the
+ * caveat every XR result carries. Throws when a cheap signal shows the pose is not the default.
+ */
+export function xrDefaultPoseWarning(
+  // Undefined when the interaction ran without a pre-dispatch observation: nothing to check.
+  observation: Pick<ObserveResult, "backStack" | "screenSize" | "screenshotImageSize"> | undefined,
+): string | undefined {
+  const xr = detectXrPanel(observation?.backStack);
+  if (!xr || !observation?.backStack) {
+    return undefined;
+  }
+  const reason = nonDefaultPoseReason(
+    observation.backStack,
+    xr.panel,
+    xrScreenshotSize(observation),
+  );
+  if (reason) {
+    throw new ActionableError(
+      `Android XR coordinates assume the default panel pose, which does not hold here: ${reason}`,
+    );
+  }
+  return XR_DEFAULT_POSE_WARNING;
+}
+
+/** Join an optional caveat onto an existing warning, keeping each text once. */
+export function appendWarning(warning: string | undefined, extra: string | undefined) {
+  return [...new Set([warning, extra].filter((text) => text !== undefined))].join(" ") || undefined;
+}
+
+/** Refuses before `dispatch` on a visibly non-default XR pose; adds the caveat to its result. */
+export async function withXrPoseWarning<
+  O extends Pick<ObserveResult, "backStack" | "screenSize" | "screenshotImageSize">,
+  A extends unknown[],
+  T extends { warning?: string },
+>(
+  platform: BootedDevice["platform"],
+  dispatch: (observation: O, ...rest: A) => Promise<T>,
+  observation: O,
+  ...rest: A
+): Promise<T> {
+  const xrWarning = platform === "android" ? xrDefaultPoseWarning(observation) : undefined;
+  const result = await dispatch(observation, ...rest);
+  return xrWarning ? { ...result, warning: appendWarning(result.warning, xrWarning) } : result;
 }
 
 /** The measured eye screenshot is square even though wm size reports 2560x2558. */

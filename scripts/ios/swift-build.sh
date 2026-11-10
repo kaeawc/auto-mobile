@@ -58,6 +58,7 @@ MACOS_PACKAGES=(
     "screen-capture"
     "network-filter"
     "audio-loopback"
+    "carplay-power"
 )
 
 # iOS + macOS packages (have both platform support)

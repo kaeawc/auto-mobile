@@ -15,7 +15,10 @@ set -euo pipefail
 
 log_file="${1:-ci-logs/ts-coverage.log}"
 mkdir -p "$(dirname "${log_file}")"
-rm -rf coverage
+# The same override scripts/test-ts.sh honors, so a relocated coverage tree (the
+# hermetic BATS suite) is the one this wrapper verifies and merges.
+coverage_root="${AUTOMOBILE_TEST_TS_COVERAGE_DIR:-coverage}"
+rm -rf "${coverage_root}"
 
 # A chunk log is clean only when it reports zero failures and no non-zero count.
 # Store the result instead of returning it so callers stay outside conditionals
@@ -34,14 +37,14 @@ set -e
 
 if [[ "${status}" -eq 0 ]]; then
   tail -n 80 "${log_file}"
-  bash scripts/ci/verify-ts-coverage-output.sh coverage
+  bash scripts/ci/verify-ts-coverage-output.sh "${coverage_root}"
   exit 0
 fi
 
 # Per-chunk logs when the chunked path ran; otherwise whatever per-shard logs exist.
-unit_logs=(coverage/shards/shard-*-chunk-*.log)
+unit_logs=("${coverage_root}"/shards/shard-*-chunk-*.log)
 if [[ ! -f "${unit_logs[0]:-}" ]]; then
-  unit_logs=(coverage/shards/shard-*.log)
+  unit_logs=("${coverage_root}"/shards/shard-*.log)
 fi
 if [[ -f "${unit_logs[0]:-}" ]]; then
   tolerated=1
@@ -50,7 +53,7 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
   coverage_junit_files=()
   # A chunk that never started (the shard budget fired first) has no log, so a
   # tolerated run must still account for every chunk its shard planned.
-  for manifest in coverage/shards/shard-*.chunks; do
+  for manifest in "${coverage_root}"/shards/shard-*.chunks; do
     [[ -f "${manifest}" ]] || continue
     planned="$(< "${manifest}")"
     for ((chunk = 1; chunk <= planned; chunk += 1)); do
@@ -79,21 +82,21 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
     echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
     tail -n 80 "${log_file}"
     if [[ "${#coverage_lcov_files[@]}" -eq 1 ]]; then
-      cp "${coverage_lcov_files[0]}" coverage/lcov.info
+      cp "${coverage_lcov_files[0]}" "${coverage_root}/lcov.info"
     elif [[ "${#coverage_lcov_files[@]}" -gt 1 ]]; then
-      bun scripts/lib/merge-lcov.ts coverage/lcov.info "${coverage_lcov_files[@]+"${coverage_lcov_files[@]}"}"
+      bun scripts/lib/merge-lcov.ts "${coverage_root}/lcov.info" "${coverage_lcov_files[@]+"${coverage_lcov_files[@]}"}"
     fi
     if [[ "${#coverage_junit_files[@]}" -eq 1 ]]; then
-      cp "${coverage_junit_files[0]}" coverage/junit.xml
+      cp "${coverage_junit_files[0]}" "${coverage_root}/junit.xml"
     elif [[ "${#coverage_junit_files[@]}" -gt 1 ]]; then
-      bun scripts/lib/merge-junit-reports.ts coverage/junit.xml "${coverage_junit_files[@]+"${coverage_junit_files[@]}"}"
+      bun scripts/lib/merge-junit-reports.ts "${coverage_root}/junit.xml" "${coverage_junit_files[@]+"${coverage_junit_files[@]}"}"
     fi
     exit 0
   fi
 elif [[ "${status}" -eq 1 ]] && grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && grep -Eq '(^|[^0-9])0 fail' "${log_file}" && ! grep -Eq '(^|[^0-9])[1-9][0-9]* fail' "${log_file}"; then
   echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
   tail -n 80 "${log_file}"
-  bash scripts/ci/verify-ts-coverage-output.sh coverage
+  bash scripts/ci/verify-ts-coverage-output.sh "${coverage_root}"
   exit 0
 fi
 

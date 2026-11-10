@@ -273,6 +273,12 @@ export AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT=false
 export AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT=false
 ```
 
+An action observation with a screenshot reports `screenshotHierarchyLagMs`, the
+milliseconds between its hierarchy and its screenshot. If the screenshot is more
+than 500 ms later, the observation also has `screenshotHierarchyMismatch: true`
+and a `freshness.warning`: the image may show a later screen than the hierarchy,
+so trust the hierarchy and call `observe` for a matching screenshot.
+
 Settled mode costs roughly 170 ms per Android observation and 20-70 ms per iOS
 observation over async. When only one call needs a matching screenshot, pass
 `observe({ screenshot: "settled" })` instead of setting the variable.

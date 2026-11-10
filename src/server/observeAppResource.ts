@@ -9,6 +9,10 @@ import { resolveActiveSessionDevice, type ActiveSessionResolver } from "./active
 import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
 import { readRetainedScreenshot } from "./retainedScreenshot";
 import { OBSERVE_APP_SHELL_META, renderObserveAppShellHtml } from "./observeAppShell";
+import type { FeatureFlagReader } from "../features/featureFlags/FeatureFlagService";
+
+/** The flag that swaps the read-only Apps shell for the interactive picker spike (#17767). */
+export const OBSERVE_APP_INTERACTIVE_FLAG = "observe-app-interactive";
 
 /**
  * MCP Apps UI resource for `observe` (issue #4669). `observe` returns screen
@@ -20,8 +24,8 @@ import { OBSERVE_APP_SHELL_META, renderObserveAppShellHtml } from "./observeAppS
  * The body is fully self-contained (inline CSS + SVG, no external hosts, no
  * scripts) to mirror the repo's artifact CSP posture. Clients that advertise MCP Apps
  * support are served the live postMessage shell in `observeAppShell.ts` instead (#4682);
- * this snapshot is what every other client reads. Interactive tap-target selection is a
- * deliberate follow-up.
+ * this snapshot is what every other client reads. With the `observe-app-interactive` flag on
+ * (off by default), Apps hosts get the element-picker variant of that shell instead (#17767).
  */
 export const OBSERVE_APP_RESOURCE_URI = "ui://automobile/observe";
 
@@ -314,6 +318,7 @@ export function createObserveAppDataSource(
 async function buildAppContent(options: {
   dataSource: ObserveAppDataSource;
   context: ResourceReadContext;
+  featureFlags: () => FeatureFlagReader;
 }): Promise<ResourceContent> {
   // An Apps host gets the stable live shell: it renders the invoking call's result delivered
   // over postMessage, so nothing here depends on this connection's cached observation. Every
@@ -322,7 +327,11 @@ async function buildAppContent(options: {
     return {
       uri: OBSERVE_APP_RESOURCE_URI,
       mimeType: MCP_APP_MIME_TYPE,
-      text: renderObserveAppShellHtml(),
+      text: renderObserveAppShellHtml(
+        options.featureFlags().isEnabled(OBSERVE_APP_INTERACTIVE_FLAG)
+          ? "interactive"
+          : "read-only",
+      ),
       _meta: OBSERVE_APP_SHELL_META,
     };
   }
@@ -341,17 +350,25 @@ async function buildAppContent(options: {
   };
 }
 
+const FLAGS_OFF: FeatureFlagReader = { isEnabled: () => false };
+
 /** Register the `ui://automobile/observe` App resource. */
 export function registerObserveAppResource(
   options: {
     dataSource?: ObserveAppDataSource;
+    /**
+     * Resolved per read, so a runtime flag toggle applies to the next read. Without it every
+     * flag reads as off, so the interactive shell (#17767) is never served.
+     */
+    featureFlags?: () => FeatureFlagReader;
   } = {},
 ): void {
   const dataSource = options.dataSource ?? createObserveAppDataSource();
+  const featureFlags = options.featureFlags ?? (() => FLAGS_OFF);
   ResourceRegistry.register(OBSERVE_APP_RESOURCE_URI, "Observe App UI", {
     description:
       "MCP App view of the observe result for the reading session with view-hierarchy bounding boxes; includes the screenshot of that exact capture when it is still retained.",
     mimeType: MCP_APP_MIME_TYPE,
-    handler: (context = {}) => buildAppContent({ dataSource, context }),
+    handler: (context = {}) => buildAppContent({ dataSource, context, featureFlags }),
   });
 }

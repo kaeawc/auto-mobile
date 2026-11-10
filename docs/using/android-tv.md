@@ -157,7 +157,11 @@ Compose field, hide the keyboard with `pressButton` `back`, then press `sendKeys
 such as `sendKeys` key `next` or `done` does not move D-pad focus out of the field.
 `focusNavigate` returns the same `blockedBy` and `escapes`. The walk can stop before trying every
 arrow (with a `direction` set, or when the target is not on screen), so a View field's error then
-names the arrows not yet pressed to try before leaving the screen. Other selectors (`testTag`, `textAny`,
+names the arrows not yet pressed to try before leaving the screen. A control that takes arrow keys
+as value changes, such as a slider, counts as not moving focus, so each arrow is pressed on it at
+most once; when no arrow leaves it the walk presses tab once and continues. If focus still does not
+move the status is `stuck` and the message names the control and the arrows it consumed; its value
+may have changed, so check it before continuing. Other selectors (`testTag`, `textAny`,
 `accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
 on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.

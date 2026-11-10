@@ -258,6 +258,13 @@ export type ObserveResult = {
   screenshotCaptureSource?: "device" | "observation-cache";
   screenshotCapturedAt?: string;
   screenshotAgeMs?: number;
+  /**
+   * Post-action screenshot capture time minus the hierarchy's device `updatedAt`,
+   * in ms (#17765). Host and device clocks differ, so small negatives are skew.
+   */
+  screenshotHierarchyLagMs?: number;
+  /** True when that lag exceeded the pairing threshold: the pixels may show a later frame. */
+  screenshotHierarchyMismatch?: boolean;
   screenshotFreshFailure?: { code: string; message: string; retryable: boolean };
   screenshotFormat?: "png" | "jpeg" | "webp";
   screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";

@@ -1,4 +1,5 @@
 import { prototypeGlassObjectError } from "./prototypeGlass";
+import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import { excludeAccessoryReferences } from "./prototypeBindingValidation";
 import { prototypeMotionErrors } from "./prototypeMotionValidation";
 import { prototypeMotionObjectError } from "./prototypeMotionTokens";
@@ -108,6 +109,9 @@ function visitReference(
   path: string,
   { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
+  if (rule.name === "iconName" && (typeof value !== "string" || !iconNames.has(value))) {
+    return fail(path, prototypeIconNameError(value));
+  }
   const nested = nestedReferences[String(rule.name)];
   if (nested) {
     return visitNested(value, rule, path, { context, depth, nested });

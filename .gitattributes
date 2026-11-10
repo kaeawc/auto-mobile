@@ -311,3 +311,8 @@ test/fixtures/watchos-clockface/*.txt text eol=lf
 test/fixtures/tvos-simctl/* text eol=lf
 # Raw dumpsys wear_service captures (whole, or the issue-attached excerpt) from a Wear OS 7.0 / API 37 emulator.
 test/fixtures/wear/wear-service/*.txt text eol=lf
+# Curated prototype icon data and its generated guide: byte-compared against generator output.
+schemas/prototype-icon-names.json text eol=lf
+schemas/prototype-spec-contract.json text eol=lf
+schemas/prototype-ios-icon-symbols.json text eol=lf
+docs/using/prototype-icons.md text eol=lf

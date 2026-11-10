@@ -1027,14 +1027,15 @@ this should move onto the #15249 keyframes engine when it is available.
 
 ## Icons and images
 
-Built-in names are the 2,075 icons of `material-icons-extended` in snake_case (`home`, `alarm_add`); the
-closed list is the `iconName` definition in `schemas/prototype-spec-contract.json`, shared by both
-validators. The renderer already ships that library, so the set adds only the list (about 10 KB). An icon
+Built-in names are a curated set of 300 Material icons in snake_case (`home`, `alarm_add`); the
+sorted source is `schemas/prototype-icon-names.json`, which generates the `iconName` definition in
+`schemas/prototype-spec-contract.json` shared by all validators. CtrlProxy's generated R8 rules
+retain only those names in all five styles from `material-icons-extended`. An icon
 node may set `variant` (`filled` default, `outlined`, `rounded`, `sharp`, `twoTone`); nav items are always
 filled. Material Symbols names without a counterpart and symbol `weight` / `fill` axes (which need a bundled
 variable font) are unavailable. Custom text fonts ship as host-uploaded assets (see "Custom fonts").
 
-Unknown names reject the spec. Images are ID-based (#9301): `{type: "image", asset: "opaque-id"}` and nav
+Unknown names reject the spec at the offending field with close substring suggestions and an allowed-icon lookup URI. Images are ID-based (#9301): `{type: "image", asset: "opaque-id"}` and nav
 `image: "opaque-id"`. Existence is not validated at spec level; a missing asset renders a placeholder and is
 reported in `missingAssets`. Bytes, MIME types, URLs, cache paths and screenshot handles are not spec
 properties.

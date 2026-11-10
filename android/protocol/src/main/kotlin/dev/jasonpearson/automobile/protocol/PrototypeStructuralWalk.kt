@@ -22,7 +22,9 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.keyPath
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 
 internal object PrototypeStructuralWalk {
@@ -58,6 +60,9 @@ internal object PrototypeStructuralWalk {
     depth: Int,
   ): PrototypeSpecError? {
     val target = definitions.getValue(checkNotNull(rule.text("name"))).jsonObject
+    if (rule.text("name") == "iconName" && !primitiveValid(value, target)) {
+      return fail(path, iconNameError(value, target))
+    }
     if (rule.text("name") == "container") return visitContainer(value, target, path, context, depth)
     val itemImages =
       if (rule.text("name") == "item") prototypeImageSlotUses((value as? JsonObject)?.get("image"))
@@ -70,6 +75,22 @@ internal object PrototypeStructuralWalk {
     if (rule.text("name") == "action") return visitAction(value, target, path, context, depth)
     if (rule.text("name") != "node") return walk(value, target, path, context, depth)
     return visitNode(value, target, path, context, depth)
+  }
+
+  private fun iconNameError(value: JsonElement, target: JsonObject): String {
+    val query = (value as? JsonPrimitive)?.content.orEmpty().lowercase().take(128)
+    val suggestions =
+      target
+        .getValue("values")
+        .jsonArray
+        .map { (it as JsonPrimitive).content }
+        .filter { query.isNotEmpty() && (it.contains(query) || query.contains(it)) }
+        .sortedWith(compareBy<String> { kotlin.math.abs(it.length - query.length) }.thenBy { it })
+        .take(3)
+    val hint =
+      if (suggestions.isEmpty()) " Choose an allowed icon name."
+      else " Did you mean ${suggestions.joinToString { "\"$it\"" }}?"
+    return "Invalid enum value: Unknown prototype icon name $value.$hint Browse automobile:prototype/icons?query=<substring> for allowed names."
   }
 
   private fun visitNode(

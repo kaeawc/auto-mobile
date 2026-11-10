@@ -27,6 +27,15 @@ teardown() {
   rm -rf "$TMP_ROOT"
 }
 
+@test "no-stage generates without any git commands" {
+  printf '#!/usr/bin/env bash\necho "unexpected git $*" >> "$STUB_LOG"\nexit 1\n' > "$TMP_ROOT/stubs/git"
+  PATH="$TMP_ROOT/stubs:$PATH" run bash "$TMP_ROOT/scripts/update-tool-definitions.sh" --no-stage
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"without staging"* ]]
+  run cat "$STUB_LOG"
+  [[ "$output" != *"unexpected git"* ]]
+}
+
 @test "installs the frozen lockfile when node_modules is missing, then generates without auto-install" {
   PATH="$TMP_ROOT/stubs:$PATH" run bash "$TMP_ROOT/scripts/update-tool-definitions.sh"
   [ "$status" -eq 0 ]

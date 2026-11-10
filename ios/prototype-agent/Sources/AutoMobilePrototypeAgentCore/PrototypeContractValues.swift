@@ -1,6 +1,27 @@
 import Foundation
 
 extension PrototypeContractValidator {
+    private static func iconSuggestions(_ query: String, rule: [String: JSONValue]) -> [String] {
+        guard !query.isEmpty, case let .array(values)? = rule["values"] else { return [] }
+        return Array(
+            values.compactMap(\.stringValue)
+                .filter { $0.contains(query) || query.contains($0) }
+                .sorted {
+                    let left = abs($0.count - query.count), right = abs($1.count - query.count)
+                    return left == right ? $0 < $1 : left < right
+                }.prefix(3)
+        )
+    }
+
+    static func iconNameError(_ value: JSONValue, rule: [String: JSONValue]) -> String {
+        let query = String((value.stringValue ?? "").lowercased().prefix(128))
+        let suggestions = iconSuggestions(query, rule: rule)
+        let hint = suggestions.isEmpty ? " Choose an allowed icon name." :
+            " Did you mean \(suggestions.map { "\"\($0)\"" }.joined(separator: ", "))?"
+        let name = value.stringValue.map { "\"\($0)\"" } ?? "(non-string)"
+        return "Invalid enum value: Unknown prototype icon name \(name).\(hint) Browse automobile:prototype/icons?query=<substring> for allowed names."
+    }
+
     static func primitive(_ value: JSONValue, rule: [String: JSONValue]) -> Bool {
         switch rule["kind"]?.stringValue {
         case "number":

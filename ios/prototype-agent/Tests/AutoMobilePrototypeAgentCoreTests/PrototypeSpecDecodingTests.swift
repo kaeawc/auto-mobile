@@ -2,6 +2,24 @@
 import XCTest
 
 final class PrototypeSpecDecodingTests: XCTestCase {
+    func testRemovedAndMisspelledIconNamesOfferAllowedSuggestions() {
+        for (name, suggestion) in [("settings_applications", "settings"), ("homee", "home")] {
+            let data = Data("""
+            {"id":"icons","window":{"placement":{"type":"fullscreen"}},"root":{"type":"icon","name":"\(name)"}}
+            """.utf8)
+            XCTAssertThrowsError(try PrototypeContractValidator.validate(data: data)) { error in
+                guard case let PrototypeLoadError.invalidSpec(path, message) = error else {
+                    return XCTFail("Expected icon-name validation error, got \(error)")
+                }
+                XCTAssertEqual(path, "root.name")
+                XCTAssertTrue(message.contains("Unknown prototype icon name \"\(name)\""))
+                XCTAssertTrue(message.contains("Did you mean"))
+                XCTAssertTrue(message.contains("\"\(suggestion)\""))
+                XCTAssertTrue(message.contains("automobile:prototype/icons"))
+            }
+        }
+    }
+
     /// A contract-valid placement: a sheet needs its `edge` and `height`, a floating window its
     /// `gravity` and `offset`.
     private func placementObject(_ type: String) -> [String: Any] {

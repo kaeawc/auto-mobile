@@ -182,10 +182,14 @@ response-path work push the pixels seconds past the hierarchy (a popup in the
 tree but not in the image). Re-reading the hierarchy after a late screenshot
 would instead add a device read to every lagging response. The published
 observation carries `screenshotHierarchyLagMs`: `screenshotCapturedAt` (host
-file time) minus the hierarchy's device `updatedAt`. Above 500 ms
-(`SCREENSHOT_HIERARCHY_LAG_THRESHOLD_MS`) it also carries
-`screenshotHierarchyMismatch: true` and a `freshness.warning`. The two clocks
-differ, so a small negative lag is skew and is never marked.
+file time) minus the hierarchy's host receipt time (`viewHierarchy.receivedAt`),
+so both operands are on the host clock and device clock skew cannot shift it.
+Apple platforms share the host clock and fall back to the device `updatedAt`
+when no receipt time exists; an Android tree without one gets no lag. Above
+500 ms (`SCREENSHOT_HIERARCHY_LAG_THRESHOLD_MS`, injectable through the settle
+context) it also carries `screenshotHierarchyMismatch: true` and a
+`freshness.warning`. A negative lag (screenshot captured before the tree
+arrived) is never marked.
 
 ## Default compact action metadata
 

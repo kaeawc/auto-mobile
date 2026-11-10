@@ -94,14 +94,14 @@ These are measured on the server side only; no host round trip was measured.
 
 ## Per-client findings
 
-Neither client could run in the cloud environment where the spike was built. **Every client claim
-below comes from public documentation and has not been tested.** What was tested is the server
-side and the page script, run against a fake window and DOM, including the minified release build.
+**Every client claim below comes from public documentation; no live host has rendered either
+shell.** The server side and the page script are covered by unit tests against a fake window and
+DOM, including the minified release build.
 
-| Client         | Renders MCP Apps (docs)                  | App-initiated `tools/call` (docs)                   | Verified here |
-| -------------- | ---------------------------------------- | --------------------------------------------------- | ------------- |
-| Claude Desktop | Yes, including local stdio servers       | Yes, proxied to the server; may prompt for approval | No            |
-| VS Code        | Yes, in chat (GitHub Copilot agent mode) | Yes, proxied to the server                          | No            |
+| Client         | Renders MCP Apps (docs)                  | App-initiated `tools/call` (docs)                   | Live-tested |
+| -------------- | ---------------------------------------- | --------------------------------------------------- | ----------- |
+| Claude Desktop | Yes, including local stdio servers       | Yes, proxied to the server; may prompt for approval | No          |
+| VS Code        | Yes, in chat (GitHub Copilot agent mode) | Yes, proxied to the server                          | No          |
 
 Open questions that need a live host:
 
@@ -121,14 +121,8 @@ Don't ship it yet, and don't drop it.
 
 The protocol supports the feature without new server surface: one flag, a second shell document,
 no new tool and no change to `observe`. The cost is small: about 6 KB more for the document and no
-extra traffic. But no live host has rendered either shell yet, and questions 1–3 decide whether the
-feature is useful or confusing.
-
-The next iteration:
-
-1. Run both shells in Claude Desktop and VS Code against a local server.
-2. Settle how the model hears about a tap made from the App (question 3).
-3. Only then decide whether to turn the flag on by default.
+extra traffic. Questions 1–3 decide whether the feature is useful or confusing, and they can only
+be answered in a live host. The flag stays off by default until they are.
 
 If either host fails to deliver structured results or blocks App tool calls, drop the picker and
 keep the read-only shell.

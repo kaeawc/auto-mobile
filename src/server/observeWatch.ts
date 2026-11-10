@@ -390,10 +390,7 @@ export async function observeWatch(
     screenshotCaptureSource: "device",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
   };
-  const hierarchyBundleId =
-    platform === "visionos"
-      ? (dependencies.visionosTargetApps ?? visionosTargetApps).get(device.deviceId)
-      : undefined;
+  const hierarchyBundleId = visionosHierarchyBundleId(platform, device.deviceId, dependencies);
   const payload = watchObservationPayload(capture, platform, hierarchyOutcome, hierarchyBundleId);
   return waitOutcome
     ? createObserveWaitResponse(payload, waitOutcome, args.includeScreenshotImage, {
@@ -401,6 +398,16 @@ export async function observeWatch(
         protection,
       })
     : createObserveResponse(payload, args.includeScreenshotImage, { signal, protection });
+}
+
+function visionosHierarchyBundleId(
+  platform: AppleScreenshotOnlyPlatform,
+  deviceId: string,
+  dependencies: WatchObserveDependencies,
+): string | undefined {
+  return platform === "visionos"
+    ? (dependencies.visionosTargetApps ?? visionosTargetApps).get(deviceId)
+    : undefined;
 }
 
 /**

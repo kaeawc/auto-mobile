@@ -109,6 +109,7 @@ import { selectedDisplayPin } from "./SessionDisplayContext";
 import { resolveTargetDisplay } from "./DisplaySelection";
 export { resolveMissingForegroundWindow } from "./observationVerdict";
 import type { ScreenshotEvidenceFiles } from "./screenshot/observationScreenshotEvidence";
+import { stampAsyncScreenshotCapturedAt } from "./screenshot/asyncScreenshotCapturedAt";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -764,6 +765,11 @@ export class RealObserveScreen implements ObserveScreen {
         displayId,
         capture,
       });
+      if (observation) {
+        await stampAsyncScreenshotCapturedAt(observation, this.device.deviceId, {
+          files: this.screenshotEvidenceFiles,
+        });
+      }
     }
     if (observation) {
       await this.runAccessibilityAudit(observation, perf);

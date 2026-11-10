@@ -13,6 +13,10 @@ import {
   runWithPostActionCaptureScope,
 } from "../utils/PostActionCaptureContext";
 import { serverConfig } from "../utils/ServerConfig";
+import {
+  classifyObservationAction,
+  isSettleGatedActionClass,
+} from "../features/action/observationActionClass";
 import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
 import { ToolDefinitionListing } from "./ToolDefinitionListing";
 import { TOOL_ANNOTATIONS } from "./toolAnnotations";
@@ -415,7 +419,13 @@ export class ToolRegistryClass {
             // Under an MCP task, keep this session alive until the task settles (#4668).
             holdSessionForCurrentTask(recording.sessionUuid);
             clearSessionlessAutolockAttribution(selectionContext, recording.sessionUuid);
-            const captures = postActionCaptures(signal, resolvedTarget.internalCall, name);
+            // Only a settle-gated action may adopt a later frame, so only it defers (#17765).
+            const captures = postActionCaptures(
+              signal,
+              resolvedTarget.internalCall,
+              name,
+              isSettleGatedActionClass(classifyObservationAction(name, handlerArgs)),
+            );
             return await runWithToolSelectionContext(
               // Bind the ROUTING session, not the selection profile, so
               // nested calls re-inject the correct derived routing UUID.

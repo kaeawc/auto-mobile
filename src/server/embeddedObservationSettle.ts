@@ -28,6 +28,7 @@ import {
   EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
   embeddedObservationSettleTickExtensionMs,
 } from "./embeddedObservationSettleBudget";
+import { stampScreenshotHierarchyLag } from "./screenshotHierarchyLag";
 
 export {
   EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS,
@@ -516,6 +517,8 @@ export interface EmbeddedObservationSettleContext {
   signal?: AbortSignal;
   /** Drives the settle gate's abort fence; defaults to the real clock. */
   timer?: Timer;
+  /** Screenshot/hierarchy lag above which the pair is marked mismatched (#17765). */
+  screenshotHierarchyLagThresholdMs?: number;
 }
 
 /**
@@ -572,14 +575,27 @@ export async function settleEmbeddedObservationInResponse(
       writeToolEnvelopePayload(view, view.payload);
     }
     await finalizePendingPostActionCaptures();
-    if (
-      view &&
-      observation &&
-      applyTerminalCaptureFailure(observation, ctx.args, ctx.signal, view.payload)
-    ) {
+    if (view && observation && markTerminalEvidence(observation, view.payload, ctx)) {
       writeToolEnvelopePayload(view, view.payload);
     }
   }
+}
+
+/**
+ * Mark the published frame's final evidence state: a failed explicit-panel capture,
+ * and how far its screenshot trails its hierarchy (#17765). Returns whether it changed.
+ */
+function markTerminalEvidence(
+  observation: ObserveResult,
+  payload: Record<string, unknown>,
+  ctx: EmbeddedObservationSettleContext,
+): boolean {
+  const failed = applyTerminalCaptureFailure(observation, ctx.args, ctx.signal, payload);
+  const stamped =
+    !ctx.internal &&
+    ctx.name !== "observe" &&
+    stampScreenshotHierarchyLag(observation, ctx.screenshotHierarchyLagThresholdMs);
+  return failed || stamped;
 }
 
 async function settleEmbeddedObservationResponse(

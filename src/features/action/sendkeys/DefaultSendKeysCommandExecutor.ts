@@ -207,7 +207,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             this.session.imeUserId = undefined;
           },
         },
-        this.timer,
         dependencies.pendingImeRestores,
       );
     this.imeRestore = new ImeRestore({

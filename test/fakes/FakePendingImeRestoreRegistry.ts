@@ -3,7 +3,6 @@ import type {
   PendingImeRestore,
   PendingImeRestoreRegistry,
 } from "../../src/features/action/sendkeys/PendingImeRestore";
-import type { Timer } from "../../src/utils/SystemTimer";
 
 export class FakePendingImeRestoreRegistry implements PendingImeRestoreRegistry {
   readonly entries = new Map<string, PendingImeRestore>();
@@ -17,7 +16,7 @@ export class FakePendingImeRestoreRegistry implements PendingImeRestoreRegistry 
     this.entries.delete(deviceId);
     return pending;
   }
-  store(deviceId: string, pending: PendingImeRestore, _timer: Timer): void {
+  store(deviceId: string, pending: PendingImeRestore): void {
     this.entries.set(deviceId, pending);
   }
   discard(deviceId: string): void {

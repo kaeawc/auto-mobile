@@ -23,15 +23,11 @@ class FixtureMediaBrowserService : MediaBrowserService() {
         setCallback(
           object : MediaSession.Callback() {
             override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-              val item = mediaId?.let(tree::playable) ?: return
-              setMetadata(
-                MediaMetadata.Builder()
-                  .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, item.mediaId)
-                  .putString(MediaMetadata.METADATA_KEY_TITLE, item.title)
-                  .putString(MediaMetadata.METADATA_KEY_ARTIST, item.subtitle)
-                  .build(),
-              )
-              setPlaybackState(state(PlaybackState.STATE_PLAYING))
+              mediaId?.let(tree::playable)?.let(::play)
+            }
+
+            override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+              tree.search(query)?.let(::play)
             }
 
             override fun onPlay() = setPlaybackState(state(PlaybackState.STATE_PLAYING))
@@ -76,13 +72,25 @@ class FixtureMediaBrowserService : MediaBrowserService() {
       else MediaBrowser.MediaItem.FLAG_PLAYABLE,
     )
 
+  private fun play(item: MediaNode) {
+    session.setMetadata(
+      MediaMetadata.Builder()
+        .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, item.mediaId)
+        .putString(MediaMetadata.METADATA_KEY_TITLE, item.title)
+        .putString(MediaMetadata.METADATA_KEY_ARTIST, item.subtitle)
+        .build(),
+    )
+    session.setPlaybackState(state(PlaybackState.STATE_PLAYING))
+  }
+
   private fun state(state: Int): PlaybackState =
     PlaybackState.Builder()
       .setActions(
         PlaybackState.ACTION_PLAY or
           PlaybackState.ACTION_PAUSE or
           PlaybackState.ACTION_STOP or
-          PlaybackState.ACTION_PLAY_FROM_MEDIA_ID,
+          PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or
+          PlaybackState.ACTION_PLAY_FROM_SEARCH,
       )
       .setState(state, 0L, if (state == PlaybackState.STATE_PLAYING) 1f else 0f)
       .build()

@@ -70,7 +70,8 @@ describe("root SPM toolchain floor workflow", () => {
   test("runs SwiftLint on Linux with the SHA-256 verified pinned binary (#17581)", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
     expect(jobs["swiftlint"]?.name).toBe("SwiftLint");
-    expect(jobs["swiftlint"]?.["runs-on"]).toBe("ubuntu-latest");
+    // 0.57.0 links libicuuc.so.74/libxml2.so.2, absent on Ubuntu 26.04 (#17777).
+    expect(jobs["swiftlint"]?.["runs-on"]).toBe("ubuntu-24.04");
     const lint = loadJobSteps(".github/workflows/pull_request.yml", "swiftlint");
     const install = stepNamed(lint, "Install pinned SwiftLint (Linux, SHA-256 verified)");
     const run = stepNamed(lint, "Run SwiftLint (fail on error-severity rules)");

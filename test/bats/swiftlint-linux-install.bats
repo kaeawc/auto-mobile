@@ -163,3 +163,49 @@ run_installer() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"libsourcekitdInProc.so"* ]]
 }
+
+# A swiftlint that cannot start (e.g. a missing shared library on a newer runner
+# image, #17777) prints nothing on stdout; the pin check must surface its stderr.
+write_swiftlint_stub() {
+  cat > "${STUB_DIR}/swiftlint" <<EOF2
+#!/usr/bin/env bash
+$1
+EOF2
+  chmod +x "${STUB_DIR}/swiftlint"
+}
+
+run_pin_check() {
+  run env PATH="${STUB_DIR}:${PATH}" bash -c "source '${PIN_DIR}/swiftlint_version.sh' && require_pinned_swiftlint_version"
+}
+
+@test "the pin check prints the binary's stderr when the version is empty" {
+  write_swiftlint_stub 'echo "swiftlint: error while loading shared libraries: libicuuc.so.74: cannot open shared object file" >&2; exit 127'
+  run_pin_check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"reported no version (exit 127)"* ]]
+  [[ "$output" == *"libicuuc.so.74: cannot open shared object file"* ]]
+  [[ "$output" == *"found 'none'"* ]]
+}
+
+@test "the pin check says when an empty-version binary printed nothing" {
+  write_swiftlint_stub 'exit 1'
+  run_pin_check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"reported no version (exit 1)"* ]]
+  [[ "$output" == *"<no output>"* ]]
+}
+
+@test "the pin check omits the startup diagnostic for a wrong but working version" {
+  write_swiftlint_stub 'echo 0.99.0'
+  run_pin_check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"found '0.99.0'"* ]]
+  [[ "$output" != *"reported no version"* ]]
+}
+
+@test "the pin check passes silently for the pinned version" {
+  write_swiftlint_stub "echo ${SWIFTLINT_LINUX_VERSION}"
+  run_pin_check
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

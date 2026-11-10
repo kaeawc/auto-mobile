@@ -7,6 +7,7 @@ import { focusedImeFieldClass } from "../imeFailureDiagnostics";
 import { AUTO_MOBILE_IME_ID } from "../AndroidImeCatalog";
 import { getCapturedKeyboard } from "../../observe/output/elementProvenance";
 import type { FormFactor } from "../../../models/DeviceMatchCriteria";
+import { hasXrSystemUi } from "../../xr/xrPanelSpace";
 import {
   NoFocusedEditableError,
   isPrintableAscii,
@@ -23,13 +24,9 @@ type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeTe
 
 const AUTO_MOBILE_IME_PACKAGE = AUTO_MOBILE_IME_ID.split("/")[0];
 
-const isXrSystemName = (name: string | undefined): boolean =>
-  !!name &&
-  (name.startsWith("com.android.systemui.xr") || name.startsWith("com.android.systemui/.xr"));
-
 /**
  * Whether the device is an Android XR headset or glasses: the announced form factor, or XR
- * system UI windows in the observed back stack (the same names #17805 keys XR panels on).
+ * system UI windows in the observed back stack (`hasXrSystemUi`, shared with XR panel detection).
  */
 export function isAndroidXrDevice(
   observation: Pick<ObserveResult, "backStack">,
@@ -38,17 +35,7 @@ export function isAndroidXrDevice(
   if (formFactor === "xr-headset" || formFactor === "xr-glasses") {
     return true;
   }
-  const backStack = observation.backStack;
-  return (
-    !!backStack &&
-    (backStack.activities.some((activity) => isXrSystemName(activity.name)) ||
-      backStack.tasks.some(
-        (task) =>
-          isXrSystemName(task.packageName) ||
-          isXrSystemName(task.rootActivity) ||
-          isXrSystemName(task.topActivity),
-      ))
-  );
+  return hasXrSystemUi(observation.backStack);
 }
 
 /**

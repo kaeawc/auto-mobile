@@ -1,3 +1,4 @@
+import { xrBackStack } from "../../../helpers/xrHeadset";
 import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { beforeEach, afterEach, expect, mock, spyOn, test } from "bun:test";
 import type {
@@ -555,4 +556,58 @@ let cachedObservation: ReturnType<
 >;
 beforeEach(() => {
   cachedObservation = spyOn(FakeObserveScreen.prototype, "getMostRecentCachedObserveResult");
+});
+
+test("XR explicit-display screen swipes use the app panel bounds", async () => {
+  const h = harness({
+    observationFor: ({ observation }) => ({
+      ...observation,
+      screenSize: { width: 2560, height: 2558 },
+      backStack: xrBackStack(),
+    }),
+  });
+  const result = await h.action.execute({ direction: "up", display: "external" });
+  expect(result.success).toBe(true);
+  expect(h.legs()).toHaveLength(1);
+  const leg = h.legs()[0];
+  for (const x of [leg.x1, leg.x2]) {
+    expect(x).toBeWithin(0, 2048);
+  }
+  for (const y of [leg.y1, leg.y2]) {
+    expect(y).toBeWithin(48, 1328);
+  }
+});
+
+test("XR explicit-display edge swipes refuse before input", async () => {
+  const h = harness({
+    observationFor: ({ observation }) => ({ ...observation, backStack: xrBackStack() }),
+  });
+  const result = await h.action.execute({
+    direction: "right",
+    display: "external",
+    fromEdge: "left",
+  });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("edge gestures");
+  expect(h.legs()).toHaveLength(0);
+});
+
+test("XR explicit-display container swipes retain their selected bounds", async () => {
+  const h = harness({
+    observationFor: ({ observation }) =>
+      tree({ observation: { ...observation, backStack: xrBackStack() }, nodes: [real] }),
+  });
+  const result = await h.action.execute({
+    direction: "up",
+    display: "external",
+    container: { elementId: "real" },
+  });
+  expect(result.success).toBe(true);
+  const leg = h.legs()[0];
+  for (const x of [leg.x1, leg.x2]) {
+    expect(x).toBeWithin(40, 140);
+  }
+  for (const y of [leg.y1, leg.y2]) {
+    expect(y).toBeWithin(70, 170);
+  }
 });

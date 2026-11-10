@@ -312,7 +312,7 @@ export const tapAtSchema = withJsonSchemaOverride(
     }),
   (js) => {
     js.description =
-      "Tap, long press, or double tap a screen point. Bare x/y use platform-native observe coordinates; image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop.";
+      "Tap, long press, or double tap a screen point. Bare x/y use platform-native observe coordinates, except on Android XR home-space, where they are screenshot pixels inside an app panel; XR observe node bounds stay in panel-window space and are not screenshot coordinates. image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop.";
   },
 );
 

@@ -1,5 +1,6 @@
 test/fixtures/visionos-settings/*.json text eol=lf
 test/fixtures/android-display/**/*.txt text eol=lf
+test/fixtures/xr-headset/*.json text eol=lf
 test/fixtures/android-aaos-cluster-screen-size/*.txt text eol=lf
 test/fixtures/android-aaos-cluster-screen-size/*.json text eol=lf
 test/fixtures/android-netsim/*.ini text eol=lf
@@ -52,6 +53,7 @@ test/fixtures/tvos-xcuitest/*.json text eol=lf
 test/fixtures/visionos-xcuitest/*.json text eol=lf
 test/fixtures/watchos-xcuitest/*.json text eol=lf
 test/fixtures/watch/*.txt text eol=lf
+test/fixtures/watch/fixture-face-dump-host-foreground.txt text eol=lf
 test/fixtures/watchos-xcuitest/sdk-hierarchy-live.json text eol=lf
 test/fixtures/ios-simctl/*.plist text eol=lf
 test/fixtures/ios-notification-center/*.json text eol=lf

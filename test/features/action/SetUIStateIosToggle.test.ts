@@ -176,7 +176,7 @@ describe("SetUIState iOS labelled switches (#14659)", () => {
     });
     expect(result.success).toBe(true);
     expect(result.fields[0]).toMatchObject({ verified: true, attempts: 1 });
-    expect(points).toEqual([{ x: 336, y: 266, action: "tap" }]);
+    expect(points).toEqual([{ x: 336, y: 266, action: "tap", pointSpace: "native" }]);
     expect(tap.getCallCount()).toBe(0);
   });
 

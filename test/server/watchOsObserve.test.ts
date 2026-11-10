@@ -191,8 +191,10 @@ describe("observe on an Apple Watch simulator through the registry", () => {
     await call("swipeOn", { ...target, direction: "up" });
     await call("pressButton", { ...target, button: "home" });
     expect(runner.commands).toEqual([
+      { type: "face", op: "dump" },
       { type: "hierarchy" },
       { type: "tap", identifier: "ctrlproxy-crown" },
+      { type: "face", op: "dump" },
       { type: "tap", x: 10, y: 20 },
       { type: "swipe", direction: "up" },
       { type: "home" },

@@ -229,4 +229,43 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: true, status: "focused", steps: 6 });
     expect(keys).toEqual(Array<InputKeyName>(6).fill("arrow_down"));
   });
+
+  test("a two-slot list with one row outside focus still reads as moving while it scrolls", async () => {
+    // Hand-built: only the focused row and the next one are visible, both `app:id/row`. Down
+    // scrolls the next item into the fixed focus slot, so the one row outside focus always shows a
+    // label that was not on screen before, and the previous neighbour's label lands on focus.
+    const items = Array.from({ length: 12 }, (_, index) => `Item ${index}`);
+    let focusIndex = 0;
+    const row = (slot: number): Element | undefined => {
+      const text = items[focusIndex + slot];
+      const top = 400 + slot * 100;
+      return text === undefined
+        ? undefined
+        : {
+            "resource-id": "app:id/row",
+            text,
+            focusable: true,
+            bounds: { left: 100, top, right: 900, bottom: top + 100 },
+          };
+    };
+    const keys: InputKeyName[] = [];
+    const list: FocusObserver & FocusKeyPresser = {
+      read: async () => ({
+        focused: row(0) ?? null,
+        elements: [0, 1].map(row).filter((element) => element !== undefined),
+      }),
+      press: async (key) => {
+        keys.push(key);
+        if (key === "arrow_down" && focusIndex < items.length - 1) {
+          focusIndex += 1;
+        }
+        return { success: true };
+      },
+    };
+    const result = await new FocusNavigate(list, list, timer).execute({
+      until: { text: "Item 6" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 6 });
+    expect(keys).toEqual(Array<InputKeyName>(6).fill("arrow_down"));
+  });
 });

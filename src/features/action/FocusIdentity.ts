@@ -39,11 +39,18 @@ function boundsText({ left, top, right, bottom }: ElementBounds): string {
   return `${left},${top},${right},${bottom}`;
 }
 
-/** Everything outside the focused element: where each node sits, and where each label is shown. */
+/**
+ * The screen around focus: where each node outside the focused element sits, and where each label
+ * is shown, the focused element's own labels included.
+ */
 interface Surroundings {
-  /** Each node's resource id and bounds, without labels. */
+  /** Each node's resource id and bounds outside the focused element, without labels. */
   layout: string;
-  /** Each non-empty label and the bounds it is shown at. */
+  /**
+   * Each non-empty label and the bounds it is shown at, on and outside the focused element. A
+   * two-slot list leaves one row outside focus; a scroll moves that row's label onto the focused
+   * row, so the focused labels must be compared too.
+   */
   labels: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
@@ -53,7 +60,7 @@ function readSurroundings(screen: Pick<FocusScreen, "focused" | "elements">): Su
     (element) => !focused || !boundsContain(focused.bounds, element.bounds),
   );
   const labels = new Map<string, Set<string>>();
-  for (const element of outside) {
+  for (const element of focused ? [focused, ...screen.elements] : screen.elements) {
     const label = `${stringProp(element, "text")}|${stringProp(element, "content-desc")}`;
     if (label !== "|") {
       const shown = labels.get(label) ?? new Set<string>();

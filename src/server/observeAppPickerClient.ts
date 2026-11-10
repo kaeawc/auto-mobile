@@ -32,6 +32,8 @@ type PickerSelector = { elementId: string } | { text: string };
 
 interface PickerTarget extends ShellBox {
   selector: PickerSelector;
+  /** Another visible element has the same selector, so `tapOn` could act on either one. */
+  ambiguous: boolean;
 }
 
 /** The extra DOM operations the picker uses on top of the shell's. */
@@ -79,7 +81,9 @@ function pickerSelectorOf(node: Record<string, unknown>): PickerSelector | null 
 function pickerTargetOf(node: Record<string, unknown>): PickerTarget | null {
   const bounds = shellBoundsOf(node.bounds);
   const selector = pickerSelectorOf(node);
-  return bounds && selector ? { ...bounds, label: shellLabelOf(node), selector } : null;
+  return bounds && selector
+    ? { ...bounds, label: shellLabelOf(node), selector, ambiguous: false }
+    : null;
 }
 
 /** Every pickable element in a delivered `observe` result, largest first (so smallest draws on top). */
@@ -93,12 +97,30 @@ function pickerTargetsOf(result: unknown): PickerTarget[] {
   }
   const area = (box: ShellBox) =>
     Math.max(0, box.right - box.left) * Math.max(0, box.bottom - box.top);
-  return (shellCollectWith(hierarchy, pickerTargetOf).boxes as PickerTarget[]).sort(
-    (a, b) => area(b) - area(a),
-  );
+  const targets = shellCollectWith(hierarchy, pickerTargetOf).boxes as PickerTarget[];
+  const counts = new Map<string, number>();
+  for (const target of targets) {
+    const key = JSON.stringify(target.selector);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  for (const target of targets) {
+    target.ambiguous = (counts.get(JSON.stringify(target.selector)) ?? 0) > 1;
+  }
+  return targets.sort((a, b) => area(b) - area(a));
 }
 
-/** Shows [target] as the current selection and enables the tap button. */
+/** The selection panel's label; an ambiguous selector says why it cannot be tapped. */
+function pickerLabelOf(target: PickerTarget | null): string {
+  if (!target) {
+    return "Select an element";
+  }
+  const label = target.label || "(unlabelled element)";
+  return target.ambiguous
+    ? `${label} (selector matches more than one element; not tappable)`
+    : label;
+}
+
+/** Shows [target] as the current selection; enables the tap button only for a unique selector. */
 function pickerSelect(doc: PickerDocument, state: PickerState, target: PickerTarget | null): void {
   state.selected = target;
   const selector = doc.getElementById("selector");
@@ -108,10 +130,10 @@ function pickerSelect(doc: PickerDocument, state: PickerState, target: PickerTar
     selector.textContent = target ? JSON.stringify(target.selector) : "";
   }
   if (label) {
-    label.textContent = target ? target.label || "(unlabelled element)" : "Select an element";
+    label.textContent = pickerLabelOf(target);
   }
   if (button) {
-    if (target) {
+    if (target && !target.ambiguous) {
       button.removeAttribute("disabled");
     } else {
       button.setAttribute("disabled", "");
@@ -152,7 +174,9 @@ function pickerTapRequest(
   id: number,
   deviceId: string,
 ): Record<string, unknown> {
-  const args: Record<string, unknown> = { selector: target.selector };
+  // "unique" makes the server refuse rather than tap the first of several matches, covering
+  // elements this result did not show (e.g. off-screen rows).
+  const args: Record<string, unknown> = { selector: target.selector, selectionStrategy: "unique" };
   if (deviceId) {
     args.deviceId = deviceId;
   }
@@ -163,7 +187,7 @@ function pickerTapRequest(
 function pickerTap(win: ShellWindow, doc: PickerDocument, state: PickerState): void {
   const target = state.selected;
   const status = doc.getElementById("tap-status");
-  if (!target) {
+  if (!target || target.ambiguous) {
     return;
   }
   const id = state.nextId++;
@@ -227,6 +251,7 @@ export const OBSERVE_PICKER_CLIENT_FUNCTIONS: readonly ((...args: never[]) => un
   pickerSelectorOf,
   pickerTargetOf,
   pickerTargetsOf,
+  pickerLabelOf,
   pickerSelect,
   pickerDecorate,
   pickerTapRequest,

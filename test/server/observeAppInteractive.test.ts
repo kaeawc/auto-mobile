@@ -181,7 +181,10 @@ describe("tapOn payload shape", () => {
   test("omits deviceId when the result did not carry one", () => {
     const [target] = pickerTargetsOf(observeResult);
     const params = pickerTapRequest(target, 1, "").params as { arguments: object };
-    expect(params.arguments).toEqual({ selector: { elementId: "app:id/root" } });
+    expect(params.arguments).toEqual({
+      selector: { elementId: "app:id/root" },
+      selectionStrategy: "unique",
+    });
   });
 });
 
@@ -220,7 +223,11 @@ describe("picker protocol", () => {
       method: "tools/call",
       params: {
         name: "tapOn",
-        arguments: { selector: { elementId: "app:id/ok" }, deviceId: "emulator-5554" },
+        arguments: {
+          selector: { elementId: "app:id/ok" },
+          selectionStrategy: "unique",
+          deviceId: "emulator-5554",
+        },
       },
     });
   });
@@ -249,5 +256,46 @@ describe("picker protocol", () => {
     expect(win.methods).not.toContain("tools/call");
     win.deliver({ jsonrpc: "2.0", id: 1000, result: {} }, { other: "frame" });
     expect(doc.node("tap-status").textContent).toBeNull();
+  });
+});
+
+describe("ambiguous selectors", () => {
+  const rows = toolResult({
+    viewHierarchy: {
+      node: [
+        { "resource-id": "app:id/remove", bounds: [0, 0, 100, 50] },
+        { "resource-id": "app:id/remove", bounds: [0, 60, 100, 110] },
+        { "resource-id": "app:id/add", bounds: [0, 120, 100, 170] },
+      ],
+    },
+  });
+
+  test("a selector shared by several elements is marked ambiguous", () => {
+    const ambiguous = pickerTargetsOf(rows).map((target) => [
+      JSON.stringify(target.selector),
+      target.ambiguous,
+    ]);
+    expect(ambiguous).toEqual([
+      ['{"elementId":"app:id/remove"}', true],
+      ['{"elementId":"app:id/remove"}', true],
+      ['{"elementId":"app:id/add"}', false],
+    ]);
+  });
+
+  test("picking an ambiguous element never enables or sends a tap", () => {
+    const win = new FakeShellWindow();
+    const doc = new FakeShellDocument();
+    new Function("window", "document", observeAppShellScript("interactive"))(win, doc);
+    win.deliver({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: rows });
+    const picks = doc.canvas.children.find((child) => child.attributes.get("id") === "picks")!
+      .children as FakeShellNode[];
+    picks[1].click();
+    expect(doc.node("selection").textContent).toContain("not tappable");
+    expect(doc.node("tap").attributes.has("disabled")).toBe(true);
+    doc.node("tap").click();
+    expect(win.methods).not.toContain("tools/call");
+    picks[2].click();
+    doc.node("tap").click();
+    expect(win.methods).toContain("tools/call");
   });
 });

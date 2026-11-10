@@ -37,7 +37,12 @@ The selector is the element's `resource-id` as `{ elementId }`, or else its text
 description as `{ text }` (the `text` selector matches both). An element with neither is drawn but
 cannot be picked. When the delivered result carries a `deviceId`, it goes into the arguments, so
 the tap goes to the device that was observed and not to whatever device is active at that moment.
-The request is:
+
+A selector only names an element, not one occurrence of it. When two visible elements share a
+selector (for example, one Remove button per list row), the panel shows the selector but leaves the
+tap button disabled, because `tapOn` would act on the first match and not necessarily the one that
+was picked. Every request also sends `selectionStrategy: "unique"`, so the server refuses instead of
+guessing if more matches exist than the delivered result showed. The request is:
 
 ```json
 {
@@ -46,7 +51,11 @@ The request is:
   "method": "tools/call",
   "params": {
     "name": "tapOn",
-    "arguments": { "selector": { "elementId": "app:id/ok" }, "deviceId": "emulator-5554" }
+    "arguments": {
+      "selector": { "elementId": "app:id/ok" },
+      "selectionStrategy": "unique",
+      "deviceId": "emulator-5554"
+    }
   }
 }
 ```
@@ -72,8 +81,8 @@ These are measured on the server side only; no host round trip was measured.
 
 | Item                       | Bytes  | Gzipped |
 | -------------------------- | ------ | ------- |
-| Read-only shell document   | 9,253  | 3,203   |
-| Interactive shell document | 14,329 | 4,425   |
+| Read-only shell document   | 9,321  | 3,213   |
+| Interactive shell document | 14,998 | 4,636   |
 
 - Rendering either document takes about 0.1 ms. It is the same bytes on every read for a given
   flag value, so a host can cache it.
@@ -111,7 +120,7 @@ Open questions that need a live host:
 Don't ship it yet, and don't drop it.
 
 The protocol supports the feature without new server surface: one flag, a second shell document,
-no new tool and no change to `observe`. The cost is small: about 5 KB more for the document and no
+no new tool and no change to `observe`. The cost is small: about 6 KB more for the document and no
 extra traffic. But no live host has rendered either shell yet, and questions 1–3 decide whether the
 feature is useful or confusing.
 

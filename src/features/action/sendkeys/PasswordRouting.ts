@@ -4,6 +4,7 @@ import { ActionableError } from "../../../models/ActionableError";
 import type { KeyEventPlan } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 import { hasFocusedTextInput } from "../ClearText";
 import { focusedImeFieldClass } from "../imeFailureDiagnostics";
+import { AUTO_MOBILE_IME_ID } from "../AndroidImeCatalog";
 import {
   NoFocusedEditableError,
   isPrintableAscii,
@@ -17,6 +18,43 @@ import type {
 } from "../SendKeys";
 
 type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeText">;
+
+const AUTO_MOBILE_IME_PACKAGE = AUTO_MOBILE_IME_ID.split("/")[0];
+
+/**
+ * The on-screen keyboard package when Auto cannot use the AutoMobile IME: another keyboard is
+ * shown while no focused editable field is readable. The IME commit is verified against that
+ * field, so it can never succeed there; the accessibility path finds the input itself (#17801).
+ */
+export function unusableImeKeyboard(observation: ObserveResult): string | undefined {
+  const keyboard = observation.keyboard;
+  if (!keyboard?.visible || keyboard.package === AUTO_MOBILE_IME_PACKAGE) {
+    return undefined;
+  }
+  const hierarchy = observation.viewHierarchy;
+  return hierarchy && hasFocusedTextInput(hierarchy) ? undefined : keyboard.package;
+}
+
+/** The client-facing note on a command Auto delivered through accessibility instead (#17801). */
+export function autoA11yFallbackWarning(keyboardPackage: string): string {
+  return (
+    `Auto mode typed through accessibility: the on-screen keyboard is ${keyboardPackage}, ` +
+    "not the AutoMobile IME, and no focused editable field is readable, so the IME path " +
+    "cannot be used on this device."
+  );
+}
+
+/** Leads a command's warning with the fallback note when Auto routed to `a11y` (#17801). */
+export function noteAutoA11yFallback(
+  result: { warning?: string },
+  imeFallbackKeyboard: string | undefined,
+): void {
+  if (imeFallbackKeyboard !== undefined) {
+    result.warning = [autoA11yFallbackWarning(imeFallbackKeyboard), result.warning]
+      .filter(Boolean)
+      .join(" ");
+  }
+}
 
 export interface PasswordRoutingDeps {
   platform(): string;
@@ -47,6 +85,8 @@ export class PasswordRouting {
     verifyPasswordDeliverable: boolean;
     focusedFieldClass?: string | null;
     passwordField?: boolean;
+    /** Set when Auto routed to `a11y` because the AutoMobile IME cannot be used (#17801). */
+    imeFallbackKeyboard?: string;
   }> {
     if (this.deps.platform() !== "android" || requestedMode !== "auto") {
       return {
@@ -56,15 +96,27 @@ export class PasswordRouting {
       };
     }
     let focusedFieldClass: string | null = null;
+    let imeFallbackKeyboard: string | undefined;
     const password = await this.isFocusedAndroidPasswordField(
       operation,
       signal,
       display,
       (observation) => {
         focusedFieldClass = focusedImeFieldClass(observation);
+        imeFallbackKeyboard =
+          this.deps.targetLayer() === "prototype" ? undefined : unusableImeKeyboard(observation);
       },
     );
     const focusedInputVerified = password !== undefined;
+    if (imeFallbackKeyboard !== undefined) {
+      return {
+        mode: "a11y",
+        focusedInputVerified,
+        verifyPasswordDeliverable: false,
+        focusedFieldClass,
+        imeFallbackKeyboard,
+      };
+    }
     if (password && (await this.deps.supportsImePasswordCommit())) {
       // The CtrlProxy IME commits and clears password fields like any other field.
       return {
@@ -142,8 +194,13 @@ export class PasswordRouting {
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       // Auto insert already reads focus for password routing. Reject before dispatch
-      // rather than trusting an IME acknowledgement with no readable editable target.
-      if (operation === "insert" && this.deps.targetLayer() !== "prototype") {
+      // rather than trusting an IME acknowledgement with no readable editable target,
+      // unless another keyboard shows that the accessibility path is the one to use.
+      if (
+        operation === "insert" &&
+        this.deps.targetLayer() !== "prototype" &&
+        unusableImeKeyboard(observation) === undefined
+      ) {
         throw new NoFocusedEditableError();
       }
       // Replace still dispatches; distinguish absent focus from a focused non-password field.

@@ -1,3 +1,4 @@
+import { xrSwipeBounds } from "../../xr/xrPanelSpace";
 import type { IosSdkWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { ScrollSearchSession } from "./ScrollSearchSession";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
@@ -794,7 +795,9 @@ export class ScrollUntilVisible {
     const insetOptions = { observation, platform: this.swipePlatform(), includeSystemInsets };
     const screenSize = swipeScreenSize(insetOptions) || { width: 1080, height: 1920 };
     return {
-      bounds: getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions)),
+      bounds:
+        (this.swipePlatform() === "android" ? xrSwipeBounds(observation.backStack) : undefined) ??
+        getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions)),
       scrollable: true,
     } as Element;
   }

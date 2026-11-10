@@ -1,3 +1,6 @@
+import { cropSource } from "../../helpers/imageRelativePoint";
+import { resolveTapAtCoordinates } from "../../../src/features/action/tapAtCoordinateResolution";
+import { xrBackStack } from "../../helpers/xrHeadset";
 import { recordPlanCall } from "../../helpers/recordPlanCall";
 import { expect, test } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -125,4 +128,132 @@ test("missing rotation evidence records a legacy tap with an actionable warning"
   expect(result.steps[0]).not.toHaveProperty("geometry");
   expect(result.warnings[0]).toContain("tapAt was recorded without geometry");
   expect(result.warnings[0]).toContain("geometry provenance is unavailable");
+});
+
+for (const point of [
+  { x: 553, y: 1178 },
+  { x: 551, y: 1175 },
+]) {
+  test(`XR screenshot point ${point.x},${point.y} reaches Connected devices rather than Storage`, async () => {
+    const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+    fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: xrBackStack() });
+    const result = await fake.tapAt.execute(point);
+    expect(result.success).toBe(true);
+    expect(fake.androidDispatches[0].x).toBeWithin(point.x === 553 ? 261 : 258, 269);
+    expect(fake.androidDispatches[0].y).toBeWithin(437, 445);
+    expect(result).toMatchObject({
+      xrPanel: {
+        packageName: "com.android.settings",
+        taskId: 6,
+        displayX: fake.androidDispatches[0].x,
+        displayY: fake.androidDispatches[0].y,
+      },
+    });
+  });
+}
+
+test("XR refuses environment points before dispatch", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: xrBackStack() });
+  const result = await fake.tapAt.execute({ x: 100, y: 100 });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("no app panel");
+  expect(result.error).toContain("XR system UI");
+  expect(fake.androidDispatches).toHaveLength(0);
+});
+
+for (const options of [
+  { x: 553 / 2558, y: 1178 / 2558, coordinateSpace: "normalized" as const },
+  { x: (553 / 2558) * 100, y: (1178 / 2558) * 100, coordinateSpace: "percent" as const },
+  {
+    image: {
+      unit: "pixels" as const,
+      x: 553,
+      y: 1178,
+      source: {
+        screenshot: {
+          screenSize: { width: 2560, height: 2558 },
+          imageSize: { width: 2558, height: 2558 },
+          screenshotOrientation: "display" as const,
+        },
+      },
+    },
+  },
+]) {
+  test(`XR resolves ${"image" in options ? "image" : options.coordinateSpace} into the same display point`, async () => {
+    const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+    fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: xrBackStack() });
+    const result = await fake.tapAt.execute(options);
+    expect(result.success).toBe(true);
+    expect(fake.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
+  });
+}
+
+test("non-XR freeform tasks preserve absolute coordinates", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  const backStack = xrBackStack();
+  backStack.activities = backStack.activities.filter((activity) => activity.taskId === 6);
+  backStack.tasks = backStack.tasks.filter((task) => task.id === 6);
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack });
+  const result = await fake.tapAt.execute({ x: 551, y: 1175 });
+  expect(result.success).toBe(true);
+  expect(fake.androidDispatches[0]).toMatchObject({ x: 551, y: 1175 });
+  expect(result.xrPanel).toBeUndefined();
+});
+
+test("XR records screenshot coordinates for replay without mapping twice", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: xrBackStack() });
+  const context: import("../../../src/models/TapAtGeometry").TapAtPlanContext = {};
+  await fake.tapAt.execute({ x: 553, y: 1178 }, { planContext: context });
+  expect(context.recordedGeometry).toMatchObject({ x: 553, y: 1178 });
+  await fake.tapAt.execute(
+    { x: 553, y: 1178 },
+    { planContext: { geometry: context.recordedGeometry } },
+  );
+  expect(fake.androidDispatches.map(({ x, y }) => ({ x, y }))).toEqual([
+    { x: 262, y: 442 },
+    { x: 262, y: 442 },
+  ]);
+});
+
+test("XR excludes environment and barrier tasks even when they precede the app", async () => {
+  const backStack = xrBackStack("swipe-up");
+  backStack.tasks.sort(
+    (a, b) =>
+      Number(b.packageName?.startsWith("com.android.systemui")) -
+      Number(a.packageName?.startsWith("com.android.systemui")),
+  );
+  const resolved = resolveTapAtCoordinates(
+    { x: 553, y: 1178 },
+    { ...observation(2560, 2558), backStack },
+    "android",
+  );
+  expect(resolved).toMatchObject({ x: 262, y: 442, xrPanel: { taskId: 6 } });
+});
+
+test("XR system UI without an app panel refuses tapAt", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  const backStack = xrBackStack();
+  backStack.tasks = backStack.tasks.filter((task) => task.id !== 6);
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack });
+  const result = await fake.tapAt.execute({ x: 553, y: 1178 });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("no app panel");
+  expect(fake.androidDispatches).toHaveLength(0);
+});
+
+test("XR image crop points use the same screenshot-to-panel mapping", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  const screenSize = { width: 2560, height: 2558 };
+  const source = await cropSource({ platform: "android", screenSize }, screenSize, {
+    left: 500,
+    top: 1100,
+    right: 600,
+    bottom: 1200,
+  });
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: xrBackStack() });
+  const result = await fake.tapAt.execute({ image: { unit: "pixels", x: 53, y: 78, source } });
+  expect(result.success).toBe(true);
+  expect(fake.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
 });

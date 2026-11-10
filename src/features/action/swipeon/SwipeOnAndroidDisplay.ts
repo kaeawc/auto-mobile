@@ -1,3 +1,4 @@
+import { xrSwipeBounds } from "../../xr/xrPanelSpace";
 import type { SwipeOnCtrlProxy } from "./types";
 import { freshSwipeHierarchy } from "./freshSwipeHierarchy";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./androidSearchDrag";
@@ -390,6 +391,7 @@ export class SwipeOnAndroidDisplay {
     decision: AutoTargetDecision;
     observation: ObserveResult;
   }): Pick<SwipeOnResult, "x1" | "y1" | "x2" | "y2" | "targetType" | "warning"> {
+    const panelBounds = xrSwipeBounds(observation.backStack, options.fromEdge);
     if (decision.element && observation.viewHierarchy) {
       const coordinates = this.ctx().resolveContainerSwipeCoordinates(
         { ...options, direction: options.direction! },
@@ -414,7 +416,9 @@ export class SwipeOnAndroidDisplay {
       ...displaySwipeCoordinates(
         options,
         observation,
-        this.resolveDisplaySwipeBounds(options, observation, bounds),
+        !bounds && panelBounds
+          ? panelBounds
+          : this.resolveDisplaySwipeBounds(options, observation, bounds),
       ),
       targetType: bounds ? "element" : "screen",
     };

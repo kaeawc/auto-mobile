@@ -1,6 +1,8 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { errorMessage } from "../../models/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { readSmartStackWidgetCells, type SmartStackWidgetCellReading } from "./WatchSmartStack";
 import type { WatchCommand, WatchRunnerClient } from "./WatchRunnerClient";
 
 export interface WatchSmartStackWidgetOptions {
@@ -36,6 +38,62 @@ export function hasSmartStackWidget(dump: string, appName: string, widgetName: s
       fields[2] === widgetName
     );
   });
+}
+
+function readWidgetCells(dump: string): SmartStackWidgetCellReading[] | undefined {
+  try {
+    return readSmartStackWidgetCells(dump);
+  } catch (error) {
+    // A dump without a window frame (the face mid-transition) has no cells to compare.
+    logger.debug(`Smart Stack cell readback skipped: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
+/**
+ * The widget cell added since `baselineDump` when its identifier's app and widget names are both
+ * empty (#17793). It must be the only new cell id, every baseline widget cell must still be
+ * there, the widget cell count must have gone up by exactly one, and the cell's own labels must
+ * hold `appName`; otherwise the cell cannot be told apart from what was already on the stack.
+ */
+export function findUnnamedAddedWidget(
+  dump: string,
+  baselineDump: string,
+  appName: string,
+): SmartStackWidgetCellReading | undefined {
+  const before = readWidgetCells(baselineDump);
+  const after = readWidgetCells(dump);
+  if (!before || !after) {
+    return undefined;
+  }
+  const afterIds = new Set(after.map(({ card }) => card.cellId));
+  const beforeIds = new Set(before.map(({ card }) => card.cellId));
+  const added = after.filter(({ card }) => !beforeIds.has(card.cellId));
+  const [cell] = added;
+  if (
+    added.length !== 1 ||
+    afterIds.size !== after.length ||
+    after.length !== before.length + 1 ||
+    ![...beforeIds].every((id) => afterIds.has(id))
+  ) {
+    return undefined;
+  }
+  return cell.card.appName === "" && cell.card.widgetName === "" && cell.labels.includes(appName)
+    ? cell
+    : undefined;
+}
+
+/** Exact names identify the widget; a nameless cell counts only as the one just added. */
+export function verifySmartStackWidget(
+  dump: string,
+  baselineDump: string,
+  appName: string,
+  widgetName: string,
+): boolean {
+  return (
+    hasSmartStackWidget(dump, appName, widgetName) ||
+    findUnnamedAddedWidget(dump, baselineDump, appName) !== undefined
+  );
 }
 
 function validateWidgetOptions(options: WatchSmartStackWidgetOptions): void {
@@ -107,31 +165,35 @@ function createWidgetActions(
         );
       }
       if (matches(dump)) {
-        return true;
+        return dump;
       }
       if (attempt < limit - 1) {
         await settle();
       }
     }
-    return false;
+    return undefined;
   };
   return { gesture, poll, settle };
 }
 
 type WidgetActions = ReturnType<typeof createWidgetActions>;
 
-async function openSmartStack({ gesture, poll }: WidgetActions): Promise<boolean> {
+/** Returns the dump that showed the header: the stack as it was before this attempt's edit. */
+async function openSmartStack({ gesture, poll }: WidgetActions): Promise<string | undefined> {
   // Home can be swallowed or toggle the face and app grid; verify each home/swipe round.
   for (let round = 0; round < 3; round++) {
     await gesture({ type: "home" });
     await gesture({ type: "face", op: "swipe", direction: "up" });
-    if (
-      await poll("headerAttempts", (dump) => dump.includes("identifier: 'Smart Stack Header'"), 4)
-    ) {
-      return true;
+    const header = await poll(
+      "headerAttempts",
+      (dump) => dump.includes("identifier: 'Smart Stack Header'"),
+      4,
+    );
+    if (header !== undefined) {
+      return header;
     }
   }
-  return false;
+  return undefined;
 }
 
 async function selectGalleryWidget({ gesture }: WidgetActions, galleryStepsFromBottom: number) {
@@ -174,7 +236,8 @@ export async function addWatchSmartStackWidget(
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       signal?.throwIfAborted();
       result.attempts++;
-      if (!(await openSmartStack(actions))) {
+      const baselineDump = await openSmartStack(actions);
+      if (baselineDump === undefined) {
         return {
           ...result,
           reason:
@@ -182,11 +245,12 @@ export async function addWatchSmartStackWidget(
         };
       }
       await selectGalleryWidget(actions, galleryStepsFromBottom);
-      result.success = await actions.poll(
-        "verificationAttempts",
-        (dump) => hasSmartStackWidget(dump, appName, widgetName),
-        10,
-      );
+      result.success =
+        (await actions.poll(
+          "verificationAttempts",
+          (dump) => verifySmartStackWidget(dump, baselineDump, appName, widgetName),
+          10,
+        )) !== undefined;
       if (result.success) {
         result.reason = "The requested widget cell is present in the Smart Stack.";
         return result;

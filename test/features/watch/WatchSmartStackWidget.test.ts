@@ -3,7 +3,9 @@ import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   addWatchSmartStackWidget,
+  findUnnamedAddedWidget,
   hasSmartStackWidget,
+  verifySmartStackWidget,
 } from "../../../src/features/watch/WatchSmartStackWidget";
 import type {
   WatchCommand,
@@ -16,6 +18,24 @@ const captures = [
   "fixture-face-smartstack-after-reload.txt",
 ].map((name) => readFileSync(new URL(`../../fixtures/watch/${name}`, import.meta.url), "utf8"));
 const options = { appName: "ProbeApp", widgetName: "ProbeWidgetXYZ" };
+// #17793: both cells were added but their identifiers carry empty app and widget names.
+const emptyNames = readFileSync(
+  new URL("../../fixtures/watch/fixture-face-smartstack-empty-names.txt", import.meta.url),
+  "utf8",
+);
+const TOP_CELL = "6FFE7596-8496-4E83-91C4-563745BD75F9";
+const LOWER_CELL = "2FB3A58A-0DA1-4EA7-8D32-C9B36220B980";
+
+/** The dump without the cell whose identifier holds `cellId` and that cell's subtree. */
+function withoutCell(dump: string, cellId: string): string {
+  const lines = dump.split("\n");
+  const start = lines.findIndex((line) => line.includes(`-- ${cellId} --`));
+  const depth = (line: string) => line.length - line.trimStart().length;
+  const end = lines.findIndex((line, index) => index > start && depth(line) <= depth(lines[start]));
+  return [...lines.slice(0, start), ...lines.slice(end)].join("\n");
+}
+const oneEmptyCell = withoutCell(emptyNames, LOWER_CELL);
+const noWidgetCells = withoutCell(oneEmptyCell, TOP_CELL);
 
 class FakeClient implements Pick<WatchRunnerClient, "request"> {
   readonly commands: WatchCommand[] = [];
@@ -88,6 +108,85 @@ describe("Smart Stack widget", () => {
         ),
       ).toBe(false);
     }
+  });
+  test("the empty-name capture has no exact name match", () => {
+    expect(hasSmartStackWidget(emptyNames, options.appName, options.widgetName)).toBe(false);
+  });
+  test.each([
+    ["no widget cell", noWidgetCells, oneEmptyCell, TOP_CELL],
+    ["one empty-name cell", oneEmptyCell, emptyNames, LOWER_CELL],
+  ])(
+    "accepts the one empty-name cell added to a stack with %s",
+    (_label, baseline, dump, cellId) => {
+      expect(findUnnamedAddedWidget(dump, baseline, options.appName)?.card).toMatchObject({
+        cellId,
+        appName: "",
+        widgetName: "",
+        hostBundleId: "dev.probe.app",
+        widgetKind: "probe",
+      });
+      expect(verifySmartStackWidget(dump, baseline, options.appName, options.widgetName)).toBe(
+        true,
+      );
+    },
+  );
+  test.each([
+    ["the stack is unchanged", emptyNames, emptyNames],
+    ["two cells appeared at once", noWidgetCells, emptyNames],
+    ["a baseline cell disappeared", captures[0], emptyNames],
+    ["a cell was removed", emptyNames, oneEmptyCell],
+    ["the baseline is not a dump", "container", oneEmptyCell],
+    ["the readback is not a dump", noWidgetCells, "container"],
+    ["the cell is named for another widget", captures[0].replace(/Cell, .*\n/, ""), captures[0]],
+  ])("rejects an empty-name readback when %s", (_label, baseline, dump) => {
+    expect(findUnnamedAddedWidget(dump, baseline, options.appName)).toBeUndefined();
+    expect(verifySmartStackWidget(dump, baseline, "OtherApp", "OtherWidget")).toBe(false);
+  });
+  test("rejects a new empty-name cell whose labels do not hold the app name", () => {
+    expect(findUnnamedAddedWidget(oneEmptyCell, noWidgetCells, "OtherApp")).toBeUndefined();
+    expect(
+      findUnnamedAddedWidget(
+        oneEmptyCell.replaceAll("label: 'ProbeApp'", "label: 'Other'"),
+        noWidgetCells,
+        options.appName,
+      ),
+    ).toBeUndefined();
+  });
+  test("rejects a duplicated cell id", () => {
+    const duplicated = emptyNames.replace(LOWER_CELL, TOP_CELL);
+    expect(findUnnamedAddedWidget(duplicated, noWidgetCells, options.appName)).toBeUndefined();
+  });
+  test("succeeds on the first attempt when the added cell's names are empty", async () => {
+    const { client, timer } = arrange([noWidgetCells, "container", oneEmptyCell]);
+    const result = await addWatchSmartStackWidget(client, options, { timer });
+    expect(result).toMatchObject({
+      success: true,
+      attempts: 1,
+      headerAttempts: 1,
+      verificationAttempts: 2,
+      steps: 12,
+    });
+    expect(client.commands).toEqual(widgetAttempt(2));
+  });
+  test("compares a retry against that attempt's own header dump", async () => {
+    const { client, timer } = arrange([
+      noWidgetCells,
+      ...Array(10).fill("container"),
+      oneEmptyCell,
+      emptyNames,
+    ]);
+    const result = await addWatchSmartStackWidget(client, options, { timer });
+    expect(result).toMatchObject({ success: true, attempts: 2, verificationAttempts: 11 });
+  });
+  test("fails when the empty-name cell was already on the stack before the edit", async () => {
+    const { client, timer } = arrange([emptyNames, ...Array(10).fill(emptyNames)]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, maxAttempts: 1 },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: false, attempts: 1, verificationAttempts: 10 });
+    expect(result.reason).toContain("Widget cell did not appear");
   });
   test("uses clockface commands in order and polls past container-only dumps", async () => {
     const { client, timer } = arrange(["container", captures[0], "container", captures[1]]);

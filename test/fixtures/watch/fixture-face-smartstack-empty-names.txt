@@ -1,0 +1,107 @@
+Attributes: Application, 0x103ccfc00, pid: 63372, label: 'ClockFace'
+Element subtree:
+ →Application, 0x103ccfc00, pid: 63372, label: 'ClockFace'
+    Window, 0x103ccc280, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x103cccf00, {{0.0, 0.0}, {187.0, 223.0}}
+        Other, 0x103ccd180, {{0.0, 0.0}, {187.0, 223.0}}
+          Other, 0x103cccb40, {{0.0, 0.0}, {187.0, 223.0}}
+            Other, 0x103ccebc0, {{0.0, 0.0}, {187.0, 223.0}}
+              Other, 0x103ccf0c0, {{0.0, 0.0}, {187.0, 223.0}}
+                Other, 0x103ccd040, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x103ccc780, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x103cccc80, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x103cccdc0, {{0.0, 0.0}, {187.0, 223.0}}
+                    CollectionView, 0x103ccc000, {{0.0, 0.0}, {187.0, 223.0}}
+                      Other, 0x103ccde00, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x103ccc140, {{0.0, 0.0}, {187.0, 223.0}}
+                          Other, 0x103ccc500, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x103ccca00, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x103ccc8c0, {{0.0, 0.0}, {187.0, 223.0}}
+                                Other, 0x103cce6c0, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x103cce800, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x103cce440, {{0.0, 0.0}, {176.0, 72.5}}
+                            Other, 0x103ccfac0, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x103ccd900, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x103ccda40, {{0.0, 0.0}, {187.0, 223.0}}
+                          Other, 0x103ccd2c0, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x103cce300, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x103ccdf40, {{0.0, 0.0}, {176.0, 72.5}}
+                            Other, 0x103cce080, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x103cce1c0, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x103ccf980, {{0.0, 0.0}, {187.0, 223.0}}
+                          Other, 0x103ccd400, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x103ccea80, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x103ccef80, {{0.0, 0.0}, {176.0, 72.5}}
+                            Other, 0x103ccd540, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x103ccdcc0, {{0.0, 0.0}, {187.0, 223.0}}
+                      Other, 0x103ccdb80, {{5.5, 15.5}, {176.0, 87.0}}, identifier: 'Smart Stack Header'
+                        Button, 0x103c1af80, {{5.5, 15.5}, {83.0, 87.0}}, label: 'Tuesday, November 10'
+                          StaticText, 0x103cc83c0, {{12.5, 20.5}, {40.0, 28.5}}, label: 'TUE'
+                          StaticText, 0x103ccaf80, {{12.5, 44.5}, {44.0, 28.5}}, label: 'NOV'
+                          StaticText, 0x103cc08c0, {{12.5, 68.5}, {22.5, 28.5}}, label: '10'
+                        Button, 0x103cc7700, {{94.5, 15.5}, {87.0, 87.0}}, label: '2:17 PM and 46 seconds'
+                          StaticText, 0x103cd1540, {{117.5, 44.5}, {41.0, 29.0}}, label: '2:17'
+                          StaticText, 0x103cd1900, {{117.5, 44.5}, {41.0, 29.0}}, label: '2:17'
+                          StaticText, 0x103cd0000, {{117.5, 44.5}, {41.0, 29.0}}, label: '2:17'
+                          StaticText, 0x103cd0140, {{117.5, 44.5}, {41.0, 29.0}}, label: '2:17'
+                      Cell, 0x103cd12c0, {{5.5, 110.0}, {176.0, 72.5}}, identifier: 'StackCollectionViewComplicationCell -- 6FFE7596-8496-4E83-91C4-563745BD75F9 --  --  -- dev.probe.app -- dev.probe.app-dev.probe.app.widget-probe-0'
+                        Other, 0x103cd9180, {{5.5, 110.0}, {176.0, 72.5}}
+                          Other, 0x103cd8dc0, {{5.5, 110.0}, {176.0, 72.5}}
+                            Other, 0x103cd92c0, {{5.5, 110.0}, {176.0, 72.5}}
+                              Other, 0x103cd8640, {{5.5, 110.0}, {176.0, 72.5}}
+                                Other, 0x103cdc000, {{5.5, 110.0}, {176.0, 72.5}}
+                                  Other, 0x103cdc140, {{5.5, 110.0}, {176.0, 72.5}}
+                                    Other, 0x103cdc280, {{5.5, 110.0}, {176.0, 72.5}}
+                                      Other, 0x103cdc3c0, {{5.5, 110.0}, {176.0, 72.5}}
+                                        Other, 0x103cdc500, {{0.0, 0.0}, {176.0, 72.5}}
+                                          Other, 0x103cdc640, {{0.0, 0.0}, {176.0, 72.5}}, label: 'ProbeApp'
+                                            Other, 0x103cdc780, {{0.0, 0.0}, {176.0, 72.5}}
+                                              Other, 0x103cdc8c0, {{0.0, 0.0}, {176.0, 72.5}}
+                                                Other, 0x103cdca00, {{0.0, 0.0}, {176.0, 72.5}}
+                                                  StaticText, 0x103cdcb40, {{0.0, 0.0}, {176.0, 72.5}}, label: 'T58'
+                                                    Other, 0x103cdcc80, {{0.0, 0.0}, {176.0, 72.5}}
+                                                      StaticText, 0x103cdcdc0, {{74.5, 27.5}, {27.5, 19.5}}, label: 'T58'
+                                            Other, 0x103cdcf00, {{0.0, 0.0}, {176.0, 72.5}}, label: 'ProbeApp'
+                      Cell, 0x103cdd040, {{16.9, 137.4}, {153.1, 63.1}}, identifier: 'StackCollectionViewComplicationCell -- 2FB3A58A-0DA1-4EA7-8D32-C9B36220B980 --  --  -- dev.probe.app -- dev.probe.app-dev.probe.app.widget-probe-0'
+                        Other, 0x103cdd180, {{16.9, 137.4}, {153.1, 63.1}}
+                          Other, 0x103cdd2c0, {{16.9, 137.4}, {153.1, 63.1}}
+                            Other, 0x103cdd400, {{16.9, 137.4}, {153.1, 63.1}}
+                              Other, 0x103cdd540, {{16.9, 137.4}, {153.1, 63.1}}
+                                Other, 0x103cdd680, {{16.9, 137.4}, {153.1, 63.1}}
+                                  Other, 0x103cdd7c0, {{16.9, 137.4}, {153.1, 63.1}}
+                                    Other, 0x103cdd900, {{16.9, 137.4}, {153.1, 63.1}}
+                                      Other, 0x103cdda40, {{16.9, 137.4}, {153.1, 63.1}}
+                                        Other, 0x103cddb80, {{0.0, 0.0}, {176.0, 72.5}}
+                                          Other, 0x103cddcc0, {{0.0, 0.0}, {176.0, 72.5}}, label: 'ProbeApp'
+                                            Other, 0x103cdde00, {{0.0, 0.0}, {176.0, 72.5}}
+                                              Other, 0x103cddf40, {{0.0, 0.0}, {176.0, 72.5}}
+                                                Other, 0x103cde080, {{0.0, 0.0}, {176.0, 72.5}}
+                                                  StaticText, 0x103cde1c0, {{0.0, 0.0}, {176.0, 72.5}}, label: 'T58'
+                                                    Other, 0x103cde300, {{0.0, 0.0}, {176.0, 72.5}}
+                                                      StaticText, 0x103cde440, {{74.5, 27.5}, {27.5, 19.5}}, label: 'T58'
+                                            Other, 0x103cde580, {{0.0, 0.0}, {176.0, 72.5}}, label: 'ProbeApp'
+                            Other, 0x103cde6c0, {{16.9, 137.4}, {153.1, 63.1}}
+                      Cell, 0x103cde800, {{30.1, 163.8}, {126.7, 52.2}}, identifier: 'StackCollectionViewTriPlatterCell'
+                        Other, 0x103cde940, {{30.1, 163.8}, {126.7, 52.2}}
+                          Other, 0x103cdea80, {{30.1, 163.8}, {126.7, 52.2}}
+                            Other, 0x103cdebc0, {{30.1, 163.8}, {126.7, 52.2}}
+                              Other, 0x103cded00, {{77.3, 163.8}, {32.4, 52.2}}
+                                Other, 0x103cdee40, {{77.3, 173.9}, {32.4, 32.4}}, identifier: 'TrailingPlatter'
+                                  Other, 0x103cdef80, {{77.3, 173.9}, {32.4, 32.4}}
+                                  Other, 0x103cdf0c0, {{78.7, 175.3}, {29.5, 29.5}}
+                                    Other, 0x103cdf200, {{78.7, 175.3}, {29.5, 29.5}}, label: 'No unread messages'
+                                      Other, 0x103cdf340, {{78.7, 175.3}, {29.5, 29.5}}, label: 'No unread messages'
+                            Other, 0x103cdf480, {{30.1, 163.8}, {126.7, 52.2}}
+                  Other, 0x103cdf5c0, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x103cdf700, {{0.0, 0.0}, {187.0, 223.0}}
+    Window, 0x103cdf840, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x103cdf980, {{0.0, 0.0}, {187.0, 223.0}}
+    Window (Main), 0x103cdfac0, {{179.0, 37.5}, {6.0, 46.5}}
+    Window, 0x103cdfc00, {{0.0, 0.0}, {187.0, 223.0}}
+Path to element:
+ →Application, 0x103ccfc00, pid: 63372, label: 'ClockFace'
+Query chain:
+ →Find: Application 'com.apple.clockface'
+  Output: {
+    Application, 0x103ccc640, pid: 63372, label: 'ClockFace'
+  }

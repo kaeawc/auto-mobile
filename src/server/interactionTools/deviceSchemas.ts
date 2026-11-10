@@ -160,12 +160,14 @@ export const pressButtonInput = z.object({
   ...responseShapeControlFields,
 });
 
-const systemTrayNotificationSchema = z.object({
-  title: z.string().optional().describe("Notification title to match"),
-  body: z.string().optional().describe("Notification body to match"),
-  appId: z.string().optional().describe("App package ID to match"),
-  tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)"),
-});
+const systemTrayNotificationSchema = z
+  .object({
+    title: z.string().optional().describe("Notification title to match"),
+    body: z.string().optional().describe("Notification body to match"),
+    appId: z.string().optional().describe("App package ID to match"),
+    tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)"),
+  })
+  .strict();
 
 const systemTraySchemaBase = z
   .object({

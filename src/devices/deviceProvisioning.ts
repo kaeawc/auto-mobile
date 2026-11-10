@@ -717,9 +717,8 @@ function xrImagesOrThrow(
     return xr;
   }
   const [abi] = preferredAbis(architecture);
-  throw new ActionableError(
-    xrMissingImageMessage(kind, describeRange(bounds), describeInstalled(images), abi),
-  );
+  const [range, installed] = [describeRange(bounds), describeInstalled(images)];
+  throw new ActionableError(xrMissingImageMessage(kind, { bounds, range, installed, abi }));
 }
 
 /** Images of the requested family in range, or that family's install guidance. */

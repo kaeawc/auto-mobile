@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.automotivefixture.media
 
+import android.content.Context
+import android.content.Intent
 import android.media.MediaDescription
 import android.media.MediaMetadata
 import android.media.browse.MediaBrowser
@@ -23,28 +25,34 @@ class FixtureMediaBrowserService : MediaBrowserService() {
         setCallback(
           object : MediaSession.Callback() {
             override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-              val item = mediaId?.let(tree::playable) ?: return
-              setMetadata(
-                MediaMetadata.Builder()
-                  .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, item.mediaId)
-                  .putString(MediaMetadata.METADATA_KEY_TITLE, item.title)
-                  .putString(MediaMetadata.METADATA_KEY_ARTIST, item.subtitle)
-                  .build(),
-              )
-              setPlaybackState(state(PlaybackState.STATE_PLAYING))
+              mediaId?.let(tree::playable)?.let(::play)
+            }
+
+            override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+              tree.search(query)?.let(::play)
             }
 
             override fun onPlay() = setPlaybackState(state(PlaybackState.STATE_PLAYING))
 
             override fun onPause() = setPlaybackState(state(PlaybackState.STATE_PAUSED))
 
-            override fun onStop() = setPlaybackState(state(PlaybackState.STATE_STOPPED))
+            override fun onStop() {
+              setPlaybackState(state(PlaybackState.STATE_STOPPED))
+              stopSelf()
+            }
           },
         )
         setPlaybackState(state(PlaybackState.STATE_STOPPED))
         isActive = true
       }
     sessionToken = session.sessionToken
+  }
+
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    if (intent?.action == ACTION_PLAY_FROM_SEARCH) {
+      tree.search(intent.getStringExtra(EXTRA_QUERY))?.let(::play)
+    }
+    return START_NOT_STICKY
   }
 
   override fun onDestroy() {
@@ -76,14 +84,40 @@ class FixtureMediaBrowserService : MediaBrowserService() {
       else MediaBrowser.MediaItem.FLAG_PLAYABLE,
     )
 
+  private fun play(item: MediaNode) {
+    // Keep the session alive while playing, even after every client unbinds.
+    startService(Intent(this, FixtureMediaBrowserService::class.java))
+    session.setMetadata(
+      MediaMetadata.Builder()
+        .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, item.mediaId)
+        .putString(MediaMetadata.METADATA_KEY_TITLE, item.title)
+        .putString(MediaMetadata.METADATA_KEY_ARTIST, item.subtitle)
+        .build(),
+    )
+    session.setPlaybackState(state(PlaybackState.STATE_PLAYING))
+  }
+
   private fun state(state: Int): PlaybackState =
     PlaybackState.Builder()
       .setActions(
         PlaybackState.ACTION_PLAY or
           PlaybackState.ACTION_PAUSE or
           PlaybackState.ACTION_STOP or
-          PlaybackState.ACTION_PLAY_FROM_MEDIA_ID,
+          PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or
+          PlaybackState.ACTION_PLAY_FROM_SEARCH,
       )
       .setState(state, 0L, if (state == PlaybackState.STATE_PLAYING) 1f else 0f)
       .build()
+
+  companion object {
+    private const val ACTION_PLAY_FROM_SEARCH =
+      "dev.jasonpearson.automobile.automotivefixture.action.PLAY_FROM_SEARCH"
+    private const val EXTRA_QUERY = "query"
+
+    /** Start intent that plays the first [MediaBrowseTree.search] match for [query]. */
+    fun playFromSearchIntent(context: Context, query: String?): Intent =
+      Intent(context, FixtureMediaBrowserService::class.java)
+        .setAction(ACTION_PLAY_FROM_SEARCH)
+        .putExtra(EXTRA_QUERY, query)
+  }
 }

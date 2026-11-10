@@ -74,6 +74,11 @@ first-record order, so it can change after `disable()` and `enable()`.
   recording stays off until the app calls `enable`.
 - The block describes templates the app returned, never what the host rendered or hid (driving
   restrictions, list limits, host-side truncation). The `note` field says so on every block.
+- The reader asks only the package in `activeWindow.appId`. During Android Auto projection that is
+  `com.google.android.projection.gearhead` (its `GhostActivity`), so a projected app's route is never
+  asked, although the app keeps recording and its route answers a direct `content call` with the
+  top screen the head unit shows. The projected app is the one whose `CarAppService` Android Auto
+  binds (`dumpsys activity services` lists it with client `com.google.android.projection.gearhead`).
 
 ## Host-rendered marker
 

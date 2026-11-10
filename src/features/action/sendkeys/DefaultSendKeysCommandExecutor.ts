@@ -314,6 +314,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private createPasswordRouting(): PasswordRouting {
     return new PasswordRouting({
       platform: () => this.device.platform,
+      formFactor: () => this.device.formFactor,
       observer: { execute: (options) => this.observer.execute(options) },
       targetLayer: () => this.targetLayer,
       resolveMode: (requestedMode) => this.resolveMode(requestedMode),

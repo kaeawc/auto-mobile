@@ -6,6 +6,7 @@ import { hasFocusedTextInput } from "../ClearText";
 import { focusedImeFieldClass } from "../imeFailureDiagnostics";
 import { AUTO_MOBILE_IME_ID } from "../AndroidImeCatalog";
 import { getCapturedKeyboard } from "../../observe/output/elementProvenance";
+import type { FormFactor } from "../../../models/DeviceMatchCriteria";
 import {
   NoFocusedEditableError,
   isPrintableAscii,
@@ -22,12 +23,48 @@ type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeTe
 
 const AUTO_MOBILE_IME_PACKAGE = AUTO_MOBILE_IME_ID.split("/")[0];
 
+const isXrSystemName = (name: string | undefined): boolean =>
+  !!name &&
+  (name.startsWith("com.android.systemui.xr") || name.startsWith("com.android.systemui/.xr"));
+
 /**
- * The on-screen keyboard package when Auto cannot use the AutoMobile IME: another keyboard is
- * shown while no focused editable field is readable. The IME commit is verified against that
- * field, so it can never succeed there; the accessibility path finds the input itself (#17801).
+ * Whether the device is an Android XR headset or glasses: the announced form factor, or XR
+ * system UI windows in the observed back stack (the same names #17805 keys XR panels on).
  */
-export function unusableImeKeyboard(observation: ObserveResult): string | undefined {
+export function isAndroidXrDevice(
+  observation: Pick<ObserveResult, "backStack">,
+  formFactor?: FormFactor,
+): boolean {
+  if (formFactor === "xr-headset" || formFactor === "xr-glasses") {
+    return true;
+  }
+  const backStack = observation.backStack;
+  return (
+    !!backStack &&
+    (backStack.activities.some((activity) => isXrSystemName(activity.name)) ||
+      backStack.tasks.some(
+        (task) =>
+          isXrSystemName(task.packageName) ||
+          isXrSystemName(task.rootActivity) ||
+          isXrSystemName(task.topActivity),
+      ))
+  );
+}
+
+/**
+ * The on-screen keyboard package when Auto cannot use the AutoMobile IME on this device: an
+ * Android XR device shows another keyboard while no focused editable field is readable. The IME
+ * commit is verified against that field, so it can never succeed there; the accessibility path
+ * finds the input itself (#17801). Phones keep the AutoMobile IME as the default even when
+ * Gboard is visible and focus is unreadable (a WebView or Compose field), per #16428.
+ */
+export function unusableImeKeyboard(
+  observation: ObserveResult,
+  formFactor?: FormFactor,
+): string | undefined {
+  if (!isAndroidXrDevice(observation, formFactor)) {
+    return undefined;
+  }
   // A raw observation carries the keyboard the capture vouched for on `elements`; the
   // top-level field is only filled in by output sanitization.
   const keyboard =
@@ -63,6 +100,8 @@ export function noteAutoA11yFallback(
 
 export interface PasswordRoutingDeps {
   platform(): string;
+  /** The device's announced form factor, when known. */
+  formFactor?(): FormFactor | undefined;
   observer: Pick<SendKeysObserver, "execute">;
   targetLayer(): HierarchyLayer | undefined;
   resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode;
@@ -109,7 +148,9 @@ export class PasswordRouting {
       (observation) => {
         focusedFieldClass = focusedImeFieldClass(observation);
         imeFallbackKeyboard =
-          this.deps.targetLayer() === "prototype" ? undefined : unusableImeKeyboard(observation);
+          this.deps.targetLayer() === "prototype"
+            ? undefined
+            : unusableImeKeyboard(observation, this.deps.formFactor?.());
       },
     );
     const focusedInputVerified = password !== undefined;
@@ -204,7 +245,7 @@ export class PasswordRouting {
       if (
         operation === "insert" &&
         this.deps.targetLayer() !== "prototype" &&
-        unusableImeKeyboard(observation) === undefined
+        unusableImeKeyboard(observation, this.deps.formFactor?.()) === undefined
       ) {
         throw new NoFocusedEditableError();
       }

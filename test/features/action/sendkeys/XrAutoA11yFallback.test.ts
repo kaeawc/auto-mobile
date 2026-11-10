@@ -5,11 +5,13 @@ import type { ObserveResult } from "../../../../src/models";
 import type { SendKeysCommandResult } from "../../../../src/features/action/SendKeys";
 import {
   autoA11yFallbackWarning,
+  isAndroidXrDevice,
   unusableImeKeyboard,
 } from "../../../../src/features/action/sendkeys/PasswordRouting";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
 import { setCapturedKeyboard } from "../../../../src/features/observe/output/elementProvenance";
 import { android, createSendKeysHarness, focused } from "../SendKeysTestHarness";
+import { buildObserveResult } from "../../../helpers/observeFixture";
 
 interface CapturedSendKeys {
   commands: SendKeysCommandResult[];
@@ -167,5 +169,72 @@ describe("Auto falls back to a11y when the AutoMobile IME cannot be used (#17801
     expect(result.warning).toBeUndefined();
     expect(harness.committed).toEqual(["wifi"]);
     expect(harness.inserted).toEqual([]);
+  });
+});
+
+/** A phone WebView page with Gboard up and no readable focused editable node. */
+const phoneWebView: ObserveResult = buildObserveResult({
+  screenSize: { width: 1080, height: 2400 },
+  systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+  updatedAt: 1,
+  viewHierarchy: {
+    hierarchy: { node: { $: { class: "android.webkit.WebView", focused: "false" } } },
+  },
+  keyboard: { visible: true, package: GBOARD },
+});
+
+describe("phones keep the AutoMobile IME under Gboard (#16428)", () => {
+  test("a phone WebView with Gboard visible is not an XR device and keeps the IME", () => {
+    expect(isAndroidXrDevice(phoneWebView, android.formFactor)).toBe(false);
+    expect(unusableImeKeyboard(phoneWebView)).toBeUndefined();
+    expect(unusableImeKeyboard(phoneWebView, "phone")).toBeUndefined();
+  });
+
+  test("auto type into an unfocused WebView field stays on the AutoMobile IME", async () => {
+    const harness = createSendKeysHarness(
+      { ...android, formFactor: "phone" },
+      { execute: async () => phoneWebView },
+    );
+    const result = await harness.executor.type({ action: "type", text: "wifi" });
+    expect(result).toMatchObject({ resolvedMode: "ime", errorCode: "NO_FOCUSED_EDITABLE" });
+    expect(result.warning ?? "").not.toContain("Auto mode typed through accessibility");
+    expect(harness.inserted).toEqual([]);
+  });
+
+  test("auto replace into an unfocused WebView field dispatches through the AutoMobile IME", async () => {
+    const harness = createSendKeysHarness(android, { execute: async () => phoneWebView });
+    const result = await harness.executor.type({
+      action: "type",
+      text: "wifi",
+      operation: "replace",
+    });
+    expect(result).toMatchObject({ resolvedMode: "ime", backend: "autoMobileIme" });
+    expect(result.warning ?? "").not.toContain("Auto mode typed through accessibility");
+    expect(harness.committed).toEqual(["wifi"]);
+    expect(harness.replaced).toEqual([]);
+    expect(harness.inserted).toEqual([]);
+  });
+});
+
+describe("Android XR detection for the fallback", () => {
+  test("the captured headset back stack is detected as XR", () => {
+    expect(isAndroidXrDevice(xrObservation)).toBe(true);
+  });
+
+  test("an announced xr-headset form factor falls back with the warning without XR windows", async () => {
+    const observation: ObserveResult = { ...xrObservation, backStack: undefined };
+    expect(isAndroidXrDevice(observation)).toBe(false);
+    expect(unusableImeKeyboard(observation, "xr-headset")).toBe(GBOARD);
+    const harness = createSendKeysHarness(
+      { ...android, formFactor: "xr-headset" },
+      { execute: async () => observation },
+    );
+    const result = await harness.executor.type({ action: "type", text: "wifi" });
+    expect(result).toMatchObject({
+      success: true,
+      resolvedMode: "a11y",
+      warning: autoA11yFallbackWarning(GBOARD),
+    });
+    expect(harness.inserted).toEqual(["wifi"]);
   });
 });

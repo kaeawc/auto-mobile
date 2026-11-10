@@ -157,6 +157,7 @@ const observeScopeRegionBoxSchema = z
     x2: z.number().min(0).max(1),
     y2: z.number().min(0).max(1),
   })
+  .strict()
   .refine((b) => b.x1 < b.x2 && b.y1 < b.y2, {
     message: "region requires x1 < x2 and y1 < y2",
   });
@@ -170,6 +171,7 @@ const observeScopeSchema = z
       .describe("Crop to a normalized 0..1 box; true = inset content rect."),
     overview: z.boolean().optional().describe("Collapse to a container skeleton."),
   })
+  .strict()
   .describe("Experimental progressive-disclosure scoping of the returned hierarchy (issue #4344)");
 
 const observeBaseSchema = withJsonSchemaOverride(
@@ -292,6 +294,7 @@ export const identifyInteractionsSchema = addDeviceTargetingToSchema(
           minConfidence: z.number().min(0).max(1).optional().describe("Min confidence (0-1)"),
           limit: z.number().int().positive().optional().describe("Max results"),
         })
+        .strict()
         .optional()
         .describe("Filter options"),
       includeContext: z
@@ -300,6 +303,7 @@ export const identifyInteractionsSchema = addDeviceTargetingToSchema(
           elementDetails: z.boolean().optional().describe("Include element details"),
           suggestedParams: z.boolean().optional().describe("Include tool params"),
         })
+        .strict()
         .optional()
         .describe("Context options"),
       layer: hierarchyLayerSchema.optional(),

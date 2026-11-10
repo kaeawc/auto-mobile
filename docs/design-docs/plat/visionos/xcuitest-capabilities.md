@@ -12,11 +12,14 @@ and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
 on demand. Provisioning still accepts only readiness `none`. The runner reports
 hierarchy and focus for the window app last launched with `launchApp`. The observation
 exposes the bundle ID of the window app the runner automates as `hierarchyBundleId`
-with every projection, including the default. It comes from the daemon's
-`visionosTargetApps` registry, set by the last `launchApp`, rather than the hierarchy's
-`packageName` (the snapshot identifier, which can be empty for an app). The field is
-omitted when the registry has no app for the device or the hierarchy is unavailable,
-and on other platforms. This app can
+with every projection, including the default. It is the target the runner that
+returned the hierarchy was launched with, recorded beside that client in the
+`visionosRunners` registry when it registers, rather than the hierarchy's `packageName`
+(the snapshot identifier, which can be empty for an app) or the latest `launchApp`
+target: `launchApp` does not restart a connected runner, and a connect-only read of a
+device another session holds reuses it as is, so the two can differ. The field is
+omitted when that runner was started without a target or registered without one, when
+the hierarchy is unavailable, and on other platforms. This app can
 differ from the app in the screenshot when another app was brought forward outside
 `launchApp`; compare them and relaunch with `launchApp` to switch. The runner
 taps enabled window and ornament elements by identifier (narrowed

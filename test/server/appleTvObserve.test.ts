@@ -149,7 +149,7 @@ describe("observe on an Apple TV simulator through the registry", () => {
         throw new Error("the Android/iOS observe pipeline ran");
       },
       watch: {
-        visionosTargetApps: { get: () => "com.example.visionos" },
+        visionosRunnerTargets: { targetBundleId: () => "com.example.visionos" },
         ...(runnerScreenshot ? {} : { screenshots }),
         fileWriter: writer,
         idGenerator: new CountingIdGenerator("appleTv-observe"),

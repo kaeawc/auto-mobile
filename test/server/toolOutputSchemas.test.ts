@@ -50,7 +50,7 @@ test("observations advertise and validate the optional visionOS hierarchyBundleI
     expect(advertised.properties?.hierarchyBundleId).toMatchObject({
       type: "string",
       description: expect.stringContaining(
-        "window app the runner automates, from the last launchApp",
+        "window app the runner that returned the hierarchy was started for",
       ),
     });
     expect(advertised.required ?? []).not.toContain("hierarchyBundleId");
@@ -62,7 +62,7 @@ test("observations advertise and validate the optional visionOS hierarchyBundleI
   expect(observe.outputSchema?.properties.hierarchyBundleId).toMatchObject({
     type: "string",
     description: expect.stringContaining(
-      "window app the runner automates, from the last launchApp",
+      "window app the runner that returned the hierarchy was started for",
     ),
   });
 });

@@ -10,9 +10,20 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 isolateEmptyToolRegistry();
 import { expect, test } from "bun:test";
-import { observeWatch, type WatchScreenshotSource } from "../../src/server/observeWatch";
+import {
+  observeWatch,
+  type WatchObserveDependencies,
+  type WatchScreenshotSource,
+} from "../../src/server/observeWatch";
+import type { VisionosRunnerClient } from "../../src/features/visionos/VisionosRunnerClient";
 import { visionosRunners } from "../../src/features/visionos/VisionosRunnerRegistry";
-import type { VisionosTargetApps } from "../../src/features/visionos/VisionosTargetApps";
+import type { VisionosRunnerRegistry } from "../../src/features/visionos/VisionosRunnerRegistry";
+import { InMemoryVisionosTargetApps } from "../../src/features/visionos/VisionosTargetApps";
+import {
+  VisionosRunnerLifecycle,
+  requireVisionosRunner,
+} from "../../src/features/visionos/VisionosRunnerLifecycle";
+import { FakeVisionosRunnerLauncher } from "../fakes/FakeVisionosRunnerLauncher";
 import {
   FakeVisionosRunnerClient,
   visionosProbeHierarchy,
@@ -28,8 +39,8 @@ import { observeToolResultSchema } from "../../src/server/toolOutputSchemas";
 
 const device = { platform: "visionos", deviceId: "vision-observe", name: "Vision Pro" } as const;
 const bundleId = "com.example.last-launched";
-const targetApps: Pick<VisionosTargetApps, "get"> = {
-  get: (deviceId) => (deviceId === device.deviceId ? bundleId : undefined),
+const runnerTargets: Pick<VisionosRunnerRegistry, "targetBundleId"> = {
+  targetBundleId: (deviceId) => (deviceId === device.deviceId ? bundleId : undefined),
 };
 class FakeVisionScreenshots implements WatchScreenshotSource {
   calls: Array<{ deviceId: string; display?: string }> = [];
@@ -47,14 +58,13 @@ class FakeVisionScreenshots implements WatchScreenshotSource {
 
 test("visionOS observe returns captured hierarchy, focused field and a retained simctl-source screenshot", async () => {
   const client = new FakeVisionosRunnerClient(visionosProbeHierarchy(probe.snapshotAfterImmersive));
-  const unregister = visionosRunners.register(device.deviceId, client);
+  const unregister = visionosRunners.register(device.deviceId, client, bundleId);
   const timer = new FakeTimer();
   const screenshots = new FakeVisionScreenshots();
   const fileWriter = new FakeScreenshotFileWriter();
   try {
     const response = await observeWatch(device, { project: "full" }, undefined, {
       screenshots,
-      visionosTargetApps: targetApps,
       fileWriter,
       timer,
       pathProtection: new FakeScreenshotPathProtection(timer),
@@ -104,7 +114,7 @@ test.each([
       ...visionosProbeHierarchy(probe.snapshotAfterImmersive),
       packageName,
     });
-    const unregister = visionosRunners.register(device.deviceId, client);
+    const unregister = visionosRunners.register(device.deviceId, client, bundleId);
     const screenshots = new FakeVisionScreenshots();
     const timer = new FakeTimer();
     const readiness = new FakeDeviceReadiness();
@@ -125,7 +135,6 @@ test.each([
       },
       watch: {
         screenshots,
-        visionosTargetApps: targetApps,
         timer,
         fileWriter: new FakeScreenshotFileWriter(),
         pathProtection: new FakeScreenshotPathProtection(timer),
@@ -160,7 +169,7 @@ test.each([
 
 function visionDependencies(
   screenshots: FakeVisionScreenshots,
-  visionosRunner: (deviceId: string, signal?: AbortSignal) => Promise<FakeVisionosRunnerClient>,
+  visionosRunner: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>,
 ) {
   const timer = new FakeTimer();
   const fileWriter = new FakeScreenshotFileWriter();
@@ -171,7 +180,7 @@ function visionDependencies(
       fileWriter,
       timer,
       visionosRunner,
-      visionosTargetApps: targetApps,
+      visionosRunnerTargets: runnerTargets,
       pathProtection: new FakeScreenshotPathProtection(timer),
       idGenerator: new CountingIdGenerator("vision-fallback"),
       cacheDir: () => "/cache/screenshots",
@@ -198,12 +207,12 @@ test("visionOS observe uses an available runner's hierarchy", async () => {
   expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
 });
 
-test("visionOS observe omits hierarchyBundleId when the registry has no app for the device", async () => {
+test("visionOS observe omits hierarchyBundleId when the runner has no target app", async () => {
   const client = new FakeVisionosRunnerClient();
   const { dependencies } = visionDependencies(new FakeVisionScreenshots(), async () => client);
   const response = await observeWatch(device, {}, undefined, {
     ...dependencies,
-    visionosTargetApps: { get: () => undefined },
+    visionosRunnerTargets: { targetBundleId: () => undefined },
   });
   const result = getStructuredPayload<ObserveResult>(readToolResponse(response))!;
   expect(result.viewHierarchy?.packageName).toBe(client.tree.packageName);
@@ -310,5 +319,55 @@ test("a read of a held visionOS device never starts a runner, but reuses a conne
     expect(connected.focusedElement).toMatchObject({ "resource-id": "field", focused: true });
   } finally {
     unregister();
+  }
+});
+
+test("a held-device observe after launching another app names the app the connected runner reads", async () => {
+  const appA = "com.example.app-a";
+  const appB = "com.example.app-b";
+  const targetApps = new InMemoryVisionosTargetApps();
+  const launcher = new FakeVisionosRunnerLauncher();
+  launcher.nextClient = () =>
+    new FakeVisionosRunnerClient(visionosProbeHierarchy(probe.snapshotAfterImmersive));
+  const lifecycle = new VisionosRunnerLifecycle({
+    launcher,
+    artifacts: { resolve: async () => "/products/AutoMobileVisionTest_xrsimulator.xctestrun" },
+    targetBundleId: (deviceId) => targetApps.get(deviceId),
+    ports: { allocate: () => 9010, release: () => {} },
+  });
+  const { dependencies } = visionDependencies(new FakeVisionScreenshots(), (deviceId, signal) =>
+    requireVisionosRunner(deviceId, signal, lifecycle),
+  );
+  // The registry the launcher registers into is the source of the bundle ID, as in production.
+  const owning: WatchObserveDependencies = {
+    ...dependencies,
+    visionosRunnerTargets: undefined,
+    heldDeviceRead: () => false,
+  };
+  const held: WatchObserveDependencies = {
+    ...owning,
+    visionosRunner: undefined,
+    heldDeviceRead: () => true,
+  };
+  const observe = async (deps: WatchObserveDependencies) =>
+    getStructuredPayload<ObserveResult>(
+      readToolResponse(await observeWatch(device, {}, undefined, deps)),
+    )!;
+  try {
+    targetApps.launched(device.deviceId, appA);
+    expect((await observe(owning)).hierarchyBundleId).toBe(appA);
+
+    // launchApp B updates the target registry but leaves the connected runner on A.
+    targetApps.launched(device.deviceId, appB);
+    const heldRead = await observe(held);
+    expect(heldRead.viewHierarchy ?? heldRead.elements).toBeDefined();
+    expect(heldRead.hierarchyBundleId).toBe(appA);
+    expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([appA]);
+
+    // The owning session's next observe restarts the runner for B and reports B.
+    expect((await observe(owning)).hierarchyBundleId).toBe(appB);
+    expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([appA, appB]);
+  } finally {
+    lifecycle.stopAll();
   }
 });

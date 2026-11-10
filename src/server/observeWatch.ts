@@ -3,11 +3,10 @@ import {
   requireVisionosRunner,
   withVisionosHostRecovery,
 } from "../features/visionos/VisionosRunnerLifecycle";
-import { visionosRunners } from "../features/visionos/VisionosRunnerRegistry";
 import {
-  visionosTargetApps,
-  type VisionosTargetApps,
-} from "../features/visionos/VisionosTargetApps";
+  visionosRunners,
+  type VisionosRunnerRegistry,
+} from "../features/visionos/VisionosRunnerRegistry";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { holderOf } from "../daemon/deviceBinding";
 import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
@@ -84,8 +83,8 @@ export interface WatchObserveDependencies {
   runner?: WatchRunnerClient;
   /** Starts or reuses the visionOS window-app runner; defaults to the shared runner lifecycle. */
   visionosRunner?: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>;
-  /** The last launchApp target per visionOS device; defaults to the daemon's shared registry. */
-  visionosTargetApps?: Pick<VisionosTargetApps, "get">;
+  /** The window app each connected visionOS runner was started for; defaults to the shared registry. */
+  visionosRunnerTargets?: Pick<VisionosRunnerRegistry, "targetBundleId">;
   /** Whether this call reads a device another session holds; defaults to the pool's holder. */
   heldDeviceRead?: (deviceId: string) => boolean;
   idGenerator?: IdGenerator;
@@ -200,6 +199,8 @@ type HierarchyOutcome = {
   hierarchy?: ViewHierarchyResult;
   unavailableReason?: string;
   appNotForeground?: true;
+  /** visionOS: the window app the runner that returned `hierarchy` was started for. */
+  hierarchyBundleId?: string;
 };
 
 async function visionosHierarchyForObserve(
@@ -210,14 +211,19 @@ async function visionosHierarchyForObserve(
     start: NonNullable<WatchObserveDependencies["visionosRunner"]>;
     /** A connect-only held read never restarts another session's runner. */
     recoverHostLoss: boolean;
+    targets: Pick<VisionosRunnerRegistry, "targetBundleId">;
   },
 ): Promise<HierarchyOutcome> {
   const displayKey = watchDisplay(device).ref.key;
   // Refuse options neither path supports before paying for runner startup.
   assertWatchObserveOptions(args, displayKey, "visionos", true);
   let hierarchy;
+  let client: VisionosRunnerClient | undefined;
   try {
-    const read = async () => (await runner.start(device.deviceId, signal)).hierarchy(signal);
+    const read = async () => {
+      client = await runner.start(device.deviceId, signal);
+      return client.hierarchy(signal);
+    };
     hierarchy = runner.recoverHostLoss
       ? await withVisionosHostRecovery(device.deviceId, signal, read)
       : await read();
@@ -234,7 +240,13 @@ async function visionosHierarchyForObserve(
     assertWatchObserveOptions(args, displayKey, "visionos", false);
     return { unavailableReason: reason };
   }
-  return { hierarchy: normalizeVisionosHierarchy(hierarchy) };
+  // The runner that answered, not the latest launchApp target: launching another app does not
+  // restart a connected runner, so the two differ until the next runner (re)start.
+  const hierarchyBundleId = client && runner.targets.targetBundleId(device.deviceId, client);
+  return {
+    hierarchy: normalizeVisionosHierarchy(hierarchy),
+    ...(hierarchyBundleId ? { hierarchyBundleId } : {}),
+  };
 }
 
 /** A sessionless deviceId read of a device some session holds (#10830): connect-only. */
@@ -269,6 +281,7 @@ async function watchHierarchyForObserve(
       start:
         dependencies.visionosRunner ?? (heldRead ? connectedVisionosRunner : requireVisionosRunner),
       recoverHostLoss: !heldRead,
+      targets: dependencies.visionosRunnerTargets ?? visionosRunners,
     });
   }
   if (screenshotOnlyPlatform(device) === "tvos") {
@@ -390,24 +403,13 @@ export async function observeWatch(
     screenshotCaptureSource: "device",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
   };
-  const hierarchyBundleId = visionosHierarchyBundleId(platform, device.deviceId, dependencies);
-  const payload = watchObservationPayload(capture, platform, hierarchyOutcome, hierarchyBundleId);
+  const payload = watchObservationPayload(capture, platform, hierarchyOutcome);
   return waitOutcome
     ? createObserveWaitResponse(payload, waitOutcome, args.includeScreenshotImage, {
         signal,
         protection,
       })
     : createObserveResponse(payload, args.includeScreenshotImage, { signal, protection });
-}
-
-function visionosHierarchyBundleId(
-  platform: AppleScreenshotOnlyPlatform,
-  deviceId: string,
-  dependencies: WatchObserveDependencies,
-): string | undefined {
-  return platform === "visionos"
-    ? (dependencies.visionosTargetApps ?? visionosTargetApps).get(deviceId)
-    : undefined;
 }
 
 /**
@@ -443,8 +445,12 @@ async function observedHierarchy(
 function watchObservationPayload(
   capture: Omit<WatchObservation, "hierarchyUnavailable">,
   platform: AppleScreenshotOnlyPlatform,
-  { hierarchy: viewHierarchy, unavailableReason, appNotForeground }: HierarchyOutcome,
-  hierarchyBundleId?: string,
+  {
+    hierarchy: viewHierarchy,
+    unavailableReason,
+    appNotForeground,
+    hierarchyBundleId,
+  }: HierarchyOutcome,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
     const message =

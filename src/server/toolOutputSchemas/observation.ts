@@ -47,8 +47,8 @@ const hierarchyBundleIdSchema = z
   .string()
   .optional()
   .describe(
-    "visionOS only: bundle ID of the window app the runner automates, from the last launchApp. " +
-      "Present with every projection when a registered app and runner hierarchy are available; omitted otherwise. This app can differ from " +
+    "visionOS only: bundle ID of the window app the runner that returned the hierarchy was started for (the launchApp target when it started). " +
+      "Present with every projection when that runner has a target app and returned a hierarchy; omitted otherwise. This app can differ from " +
       "the screenshot when another app was brought forward outside launchApp; compare them and " +
       "relaunch with launchApp to switch.",
   );

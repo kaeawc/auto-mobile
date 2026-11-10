@@ -340,7 +340,7 @@ export type ObserveResult = {
   /** View hierarchy data */
   viewHierarchy?: ViewHierarchyResult;
 
-  /** visionOS window-app bundle ID from the last launchApp; absent without a registered app or hierarchy. */
+  /** visionOS: bundle ID the connected runner was started for; absent without a runner target or hierarchy. */
   hierarchyBundleId?: string;
 
   /**

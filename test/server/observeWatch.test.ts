@@ -62,7 +62,7 @@ function arrange(result?: Buffer | Error, runner?: FakeWatchRunnerClient) {
     observeWatch(device, args, signal, {
       screenshots,
       runner,
-      visionosTargetApps: { get: () => "com.example.visionos" },
+      visionosRunnerTargets: { targetBundleId: () => "com.example.visionos" },
       timer,
       idGenerator: new CountingIdGenerator("watch"),
       fileWriter: writer,

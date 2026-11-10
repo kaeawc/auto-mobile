@@ -250,6 +250,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler, PlainT
       internal: internalCall,
       signal,
       timer,
+      platform: device?.platform,
       createSettleObserve: () => (device ? this.createSettleObserve(device, timer) : undefined),
     });
 

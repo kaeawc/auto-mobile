@@ -259,8 +259,8 @@ export type ObserveResult = {
   screenshotCapturedAt?: string;
   screenshotAgeMs?: number;
   /**
-   * Post-action screenshot capture time minus the hierarchy's device `updatedAt`,
-   * in ms (#17765). Host and device clocks differ, so small negatives are skew.
+   * Post-action screenshot capture time minus the hierarchy's host receipt time,
+   * in ms (#17765, #17787). Both are host-clock times, so device skew cannot shift it.
    */
   screenshotHierarchyLagMs?: number;
   /** True when that lag exceeded the pairing threshold: the pixels may show a later frame. */

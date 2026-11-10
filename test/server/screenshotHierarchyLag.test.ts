@@ -27,7 +27,15 @@ import { FakeTimer } from "../fakes/FakeTimer";
 const device: BootedDevice = { name: "Pixel", deviceId: "emulator-5554", platform: "android" };
 const HIERARCHY_AT = Date.parse("2026-11-10T07:22:56.000Z");
 
-function frame(id: string, updatedAt = HIERARCHY_AT): ObserveResult {
+/**
+ * An action frame whose hierarchy reached the host at `receivedAt` (host clock) and
+ * carries the device-authored `updatedAt`; they differ by the device's clock skew.
+ */
+function frame(
+  id: string,
+  receivedAt = HIERARCHY_AT,
+  updatedAt: number | undefined = receivedAt,
+): ObserveResult {
   return {
     ...buildObserveResult({
       updatedAt,
@@ -37,11 +45,18 @@ function frame(id: string, updatedAt = HIERARCHY_AT): ObserveResult {
         packageName: "com.example.chat",
         hierarchy: { node: { class: "android.widget.EditText", text: id } },
         updatedAt,
+        receivedAt,
       },
     }),
     deviceId: device.deviceId,
     observationId: id,
   };
+}
+
+/** A source that does not track host receipt time (e.g. the iOS delegate). */
+function withoutHostReceipt(observation: ObserveResult): ObserveResult {
+  delete observation.viewHierarchy?.receivedAt;
+  return observation;
 }
 
 /** A capture seam that stamps the injected clock as the screenshot time. */
@@ -106,21 +121,75 @@ describe("stampScreenshotHierarchyLag", () => {
     });
   });
 
-  test("the threshold is injectable and a negative skew is never a mismatch", () => {
+  test("the threshold is injectable", () => {
     const late = {
       ...frame("x"),
       screenshotCapturedAt: new Date(HIERARCHY_AT + 200).toISOString(),
     };
-    stampScreenshotHierarchyLag(late, 100);
+    stampScreenshotHierarchyLag(late, { thresholdMs: 100 });
     expect(late.screenshotHierarchyMismatch).toBe(true);
-    const skewed = {
-      ...frame("y"),
-      screenshotCapturedAt: new Date(HIERARCHY_AT - 40).toISOString(),
-    };
-    stampScreenshotHierarchyLag(skewed);
-    expect(skewed.screenshotHierarchyLagMs).toBe(-40);
-    expect(skewed.screenshotHierarchyMismatch).toBeUndefined();
+    const within = { ...late, freshness: undefined, screenshotHierarchyMismatch: undefined };
+    stampScreenshotHierarchyLag(within, { thresholdMs: 300 });
+    expect(within.screenshotHierarchyMismatch).toBeUndefined();
     expect(SCREENSHOT_HIERARCHY_LAG_THRESHOLD_MS).toBe(500);
+  });
+
+  // #17787: the screenshot time is a host file time, so the lag must be measured
+  // against the host receipt time, never the device-authored `updatedAt`.
+  describe("is measured on the host clock whatever the device clock skew", () => {
+    /** The hierarchy arrives at host `now`; the screenshot is captured `captureAfterMs` later. */
+    function capturedPair(deviceSkewMs: number, captureAfterMs: number): ObserveResult {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(HIERARCHY_AT);
+      const receivedAt = timer.now();
+      const observation = frame("pair", receivedAt, receivedAt + deviceSkewMs);
+      timer.advanceTime(captureAfterMs);
+      observation.screenshotCapturedAt = new Date(timer.now()).toISOString();
+      return observation;
+    }
+
+    test("a device clock running ahead of the host does not hide a late screenshot", () => {
+      const observation = capturedPair(+250, 120);
+      stampScreenshotHierarchyLag(observation, { platform: "android" });
+      expect(observation.screenshotHierarchyLagMs).toBe(120);
+      expect(observation.screenshotHierarchyMismatch).toBeUndefined();
+    });
+
+    test("a device clock running behind the host does not raise a false mismatch", () => {
+      const observation = capturedPair(-600, 120);
+      stampScreenshotHierarchyLag(observation, { platform: "android" });
+      expect(observation.screenshotHierarchyLagMs).toBe(120);
+      expect(observation.screenshotHierarchyMismatch).toBeUndefined();
+      expect(observation.freshness?.warning).toBeUndefined();
+    });
+
+    test("a really late screenshot is marked even when the device clock is ahead", () => {
+      // The old cross-clock value would be 600 - 250 = 350 ms: within the threshold.
+      const observation = capturedPair(+250, 600);
+      stampScreenshotHierarchyLag(observation, { platform: "android" });
+      expect(observation.screenshotHierarchyLagMs).toBe(600);
+      expect(observation.screenshotHierarchyMismatch).toBe(true);
+      expect(observation.freshness?.warning).toContain(SCREENSHOT_HIERARCHY_LAG_WARNING);
+    });
+
+    test("an Android tree without a host receipt time gets no cross-clock lag", () => {
+      const observation = {
+        ...withoutHostReceipt(frame("unreceived", HIERARCHY_AT, HIERARCHY_AT - 250)),
+        screenshotCapturedAt: new Date(HIERARCHY_AT).toISOString(),
+      };
+      expect(stampScreenshotHierarchyLag(observation, { platform: "android" })).toBe(false);
+      expect(stampScreenshotHierarchyLag(observation)).toBe(false);
+      expect(observation.screenshotHierarchyLagMs).toBeUndefined();
+    });
+
+    test("iOS, which shares the host clock, falls back to the device updatedAt", () => {
+      const observation = {
+        ...withoutHostReceipt(frame("ios")),
+        screenshotCapturedAt: new Date(HIERARCHY_AT + 90).toISOString(),
+      };
+      stampScreenshotHierarchyLag(observation, { platform: "ios" });
+      expect(observation.screenshotHierarchyLagMs).toBe(90);
+    });
   });
 
   test("no screenshot means no lag, and a stale stamp is removed", () => {

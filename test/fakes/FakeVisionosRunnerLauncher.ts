@@ -17,7 +17,7 @@ export class FakeVisionosRunnerLauncher implements VisionosRunnerLauncher {
     this.calls.push("launch");
     this.launches.push(options);
     const client = this.nextClient?.() ?? this.client;
-    const unregister = visionosRunners.register(options.deviceId, client);
+    const unregister = visionosRunners.register(options.deviceId, client, options.bundleId);
     return {
       stop: () => {
         this.calls.push("stop");

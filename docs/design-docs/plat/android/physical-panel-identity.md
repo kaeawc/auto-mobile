@@ -125,7 +125,11 @@ another adb round trip:
    to act on (`logicalIdForPanel`) and for the `screencap -d` id. A logical display it does not
    list (a `FLAG_PRIVATE` AAOS cluster panel) takes its `screencap -d` id from the `local:`
    uniqueId of its enabled record in `dumpsys display`'s Logical Displays section; a display
-   absent from both, or listed without a `local:` id, is not captured.
+   absent from both, or listed without a `local:` id, is not captured. Where `cmd display` has no
+   `get-displays` subcommand (API 30 answers `Unknown command`), the enabled records of that
+   Logical Displays section replace it; a record with no `mIsEnabled` line (that field is absent
+   on API 30) counts as enabled. When neither source can be read, the selection fails with a
+   non-retryable error, since a retry would fail the same way.
 
 The fingerprint is internal evidence: it is stripped from observe output, and it is not sent per
 window, per node or on screenshot frames.

@@ -568,6 +568,39 @@ describe("TakeScreenshot Android physical display selection", function () {
       });
     });
 
+    describe("API 30 without get-displays (#17742) and a display it would hide (#17740)", function () {
+      // Android 11 answers `cmd display get-displays` with "Unknown command" (exit 255) and its
+      // dumpsys display Logical Displays records carry no mIsEnabled line.
+      const api30DumpsysDisplay = [
+        "Logical Displays: size=2",
+        "  Display 0:",
+        "    mDisplayId=0",
+        '    mBaseDisplayInfo=DisplayInfo{"Built-in Screen, displayId 0", uniqueId "local:4619827259835644672", real 1080 x 1920, type INTERNAL, state ON}',
+        "  Display 3:",
+        "    mDisplayId=3",
+        '    mBaseDisplayInfo=DisplayInfo{"Cluster, displayId 3", uniqueId "local:4619827259835644673", real 1280 x 720, type INTERNAL, state ON}',
+        "",
+        "DisplayModeDirector",
+      ].join("\n");
+
+      test("captures a display from its dumpsys record when get-displays is unsupported", async function () {
+        const adb = adbWithDisplays("");
+        adb.setCommandError(
+          "cmd display get-displays",
+          new Error("exit code: 255\nUnknown command: get-displays"),
+        );
+        adb.setCommandResponse("dumpsys display", createExecResult(api30DumpsysDisplay, ""));
+
+        await captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/api30.png", {
+          format: "png",
+          displayId: 3,
+        });
+
+        expect(screencapCommand(adb)).toContain("screencap -d 4619827259835644673 -p");
+        expect(screencapCommand(adb)).not.toContain("screencap -d 3 ");
+      });
+    });
+
     test("leaves the default-display command unchanged when no display is requested", async function () {
       const adb = new FakeAdbExecutor();
       configureDisplayFixtures(adb);

@@ -89,6 +89,13 @@ An expired known reading is served stale while one background refresh runs
 `staleLockedMs`), so a burst of observes on a loaded host does not report
 `deviceLockUnknown` just because the TTL lapsed (#15311). Invalidation drops the
 stale reading; only a device with no recent reading can still report `pending`.
+A successful power press always leaves the device locked, but it acknowledges before
+SpringBoard publishes the new lockstate, so it invalidates with `expectLocked`: for
+`lockTransitionMs` (5 seconds) an unlocked reading is re-polled every
+`lockTransitionPollMs` (250 ms) instead of cached or served, so observe reports
+`pending` rather than a pre-transition `locked: false` (#17770). The first locked
+reading ends the window; past it the host reading is trusted. Any other invalidation
+cancels a pending transition.
 Caller abort detaches cache/budget waits with an unknown `pending` reading and
 message `caller aborted`; the shared read continues and can populate the cache.
 A notifyutil executor abort becomes an unknown `error` reading.

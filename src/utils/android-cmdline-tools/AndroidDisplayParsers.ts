@@ -58,15 +58,18 @@ function parseDisplayInfo(logicalId: string, line: string): AndroidDisplayInfo {
   };
 }
 
-/** Enabled records in dumpsys display's Logical Displays section, including private displays. */
+/**
+ * Enabled records in dumpsys display's Logical Displays section, including private displays.
+ * API 30 and older print no `mIsEnabled` line, so a record is enabled unless it says otherwise.
+ */
 export function parseDumpsysLogicalDisplays(output: string): AndroidDisplayInfo[] {
   const records: AndroidDisplayInfo[] = [];
   let sectionIndent: number | undefined;
   let logicalId: string | undefined;
-  let enabled = false;
+  let enabled: boolean | undefined;
   let baseInfo: string | undefined;
   const finishRecord = () => {
-    if (enabled && logicalId !== undefined && baseInfo !== undefined) {
+    if (enabled !== false && logicalId !== undefined && baseInfo !== undefined) {
       records.push(parseDisplayInfo(logicalId, baseInfo));
     }
   };
@@ -81,7 +84,7 @@ export function parseDumpsysLogicalDisplays(output: string): AndroidDisplayInfo[
     if (/^ *Display \d+:/.test(line)) {
       finishRecord();
       logicalId = undefined;
-      enabled = false;
+      enabled = undefined;
       baseInfo = undefined;
       continue;
     }

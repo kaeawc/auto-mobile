@@ -9,7 +9,8 @@ import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetec
 import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessibilityService";
 import { FakeOverlayDetector } from "../../../fakes/FakeOverlayDetector";
 import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecutor";
-import type { ObserveResult, SwipeOnResult } from "../../../../src/models";
+import type { BackStackInfo, ObserveResult, SwipeOnResult } from "../../../../src/models";
+import { xrBackStack } from "../../../helpers/xrHeadset";
 
 const VIEWPORT = 1800;
 const PITCH = 300;
@@ -26,7 +27,13 @@ function listHarness({
   overshoot = false,
   stuckRecovery = false,
   platform = "android",
-}: { overshoot?: boolean; stuckRecovery?: boolean; platform?: "android" | "ios" } = {}) {
+  backStackAfterFirstSwipe,
+}: {
+  overshoot?: boolean;
+  stuckRecovery?: boolean;
+  platform?: "android" | "ios";
+  backStackAfterFirstSwipe?: BackStackInfo;
+} = {}) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   let offset = 0;
@@ -37,6 +44,9 @@ function listHarness({
     display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     screenSize: { width: 1080, height: 2400 },
+    ...(steps.length > 0 && backStackAfterFirstSwipe
+      ? { backStack: backStackAfterFirstSwipe }
+      : {}),
     viewHierarchy: {
       hierarchy: {
         node: createFlatNodeForTest({
@@ -150,6 +160,17 @@ test("a two-viewport overshoot back-scrolls partially and still finds row 11", a
   for (const step of backwards) {
     expect(Math.abs(step.y2 - step.y1)).toBe(VIEWPORT / 2);
   }
+});
+
+test("overlap recovery refuses its back-scroll when the post-swipe XR pose is invalid", async () => {
+  const backStack = xrBackStack("swipe-up");
+  const settings = backStack.tasks.find((task) => task.id === 6)!;
+  backStack.tasks.push({ ...settings, id: 7, packageName: "com.example.second" });
+  const h = listHarness({ overshoot: true, backStackAfterFirstSwipe: backStack });
+  await expect(h.search("row 11")).rejects.toThrow("2 app panels are open");
+  // Only the forward swipe ran: the overshoot's recovery back-scroll was refused before input.
+  expect(h.steps).toHaveLength(1);
+  expect(h.steps[0].y2).toBeLessThan(h.steps[0].y1);
 });
 
 test("unrecoverable zero overlap falls back to the normal end-of-list detector", async () => {

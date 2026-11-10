@@ -307,13 +307,10 @@ export class ScrollUntilVisible {
             resolveReverseBounds: (...args) => this.resolveReverseBounds(...args),
             computeHalfScreenReverseCoords: (...args) =>
               this.computeHalfScreenReverseCoords(...args),
-            dispatchSearchSwipe: async (dispatch) => {
-              // Each search swipe refuses before input on a visibly non-default XR pose.
-              if (this.swipePlatform() === "android") {
-                xrWarning = xrDefaultPoseWarning(dispatch.observation);
-              }
-              return this.dispatchSearchSwipe(dispatch);
-            },
+            dispatchSearchSwipe: (dispatch) =>
+              this.dispatchSearchSwipe(dispatch, (warning) => {
+                xrWarning = warning;
+              }),
             matchInterruptedDisplaySearch: (...args) => this.matchInterruptedDisplaySearch(...args),
             findVisibleSearchTarget: (...args) => this.findVisibleSearchTarget(...args),
             shouldGuardSearchStep: (...args) => this.shouldGuardSearchStep(...args),
@@ -514,7 +511,20 @@ export class ScrollUntilVisible {
     };
   }
 
-  private async dispatchSearchSwipe({
+  // Forward and overlap-recovery swipes refuse before input on a visibly non-default XR pose;
+  // recovery passes no recorder because its forward swipe already recorded the caveat.
+  private async dispatchSearchSwipe(
+    dispatch: SearchSwipeDispatchOptions,
+    onXrPoseWarning: (warning: string) => void = () => {},
+  ): Promise<SwipeResult> {
+    if (this.swipePlatform() === "android") {
+      const xrWarning = xrDefaultPoseWarning(dispatch.observation);
+      xrWarning && onXrPoseWarning(xrWarning);
+    }
+    return this.dispatchPoseCheckedSearchSwipe(dispatch);
+  }
+
+  private async dispatchPoseCheckedSearchSwipe({
     coordinates,
     direction,
     duration,

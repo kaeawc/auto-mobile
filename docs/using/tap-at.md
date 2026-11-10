@@ -11,12 +11,13 @@ percent, and image inputs resolve to the same screenshot space. The result's
 `xrPanel` identifies the app and task and reports `displayX`, `displayY`, the
 mapped display pixels used for input; `x`, `y` also report that dispatched point.
 
-A point outside the panel fails with “no app panel under that screenshot point”.
+A point outside the panel fails with “no app panel under that screenshot point”
+and no `warning`.
 XR system UI, including the home-space launcher and environment buttons, cannot
 be tapped with `tapAt`. Open an app panel, observe again, and choose a point
 inside its screenshot projection. This mapping supports the default headset
 pose in home space; moved panels and immersive apps are outside its scope.
-Every XR result carries a `warning` that coordinates assume the default panel
+Every successful XR mapping carries a `warning` that coordinates assume the default panel
 pose: if the panel was moved or scaled, keep it in its default position (or
 reopen the app), observe again, and retry. When more than one app panel is
 open, or the panel cannot fit the screenshot at the default pose, `tapAt`

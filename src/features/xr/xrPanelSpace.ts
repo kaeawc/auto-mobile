@@ -16,22 +16,29 @@ type Point = { x: number; y: number };
 type Size = { width: number; height: number };
 export type XrPanel = TaskInfo & { packageName: string; bounds: ElementBounds };
 
+const isXrSystemUiName = (name: string | undefined): boolean =>
+  !!name &&
+  (name.startsWith("com.android.systemui.xr") || name.startsWith("com.android.systemui/.xr"));
+
+/** Whether the observed back stack holds Android XR System UI tasks or activities. */
+export function hasXrSystemUi(backStack: BackStackInfo | undefined): backStack is BackStackInfo {
+  return (
+    !!backStack &&
+    (backStack.activities.some((activity) => isXrSystemUiName(activity.name)) ||
+      backStack.tasks.some(
+        (task) =>
+          isXrSystemUiName(task.packageName) ||
+          isXrSystemUiName(task.rootActivity) ||
+          isXrSystemUiName(task.topActivity),
+      ))
+  );
+}
+
 /** Undefined means non-XR; a null panel means XR system UI without an app panel. */
 export function detectXrPanel(
   backStack: BackStackInfo | undefined,
 ): { panel: XrPanel | null } | undefined {
-  const isXrName = (name: string | undefined) =>
-    name?.startsWith("com.android.systemui.xr") || name?.startsWith("com.android.systemui/.xr");
-  if (
-    !backStack ||
-    !(
-      backStack.activities.some((activity) => isXrName(activity.name)) ||
-      backStack.tasks.some(
-        (task) =>
-          isXrName(task.packageName) || isXrName(task.rootActivity) || isXrName(task.topActivity),
-      )
-    )
-  ) {
+  if (!hasXrSystemUi(backStack)) {
     return undefined;
   }
   const panel = backStack.tasks.find((task): task is XrPanel => {

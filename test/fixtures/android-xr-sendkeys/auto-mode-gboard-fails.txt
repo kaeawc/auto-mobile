@@ -1,0 +1,478 @@
+$ sendKeys --deviceId emulator-5558 --commands [{"action":"type","text":"wifi"}]
+{
+  "_meta": {
+    "automobile/routedSessionUuid": "bf79826d-45d9-4aef-ad46-a0eda4c8d4f8"
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"message\":\"sendKeys stopped at command 0: No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.\",\"success\":false,\"completedCommands\":0,\"failedIndex\":0,\"commands\":[{\"index\":0,\"action\":\"type\",\"textLength\":4,\"operation\":\"insert\",\"requestedMode\":\"auto\",\"resolvedMode\":\"ime\",\"backend\":\"autoMobileIme\",\"capability\":\"semanticText\",\"keyboard\":{\"component\":\"dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme\",\"package\":\"dev.jasonpearson.automobile.ctrlproxy\"},\"success\":false,\"error\":\"No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.\",\"errorCode\":\"NO_FOCUSED_EDITABLE\"}],\"observation\":{\"observationId\":\"906571b6-24d5-4ac2-af20-4828d1ccc8f2\",\"deviceId\":\"emulator-5558\",\"display\":{\"key\":\"0\",\"role\":\"unknown\",\"posture\":\"unknown\",\"generation\":0},\"updatedAt\":1794345250937,\"screenSize\":{\"width\":2560,\"height\":2558,\"units\":\"physical-pixels\"},\"systemInsets\":{\"top\":48,\"bottom\":0,\"left\":0,\"right\":0},\"insets\":{\"available\":true,\"source\":\"android-window-metrics\",\"units\":\"physical-pixels\",\"systemBars\":{\"visible\":{\"top\":48,\"bottom\":0,\"left\":0,\"right\":0},\"stable\":{\"top\":48,\"bottom\":0,\"left\":0,\"right\":0}},\"displayCutout\":{\"top\":0,\"bottom\":0,\"left\":0,\"right\":0},\"displayCutoutInfo\":{\"classification\":\"none\",\"bounds\":null},\"systemGestures\":{\"top\":48,\"bottom\":0,\"left\":0,\"right\":0},\"mandatorySystemGestures\":{\"top\":48,\"bottom\":0,\"left\":0,\"right\":0},\"tappableElement\":{\"top\":48,\"bottom\":0,\"left\":0,\"right\":0},\"systemChrome\":{\"visibility\":\"partial\",\"statusBar\":\"visible\",\"navigationBar\":\"hidden\",\"homeIndicatorAutoHideRequested\":null,\"source\":\"android-window-insets\"}},\"intentChooserDetected\":false,\"notificationPermissionDetected\":false,\"rotation\":0,\"wakefulness\":\"Awake\",\"wakefulnessSource\":\"hierarchy\",\"backStack\":{\"depth\":2,\"activities\":[{\"name\":\"com.android.settings.intelligence.search.SearchActivity\",\"taskId\":6,\"userId\":0,\"taskAffinity\":\"1000:com.android.settings.root\",\"isTaskRoot\":false},{\"name\":\"com.android.settings.SubSettings\",\"taskId\":6,\"userId\":0,\"taskAffinity\":\"1000:com.android.settings.root\",\"isTaskRoot\":false},{\"name\":\"com.android.settings.Settings\",\"taskId\":6,\"userId\":0,\"taskAffinity\":\"1000:com.android.settings.root\",\"isTaskRoot\":true},{\"name\":\"com.android.systemui.xr.wm.SysUiVisibilityBarrier\",\"taskId\":4,\"userId\":0,\"taskAffinity\":\"10113:com.android.systemui:535243222\",\"isTaskRoot\":true},{\"name\":\"com.android.systemui.xrhomeenv.MainActivity\",\"taskId\":5,\"userId\":0,\"taskAffinity\":\"10101:com.android.systemui.xrhomeenv\",\"isTaskRoot\":true},{\"name\":\"com.android.systemui.xr.home.SysUiHomeActivity\",\"taskId\":3,\"userId\":0,\"taskAffinity\":\"10113:com.android.systemui:659197860\",\"isTaskRoot\":true}],\"tasks\":[{\"id\":6,\"userId\":0,\"affinity\":\"1000:com.android.settings.root\",\"numActivities\":3,\"launchedFromPackage\":\"com.android.shell\",\"rootActivity\":\"com.android.settings/.Settings\",\"packageName\":\"com.android.settings\",\"windowingMode\":\"freeform\",\"bounds\":[0,48,2048,1328]},{\"id\":4,\"userId\":0,\"affinity\":\"10113:com.android.systemui:535243222\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.systemui\",\"rootActivity\":\"com.android.systemui/.xr.wm.SysUiVisibilityBarrier\",\"packageName\":\"com.android.systemui\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,2560,2558]},{\"id\":5,\"userId\":0,\"affinity\":\"10101:com.android.systemui.xrhomeenv\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.systemui\",\"rootActivity\":\"com.android.systemui.xrhomeenv/.MainActivity\",\"packageName\":\"com.android.systemui.xrhomeenv\",\"windowingMode\":\"freeform\",\"bounds\":[0,48,2048,1328]},{\"id\":3,\"userId\":0,\"affinity\":\"10113:com.android.systemui:659197860\",\"numActivities\":1,\"rootActivity\":\"com.android.systemui/.xr.home.SysUiHomeActivity\",\"packageName\":\"com.android.systemui\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,1200,1592]}],\"currentActivity\":{\"name\":\"com.android.settings.intelligence.search.SearchActivity\",\"taskId\":6,\"userId\":0},\"displayCount\":1,\"currentTaskId\":6,\"capturedAt\":1794345251150,\"source\":\"adb\"},\"activeWindow\":{\"appId\":\"com.android.settings.intelligence\",\"activityName\":\"com.android.settings.intelligence.search.SearchActivity\",\"layoutSeqSum\":1045},\"deviceLock\":{\"locked\":false,\"keyguardShowing\":false,\"secure\":false},\"accessibilityState\":{\"enabled\":false,\"service\":\"unknown\",\"detectionSkipped\":false},\"freshness\":{\"requestedAfter\":1794345250141,\"actualTimestamp\":1794345250937,\"ageMs\":62,\"verified\":true,\"isFresh\":true},\"screenshotCapturedAt\":\"2026-11-10T21:14:11.280Z\",\"settled\":false,\"screenshotHierarchyLagMs\":155,\"skeleton\":[{\"bounds\":[0,0,3522,2030],\"affordances\":[\"tap\"],\"elementId\":\"s2-d2de3ae627999391\",\"label\":\"Recents\"},{\"bounds\":[73,48,2828,1853],\"affordances\":[\"tap\"],\"elementId\":\"s2-f69021943d4baad0\",\"label\":\"Launcher\"},{\"bounds\":[0,0,3072,1416],\"affordances\":[\"tap\"],\"elementId\":\"s2-51320023ce5e9c24\",\"label\":\"Notifications\"},{\"bounds\":[0,0,2400,2400],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/home_screen\",\"label\":\"3:14 PM\"},{\"bounds\":[964,1873,1140,2049],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/home_screen_launcher_button\",\"label\":\"Open Launcher Panel\"},{\"bounds\":[1260,1873,1436,2049],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/home_screen_env_button\",\"label\":\"Environment\"},{\"bounds\":[729,1210,848,1306],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/button2\",\"label\":\"OK\"},{\"bounds\":[760,1189,1800,1571],\"affordances\":[\"input\"],\"elementId\":\"<ime>\",\"label\":\"Keyboard (com.google.android.inputmethod.latin)\"}],\"keyboard\":{\"visible\":true,\"package\":\"com.google.android.inputmethod.latin\"},\"context\":[{\"bounds\":[0,0,496,680],\"affordances\":[],\"occluded\":true,\"elementId\":\"s2-e463212d84da9d12-2\"},{\"bounds\":[0,0,1000,1700],\"affordances\":[],\"elementId\":\"com.android.systemui:id/quick_settings_root_frame\",\"label\":\"Quick Settings\"},{\"bounds\":[0,0,2,2],\"affordances\":[],\"elementId\":\"com.android.systemui:id/accessibility_announcement\",\"label\":\"Recentered\"},{\"bounds\":[64,950,856,1015],\"affordances\":[],\"elementId\":\"com.android.systemui:id/alertTitle\",\"label\":\"Unable to detect surroundings\"},{\"bounds\":[64,1063,856,1146],\"affordances\":[],\"elementId\":\"com.android.systemui:id/message\",\"label\":\"Make sure you're in a well-lit area and the headset cameras are uncovered\"},{\"bounds\":[90,0,136,48],\"affordances\":[],\"elementId\":\"s2-5f42272ca1db0b1c\",\"label\":\"Google Play Protect notification:\"},{\"bounds\":[136,0,182,48],\"affordances\":[],\"elementId\":\"s2-59c2c43e07860ca2\",\"label\":\"Android System notification:\"},{\"bounds\":[16,0,2504,48],\"affordances\":[],\"elementId\":\"com.android.systemui:status-bar-summary\",\"label\":\"Status bar: 3:14, Wifi signal full., Battery charging, 100 percent.\"}],\"observationScreenshotResourceUri\":\"automobile:observation/emulator-5558/906571b6-24d5-4ac2-af20-4828d1ccc8f2/screenshot\"},\"error\":\"No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.\",\"errorCode\":\"NO_FOCUSED_EDITABLE\",\"observationDiff\":{\"mode\":\"full\",\"reason\":\"disabled\",\"hint\":\"Set --actions-diff-observe to receive diffs.\"}}"
+    }
+  ],
+  "structuredContent": {
+    "message": "sendKeys stopped at command 0: No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+    "success": false,
+    "completedCommands": 0,
+    "failedIndex": 0,
+    "commands": [
+      {
+        "index": 0,
+        "action": "type",
+        "textLength": 4,
+        "operation": "insert",
+        "requestedMode": "auto",
+        "resolvedMode": "ime",
+        "backend": "autoMobileIme",
+        "capability": "semanticText",
+        "keyboard": {
+          "component": "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme",
+          "package": "dev.jasonpearson.automobile.ctrlproxy"
+        },
+        "success": false,
+        "error": "No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+        "errorCode": "NO_FOCUSED_EDITABLE"
+      }
+    ],
+    "observation": {
+      "observationId": "906571b6-24d5-4ac2-af20-4828d1ccc8f2",
+      "deviceId": "emulator-5558",
+      "display": {
+        "key": "0",
+        "role": "unknown",
+        "posture": "unknown",
+        "generation": 0
+      },
+      "updatedAt": 1794345250937,
+      "screenSize": {
+        "width": 2560,
+        "height": 2558,
+        "units": "physical-pixels"
+      },
+      "systemInsets": {
+        "top": 48,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "insets": {
+        "available": true,
+        "source": "android-window-metrics",
+        "units": "physical-pixels",
+        "systemBars": {
+          "visible": {
+            "top": 48,
+            "bottom": 0,
+            "left": 0,
+            "right": 0
+          },
+          "stable": {
+            "top": 48,
+            "bottom": 0,
+            "left": 0,
+            "right": 0
+          }
+        },
+        "displayCutout": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "displayCutoutInfo": {
+          "classification": "none",
+          "bounds": null
+        },
+        "systemGestures": {
+          "top": 48,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "mandatorySystemGestures": {
+          "top": 48,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "tappableElement": {
+          "top": 48,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "systemChrome": {
+          "visibility": "partial",
+          "statusBar": "visible",
+          "navigationBar": "hidden",
+          "homeIndicatorAutoHideRequested": null,
+          "source": "android-window-insets"
+        }
+      },
+      "intentChooserDetected": false,
+      "notificationPermissionDetected": false,
+      "rotation": 0,
+      "wakefulness": "Awake",
+      "wakefulnessSource": "hierarchy",
+      "backStack": {
+        "depth": 2,
+        "activities": [
+          {
+            "name": "com.android.settings.intelligence.search.SearchActivity",
+            "taskId": 6,
+            "userId": 0,
+            "taskAffinity": "1000:com.android.settings.root",
+            "isTaskRoot": false
+          },
+          {
+            "name": "com.android.settings.SubSettings",
+            "taskId": 6,
+            "userId": 0,
+            "taskAffinity": "1000:com.android.settings.root",
+            "isTaskRoot": false
+          },
+          {
+            "name": "com.android.settings.Settings",
+            "taskId": 6,
+            "userId": 0,
+            "taskAffinity": "1000:com.android.settings.root",
+            "isTaskRoot": true
+          },
+          {
+            "name": "com.android.systemui.xr.wm.SysUiVisibilityBarrier",
+            "taskId": 4,
+            "userId": 0,
+            "taskAffinity": "10113:com.android.systemui:535243222",
+            "isTaskRoot": true
+          },
+          {
+            "name": "com.android.systemui.xrhomeenv.MainActivity",
+            "taskId": 5,
+            "userId": 0,
+            "taskAffinity": "10101:com.android.systemui.xrhomeenv",
+            "isTaskRoot": true
+          },
+          {
+            "name": "com.android.systemui.xr.home.SysUiHomeActivity",
+            "taskId": 3,
+            "userId": 0,
+            "taskAffinity": "10113:com.android.systemui:659197860",
+            "isTaskRoot": true
+          }
+        ],
+        "tasks": [
+          {
+            "id": 6,
+            "userId": 0,
+            "affinity": "1000:com.android.settings.root",
+            "numActivities": 3,
+            "launchedFromPackage": "com.android.shell",
+            "rootActivity": "com.android.settings/.Settings",
+            "packageName": "com.android.settings",
+            "windowingMode": "freeform",
+            "bounds": [
+              0,
+              48,
+              2048,
+              1328
+            ]
+          },
+          {
+            "id": 4,
+            "userId": 0,
+            "affinity": "10113:com.android.systemui:535243222",
+            "numActivities": 1,
+            "launchedFromPackage": "com.android.systemui",
+            "rootActivity": "com.android.systemui/.xr.wm.SysUiVisibilityBarrier",
+            "packageName": "com.android.systemui",
+            "windowingMode": "fullscreen",
+            "bounds": [
+              0,
+              0,
+              2560,
+              2558
+            ]
+          },
+          {
+            "id": 5,
+            "userId": 0,
+            "affinity": "10101:com.android.systemui.xrhomeenv",
+            "numActivities": 1,
+            "launchedFromPackage": "com.android.systemui",
+            "rootActivity": "com.android.systemui.xrhomeenv/.MainActivity",
+            "packageName": "com.android.systemui.xrhomeenv",
+            "windowingMode": "freeform",
+            "bounds": [
+              0,
+              48,
+              2048,
+              1328
+            ]
+          },
+          {
+            "id": 3,
+            "userId": 0,
+            "affinity": "10113:com.android.systemui:659197860",
+            "numActivities": 1,
+            "rootActivity": "com.android.systemui/.xr.home.SysUiHomeActivity",
+            "packageName": "com.android.systemui",
+            "windowingMode": "fullscreen",
+            "bounds": [
+              0,
+              0,
+              1200,
+              1592
+            ]
+          }
+        ],
+        "currentActivity": {
+          "name": "com.android.settings.intelligence.search.SearchActivity",
+          "taskId": 6,
+          "userId": 0
+        },
+        "displayCount": 1,
+        "currentTaskId": 6,
+        "capturedAt": 1794345251150,
+        "source": "adb"
+      },
+      "activeWindow": {
+        "appId": "com.android.settings.intelligence",
+        "activityName": "com.android.settings.intelligence.search.SearchActivity",
+        "layoutSeqSum": 1045
+      },
+      "deviceLock": {
+        "locked": false,
+        "keyguardShowing": false,
+        "secure": false
+      },
+      "accessibilityState": {
+        "enabled": false,
+        "service": "unknown",
+        "detectionSkipped": false
+      },
+      "freshness": {
+        "requestedAfter": 1794345250141,
+        "actualTimestamp": 1794345250937,
+        "ageMs": 62,
+        "verified": true,
+        "isFresh": true
+      },
+      "screenshotCapturedAt": "2026-11-10T21:14:11.280Z",
+      "settled": false,
+      "screenshotHierarchyLagMs": 155,
+      "skeleton": [
+        {
+          "bounds": [
+            0,
+            0,
+            3522,
+            2030
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-d2de3ae627999391",
+          "label": "Recents"
+        },
+        {
+          "bounds": [
+            73,
+            48,
+            2828,
+            1853
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-f69021943d4baad0",
+          "label": "Launcher"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            3072,
+            1416
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-51320023ce5e9c24",
+          "label": "Notifications"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            2400,
+            2400
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "com.android.systemui:id/home_screen",
+          "label": "3:14 PM"
+        },
+        {
+          "bounds": [
+            964,
+            1873,
+            1140,
+            2049
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "com.android.systemui:id/home_screen_launcher_button",
+          "label": "Open Launcher Panel"
+        },
+        {
+          "bounds": [
+            1260,
+            1873,
+            1436,
+            2049
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "com.android.systemui:id/home_screen_env_button",
+          "label": "Environment"
+        },
+        {
+          "bounds": [
+            729,
+            1210,
+            848,
+            1306
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "com.android.systemui:id/button2",
+          "label": "OK"
+        },
+        {
+          "bounds": [
+            760,
+            1189,
+            1800,
+            1571
+          ],
+          "affordances": [
+            "input"
+          ],
+          "elementId": "<ime>",
+          "label": "Keyboard (com.google.android.inputmethod.latin)"
+        }
+      ],
+      "keyboard": {
+        "visible": true,
+        "package": "com.google.android.inputmethod.latin"
+      },
+      "context": [
+        {
+          "bounds": [
+            0,
+            0,
+            496,
+            680
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-e463212d84da9d12-2"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            1000,
+            1700
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/quick_settings_root_frame",
+          "label": "Quick Settings"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            2,
+            2
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/accessibility_announcement",
+          "label": "Recentered"
+        },
+        {
+          "bounds": [
+            64,
+            950,
+            856,
+            1015
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/alertTitle",
+          "label": "Unable to detect surroundings"
+        },
+        {
+          "bounds": [
+            64,
+            1063,
+            856,
+            1146
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/message",
+          "label": "Make sure you're in a well-lit area and the headset cameras are uncovered"
+        },
+        {
+          "bounds": [
+            90,
+            0,
+            136,
+            48
+          ],
+          "affordances": [],
+          "elementId": "s2-5f42272ca1db0b1c",
+          "label": "Google Play Protect notification:"
+        },
+        {
+          "bounds": [
+            136,
+            0,
+            182,
+            48
+          ],
+          "affordances": [],
+          "elementId": "s2-59c2c43e07860ca2",
+          "label": "Android System notification:"
+        },
+        {
+          "bounds": [
+            16,
+            0,
+            2504,
+            48
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:status-bar-summary",
+          "label": "Status bar: 3:14, Wifi signal full., Battery charging, 100 percent."
+        }
+      ],
+      "observationScreenshotResourceUri": "automobile:observation/emulator-5558/906571b6-24d5-4ac2-af20-4828d1ccc8f2/screenshot"
+    },
+    "error": "No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+    "errorCode": "NO_FOCUSED_EDITABLE",
+    "observationDiff": {
+      "mode": "full",
+      "reason": "disabled",
+      "hint": "Set --actions-diff-observe to receive diffs."
+    }
+  },
+  "isError": true,
+  "success": false,
+  "error": "No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode."
+}
+No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.
+[exit 1]
+

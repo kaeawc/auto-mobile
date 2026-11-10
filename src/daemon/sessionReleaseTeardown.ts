@@ -97,7 +97,7 @@ export class SessionReleaseTeardown {
     const forcedSignal = operation?.forcedAbort?.signal;
     return this.runUnderTeardownShield(async (shieldSignal) => {
       if (needsIme) {
-        await this.flushPendingIme(deviceId, operation, shieldSignal);
+        await this.flushPendingIme(deviceId, () => releaseWasForced(operation), shieldSignal);
       }
       if (!needsTeardown) {
         return [];
@@ -114,21 +114,38 @@ export class SessionReleaseTeardown {
    */
   private async flushPendingIme(
     deviceId: string,
-    operation: SessionReleaseOperation | undefined,
+    isForced: () => boolean,
     signal: AbortSignal,
   ): Promise<void> {
     try {
-      await this.pendingIme.flush(deviceId, {
-        signal,
-        isForced: () => releaseWasForced(operation),
-      });
+      await this.pendingIme.flush(deviceId, { signal, isForced });
     } catch (error) {
       // ImeRestore quarantines unsafe state; release still completes with a visible diagnostic.
       logger.warn(`[SendKeys] Session-end IME restoration failed on ${deviceId}`, error);
-      if (releaseWasForced(operation) || signal.aborted) {
+      if (isForced() || signal.aborted) {
         this.pendingIme.discard(deviceId);
       }
     }
+  }
+
+  /**
+   * A rebind leaves the old device, so its typing IME is restored as release restores it
+   * (#16428); `mayRestore` false (ownership moved on) discards the snapshot instead.
+   */
+  async restorePendingImeForRebind(
+    deviceId: string,
+    mayRestore: () => boolean,
+  ): Promise<{ pending: null }> {
+    const stages = await this.runUnderTeardownShield(async (signal) => {
+      await this.flushPendingIme(deviceId, () => !mayRestore(), signal);
+      return [];
+    });
+    await Promise.all(stages);
+    return { pending: null };
+  }
+
+  hasPendingIme(deviceId: string): boolean {
+    return this.pendingIme.hasPending(deviceId);
   }
 
   /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */

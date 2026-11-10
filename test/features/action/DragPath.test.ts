@@ -509,6 +509,106 @@ describe("DragPath", () => {
     expect(frames).toEqual([]);
   });
 
+  describe("posture change since the caller's observe (#17752)", () => {
+    const points = [
+      { x: 10, y: 10 },
+      { x: 10, y: 100, durationMs: 50 },
+    ];
+
+    function createFenced(device: BootedDevice, timer: FakeTimer, deps: DragPathDependencies) {
+      const transitions = new FakeDisplayTransitionReader();
+      // The caller observed at the current revision; tests fold the device after that.
+      const observedRevision = transitions.fullRevision;
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult(observation(100, 200, "frame-7"));
+      const dragPath = new DragPath(device, new FakeAdbExecutor(), {
+        timer,
+        displayTransitions: transitions,
+        renderedDisplayRevision: () => observedRevision,
+        renderedDisplayGeneration: () => 7,
+        ...deps,
+      });
+      dragPath.window = new FakeWindow();
+      dragPath.observeScreen = observe;
+      return { dragPath, transitions };
+    }
+
+    test("Android refuses with the typed staleDisplay failure and sends no input", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const { client, frames } = fakeClient(timer);
+      const { dragPath, transitions } = createFenced(android, timer, { androidClient: client });
+      transitions.transition();
+
+      const result = await dragPath.execute({ points });
+
+      expect(result.success).toBe(false);
+      expect(result.staleDisplay).toEqual({
+        observedGeneration: 7,
+        currentGeneration: 8,
+        currentDisplayKey: "cover",
+        retry: "observe",
+      });
+      expect(result.error).toStartWith("Display changed since these coordinates were chosen");
+      expect(frames).toEqual([]);
+    });
+
+    test("iOS refuses with the typed staleDisplay failure and sends no input", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeIOSCtrlProxy();
+      const { dragPath, transitions } = createFenced(ios, timer, { iosClient: fake });
+      transitions.transition();
+
+      const result = await dragPath.execute({ points });
+
+      expect(result.success).toBe(false);
+      expect(result.staleDisplay).toMatchObject({
+        observedGeneration: 7,
+        currentGeneration: 8,
+        retry: "observe",
+      });
+      expect(fake.getPathGestureHistory()).toEqual([]);
+    });
+
+    test("strokes normally when the display is unchanged since the observe", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const { client, frames } = fakeClient(timer);
+      const { dragPath } = createFenced(android, timer, { androidClient: client });
+
+      const result = await dragPath.execute({ points });
+
+      expect(result.success).toBe(true);
+      expect(result.staleDisplay).toBeUndefined();
+      expect(frames.map((f) => f.kind)[0]).toBe("start");
+    });
+
+    test("a fold during the stroke keeps the lifted-finger note and adds staleDisplay", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const { client, frames } = fakeClient(timer);
+      const holder: { transitions?: FakeDisplayTransitionReader } = {};
+      const { dragPath, transitions } = createFenced(android, timer, {
+        androidClient: client,
+        idGenerator: {
+          next: () => {
+            holder.transitions?.transition();
+            return "stroke-1";
+          },
+        },
+      });
+      holder.transitions = transitions;
+
+      const result = await dragPath.execute({ points });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("The finger was lifted");
+      expect(result.staleDisplay).toMatchObject({ retry: "observe" });
+      expect(frames).toEqual([]);
+    });
+  });
+
   test("an out-of-bounds point fails before any input", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

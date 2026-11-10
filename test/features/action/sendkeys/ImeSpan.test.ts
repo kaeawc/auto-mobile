@@ -26,7 +26,7 @@ function harness() {
     },
   };
   const pending = new DevicePendingImeRestores();
-  return { service: new ImeSpanService(host, new FakeTimer(), pending), host, calls, pending };
+  return { service: new ImeSpanService(host, pending), host, calls, pending };
 }
 function execution(): Execution {
   return { results: [{ index: 0, action: "type", resolvedMode: "ime", success: true }] };

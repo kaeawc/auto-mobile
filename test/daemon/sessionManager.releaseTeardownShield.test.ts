@@ -385,23 +385,73 @@ test("session release restores a pending typing IME exactly once before handing 
   const { pendingImeRestores } =
     await import("../../src/features/action/sendkeys/PendingImeRestore");
   const restored: string[] = [];
-  pendingImeRestores.store(
-    device.deviceId,
-    {
-      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
-      userId: 10,
-      restore: async () => {
-        expect(h.manager.getSessionForDevice(device.deviceId)).toBe("old");
-        restored.push("restore");
-      },
+  pendingImeRestores.store(device.deviceId, {
+    snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+    userId: 10,
+    restore: async () => {
+      expect(h.manager.getSessionForDevice(device.deviceId)).toBe("old");
+      restored.push("restore");
     },
-    h.timer,
-  );
+  });
   try {
     await h.manager.releaseSession("old", "plan-auto-release");
     await h.manager.releaseSession("old", "plan-auto-release");
     expect(restored).toEqual(["restore"]);
   } finally {
+    pendingImeRestores.discard(device.deviceId);
+  }
+});
+
+test("rebinding a session to another device restores the old device's typing IME (#16428)", async () => {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
+  managers.push(manager);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const restored: string[] = [];
+  await manager.createSession("rebind-ime", "rebind-ime-a", "android");
+  pendingImeRestores.store("rebind-ime-a", {
+    snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+    userId: 10,
+    restore: async () => {
+      restored.push("rebind-ime-a");
+    },
+  });
+  try {
+    await manager.rebindSession("rebind-ime", "rebind-ime-b", "android");
+    expect(restored).toEqual(["rebind-ime-a"]);
+    expect(pendingImeRestores.hasPending("rebind-ime-a")).toBe(false);
+  } finally {
+    pendingImeRestores.discard("rebind-ime-a");
+  }
+});
+
+test("a failed IME restore at session release is logged and the release still completes (#16428)", async () => {
+  const h = await harness();
+  await ownDevice(h, []);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  pendingImeRestores.store(device.deviceId, {
+    snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+    userId: 10,
+    restore: async () => {
+      throw new Error("ime set rejected");
+    },
+  });
+  try {
+    await h.manager.releaseSession("old", "plan-auto-release");
+    expect(h.manager.getSession("old")).toBeNull();
+    expect(h.manager.getSessionForDevice(device.deviceId)).toBeNull();
+    const messages = warn.mock.calls.map((call) => String(call[0]));
+    expect(messages).toContain(
+      `[SendKeys] Session-end IME restoration failed on ${device.deviceId}`,
+    );
+    expect(pendingImeRestores.hasPending(device.deviceId)).toBe(false);
+  } finally {
+    warn.mockRestore();
     pendingImeRestores.discard(device.deviceId);
   }
 });
@@ -414,22 +464,18 @@ test("a release forced after the restore took the IME lock aborts that restore's
   const started = Promise.withResolvers<AbortSignal | undefined>();
   const gate = Promise.withResolvers<void>();
   const writes: string[] = [];
-  pendingImeRestores.store(
-    device.deviceId,
-    {
-      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
-      userId: 10,
-      restore: async (fence) => {
-        started.resolve(fence);
-        await gate.promise;
-        // Stands in for ImeRestore: every later device write checks the fence first.
-        if (!fence?.aborted) {
-          writes.push("ime disable");
-        }
-      },
+  pendingImeRestores.store(device.deviceId, {
+    snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+    userId: 10,
+    restore: async (fence) => {
+      started.resolve(fence);
+      await gate.promise;
+      // Stands in for ImeRestore: every later device write checks the fence first.
+      if (!fence?.aborted) {
+        writes.push("ime disable");
+      }
     },
-    h.timer,
-  );
+  });
   const session = h.manager.getSession("old");
   const stateRestore = Reflect.get(h.manager, "stateRestore") as SessionDeviceStateRestore;
   const operation: SessionReleaseOperation = {
@@ -466,17 +512,13 @@ test("a release forced while it waits for the IME lock discards the pending rest
     await import("../../src/features/action/sendkeys/PendingImeRestore");
   const { withAndroidImeLock } = await import("../../src/features/action/androidImeLock");
   const restores: string[] = [];
-  pendingImeRestores.store(
-    device.deviceId,
-    {
-      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
-      userId: 10,
-      restore: async () => {
-        restores.push("restore");
-      },
+  pendingImeRestores.store(device.deviceId, {
+    snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+    userId: 10,
+    restore: async () => {
+      restores.push("restore");
     },
-    h.timer,
-  );
+  });
   const session = h.manager.getSession("old");
   const stateRestore = Reflect.get(h.manager, "stateRestore") as SessionDeviceStateRestore;
   const operation: SessionReleaseOperation = {

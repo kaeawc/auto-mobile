@@ -163,15 +163,6 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   selectsActiveDevice?: boolean;
   /** See {@link ToolTraits.hostInventory}. */
   hostInventory?: boolean;
-  /** See {@link ToolTraits.keepsImeRestorePending}. */
-  keepsImeRestorePending?: boolean;
-  /**
-   * The handler flushes its target device's pending IME restore itself, once it has admitted the
-   * caller for that device; the registry never flushes before dispatch (#16579). A lifecycle tool
-   * whose ownership check runs inside the handler declares this, so a refused call never consumes
-   * another session's pending restore.
-   */
-  flushesImeRestoreAfterAdmission?: boolean;
 }
 
 /**
@@ -196,8 +187,6 @@ export interface SessionlessDeviceRead {
 
 /** Behaviour a tool declares on its definition instead of the pipeline keying on its name (#11825). */
 export interface ToolTraits {
-  /** Typing or read-only tool that leaves keyboard restoration pending until the next non-typing tool. */
-  keepsImeRestorePending?: boolean;
   /** Always ends an app's process (not `appLifecycle` `killBackgrounded`, the state-preserving kill). */
   stopsApp?: boolean;
   /** Replaces a process without naming the app in its args (`installApp`): all remembered screens go. */
@@ -276,7 +265,6 @@ export const SELECTS_ACTIVE_DEVICE = { selectsActiveDevice: true } as const;
 /** Just the trait fields of a registration's options, for the registered tool and the recorder. */
 export function pickToolTraits(options: ToolTraits): ToolTraits {
   const {
-    keepsImeRestorePending,
     stopsApp,
     replacesProcess,
     recordsNavigation,
@@ -292,7 +280,6 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     changesOpaquePersistentState,
   } = options;
   return {
-    keepsImeRestorePending,
     stopsApp,
     replacesProcess,
     recordsNavigation,

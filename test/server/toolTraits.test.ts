@@ -18,7 +18,6 @@ function toolsWith(
     | "stopsApp"
     | "replacesProcess"
     | "loudArtifactWrites"
-    | "keepsImeRestorePending"
     | "defaultsToSkeletonObservation"
     | "stagesFiles",
 ): string[] {
@@ -88,10 +87,6 @@ describe("tool traits replace the navigation recorder's name lists (#11825)", ()
 
   test("stagesFiles is declared by exactly the tools FILE_STAGING_TOOLS named", () => {
     expect(toolsWith("stagesFiles")).toEqual(["putAppFile"]);
-  });
-
-  test("only typing and observation leave keyboard restoration pending", () => {
-    expect(toolsWith("keepsImeRestorePending")).toEqual(["observe", "sendKeys"]);
   });
 
   test("the state-preserving kill is not an app-stopping tool", () => {

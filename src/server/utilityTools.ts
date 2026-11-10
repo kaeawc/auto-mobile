@@ -182,13 +182,16 @@ const doNotDisturbStateInputSchema = z
     enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb"),
     mode: doNotDisturbModeSchema.optional().describe("Do Not Disturb mode"),
   })
+  .strict()
   .refine((values) => values.enabled !== undefined || values.mode !== undefined, {
     message: "Provide enabled or mode for doNotDisturb",
   });
 
-const biometricStateInputSchema = z.object({
-  enrollment: biometricEnrollmentSchema.describe("Set iOS Simulator biometric enrollment state."),
-});
+const biometricStateInputSchema = z
+  .object({
+    enrollment: biometricEnrollmentSchema.describe("Set iOS Simulator biometric enrollment state."),
+  })
+  .strict();
 
 const connectivityStateInputSchema = z
   .object({
@@ -197,6 +200,7 @@ const connectivityStateInputSchema = z
     bluetoothEnabled: z.boolean().optional().describe("Enable or disable Bluetooth on Android."),
     locationEnabled: z.boolean().optional().describe("Enable or disable Location on Android."),
   })
+  .strict()
   .refine(
     (values) =>
       values.airplaneMode !== undefined ||
@@ -373,6 +377,7 @@ const networkConditionInputSchema = z
           `${MAX_NETWORK_CONDITION_TTL_SECONDS}s (~24.8 days) to fit the timer's 32-bit limit.`,
       ),
   })
+  .strict()
   // Reject non-actionable / contradictory requests using the SAME classifier the
   // setter uses, so schema acceptance and runtime behavior cannot disagree
   // (issue #6012 review + audit): `{}`, falsy-only cancel/reset and TTL-only are

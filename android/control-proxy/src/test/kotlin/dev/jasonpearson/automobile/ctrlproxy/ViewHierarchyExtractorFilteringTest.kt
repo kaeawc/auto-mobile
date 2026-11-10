@@ -135,6 +135,85 @@ internal class ViewHierarchyExtractorFilteringTest : ViewHierarchyExtractorFixtu
   // MARK: - Occlusion Filtering Tests
 
   @Test
+  fun `cross-window occlusion requires device support`() {
+    for (supported in listOf(false, true)) {
+      val deviceExtractor = ViewHierarchyExtractor(crossWindowOcclusionSupported = supported)
+      assertEquals(
+        supported,
+        deviceExtractor.isOcclusionFilteringActive(
+          disableAllFiltering = false,
+          occlusionEnabled = true,
+          windowCount = 2,
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `XR Settings children survive a covering environment window only when occlusion is unsupported`() {
+    // Mirror the Settings panel and xrhomeenv bounds, layers and IDs from the XR capture.
+    // Environment content is not inert: it includes the text "Home Environment".
+    for (supported in listOf(false, true)) {
+      val settingsBounds = Rect(744, 48, 2048, 1328)
+      val environmentBounds = Rect(0, 48, 2048, 1328)
+      val settings =
+        fakeNode(
+          packageName = "com.android.settings",
+          state =
+            NodeState(
+              bounds = settingsBounds,
+              children =
+                listOf(
+                  fakeNode(
+                    packageName = "com.android.settings",
+                    text = "Connected devices",
+                    state = NodeState(bounds = Rect(800, 200, 1800, 300)),
+                  ),
+                ),
+            ),
+        )
+      val environment =
+        fakeNode(
+          packageName = "com.android.systemui.xrhomeenv",
+          text = "Home Environment",
+          state = NodeState(bounds = environmentBounds),
+        )
+      val windows =
+        listOf(
+          fakeWindow(
+            id = 39,
+            layer = 1,
+            root = settings,
+            state = WindowState(focused = true, active = true, bounds = settingsBounds),
+          ),
+          fakeWindow(
+            id = 5,
+            layer = 2,
+            root = environment,
+            state = WindowState(bounds = environmentBounds),
+          ),
+        )
+      val result =
+        ViewHierarchyExtractor(
+            // Keep the structural window root, as on the XR service's API 30+ path.
+            pruneBaselineWrappers = true,
+            crossWindowOcclusionSupported = supported,
+          )
+          .extractFromAllWindows(
+            windows,
+            null,
+            options = HierarchyExtractionOptions(occlusionEnabled = true),
+          )
+      val serialized = json.encodeToString(ViewHierarchy.serializer(), result)
+      assertNotNull(result.hierarchy)
+      val settingsHierarchy = result.hierarchy!!.children.single { it.windowId == 39 }
+      assertEquals(!supported, settingsHierarchy.children.any { it.text == "Connected devices" })
+      assertEquals(if (supported) "hidden" else null, settingsHierarchy.occlusionState)
+      assertEquals(supported, serialized.contains("\"occlusionState\":\"hidden\""))
+    }
+  }
+
+  @Test
   fun `occlusion filtering is active by default with multiple windows`() {
     assertTrue(
       extractor.isOcclusionFilteringActive(

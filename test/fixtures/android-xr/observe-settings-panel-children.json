@@ -1,0 +1,1746 @@
+{
+  "windows": [
+    {
+      "id": 154,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 1,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        744,
+        48,
+        2048,
+        1328
+      ],
+      "packageName": "com.android.settings",
+      "hierarchy": {
+        "windowId": 154,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-724c738e9937cf78",
+        "bounds": [
+          744,
+          48,
+          2048,
+          1328
+        ],
+        "node": {
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "resource-id": "android:id/content",
+          "visible-to-user": true,
+          "view-id": "android:id/content",
+          "bounds": [
+            744,
+            48,
+            2048,
+            1328
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus",
+              "scroll_forward"
+            ],
+            "resource-id": "com.android.settings:id/content_parent",
+            "visible-to-user": true,
+            "view-id": "com.android.settings:id/content_parent",
+            "scrollable": "true",
+            "bounds": [
+              744,
+              48,
+              2048,
+              1328
+            ],
+            "node": [
+              {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "com.android.settings:id/app_bar",
+                "visible-to-user": true,
+                "view-id": "com.android.settings:id/app_bar",
+                "class": "android.widget.LinearLayout",
+                "className": "android.widget.LinearLayout",
+                "bounds": [
+                  744,
+                  48,
+                  2048,
+                  406
+                ],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus",
+                    "next_at_movement_granularity",
+                    "previous_at_movement_granularity",
+                    "set_selection"
+                  ],
+                  "content-desc": "Network & internet",
+                  "resource-id": "com.android.settings:id/collapsing_toolbar",
+                  "visible-to-user": true,
+                  "view-id": "com.android.settings:id/collapsing_toolbar",
+                  "bounds": [
+                    744,
+                    48,
+                    2048,
+                    406
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.settings:id/action_bar",
+                    "visible-to-user": true,
+                    "view-id": "com.android.settings:id/action_bar",
+                    "class": "android.view.ViewGroup",
+                    "className": "android.view.ViewGroup",
+                    "bounds": [
+                      744,
+                      48,
+                      2048,
+                      176
+                    ]
+                  }
+                }
+              },
+              {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "com.android.settings:id/content_frame",
+                "visible-to-user": true,
+                "view-id": "com.android.settings:id/content_frame",
+                "bounds": [
+                  744,
+                  406,
+                  2048,
+                  1328
+                ],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.settings:id/main_content",
+                  "visible-to-user": true,
+                  "view-id": "com.android.settings:id/main_content",
+                  "bounds": [
+                    744,
+                    406,
+                    2048,
+                    1328
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.settings:id/container_material",
+                    "visible-to-user": true,
+                    "view-id": "com.android.settings:id/container_material",
+                    "class": "android.widget.LinearLayout",
+                    "className": "android.widget.LinearLayout",
+                    "bounds": [
+                      744,
+                      406,
+                      2048,
+                      1328
+                    ],
+                    "node": {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "android:id/list_container",
+                      "visible-to-user": true,
+                      "view-id": "android:id/list_container",
+                      "bounds": [
+                        744,
+                        406,
+                        2048,
+                        1328
+                      ],
+                      "node": {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.android.settings:id/recycler_view",
+                        "visible-to-user": true,
+                        "collection-info": "rows:7,cols:1",
+                        "view-id": "com.android.settings:id/recycler_view",
+                        "class": "androidx.recyclerview.widget.RecyclerView",
+                        "className": "androidx.recyclerview.widget.RecyclerView",
+                        "focusable": "true",
+                        "bounds": [
+                          744,
+                          406,
+                          2048,
+                          1328
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "click",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 0,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:0,col:0",
+                            "view-id": "s2-5c5185b0afbbea91~5d6b95d7",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "clickable": "true",
+                            "focusable": "true",
+                            "bounds": [
+                              744,
+                              406,
+                              2048,
+                              562
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/icon_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/icon_frame",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "bounds": [
+                                  792,
+                                  452,
+                                  888,
+                                  516
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "android:id/icon",
+                                  "visible-to-user": true,
+                                  "view-id": "android:id/icon",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    792,
+                                    460,
+                                    840,
+                                    508
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Internet",
+                                "resource-id": "android:id/title",
+                                "visible-to-user": true,
+                                "view-id": "android:id/title",
+                                "bounds": [
+                                  888,
+                                  438,
+                                  1025,
+                                  492
+                                ]
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "AndroidWifi",
+                                "resource-id": "android:id/summary",
+                                "visible-to-user": true,
+                                "view-id": "android:id/summary",
+                                "bounds": [
+                                  888,
+                                  492,
+                                  1033,
+                                  530
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 1,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:1,col:0",
+                            "view-id": "s2-5c5185b0afbbea91~e80b7587",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "clickable": "true",
+                            "enabled": "false",
+                            "focusable": "true",
+                            "bounds": [
+                              744,
+                              562,
+                              2048,
+                              718
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/icon_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/icon_frame",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "enabled": "false",
+                                "bounds": [
+                                  792,
+                                  608,
+                                  888,
+                                  672
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "android:id/icon",
+                                  "visible-to-user": true,
+                                  "view-id": "android:id/icon",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "enabled": "false",
+                                  "bounds": [
+                                    792,
+                                    616,
+                                    840,
+                                    664
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Calls & SMS",
+                                "resource-id": "android:id/title",
+                                "visible-to-user": true,
+                                "view-id": "android:id/title",
+                                "enabled": "false",
+                                "bounds": [
+                                  888,
+                                  594,
+                                  1105,
+                                  648
+                                ]
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "No SIM",
+                                "resource-id": "android:id/summary",
+                                "visible-to-user": true,
+                                "view-id": "android:id/summary",
+                                "enabled": "false",
+                                "bounds": [
+                                  888,
+                                  648,
+                                  980,
+                                  686
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "click",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 2,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:2,col:0",
+                            "view-id": "s2-bfee7e27721a5f4b",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "clickable": "true",
+                            "focusable": "true",
+                            "bounds": [
+                              744,
+                              718,
+                              2048,
+                              836
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/icon_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/icon_frame",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "bounds": [
+                                  792,
+                                  745,
+                                  888,
+                                  809
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "android:id/icon",
+                                  "visible-to-user": true,
+                                  "view-id": "android:id/icon",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    792,
+                                    753,
+                                    840,
+                                    801
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Airplane mode",
+                                "resource-id": "android:id/title",
+                                "visible-to-user": true,
+                                "view-id": "android:id/title",
+                                "bounds": [
+                                  888,
+                                  750,
+                                  1147,
+                                  804
+                                ]
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "android:id/widget_frame",
+                                "visible-to-user": true,
+                                "view-id": "android:id/widget_frame",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "bounds": [
+                                  1872,
+                                  718,
+                                  2016,
+                                  836
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "android:id/switch_widget",
+                                  "visible-to-user": true,
+                                  "state-description": "OFF",
+                                  "view-id": "android:id/switch_widget",
+                                  "class": "android.widget.Switch",
+                                  "className": "android.widget.Switch",
+                                  "checkable": "true",
+                                  "bounds": [
+                                    1904,
+                                    729,
+                                    2016,
+                                    825
+                                  ]
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "click",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 3,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:3,col:0",
+                            "view-id": "s2-5c5185b0afbbea91~62623137",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "clickable": "true",
+                            "focusable": "true",
+                            "bounds": [
+                              744,
+                              836,
+                              2048,
+                              992
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/icon_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/icon_frame",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "bounds": [
+                                  792,
+                                  882,
+                                  888,
+                                  946
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "android:id/icon",
+                                  "visible-to-user": true,
+                                  "view-id": "android:id/icon",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    792,
+                                    890,
+                                    840,
+                                    938
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Hotspot & tethering",
+                                "resource-id": "android:id/title",
+                                "visible-to-user": true,
+                                "view-id": "android:id/title",
+                                "bounds": [
+                                  888,
+                                  868,
+                                  1235,
+                                  922
+                                ]
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Off",
+                                "resource-id": "android:id/summary",
+                                "visible-to-user": true,
+                                "view-id": "android:id/summary",
+                                "bounds": [
+                                  888,
+                                  922,
+                                  927,
+                                  960
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "click",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 4,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:4,col:0",
+                            "view-id": "s2-5c5185b0afbbea91~d1d1127d",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "clickable": "true",
+                            "focusable": "true",
+                            "bounds": [
+                              744,
+                              992,
+                              2048,
+                              1148
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/icon_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/icon_frame",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "bounds": [
+                                  792,
+                                  1038,
+                                  888,
+                                  1102
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "android:id/icon",
+                                  "visible-to-user": true,
+                                  "view-id": "android:id/icon",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    792,
+                                    1046,
+                                    840,
+                                    1094
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Data Saver",
+                                "resource-id": "android:id/title",
+                                "visible-to-user": true,
+                                "view-id": "android:id/title",
+                                "bounds": [
+                                  888,
+                                  1024,
+                                  1081,
+                                  1078
+                                ]
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Off",
+                                "resource-id": "android:id/summary",
+                                "visible-to-user": true,
+                                "view-id": "android:id/summary",
+                                "bounds": [
+                                  888,
+                                  1078,
+                                  927,
+                                  1116
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "click",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 5,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:5,col:0",
+                            "view-id": "s2-9d2b0563dfcdc35a",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "clickable": "true",
+                            "focusable": "true",
+                            "bounds": [
+                              744,
+                              1148,
+                              2048,
+                              1304
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/icon_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/icon_frame",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "bounds": [
+                                  792,
+                                  1194,
+                                  888,
+                                  1258
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "android:id/icon",
+                                  "visible-to-user": true,
+                                  "view-id": "android:id/icon",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    792,
+                                    1202,
+                                    840,
+                                    1250
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "VPN",
+                                "resource-id": "android:id/title",
+                                "visible-to-user": true,
+                                "view-id": "android:id/title",
+                                "bounds": [
+                                  888,
+                                  1180,
+                                  967,
+                                  1234
+                                ]
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "None",
+                                "resource-id": "android:id/summary",
+                                "visible-to-user": true,
+                                "view-id": "android:id/summary",
+                                "bounds": [
+                                  888,
+                                  1234,
+                                  954,
+                                  1272
+                                ]
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "android:id/widget_frame",
+                                "visible-to-user": true,
+                                "view-id": "android:id/widget_frame",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "bounds": [
+                                  1872,
+                                  1148,
+                                  2016,
+                                  1304
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "click",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 6,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:6,col:0",
+                            "view-id": "s2-e463212d84da9d12-1",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "clickable": "true",
+                            "focusable": "true",
+                            "bounds": [
+                              744,
+                              1304,
+                              2048,
+                              1328
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 153,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 0,
+      "isActive": true,
+      "isFocused": true,
+      "bounds": [
+        0,
+        48,
+        744,
+        1328
+      ],
+      "packageName": "com.android.settings",
+      "hierarchy": {
+        "windowId": 153,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-186e7bc1b14b5775",
+        "bounds": [
+          0,
+          48,
+          744,
+          1328
+        ],
+        "node": {
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "resource-id": "android:id/content",
+          "visible-to-user": true,
+          "view-id": "android:id/content",
+          "bounds": [
+            0,
+            48,
+            744,
+            1328
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.android.settings:id/settings_homepage_container",
+            "visible-to-user": true,
+            "view-id": "com.android.settings:id/settings_homepage_container",
+            "class": "android.view.ViewGroup",
+            "className": "android.view.ViewGroup",
+            "bounds": [
+              0,
+              48,
+              744,
+              1328
+            ],
+            "node": [
+              {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "com.android.settings:id/app_bar",
+                "visible-to-user": true,
+                "view-id": "com.android.settings:id/app_bar",
+                "class": "android.widget.LinearLayout",
+                "className": "android.widget.LinearLayout",
+                "bounds": [
+                  0,
+                  48,
+                  744,
+                  176
+                ],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.settings:id/app_bar_container",
+                  "visible-to-user": true,
+                  "view-id": "com.android.settings:id/app_bar_container",
+                  "class": "android.widget.LinearLayout",
+                  "className": "android.widget.LinearLayout",
+                  "bounds": [
+                    0,
+                    48,
+                    744,
+                    176
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.settings:id/homepage_app_bar_two_pane_view",
+                    "visible-to-user": true,
+                    "view-id": "com.android.settings:id/homepage_app_bar_two_pane_view",
+                    "class": "android.widget.LinearLayout",
+                    "className": "android.widget.LinearLayout",
+                    "bounds": [
+                      36,
+                      48,
+                      708,
+                      176
+                    ],
+                    "node": [
+                      {
+                        "resource-id": "com.android.settings:id/search_action_bar_two_pane",
+                        "visible-to-user": true,
+                        "view-id": "com.android.settings:id/search_action_bar_two_pane",
+                        "class": "android.view.ViewGroup",
+                        "className": "android.view.ViewGroup",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "bounds": [
+                          48,
+                          60,
+                          568,
+                          164
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "visible-to-user": true,
+                            "view-id": "s2-6d3cf9235fb393ab",
+                            "class": "android.widget.ImageButton",
+                            "className": "android.widget.ImageButton",
+                            "focusable": "true",
+                            "bounds": [
+                              64,
+                              60,
+                              176,
+                              164
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus",
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "set_selection"
+                            ],
+                            "text": "Search",
+                            "resource-id": "com.android.settings:id/search_bar_title",
+                            "visible-to-user": true,
+                            "view-id": "com.android.settings:id/search_bar_title",
+                            "bounds": [
+                              176,
+                              85,
+                              292,
+                              139
+                            ]
+                          }
+                        ],
+                        "occluded": true
+                      },
+                      {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.android.settings:id/account_avatar_two_pane_version",
+                        "visible-to-user": true,
+                        "view-id": "com.android.settings:id/account_avatar_two_pane_version",
+                        "class": "android.widget.ImageView",
+                        "className": "android.widget.ImageView",
+                        "bounds": [
+                          600,
+                          64,
+                          696,
+                          160
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "actions": [
+                  "focus",
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus",
+                  "scroll_forward"
+                ],
+                "resource-id": "com.android.settings:id/main_content_scrollable_container",
+                "visible-to-user": true,
+                "view-id": "com.android.settings:id/main_content_scrollable_container",
+                "focusable": "true",
+                "scrollable": "true",
+                "bounds": [
+                  0,
+                  176,
+                  744,
+                  1328
+                ],
+                "node": {
+                  "actions": [
+                    "clear_focus",
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.settings:id/homepage_container",
+                  "visible-to-user": true,
+                  "view-id": "com.android.settings:id/homepage_container",
+                  "class": "android.widget.LinearLayout",
+                  "className": "android.widget.LinearLayout",
+                  "focusable": "true",
+                  "focused": "true",
+                  "bounds": [
+                    0,
+                    176,
+                    744,
+                    1328
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.settings:id/main_content",
+                    "visible-to-user": true,
+                    "view-id": "com.android.settings:id/main_content",
+                    "bounds": [
+                      0,
+                      196,
+                      744,
+                      1328
+                    ],
+                    "node": {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.settings:id/container_material",
+                      "visible-to-user": true,
+                      "view-id": "com.android.settings:id/container_material",
+                      "class": "android.widget.LinearLayout",
+                      "className": "android.widget.LinearLayout",
+                      "bounds": [
+                        0,
+                        196,
+                        744,
+                        1328
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "android:id/list_container",
+                        "visible-to-user": true,
+                        "view-id": "android:id/list_container",
+                        "bounds": [
+                          0,
+                          196,
+                          744,
+                          1328
+                        ],
+                        "node": {
+                          "actions": [
+                            "focus",
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.android.settings:id/recycler_view",
+                          "visible-to-user": true,
+                          "collection-info": "rows:16,cols:1",
+                          "view-id": "com.android.settings:id/recycler_view",
+                          "class": "androidx.recyclerview.widget.RecyclerView",
+                          "className": "androidx.recyclerview.widget.RecyclerView",
+                          "focusable": "true",
+                          "bounds": [
+                            0,
+                            196,
+                            744,
+                            1328
+                          ],
+                          "node": [
+                            {
+                              "actions": [
+                                "focus",
+                                "select",
+                                "clear_selection",
+                                "click",
+                                "accessibility_focus"
+                              ],
+                              "collection-row-index": 0,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:0,col:0",
+                              "view-id": "s2-2af87c3887f372cd~327902e1",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                48,
+                                196,
+                                696,
+                                372
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/text_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/text_frame",
+                                "class": "android.widget.RelativeLayout",
+                                "className": "android.widget.RelativeLayout",
+                                "bounds": [
+                                  48,
+                                  206,
+                                  696,
+                                  362
+                                ],
+                                "node": [
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Network & internet",
+                                    "resource-id": "android:id/title",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/title",
+                                    "bounds": [
+                                      96,
+                                      238,
+                                      427,
+                                      292
+                                    ]
+                                  },
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Wi‑Fi, hotspot",
+                                    "resource-id": "android:id/summary",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/summary",
+                                    "bounds": [
+                                      96,
+                                      292,
+                                      266,
+                                      330
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "actions": [
+                                "focus",
+                                "select",
+                                "clear_selection",
+                                "click",
+                                "accessibility_focus"
+                              ],
+                              "collection-row-index": 1,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:1,col:0",
+                              "view-id": "s2-2af87c3887f372cd~07b16976",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                48,
+                                372,
+                                696,
+                                548
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/text_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/text_frame",
+                                "class": "android.widget.RelativeLayout",
+                                "className": "android.widget.RelativeLayout",
+                                "bounds": [
+                                  48,
+                                  382,
+                                  696,
+                                  538
+                                ],
+                                "node": [
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Connected devices",
+                                    "resource-id": "android:id/title",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/title",
+                                    "bounds": [
+                                      96,
+                                      414,
+                                      434,
+                                      468
+                                    ]
+                                  },
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Bluetooth, pairing",
+                                    "resource-id": "android:id/summary",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/summary",
+                                    "bounds": [
+                                      96,
+                                      468,
+                                      313,
+                                      506
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "actions": [
+                                "focus",
+                                "select",
+                                "clear_selection",
+                                "click",
+                                "accessibility_focus"
+                              ],
+                              "collection-row-index": 2,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:2,col:0",
+                              "view-id": "s2-2af87c3887f372cd~bfcaf55f",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                48,
+                                548,
+                                696,
+                                724
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/text_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/text_frame",
+                                "class": "android.widget.RelativeLayout",
+                                "className": "android.widget.RelativeLayout",
+                                "bounds": [
+                                  48,
+                                  558,
+                                  696,
+                                  714
+                                ],
+                                "node": [
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Apps",
+                                    "resource-id": "android:id/title",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/title",
+                                    "bounds": [
+                                      96,
+                                      590,
+                                      187,
+                                      644
+                                    ]
+                                  },
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Recent apps, default apps",
+                                    "resource-id": "android:id/summary",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/summary",
+                                    "bounds": [
+                                      96,
+                                      644,
+                                      418,
+                                      682
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "collection-row-index": 3,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:3,col:0",
+                              "view-id": "s2-2af87c3887f372cd~21c292ab",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                48,
+                                724,
+                                696,
+                                900
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/text_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/text_frame",
+                                "class": "android.widget.RelativeLayout",
+                                "className": "android.widget.RelativeLayout",
+                                "bounds": [
+                                  48,
+                                  734,
+                                  696,
+                                  890
+                                ],
+                                "node": [
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Notifications",
+                                    "resource-id": "android:id/title",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/title",
+                                    "bounds": [
+                                      96,
+                                      766,
+                                      325,
+                                      820
+                                    ]
+                                  },
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Notification history, conversations",
+                                    "resource-id": "android:id/summary",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/summary",
+                                    "bounds": [
+                                      96,
+                                      820,
+                                      517,
+                                      858
+                                    ]
+                                  }
+                                ]
+                              },
+                              "occluded": true
+                            },
+                            {
+                              "collection-row-index": 4,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:4,col:0",
+                              "view-id": "s2-2af87c3887f372cd~4541b53b",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                48,
+                                900,
+                                696,
+                                1076
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/text_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/text_frame",
+                                "class": "android.widget.RelativeLayout",
+                                "className": "android.widget.RelativeLayout",
+                                "bounds": [
+                                  48,
+                                  910,
+                                  696,
+                                  1066
+                                ],
+                                "node": [
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Battery",
+                                    "resource-id": "android:id/title",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/title",
+                                    "bounds": [
+                                      96,
+                                      942,
+                                      224,
+                                      996
+                                    ]
+                                  },
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "100%",
+                                    "resource-id": "android:id/summary",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/summary",
+                                    "bounds": [
+                                      96,
+                                      996,
+                                      165,
+                                      1034
+                                    ]
+                                  }
+                                ]
+                              },
+                              "occluded": true
+                            },
+                            {
+                              "collection-row-index": 5,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:5,col:0",
+                              "view-id": "s2-2af87c3887f372cd~3327cfee",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                48,
+                                1076,
+                                696,
+                                1252
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/text_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/text_frame",
+                                "class": "android.widget.RelativeLayout",
+                                "className": "android.widget.RelativeLayout",
+                                "bounds": [
+                                  48,
+                                  1086,
+                                  696,
+                                  1242
+                                ],
+                                "node": [
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "Storage",
+                                    "resource-id": "android:id/title",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/title",
+                                    "bounds": [
+                                      96,
+                                      1118,
+                                      234,
+                                      1172
+                                    ]
+                                  },
+                                  {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "text": "41% used - 9.48 GB free",
+                                    "resource-id": "android:id/summary",
+                                    "visible-to-user": true,
+                                    "view-id": "android:id/summary",
+                                    "bounds": [
+                                      96,
+                                      1172,
+                                      392,
+                                      1210
+                                    ]
+                                  }
+                                ]
+                              },
+                              "occluded": true
+                            },
+                            {
+                              "collection-row-index": 6,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:6,col:0",
+                              "view-id": "s2-39ad435123b44bf5",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                48,
+                                1252,
+                                696,
+                                1328
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.settings:id/text_frame",
+                                "visible-to-user": true,
+                                "view-id": "com.android.settings:id/text_frame",
+                                "class": "android.widget.RelativeLayout",
+                                "className": "android.widget.RelativeLayout",
+                                "bounds": [
+                                  48,
+                                  1262,
+                                  696,
+                                  1328
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "text": "Sound",
+                                  "resource-id": "android:id/title",
+                                  "visible-to-user": true,
+                                  "view-id": "android:id/title",
+                                  "bounds": [
+                                    96,
+                                    1294,
+                                    210,
+                                    1328
+                                  ]
+                                }
+                              },
+                              "occluded": true
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

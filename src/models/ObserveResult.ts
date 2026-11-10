@@ -652,11 +652,10 @@ export type ObserveResult = {
   predictions?: Predictions;
 
   /**
-   * Accessibility state for the device
-   * Indicates if accessibility services (TalkBack/VoiceOver) are enabled
+   * Screen reader state (TalkBack/VoiceOver). CtrlProxy being bound does not set it.
    */
   accessibilityState?: {
-    /** Whether any accessibility service is enabled */
+    /** Whether the screen reader is enabled */
     enabled: boolean;
     /** The detected accessibility service type */
     service: "talkback" | "voiceover" | "unknown";

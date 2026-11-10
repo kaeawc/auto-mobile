@@ -7,6 +7,7 @@ import { isStrictlyScoped } from "../utility/ScopedSelection";
 import { assertLongPressWithinHardMax, throwIfLongPressInterrupted } from "./tapSharedHelpers";
 import {
   isSemanticActionRejected,
+  isCompleteHierarchy,
   type TalkBackTargetContext,
 } from "../talkback/resourceIdActionError";
 import { dispatchAndroidLongPress } from "./androidLongPress";
@@ -57,6 +58,12 @@ import {
   PRE_RETRY_DELAY_MS,
 } from "./androidGhostTapRetry";
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
+import {
+  SearchableHierarchy,
+  matchesCtrlProxyNodeSelector,
+  type SearchableEntry,
+} from "../utility/SearchableNode";
+import { boundsNearlyEqual } from "../../utils/bounds";
 import { TapTargetResolver } from "./TapTargetResolver";
 
 /**
@@ -162,6 +169,10 @@ export class TapGestureDispatcher {
       isTalkBackEnabled?: boolean;
     } & { element: Element },
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    if (this.host.device().formFactor === "xr-headset") {
+      await this.executeXrNodeClick(action, element, signal, options);
+      return undefined;
+    }
     const { x, y } = point;
     const { displayFence: fence, resolvedHierarchy, onActivationWarning } = options ?? {};
     // Check if TalkBack is enabled (not just any accessibility service)
@@ -234,6 +245,128 @@ export class TapGestureDispatcher {
       },
     );
     return undefined;
+  }
+
+  private xrCoordinateError(): ActionableError {
+    return new ActionableError(
+      "The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.",
+    );
+  }
+
+  private xrNodeClickSelector(
+    action: string,
+    element: Element,
+    options: ResolvedAndroidTapOptions,
+  ): NonNullable<ReturnType<typeof stableNodeSelectorForElement>> {
+    const hierarchy = resolveViewHierarchyForSearch(options.resolvedHierarchy) ?? null;
+    if (
+      action !== "tap" ||
+      element["hierarchy-source"] === "uiautomator" ||
+      !element.bounds ||
+      !isCompleteHierarchy(hierarchy)
+    ) {
+      throw this.xrCoordinateError();
+    }
+    const entries = new SearchableHierarchy().project(hierarchy);
+    // Native selectors are global across windows, including for an ancestor click.
+    const uniqueSelector = (candidate: Element) => {
+      const selector = stableNodeSelectorForElement(candidate);
+      if (!selector) {
+        return undefined;
+      }
+      const matches = entries.filter((entry) =>
+        matchesCtrlProxyNodeSelector(entry.properties, selector),
+      );
+      return new Set(matches.map((entry) => entry.source)).size === 1 &&
+        matches[0]?.bounds &&
+        boundsNearlyEqual(matches[0].bounds, candidate.bounds, 0)
+        ? selector
+        : undefined;
+    };
+    if (hasAccessibilityAction(element.actions, "click")) {
+      const selector = uniqueSelector(element);
+      if (selector) {
+        return selector;
+      }
+      throw this.xrCoordinateError();
+    }
+
+    return this.xrAncestorClickSelector(element, entries, uniqueSelector);
+  }
+
+  private xrAncestorClickSelector(
+    element: Element,
+    entries: readonly SearchableEntry[],
+    uniqueSelector: (candidate: Element) => ReturnType<typeof stableNodeSelectorForElement>,
+  ): NonNullable<ReturnType<typeof stableNodeSelectorForElement>> {
+    // Bind the label to one captured source before following actual parent links.
+    // A view-id locates a captured node; it is never sent as a native action selector.
+    const targetSelector = stableNodeSelectorForElement(element);
+    const targets = entries.filter(
+      (entry) =>
+        entry.bounds &&
+        boundsNearlyEqual(entry.bounds, element.bounds, 0) &&
+        entry.properties.text === element.text &&
+        !hasAccessibilityAction(entry.properties.actions, "click") &&
+        (element["view-id"]
+          ? entry.properties["view-id"] === element["view-id"]
+          : targetSelector && matchesCtrlProxyNodeSelector(entry.properties, targetSelector)),
+    );
+    if (new Set(targets.map((entry) => entry.source)).size !== 1) {
+      throw this.xrCoordinateError();
+    }
+    for (let at = targets[0].parentIndex; at !== undefined; at = entries[at].parentIndex) {
+      const ancestor = entries[at];
+      const bounds = ancestor.bounds;
+      if (
+        !bounds ||
+        bounds.left > element.bounds.left ||
+        bounds.top > element.bounds.top ||
+        bounds.right < element.bounds.right ||
+        bounds.bottom < element.bounds.bottom ||
+        !hasAccessibilityAction(ancestor.properties.actions, "click")
+      ) {
+        continue;
+      }
+      const selector = uniqueSelector({ ...ancestor.properties, bounds });
+      if (selector) {
+        return selector;
+      }
+    }
+    throw this.xrCoordinateError();
+  }
+
+  private async executeXrNodeClick(
+    action: string,
+    element: Element,
+    signal?: AbortSignal,
+    options: ResolvedAndroidTapOptions = {},
+  ): Promise<void> {
+    throwIfAborted(signal);
+    const selector = this.xrNodeClickSelector(action, element, options);
+    try {
+      if (
+        !(await this.host.accessibilityService().supportsNodeActionSelectors(undefined, signal))
+      ) {
+        throw this.xrCoordinateError();
+      }
+      throwIfAborted(signal);
+      options.displayFence?.assertCurrent();
+      const result = await this.host
+        .accessibilityService()
+        .requestNodeAction("click", selector, { signal });
+      throwIfAborted(signal);
+      if (!result.success) {
+        throw this.xrCoordinateError();
+      }
+      options.onTalkBackActivation?.();
+    } catch (error) {
+      throwIfAborted(signal);
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
+      throw new ActionableError(this.xrCoordinateError().message, { cause: error });
+    }
   }
 
   async executeScopedAndroidTap(context: {
@@ -312,6 +445,9 @@ export class TapGestureDispatcher {
       fenceOptions?: ResolvedAndroidTapOptions,
     ]
   ): Promise<void> {
+    if (this.host.device().formFactor === "xr-headset") {
+      throw this.xrCoordinateError();
+    }
     const fence = fenceOptions.displayFence;
     if (action === "tap") {
       if (

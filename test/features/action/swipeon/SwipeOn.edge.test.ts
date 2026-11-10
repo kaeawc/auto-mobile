@@ -84,6 +84,23 @@ describe("SwipeOn fromEdge (#12537)", () => {
     for (const y of [call.y1, call.y2]) {
       expect(y).toBeWithin(48, 1328);
     }
+    expect(result.warning).toContain("assume the app panel is in its default pose");
+  });
+
+  test("XR swipes refuse before dispatch when two app panels are open", async () => {
+    const backStack = xrBackStack("swipe-up");
+    const settings = backStack.tasks.find((task) => task.id === 6)!;
+    backStack.tasks.push({ ...settings, id: 7, packageName: "com.example.second" });
+    observe.setObserveResult({
+      ...observation(),
+      screenSize: { width: 2560, height: 2558 },
+      backStack,
+    });
+    const result = await createSwipeOn().execute({ direction: "up", autoTarget: false });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("2 app panels are open");
+    expect(result.error).toContain("Close the other app panels");
+    expect(gesture.getSwipeCalls()).toHaveLength(0);
   });
 
   test("XR system UI only refuses swipes", async () => {
@@ -97,7 +114,11 @@ describe("SwipeOn fromEdge (#12537)", () => {
   });
 
   test("XR edge swipes refuse before dispatch", async () => {
-    observe.setObserveResult({ ...observation(), backStack: xrBackStack() });
+    observe.setObserveResult({
+      ...observation(),
+      screenSize: { width: 2560, height: 2558 },
+      backStack: xrBackStack(),
+    });
     const result = await createSwipeOn().execute({
       direction: "right",
       fromEdge: "left",
@@ -112,5 +133,6 @@ describe("SwipeOn fromEdge (#12537)", () => {
     const result = await createSwipeOn().execute({ direction: "up", autoTarget: false });
     expect(result.success).toBe(true);
     expect(gesture.getSwipeCalls()[0]).toMatchObject({ x1: 1280, y1: 2302, x2: 1280, y2: 255 });
+    expect(result.warning ?? "").not.toContain("default pose");
   });
 });

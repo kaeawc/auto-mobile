@@ -1,5 +1,10 @@
 import type { ImageRelativePoint } from "../../models/ImageRelativePoint";
-import { detectXrPanel, screenshotPointToPanelPoint, xrScreenshotSize } from "../xr/xrPanelSpace";
+import {
+  detectXrPanel,
+  screenshotPointToPanelPoint,
+  xrDefaultPoseWarning,
+  xrScreenshotSize,
+} from "../xr/xrPanelSpace";
 import type { TapAtResult } from "../../models/TapAtResult";
 
 import type { TapAtPlanContext } from "../../models/TapAtGeometry";
@@ -14,6 +19,7 @@ type ResolvedPoint = {
   x: number;
   y: number;
   xrPanel?: TapAtResult["xrPanel"];
+  warning?: string;
   screenshotPoint?: { x: number; y: number };
 };
 
@@ -203,6 +209,7 @@ export function resolveTapAtCoordinates(
       ? Math.min(Math.round(resolvedY), Math.ceil(limits.height) - 1)
       : resolvedY;
   if (xr) {
+    const warning = xrDefaultPoseWarning(observeResult);
     const mapped = screenshotPointToPanelPoint({ x, y }, xr.panel, screenSize);
     return {
       ...mapped,
@@ -213,6 +220,7 @@ export function resolveTapAtCoordinates(
         displayX: mapped.x,
         displayY: mapped.y,
       },
+      warning,
     };
   }
   return { x, y };

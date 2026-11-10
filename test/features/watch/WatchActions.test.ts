@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import type { WatchCommand } from "../../../src/features/watch/WatchRunnerClient";
 import { InputText } from "../../../src/features/action/InputText";
 import { SwipeAtCoordinate } from "../../../src/features/action/SwipeAtCoordinate";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -168,6 +170,7 @@ describe("watch actions", () => {
     });
     expect(result.success).toBe(true);
     expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
       { type: "hierarchy" },
       { type: "tap", identifier: "ctrlproxy-crown" },
     ]);
@@ -200,11 +203,15 @@ describe("watch actions", () => {
     const result = await watchTapOn(device.deviceId, { action: "tap", text: "Visible row" });
 
     expect(result).toMatchObject({ success: true, element: { text: "Visible row" } });
-    expect(client.commands).toEqual([{ type: "hierarchy" }, { type: "tap", x: 40, y: 60 }]);
+    expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
+      { type: "hierarchy" },
+      { type: "tap", x: 40, y: 60 },
+    ]);
   });
   test("text-only nodes dispatch their center in XCTest points", async () => {
     await watchTapOn(device.deviceId, { action: "tap", text: "CtrlProxyWatch" });
-    expect(client.commands[1]).toEqual({ type: "tap", x: 92, y: 112 });
+    expect(client.commands[2]).toEqual({ type: "tap", x: 92, y: 112 });
   });
   test("coordinate entry point routes without a hierarchy read", async () => {
     const result = await defaultTapAtElementFactory(device).execute({
@@ -212,7 +219,10 @@ describe("watch actions", () => {
       y: 80,
     });
     expect(result).toMatchObject({ success: true, x: 50, y: 80 });
-    expect(client.commands).toEqual([{ type: "tap", x: 50, y: 80 }]);
+    expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
+      { type: "tap", x: 50, y: 80 },
+    ]);
   });
   test.each(["call context", "positional"] as const)(
     "coordinate entry point honors cancellation via %s before any command",
@@ -231,7 +241,7 @@ describe("watch actions", () => {
     await expect(
       watchTapOn(device.deviceId, { action: "tap", text: "Non-hittable fixture" }),
     ).rejects.toThrow("No watch element matched");
-    expect(client.commands).toEqual([{ type: "hierarchy" }]);
+    expect(client.commands).toEqual([{ type: "face", op: "dump" }, { type: "hierarchy" }]);
   });
   test("refuses offscreen text matches", async () => {
     unregister();
@@ -243,7 +253,7 @@ describe("watch actions", () => {
     await expect(
       watchTapOn(device.deviceId, { action: "tap", text: "CtrlProxyWatch" }),
     ).rejects.toThrow("No watch element matched");
-    expect(client.commands).toEqual([{ type: "hierarchy" }]);
+    expect(client.commands).toEqual([{ type: "face", op: "dump" }, { type: "hierarchy" }]);
   });
   test("swipeOn entry point sends direction and home entry point sends home", async () => {
     const timer = new FakeTimer();
@@ -326,4 +336,87 @@ describe("watch actions", () => {
     await expect(watchPress(device.deviceId, "back")).rejects.toThrow("press back");
     expect(client.commands).toEqual([]);
   });
+});
+
+describe("watch actions with Smart Stack", () => {
+  const dump = readFileSync(
+    new URL(
+      "../../fixtures/watchos-clockface/fixture-face-smartstack-after-reload.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const cellId =
+    "StackCollectionViewComplicationCell -- 93A18F3B-D642-41DA-B6A4-F312ED9DB584 -- ProbeApp -- ProbeWidgetXYZ -- dev.probe.app -- dev.probe.app-dev.probe.app.widget-probe-0";
+  function useDump(text: string, failure = false) {
+    class StackClient extends FakeWatchRunnerClient {
+      override async request(
+        command: WatchCommand,
+        signal?: AbortSignal,
+        options?: { timeoutMs?: number },
+      ): Promise<unknown> {
+        const result = await super.request(command, signal, options);
+        if (command.type === "face" && command.op === "dump") {
+          if (failure) {
+            throw new Error("unsupported face command");
+          }
+          return text;
+        }
+        return result;
+      }
+    }
+    unregister();
+    client = new StackClient();
+    unregister = watchRunners.register(device.deviceId, client);
+  }
+  test("tapAt sends exactly one normalized face tap and no app command", async () => {
+    useDump(dump);
+    expect(await watchTapAt(device.deviceId, { x: 93.5, y: 146.25 })).toEqual({
+      success: true,
+      action: "tap",
+      x: 93.5,
+      y: 146.25,
+    });
+    expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
+      { type: "face", op: "tap", x: 0.5, y: 146.25 / 223 },
+    ]);
+  });
+  test.each([{ text: "T28" }, { elementId: cellId }])(
+    "tapOn matches widget %j without app hierarchy or tap",
+    async (selector) => {
+      useDump(dump);
+      const result = await watchTapOn(device.deviceId, { action: "tap", ...selector });
+      expect(result).toMatchObject({
+        success: true,
+        action: "tap",
+        element: { "resource-id": cellId },
+      });
+      expect(client.commands).toEqual([
+        { type: "face", op: "dump" },
+        { type: "face", op: "tap", x: 0.5, y: 146.25 / 223 },
+      ]);
+    },
+  );
+  test.each([false, true])(
+    "closed stack or failed preflight preserves app taps (failure=%s)",
+    async (failure) => {
+      useDump(
+        readFileSync(
+          new URL("../../fixtures/watch/fixture-face-dump-host-foreground.txt", import.meta.url),
+          "utf8",
+        ),
+        failure,
+      );
+      await watchTapAt(device.deviceId, { x: 50, y: 80 });
+      await watchTapOn(device.deviceId, { action: "tap", elementId: "ctrlproxy-crown" });
+      expect(client.commands).toEqual([
+        { type: "face", op: "dump" },
+        { type: "tap", x: 50, y: 80 },
+        { type: "face", op: "dump" },
+        { type: "hierarchy" },
+        { type: "tap", identifier: "ctrlproxy-crown" },
+      ]);
+    },
+  );
 });

@@ -56,6 +56,7 @@ test.each<SendKeysSelector>([{ elementId: "ctrlproxy-crown" }, { text: "CtrlProx
     );
     expect(result.success).toBe(true);
     expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
       { type: "hierarchy" },
       { type: "tap", identifier: "ctrlproxy-crown" },
       { type: "type", text: "hello" },
@@ -194,6 +195,7 @@ test.each([
       release();
     }
     expect(fake.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+      { type: "face", op: "dump" },
       { type: "tap", identifier: "watch-text-field" },
       { type: "type", text: "CD" },
     ]);
@@ -230,6 +232,7 @@ test("text selector reaches a labeled field by its value through the value child
     release();
   }
   expect(fake.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+    { type: "face", op: "dump" },
     // The field and its value child share an identifier, so the tap falls back to coordinates.
     { type: "tap", x: 50, y: 20 },
     { type: "type", text: "CD" },

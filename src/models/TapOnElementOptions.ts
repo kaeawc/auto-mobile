@@ -18,6 +18,11 @@ export interface TapOnElementOptions {
   testTag?: string;
   /** Exact text of a semantic accessibility link anywhere in the scoped hierarchy. */
   accessibilityLink?: string;
+  /**
+   * Match `text` only when it equals an element's text, content description or hint
+   * (case-insensitive). Without it a `text` selector falls back to a substring match.
+   */
+  exactText?: boolean;
   // Selection strategy when multiple elements match (default: first)
   selectionStrategy?: ElementSelectionStrategy;
 

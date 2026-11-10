@@ -594,6 +594,8 @@ interface ExitContext {
   adjusted: boolean;
   /** Escapes already pressed, in order; each key is pressed at most once per call. */
   trap: { escapes?: FocusTrapEscape[] };
+  /** Arrows refused from the focused element since the walk last escaped a trap. */
+  refused: ReadonlySet<FocusNavigateDirection>;
   select: boolean;
   signal: AbortSignal | undefined;
 }
@@ -633,11 +635,58 @@ function tabEscapes(screen: FocusScreen, focused: Element): boolean {
   return !isEditableElementProperties(focused) || !isViewTextField(screen, focused);
 }
 
-/** The keys a caller presses to leave the field: back then down for a View field, else tab. */
-function trapAdvice(viewField: boolean, escapes: readonly FocusTrapEscape[]): string {
+/** Where a caller goes once no key leaves a View field: off the screen, not another arrow. */
+const LEAVE_SCREEN_ADVICE =
+  "press pressButton back to leave the screen and reach the target from another route, observe, then retry";
+
+/** What a stuck walk tried: the escape keys pressed and the arrows refused since the last one. */
+interface TrapAttempt {
+  escapes: readonly FocusTrapEscape[];
+  /**
+   * Arrows pressed from the trapped element that left focus on it, since the last escape. A
+   * fixed-direction walk, or one whose target is not in the read, can stop after one refusal.
+   */
+  refused: ReadonlySet<FocusNavigateDirection>;
+}
+
+/** `a`, `a or b`, `a, b or c`: the arrows a caller has yet to press. */
+function joinDirections(directions: readonly FocusNavigateDirection[], last: string): string {
+  return directions.length < 2
+    ? directions.join("")
+    : `${directions.slice(0, -1).join(", ")} ${last} ${directions.at(-1)}`;
+}
+
+/** The arrows of a trap walk that no read has refused yet, in D-pad order. */
+function untriedDirections(attempt: TrapAttempt): FocusNavigateDirection[] {
+  return FOCUS_NAVIGATE_DIRECTIONS.filter((direction) => !attempt.refused.has(direction));
+}
+
+/**
+ * What a caller does next: tab for a Compose field, and for a View field only keys no read has
+ * already shown to fail. A View `EditText` on Android TV keeps focus on every direction even with
+ * the keyboard hidden (#17741), so leaving the screen is advised only once all four arrows were
+ * refused since the last escape; before that, the arrows not yet pressed are named first (a
+ * fixed-direction walk, or one whose target is not in the read, can stop after one refusal).
+ */
+function trapAdvice(
+  blocker: FocusNavigateBlocker,
+  viewField: boolean,
+  attempt: TrapAttempt,
+): string {
+  const { escapes } = attempt;
   // An IME action (sendKeys next/done) does not move D-pad focus out of a TV text field (#17378).
   if (viewField) {
-    return "Hide the keyboard with pressButton back, press pressButton down to move focus out of the field, observe, then retry";
+    const hide =
+      blocker === "ime" && !escapes.includes("back")
+        ? "Hide the keyboard with pressButton back and observe; "
+        : "";
+    const untried = untriedDirections(attempt);
+    if (untried.length > 0) {
+      return `${hide}${hide ? "then " : ""}press pressButton ${joinDirections(untried, "or")} (not yet pressed from this field) and observe; if focus still does not leave it, ${LEAVE_SCREEN_ADVICE}`;
+    }
+    return hide
+      ? `${hide}if no D-pad direction then moves focus out of the field, ${LEAVE_SCREEN_ADVICE}`
+      : `No D-pad direction moves focus out of this field; ${LEAVE_SCREEN_ADVICE}`;
   }
   if (escapes.includes("tab")) {
     return "Focus did not leave the field with back, the D-pad or tab; observe, then retry from another route";
@@ -650,8 +699,9 @@ function trapMessage(
   blocker: FocusNavigateBlocker,
   screen: FocusScreen,
   focusedElement: FocusPathEntry | undefined,
-  escapes: readonly FocusTrapEscape[],
+  attempt: TrapAttempt,
 ): string {
+  const { escapes, refused } = attempt;
   const { focused } = screen;
   const editable = focused !== null && isEditableElementProperties(focused);
   const holder = editable
@@ -662,13 +712,21 @@ function trapMessage(
       ? `D-pad focus is trapped by the on-screen keyboard over ${holder}`
       : `D-pad focus is trapped in ${holder}`;
   const viewField = editable && isViewTextField(screen, focused);
+  const every = untriedDirections(attempt).length === 0;
+  const pressed = joinDirections(
+    FOCUS_NAVIGATE_DIRECTIONS.filter((direction) => refused.has(direction)),
+    "and",
+  );
+  const refusal =
+    every || !pressed ? "arrow keys do not leave it" : `pressing ${pressed} does not leave it`;
   const tried =
     escapes.length > 0
-      ? `; pressing ${escapes.join(" then ")} and every direction again did not move focus`
+      ? `; pressing ${escapes.join(" then ")} and ${every || !pressed ? "every direction" : pressed} again did not move focus`
       : viewField
-        ? "; arrow keys do not leave it and tab would type into it"
-        : "; arrow keys do not leave it";
-  return `${trap}${tried}. ${trapAdvice(viewField, escapes)}`;
+        ? `; ${refusal} and tab would type into it`
+        : `; ${refusal}`;
+  const advice = trapAdvice(blocker, viewField, attempt);
+  return `${trap}${tried}. ${advice.charAt(0).toUpperCase()}${advice.slice(1)}`;
 }
 
 export class FocusNavigate {
@@ -732,6 +790,7 @@ export class FocusNavigate {
           focusedElement,
           adjusted: progress.adjusted.size > 0,
           trap,
+          refused: progress.blocked,
           select: options.select === true,
           signal,
         });
@@ -867,7 +926,7 @@ export class FocusNavigate {
    */
   private async trapOutcome(
     done: FocusNavigateResult,
-    { screen, focusedElement, adjusted, trap, signal }: ExitContext,
+    { screen, focusedElement, adjusted, trap, refused, signal }: ExitContext,
   ): Promise<FocusNavigateResult | "escaped" | undefined> {
     const blocker = done.status === "stuck" ? focusBlocker(screen) : undefined;
     if (!blocker) {
@@ -880,7 +939,10 @@ export class FocusNavigate {
     }
     return this.stopped("stuck", done.steps, done.path, {
       focusedElement,
-      message: trapMessage(blocker, screen, focusedElement, trap.escapes),
+      message: trapMessage(blocker, screen, focusedElement, {
+        escapes: trap.escapes,
+        refused,
+      }),
       blockedBy: blocker,
       escapes: trap.escapes,
     });
@@ -893,7 +955,7 @@ export class FocusNavigate {
    */
   private async adjustableOutcome(
     done: FocusNavigateResult,
-    { screen, focusedElement, adjusted, trap, signal }: Omit<ExitContext, "select">,
+    { screen, focusedElement, adjusted, trap, signal }: Omit<ExitContext, "select" | "refused">,
   ): Promise<FocusNavigateResult | "escaped" | undefined> {
     if (done.status !== "stuck" || !adjusted || !screen.focused) {
       return undefined;

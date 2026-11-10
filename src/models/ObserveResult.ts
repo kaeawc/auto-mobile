@@ -340,6 +340,9 @@ export type ObserveResult = {
   /** View hierarchy data */
   viewHierarchy?: ViewHierarchyResult;
 
+  /** visionOS: bundle ID the connected runner was started for; absent without a runner target or hierarchy. */
+  hierarchyBundleId?: string;
+
   /**
    * Why a served observation or diff may be incomplete (issues #6601, #6933).
    * On a non-diff skeleton projection, this contains only capture-fidelity

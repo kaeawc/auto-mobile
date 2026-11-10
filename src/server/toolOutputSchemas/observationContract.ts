@@ -125,6 +125,8 @@ export const observationScreenshotOutputFields = {
   screenshotCaptureSource: z.enum(["device", "observation-cache"]).optional(),
   screenshotCapturedAt: z.string().optional(),
   screenshotAgeMs: z.number().optional(),
+  screenshotHierarchyLagMs: z.number().optional(),
+  screenshotHierarchyMismatch: z.boolean().optional(),
   screenshotFreshFailure: z
     .object({ code: z.string(), message: z.string(), retryable: z.boolean() })
     .optional(),

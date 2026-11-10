@@ -22,7 +22,7 @@ import { logger } from "../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import {
   beginPostActionCaptureAction,
-  deferTerminalScreenshot,
+  captureOrDeferTerminalScreenshot,
 } from "../../utils/PostActionCaptureContext";
 import { serverConfig } from "../../utils/ServerConfig";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
@@ -763,12 +763,12 @@ export class BaseVisualChange {
     if (this.shouldCapturePostActionScreenshot() || serverConfig.isAccessibilityAuditEnabled()) {
       if (
         this.observeScreen.captureScreenshot &&
-        deferTerminalScreenshot(observation, async (chosen, requestSignal) => {
+        (await captureOrDeferTerminalScreenshot(observation, async (chosen, requestSignal) => {
           await this.observeScreen.captureScreenshot?.(perf, {
             signal: requestSignal ?? signal,
             observation: chosen,
           });
-        })
+        }))
       ) {
         return;
       }

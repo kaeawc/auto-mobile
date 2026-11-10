@@ -2,7 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import type { Element, TapOnElementOptions, TapOnElementResult } from "../../models";
 import { boundsArea } from "../../utils/bounds";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { compareSelectionRank } from "../utility/selectionRank";
+import { compareSelectionRank, selectableCandidates } from "../utility/selectionRank";
 import { normalizeTvosHierarchy } from "./TvosHierarchy";
 import type { TvosRunnerClient } from "./TvosRunnerClient";
 import { tvosRunners } from "./TvosRunnerRegistry";
@@ -90,6 +90,21 @@ function matches(element: Element, options: TapOnElementOptions): boolean {
   );
 }
 
+/** Matching labels share the outermost matching focus owner that contains their bounds. */
+function focusOwner(target: Element, matches: Element[]): Element {
+  return matches.reduce((owner, candidate) => {
+    const outer = candidate.bounds;
+    const inner = target.bounds;
+    return outer.left <= inner.left &&
+      outer.top <= inner.top &&
+      outer.right >= inner.right &&
+      outer.bottom >= inner.bottom &&
+      boundsArea(outer) > boundsArea(owner.bounds)
+      ? candidate
+      : owner;
+  }, target);
+}
+
 interface TargetIdentity {
   key: string;
   ordinal: number;
@@ -97,12 +112,7 @@ interface TargetIdentity {
 }
 
 function identityKey(element: Element): string {
-  return JSON.stringify([
-    element["resource-id"],
-    element["view-id"],
-    element.text,
-    element.className,
-  ]);
+  return JSON.stringify([element["resource-id"], element["view-id"], element.text, element.class]);
 }
 
 interface ScreenRead {
@@ -115,7 +125,7 @@ interface ScreenRead {
 
 /** Identity without text, so cells of one row share a kind even when their labels differ. */
 function kindKey(element: Element): string {
-  return JSON.stringify([element["resource-id"], element["view-id"], element.className]);
+  return JSON.stringify([element["resource-id"], element["view-id"], element.class]);
 }
 
 /**
@@ -165,23 +175,25 @@ async function readScreen(
       "The tvOS tapOn target disappeared or became ambiguous; observe and retry with its current identifier or exact text.",
     );
   }
+  const matching = all.filter(
+    (element) =>
+      element.bounds.right > element.bounds.left &&
+      element.bounds.bottom > element.bounds.top &&
+      matches(element, options),
+  );
+  const ranked = matching
+    .map((element, order) => ({
+      element,
+      windowRank: onScreen(element, hierarchy.screenWidth!, hierarchy.screenHeight!) ? 0 : 1,
+      area: boundsArea(element.bounds),
+      order,
+      interactive: false,
+    }))
+    .sort(compareSelectionRank)
+    .map(({ element }) => element);
   const target = identity
     ? peers[identity.ordinal]
-    : all
-        .filter(
-          (element) =>
-            element.bounds.right > element.bounds.left &&
-            element.bounds.bottom > element.bounds.top &&
-            matches(element, options),
-        )
-        .map((element, order) => ({
-          element,
-          windowRank: onScreen(element, hierarchy.screenWidth!, hierarchy.screenHeight!) ? 0 : 1,
-          area: boundsArea(element.bounds),
-          order,
-          interactive: false,
-        }))
-        .sort(compareSelectionRank)[options.index ?? 0]?.element;
+    : selectableCandidates(ranked, (element) => focusOwner(element, matching))[options.index ?? 0];
   if (!target || identity) {
     return { focus, target, identity, signature };
   }

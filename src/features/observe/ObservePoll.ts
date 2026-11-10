@@ -25,6 +25,13 @@ export interface ObservePollOptions {
    */
   timeoutMs: number;
   /**
+   * Extra budget in ms granted on top of {@link timeoutMs}, read live before
+   * every budget decision (#17749). The settle gate grants it only while a
+   * ticking or blinking node is the sole change between reads, so confirming
+   * the tick fits; it returns 0 otherwise. Default: no extension.
+   */
+  budgetExtensionMs?: () => number;
+  /**
    * Make {@link timeoutMs} a hard cap (#17670): race every poll read, the
    * terminal back-stack read and the reconciliation capture against the
    * remaining budget, abort a read the budget cuts off, and start no poll with
@@ -104,6 +111,11 @@ export interface ObservePollOutcome {
   stopped: boolean;
   /** Why the loop produced this observation. */
   terminalReason: "matched" | "screen_off" | "timeout";
+}
+
+/** The loop's current budget: {@link ObservePollOptions.timeoutMs} plus any live extension. */
+function pollBudgetMs(options: ObservePollOptions): number {
+  return options.timeoutMs + Math.max(0, options.budgetExtensionMs?.() ?? 0);
 }
 
 /** Under a hard budget, no poll read starts with less than this many ms left (#17670). */
@@ -430,7 +442,7 @@ function revalidateTerminalMatch(
   outcome.terminalReason = "timeout";
   // Publish the newest full-pipeline capture only on a terminal outcome.
   // Embedded settle instead resumes with admissible evidence while time remains.
-  if (options.resumeOnTerminalMismatch && timer.now() - start < options.timeoutMs) {
+  if (options.resumeOnTerminalMismatch && timer.now() - start < pollBudgetMs(options)) {
     return {
       kind: "resume",
       outcome,
@@ -496,7 +508,7 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
       await awaitFinalizationWhilePollIsLive(
         workPromise,
         timer,
-        options.timeoutMs - (timer.now() - start),
+        pollBudgetMs(options) - (timer.now() - start),
         options.signal,
       );
     } else {
@@ -558,7 +570,7 @@ function terminalRead<T>(
   if (options.hardBudget) {
     return raceReadAgainstBudget(read, {
       timer,
-      remainingMs: options.timeoutMs - (timer.now() - start),
+      remainingMs: pollBudgetMs(options) - (timer.now() - start),
       signal: options.signal,
       label,
     });
@@ -634,7 +646,7 @@ async function readNextPoll(
     lastCapture,
   }: { start: number; minTimestamp: number; lastCapture?: PollCapture },
 ): Promise<{ capture: PollCapture } | { expired: PollCapture }> {
-  const remainingMs = options.timeoutMs - (timer.now() - start);
+  const remainingMs = pollBudgetMs(options) - (timer.now() - start);
   const timeoutMs = Math.max(1, remainingMs);
   if (!options.hardBudget) {
     return {
@@ -651,7 +663,7 @@ async function readNextPoll(
   }
   if (!lastCapture) {
     throw new ActionableError(
-      `Observe poll read did not finish within its ${options.timeoutMs}ms budget`,
+      `Observe poll read did not finish within its ${pollBudgetMs(options)}ms budget`,
     );
   }
   return { expired: lastCapture };
@@ -740,7 +752,7 @@ export async function pollObserveUntil(
       )
     ).outcome;
   };
-  const remainingMs = (): number => options.timeoutMs - (timer.now() - start);
+  const remainingMs = (): number => pollBudgetMs(options) - (timer.now() - start);
 
   while (true) {
     throwIfAborted(options.signal);
@@ -833,7 +845,7 @@ export async function pollObserveUntil(
         timer.sleep(
           Math.min(
             Math.max(1, options.pollMs),
-            Math.max(0, options.timeoutMs - (timer.now() - start)),
+            Math.max(0, pollBudgetMs(options) - (timer.now() - start)),
           ),
         ),
         options.signal,
@@ -850,7 +862,9 @@ export async function pollObserveUntil(
     }
 
     await awaitWhileRequestIsLive(
-      timer.sleep(Math.min(options.pollMs, Math.max(0, options.timeoutMs - (timer.now() - start)))),
+      timer.sleep(
+        Math.min(options.pollMs, Math.max(0, pollBudgetMs(options) - (timer.now() - start))),
+      ),
       options.signal,
     );
   }

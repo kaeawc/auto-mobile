@@ -6,12 +6,18 @@ import { ActionableError } from "../../../models/ActionableError";
 import { displayTransitions } from "../DisplayTransition";
 import {
   parseAndroidDisplayInfos,
+  parseDumpsysLogicalDisplays,
   parseSurfaceFlingerDisplayIds,
   physicalDisplayIdForLogicalId,
+  type AndroidDisplayInfo,
 } from "../../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
+import { errorMessage } from "../../../utils/describeUnknownError";
 
 const SURFACE_FLINGER_DISPLAY_IDS_COMMAND = "shell dumpsys SurfaceFlinger --display-id";
 const DEFAULT_DISPLAY_INFO_COMMAND = "shell cmd display get-displays";
+const DUMPSYS_DISPLAY_COMMAND = "shell dumpsys display";
+const DUMPSYS_DISPLAY_TIMEOUT_MS = 2000;
 export const PHYSICAL_DISPLAY_ID_CACHE_TTL_MS = 10_000;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const screenshotCaptureTails = new Map<string, Promise<void>>();
@@ -132,12 +138,15 @@ export class AndroidPhysicalDisplayIdResolver implements PhysicalDisplayIdResolv
   }
 
   /**
-   * Resolve an Android logical display id (as listed by `cmd display
-   * get-displays`) to the physical id `screencap -d` takes. Returns null when
-   * the list is unreadable or the display has no `local:` physical id; the
-   * caller decides how to proceed, because the logical id itself is rejected by
-   * `screencap -d`. A cached list that lacks the requested id is refetched once
-   * (a hot-plugged display or a lagging fold transition), never more.
+   * Resolve an Android logical display id to the physical id `screencap -d`
+   * takes. `cmd display get-displays` is read first; a display it does not
+   * list (an AAOS FLAG_PRIVATE cluster panel is hidden from the shell caller,
+   * #17740) is then looked up in `dumpsys display`'s Logical Displays section,
+   * which includes private displays. Returns null when neither source gives the
+   * display a `local:` physical id; the caller decides how to proceed, because
+   * the logical id itself is rejected by `screencap -d`. A cached list that
+   * lacks the requested id is refetched once (a hot-plugged display or a
+   * lagging fold transition), never more.
    */
   async resolveLogical(
     adb: AdbExecutor,
@@ -155,13 +164,59 @@ export class AndroidPhysicalDisplayIdResolver implements PhysicalDisplayIdResolv
     }
     this.logicalCache.delete(deviceId);
     const infos = await this.readLogicalDisplayInfos(adb, deviceId, revision, signal);
-    const physicalId = infos ? physicalDisplayIdForLogicalId(infos, logicalId) : undefined;
-    if (infos && physicalId === undefined) {
-      logger.warn(
-        `[AndroidPhysicalDisplayId] Logical display ${logicalId} has no physical display id in the display list`,
-      );
+    // Default display 0 is never private, and plain screencap already captures it.
+    if (logicalId === 0 || infos?.some((info) => info.logicalId === String(logicalId))) {
+      return listedPhysicalDisplayId(infos, logicalId);
     }
-    return physicalId ?? null;
+    return this.resolveHiddenLogical({ adb, deviceId, logicalId, revision, listed: infos, signal });
+  }
+
+  /** Resolve a display absent from `get-displays` from `dumpsys display`'s private records. */
+  private async resolveHiddenLogical(request: HiddenLogicalDisplayRequest): Promise<string | null> {
+    const { deviceId, logicalId, listed } = request;
+    const hidden = await this.readDumpsysLogicalDisplay(request.adb, logicalId, request.signal);
+    const physicalId = hidden ? physicalDisplayIdForLogicalId([hidden], logicalId) : undefined;
+    if (hidden === undefined || physicalId === undefined) {
+      logger.warn(
+        `[AndroidPhysicalDisplayId] Logical display ${logicalId} has no physical display id in "cmd display get-displays" or "dumpsys display"`,
+      );
+      return null;
+    }
+    if (listed && listed.length > 0) {
+      // Cache the supplemented list so repeat captures of the hidden display skip both reads.
+      this.logicalCache.set(deviceId, {
+        infos: [...listed, hidden],
+        expiresAt: this.timer.now() + this.ttlMs,
+        revision: request.revision,
+      });
+    }
+    return physicalId;
+  }
+
+  /** The enabled `dumpsys display` Logical Displays record for one id, or undefined. */
+  private async readDumpsysLogicalDisplay(
+    adb: AdbExecutor,
+    logicalId: number,
+    signal?: AbortSignal,
+  ): Promise<AndroidDisplayInfo | undefined> {
+    try {
+      const output = await adb.executeCommand(DUMPSYS_DISPLAY_COMMAND, {
+        signal,
+        timeoutMs: DUMPSYS_DISPLAY_TIMEOUT_MS,
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
+      });
+      return parseDumpsysLogicalDisplays(output.stdout).find(
+        (info) => info.logicalId === String(logicalId),
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(
+        `[AndroidPhysicalDisplayId] dumpsys display lookup failed: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   private async readLogicalDisplayInfos(
@@ -169,7 +224,7 @@ export class AndroidPhysicalDisplayIdResolver implements PhysicalDisplayIdResolv
     deviceId: string,
     revision: number,
     signal?: AbortSignal,
-  ): Promise<ReturnType<typeof parseAndroidDisplayInfos> | null> {
+  ): Promise<AndroidDisplayInfo[] | null> {
     try {
       const output = await adb.executeCommand(DEFAULT_DISPLAY_INFO_COMMAND, { signal });
       const infos = parseAndroidDisplayInfos(output.stdout);
@@ -187,6 +242,34 @@ export class AndroidPhysicalDisplayIdResolver implements PhysicalDisplayIdResolv
       return null;
     }
   }
+}
+
+interface HiddenLogicalDisplayRequest {
+  adb: AdbExecutor;
+  deviceId: string;
+  logicalId: number;
+  /** The revision captured before discovery, so a transition during the lookup is not cached. */
+  revision: number;
+  /** The `get-displays` records, or null when that list was unreadable. */
+  listed: AndroidDisplayInfo[] | null;
+  signal?: AbortSignal;
+}
+
+function listedPhysicalDisplayId(
+  infos: readonly AndroidDisplayInfo[] | null,
+  logicalId: number,
+): string | null {
+  if (infos === null) {
+    // readLogicalDisplayInfos already logged why the list is unreadable.
+    return null;
+  }
+  const physicalId = physicalDisplayIdForLogicalId(infos, logicalId);
+  if (physicalId === undefined) {
+    logger.warn(
+      `[AndroidPhysicalDisplayId] Logical display ${logicalId} has no physical display id in the display list`,
+    );
+  }
+  return physicalId ?? null;
 }
 
 type PhysicalDisplayResolution =

@@ -222,7 +222,10 @@ describe("DragPath iOS fresh-frame retry", () => {
     async (display) => {
       const h = harness();
       h.observe.onFresh = () => h.transitions.transition();
-      await expect(h.drag.execute({ ...options, display })).rejects.toThrow("Display changed");
+      const result = await h.drag.execute({ ...options, display });
+      expect(result.success).toBe(false);
+      expect(result.error).toStartWith("Display changed");
+      expect(result.staleDisplay).toMatchObject({ retry: "observe" });
       expect(h.requests).toHaveLength(1);
     },
   );

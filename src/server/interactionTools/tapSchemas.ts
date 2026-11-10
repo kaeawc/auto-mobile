@@ -146,6 +146,7 @@ export const tapOnSchema = withJsonSchemaOverride(
               .optional()
               .describe("Polling duration (ms, default: 1500)"),
           })
+          .strict()
           .optional()
           .describe("Poll for element before tapping"),
         preTapStability: z
@@ -353,6 +354,7 @@ export const tapAnySchema = withJsonSchemaOverride(
               .optional()
               .describe("Polling duration (ms, default: 1500)"),
           })
+          .strict()
           .optional()
           .describe("Poll for clickable element before tapping"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is

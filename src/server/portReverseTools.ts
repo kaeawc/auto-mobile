@@ -53,10 +53,12 @@ const portReverseInput = z.object({
     ),
   ports: z
     .array(
-      z.object({
-        devicePort: port.describe("Device-side localhost port"),
-        hostPort: port.optional().describe("Host loopback port; default devicePort"),
-      }),
+      z
+        .object({
+          devicePort: port.describe("Device-side localhost port"),
+          hostPort: port.optional().describe("Host loopback port; default devicePort"),
+        })
+        .strict(),
     )
     .min(1)
     .max(32)

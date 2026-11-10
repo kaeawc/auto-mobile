@@ -91,7 +91,9 @@ describe("CarPlay screen power", () => {
   });
   test("both Swift CI runners register the package beside audio-loopback", () => {
     for (const file of ["scripts/ios/swift-build.sh", "scripts/ios/swift-test.sh"]) {
-      expect(readFileSync(file, "utf8")).toContain('"audio-loopback"\n    "carplay-power"');
+      // Windows checkouts use CRLF line endings.
+      const script = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+      expect(script).toContain('"audio-loopback"\n    "carplay-power"');
     }
   });
 });

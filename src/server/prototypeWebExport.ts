@@ -30,7 +30,7 @@ export interface PrototypeWebExportDependencies {
 }
 
 export interface PrototypeWebExportInput extends PrototypeWebResourceQuery {
-  /** Absolute file path, or a directory (existing, or ending in a separator). */
+  /** Absolute `.html` file path, or a directory (existing, or ending in a separator). */
   readonly outputPath?: string;
   readonly overwrite?: boolean;
 }
@@ -98,6 +98,11 @@ async function targetPath(
   if (kind === "other") {
     throw new ActionableError(
       `outputPath "${outputPath}" exists and is not a regular file or directory; choose another outputPath.`,
+    );
+  }
+  if (path.extname(outputPath).toLowerCase() !== ".html") {
+    throw new ActionableError(
+      `outputPath "${outputPath}" is neither an .html file nor a directory: end a file path in .html, or end a directory path in "${path.sep}" (or name an existing directory) to write ${fileName} there.`,
     );
   }
   return outputPath;

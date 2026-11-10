@@ -43,6 +43,30 @@ test("freshness schema accepts bounded machine-readable unavailability", () => {
   expect(() => freshnessSchema.parse({ ...fields, unavailableDetail: "x".repeat(501) })).toThrow();
 });
 
+test("observations advertise and validate the optional visionOS hierarchyBundleId", () => {
+  const hierarchyBundleId = "com.apple.mobileslideshow";
+  for (const schema of [observeResultSchema, observationSummarySchema]) {
+    const advertised = toJSONSchema(schema);
+    expect(advertised.properties?.hierarchyBundleId).toMatchObject({
+      type: "string",
+      description: expect.stringContaining(
+        "window app the runner that returned the hierarchy was started for",
+      ),
+    });
+    expect(advertised.required ?? []).not.toContain("hierarchyBundleId");
+    expect(schema.parse({ hierarchyBundleId }).hierarchyBundleId).toBe(hierarchyBundleId);
+    expect(schema.safeParse({ hierarchyBundleId: 42 }).success).toBe(false);
+    expect(schema.parse({})).not.toHaveProperty("hierarchyBundleId");
+  }
+  const observe = generatedDefinitions.find((definition) => definition.name === "observe")!;
+  expect(observe.outputSchema?.properties.hierarchyBundleId).toMatchObject({
+    type: "string",
+    description: expect.stringContaining(
+      "window app the runner that returned the hierarchy was started for",
+    ),
+  });
+});
+
 test("observe advertises optional typed per-panel observations", () => {
   const stamp = {
     key: "cover",

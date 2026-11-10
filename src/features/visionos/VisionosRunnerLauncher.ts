@@ -171,7 +171,7 @@ export class XcodebuildVisionosRunnerLauncher implements VisionosRunnerLauncher 
         break;
       }
       options.signal?.throwIfAborted();
-      state.unregister = visionosRunners.register(options.deviceId, client);
+      state.unregister = visionosRunners.register(options.deviceId, client, options.bundleId);
       return;
     }
     throw new ActionableError(

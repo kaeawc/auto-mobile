@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
-# bats file_tags=serial
-# Both coverage tests own the shared repo-relative `coverage/` directory, so
-# they must not run in parallel with each other.
+# bats file_tags=parallel-within-file
+# Hermetic: every test relocates the coverage tree (AUTOMOBILE_TEST_TS_COVERAGE_DIR)
+# and the shard scratch tree (AUTOMOBILE_TEST_TS_SCRATCH_DIR) into
+# BATS_TEST_TMPDIR and stubs bun/find, so nothing is written to the real
+# `coverage/` or `scratch/` and this file runs in the parallel pass (#17778).
 #
 # Chunked coverage lane (#10213): a few shard processes, each running its files
 # in sequential `bun test --coverage` processes of at most N files so no process
@@ -21,6 +23,9 @@ EOF
 
 setup() {
   export AUTOMOBILE_RUNNER_CALIBRATION=0
+  export AUTOMOBILE_TEST_TS_COVERAGE_DIR="$BATS_TEST_TMPDIR/coverage"
+  COV="$AUTOMOBILE_TEST_TS_COVERAGE_DIR"
+  export AUTOMOBILE_TEST_TS_SCRATCH_DIR="$BATS_TEST_TMPDIR/scratch"
   # Stub lanes assert the full discovered file set on every OS (see test-ts.bats for the skip tests).
   export AUTOMOBILE_MACOS_ONLY_TESTS=include
   # The supervisor declines a retry on a loaded host; pin the load so retry
@@ -130,7 +135,7 @@ EOF
 }
 
 teardown() {
-  rm -rf "$STUB_BIN" coverage
+  rm -rf "$STUB_BIN"
 }
 
 run_coverage() {
@@ -144,24 +149,24 @@ run_coverage() {
   [ "$status" -eq 0 ]
   # 115 files per shard -> chunks of 50, 50, 15.
   for number in 1 2; do
-    [ "$(cat "coverage/shards/shard-${number}.chunks")" -eq 3 ]
-    [ "$(wc -l < "coverage/shards/files-${number}-1" | tr -d ' ')" -eq 50 ]
-    [ "$(wc -l < "coverage/shards/files-${number}-2" | tr -d ' ')" -eq 50 ]
-    [ "$(wc -l < "coverage/shards/files-${number}-3" | tr -d ' ')" -eq 15 ]
-    [ -f "coverage/shards/shard-${number}.log" ]
+    [ "$(cat "${COV}/shards/shard-${number}.chunks")" -eq 3 ]
+    [ "$(wc -l < "${COV}/shards/files-${number}-1" | tr -d ' ')" -eq 50 ]
+    [ "$(wc -l < "${COV}/shards/files-${number}-2" | tr -d ' ')" -eq 50 ]
+    [ "$(wc -l < "${COV}/shards/files-${number}-3" | tr -d ' ')" -eq 15 ]
+    [ -f "${COV}/shards/shard-${number}.log" ]
   done
-  [ ! -f coverage/shards/shard-3.chunks ]
+  [ ! -f "${COV}"/shards/shard-3.chunks ]
   [[ "$output" == *"coverage shard 1 chunk 1/3: 50 files"*"coverage shard 1 chunk 3/3: 15 files"* ]]
   # Shared source merged once, with counts summed over all six chunk reports.
-  [ "$(grep -c '^SF:src/shared.ts$' coverage/lcov.info)" -eq 1 ]
-  grep -q '^FNDA:6,shared$' coverage/lcov.info
-  grep -q '^FNF:2$' coverage/lcov.info
-  grep -q '^BRDA:1,0,0,6$' coverage/lcov.info
-  grep -q '^DA:1,6$' coverage/lcov.info
-  grep -q 'tests="6"' coverage/junit.xml
+  [ "$(grep -c '^SF:src/shared.ts$' "${COV}"/lcov.info)" -eq 1 ]
+  grep -q '^FNDA:6,shared$' "${COV}"/lcov.info
+  grep -q '^FNF:2$' "${COV}"/lcov.info
+  grep -q '^BRDA:1,0,0,6$' "${COV}"/lcov.info
+  grep -q '^DA:1,6$' "${COV}"/lcov.info
+  grep -q 'tests="6"' "${COV}"/junit.xml
   for chunk in 1 2 3; do
-    grep -q "shard-1-chunk-${chunk}" coverage/junit.xml
-    grep -q "shard-2-chunk-${chunk}" coverage/junit.xml
+    grep -q "shard-1-chunk-${chunk}" "${COV}"/junit.xml
+    grep -q "shard-2-chunk-${chunk}" "${COV}"/junit.xml
   done
 }
 
@@ -169,20 +174,20 @@ run_coverage() {
   stub_find 25
   run_coverage AUTOMOBILE_COVERAGE_SHARDS=3 AUTOMOBILE_COVERAGE_CHUNK_FILES=4
   [ "$status" -eq 0 ]
-  cat coverage/shards/files-* | sort > "$BATS_TEST_TMPDIR/seen"
+  cat "${COV}"/shards/files-* | sort > "$BATS_TEST_TMPDIR/seen"
   for ((i = 0; i < 25; i += 1)); do printf 'test/fixture%03d.test.ts\n' "$i"; done | sort > "$BATS_TEST_TMPDIR/expected"
   # Complete (nothing dropped), disjoint (nothing run twice) and never over the chunk size.
   cmp "$BATS_TEST_TMPDIR/seen" "$BATS_TEST_TMPDIR/expected"
-  for list in coverage/shards/files-*; do
+  for list in "${COV}"/shards/files-*; do
     [ "$(wc -l < "$list" | tr -d ' ')" -le 4 ]
   done
   # 9, 8 and 8 files -> 3, 2 and 2 chunks.
-  [ "$(cat coverage/shards/shard-1.chunks)" -eq 3 ]
-  [ "$(cat coverage/shards/shard-2.chunks)" -eq 2 ]
-  [ "$(cat coverage/shards/shard-3.chunks)" -eq 2 ]
+  [ "$(cat "${COV}"/shards/shard-1.chunks)" -eq 3 ]
+  [ "$(cat "${COV}"/shards/shard-2.chunks)" -eq 2 ]
+  [ "$(cat "${COV}"/shards/shard-3.chunks)" -eq 2 ]
   # Every source of every file reaches the merged LCOV exactly once.
-  [ "$(grep -c '^SF:src/fixture' coverage/lcov.info)" -eq 25 ]
-  [ "$(grep -c '^SF:src/only-' coverage/lcov.info)" -eq 7 ]
+  [ "$(grep -c '^SF:src/fixture' "${COV}"/lcov.info)" -eq 25 ]
+  [ "$(grep -c '^SF:src/only-' "${COV}"/lcov.info)" -eq 7 ]
 }
 
 @test "chunks run sequentially within a shard and never more than the shard count at once" {
@@ -191,8 +196,8 @@ run_coverage() {
   [ "$status" -eq 0 ]
   # events holds one line per start/end in true time order (short appends are
   # atomic). Each shard has 30 files -> 3 chunks, so 6 starts and 6 ends.
-  [ "$(grep -c '^start' coverage/shards/events)" -eq 6 ]
-  [ "$(grep -c '^end' coverage/shards/events)" -eq 6 ]
+  [ "$(grep -c '^start' "${COV}"/shards/events)" -eq 6 ]
+  [ "$(grep -c '^end' "${COV}"/shards/events)" -eq 6 ]
   open1=0 open2=0 running=0 peak=0
   while read -r event number; do
     if [[ "$event" == start ]]; then
@@ -206,7 +211,7 @@ run_coverage() {
       if [[ "$number" == 2 ]]; then open2=$((open2 - 1)); fi
       running=$((running - 1))
     fi
-  done < coverage/shards/events
+  done < "${COV}"/shards/events
   [ "$peak" -le 2 ]
 }
 
@@ -225,7 +230,7 @@ peak_running_chunks() {
   while read -r event number; do
     if [[ "$event" == start ]]; then running=$((running + 1)); else running=$((running - 1)); fi
     if [[ "$running" -gt "$peak" ]]; then peak="$running"; fi
-  done < coverage/shards/events
+  done < "${COV}"/shards/events
   echo "$peak"
 }
 
@@ -233,7 +238,7 @@ peak_running_chunks() {
 assert_round_robin_shard() {
   local number="$1" shards="$2" total="$3" index
   for ((index = number - 1; index < total; index += shards)); do printf 'test/fixture%03d.test.ts\n' "$index"; done > "$BATS_TEST_TMPDIR/expected-$number"
-  cat "coverage/shards/files-${number}-"* > "$BATS_TEST_TMPDIR/seen-$number"
+  cat "${COV}/shards/files-${number}-"* > "$BATS_TEST_TMPDIR/seen-$number"
   cmp "$BATS_TEST_TMPDIR/seen-$number" "$BATS_TEST_TMPDIR/expected-$number"
 }
 
@@ -247,7 +252,7 @@ assert_round_robin_shard() {
   [ "$(peak_running_chunks)" -eq 1 ]
   # The partition is still the configured three shards, not the one slot.
   for number in 1 2 3; do assert_round_robin_shard "$number" 3 9; done
-  [ "$(grep -c '^SF:src/fixture' coverage/lcov.info)" -eq 9 ]
+  [ "$(grep -c '^SF:src/fixture' "${COV}"/lcov.info)" -eq 9 ]
   # The other lane's slots are left booked to it.
   [ "$(cat "$AUTOMOBILE_COORDINATION_DIR/test-slots/0/owner.pid")" = "$$" ]
   [ "$(cat "$AUTOMOBILE_COORDINATION_DIR/test-slots/1/owner.pid")" = "$$" ]
@@ -263,7 +268,7 @@ assert_round_robin_shard() {
   [[ "$output" == *'coverage shards=2 running at most 1 at once'* ]]
   [ "$(peak_running_chunks)" -eq 1 ]
   for number in 1 2; do assert_round_robin_shard "$number" 2 8; done
-  [ -f coverage/lcov.info ]
+  [ -f "${COV}"/lcov.info ]
 }
 
 @test "a bounded coverage retry reuses its shard's seat before the next shard starts (#14448)" {
@@ -275,7 +280,7 @@ assert_round_robin_shard() {
   [ "$(grep -c 'passed on its retry' <<< "$output")" -eq 2 ]
   # A killed attempt logs a start with no end. Shard 1's retry ran in its seat
   # and finished before shard 2's first attempt began, so nothing overlapped.
-  [ "$(cat coverage/shards/events)" = "$(printf 'start 1\nstart 1\nend 1\nstart 2\nstart 2\nend 2')" ]
+  [ "$(cat "${COV}"/shards/events)" = "$(printf 'start 1\nstart 1\nend 1\nstart 2\nstart 2\nend 2')" ]
   for number in 1 2; do assert_round_robin_shard "$number" 2 8; done
 }
 
@@ -293,7 +298,7 @@ assert_round_robin_shard() {
   run_coverage AUTOMOBILE_COVERAGE_SHARDS=2 AUTOMOBILE_COVERAGE_CHUNK_FILES=5
   [ "$status" -eq 0 ]
   for number in 1 2; do
-    [ "$(cat "coverage/shards/timing-env-${number}")" = "coverage/shards/timing-shard-${number}.ndjson" ]
+    [ "$(cat "${COV}/shards/timing-env-${number}")" = "${COV}/shards/timing-shard-${number}.ndjson" ]
   done
 }
 
@@ -302,7 +307,7 @@ assert_round_robin_shard() {
   cat > "$STUB_BIN/bun" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "scripts/lib/write-coverage-bunfig.ts" ]]; then exec "$REAL_BUN" "$@"; fi
-printf '%s\n' "$@" > "coverage/shards/args-${AUTOMOBILE_TEST_TIMING_LOG##*-}"
+printf '%s\n' "$@" > "${AUTOMOBILE_TEST_TS_COVERAGE_DIR}/shards/args-${AUTOMOBILE_TEST_TIMING_LOG##*-}"
 echo '0 fail'
 for arg in "$@"; do
   if [[ "$arg" == *.xml ]]; then
@@ -314,11 +319,11 @@ EOF
   chmod +x "$STUB_BIN/bun"
   run_coverage AUTOMOBILE_COVERAGE_SHARDS=2
   [ "$status" -eq 0 ]
-  args=coverage/shards/args-2.ndjson
+  args="${COV}"/shards/args-2.ndjson
   grep -qx -- '--coverage' "$args"
   grep -qx -- '--coverage-reporter=lcov' "$args"
-  grep -qx -- '--config=coverage/shards/shard-2-chunk-1.toml' "$args"
-  grep -qx -- 'coverage/shards/shard-2-chunk-1.xml' "$args"
+  grep -qx -- "--config=${COV}/shards/shard-2-chunk-1.toml" "$args"
+  grep -qx -- "${COV}/shards/shard-2-chunk-1.xml" "$args"
   grep -qx -- 'test/fixture001.test.ts' "$args"
   grep -qx -- 'test/fixture003.test.ts' "$args"
   grep -q -- 'test/setup/fileTimingProbe.ts' "$args"
@@ -328,20 +333,20 @@ EOF
   stub_find 12
   run_coverage AUTOMOBILE_COVERAGE_SHARDS=3 AUTOMOBILE_COVERAGE_CHUNK_FILES=100
   [ "$status" -eq 0 ]
-  [ -f coverage/shards/shard-3.chunks ]
-  [ ! -f coverage/shards/shard-4.chunks ]
-  [ "$(grep -c '^SF:src/only-' coverage/lcov.info)" -eq 3 ]
+  [ -f "${COV}"/shards/shard-3.chunks ]
+  [ ! -f "${COV}"/shards/shard-4.chunks ]
+  [ "$(grep -c '^SF:src/only-' "${COV}"/lcov.info)" -eq 3 ]
 
   run_coverage AUTOMOBILE_COVERAGE_SHARDS=1 AUTOMOBILE_COVERAGE_CHUNK_FILES=100
   [ "$status" -eq 0 ]
-  cmp coverage/shards/shard-1-chunk-1/lcov.info coverage/lcov.info
-  cmp coverage/shards/shard-1-chunk-1.xml coverage/junit.xml
+  cmp "${COV}"/shards/shard-1-chunk-1/lcov.info "${COV}"/lcov.info
+  cmp "${COV}"/shards/shard-1-chunk-1.xml "${COV}"/junit.xml
 
   # More shards than files: no empty shard processes.
   run_coverage AUTOMOBILE_COVERAGE_SHARDS=50
   [ "$status" -eq 0 ]
-  [ -f coverage/shards/shard-12.chunks ]
-  [ ! -f coverage/shards/shard-13.chunks ]
+  [ -f "${COV}"/shards/shard-12.chunks ]
+  [ ! -f "${COV}"/shards/shard-13.chunks ]
 
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_COVERAGE_SHARDS=0 bash "$SCRIPT" coverage
   printf '%s\n' "$output"
@@ -353,7 +358,7 @@ EOF
 assert_interleaved_shard() {
   local number="$1" first="$2" step="$3" total="$4" index
   for ((index = first; index < total; index += step)); do printf 'test/fixture%03d.test.ts\n' "$index"; done > "$BATS_TEST_TMPDIR/expected-$number"
-  cat "coverage/shards/files-${number}-"* > "$BATS_TEST_TMPDIR/seen-$number"
+  cat "${COV}/shards/files-${number}-"* > "$BATS_TEST_TMPDIR/seen-$number"
   cmp "$BATS_TEST_TMPDIR/seen-$number" "$BATS_TEST_TMPDIR/expected-$number"
 }
 
@@ -364,21 +369,21 @@ assert_interleaved_shard() {
   # Part 1 takes even files; its two shards round-robin them: 0,4,8,... and 2,6,10,...
   assert_interleaved_shard 1 0 4 40
   assert_interleaved_shard 2 2 4 40
-  [ ! -f coverage/shards/shard-3.chunks ]
-  [ "$(grep -c '^SF:src/fixture' coverage/lcov.info)" -eq 20 ]
-  cat coverage/shards/files-* > "$BATS_TEST_TMPDIR/part-1-files"
+  [ ! -f "${COV}"/shards/shard-3.chunks ]
+  [ "$(grep -c '^SF:src/fixture' "${COV}"/lcov.info)" -eq 20 ]
+  cat "${COV}"/shards/files-* > "$BATS_TEST_TMPDIR/part-1-files"
 
   run_coverage AUTOMOBILE_COVERAGE_PART=2 AUTOMOBILE_COVERAGE_PARTS=2 AUTOMOBILE_COVERAGE_CHUNK_FILES=4
   [ "$status" -eq 0 ]
   # Part 2 numbers its shards 3 and 4, so its chunk reports never collide with part 1's.
-  [ ! -f coverage/shards/shard-1.chunks ]
-  [ -f coverage/shards/shard-3-chunk-1.xml ]
-  [ -f coverage/shards/shard-4-chunk-1.xml ]
+  [ ! -f "${COV}"/shards/shard-1.chunks ]
+  [ -f "${COV}"/shards/shard-3-chunk-1.xml ]
+  [ -f "${COV}"/shards/shard-4-chunk-1.xml ]
   assert_interleaved_shard 3 1 4 40
   assert_interleaved_shard 4 3 4 40
   [[ "$output" == *"coverage shard 3 chunk 1/"* ]]
-  grep -q 'shard-3-chunk-1' coverage/junit.xml
-  cat "$BATS_TEST_TMPDIR/part-1-files" coverage/shards/files-* | sort > "$BATS_TEST_TMPDIR/seen"
+  grep -q 'shard-3-chunk-1' "${COV}"/junit.xml
+  cat "$BATS_TEST_TMPDIR/part-1-files" "${COV}"/shards/files-* | sort > "$BATS_TEST_TMPDIR/seen"
   for ((i = 0; i < 40; i += 1)); do printf 'test/fixture%03d.test.ts\n' "$i"; done > "$BATS_TEST_TMPDIR/expected"
   # Together the parts run every file exactly once.
   cmp "$BATS_TEST_TMPDIR/seen" "$BATS_TEST_TMPDIR/expected"
@@ -392,7 +397,7 @@ assert_interleaved_shard() {
   run_coverage AUTOMOBILE_COVERAGE_PARTS=0
   [ "$status" -eq 2 ]
   [[ "$output" == *"AUTOMOBILE_COVERAGE_PARTS must be a positive integer"* ]]
-  [ ! -f coverage/shards/events ]
+  [ ! -f "${COV}"/shards/events ]
 }
 
 @test "coverage discovery leaves repository lint and script tests to the unit lanes (#16377)" {
@@ -404,7 +409,7 @@ EOF
   run_coverage AUTOMOBILE_COVERAGE_SHARDS=1
   [ "$status" -eq 0 ]
   printf '%s\n' test/fixture000.test.ts test/fixture001.test.ts > "$BATS_TEST_TMPDIR/expected"
-  cmp coverage/shards/files-1-1 "$BATS_TEST_TMPDIR/expected"
+  cmp "${COV}"/shards/files-1-1 "$BATS_TEST_TMPDIR/expected"
 }
 
 @test "a failing chunk fails its shard and the step, names itself, and keeps merged artifacts out" {
@@ -416,9 +421,9 @@ EOF
   [[ "$output" != *"coverage shard 2/2 exited"* ]]
   # The failing chunk's own output is in the log, and later chunks still ran.
   [[ "$output" == *"1 fail in shard 1 chunk 2"* ]]
-  [ -f coverage/shards/files-1-3 ]
-  [ ! -f coverage/lcov.info ]
-  [ ! -f coverage/junit.xml ]
+  [ -f "${COV}"/shards/files-1-3 ]
+  [ ! -f "${COV}"/lcov.info ]
+  [ ! -f "${COV}"/junit.xml ]
 }
 
 @test "a timed-out shard retains the 720 second guard and names its index" {
@@ -438,7 +443,7 @@ EOF
   [ "$(sort -u "$BATS_TEST_TMPDIR/budgets")" = 720 ]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget (shard 1/2)"* ]]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget (shard 2/2)"* ]]
-  [ ! -f coverage/lcov.info ]
+  [ ! -f "${COV}"/lcov.info ]
 }
 
 @test "the shard budget interrupts a running chunk, names it and prints its log tail" {
@@ -464,12 +469,12 @@ EOF
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 bash scripts/ci/run-ts-coverage.sh "$BATS_TEST_TMPDIR/out.log"
   printf '%s\n' "$output"
   [ "$status" -eq 0 ]
-  [ -f coverage/lcov.info ]
-  [ -f coverage/junit.xml ]
-  [ "$(grep -c '^SF:src/shared.ts$' coverage/lcov.info)" -eq 1 ]
-  grep -q '^FNDA:6,shared$' coverage/lcov.info
-  [ "$(grep -c '^SF:src/fixture' coverage/lcov.info)" -eq 30 ]
-  grep -q 'tests="6"' coverage/junit.xml
+  [ -f "${COV}"/lcov.info ]
+  [ -f "${COV}"/junit.xml ]
+  [ "$(grep -c '^SF:src/shared.ts$' "${COV}"/lcov.info)" -eq 1 ]
+  grep -q '^FNDA:6,shared$' "${COV}"/lcov.info
+  [ "$(grep -c '^SF:src/fixture' "${COV}"/lcov.info)" -eq 30 ]
+  grep -q 'tests="6"' "${COV}"/junit.xml
 }
 
 @test "WriteFailed on one chunk does not tolerate another chunk's real failure" {
@@ -479,7 +484,7 @@ EOF
     bash scripts/ci/run-ts-coverage.sh "$BATS_TEST_TMPDIR/out.log"
   printf '%s\n' "$output"
   [ "$status" -ne 0 ]
-  [ ! -f coverage/lcov.info ]
+  [ ! -f "${COV}"/lcov.info ]
 }
 
 @test "WriteFailed recovery refuses a run that is missing a planned chunk's log" {
@@ -489,7 +494,7 @@ EOF
     bash scripts/ci/run-ts-coverage.sh "$BATS_TEST_TMPDIR/out.log"
   printf '%s\n' "$output"
   [ "$status" -ne 0 ]
-  [ ! -f coverage/lcov.info ]
+  [ ! -f "${COV}"/lcov.info ]
 }
 
 # Fast infra simulation: the first attempt of each shard exits as an infra kill
@@ -508,10 +513,10 @@ make_infra_timeout() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"retrying once with the same budget"* ]]
     [[ "$output" == *"passed on its retry"* ]]
-    [ -f coverage/shards/shard-1.attempt-1.log ]
-    [ -f coverage/shards/attempt-1/shard-1-chunk-99.xml ]
-    [ ! -f coverage/shards/shard-1-chunk-99.xml ]
-    [ -f coverage/lcov.info ]
+    [ -f "${COV}"/shards/shard-1.attempt-1.log ]
+    [ -f "${COV}"/shards/attempt-1/shard-1-chunk-99.xml ]
+    [ ! -f "${COV}"/shards/shard-1-chunk-99.xml ]
+    [ -f "${COV}"/lcov.info ]
   done
 }
 
@@ -560,5 +565,5 @@ SH
   [ "$status" -eq 137 ]
   [[ "$output" == *"after a retry"* ]]
   [[ "$output" != *"continuing to verify coverage output"* ]]
-  [ ! -f coverage/lcov.info ]
+  [ ! -f "${COV}"/lcov.info ]
 }

@@ -103,6 +103,25 @@ describe("SwipeOn fromEdge (#12537)", () => {
     expect(gesture.getSwipeCalls()).toHaveLength(0);
   });
 
+  test("XR lookFor refuses before dispatch when two app panels are open", async () => {
+    const backStack = xrBackStack("swipe-up");
+    const settings = backStack.tasks.find((task) => task.id === 6)!;
+    backStack.tasks.push({ ...settings, id: 7, packageName: "com.example.second" });
+    observe.setObserveResult({
+      ...observation(),
+      screenSize: { width: 2560, height: 2558 },
+      backStack,
+    });
+    const result = await createSwipeOn().execute({
+      direction: "up",
+      autoTarget: false,
+      lookFor: { text: "Missing", maxTime: 1000 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("2 app panels are open");
+    expect(gesture.getSwipeCalls()).toHaveLength(0);
+  });
+
   test("XR system UI only refuses swipes", async () => {
     const backStack = xrBackStack("swipe-up");
     backStack.tasks = backStack.tasks.filter((task) => task.packageName !== "com.android.settings");

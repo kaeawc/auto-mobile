@@ -1,4 +1,4 @@
-import { xrSwipeBounds } from "../../xr/xrPanelSpace";
+import { appendWarning, xrDefaultPoseWarning, xrSwipeBounds } from "../../xr/xrPanelSpace";
 import type { IosSdkWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { ScrollSearchSession } from "./ScrollSearchSession";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
@@ -287,8 +287,9 @@ export class ScrollUntilVisible {
     strategy?: ScrollUntilVisibleStrategy;
   }): Promise<SwipeOnResult> {
     const swipes: SwipeCounter = { dispatched: 0 };
+    let xrWarning: string | undefined;
     try {
-      return await withSwipeObservationReadScope(() =>
+      const result = await withSwipeObservationReadScope(() =>
         new ScrollSearchSession(
           { ...args, swipes },
           this.deps,
@@ -306,7 +307,13 @@ export class ScrollUntilVisible {
             resolveReverseBounds: (...args) => this.resolveReverseBounds(...args),
             computeHalfScreenReverseCoords: (...args) =>
               this.computeHalfScreenReverseCoords(...args),
-            dispatchSearchSwipe: (...args) => this.dispatchSearchSwipe(...args),
+            dispatchSearchSwipe: async (dispatch) => {
+              // Each search swipe refuses before input on a visibly non-default XR pose.
+              if (this.swipePlatform() === "android") {
+                xrWarning = xrDefaultPoseWarning(dispatch.observation);
+              }
+              return this.dispatchSearchSwipe(dispatch);
+            },
             matchInterruptedDisplaySearch: (...args) => this.matchInterruptedDisplaySearch(...args),
             findVisibleSearchTarget: (...args) => this.findVisibleSearchTarget(...args),
             shouldGuardSearchStep: (...args) => this.shouldGuardSearchStep(...args),
@@ -316,6 +323,7 @@ export class ScrollUntilVisible {
           args.perf ?? new NoOpPerformanceTracker(),
         ).execute(),
       );
+      return xrWarning ? { ...result, warning: appendWarning(result.warning, xrWarning) } : result;
     } catch (error) {
       // A search cancelled after it moved the screen must say so (#10151).
       throw annotateSearchCancellation(error, args.signal, swipes);

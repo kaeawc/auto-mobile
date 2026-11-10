@@ -641,3 +641,40 @@ test("XR display container-element swipes resolve before the fromEdge panel refu
   }
   expect(resolved.warning).toContain("assume the app panel is in its default pose");
 });
+
+const twoPanelXrObservation = (observation: ObserveResult): ObserveResult => {
+  const xr = xrObservation(observation);
+  const settings = xr.backStack!.tasks.find((task) => task.id === 6)!;
+  xr.backStack!.tasks.push({ ...settings, id: 7, packageName: "com.example.second" });
+  return xr;
+};
+
+test("XR explicit-display lookFor searches carry the default-pose warning", async () => {
+  const h = harness({
+    foundAfter: 1,
+    observationFor: ({ observation }) => xrObservation(observation),
+  });
+  const result = await h.action.execute({
+    direction: "up",
+    display: "external",
+    lookFor: { text: "Found" },
+  });
+  expect(result).toMatchObject({ success: true, found: true });
+  expect(result.warning).toContain("assume the app panel is in its default pose");
+  expect(h.legs()).toHaveLength(1);
+});
+
+test("XR explicit-display lookFor refuses before input when two app panels are open", async () => {
+  const h = harness({
+    foundAfter: 1,
+    observationFor: ({ observation }) => twoPanelXrObservation(observation),
+  });
+  const result = await h.action.execute({
+    direction: "up",
+    display: "external",
+    lookFor: { text: "Found" },
+  });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("2 app panels are open");
+  expect(h.legs()).toHaveLength(0);
+});

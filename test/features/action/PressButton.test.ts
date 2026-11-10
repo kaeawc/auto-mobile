@@ -1036,6 +1036,36 @@ for (const platform of ["ios", "android"] as const) {
   });
 }
 
+test.each([
+  ["power", true, [{ expectLocked: true }]],
+  ["power", false, [undefined]],
+  ["volume_up", true, [undefined]],
+] as const)(
+  "iOS %s press with success %s marks a pending lock transition only after a power press (#17770)",
+  async (button, success, expected) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new FakeIOSCtrlProxy(timer);
+    client.setPressButtonResult({ success, totalTimeMs: 1, ...(success ? {} : { error: "nope" }) });
+    const getInstanceSpy = spyOnIosClientInstance(client);
+    const invalidations: unknown[] = [];
+    try {
+      const device: BootedDevice = { platform: "ios", deviceId: "ios-lock", name: "iPhone" };
+      const press = new PressButton(device, null, timer, {
+        iosLockStateInvalidator: {
+          invalidate: (_id, invalidation) => {
+            invalidations.push(invalidation);
+          },
+        },
+      });
+      expect((await press.press(button)).success).toBe(success);
+      expect(invalidations).toEqual([...expected]);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  },
+);
+
 describe("iOS recent press with the App Switcher already open", () => {
   const device: BootedDevice = { deviceId: "ios-device", platform: "ios", name: "iPhone" };
 

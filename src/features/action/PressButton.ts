@@ -1,7 +1,7 @@
 import { tvosPress, unsupportedTvosAction } from "../tvos/TvosActions";
 import { watchPress, unsupportedWatchAction } from "../watch/WatchActions";
 import { isIosAppSwitcherVisible } from "../observe/ios/AppSwitcherSnapshotClassifier";
-import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
+import { invalidateIosLockAfterPress } from "./iosLockAfterPress";
 import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
@@ -405,6 +405,7 @@ export class PressButton extends BaseVisualChange {
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
     let dispatched = false;
+    let pressed: PressButtonResult | undefined;
     const markDispatch = () => {
       if (!dispatched) {
         dispatched = true;
@@ -423,14 +424,14 @@ export class PressButton extends BaseVisualChange {
             displayId,
           });
         case "ios":
-          return await this.executeiOSButtonPress(button, {
+          return (pressed = await this.executeiOSButtonPress(button, {
             timeoutMs,
             frameContext,
             signal,
             onDispatch: markDispatch,
             onRecentAppsRoute,
             appSwitcherWasOpen,
-          });
+          }));
         default:
           throw unsupportedPlatformError(this.device.platform, "press buttons");
       }
@@ -448,9 +449,7 @@ export class PressButton extends BaseVisualChange {
         error: `Failed to press button: ${errorMessage(error)}`,
       };
     } finally {
-      if (this.device.platform === "ios") {
-        (this.iosLockStateInvalidator ?? getIosLockStateCache()).invalidate(this.device.deviceId);
-      }
+      invalidateIosLockAfterPress(this.iosLockStateInvalidator, this.device, button, pressed);
       if (isNavigationPressButton(button)) {
         this.windowCacheInvalidator.invalidate(this.device, true);
       }

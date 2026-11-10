@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { createExecResult } from "../../../src/utils/execResult";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
@@ -219,6 +220,7 @@ describe("default-display dispatch fences", () => {
             const strategy = new FakeTapStrategy();
             const action = h.attach(
               new TapOnElement(h.device, h.adb, {
+                xrDetector: new FakeAndroidXrDetector(),
                 ...h.deps,
                 tapStrategy: strategy,
                 waitForCondition: {
@@ -254,7 +256,12 @@ describe("default-display dispatch fences", () => {
                 return false;
               });
             }
-            const action = h.attach(new TapAnyElement(h.device, null, h.deps));
+            const action = h.attach(
+              new TapAnyElement(h.device, null, {
+                ...h.deps,
+                xrDetector: new FakeAndroidXrDetector(),
+              }),
+            );
             action.testHooks.setRefreshViewHierarchy(async () => null);
             run = () => action.execute({ action: actionName });
           }
@@ -418,6 +425,7 @@ describe("default-display dispatch fences", () => {
     strategy.retryTapIfNoChange = true;
     const action = h.attach(
       new TapOnElement(h.device, h.adb, {
+        xrDetector: new FakeAndroidXrDetector(),
         ...h.deps,
         tapStrategy: strategy,
         waitForCondition: {
@@ -532,6 +540,7 @@ describe("TalkBack waits retain the action fence", () => {
             ? await h
                 .attach(
                   new TapOnElement(h.device, h.adb, {
+                    xrDetector: new FakeAndroidXrDetector(),
                     ...h.deps,
                     tapStrategy,
                     hierarchyCapture: new FakeHierarchyCapture(() => h.screen.viewHierarchy!),
@@ -555,6 +564,7 @@ describe("TalkBack waits retain the action fence", () => {
             : await (() => {
                 const action = h.attach(
                   new TapAnyElement(h.device, null, {
+                    xrDetector: new FakeAndroidXrDetector(),
                     ...h.deps,
                     talkBackStrategy: strategy,
                     talkBackDriverFactory: factory,
@@ -704,6 +714,7 @@ describe("default-display recovery dispatches", () => {
             ? await h
                 .attach(
                   new TapOnElement(h.device, h.adb, {
+                    xrDetector: new FakeAndroidXrDetector(),
                     ...h.deps,
                     tapStrategy,
                     elementSelector: selector,
@@ -724,6 +735,7 @@ describe("default-display recovery dispatches", () => {
             : await (() => {
                 const action = h.attach(
                   new TapAnyElement(h.device, null, {
+                    xrDetector: new FakeAndroidXrDetector(),
                     ...h.deps,
                     elementSelector: selector,
                   }),
@@ -769,6 +781,7 @@ describe("default-display recovery dispatches", () => {
     const result = await h
       .attach(
         new TapOnElement(h.device, h.adb, {
+          xrDetector: new FakeAndroidXrDetector(),
           ...h.deps,
           elementSelector: selector,
           tapStrategy: new FakeTapStrategy(),
@@ -809,6 +822,7 @@ describe("default-display recovery dispatches", () => {
       const result = await h
         .attach(
           new TapOnElement(h.device, h.adb, {
+            xrDetector: new FakeAndroidXrDetector(),
             ...h.deps,
             tapStrategy,
             selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
@@ -999,7 +1013,9 @@ describe("display fence options preserve public call shapes", () => {
       const driver = new FakeTalkBackNavigationDriver();
       spyOn(driver, "requestTapCoordinates").mockImplementation(dispatch);
       const strategy = new TalkBackTapStrategy({ timer: h.timer });
-      const tap = h.attach(new TapOnElement(h.device, h.adb, h.deps));
+      const tap = h.attach(
+        new TapOnElement(h.device, h.adb, { ...h.deps, xrDetector: new FakeAndroidXrDetector() }),
+      );
       const path = [
         { x: 10, y: 10 },
         { x: 20, y: 20 },
@@ -1164,6 +1180,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       };
       const on = h.attach(
         new TapOnElement(h.device, h.adb, {
+          xrDetector: new FakeAndroidXrDetector(),
           ...h.deps,
           observeScreen: h.observe,
           tapStrategy: new FakeTapStrategy(),
@@ -1172,7 +1189,11 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       );
       on.refreshViewHierarchy = refresh;
       const any = h.attach(
-        new TapAnyElement(h.device, h.adb, { ...h.deps, observeScreen: h.observe }),
+        new TapAnyElement(h.device, h.adb, {
+          xrDetector: new FakeAndroidXrDetector(),
+          ...h.deps,
+          observeScreen: h.observe,
+        }),
       );
       any.testHooks.setRefreshViewHierarchy(async (_defaultRefresh, timeout) => refresh(timeout));
       const options = {

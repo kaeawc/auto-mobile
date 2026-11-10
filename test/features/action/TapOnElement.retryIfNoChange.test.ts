@@ -19,6 +19,7 @@ import type {
 } from "../../../src/features/observe/interfaces/WaitForCondition";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 
 function makeElement(): Element {
   return {
@@ -49,7 +50,7 @@ function createTapOnElement(
   waitForCondition?: WaitForCondition,
   extraOptions: Pick<
     TapOnElementDependencies,
-    "selectionStateTracker" | "elementSelector" | "tapStrategy"
+    "selectionStateTracker" | "elementSelector" | "tapStrategy" | "xrDetector"
   > = {},
 ): { tap: TapOnElement; timer: FakeTimer } {
   const timer = new FakeTimer();
@@ -61,7 +62,7 @@ function createTapOnElement(
       deviceId: "emulator-5554",
     },
     new FakeAdbClient(),
-    { timer, waitForCondition, ...extraOptions },
+    { timer, waitForCondition, xrDetector: new FakeAndroidXrDetector(), ...extraOptions },
   );
   return { tap, timer };
 }
@@ -100,6 +101,38 @@ describe("retryTapIfNoChange", () => {
     });
 
     expect(tapCallCount).toBe(0);
+  });
+
+  test("never re-clicks an XR node when the hierarchy is unchanged (#17811)", async () => {
+    const { tap } = createTapOnElement("android", undefined, {
+      xrDetector: new FakeAndroidXrDetector(true),
+    });
+    const hierarchy = makeHierarchy("same-state");
+    let refreshes = 0;
+    tap.refreshViewHierarchy = async () => {
+      refreshes++;
+      return hierarchy;
+    };
+    let tapCallCount = 0;
+    tap.executeAndroidTap = async () => {
+      tapCallCount++;
+    };
+
+    await tap.retryTapIfNoChange(
+      tap.testHooks.hashViewHierarchy(hierarchy),
+      { x: 60, y: 45 },
+      "tap",
+      {
+        longPressDuration: 0,
+        tapElement: makeElement(),
+        options: { action: "tap" },
+        isTalkBackEnabled: false,
+        screenSize: { width: 1080, height: 1920 },
+      },
+    );
+
+    expect(tapCallCount).toBe(0);
+    expect(refreshes).toBe(0);
   });
 
   test("retries tap when hierarchy unchanged after tap", async () => {

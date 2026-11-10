@@ -60,6 +60,10 @@ import type { FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
 import { LongPressMetadataDetector } from "./LongPressMetadataDetector";
+import {
+  defaultAndroidXrDetector,
+  type AndroidXrDetector,
+} from "../../utils/android-cmdline-tools/androidXrDevice";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { resolveTapAccessibilityDependencies } from "./tapAccessibilityDependencies";
@@ -95,6 +99,8 @@ export interface TapOnElementDependencies extends DisplayFenceDependencies {
    * picks the right strategy based on `device.platform`.
    */
   tapStrategy?: TapStrategy;
+  /** Decides XR node-click routing; tests inject a fake so no `pm has-feature` probe runs. */
+  xrDetector?: AndroidXrDetector;
 }
 
 export {
@@ -285,6 +291,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     accessibilityService: () => this.accessibilityService,
     adb: () => this.adb,
     device: () => this.device,
+    isAndroidXr: (signal) => this.xrDetector.isAndroidXr(this.adb, this.device, signal),
     dispatchCoordinateTapOrAdbFallback: (...args) =>
       this.dispatchCoordinateTapOrAdbFallback(...args),
     executeAndroidLongPress: (...args) => this.executeAndroidLongPress(...args),
@@ -390,6 +397,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private strategy: TapStrategy;
   private longPressMetadataDetector: LongPressMetadataDetector;
   private readonly waitForCondition: WaitForCondition;
+  private readonly xrDetector: AndroidXrDetector;
 
   constructor(
     device: BootedDevice,
@@ -463,6 +471,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         screenshotCapturer: this.screenshotCapturer,
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
+    this.xrDetector = options.xrDetector ?? defaultAndroidXrDetector;
     this.elementSelector = this.createElementSelector(options);
     const accessibility = resolveTapAccessibilityDependencies(options, {
       device,

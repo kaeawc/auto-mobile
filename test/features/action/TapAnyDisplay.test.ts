@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
@@ -89,7 +90,10 @@ function harness(
     talkBackStrategy: new TalkBackTapStrategy({ timer }),
     talkBackDriverFactory: { createDriver: () => talkBackDriver },
   };
-  const action = new TapAnyElement(targetDevice, adb, deps);
+  const action = new TapAnyElement(targetDevice, adb, {
+    ...deps,
+    xrDetector: new FakeAndroidXrDetector(),
+  });
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
   action.observeScreen = observe;

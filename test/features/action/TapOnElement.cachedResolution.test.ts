@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { createExecResult } from "../../../src/utils/execResult";
 import { buildObserveResult } from "../../helpers/observeFixture";
@@ -95,6 +96,7 @@ function harness(
   const adb = new FakeAdbExecutor();
   const strategy = new FakeTapStrategy();
   const tap = new TapOnElement(device, adb, {
+    xrDetector: new FakeAndroidXrDetector(),
     timer,
     tapStrategy: strategy,
     visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
@@ -552,6 +554,7 @@ function cachedTapAny(current: ObserveResult, cached = page([row("Old", 1700)], 
   detector.setTalkBackEnabled(false);
   const adb = new FakeAdbExecutor();
   const tap = new TapAnyElement(device, adb, {
+    xrDetector: new FakeAndroidXrDetector(),
     timer,
     accessibilityDetector: detector,
     elementSelector: new ResolverElementSelector(),
@@ -613,6 +616,7 @@ describe("tapAny TalkBack fresh selection", () => {
       const fresh = page([row("Current", 300), row("Other", 500)], "Main");
       driver.hierarchy = fresh.viewHierarchy;
       const tap = new TapAnyElement(device, new FakeAdbExecutor(), {
+        xrDetector: new FakeAndroidXrDetector(),
         timer,
         accessibilityDetector: detector,
         talkBackStrategy: new TalkBackTapStrategy({ timer }),
@@ -645,6 +649,7 @@ describe("tapAny TalkBack fresh selection", () => {
     const cached = page([row("Old", 1700)], "Old");
     driver.hierarchy = cached.viewHierarchy;
     const tap = new TapAnyElement(device, new FakeAdbExecutor(), {
+      xrDetector: new FakeAndroidXrDetector(),
       timer,
       accessibilityDetector: detector,
       talkBackStrategy: new TalkBackTapStrategy({ timer }),
@@ -723,6 +728,7 @@ describe("tapAny TalkBack retry freshness", () => {
     const after = page([row("Current", 500)], "Main");
     driver.hierarchy = before.viewHierarchy;
     const tap = new TapAnyElement(device, new FakeAdbExecutor(), {
+      xrDetector: new FakeAndroidXrDetector(),
       timer,
       accessibilityDetector: detector,
       talkBackStrategy: new TalkBackTapStrategy({ timer }),
@@ -807,6 +813,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       const tap =
         tool === "tapOn"
           ? new TapOnElement(device, h.adb, {
+              xrDetector: new FakeAndroidXrDetector(),
               timer: h.timer,
               hierarchyCapture: captures,
               tapStrategy: h.strategy,
@@ -816,6 +823,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
               selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
             })
           : new TapAnyElement(device, h.adb, {
+              xrDetector: new FakeAndroidXrDetector(),
               timer: h.timer,
               hierarchyCapture: captures,
               accessibilityDetector: detector,
@@ -1100,6 +1108,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
     const tap =
       tool === "tapOn"
         ? new TapOnElement(device, h.adb, {
+            xrDetector: new FakeAndroidXrDetector(),
             timer: h.timer,
             hierarchyCapture: captures,
             tapStrategy: h.strategy,
@@ -1107,6 +1116,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
             selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
           })
         : new TapAnyElement(device, h.adb, {
+            xrDetector: new FakeAndroidXrDetector(),
             timer: h.timer,
             hierarchyCapture: captures,
             accessibilityDetector: detector,

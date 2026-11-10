@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
@@ -127,6 +128,7 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
           tapStrategy: new FakeTapStrategy(),
         })
       : new TapAnyElement(device, adb, {
+          xrDetector: new FakeAndroidXrDetector(),
           timer,
           elementSelector: selector,
           accessibilityDetector: detector,
@@ -482,7 +484,12 @@ for (const action of ["tap", "longPress"] as const) {
     const tap = new TapOnElement(
       { name: "fake", platform: "android", deviceId: "fake-native" },
       adb,
-      { timer, talkBackStrategy: talkBack, talkBackDriverFactory: { createDriver: () => driver } },
+      {
+        xrDetector: new FakeAndroidXrDetector(),
+        timer,
+        talkBackStrategy: talkBack,
+        talkBackDriverFactory: { createDriver: () => driver },
+      },
     );
     const element = new ResolverElementSelector().selectByResourceId(capture(), "remove", {
       container: scope,
@@ -527,6 +534,7 @@ test("tapOn scoped long press does not reselect a global native resource ID", as
   const adb = new FakeAdbClient();
   const timer = new FakeTimer();
   const tap = new TapOnElement({ name: "fake", platform: "android", deviceId: "fake-long" }, adb, {
+    xrDetector: new FakeAndroidXrDetector(),
     timer,
   });
   const element = new ResolverElementSelector().selectByResourceId(capture(), "remove", {
@@ -581,6 +589,7 @@ test.each([true, false])(
         hierarchy: { node: encodeIosDollar(cart) },
       };
       const tap = new TapAnyElement({ name: "fake", platform: "ios", deviceId: "fake-ios" }, null, {
+        xrDetector: new FakeAndroidXrDetector(),
         timer,
         iosVoiceOverDetector: detector,
       });

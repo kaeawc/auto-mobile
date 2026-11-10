@@ -23,6 +23,7 @@ import type { BootedDevice, ObserveResult, OpenURLResult } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
 import type { WaitForObservationOutcome } from "../observeTools";
 import type { AndroidCtrlProxy } from "../../features/observe/android";
+import type { PendingImeRestoreRegistry } from "../../features/action/sendkeys/PendingImeRestore";
 import type { KeyboardProfileRestoreRegistry } from "../../features/utility/KeyboardProfileRestore";
 import type { SessionKeyboardProfileHost } from "../sessionKeyboardProfile";
 import type { ProgressCallback } from "../toolRegistry";
@@ -74,6 +75,8 @@ export interface InteractionToolDependencies {
   rotateFactory?: (device: BootedDevice, options?: RotateOptions) => RotateLike;
   setPostureFactory?: (device: BootedDevice) => SetPostureLike;
   keyboardFactory?: (device: BootedDevice) => Pick<Keyboard, "execute">;
+  /** Restores the session's original keyboard before an installed-IME action (#16428). */
+  pendingImeRestores?: Pick<PendingImeRestoreRegistry, "flush">;
   /** OpenURL for Android and iOS, TvosOpenURL for an Apple TV (#16724). */
   openUrlFactory?: (device: BootedDevice) => OpenLinkExecutor;
   openLinkChooserFactory?: (device: BootedDevice) => Pick<HandleIntentChooser, "execute">;

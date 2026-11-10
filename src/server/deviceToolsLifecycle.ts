@@ -799,7 +799,6 @@ async function stopDevice(
   if (args.device.platform === "android") {
     // Only an admitted caller restores the target's keyboard; a refused one leaves it pending (#16579).
     await flushPendingImeRestoreBeforeTool(
-      false,
       args.device.deviceId,
       deps.pendingImeRestores ?? pendingImeRestores,
     );

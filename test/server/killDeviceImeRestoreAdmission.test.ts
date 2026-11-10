@@ -2,7 +2,6 @@ import { describe, expect } from "bun:test";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { pendingImeRestores } from "../../src/features/action/sendkeys/PendingImeRestore";
 import { FakePendingImeRestoreRegistry } from "../fakes/FakePendingImeRestoreRegistry";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { setDeviceToolsDependencies } from "../../src/server/deviceTools";
 import { BASE, restartStopHarness } from "../helpers/restartStopHarness";
 
@@ -14,21 +13,15 @@ describe("killDevice flushes the target's pending IME restore only after admissi
   async function heldDeviceWithPendingRestore() {
     const f = await fixture("android", false, false, "owner-conn", false);
     const events: string[] = [];
-    const imeTimer = new FakeTimer();
-    pendingImeRestores.store(
-      f.device.deviceId,
-      {
-        snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: null } },
-        userId: 0,
-        restore: async () => {
-          events.push(`restore:${f.manager.killed.length}`);
-        },
+    pendingImeRestores.store(f.device.deviceId, {
+      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: null } },
+      userId: 0,
+      restore: async () => {
+        events.push(`restore:${f.manager.killed.length}`);
       },
-      imeTimer,
-    );
+    });
     cleanups.push(() => {
       pendingImeRestores.discard(f.device.deviceId);
-      expect(imeTimer.getPendingTimeoutCount()).toBe(0);
     });
     return { f, events };
   }

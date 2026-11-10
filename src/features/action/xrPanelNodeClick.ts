@@ -1,0 +1,201 @@
+import { ActionableError, type Element, type ViewHierarchyResult } from "../../models";
+import { boundsNearlyEqual } from "../../utils/bounds";
+import { throwIfAborted } from "../../utils/toolUtils";
+import { StaleDisplayError } from "../observe/StaleDisplayError";
+import { isCompleteHierarchy } from "../talkback/resourceIdActionError";
+import { stableNodeSelectorForElement } from "../talkback/TalkBackTapStrategy";
+import { hasAccessibilityAction } from "../utility/elementProperties";
+import {
+  SearchableHierarchy,
+  matchesCtrlProxyNodeSelector,
+  type SearchableEntry,
+} from "../utility/SearchableNode";
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
+import type { DisplayFenceOption } from "./BaseVisualChange";
+import type { TapOnCtrlProxy } from "./tapHierarchyRead";
+import { findTapTargetNode } from "./tapTargetSupport";
+
+type VerifiedNodeTarget = {
+  selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
+  expectedBounds: Element["bounds"];
+};
+
+type XrNodeClickOptions = DisplayFenceOption & {
+  resolvedHierarchy?: ViewHierarchyResult;
+  onTalkBackActivation?: () => void;
+  /** Set for container-scoped selections; ancestor activation never leaves it. */
+  container?: unknown;
+};
+
+/** Resolves the requested container in the click's hierarchy. */
+type XrContainerResolver = (hierarchy: ViewHierarchyResult) => Element | undefined;
+
+export function xrCoordinateError(): ActionableError {
+  return new ActionableError(
+    "The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.",
+  );
+}
+
+function xrNodeClickSelector(
+  action: string,
+  element: Element,
+  options: XrNodeClickOptions,
+  resolveContainer?: XrContainerResolver,
+): VerifiedNodeTarget {
+  const hierarchy = resolveViewHierarchyForSearch(options.resolvedHierarchy) ?? null;
+  if (
+    action !== "tap" ||
+    element["hierarchy-source"] === "uiautomator" ||
+    !element.bounds ||
+    !isCompleteHierarchy(hierarchy)
+  ) {
+    throw xrCoordinateError();
+  }
+  const entries = new SearchableHierarchy().project(hierarchy);
+  // Native selectors are global across windows, including for an ancestor click.
+  const uniqueSelector = (candidate: Element) => {
+    const selector = stableNodeSelectorForElement(candidate);
+    if (!selector) {
+      return undefined;
+    }
+    const matches = entries.filter((entry) =>
+      matchesCtrlProxyNodeSelector(entry.properties, selector),
+    );
+    return new Set(matches.map((entry) => entry.source)).size === 1 &&
+      matches[0]?.bounds &&
+      boundsNearlyEqual(matches[0].bounds, candidate.bounds, 0)
+      ? { selector, expectedBounds: candidate.bounds }
+      : undefined;
+  };
+  if (hasAccessibilityAction(element.actions, "click")) {
+    const selector = uniqueSelector(element);
+    if (selector) {
+      return selector;
+    }
+    throw xrCoordinateError();
+  }
+
+  // Like TapTargetResolver, a container-scoped selection never promotes past its container.
+  const scoped = options.container !== undefined;
+  const container = scoped ? resolveContainer?.(hierarchy) : undefined;
+  const containerEntry = container ? findTapTargetNode(entries, container) : undefined;
+  const containerIndex = containerEntry ? entries.indexOf(containerEntry) : -1;
+  return xrAncestorClickSelector(element, entries, uniqueSelector, { scoped, containerIndex });
+}
+
+/**
+ * The target's ancestor indexes, nearest first. A container-scoped selection may only
+ * activate an owner strictly inside the container, so the walk stops there; an unresolved
+ * container or one off the target's parent chain refuses.
+ */
+function ancestorsWithinScope(
+  entries: readonly SearchableEntry[],
+  target: SearchableEntry,
+  scope: { scoped: boolean; containerIndex: number },
+): number[] {
+  const ancestors: number[] = [];
+  for (let at = target.parentIndex; at !== undefined; at = entries[at].parentIndex) {
+    ancestors.push(at);
+  }
+  if (!scope.scoped) {
+    return ancestors;
+  }
+  const boundary = ancestors.indexOf(scope.containerIndex);
+  if (boundary < 0) {
+    throw xrCoordinateError();
+  }
+  return ancestors.slice(0, boundary);
+}
+
+function xrAncestorClickSelector(
+  element: Element,
+  entries: readonly SearchableEntry[],
+  uniqueSelector: (candidate: Element) => VerifiedNodeTarget | undefined,
+  scope: { scoped: boolean; containerIndex: number },
+): VerifiedNodeTarget {
+  // Bind the label to one captured source before following actual parent links.
+  // A view-id locates a captured node; it is never sent as a native action selector.
+  const targetSelector = stableNodeSelectorForElement(element);
+  const targets = entries.filter(
+    (entry) =>
+      entry.bounds &&
+      boundsNearlyEqual(entry.bounds, element.bounds, 0) &&
+      entry.properties.text === element.text &&
+      !hasAccessibilityAction(entry.properties.actions, "click") &&
+      (element["view-id"]
+        ? entry.properties["view-id"] === element["view-id"]
+        : targetSelector && matchesCtrlProxyNodeSelector(entry.properties, targetSelector)),
+  );
+  if (new Set(targets.map((entry) => entry.source)).size !== 1) {
+    throw xrCoordinateError();
+  }
+  for (const at of ancestorsWithinScope(entries, targets[0], scope)) {
+    const ancestor = entries[at];
+    const bounds = ancestor.bounds;
+    if (
+      !bounds ||
+      bounds.left > element.bounds.left ||
+      bounds.top > element.bounds.top ||
+      bounds.right < element.bounds.right ||
+      bounds.bottom < element.bounds.bottom ||
+      !hasAccessibilityAction(ancestor.properties.actions, "click")
+    ) {
+      continue;
+    }
+    const selector = uniqueSelector({ ...ancestor.properties, bounds });
+    if (selector) {
+      return selector;
+    }
+  }
+  throw xrCoordinateError();
+}
+
+export async function executeXrNodeClick<O extends XrNodeClickOptions>(
+  accessibilityService: () => Pick<
+    TapOnCtrlProxy,
+    "supportsNodeActionSelectors" | "requestNodeAction"
+  >,
+  {
+    action,
+    element,
+    signal,
+    options,
+    resolveContainer,
+  }: {
+    action: string;
+    element: Element;
+    signal?: AbortSignal;
+    options?: O;
+    resolveContainer?: (hierarchy: ViewHierarchyResult, options: O) => Element | undefined;
+  },
+): Promise<void> {
+  throwIfAborted(signal);
+  const { selector, expectedBounds } = xrNodeClickSelector(
+    action,
+    element,
+    options ?? {},
+    options && resolveContainer && ((hierarchy) => resolveContainer(hierarchy, options)),
+  );
+  try {
+    if (!(await accessibilityService().supportsNodeActionSelectors(undefined, signal, true))) {
+      throw xrCoordinateError();
+    }
+    throwIfAborted(signal);
+    options?.displayFence?.assertCurrent();
+    const result = await accessibilityService().requestNodeAction("click", selector, {
+      signal,
+      expectedBounds,
+    });
+    throwIfAborted(signal);
+    if (!result.success) {
+      throw xrCoordinateError();
+    }
+    options?.onTalkBackActivation?.();
+  } catch (error) {
+    throwIfAborted(signal);
+    if (error instanceof StaleDisplayError) {
+      throw error;
+    }
+    throw new ActionableError(xrCoordinateError().message, { cause: error });
+  }
+}

@@ -4,9 +4,13 @@ import {
   type AndroidActionDispatcherContext,
 } from "../../../../src/features/observe/android/AndroidActionDispatcher";
 import { RequestManager } from "../../../../src/utils/RequestManager";
+import type { A11yActionResult } from "../../../../src/features/observe/android/types";
+import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-function harness(options: { connected?: boolean; supported?: string[] | null } = {}) {
+function harness(
+  options: { connected?: boolean; supported?: string[] | null; sent?: string[] } = {},
+) {
   const timer = new FakeTimer();
   const requestManager = new RequestManager(timer);
   const pendingFocusedInputClickIds = new Set<string>();
@@ -22,9 +26,25 @@ function harness(options: { connected?: boolean; supported?: string[] | null } =
     waitForHandshake: async () => {},
     isCommandSupported: (messageType) => supported?.includes(messageType) === true,
     cancelScreenshotBackoff: () => {},
-    createDelegateContext: () => {
-      throw new Error("not needed when the socket never connects");
-    },
+    createDelegateContext: () => ({
+      timer,
+      requestManager,
+      ensureConnected: async () => true,
+      cancelScreenshotBackoff: () => {},
+      getWebSocket: () =>
+        new (class extends FakeWebSocket {
+          override readyState = WebSocketState.OPEN;
+          override send(data: string): void {
+            options.sent?.push(data);
+            const message: { requestId: string } = JSON.parse(data);
+            requestManager.resolve<A11yActionResult>(message.requestId, {
+              success: true,
+              action: "click",
+              totalTimeMs: 0,
+            });
+          }
+        })("ws://fake", "none", 0, timer),
+    }),
   };
   return {
     dispatcher: new AndroidActionDispatcher(context),
@@ -55,6 +75,52 @@ describe("AndroidActionDispatcher", () => {
         supported: ["node_selector_actions"],
       }).dispatcher.supportsNodeActionSelectors(),
     ).toBe(true);
+  });
+
+  test("bounds verification requires its own advertised flag", async () => {
+    for (const supported of [
+      null,
+      ["node_selector_actions"],
+      ["node_selector_bounds_v1"],
+      ["node_selector_actions", "node_selector_bounds_v1"],
+    ]) {
+      expect(
+        await harness({ connected: true, supported }).dispatcher.supportsNodeActionSelectors(
+          undefined,
+          undefined,
+          true,
+        ),
+      ).toBe(supported?.length === 2);
+    }
+  });
+
+  test("serializes expected node bounds only when provided", async () => {
+    const sent: string[] = [];
+    const { dispatcher } = harness({ connected: true, sent });
+    const expectedBounds = { left: -4, top: 2, right: 80, bottom: 100 };
+    for (const bounds of [expectedBounds, undefined]) {
+      expect(
+        (
+          await dispatcher.requestNodeAction(
+            "click",
+            { resourceId: "id/button" },
+            { expectedBounds: bounds },
+          )
+        ).success,
+      ).toBe(true);
+    }
+    const [verified, legacy] = sent.map((data) => JSON.parse(data));
+    expect(verified).toMatchObject({
+      type: "request_action",
+      selector: { resourceId: "id/button" },
+      boundsLeft: -4,
+      boundsTop: 2,
+      boundsRight: 80,
+      boundsBottom: 100,
+    });
+    for (const key of ["boundsLeft", "boundsTop", "boundsRight", "boundsBottom"]) {
+      expect(legacy).not.toHaveProperty(key);
+    }
   });
 
   test("an unattributed focused-click rejection settles every pending click", async () => {

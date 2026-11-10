@@ -33,6 +33,7 @@ const oldApkAdvertisedCommands = [
   "discover_keystore",
   "set_hierarchy_interval",
   "node_selector_actions",
+  "node_selector_bounds_v1",
   "request_activate_accessibility_link",
   "request_insert_text",
   "request_insert_text_state",

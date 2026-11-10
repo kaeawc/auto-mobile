@@ -5,6 +5,7 @@
     "test/fixtures/simctl/pairs/**",
     "test/fixtures/android-avdmanager/*.txt",
     "test/fixtures/visionos-settings/*.json",
+    "test/fixtures/android-xr/*.json",
     "dist/**",
     "ios/**",
     "android/**",

@@ -1,0 +1,1856 @@
+{
+  "screenSize": {
+    "width": 2560,
+    "height": 2558,
+    "units": "physical-pixels"
+  },
+  "activeWindow": {
+    "appId": "com.android.settings",
+    "activityName": "com.android.settings.Settings$NetworkDashboardActivity",
+    "layoutSeqSum": 745
+  },
+  "windows": [
+    {
+      "id": 29,
+      "displayId": 0,
+      "type": 3,
+      "windowLayer": 29,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        2560,
+        48
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 29,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-87c8f71b6878b246",
+        "bounds": [
+          0,
+          0,
+          2560,
+          48
+        ],
+        "node": [
+          {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/status_bar_launch_animation_container",
+            "visible-to-user": true,
+            "view-id": "com.android.systemui:id/status_bar_launch_animation_container",
+            "bounds": [
+              0,
+              0,
+              2560,
+              48
+            ]
+          },
+          {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/status_bar_container",
+            "visible-to-user": true,
+            "view-id": "com.android.systemui:id/status_bar_container",
+            "bounds": [
+              0,
+              0,
+              2560,
+              48
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.android.systemui:id/status_bar",
+              "visible-to-user": true,
+              "pane-title": "Status bar",
+              "view-id": "com.android.systemui:id/status_bar",
+              "bounds": [
+                0,
+                0,
+                2560,
+                48
+              ],
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "com.android.systemui:id/status_bar_contents",
+                "visible-to-user": true,
+                "view-id": "com.android.systemui:id/status_bar_contents",
+                "class": "android.widget.LinearLayout",
+                "className": "android.widget.LinearLayout",
+                "bounds": [
+                  0,
+                  0,
+                  2520,
+                  48
+                ],
+                "node": [
+                  {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.systemui:id/status_bar_start_side_container",
+                    "visible-to-user": true,
+                    "view-id": "com.android.systemui:id/status_bar_start_side_container",
+                    "bounds": [
+                      16,
+                      0,
+                      1260,
+                      48
+                    ],
+                    "node": {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.systemui:id/status_bar_start_side_content",
+                      "visible-to-user": true,
+                      "view-id": "com.android.systemui:id/status_bar_start_side_content",
+                      "bounds": [
+                        16,
+                        0,
+                        182,
+                        48
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+                        "visible-to-user": true,
+                        "view-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+                        "class": "android.widget.LinearLayout",
+                        "className": "android.widget.LinearLayout",
+                        "bounds": [
+                          16,
+                          0,
+                          182,
+                          48
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus",
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "set_selection"
+                            ],
+                            "text": "3:22 ",
+                            "content-desc": "3:22 PM",
+                            "resource-id": "com.android.systemui:id/clock",
+                            "visible-to-user": true,
+                            "view-id": "com.android.systemui:id/clock",
+                            "bounds": [
+                              16,
+                              0,
+                              90,
+                              48
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "resource-id": "com.android.systemui:id/notification_icon_area",
+                            "visible-to-user": true,
+                            "view-id": "com.android.systemui:id/notification_icon_area",
+                            "bounds": [
+                              90,
+                              0,
+                              182,
+                              48
+                            ],
+                            "node": {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.android.systemui:id/notificationIcons",
+                              "visible-to-user": true,
+                              "view-id": "com.android.systemui:id/notificationIcons",
+                              "class": "android.view.ViewGroup",
+                              "className": "android.view.ViewGroup",
+                              "bounds": [
+                                90,
+                                0,
+                                182,
+                                48
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Google Play Protect notification: ",
+                                  "visible-to-user": true,
+                                  "view-id": "s2-5f42272ca1db0b1c",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    90,
+                                    0,
+                                    136,
+                                    48
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Android System notification: ",
+                                  "visible-to-user": true,
+                                  "view-id": "s2-59c2c43e07860ca2",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    136,
+                                    0,
+                                    182,
+                                    48
+                                  ]
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.systemui:id/status_bar_end_side_container",
+                    "visible-to-user": true,
+                    "view-id": "com.android.systemui:id/status_bar_end_side_container",
+                    "bounds": [
+                      1260,
+                      0,
+                      2504,
+                      48
+                    ],
+                    "node": {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.systemui:id/status_bar_end_side_content",
+                      "visible-to-user": true,
+                      "view-id": "com.android.systemui:id/status_bar_end_side_content",
+                      "class": "android.widget.LinearLayout",
+                      "className": "android.widget.LinearLayout",
+                      "bounds": [
+                        2424,
+                        0,
+                        2504,
+                        48
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.android.systemui:id/system_icons",
+                        "visible-to-user": true,
+                        "view-id": "com.android.systemui:id/system_icons",
+                        "class": "android.widget.LinearLayout",
+                        "className": "android.widget.LinearLayout",
+                        "bounds": [
+                          2424,
+                          0,
+                          2504,
+                          48
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "resource-id": "com.android.systemui:id/statusIcons",
+                            "visible-to-user": true,
+                            "view-id": "com.android.systemui:id/statusIcons",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "bounds": [
+                              2424,
+                              0,
+                              2483,
+                              48
+                            ],
+                            "node": {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.android.systemui:id/wifi_combo",
+                              "visible-to-user": true,
+                              "view-id": "com.android.systemui:id/wifi_combo",
+                              "bounds": [
+                                2424,
+                                3,
+                                2471,
+                                45
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.android.systemui:id/wifi_group",
+                                "visible-to-user": true,
+                                "view-id": "com.android.systemui:id/wifi_group",
+                                "class": "android.widget.LinearLayout",
+                                "className": "android.widget.LinearLayout",
+                                "bounds": [
+                                  2429,
+                                  3,
+                                  2471,
+                                  45
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.android.systemui:id/wifi_combo",
+                                  "visible-to-user": true,
+                                  "view-id": "com.android.systemui:id/wifi_combo",
+                                  "bounds": [
+                                    2429,
+                                    3,
+                                    2471,
+                                    45
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus",
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "set_selection"
+                                    ],
+                                    "content-desc": "Wifi signal full.",
+                                    "resource-id": "com.android.systemui:id/wifi_signal",
+                                    "visible-to-user": true,
+                                    "view-id": "com.android.systemui:id/wifi_signal",
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      2429,
+                                      3,
+                                      2471,
+                                      45
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus",
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "set_selection"
+                            ],
+                            "content-desc": "Battery charging, 100 percent.",
+                            "resource-id": "com.android.systemui:id/battery",
+                            "visible-to-user": true,
+                            "view-id": "com.android.systemui:id/battery",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "bounds": [
+                              2483,
+                              0,
+                              2504,
+                              48
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 1,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 28,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        790,
+        920,
+        1370
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 1,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-566b3a8595151764",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "partial",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-87c8f71b6878b246",
+        "bounds": [
+          0,
+          0,
+          920,
+          2160
+        ],
+        "node": {
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "resource-id": "com.android.systemui:id/container",
+          "visible-to-user": false,
+          "view-id": "com.android.systemui:id/container",
+          "class": "android.widget.LinearLayout",
+          "className": "android.widget.LinearLayout",
+          "bounds": [
+            0,
+            790,
+            920,
+            1370
+          ],
+          "node": [
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.android.systemui:id/topPanel",
+              "visible-to-user": false,
+              "view-id": "com.android.systemui:id/topPanel",
+              "class": "android.widget.LinearLayout",
+              "className": "android.widget.LinearLayout",
+              "bounds": [
+                64,
+                854,
+                856,
+                1063
+              ],
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "com.android.systemui:id/title_template",
+                "visible-to-user": false,
+                "view-id": "com.android.systemui:id/title_template",
+                "class": "android.widget.LinearLayout",
+                "className": "android.widget.LinearLayout",
+                "bounds": [
+                  64,
+                  854,
+                  856,
+                  1015
+                ],
+                "node": [
+                  {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.systemui:id/icon",
+                    "visible-to-user": false,
+                    "view-id": "com.android.systemui:id/icon",
+                    "class": "android.widget.ImageView",
+                    "className": "android.widget.ImageView",
+                    "bounds": [
+                      428,
+                      854,
+                      492,
+                      918
+                    ]
+                  },
+                  {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus",
+                      "next_at_movement_granularity",
+                      "previous_at_movement_granularity",
+                      "set_selection"
+                    ],
+                    "text": "Unable to detect surroundings",
+                    "resource-id": "com.android.systemui:id/alertTitle",
+                    "visible-to-user": false,
+                    "view-id": "com.android.systemui:id/alertTitle",
+                    "bounds": [
+                      64,
+                      950,
+                      856,
+                      1015
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.android.systemui:id/contentPanel",
+              "visible-to-user": false,
+              "view-id": "com.android.systemui:id/contentPanel",
+              "class": "android.widget.LinearLayout",
+              "className": "android.widget.LinearLayout",
+              "bounds": [
+                64,
+                1063,
+                856,
+                1210
+              ],
+              "node": {
+                "actions": [
+                  "focus",
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "com.android.systemui:id/scrollView",
+                "visible-to-user": false,
+                "view-id": "com.android.systemui:id/scrollView",
+                "focusable": "true",
+                "bounds": [
+                  64,
+                  1063,
+                  856,
+                  1146
+                ],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus",
+                    "next_at_movement_granularity",
+                    "previous_at_movement_granularity",
+                    "set_selection"
+                  ],
+                  "text": "Make sure you're in a well-lit area and the headset cameras are uncovered",
+                  "resource-id": "com.android.systemui:id/message",
+                  "visible-to-user": false,
+                  "view-id": "com.android.systemui:id/message",
+                  "bounds": [
+                    64,
+                    1063,
+                    856,
+                    1146
+                  ]
+                }
+              }
+            },
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.android.systemui:id/horizontalButtonPanel",
+              "visible-to-user": false,
+              "view-id": "com.android.systemui:id/horizontalButtonPanel",
+              "class": "android.widget.LinearLayout",
+              "className": "android.widget.LinearLayout",
+              "bounds": [
+                64,
+                1210,
+                856,
+                1306
+              ],
+              "node": {
+                "actions": [
+                  "focus",
+                  "select",
+                  "clear_selection",
+                  "click",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                ],
+                "text": "OK",
+                "resource-id": "com.android.systemui:id/button2",
+                "visible-to-user": false,
+                "view-id": "com.android.systemui:id/button2",
+                "class": "android.widget.Button",
+                "className": "android.widget.Button",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": [
+                  729,
+                  1210,
+                  848,
+                  1306
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 19,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 27,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        790,
+        920,
+        1370
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 19,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-e463212d84da9d12-8",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "partial",
+        "occludedBy": "android.widget.LinearLayout",
+        "occludedByViewId": "s2-566b3a8595151764",
+        "bounds": [
+          0,
+          0,
+          920,
+          2160
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 26,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        812,
+        920,
+        1347
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 17,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-e463212d84da9d12-7",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "partial",
+        "occludedBy": "android.widget.LinearLayout",
+        "occludedByViewId": "s2-e463212d84da9d12-8",
+        "bounds": [
+          0,
+          0,
+          920,
+          2160
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 25,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        812,
+        920,
+        1347
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 14,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-e463212d84da9d12-6",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "partial",
+        "occludedBy": "android.widget.LinearLayout",
+        "occludedByViewId": "s2-e463212d84da9d12-8",
+        "bounds": [
+          0,
+          0,
+          920,
+          2160
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 24,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        790,
+        920,
+        1370
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 9,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-e463212d84da9d12-5",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "partial",
+        "occludedBy": "android.widget.LinearLayout",
+        "occludedByViewId": "s2-e463212d84da9d12-8",
+        "bounds": [
+          0,
+          0,
+          920,
+          2160
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 23,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        2400,
+        2400
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 10,
+        "actions": [
+          "focus",
+          "select",
+          "clear_selection",
+          "click",
+          "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/home_screen",
+        "visible-to-user": false,
+        "view-id": "com.android.systemui:id/home_screen",
+        "class": "android.view.ViewGroup",
+        "className": "android.view.ViewGroup",
+        "clickable": "true",
+        "focusable": "true",
+        "occlusionState": "partial",
+        "occludedBy": "android.widget.LinearLayout",
+        "occludedByViewId": "s2-e463212d84da9d12-5",
+        "bounds": [
+          0,
+          0,
+          2400,
+          2400
+        ],
+        "node": [
+          {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/home_screen_date_time",
+            "visible-to-user": false,
+            "view-id": "com.android.systemui:id/home_screen_date_time",
+            "class": "android.widget.LinearLayout",
+            "className": "android.widget.LinearLayout",
+            "occlusionState": "partial",
+            "occludedBy": "unlabeled view",
+            "occludedByViewId": "s2-87c8f71b6878b246",
+            "bounds": [
+              883,
+              0,
+              1518,
+              283
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+              ],
+              "text": "3:22 PM",
+              "resource-id": "com.android.systemui:id/home_screen_clock",
+              "visible-to-user": false,
+              "view-id": "com.android.systemui:id/home_screen_clock",
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "occludedByViewId": "s2-87c8f71b6878b246",
+              "bounds": [
+                883,
+                0,
+                1518,
+                229
+              ]
+            }
+          },
+          {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/home_screen_button_layout",
+            "visible-to-user": false,
+            "view-id": "com.android.systemui:id/home_screen_button_layout",
+            "class": "android.view.ViewGroup",
+            "className": "android.view.ViewGroup",
+            "bounds": [
+              904,
+              1813,
+              1496,
+              2109
+            ],
+            "node": [
+              {
+                "actions": [
+                  "focus",
+                  "select",
+                  "clear_selection",
+                  "click",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                ],
+                "content-desc": "Open Launcher Panel",
+                "resource-id": "com.android.systemui:id/home_screen_launcher_button",
+                "visible-to-user": false,
+                "view-id": "com.android.systemui:id/home_screen_launcher_button",
+                "class": "android.widget.ImageButton",
+                "className": "android.widget.ImageButton",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": [
+                  964,
+                  1873,
+                  1140,
+                  2049
+                ]
+              },
+              {
+                "actions": [
+                  "focus",
+                  "select",
+                  "clear_selection",
+                  "click",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                ],
+                "content-desc": "Environment",
+                "resource-id": "com.android.systemui:id/home_screen_env_button",
+                "visible-to-user": false,
+                "view-id": "com.android.systemui:id/home_screen_env_button",
+                "class": "android.widget.ImageButton",
+                "className": "android.widget.ImageButton",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": [
+                  1260,
+                  1873,
+                  1436,
+                  2049
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 22,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        400,
+        900
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 3,
+        "actions": [
+          "focus",
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-e463212d84da9d12-4",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "focusable": "true",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/home_screen",
+        "occludedByViewId": "com.android.systemui:id/home_screen",
+        "bounds": [
+          0,
+          0,
+          400,
+          900
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 21,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        1000,
+        300
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 21,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-e463212d84da9d12-3",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/home_screen",
+        "occludedByViewId": "com.android.systemui:id/home_screen",
+        "bounds": [
+          0,
+          0,
+          1000,
+          300
+        ]
+      }
+    },
+    {
+      "id": 23,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 20,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        600,
+        720
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 23,
+        "actions": [
+          "focus",
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/magnifier_panel_view",
+        "visible-to-user": false,
+        "view-id": "com.android.systemui:id/magnifier_panel_view",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "focusable": "true",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/home_screen",
+        "occludedByViewId": "com.android.systemui:id/home_screen",
+        "bounds": [
+          0,
+          0,
+          600,
+          720
+        ]
+      }
+    },
+    {
+      "id": 0,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 19,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        260,
+        100
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 0,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-0d9b468dbcaf26fe-5",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/magnifier_panel_view",
+        "occludedByViewId": "com.android.systemui:id/magnifier_panel_view",
+        "bounds": [
+          0,
+          0,
+          260,
+          100
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "displayId": 0,
+      "type": 4,
+      "windowLayer": 18,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        2,
+        2
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 15,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity",
+          "set_selection"
+        ],
+        "content-desc": "Recentered",
+        "resource-id": "com.android.systemui:id/accessibility_announcement",
+        "visible-to-user": false,
+        "live-region": "assertive",
+        "view-id": "com.android.systemui:id/accessibility_announcement",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "hidden",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-0d9b468dbcaf26fe-5",
+        "bounds": [
+          0,
+          0,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "displayId": 0,
+      "type": 3,
+      "windowLayer": 17,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        480,
+        96
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 16,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/navigation_bar_frame",
+        "visible-to-user": false,
+        "view-id": "com.android.systemui:id/navigation_bar_frame",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/magnifier_panel_view",
+        "occludedByViewId": "com.android.systemui:id/magnifier_panel_view",
+        "bounds": [
+          0,
+          0,
+          480,
+          96
+        ]
+      }
+    },
+    {
+      "id": 26,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 16,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        720,
+        152
+      ],
+      "packageName": "com.android.systemui"
+    },
+    {
+      "id": 25,
+      "displayId": 0,
+      "type": 3,
+      "windowLayer": 15,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        128,
+        128
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 25,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/quick_search_close_button_container",
+        "visible-to-user": false,
+        "view-id": "com.android.systemui:id/quick_search_close_button_container",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/magnifier_panel_view",
+        "occludedByViewId": "com.android.systemui:id/magnifier_panel_view",
+        "bounds": [
+          0,
+          0,
+          128,
+          128
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "displayId": 0,
+      "type": 3,
+      "windowLayer": 14,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        1000,
+        1700
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 12,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity",
+          "set_selection"
+        ],
+        "content-desc": "Quick Settings",
+        "resource-id": "com.android.systemui:id/quick_settings_root_frame",
+        "visible-to-user": false,
+        "view-id": "com.android.systemui:id/quick_settings_root_frame",
+        "class": "android.view.ViewGroup",
+        "className": "android.view.ViewGroup",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/home_screen",
+        "occludedByViewId": "com.android.systemui:id/home_screen",
+        "bounds": [
+          0,
+          0,
+          1000,
+          1700
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "displayId": 0,
+      "type": 3,
+      "windowLayer": 13,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        496,
+        680
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 28,
+        "visible-to-user": false,
+        "view-id": "s2-e463212d84da9d12-2",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "clickable": "true",
+        "focusable": "true",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/quick_settings_root_frame",
+        "occludedByViewId": "com.android.systemui:id/quick_settings_root_frame",
+        "bounds": [
+          0,
+          0,
+          496,
+          680
+        ],
+        "occluded": true
+      }
+    },
+    {
+      "id": 33,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 12,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        216,
+        455,
+        280,
+        530
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 33,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/tooltip_container",
+        "visible-to-user": false,
+        "view-id": "com.android.systemui:id/tooltip_container",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "hidden",
+        "occludedBy": "android.widget.LinearLayout",
+        "occludedByViewId": "s2-e463212d84da9d12-2",
+        "bounds": [
+          0,
+          0,
+          496,
+          532
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "displayId": 0,
+      "type": 3,
+      "windowLayer": 11,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        3072,
+        1416
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 20,
+        "actions": [
+          "focus",
+          "select",
+          "clear_selection",
+          "click",
+          "accessibility_focus",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity",
+          "set_selection"
+        ],
+        "content-desc": "Notifications",
+        "visible-to-user": false,
+        "view-id": "s2-51320023ce5e9c24",
+        "clickable": "true",
+        "focusable": "true",
+        "occlusionState": "partial",
+        "occludedBy": "com.android.systemui:id/home_screen",
+        "occludedByViewId": "com.android.systemui:id/home_screen",
+        "bounds": [
+          0,
+          0,
+          3072,
+          1416
+        ],
+        "node": {
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "resource-id": "com.android.systemui:id/notification_content_area",
+          "visible-to-user": false,
+          "view-id": "com.android.systemui:id/notification_content_area",
+          "occlusionState": "partial",
+          "occludedBy": "com.android.systemui:id/home_screen",
+          "occludedByViewId": "com.android.systemui:id/home_screen",
+          "bounds": [
+            0,
+            144,
+            3072,
+            1416
+          ]
+        }
+      }
+    },
+    {
+      "id": 22,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 10,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        2900,
+        1900
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 22,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity",
+          "set_selection",
+          "click"
+        ],
+        "content-desc": "Launcher",
+        "visible-to-user": false,
+        "view-id": "s2-f69021943d4baad0",
+        "clickable": "true",
+        "occlusionState": "hidden",
+        "occludedBy": "com.android.systemui:id/home_screen",
+        "occludedByViewId": "com.android.systemui:id/home_screen",
+        "bounds": [
+          73,
+          48,
+          2828,
+          1853
+        ]
+      }
+    },
+    {
+      "id": 31,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 9,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        200,
+        250
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 31,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-e463212d84da9d12-1",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "hidden",
+        "occludedBy": "Notifications",
+        "occludedByViewId": "s2-51320023ce5e9c24",
+        "bounds": [
+          0,
+          0,
+          200,
+          250
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 8,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        800,
+        792
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 11,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/gnav_container",
+        "visible-to-user": false,
+        "view-id": "com.android.systemui:id/gnav_container",
+        "class": "android.view.ViewGroup",
+        "className": "android.view.ViewGroup",
+        "occlusionState": "hidden",
+        "occludedBy": "Notifications",
+        "occludedByViewId": "s2-51320023ce5e9c24",
+        "bounds": [
+          0,
+          0,
+          800,
+          792
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "displayId": 0,
+      "type": 3,
+      "windowLayer": 7,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        3522,
+        2030
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 8,
+        "actions": [
+          "focus",
+          "select",
+          "clear_selection",
+          "accessibility_focus",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity",
+          "set_selection",
+          "click"
+        ],
+        "content-desc": "Recents",
+        "visible-to-user": false,
+        "view-id": "s2-d2de3ae627999391",
+        "class": "android.view.ViewGroup",
+        "className": "android.view.ViewGroup",
+        "clickable": "true",
+        "focusable": "true",
+        "occlusionState": "partial",
+        "occludedBy": "Launcher",
+        "occludedByViewId": "s2-f69021943d4baad0",
+        "bounds": [
+          0,
+          0,
+          3522,
+          2030
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 6,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        960,
+        1480
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 13,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-0d9b468dbcaf26fe-4",
+        "occlusionState": "hidden",
+        "occludedBy": "Recents",
+        "occludedByViewId": "s2-d2de3ae627999391",
+        "bounds": [
+          0,
+          0,
+          960,
+          1480
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 5,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        312,
+        144
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 18,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": false,
+        "view-id": "s2-191591a72fd98fa1",
+        "class": "android.view.ViewGroup",
+        "className": "android.view.ViewGroup",
+        "occlusionState": "hidden",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-0d9b468dbcaf26fe-4",
+        "bounds": [
+          0,
+          0,
+          312,
+          144
+        ]
+      }
+    },
+    {
+      "id": 37,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 4,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        384,
+        128
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 37,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/caption",
+        "visible-to-user": true,
+        "pane-title": "Settings",
+        "view-id": "com.android.systemui:id/caption",
+        "class": "android.widget.LinearLayout",
+        "className": "android.widget.LinearLayout",
+        "occlusionState": "hidden",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-0d9b468dbcaf26fe-4",
+        "bounds": [
+          0,
+          0,
+          384,
+          128
+        ]
+      }
+    },
+    {
+      "id": 32,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 3,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        2560,
+        2558
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 32,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-a97f2389e741928e",
+        "occlusionState": "partial",
+        "occludedBy": "com.android.systemui:id/home_screen",
+        "occludedByViewId": "com.android.systemui:id/home_screen",
+        "bounds": [
+          0,
+          0,
+          2560,
+          2558
+        ],
+        "node": {
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "resource-id": "android:id/decor_content_parent",
+          "visible-to-user": true,
+          "view-id": "android:id/decor_content_parent",
+          "class": "android.view.ViewGroup",
+          "className": "android.view.ViewGroup",
+          "occlusionState": "partial",
+          "occludedBy": "com.android.systemui:id/home_screen",
+          "occludedByViewId": "com.android.systemui:id/home_screen",
+          "bounds": [
+            0,
+            0,
+            2560,
+            2558
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "view-id": "android:id/content",
+            "occlusionState": "partial",
+            "occludedBy": "com.android.systemui:id/home_screen",
+            "occludedByViewId": "com.android.systemui:id/home_screen",
+            "bounds": [
+              0,
+              176,
+              2560,
+              2558
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 2,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        48,
+        2048,
+        1328
+      ],
+      "packageName": "com.android.systemui.xrhomeenv",
+      "hierarchy": {
+        "windowId": 5,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-0d9b468dbcaf26fe-3",
+        "occlusionState": "hidden",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-a97f2389e741928e",
+        "bounds": [
+          0,
+          48,
+          2048,
+          1328
+        ]
+      }
+    },
+    {
+      "id": 39,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 1,
+      "isActive": true,
+      "isFocused": true,
+      "bounds": [
+        744,
+        48,
+        2048,
+        1328
+      ],
+      "packageName": "com.android.settings",
+      "hierarchy": {
+        "windowId": 39,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-0d9b468dbcaf26fe-2",
+        "occlusionState": "hidden",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-0d9b468dbcaf26fe-3",
+        "bounds": [
+          744,
+          48,
+          2048,
+          1328
+        ]
+      }
+    },
+    {
+      "id": 38,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 0,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        48,
+        744,
+        1328
+      ],
+      "packageName": "com.android.settings",
+      "hierarchy": {
+        "windowId": 38,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-0d9b468dbcaf26fe-1",
+        "occlusionState": "hidden",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-0d9b468dbcaf26fe-3",
+        "bounds": [
+          0,
+          48,
+          744,
+          1328
+        ]
+      }
+    }
+  ]
+}

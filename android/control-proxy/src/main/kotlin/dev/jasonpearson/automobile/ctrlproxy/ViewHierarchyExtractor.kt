@@ -57,6 +57,7 @@ internal constructor(
       null
     },
   private val pruneBaselineWrappers: Boolean = false,
+  private val crossWindowOcclusionSupported: Boolean = true,
 ) {
 
   internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
@@ -1967,7 +1968,8 @@ internal constructor(
     disableAllFiltering: Boolean,
     occlusionEnabled: Boolean,
     windowCount: Int,
-  ): Boolean = !disableAllFiltering && occlusionEnabled && windowCount > 1
+  ): Boolean =
+    crossWindowOcclusionSupported && !disableAllFiltering && occlusionEnabled && windowCount > 1
 
   private val occlusionCalculator = OcclusionCalculator(stats, GeneratedViewId::fromPath)
 

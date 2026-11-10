@@ -101,12 +101,14 @@ interface CtrlProxyActions {
 
   suspend fun requestClickFocusedInput(requestId: String?)
 
+  @Suppress("LongParameterList") // Wire request fields pass through unchanged.
   suspend fun requestAction(
     requestId: String?,
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
     arguments: NodeActionArguments = NodeActionArguments(),
+    expectedBounds: NodeExpectedBounds? = null,
   )
 
   suspend fun requestActivateAccessibilityLink(

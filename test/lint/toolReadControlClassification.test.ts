@@ -236,6 +236,8 @@ const PLAIN_CLASSIFICATION: Classification = {
     "deleteDevice",
     // Stops the active recording.
     "exportPlan",
+    // Writes the prototype web page to a host file.
+    "exportPrototypeWeb",
     "getAndroid",
     "getApple",
     "killDevice",

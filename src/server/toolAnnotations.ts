@@ -26,6 +26,7 @@ const setDevice = Object.freeze({ ...controlDevice, idempotentHint: true });
 const clearDevice = Object.freeze({ ...destructiveDevice, idempotentHint: true });
 const controlHost = Object.freeze({ ...controlDevice, openWorldHint: false });
 const setHost = Object.freeze({ ...controlHost, idempotentHint: true });
+const destructiveHost = Object.freeze({ ...controlHost, destructiveHint: true });
 
 /**
  * MCP defaults are false/true/false/true (readOnly/destructive/idempotent/openWorld).
@@ -88,6 +89,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   dragAndDrop: entry("Drag and Drop Element", destructiveDevice),
   dragPath: entry("Drag Along Path", destructiveDevice),
   exportPlan: entry("Export Plan", controlDevice),
+  // overwrite: true replaces an existing host file.
+  exportPrototypeWeb: entry("Export Prototype Web Page", destructiveHost),
   highlight: entry("Highlight Screen Element", controlDevice),
   homeScreen: entry("Open Home Screen", controlDevice),
   hoverAt: entry("Hover Over Path", destructiveDevice),

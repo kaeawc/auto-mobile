@@ -9104,6 +9104,118 @@
     }
   },
   {
+    "name": "exportPrototypeWeb",
+    "title": "Export Prototype Web Page",
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false
+    },
+    "description": "Write the automobile:prototype/<id>/web page (same bytes, offline, same CSP) to an HTML file; returns its path and sha256, not the HTML. Refuses to replace a different existing file without overwrite.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Shown prototype id",
+          "type": "string",
+          "minLength": 1
+        },
+        "frame": {
+          "description": "Device frame id",
+          "type": "string"
+        },
+        "revision": {
+          "description": "Kept spec revision (default latest)",
+          "type": "string"
+        },
+        "variant": {
+          "description": "Variant id shown first",
+          "type": "string"
+        },
+        "mcpSessionId": {
+          "description": "Only this MCP session's revisions",
+          "type": "string"
+        },
+        "outputPath": {
+          "description": "Absolute .html file or directory (default: AutoMobile data dir)",
+          "type": "string"
+        },
+        "overwrite": {
+          "description": "Replace a different existing file",
+          "type": "boolean"
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "number"
+        },
+        "frame": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "variants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rendererVersion": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["path", "sha256", "bytes", "frame", "revision", "variants", "rendererVersion"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "focusNavigate",
     "title": "Navigate D-pad Focus",
     "annotations": {
@@ -9337,6 +9449,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "exportPrototypeWeb",
               "focusNavigate",
               "getAppPermissions",
               "getDataStore",
@@ -9503,6 +9616,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "exportPrototypeWeb",
               "focusNavigate",
               "getAppPermissions",
               "getDataStore",
@@ -32415,6 +32529,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "exportPrototypeWeb",
               "focusNavigate",
               "getAppPermissions",
               "getDataStore",
@@ -44908,6 +45023,7 @@
             "executePlan",
             "explore",
             "exportPlan",
+            "exportPrototypeWeb",
             "focusNavigate",
             "getAppPermissions",
             "getDataStore",
@@ -45036,6 +45152,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "exportPrototypeWeb",
               "focusNavigate",
               "getAppPermissions",
               "getDataStore",

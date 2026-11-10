@@ -257,6 +257,29 @@ To compare design alternatives, show each under its own id with the same `varian
 example `variant: {group: "checkout", label: "Compact"}`. The web page of any of them offers every
 alternative in the group by its label. The device keeps showing whichever was shown last.
 
+### Export the web page to a file
+
+To host the page, attach it to a CI run or send it to someone without a device, call the
+`exportPrototypeWeb` tool. It is off by default: enable it with `setToolEnabled` (see [Dynamic tools](dynamic-tools.md)). It needs no
+device. It writes the same bytes the `automobile:prototype/<id>/web` resource returns for the same
+parameters (no network access, the same Content Security Policy) and returns the file's details
+instead of the HTML.
+
+| Parameter                                      | Meaning                                                                                                                                                                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                           | The shown prototype's id. Required.                                                                                                                                                                                       |
+| `frame`, `revision`, `variant`, `mcpSessionId` | As for the resource above.                                                                                                                                                                                                |
+| `outputPath`                                   | An absolute file path, or a directory (an existing one, or a path ending in `/`). Defaults to `prototype-web/` in the AutoMobile data directory. In a directory the file is named `<id>-<frame>-r<revision>-<hash>.html`. |
+| `overwrite`                                    | `true` replaces an existing file with different content. Without it the call is refused and nothing is written. A file that already holds the same bytes is left as it is.                                                |
+
+The result is `{path, sha256, bytes, frame, revision, variants, rendererVersion}`: `sha256` is the
+hash of the written file and matches the resource's `_meta.sha256`. The page already offers every
+variant in its group, so one file covers the whole set.
+
+Errors name what to change: an unknown id lists the known prototypes, a revision older than the
+kept 20 names the oldest kept one, an unknown frame lists the valid frames, and a relative or
+unwritable `outputPath` asks for a writable absolute path.
+
 ## Embed envelope
 
 To take a prototype's spec together with what it needs from a renderer, read

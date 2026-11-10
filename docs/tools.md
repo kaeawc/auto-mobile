@@ -41,6 +41,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🕸️ <code>getNavigationGraph</code>   | List learned screens and transitions                     |
 | 🔎 <code>identifyInteractions</code> | Suggest likely interactions                              |
 | 🧪 <code>prototype</code>            | Show agent-authored UI on the device                     |
+| 🌐 <code>exportPrototypeWeb</code>   | Write a shown prototype's web preview to an HTML file    |
 | 🔦 <code>highlight</code>            | Draw a red hand-drawn circle around a UI element         |
 
 ## 👆 Interact

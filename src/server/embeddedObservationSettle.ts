@@ -10,6 +10,7 @@ import {
 } from "../utils/PostActionCaptureContext";
 import { isAdoptableCapture } from "../features/observe/isAdoptableCapture";
 import type { ObserveResult } from "../models/ObserveResult";
+import type { Platform } from "../models/Platform";
 import type { SettleObserve, SettleOptions } from "../features/observe/interfaces/SettleObserve";
 import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
 import {
@@ -519,6 +520,8 @@ export interface EmbeddedObservationSettleContext {
   timer?: Timer;
   /** Screenshot/hierarchy lag above which the pair is marked mismatched (#17765). */
   screenshotHierarchyLagThresholdMs?: number;
+  /** The resolved device's platform, which decides the lag's clock fallback (#17787). */
+  platform?: Platform;
 }
 
 /**
@@ -594,7 +597,10 @@ function markTerminalEvidence(
   const stamped =
     !ctx.internal &&
     ctx.name !== "observe" &&
-    stampScreenshotHierarchyLag(observation, ctx.screenshotHierarchyLagThresholdMs);
+    stampScreenshotHierarchyLag(observation, {
+      thresholdMs: ctx.screenshotHierarchyLagThresholdMs,
+      platform: ctx.platform,
+    });
   return failed || stamped;
 }
 

@@ -159,8 +159,10 @@ Every other tool refuses a watch before doing anything, with:
   that should respond first. If nothing changes, it may wake again and retry once; this requires a stable screen
   and an unchanged readable focused value, both preserved by the wake. Without a safe touch point it
   rotates without waking; after an initial wake, it never repeats the turn without a comparable value.
-  If it still changes nothing or a safe retry is unavailable, it fails. Verification is skipped when
-  a stable hierarchy cannot be read. Use `observe` after rotating to confirm the app responded. Retry
+  If it still changes nothing or a safe retry is unavailable, it fails. Without a stable hierarchy,
+  it compares the focused value from the last pre-rotation observation with the same control after rotating,
+  without waking or retrying; if either value or the post-rotation snapshot is unavailable, verification is skipped.
+  Use `observe` after rotating to confirm the app responded. Retry
   only if `observe` confirms the turn had no effect: if the first turn changed the control but
   verification failed, retrying can overshoot. Tap the control that should respond to the Digital
   Crown before retrying `rotateCrown`.

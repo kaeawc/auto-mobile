@@ -31,6 +31,19 @@ export async function readOpenSmartStack(
   }
 }
 
+/** Whether screen-absolute bounds are non-empty and lie entirely within the screen. */
+function isOnScreen(bounds: Element["bounds"], hierarchy: ViewHierarchyResult): boolean {
+  const { left, top, right, bottom } = bounds;
+  return (
+    right > left &&
+    bottom > top &&
+    left >= 0 &&
+    top >= 0 &&
+    right <= hierarchy.screenWidth! &&
+    bottom <= hierarchy.screenHeight!
+  );
+}
+
 /** Shared flattening and on-screen filtering for app and clockface tap candidates. */
 export function watchHierarchyElements(hierarchy: ViewHierarchyResult): {
   all: Element[];
@@ -39,17 +52,7 @@ export function watchHierarchyElements(hierarchy: ViewHierarchyResult): {
   const all = new DefaultElementParser()
     .flattenViewHierarchy(hierarchy)
     .map((entry) => entry.element);
-  const available = all.filter((element) => {
-    const { left, top, right, bottom } = element.bounds;
-    return (
-      right > left &&
-      bottom > top &&
-      left >= 0 &&
-      top >= 0 &&
-      right <= hierarchy.screenWidth! &&
-      bottom <= hierarchy.screenHeight!
-    );
-  });
+  const available = all.filter((element) => isOnScreen(element.bounds, hierarchy));
   return { all, available };
 }
 
@@ -127,7 +130,9 @@ export async function tapSmartStackOn(
   signal?: AbortSignal,
 ): Promise<TapOnElementResult> {
   const { all, available } = watchHierarchyElements(hierarchy);
+  // Card bounds are screen-absolute, so off-screen cards are dropped before the index applies.
   const cards = smartStack.cards
+    .filter((card) => isOnScreen(card.bounds, hierarchy))
     .map((card) => {
       const cell = all.find((element) => {
         const identifier = element["resource-id"];

@@ -164,6 +164,55 @@ describe("Smart Stack face taps", () => {
       y: (137.4 + 200.5) / 2 / 223,
     });
   });
+  test("skips an off-screen card with the same text before applying the index", async () => {
+    const offScreenStack = async () => {
+      const client = new FaceDumpClient(textDump);
+      const stack = await readOpenSmartStack(client, () => 1);
+      const visible = stack!.smartStack.cards[0];
+      if (visible.type !== "widget") {
+        throw new Error("fixture's first card is expected to be the T28 widget");
+      }
+      // A second T28 widget card scrolled above the screen, ahead of the visible one.
+      stack!.smartStack.cards.unshift({
+        ...visible,
+        cellId: "00000000-0000-0000-0000-000000000000",
+        bounds: { left: 5.5, top: -100, right: 181.5, bottom: -27.5 },
+        texts: ["T28"],
+      });
+      return { client, stack: stack! };
+    };
+    const visibleTap = { type: "face", op: "tap", x: 0.5, y: 146.25 / 223 } as const;
+
+    const first = await offScreenStack();
+    const result = await tapSmartStackOn(first.client, first.stack, { action: "tap", text: "T28" });
+    expect(result.element["resource-id"]).toBe(
+      "StackCollectionViewComplicationCell -- 93A18F3B-D642-41DA-B6A4-F312ED9DB584 -- ProbeApp -- ProbeWidgetXYZ -- dev.probe.app -- dev.probe.app-dev.probe.app.widget-probe-0",
+    );
+    expect(first.client.commands.at(-1)).toEqual(visibleTap);
+
+    // Index 1 counts only on-screen cards: one visible match leaves nothing at index 1.
+    const second = await offScreenStack();
+    await expect(
+      tapSmartStackOn(second.client, second.stack, { action: "tap", text: "T28", index: 1 }),
+    ).rejects.toThrow("The Smart Stack is open, but no element matched.");
+    expect(second.client.commands).toEqual([{ type: "face", op: "dump" }]);
+
+    // With a second visible match, index 1 still selects it rather than the off-screen card.
+    const third = await offScreenStack();
+    third.stack.smartStack.cards[2].texts.push("T28");
+    const indexed = await tapSmartStackOn(third.client, third.stack, {
+      action: "tap",
+      text: "T28",
+      index: 1,
+    });
+    expect(indexed.element["resource-id"]).toBe("StackCollectionViewTriPlatterCell");
+    expect(third.client.commands.at(-1)).toEqual({
+      type: "face",
+      op: "tap",
+      x: (16.9 + 170) / 2 / 187,
+      y: (137.4 + 200.5) / 2 / 223,
+    });
+  });
   test("falls back to header element matching when no card matches", async () => {
     const client = new FaceDumpClient(stackDump);
     const stack = await readOpenSmartStack(client, () => 1);

@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import { getTempDir } from "../utils/tempDir";
@@ -45,7 +45,8 @@ export class NodePrototypeWebExportFiles implements PrototypeWebExportFiles {
       await writeFile(filePath, bytes, { flag: "wx", mode: FILE_MODE });
       return;
     }
-    const tempPath = join(directory, `.${basename(filePath)}.${this.ids.next()}.tmp`);
+    // Independent of the target name, so a long valid basename cannot push it past NAME_MAX.
+    const tempPath = join(directory, `.automobile-export-${this.ids.next()}.tmp`);
     try {
       await writeFile(tempPath, bytes, { flag: "wx", mode: FILE_MODE });
       await rename(tempPath, filePath);

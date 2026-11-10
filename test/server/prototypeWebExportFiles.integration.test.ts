@@ -60,6 +60,14 @@ describe("NodePrototypeWebExportFiles", () => {
     expect(await readdir(root)).toEqual(["page.html"]);
   });
 
+  test("an overwrite works for the longest basename an exclusive write accepts", async () => {
+    const target = path.join(root, `${"a".repeat(240)}.html`);
+    await files.write(target, PAGE, { exclusive: true });
+    await files.write(target, new TextEncoder().encode("new"), { exclusive: false });
+    expect(await text(target)).toBe("new");
+    expect(await readdir(root)).toEqual([path.basename(target)]);
+  });
+
   test.skipIf(isWindows)(
     "an overwrite replaces a symlink at the path instead of writing through it",
     async () => {

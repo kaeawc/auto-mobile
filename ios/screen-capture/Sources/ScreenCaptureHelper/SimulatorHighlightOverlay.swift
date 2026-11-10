@@ -40,6 +40,7 @@ enum SimulatorDisplayGeometry {
         )
     }
 
+    /// Preserves CGWindowList's front-to-back order: the first matching window is the focused panel.
     static func targets() -> [SimulatorOverlayTarget] {
         let simulatorPIDs = Set(
             NSWorkspace.shared.runningApplications
@@ -73,6 +74,7 @@ enum SimulatorDisplayGeometry {
         )
     }
 
+    /// Candidates must be in front-to-back order for the two-panel focused-window fallback.
     static func find(
         deviceName: String,
         sourceSize: CGSize? = nil,
@@ -83,27 +85,38 @@ enum SimulatorDisplayGeometry {
     {
         let matches = candidates.filter { simulatorWindowTitle($0.title, namesDevice: deviceName) }
         if matches.count == 1 { return matches[0] }
-        if matches.count > 1, let sourceSize,
-           sourceSize.width.isFinite, sourceSize.height.isFinite,
-           sourceSize.width > 0, sourceSize.height > 0
-        {
-            let sourceAspect = longShortRatio(sourceSize)
-            let panelMatches = matches.filter { window in
-                guard let frame = displayFrame(window),
-                      frame.width.isFinite, frame.height.isFinite,
-                      frame.width > 0, frame.height > 0 else { return false }
-                // Allow minor rounding differences when the host window is scaled.
-                return abs(longShortRatio(frame.size) / sourceAspect - 1) <= 0.02
+        let panels = matches.compactMap { window -> (window: SimulatorOverlayTarget, aspect: CGFloat)? in
+            guard let frame = displayFrame(window), let aspect = longShortRatio(frame.size) else { return nil }
+            return (window, aspect)
+        }
+        if let sourceSize, let sourceAspect = longShortRatio(sourceSize) {
+            let ranked = panels.map { (window: $0.window, error: abs($0.aspect / sourceAspect - 1)) }
+                .sorted { $0.error < $1.error }
+            // Allow 2% scaling/rounding error, but require a 0.005 relative-error lead over the runner-up.
+            if let best = ranked.first, best.error <= 0.02,
+               ranked.count == 1 || ranked[1].error - best.error >= 0.005
+            {
+                return best.window
             }
-            if panelMatches.count == 1 { return panelMatches[0] }
+        }
+        if matches.count == 2, isTwoPanelDevice(panels.map(\.aspect)) {
+            return matches[0]
         }
         throw OverlayError(
             "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows. Device Hub shows both panels of a foldable such as the Duo in one window; if several windows match, the display size could not pick one."
         )
     }
 
-    private static func longShortRatio(_ size: CGSize) -> CGFloat {
-        max(size.width, size.height) / min(size.width, size.height)
+    /// Both panels must be valid and differ by at least 1% relative to the smaller aspect ratio.
+    private static func isTwoPanelDevice(_ aspects: [CGFloat]) -> Bool {
+        guard aspects.count == 2 else { return false }
+        return max(aspects[0], aspects[1]) / min(aspects[0], aspects[1]) - 1 >= 0.01
+    }
+
+    private static func longShortRatio(_ size: CGSize) -> CGFloat? {
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
+        let ratio = max(size.width, size.height) / min(size.width, size.height)
+        return ratio.isFinite ? ratio : nil
     }
 
     static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {

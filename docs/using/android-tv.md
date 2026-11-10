@@ -154,7 +154,8 @@ direction leaves it, so press `pressButton` `back` to leave the screen and reach
 another route (if the keyboard was still shown, hide it with `back` and observe first); for a
 Compose field, hide the keyboard with `pressButton` `back`, then press `sendKeys` key `tab`. An IME action
 such as `sendKeys` key `next` or `done` does not move D-pad focus out of the field.
-`focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
+`focusNavigate` returns the same `blockedBy` and `escapes`; when it was called with a `direction`,
+only that direction was tried, so a View field's error says to retry without `direction` instead. Other selectors (`testTag`, `textAny`,
 `accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
 on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.

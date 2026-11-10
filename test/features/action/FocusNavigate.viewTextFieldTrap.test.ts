@@ -82,13 +82,16 @@ class Mt0093aDevice implements FocusObserver, FocusKeyPresser, FocusKeyboardHide
   }
 }
 
-function navigate(device: Mt0093aDevice, withHider = true) {
+function navigate(
+  device: Mt0093aDevice,
+  { withHider = true, direction }: { withHider?: boolean; direction?: "up" } = {},
+) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const navigator = withHider
     ? new FocusNavigate(device, device, timer, device)
     : new FocusNavigate(device, device, timer);
-  return navigator.execute({ until: { label: "Player" } });
+  return navigator.execute({ until: { label: "Player" }, ...(direction ? { direction } : {}) });
 }
 
 /** Every D-pad direction a message tells the caller to press. */
@@ -133,7 +136,7 @@ describe("FocusNavigate View text-field trap advice (#17741)", () => {
   test("without a keyboard hider, only hiding the keyboard is advised before leaving", async () => {
     const device = new Mt0093aDevice(true);
 
-    const result = await navigate(device, false);
+    const result = await navigate(device, { withHider: false });
 
     expect(result.blockedBy).toBe("ime");
     expect(result.escapes).toEqual([]);
@@ -141,5 +144,19 @@ describe("FocusNavigate View text-field trap advice (#17741)", () => {
     expect(advisedArrows(result.message)).toEqual([]);
     expect(result.message).toContain("Hide the keyboard with pressButton back and observe");
     expect(result.message).toContain("press pressButton back to leave the screen");
+  });
+
+  test("a fixed-direction walk is told to retry every direction, not to leave the screen", async () => {
+    const device = new Mt0093aDevice(true);
+
+    const result = await navigate(device, { direction: "up" });
+
+    expect(result.status).toBe("stuck");
+    expect(result.escapes).toEqual(["back"]);
+    expect(device.keys).not.toContain("arrow_down");
+    expect(result.message).toContain("pressing back and up again did not move focus");
+    expect(result.message).toContain("Retry without direction so every D-pad direction is tried");
+    expect(result.message).not.toContain("leave the screen and reach");
+    expect(result.message).not.toContain("No D-pad direction moves focus");
   });
 });

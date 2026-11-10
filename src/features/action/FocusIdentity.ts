@@ -46,12 +46,23 @@ function boundsText({ left, top, right, bottom }: ElementBounds): string {
 interface Surroundings {
   /** Each node's resource id and bounds outside the focused element, without labels. */
   layout: string;
+  /** The nodes outside the focused element, in {@link layout}'s order, with their labels. */
+  outside: readonly OutsideNode[];
   /**
    * Each non-empty label and the bounds it is shown at, on and outside the focused element. A
    * two-slot list leaves one row outside focus; a scroll moves that row's label onto the focused
    * row, so the focused labels must be compared too.
    */
   labels: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+interface OutsideNode {
+  resourceId: string;
+  label: string;
+}
+
+function labelOf(element: Element): string {
+  return `${stringProp(element, "text")}|${stringProp(element, "content-desc")}`;
 }
 
 function readSurroundings(screen: Pick<FocusScreen, "focused" | "elements">): Surroundings {
@@ -61,7 +72,7 @@ function readSurroundings(screen: Pick<FocusScreen, "focused" | "elements">): Su
   );
   const labels = new Map<string, Set<string>>();
   for (const element of focused ? [focused, ...screen.elements] : screen.elements) {
-    const label = `${stringProp(element, "text")}|${stringProp(element, "content-desc")}`;
+    const label = labelOf(element);
     if (label !== "|") {
       const shown = labels.get(label) ?? new Set<string>();
       shown.add(boundsText(element.bounds));
@@ -72,6 +83,10 @@ function readSurroundings(screen: Pick<FocusScreen, "focused" | "elements">): Su
     layout: outside
       .map((element) => `${stringProp(element, "resource-id")}@${boundsText(element.bounds)}`)
       .join("\n"),
+    outside: outside.map((element) => ({
+      resourceId: stringProp(element, "resource-id"),
+      label: labelOf(element),
+    })),
     labels,
   };
 }
@@ -92,6 +107,23 @@ function surroundingsStayed(before: Surroundings, after: Surroundings): boolean 
   });
 }
 
+/**
+ * Whether the screen around focus shows the control changing a value, not a list paging under it
+ * (#17773). Some node outside focus, other than a sibling sharing the control's resource id, must
+ * show a new label at the same place (a value readout), and some other labelled node outside focus
+ * must keep its label (the screen did not page). A one-slot recycler leaves nothing outside focus,
+ * and a full repage changes every row, so neither gives that evidence and both read as moving.
+ */
+function showsValueChange(before: Surroundings, after: Surroundings, controlId: string): boolean {
+  const pairs = after.outside.map((node, index) => ({ node, was: before.outside[index] }));
+  const readout = pairs.some(
+    ({ node, was }) =>
+      was !== undefined && node.label !== was.label && node.resourceId !== controlId,
+  );
+  const anchor = pairs.some(({ node, was }) => node.label !== "|" && node.label === was?.label);
+  return readout && anchor;
+}
+
 function boundsContain(outer: ElementBounds, inner: ElementBounds): boolean {
   const overlap = intersectBounds(outer, inner);
   return overlap !== null && boundsEqual(overlap, inner);
@@ -109,8 +141,8 @@ export interface FocusIdentity {
 /**
  * Keys focus across reads. A press that changes the focused control's own label (a slider
  * announcing its new value) while it keeps its resource id, class and bounds and the screen around
- * it stays put ({@link surroundingsStayed}) did not move focus (#17739): from then on the control
- * is keyed without its label. A fixed-slot recycler row keeps its bounds too, but the rows around
+ * it stays put ({@link surroundingsStayed}) and shows the new value ({@link showsValueChange}) did
+ * not move focus (#17739, #17773): from then on the control is keyed without its label. A fixed-slot recycler row keeps its bounds too, but the rows around
  * it shift (#17315), so it still reads as moving.
  */
 interface ReadIdentity {
@@ -130,7 +162,8 @@ function changedInPlace(
     entry.resourceId !== undefined &&
     previous.position === next.position &&
     surroundingsStayed(previous.surroundings, next.surroundings) &&
-    previous.label !== next.label
+    previous.label !== next.label &&
+    showsValueChange(previous.surroundings, next.surroundings, entry.resourceId)
   );
 }
 

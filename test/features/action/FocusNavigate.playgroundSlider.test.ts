@@ -268,4 +268,85 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: true, status: "focused", steps: 6 });
     expect(keys).toEqual(Array<InputKeyName>(6).fill("arrow_down"));
   });
+
+  test("a one-slot list reads as moving while it scrolls (#17773)", async () => {
+    // Hand-built: the recycler shows only the focused row, `app:id/row` at fixed bounds, under a
+    // static title. Down scrolls the next item into that one slot, so no row is left outside focus
+    // and the only label outside it never changes.
+    const list = new FakeSlotList(1, ["title"]);
+    const result = await new FocusNavigate(list, list, timer).execute({
+      until: { text: "Item 6" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 6 });
+    expect(list.keys).toEqual(Array<InputKeyName>(6).fill("arrow_down"));
+  });
+
+  test("a one-slot list with nothing else on screen reads as moving (#17773)", async () => {
+    const list = new FakeSlotList(1, []);
+    const result = await new FocusNavigate(list, list, timer).execute({
+      until: { text: "Item 6" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 6 });
+    expect(list.keys).toEqual(Array<InputKeyName>(6).fill("arrow_down"));
+  });
+
+  test("a list that repages every visible row in place reads as moving (#17773)", async () => {
+    // Hand-built: three `app:id/row` slots under a static title; each down press replaces every
+    // row's label at the same bounds, so no label moves to a new place.
+    const list = new FakeSlotList(3, ["title"], 3);
+    const result = await new FocusNavigate(list, list, timer).execute({
+      until: { text: "Item 6" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 2 });
+    expect(list.keys).toEqual(Array<InputKeyName>(2).fill("arrow_down"));
+  });
 });
+
+/**
+ * A recycler of `app:id/row` rows at fixed slots, focus on the first slot. Each down press
+ * advances the list by `page` items, so the focused slot always shows the next label.
+ */
+class FakeSlotList implements FocusObserver, FocusKeyPresser {
+  readonly keys: InputKeyName[] = [];
+  private readonly items = Array.from({ length: 12 }, (_, index) => `Item ${index}`);
+  private first = 0;
+
+  constructor(
+    private readonly slots: number,
+    private readonly statics: readonly string[],
+    private readonly page = 1,
+  ) {}
+
+  private row(slot: number): Element | undefined {
+    const text = this.items[this.first + slot];
+    const top = 400 + slot * 100;
+    return text === undefined
+      ? undefined
+      : {
+          "resource-id": "app:id/row",
+          text,
+          focusable: true,
+          bounds: { left: 100, top, right: 900, bottom: top + 100 },
+        };
+  }
+
+  async read(): Promise<FocusScreen> {
+    const statics: Element[] = this.statics.map((text, index) => ({
+      "resource-id": `app:id/${text}`,
+      text,
+      bounds: { left: 100, top: 100 + index * 60, right: 900, bottom: 150 + index * 60 },
+    }));
+    const rows = Array.from({ length: this.slots }, (_, slot) => this.row(slot)).filter(
+      (element) => element !== undefined,
+    );
+    return { focused: this.row(0) ?? null, elements: [...statics, ...rows] };
+  }
+
+  async press(key: InputKeyName): Promise<{ success: boolean }> {
+    this.keys.push(key);
+    if (key === "arrow_down" && this.first + this.page < this.items.length) {
+      this.first += this.page;
+    }
+    return { success: true };
+  }
+}

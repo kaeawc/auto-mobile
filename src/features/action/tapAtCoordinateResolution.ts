@@ -142,7 +142,7 @@ function tapAtCoordinateFrame(
   toolName: string,
 ) {
   const xr =
-    platform === "android" && toolName === "tapAt"
+    platform === "android" && toolName === "tapAt" && options.pointSpace !== "native"
       ? detectXrPanel(observation.backStack)
       : undefined;
   const screenSize = xr ? xrScreenshotSize(observation) : observation.screenSize;

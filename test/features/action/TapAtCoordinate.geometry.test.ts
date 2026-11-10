@@ -257,3 +257,25 @@ test("XR image crop points use the same screenshot-to-panel mapping", async () =
   expect(result.success).toBe(true);
   expect(fake.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
 });
+
+test("XR native point space dispatches hierarchy coordinates unmapped", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: xrBackStack() });
+  const result = await fake.tapAt.execute({ x: 262, y: 442, pointSpace: "native" });
+  expect(result.success).toBe(true);
+  expect(result.xrPanel).toBeUndefined();
+  expect(fake.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
+});
+
+test("XR public tapAt with the same numbers still treats them as screenshot pixels", async () => {
+  const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+  fake.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: xrBackStack() });
+  const native = await fake.tapAt.execute({ x: 262, y: 442 });
+  expect(native.success).toBe(false);
+  expect(native.error).toContain("no app panel");
+  const screenshot = await fake.tapAt.execute({ x: 553, y: 1178, pointSpace: "screenshot" });
+  expect(screenshot.success).toBe(true);
+  expect(fake.androidDispatches).toHaveLength(1);
+  expect(fake.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
+  expect(screenshot.xrPanel).toMatchObject({ taskId: 6, displayX: 262, displayY: 442 });
+});

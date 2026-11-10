@@ -19,6 +19,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
 import { textFieldToolkit } from "./textFieldToolkit";
 import { describeFocus, elementMatchesTarget, stringProp } from "./FocusNavigateMatching";
+import { createFocusIdentity, focusKey, type FocusIdentity } from "./FocusIdentity";
 
 export { elementMatchesTarget } from "./FocusNavigateMatching";
 
@@ -417,25 +418,6 @@ function distanceToNearest(from: Element | null, matches: readonly Element[]): n
   );
 }
 
-/**
- * The focused element's identity across presses. A recycler row can keep fixed bounds while the
- * list scrolls under it, so the contained label is part of the key: otherwise every press on such
- * a list reads as "focus did not move" (#17315).
- */
-function focusKey(entry: FocusPathEntry | undefined): string {
-  if (!entry) {
-    return "";
-  }
-  const { left, top, right, bottom } = entry.bounds;
-  return [
-    entry.resourceId ?? "",
-    entry.text ?? "",
-    entry.contentDesc ?? "",
-    `${left},${top},${right},${bottom}`,
-    entry.descendantLabel ?? "",
-  ].join("|");
-}
-
 /** Tracks whether presses move focus, and toward the target, across one navigation call. */
 interface FocusProgress {
   readonly unchanged: number;
@@ -447,19 +429,26 @@ interface FocusProgress {
   readonly stalled: ReadonlySet<FocusNavigateDirection>;
   /** The direction of the press that moved focus onto the current element, if known. */
   readonly arrivedBy: FocusNavigateDirection | undefined;
+  /** Directions the focused control consumed by changing its own value instead of moving focus. */
+  readonly adjusted: ReadonlySet<FocusNavigateDirection>;
   /** Presses a stalled direction again because every escape from it failed; it stays undemoted. */
   resume(direction: FocusNavigateDirection): void;
   /**
    * Records an observation and the focused element's distance to the target (undefined when
    * either is missing). Container-only focus leaves the last control's progress intact.
    */
-  observe(key: string, distance: number | undefined, containsTarget: boolean): void;
+  observe(identity: FocusIdentity, distance: number | undefined, containsTarget: boolean): void;
   pressed(direction: FocusNavigateDirection, containsTarget: boolean): void;
 }
 
 interface ElementMemory {
   blocked: Set<FocusNavigateDirection>;
   tried: Set<FocusNavigateDirection>;
+  adjusted: Set<FocusNavigateDirection>;
+}
+
+function emptyMemory(): ElementMemory {
+  return { blocked: new Set(), tried: new Set(), adjusted: new Set() };
 }
 
 /** Tracks presses in one direction that move focus without bringing it closer to the target. */
@@ -505,7 +494,7 @@ function createStallTracker() {
 function createFocusProgress(): FocusProgress {
   const memoryByElement = new Map<string, ElementMemory>();
   const stall = createStallTracker();
-  let memory: ElementMemory = { blocked: new Set(), tried: new Set() };
+  let memory = emptyMemory();
   let unchanged = 0;
   let previousKey: string | undefined;
   let lastDirection: FocusNavigateDirection | undefined;
@@ -523,20 +512,31 @@ function createFocusProgress(): FocusProgress {
     get tried() {
       return memory.tried;
     },
+    get adjusted() {
+      return memory.adjusted;
+    },
     stalled: stall.stalled,
     resume: (direction) => stall.resume(direction),
-    observe(key, distance, containsTarget) {
+    observe({ key, replaces, changedInPlace }, distance, containsTarget) {
       // A container read cannot prove a refused arrow or movement away from the target.
       if (containsTarget) {
         return;
       }
+      if (replaces !== undefined && replaces === previousKey) {
+        // The control changed its own value: carry what was learned there to its label-free key.
+        memoryByElement.set(key, memory);
+        previousKey = key;
+      }
       const didNotMove = previousKey !== undefined && key === previousKey;
       unchanged = didNotMove ? unchanged + 1 : 0;
       if (!didNotMove) {
-        memory = memoryByElement.get(key) ?? { blocked: new Set(), tried: new Set() };
+        memory = memoryByElement.get(key) ?? emptyMemory();
         memoryByElement.set(key, memory);
       } else if (lastDirection) {
         memory.blocked.add(lastDirection);
+        if (changedInPlace) {
+          memory.adjusted.add(lastDirection);
+        }
       }
       stall.observe(distance, didNotMove ? undefined : lastDirection);
       arrivedBy = didNotMove ? arrivedBy : lastDirection;
@@ -553,13 +553,28 @@ function createFocusProgress(): FocusProgress {
   };
 }
 
-function stuckMessage(progress: FocusProgress): string {
-  const { unchanged, blocked, tried } = progress;
+function stuckMessage(progress: FocusProgress, focusedElement?: FocusPathEntry): string {
+  const { unchanged, blocked, tried, adjusted } = progress;
   const unmoved = Math.max(1, unchanged, blocked.size);
   const presses = `${unmoved} ${unmoved === 1 ? "press" : "presses"}`;
-  return blocked.size < tried.size
-    ? `Every D-pad direction from the focused element was tried; focus did not move after ${presses}`
-    : `Focus did not move after ${presses}`;
+  const base =
+    blocked.size < tried.size
+      ? `Every D-pad direction from the focused element was tried; focus did not move after ${presses}`
+      : `Focus did not move after ${presses}`;
+  if (adjusted.size === 0) {
+    return base;
+  }
+  // Say why: the control took the arrows as value changes (a slider), and it was left changed.
+  const directions = FOCUS_NAVIGATE_DIRECTIONS.filter((direction) => adjusted.has(direction));
+  return `${base}; the focused control${describeEntry(focusedElement)} consumed ${directions.join(" and ")} by changing its own value instead of moving focus, so its value may have changed`;
+}
+
+const STOPPED_SUFFIX = "; the target was not focused. Observe before retrying.";
+
+/** A stopped result's message without its closing advice, to extend it. */
+function stripRetryAdvice(message: string | undefined): string {
+  const text = message ?? "";
+  return text.endsWith(STOPPED_SUFFIX) ? text.slice(0, -STOPPED_SUFFIX.length) : text;
 }
 
 /** Whether the walk has run out of presses that could still move focus. */
@@ -575,6 +590,8 @@ function isExhausted(
 interface ExitContext {
   screen: FocusScreen;
   focusedElement: FocusPathEntry | undefined;
+  /** Whether the focused control consumed a direction by changing its own value (#17739). */
+  adjusted: boolean;
   /** Escapes already pressed, in order; each key is pressed at most once per call. */
   trap: { escapes?: FocusTrapEscape[] };
   select: boolean;
@@ -675,6 +692,7 @@ export class FocusNavigate {
     const path: FocusPathEntry[] = [];
     let steps = 0;
     let progress = createFocusProgress();
+    const identify = createFocusIdentity();
     const planTarget = createTargetPlanner();
     const trap: ExitContext["trap"] = {};
     let lastDirection: FocusNavigateDirection | undefined;
@@ -687,8 +705,11 @@ export class FocusNavigate {
         maxSteps > 0,
       );
       const { focused } = screen;
-      const key = focusKey(focusedElement);
-      progress.observe(key, distanceToNearest(focused, onScreen), containsTarget);
+      progress.observe(
+        identify(focusedElement, screen),
+        distanceToNearest(focused, onScreen),
+        containsTarget,
+      );
 
       const direction =
         options.direction ??
@@ -701,7 +722,7 @@ export class FocusNavigate {
       const exhausted = !containsTarget && isExhausted(options, progress, direction);
       const done = this.exitFor(focusedElement, matches, {
         steps,
-        stuck: exhausted ? stuckMessage(progress) : undefined,
+        stuck: exhausted ? stuckMessage(progress, focusedElement) : undefined,
         maxSteps,
         path,
       });
@@ -709,6 +730,7 @@ export class FocusNavigate {
         const outcome = await this.exit(done, {
           screen,
           focusedElement,
+          adjusted: progress.adjusted.size > 0,
           trap,
           select: options.select === true,
           signal,
@@ -845,11 +867,11 @@ export class FocusNavigate {
    */
   private async trapOutcome(
     done: FocusNavigateResult,
-    { screen, focusedElement, trap, signal }: ExitContext,
+    { screen, focusedElement, adjusted, trap, signal }: ExitContext,
   ): Promise<FocusNavigateResult | "escaped" | undefined> {
     const blocker = done.status === "stuck" ? focusBlocker(screen) : undefined;
     if (!blocker) {
-      return undefined;
+      return this.adjustableOutcome(done, { screen, focusedElement, adjusted, trap, signal });
     }
     const pressed = await this.escapeTrap(screen, trap.escapes ?? [], signal);
     trap.escapes = [...(trap.escapes ?? []), ...pressed];
@@ -862,6 +884,34 @@ export class FocusNavigate {
       blockedBy: blocker,
       escapes: trap.escapes,
     });
+  }
+
+  /**
+   * For a stuck exit on a control that took every arrow it did not refuse as a value change (a
+   * slider, #17739): press tab once, which moves focus out of it, and retry from there. After that
+   * tab, the stuck result says it was tried. Undefined when nothing applies.
+   */
+  private async adjustableOutcome(
+    done: FocusNavigateResult,
+    { screen, focusedElement, adjusted, trap, signal }: Omit<ExitContext, "select">,
+  ): Promise<FocusNavigateResult | "escaped" | undefined> {
+    if (done.status !== "stuck" || !adjusted || !screen.focused) {
+      return undefined;
+    }
+    const escapes = trap.escapes ?? [];
+    if (escapes.includes("tab")) {
+      return this.stopped("stuck", done.steps, done.path, {
+        focusedElement,
+        message: `${stripRetryAdvice(done.message)}; pressing tab did not move focus out of it either`,
+      });
+    }
+    throwIfAborted(signal);
+    const pressed = await this.keys.press("tab", signal);
+    if (!pressed.success) {
+      throw new ActionableError(pressed.error ?? "Failed to press tab");
+    }
+    trap.escapes = [...escapes, "tab"];
+    return "escaped";
   }
 
   /**
@@ -970,7 +1020,7 @@ export class FocusNavigate {
       path,
       ...(focusedElement ? { focusedElement } : {}),
       ...(blockedBy ? { blockedBy, escapes: escapes ?? [] } : {}),
-      message: `${message}; the target was not focused. Observe before retrying.`,
+      message: `${message}${STOPPED_SUFFIX}`,
     };
   }
 }

@@ -153,7 +153,11 @@ since tab could type into it. If focus still does not move, `focusNavigation.sta
 keyboard with `pressButton` `back`, press `pressButton` `down`, observe, then retry; for a Compose
 field, hide the keyboard with `pressButton` `back`, then press `sendKeys` key `tab`. An IME action
 such as `sendKeys` key `next` or `done` does not move D-pad focus out of the field.
-`focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
+`focusNavigate` returns the same `blockedBy` and `escapes`. A control that takes arrow keys as
+value changes, such as a slider, counts as not moving focus, so each arrow is pressed on it at most
+once; when no arrow leaves it the walk presses tab once and continues. If focus still does not move
+the status is `stuck` and the message names the control and the arrows it consumed; its value may
+have changed, so check it before continuing. Other selectors (`testTag`, `textAny`,
 `accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
 on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.

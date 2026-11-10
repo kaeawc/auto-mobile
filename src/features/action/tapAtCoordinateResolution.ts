@@ -1,3 +1,7 @@
+import type { ImageRelativePoint } from "../../models/ImageRelativePoint";
+import { detectXrPanel, screenshotPointToPanelPoint, xrScreenshotSize } from "../xr/xrPanelSpace";
+import type { TapAtResult } from "../../models/TapAtResult";
+
 import type { TapAtPlanContext } from "../../models/TapAtGeometry";
 import type { BootedDevice, ObserveResult, TapAtOptions } from "../../models";
 import { layerGestureRefusal } from "../observe/hierarchyLayer";
@@ -5,6 +9,13 @@ import { resolveImageRelativePoint } from "./imageRelativePoint";
 import { normalizedAxis } from "./coordinateAxis";
 import { LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "./tapAtGesture";
 import { TapAtGeometryError } from "./TapAtGeometryError";
+
+type ResolvedPoint = {
+  x: number;
+  y: number;
+  xrPanel?: TapAtResult["xrPanel"];
+  screenshotPoint?: { x: number; y: number };
+};
 
 function gestureOptionError(options: TapAtOptions): string | undefined {
   const { durationMs } = options;
@@ -105,13 +116,49 @@ function androidIntegerLimits(
     : screenSize;
 }
 
+/** Preserve source validation while accounting for the measured composed-eye raster. */
+function xrScreenshotPoint(
+  image: ImageRelativePoint | undefined,
+  observation: ObserveResult,
+  screenSize: ObserveResult["screenSize"],
+): ImageRelativePoint | undefined {
+  if (!image || !("screenshot" in image.source)) {
+    return image;
+  }
+  const source = image.source.screenshot;
+  if (
+    source.screenSize.width !== observation.screenSize.width ||
+    source.screenSize.height !== observation.screenSize.height
+  ) {
+    return image;
+  }
+  return { ...image, source: { screenshot: { ...source, screenSize } } };
+}
+
+function tapAtCoordinateFrame(
+  options: TapAtOptions,
+  observation: ObserveResult,
+  platform: BootedDevice["platform"],
+  toolName: string,
+) {
+  const xr =
+    platform === "android" && toolName === "tapAt" && options.pointSpace !== "native"
+      ? detectXrPanel(observation.backStack)
+      : undefined;
+  const screenSize = xr ? xrScreenshotSize(observation) : observation.screenSize;
+  const image = xr ? xrScreenshotPoint(options.image, observation, screenSize) : options.image;
+  const imageScreenSize =
+    xr && image && "crop" in image.source ? observation.screenSize : screenSize;
+  return { xr, screenSize, image, imageScreenSize };
+}
+
 /** Shared native point resolution for coordinate dispatch and hierarchy preview. */
 export function resolveTapAtCoordinates(
   options: TapAtOptions,
   observeResult: ObserveResult,
   platform: BootedDevice["platform"],
   toolName: string = "tapAt",
-): { x: number; y: number } | { x: number; y: number; error: string } {
+): ResolvedPoint | { x: number; y: number; error: string } {
   const { x: rawX, y: rawY } = inputPoint(options);
   const optionError = coordinateOptionError(options, toolName);
   if (optionError) {
@@ -119,7 +166,12 @@ export function resolveTapAtCoordinates(
   }
   const space = options.coordinateSpace ?? "absolute";
 
-  const screenSize = observeResult.screenSize;
+  const { xr, screenSize, image, imageScreenSize } = tapAtCoordinateFrame(
+    options,
+    observeResult,
+    platform,
+    toolName,
+  );
   if (!hasPositiveScreenSize(screenSize)) {
     return {
       x: rawX,
@@ -127,8 +179,8 @@ export function resolveTapAtCoordinates(
       error: `${toolName} requires a positive screenSize from a fresh observation`,
     };
   }
-  const point = options.image
-    ? resolveImageRelativePoint(options.image, platform === "ios" ? "ios" : "android", screenSize)
+  const point = image
+    ? resolveImageRelativePoint(image, platform === "ios" ? "ios" : "android", imageScreenSize)
     : {
         x: resolveAxis(rawX, screenSize.width, space),
         y: resolveAxis(rawY, screenSize.height, space),
@@ -150,6 +202,19 @@ export function resolveTapAtCoordinates(
     platform === "android"
       ? Math.min(Math.round(resolvedY), Math.ceil(limits.height) - 1)
       : resolvedY;
+  if (xr) {
+    const mapped = screenshotPointToPanelPoint({ x, y }, xr.panel, screenSize);
+    return {
+      ...mapped,
+      screenshotPoint: { x, y },
+      xrPanel: {
+        packageName: xr.panel!.packageName,
+        taskId: xr.panel!.id,
+        displayX: mapped.x,
+        displayY: mapped.y,
+      },
+    };
+  }
   return { x, y };
 }
 
@@ -172,7 +237,7 @@ export function resolveCoordinates(
   options: TapAtOptions,
   observeResult: ObserveResult,
   platform: BootedDevice["platform"],
-): { x: number; y: number } | { x: number; y: number; error: string } {
+): ResolvedPoint | { x: number; y: number; error: string } {
   validatePlanGeometry(options, observeResult, platform);
   const gestureError = gestureOptionError(options);
   if (gestureError) {
@@ -187,7 +252,12 @@ export function resolveCoordinates(
     return { ...resolved, error: layerRefusal };
   }
   if (options.planContext) {
-    recordNativeGeometry(options.planContext, observeResult, resolved, platform);
+    recordNativeGeometry(
+      options.planContext,
+      observeResult,
+      resolved.screenshotPoint ?? resolved,
+      platform,
+    );
   }
   return resolved;
 }

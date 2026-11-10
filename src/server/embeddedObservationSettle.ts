@@ -26,6 +26,7 @@ import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/too
 import {
   EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS,
   EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
+  embeddedObservationSettleTickExtensionMs,
 } from "./embeddedObservationSettleBudget";
 
 export {
@@ -214,6 +215,11 @@ function settleOptions(
     pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
     signal,
     initialMinTimestampMs: hierarchyUpdatedAtToMillis(input.observation.viewHierarchy),
+    // The action's capture is the first diff for ticking-node detection, and a
+    // screen held unsettled only by a ticking or blinking node gets a bounded
+    // extension to prove it, inside the fence's margin (#17749).
+    referenceObservation: input.observation,
+    volatileExtensionMs: embeddedObservationSettleTickExtensionMs(budgetMs),
     // A still screen pushes nothing newer than the action's capture. Skip
     // the push wait so a rejected cache triggers sync re-extraction (#6099)
     // with a newer device timestamp, leaving time for the second stable read.

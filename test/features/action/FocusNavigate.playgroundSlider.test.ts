@@ -15,7 +15,9 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 // focused `slider_control` at [44,433][1876,521] announces "Slider with value N percent" through a
 // contained label and takes left/right as value changes, `filter_chip_2` sits above it, and the
 // bottom bar (Demos, Slides, Settings) is not reachable from the slider with the D-pad. Tab leaving
-// the slider follows the #17356 notes; the bottom bar's bounds are illustrative. Not a parser
+// the slider follows the #17356 notes; the bottom bar's bounds are illustrative. As in the
+// Playground's TapScreen, a `slider_value_text` above the slider and the linear progress
+// indicator's content-desc below it repeat the value outside the slider's bounds. Not a parser
 // fixture: the observer hands FocusNavigate Elements.
 const SLIDER_BOUNDS: ElementBounds = { left: 44, top: 433, right: 1876, bottom: 521 };
 const CHIP_BOUNDS: ElementBounds = { left: 227, top: 417, right: 382, bottom: 513 };
@@ -98,8 +100,24 @@ class FakePlaygroundHome implements FocusObserver, FocusKeyPresser {
     const ids: NodeId[] = ["chip", "slider", "demos", "slides", "settings"];
     return {
       focused: this.element(this.focus),
-      elements: [tab, ...ids.map((id) => this.element(id)), sliderLabel],
+      elements: [tab, ...ids.map((id) => this.element(id)), sliderLabel, ...this.valueReadouts()],
     };
+  }
+
+  /** The sibling readouts the Playground updates with the slider. */
+  private valueReadouts(): Element[] {
+    return [
+      {
+        "resource-id": "slider_value_text",
+        text: `Slider Value: ${this.value}%`,
+        bounds: { left: 64, top: 393, right: 360, bottom: 425 },
+      },
+      {
+        "resource-id": "linear_progress_indicator",
+        "content-desc": `Linear progress indicator showing ${this.value} percent`,
+        bounds: { left: 64, top: 600, right: 1856, bottom: 608 },
+      },
+    ];
   }
 
   async press(key: InputKeyName): Promise<{ success: boolean }> {
@@ -172,5 +190,43 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     });
     expect(result).toMatchObject({ success: false, status: "stuck" });
     expect(home.presses).not.toContain("tab");
+  });
+
+  test("a fixed-slot list row with a resource id still reads as moving while its list scrolls", async () => {
+    // Hand-built: like #17315's Languages list, but every row carries `app:id/row`. Down scrolls
+    // the next item into the fixed focus slot, so the neighbours shift by one slot each press.
+    const items = Array.from({ length: 12 }, (_, index) => `Item ${index}`);
+    let focusIndex = 0;
+    const row = (slot: number): Element | undefined => {
+      const text = items[focusIndex + slot - 1];
+      const top = 400 + slot * 100;
+      return text === undefined
+        ? undefined
+        : {
+            "resource-id": "app:id/row",
+            text,
+            focusable: true,
+            bounds: { left: 100, top, right: 900, bottom: top + 100 },
+          };
+    };
+    const keys: InputKeyName[] = [];
+    const list: FocusObserver & FocusKeyPresser = {
+      read: async () => ({
+        focused: row(1) ?? null,
+        elements: [0, 1, 2, 3].map(row).filter((element) => element !== undefined),
+      }),
+      press: async (key) => {
+        keys.push(key);
+        if (key === "arrow_down" && focusIndex < items.length - 1) {
+          focusIndex += 1;
+        }
+        return { success: true };
+      },
+    };
+    const result = await new FocusNavigate(list, list, timer).execute({
+      until: { text: "Item 6" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 6 });
+    expect(keys).toEqual(Array<InputKeyName>(6).fill("arrow_down"));
   });
 });

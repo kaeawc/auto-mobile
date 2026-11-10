@@ -43,6 +43,16 @@ import {
 } from "./observationMetadata";
 import { accessibilityStateSchema } from "./accessibility";
 
+const hierarchyBundleIdSchema = z
+  .string()
+  .optional()
+  .describe(
+    "visionOS only: bundle ID of the window app the runner automates, from the last launchApp. " +
+      "Present with every projection when a registered app and runner hierarchy are available; omitted otherwise. This app can differ from " +
+      "the screenshot when another app was brought forward outside launchApp; compare them and " +
+      "relaunch with launchApp to switch.",
+  );
+
 const importedPrototypeContentSchema = z
   .object({
     untrusted: z.literal(true),
@@ -114,6 +124,7 @@ export const observationSummarySchema = z
     freshness: freshnessSchema.optional(),
     // Full/raw action projections place the raw ObserveResult (the observe tool's shape) under `.observation`.
     viewHierarchy: viewHierarchyResultSchema.optional(),
+    hierarchyBundleId: hierarchyBundleIdSchema,
     truncationReasons: z
       .array(z.string())
       .optional()
@@ -529,6 +540,7 @@ export const observeResultSchema = z
       })
       .optional(),
     viewHierarchy: viewHierarchyResultSchema.optional(),
+    hierarchyBundleId: hierarchyBundleIdSchema,
     truncationReasons: z
       .array(z.string())
       .optional()

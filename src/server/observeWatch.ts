@@ -4,6 +4,10 @@ import {
   withVisionosHostRecovery,
 } from "../features/visionos/VisionosRunnerLifecycle";
 import { visionosRunners } from "../features/visionos/VisionosRunnerRegistry";
+import {
+  visionosTargetApps,
+  type VisionosTargetApps,
+} from "../features/visionos/VisionosTargetApps";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { holderOf } from "../daemon/deviceBinding";
 import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
@@ -80,6 +84,8 @@ export interface WatchObserveDependencies {
   runner?: WatchRunnerClient;
   /** Starts or reuses the visionOS window-app runner; defaults to the shared runner lifecycle. */
   visionosRunner?: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>;
+  /** The last launchApp target per visionOS device; defaults to the daemon's shared registry. */
+  visionosTargetApps?: Pick<VisionosTargetApps, "get">;
   /** Whether this call reads a device another session holds; defaults to the pool's holder. */
   heldDeviceRead?: (deviceId: string) => boolean;
   idGenerator?: IdGenerator;
@@ -384,7 +390,11 @@ export async function observeWatch(
     screenshotCaptureSource: "device",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
   };
-  const payload = watchObservationPayload(capture, platform, hierarchyOutcome);
+  const hierarchyBundleId =
+    platform === "visionos"
+      ? (dependencies.visionosTargetApps ?? visionosTargetApps).get(device.deviceId)
+      : undefined;
+  const payload = watchObservationPayload(capture, platform, hierarchyOutcome, hierarchyBundleId);
   return waitOutcome
     ? createObserveWaitResponse(payload, waitOutcome, args.includeScreenshotImage, {
         signal,
@@ -427,6 +437,7 @@ function watchObservationPayload(
   capture: Omit<WatchObservation, "hierarchyUnavailable">,
   platform: AppleScreenshotOnlyPlatform,
   { hierarchy: viewHierarchy, unavailableReason, appNotForeground }: HierarchyOutcome,
+  hierarchyBundleId?: string,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
     const message =
@@ -448,6 +459,7 @@ function watchObservationPayload(
   return {
     ...capture,
     viewHierarchy,
+    ...(hierarchyBundleId !== undefined ? { hierarchyBundleId } : {}),
     ...(platform === "tvos" || platform === "visionos"
       ? { focusedElement: findFocusedElement(viewHierarchy) ?? undefined }
       : {}),

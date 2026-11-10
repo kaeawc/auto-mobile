@@ -62,6 +62,7 @@ function arrange(result?: Buffer | Error, runner?: FakeWatchRunnerClient) {
     observeWatch(device, args, signal, {
       screenshots,
       runner,
+      visionosTargetApps: { get: () => "com.example.visionos" },
       timer,
       idGenerator: new CountingIdGenerator("watch"),
       fileWriter: writer,
@@ -253,6 +254,7 @@ test("connected watch hierarchy keeps the screenshot and uses XCTest point dimen
   expect(result.screenshotImageSize).toEqual({ width: 416, height: 496 });
   expect(result.screenshotPath).toBeDefined();
   expect(result).not.toHaveProperty("hierarchyUnavailable");
+  expect(result).not.toHaveProperty("hierarchyBundleId");
   expect(runner.commands).toEqual([{ type: "hierarchy" }]);
   expect(screenshots.captures).toHaveLength(1);
 });

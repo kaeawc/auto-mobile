@@ -340,6 +340,9 @@ export type ObserveResult = {
   /** View hierarchy data */
   viewHierarchy?: ViewHierarchyResult;
 
+  /** visionOS window-app bundle ID from the last launchApp; absent without a registered app or hierarchy. */
+  hierarchyBundleId?: string;
+
   /**
    * Why a served observation or diff may be incomplete (issues #6601, #6933).
    * On a non-diff skeleton projection, this contains only capture-fidelity

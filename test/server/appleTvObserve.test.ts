@@ -149,6 +149,7 @@ describe("observe on an Apple TV simulator through the registry", () => {
         throw new Error("the Android/iOS observe pipeline ran");
       },
       watch: {
+        visionosTargetApps: { get: () => "com.example.visionos" },
         ...(runnerScreenshot ? {} : { screenshots }),
         fileWriter: writer,
         idGenerator: new CountingIdGenerator("appleTv-observe"),
@@ -183,6 +184,7 @@ describe("observe on an Apple TV simulator through the registry", () => {
       });
       const result = getStructuredPayload<ObserveResult>(readToolResponse(response))!;
       expect(result.focusedElement?.["resource-id"]).toBe("B01");
+      expect(result).not.toHaveProperty("hierarchyBundleId");
       expect(result.screenshotImageSize).toEqual({ width: 1920, height: 1080 });
       expect(client.commands).toEqual([
         { type: "request_hierarchy" },

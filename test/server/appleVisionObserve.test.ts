@@ -12,6 +12,7 @@ isolateEmptyToolRegistry();
 import { expect, test } from "bun:test";
 import { observeWatch, type WatchScreenshotSource } from "../../src/server/observeWatch";
 import { visionosRunners } from "../../src/features/visionos/VisionosRunnerRegistry";
+import type { VisionosTargetApps } from "../../src/features/visionos/VisionosTargetApps";
 import {
   FakeVisionosRunnerClient,
   visionosProbeHierarchy,
@@ -26,6 +27,10 @@ import type { ObserveResult } from "../../src/models";
 import { observeToolResultSchema } from "../../src/server/toolOutputSchemas";
 
 const device = { platform: "visionos", deviceId: "vision-observe", name: "Vision Pro" } as const;
+const bundleId = "com.example.last-launched";
+const targetApps: Pick<VisionosTargetApps, "get"> = {
+  get: (deviceId) => (deviceId === device.deviceId ? bundleId : undefined),
+};
 class FakeVisionScreenshots implements WatchScreenshotSource {
   calls: Array<{ deviceId: string; display?: string }> = [];
   async capture(target: typeof device, display?: string) {
@@ -49,6 +54,7 @@ test("visionOS observe returns captured hierarchy, focused field and a retained 
   try {
     const response = await observeWatch(device, { project: "full" }, undefined, {
       screenshots,
+      visionosTargetApps: targetApps,
       fileWriter,
       timer,
       pathProtection: new FakeScreenshotPathProtection(timer),
@@ -58,6 +64,7 @@ test("visionOS observe returns captured hierarchy, focused field and a retained 
     const result = getStructuredPayload<ObserveResult>(readToolResponse(response))!;
     expect(result.focusedElement).toMatchObject({ "resource-id": "field", focused: true });
     expect(result.viewHierarchy?.packageName).toBe("dev.automobile.probe.app");
+    expect(result.hierarchyBundleId).toBe(bundleId);
     expect(result.screenshotImageSize).toEqual({ width: 3840, height: 2160 });
     expect(fileWriter.written).toEqual([result.screenshotPath!]);
     expect(screenshots.calls).toEqual([{ deviceId: device.deviceId, display: undefined }]);
@@ -84,51 +91,72 @@ test("visionOS observe refuses unsupported options before hierarchy or capture",
   }
 });
 
-test("the registered observe tool routes a visionOS session into the Apple window pipeline", async () => {
-  const session = "vision-observe-session";
-  const client = new FakeVisionosRunnerClient(visionosProbeHierarchy(probe.snapshotAfterImmersive));
-  const unregister = visionosRunners.register(device.deviceId, client);
-  const screenshots = new FakeVisionScreenshots();
-  const timer = new FakeTimer();
-  const readiness = new FakeDeviceReadiness();
-  readiness.setConnectedDevices([device]);
-  const previous = ToolRegistry.getCollaboratorsForTesting();
-  ToolRegistry.setCollaboratorsForTesting({
-    deviceReadiness: readiness,
-    toolCallRepository: { async recordToolCall() {} },
-  });
-  const restore = ToolRegistry.setPipelineOverridesForTesting({
-    displayInventory: new FakeDisplayInventoryProvider(),
-  });
-  registerDirectSessionDevice(session, device);
-  registerObserveTools({
-    timer,
-    createScreen: () => {
-      throw new Error("Android/iOS observe path ran");
-    },
-    watch: {
-      screenshots,
-      timer,
-      fileWriter: new FakeScreenshotFileWriter(),
-      pathProtection: new FakeScreenshotPathProtection(timer),
-      cacheDir: () => "/cache/screenshots",
-    },
-  });
-  try {
-    const response = await ToolRegistry.getTool("observe")!.handler({
-      sessionUuid: session,
-      project: "full",
+test.each([
+  { project: undefined, packageName: "" },
+  { project: "full", packageName: "" },
+  { project: undefined, packageName: "com.apple.mobileslideshow" },
+  { project: "full", packageName: "com.apple.mobileslideshow" },
+] as const)(
+  "the registered visionOS observe tool uses the target bundle ID with project $project and packageName '$packageName'",
+  async ({ project, packageName }) => {
+    const session = "vision-observe-session";
+    const client = new FakeVisionosRunnerClient({
+      ...visionosProbeHierarchy(probe.snapshotAfterImmersive),
+      packageName,
     });
-    const result = getStructuredPayload<ObserveResult>(readToolResponse(response))!;
-    expect(result.focusedElement).toMatchObject({ "resource-id": "field", focused: true });
-    expect(screenshots.calls).toHaveLength(1);
-  } finally {
-    unregister();
-    unregisterDirectSession(session);
-    restore();
-    ToolRegistry.setCollaboratorsForTesting(previous);
-  }
-});
+    const unregister = visionosRunners.register(device.deviceId, client);
+    const screenshots = new FakeVisionScreenshots();
+    const timer = new FakeTimer();
+    const readiness = new FakeDeviceReadiness();
+    readiness.setConnectedDevices([device]);
+    const previous = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({
+      deviceReadiness: readiness,
+      toolCallRepository: { async recordToolCall() {} },
+    });
+    const restore = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
+    registerDirectSessionDevice(session, device);
+    registerObserveTools({
+      timer,
+      createScreen: () => {
+        throw new Error("Android/iOS observe path ran");
+      },
+      watch: {
+        screenshots,
+        visionosTargetApps: targetApps,
+        timer,
+        fileWriter: new FakeScreenshotFileWriter(),
+        pathProtection: new FakeScreenshotPathProtection(timer),
+        cacheDir: () => "/cache/screenshots",
+      },
+    });
+    try {
+      const response = await ToolRegistry.getTool("observe")!.handler({
+        sessionUuid: session,
+        ...(project ? { project } : {}),
+      });
+      const result = getStructuredPayload<ObserveResult>(readToolResponse(response))!;
+      expect(result.focusedElement).toMatchObject({ "resource-id": "field", focused: true });
+      expect(result.hierarchyBundleId).toBe(bundleId);
+      if (project === "full") {
+        expect(result.viewHierarchy?.packageName).toBe(packageName);
+      } else {
+        expect(result.viewHierarchy).toBeUndefined();
+        expect(result.skeleton).toBeDefined();
+      }
+      expect(screenshots.calls).toHaveLength(1);
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+    } finally {
+      unregister();
+      unregisterDirectSession(session);
+      restore();
+      ToolRegistry.setCollaboratorsForTesting(previous);
+    }
+  },
+);
 
 function visionDependencies(
   screenshots: FakeVisionScreenshots,
@@ -143,6 +171,7 @@ function visionDependencies(
       fileWriter,
       timer,
       visionosRunner,
+      visionosTargetApps: targetApps,
       pathProtection: new FakeScreenshotPathProtection(timer),
       idGenerator: new CountingIdGenerator("vision-fallback"),
       cacheDir: () => "/cache/screenshots",
@@ -164,8 +193,22 @@ test("visionOS observe uses an available runner's hierarchy", async () => {
   )!;
   expect(started).toEqual([device.deviceId]);
   expect(result.hierarchyUnavailable).toBeUndefined();
+  expect(result.hierarchyBundleId).toBe(bundleId);
   expect(result.focusedElement).toMatchObject({ "resource-id": "field", focused: true });
   expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
+});
+
+test("visionOS observe omits hierarchyBundleId when the registry has no app for the device", async () => {
+  const client = new FakeVisionosRunnerClient();
+  const { dependencies } = visionDependencies(new FakeVisionScreenshots(), async () => client);
+  const response = await observeWatch(device, {}, undefined, {
+    ...dependencies,
+    visionosTargetApps: { get: () => undefined },
+  });
+  const result = getStructuredPayload<ObserveResult>(readToolResponse(response))!;
+  expect(result.viewHierarchy?.packageName).toBe(client.tree.packageName);
+  expect(client.tree.packageName).not.toBe("");
+  expect(result).not.toHaveProperty("hierarchyBundleId");
 });
 
 test.each([
@@ -197,6 +240,7 @@ test.each([
       hierarchyUnavailable: { platform: string; message: string };
     }>(readToolResponse(response))!;
     expect(result.viewHierarchy).toBeUndefined();
+    expect(result).not.toHaveProperty("hierarchyBundleId");
     expect(result.hierarchyUnavailable.platform).toBe("visionos");
     expect(result.hierarchyUnavailable.message).toContain("The view hierarchy needs the runner.");
     expect(result.hierarchyUnavailable.message).toContain(reason);

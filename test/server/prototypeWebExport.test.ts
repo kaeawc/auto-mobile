@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import path from "node:path";
 import { PrototypeSpecRevisions } from "../../src/features/prototype/prototypeSpecRevisions";
 import {
   prototypeResourceReadersModule,
@@ -146,13 +147,10 @@ describe("exportPrototypeWeb (#17720)", () => {
 
   test("defaults to a content-addressed name in the data directory, or inside a directory", async () => {
     const byDefault = await exportWeb({ id: "checkout" });
-    expect(byDefault.path).toBe(
-      `/data/prototype-web/checkout-${byDefault.frame}-r2-${byDefault.sha256.slice(0, 12)}.html`,
-    );
+    const name = `checkout-${byDefault.frame}-r2-${byDefault.sha256.slice(0, 12)}.html`;
+    expect(byDefault.path).toBe(path.join("/data/prototype-web", name));
     const inDirectory = await exportWeb({ id: "checkout", outputPath: "/out" });
-    expect(inDirectory.path).toBe(
-      `/out/checkout-${byDefault.frame}-r2-${byDefault.sha256.slice(0, 12)}.html`,
-    );
+    expect(inDirectory.path).toBe(path.join("/out", name));
   });
 
   test("refuses to replace a different file unless overwrite is set; identical bytes are kept", async () => {

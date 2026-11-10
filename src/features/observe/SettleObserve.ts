@@ -4,7 +4,11 @@ import { diffObserveResult, isSameObservationScreen } from "./output/ObserveResu
 import type { ObserveDiff } from "./output/ObserveResultOutput";
 import { pollObserveUntil } from "./ObservePoll";
 import { prototypeMotionActive } from "./prototypeMotion";
-import { VolatileTextTracker, untrackableIdentities } from "./settleVolatileText";
+import {
+  VolatileTextTracker,
+  splitVolatileChanges,
+  untrackableIdentities,
+} from "./settleVolatileText";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveResult } from "../../models";
 
@@ -30,6 +34,28 @@ export function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
 }
 
 /**
+ * Feed the tracker the diff from the caller's own capture to the first poll
+ * (#17749): a genuine device read of the same screen, so a node already ticking
+ * across the action needs one poll fewer to be proven volatile. The diff never
+ * counts toward the stable-read run. Skipped for another screen or a capture
+ * taken mid-motion, where the diff is not a tick.
+ */
+function seedFromReference(
+  tracker: VolatileTextTracker,
+  reference: ObserveResult | undefined,
+  first: ObserveResult,
+): void {
+  if (
+    reference === undefined ||
+    prototypeMotionActive(reference.viewHierarchy) > 0 ||
+    !isSameObservationScreen(reference, first)
+  ) {
+    return;
+  }
+  tracker.mask(diffObserveResult(reference, first), untrackableIdentities(reference, first));
+}
+
+/**
  * Poll the screen until the view hierarchy is structurally stable (issue #4389).
  *
  * The stability comparator is the #3053 structural diff (`diffObserveResult`
@@ -40,7 +66,9 @@ export function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
  * and the mandatory timeout governs. A node whose text alone changes in two
  * consecutive diffs (a running clock, a typing indicator) is masked for the rest
  * of the settle by {@link VolatileTextTracker}, so such a screen settles once
- * everything else holds still (#17670).
+ * everything else holds still (#17670). A node that blinks (its visibility
+ * flips) is treated the same way, and while ticks are the only change the loop
+ * may spend `volatileExtensionMs` past its budget to confirm them (#17749).
  *
  * Returns only the final snapshot — the intermediate transition hierarchies never
  * reach the caller. DI mirrors `AwaitIdle`: `timer` is the last constructor param.
@@ -67,6 +95,9 @@ export class RealSettleObserve implements SettleObserve {
     let motionPending = false;
     // Nodes whose text ticks every poll (clocks, typing indicators) are masked once seen (#17670).
     const volatileText = new VolatileTextTracker();
+    // Whether only ticking or blinking nodes have changed since the last tick (#17749).
+    let onlyTicking = false;
+    const volatileExtensionMs = Math.max(0, options.volatileExtensionMs ?? 0);
 
     const outcome = await pollObserveUntil(
       this.observeScreen,
@@ -83,6 +114,7 @@ export class RealSettleObserve implements SettleObserve {
         },
         resumeOnTerminalMismatch: options.resumeOnTerminalMismatch,
         hardBudget: options.hardBudget,
+        budgetExtensionMs: () => (onlyTicking ? volatileExtensionMs : 0),
         skipPerformanceAudit: options.skipPerformanceAudit,
         skipRecompositionTracking: options.skipRecompositionTracking,
       },
@@ -91,6 +123,7 @@ export class RealSettleObserve implements SettleObserve {
         // device still reports animations settling (#15114); the timeout bounds the wait.
         motionPending = prototypeMotionActive(observation.viewHierarchy) > 0;
         if (motionPending) {
+          onlyTicking = false;
           equalRun = 0;
           // A motion read is not diffed, so later diffs are not consecutive with
           // earlier ones, and the screen may change behind it: start over.
@@ -98,20 +131,24 @@ export class RealSettleObserve implements SettleObserve {
           return false;
         }
         if (previous === undefined) {
+          seedFromReference(volatileText, options.referenceObservation, observation);
           equalRun = 1;
           return equalRun >= stableReads;
         }
         if (!isSameObservationScreen(previous, observation)) {
+          onlyTicking = false;
           volatileText.reset();
           equalRun = 1;
           return equalRun >= stableReads;
         }
-        const structurallyStable = isStabilityDiffEmpty(
-          volatileText.mask(
-            diffObserveResult(previous, observation),
-            untrackableIdentities(previous, observation),
-          ),
-        );
+        const diff = diffObserveResult(previous, observation);
+        const untrackable = untrackableIdentities(previous, observation);
+        const split = splitVolatileChanges(diff, untrackable);
+        // A tick grants the extension and any other change withdraws it; an
+        // empty diff keeps it, so a tick confirmed on this read can still
+        // finish its terminal back-stack read.
+        onlyTicking = isStabilityDiffEmpty(split.rest) && (split.ticks > 0 || onlyTicking);
+        const structurallyStable = isStabilityDiffEmpty(volatileText.mask(diff, untrackable));
         equalRun = structurallyStable ? equalRun + 1 : 1;
         return equalRun >= stableReads;
       },

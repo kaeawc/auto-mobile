@@ -17,6 +17,7 @@ import {
   type WearSurface,
   type WearSurfaceResult,
 } from "../features/wear/WearSurface";
+import { AdbComplicationProviderLister } from "../features/wear/ComplicationProviders";
 import { AdbTileProviderLister } from "../features/wear/TileProviders";
 import {
   AdbWatchFaceSurface,
@@ -160,6 +161,12 @@ export const wearSurfaceResultSchema = z.object({
     .boolean()
     .optional()
     .describe("Watch face change actions: true only when dumpsys wear_service showed the change"),
+  change: z
+    .enum(["applied", "unchanged"])
+    .optional()
+    .describe(
+      "setComplication and unsetComplication: unchanged when the slot already showed the request before the broadcast",
+    ),
   favoriteId: z.number().optional(),
   readback: z
     .object({
@@ -233,8 +240,14 @@ const defaultWearSurfaceFactory: WearSurfaceFactory = (device) => {
 const defaultWatchFaceReaderFactory: WatchFaceReaderFactory = (device) =>
   new AdbWatchFaceReader(defaultAdbClientFactory.create(device));
 
-const defaultWatchFaceSurfaceFactory: WatchFaceSurfaceFactory = (device) =>
-  new AdbWatchFaceSurface({ adb: defaultAdbClientFactory.create(device), timer: defaultTimer });
+const defaultWatchFaceSurfaceFactory: WatchFaceSurfaceFactory = (device) => {
+  const adb = defaultAdbClientFactory.create(device);
+  return new AdbWatchFaceSurface({
+    adb,
+    timer: defaultTimer,
+    providers: new AdbComplicationProviderLister(adb),
+  });
+};
 
 const defaultFormFactorRead = traitsFormFactorRead(
   defaultDeviceTraits,
@@ -437,7 +450,7 @@ export const createWearSurfaceHandler =
 const wearSurfaceTool = defineDeviceTool({
   name: "wearSurface",
   description:
-    "Wear OS watches only (other form factors are refused without a change): tiles, watch faces and complications. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read. setWatchFace switches the active face (bare package for a WFF face, <package>/<class> for a classic one) and unsetWatchFace reverts it; setComplication puts a provider in a face slot with an androidx type int, unsetComplication empties the slot. Watch face changes succeed (applied: true) only when a dumpsys wear_service readback shows the change: an accepted broadcast can still leave a slot empty when the provider does not support the type (error not_applied).",
+    "Wear OS watches only (other form factors are refused without a change): tiles, watch faces and complications. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read. setWatchFace switches the active face (bare package for a WFF face, <package>/<class> for a classic one) and unsetWatchFace reverts it; setComplication puts a provider in a face slot with an androidx type int, unsetComplication empties the slot. Watch face changes succeed (applied: true) only when a dumpsys wear_service readback shows the change: setComplication fails before sending with error provider_not_found (naming the valid ones) when the provider is not a complication data source on the device. An accepted broadcast is ignored when the provider does not support the type: the slot keeps its previous provider and type (error unsupported_type). A complication request the slot already showed succeeds with change: unchanged.",
   input: wearSurfaceInput,
   handler: createWearSurfaceHandler(),
   options: {

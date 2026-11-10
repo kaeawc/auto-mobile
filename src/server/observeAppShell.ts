@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { OBSERVE_SHELL_CLIENT_FUNCTIONS, shellBoot } from "./observeAppShellClient";
+import { OBSERVE_PICKER_CLIENT_FUNCTIONS, pickerBoot } from "./observeAppPickerClient";
 
 /**
  * The stable, read-only live shell behind `ui://automobile/observe` for MCP Apps hosts (#4682).
@@ -17,7 +18,9 @@ import { OBSERVE_SHELL_CLIENT_FUNCTIONS, shellBoot } from "./observeAppShellClie
  * 3. The host's own sandbox. MCP Apps hosts render the view in a sandboxed iframe; the shell needs
  *    only `allow-scripts` and works with an opaque origin (`allow-same-origin` is not required and
  *    must not be granted), a document that never touches storage, cookies or the parent's DOM.
- * 4. The script never sends a request other than `ui/initialize`, so the App cannot call tools.
+ * 4. The read-only script never sends a request other than `ui/initialize`, so it cannot call
+ *    tools. The interactive variant (flag `observe-app-interactive`, #17767) additionally sends
+ *    `tools/call tapOn` through the host, and only when the user presses its tap button.
  *
  * Host requirement: a `<meta>` CSP cannot set `frame-ancestors` or `sandbox`, so the host must
  * render the view in a sandboxed iframe with `allow-scripts` only: never `allow-same-origin`,
@@ -35,9 +38,29 @@ body { margin:0; padding:12px; background:var(--am-bg); color:var(--am-fg); font
 .am-box:hover { fill:color-mix(in srgb, var(--am-box) 18%, transparent); }
 #status { margin:0 0 8px; opacity:.75; }`;
 
+/** Extra rules for the interactive picker (#17767): hit targets and the selection panel. */
+export const OBSERVE_APP_PICKER_STYLE = `${OBSERVE_APP_SHELL_STYLE}
+.am-pick { fill:transparent; stroke:none; cursor:pointer; pointer-events:all; }
+.am-pick:hover { fill:color-mix(in srgb, var(--am-box) 25%, transparent); }
+#picker { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+#selector { font:12px/1.4 ui-monospace, monospace; overflow-wrap:anywhere; flex:1 1 200px; }
+#tap-status { flex-basis:100%; margin:0; opacity:.75; }`;
+
+/** The two shell flavours: read-only (the default) and the flag-gated interactive picker. */
+export type ObserveAppShellMode = "read-only" | "interactive";
+
 /** The one inline script: the client functions followed by the call that starts them. */
-export function observeAppShellScript(): string {
-  return `${OBSERVE_SHELL_CLIENT_FUNCTIONS.map((fn) => fn.toString()).join("\n")}\n${shellBoot.name}(window, document);`;
+export function observeAppShellScript(mode: ObserveAppShellMode = "read-only"): string {
+  const functions =
+    mode === "interactive"
+      ? [...OBSERVE_SHELL_CLIENT_FUNCTIONS, ...OBSERVE_PICKER_CLIENT_FUNCTIONS]
+      : OBSERVE_SHELL_CLIENT_FUNCTIONS;
+  const boot = mode === "interactive" ? pickerBoot : shellBoot;
+  return `${functions.map((fn) => fn.toString()).join("\n")}\n${boot.name}(window, document);`;
+}
+
+function styleFor(mode: ObserveAppShellMode): string {
+  return mode === "interactive" ? OBSERVE_APP_PICKER_STYLE : OBSERVE_APP_SHELL_STYLE;
 }
 
 function sha256Source(text: string): string {
@@ -45,11 +68,14 @@ function sha256Source(text: string): string {
 }
 
 /** The CSP carried by the shell's `<meta>`: nothing is allowed beyond the two hashed inline blocks. */
-export function observeAppShellCsp(script = observeAppShellScript()): string {
+export function observeAppShellCsp(
+  script = observeAppShellScript(),
+  style = OBSERVE_APP_SHELL_STYLE,
+): string {
   return [
     "default-src 'none'",
     `script-src ${sha256Source(script)}`,
-    `style-src ${sha256Source(OBSERVE_APP_SHELL_STYLE)}`,
+    `style-src ${sha256Source(style)}`,
     "img-src data:",
     "connect-src 'none'",
     "frame-src 'none'",
@@ -68,22 +94,33 @@ export const OBSERVE_APP_SHELL_META = {
   },
 } as const;
 
-/** The shell document. Pure and constant: the same bytes on every read. */
-export function renderObserveAppShellHtml(): string {
-  const script = observeAppShellScript();
+/** The picker panel: a selection label, the selector as text and the one tap button. */
+const PICKER_PANEL = `
+<aside id="picker" aria-label="element picker">
+<p id="selection">Select an element</p>
+<code id="selector"></code>
+<button id="tap" type="button" disabled>tapOn</button>
+<p id="tap-status"></p>
+</aside>`;
+
+/** The shell document. Pure and constant per mode: the same bytes on every read. */
+export function renderObserveAppShellHtml(mode: ObserveAppShellMode = "read-only"): string {
+  const script = observeAppShellScript(mode);
+  const style = styleFor(mode);
+  const panel = mode === "interactive" ? PICKER_PANEL : "";
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta http-equiv="Content-Security-Policy" content="${observeAppShellCsp(script)}"/>
+<meta http-equiv="Content-Security-Policy" content="${observeAppShellCsp(script, style)}"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>AutoMobile — observe</title>
-<style>${OBSERVE_APP_SHELL_STYLE}</style>
+<style>${style}</style>
 </head>
 <body>
 <main id="stage" data-observe-app="shell">
 <p id="status">Waiting for an observe result…</p>
-<svg id="canvas" viewBox="0 0 1 1" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="observe screen overlay"></svg>
+<svg id="canvas" viewBox="0 0 1 1" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="observe screen overlay"></svg>${panel}
 </main>
 <script>${script}</script>
 </body>

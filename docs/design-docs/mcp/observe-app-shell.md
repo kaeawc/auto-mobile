@@ -2,7 +2,8 @@
 
 `ui://automobile/observe` is the MCP App for `observe`. Owner decision (2026-10-26): it is a
 read-only live view, a screenshot with the view-hierarchy boxes, updated through `postMessage`.
-It takes no actions and makes no device-control calls; an element picker may come later.
+It takes no actions and makes no device-control calls. An element picker that can tap is a
+flag-gated spike, described in [Interactive observe App](observe-app-interactive.md).
 
 ## Who gets what
 

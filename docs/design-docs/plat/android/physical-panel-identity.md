@@ -122,7 +122,11 @@ another adb round trip:
    before the display swap and still describe the old panel. A resolved key is not compared with
    a previous placeholder key (`"0"`), so a rotation-only push stays a non-transition.
 3. **`cmd display get-displays` stays the authority** for ambiguous devices, for selecting a panel
-   to act on (`logicalIdForPanel`) and for the `screencap -d` id.
+   to act on (`logicalIdForPanel`) and for the `screencap -d` id. Where `cmd display` has no
+   `get-displays` subcommand (API 30 answers `Unknown command`), the enabled records of the
+   `dumpsys display` Logical Displays section replace it; a record with no `mIsEnabled` line (that
+   field is absent on API 30) counts as enabled. When neither source can be read, the selection
+   fails with a non-retryable error, since a retry would fail the same way.
 
 The fingerprint is internal evidence: it is stripped from observe output, and it is not sent per
 window, per node or on screenshot frames.

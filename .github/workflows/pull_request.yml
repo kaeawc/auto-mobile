@@ -430,6 +430,8 @@ jobs:
             ios:
               - 'ios/**'
               - 'scripts/ios/**'
+              # The SwiftLint job's installer and validator (#17777).
+              - 'scripts/swiftlint/**'
               - 'test/fixtures/ios-contract/**'
               - 'test/fixtures/ios-ctrlproxy-request-snapshots.json'
               # Shared fixtures read by prototype, runner, wire, and capture tests.
@@ -2693,8 +2695,10 @@ jobs:
     name: "SwiftLint"
     # Linux, with the official SwiftLint Linux binary pinned to the Mac lane's
     # version and verified against a committed SHA-256 (#17581). SwiftLint loads
-    # sourcekitd from the Swift toolchain that ubuntu-latest ships on PATH.
-    runs-on: ubuntu-latest
+    # sourcekitd from the Swift toolchain the image ships on PATH. Pinned to
+    # ubuntu-24.04: the 0.57.0 binary links libicuuc.so.74 and libxml2.so.2,
+    # which Ubuntu 26.04 (the newer ubuntu-latest) no longer ships (#17777).
+    runs-on: ubuntu-24.04
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:

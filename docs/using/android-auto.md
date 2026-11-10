@@ -106,8 +106,7 @@ default values, the same as `default.ini`: 800x480 at 160 dpi and 30 fps.
   projection display as the active one, with a warning that it has no accessible content. The projected
   UI is not in the accessibility tree; `observe`, `tapOn` and other tools act only on the phone screen.
 - While projecting, the phone's foreground app is Android Auto, not your app, so `observe` does not
-  include your app's `carAppTemplates` block. Your app still records its template stack, and the route
-  answers when queried for your package.
+  include your app's `carAppTemplates` block.
 - The first `observe` on a fresh emulator installs AutoMobile's on-device service. If the DHU is
   connected through `adb forward`, a dropped adb connection at that point ends the projection; use the
   emulator redirect.

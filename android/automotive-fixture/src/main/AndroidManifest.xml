@@ -18,12 +18,14 @@
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
-      <!-- Android Auto requires media apps to accept voice "play X" searches. -->
+      <meta-data android:name="distractionOptimized" android:value="true" />
+    </activity>
+    <!-- Android Auto requires media apps to accept voice "play X" searches; this forwards them to the media session. -->
+    <activity android:name=".media.PlayFromSearchActivity" android:exported="true" android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
       <intent-filter>
         <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
         <category android:name="android.intent.category.DEFAULT" />
       </intent-filter>
-      <meta-data android:name="distractionOptimized" android:value="true" />
     </activity>
     <!-- No distractionOptimized meta-data: blocked while driving. -->
     <activity android:name=".ParkedOnlyActivity" android:exported="false" />

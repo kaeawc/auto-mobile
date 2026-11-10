@@ -1,3 +1,4 @@
+import type { AndroidProbeOverloadTracker } from "./AndroidProbeOverloadTracker";
 import type { BootedDevice } from "../models";
 import type { AdjustableDeadline } from "../utils/AdjustableDeadline";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
@@ -72,8 +73,12 @@ export interface ReadinessAttemptContext extends RunnerReadinessRequest {
    * mirroring iOS's single `forceRestart` between "connected" and "healthy".
    */
   ctrlProxyProcessRestartAttempted: boolean;
-  /** Continuous connected-but-unresponsive interval after the process restart. */
-  ctrlProxyUnresponsiveSinceMs: number | null;
+  /**
+   * Android overload signal (consecutive probe timeouts while connected) that
+   * alone switches the health poll to backoff and arms the post-restart
+   * fail-fast (#17813).
+   */
+  androidProbeOverload: AndroidProbeOverloadTracker;
   /**
    * When the last successful accessibility-service rebind completed, so
    * escalation to a full process restart can wait out

@@ -1,8 +1,10 @@
 import { runIosRunnerSetup } from "./runIosRunnerSetup";
+import { AndroidProbeOverloadTracker } from "./AndroidProbeOverloadTracker";
 import {
   READINESS_RETRY_DELAY_MS,
   CTRL_PROXY_READINESS_BACKOFF,
   CTRL_PROXY_UNRESPONSIVE_AFTER_RESTART_FAIL_MS,
+  CTRL_PROXY_OVERLOAD_MIN_PROBE_TIMEOUTS,
   CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS,
   RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS,
   CTRL_PROXY_REBIND_RECOVERY_POLL_MS,
@@ -56,6 +58,8 @@ export type {
 export { normalizeDiagnostic, RunnerReadinessError, SystemUiAnrRecoveryRequiredError };
 export type { AndroidCompatibilityResult, RunnerReadinessPhase, RunnerReadinessRequest };
 
+const PROBE_TIMEOUT_CLOCK_SLACK_MS = 10;
+
 export class RunnerReadinessService {
   private readonly phases: ReadinessPhaseRunner;
   private readonly anrRecovery: SystemUiAnrRecovery;
@@ -79,7 +83,14 @@ export class RunnerReadinessService {
       ctrlProxyAccessibilityRebindAttempted: false,
       lastConnectedRecoveryMs: Number.NEGATIVE_INFINITY,
       ctrlProxyProcessRestartAttempted: false,
-      ctrlProxyUnresponsiveSinceMs: null,
+      androidProbeOverload: new AndroidProbeOverloadTracker({
+        backoff: this.dependencies.androidHealthProbeBackoff ?? CTRL_PROXY_READINESS_BACKOFF,
+        baseDelayMs: READINESS_RETRY_DELAY_MS,
+        minConsecutiveTimeouts: CTRL_PROXY_OVERLOAD_MIN_PROBE_TIMEOUTS,
+        failAfterRestartMs:
+          this.dependencies.ctrlProxyUnresponsiveAfterRestartFailMs ??
+          CTRL_PROXY_UNRESPONSIVE_AFTER_RESTART_FAIL_MS,
+      }),
       lastSuccessfulRebindMs: Number.NEGATIVE_INFINITY,
       failedHealthProbesSinceRecovery: 0,
     };
@@ -578,7 +589,6 @@ export class RunnerReadinessService {
     // Provisioning is done; open the steady-state health window now so a long
     // cold launch above did not consume it (#5376).
     this.phases.startHealthWindow(context);
-    let failedHealthProbes = 0;
     let attempts = 0;
     let connected = client.isConnected();
     let phase: RunnerReadinessPhase = connected ? "runner-health" : "runner-connect";
@@ -591,8 +601,7 @@ export class RunnerReadinessService {
       attempts++;
       connected = client.isConnected();
       if (!connected) {
-        failedHealthProbes = 0;
-        context.ctrlProxyUnresponsiveSinceMs = null;
+        context.androidProbeOverload.recordDisconnect();
         phase = "runner-connect";
         await this.rebindUnhealthyAndroidAccessibilityService(
           context,
@@ -610,10 +619,8 @@ export class RunnerReadinessService {
       if (connected) {
         phase = "runner-health";
         if (await this.probeResponsiveClient(context, client, attempts, androidManager)) {
-          failedHealthProbes = 0;
           return;
         }
-        failedHealthProbes++;
       }
       if (
         context.device.platform === "android" &&
@@ -625,24 +632,19 @@ export class RunnerReadinessService {
 
       const remaining = this.phases.remainingForPhase(context, "runner-health");
       if (remaining > 0) {
-        const delay = this.healthProbeRetryDelay(context, connected, failedHealthProbes);
-        await this.dependencies.timer.sleep(Math.min(delay, remaining));
+        await this.dependencies.timer.sleep(
+          Math.min(this.healthProbeRetryDelay(context, connected), remaining),
+        );
       }
     }
     await this.failUnresponsiveClient(context, client, phase, { attempts });
   }
 
-  private healthProbeRetryDelay(
-    context: ReadinessAttemptContext,
-    connected: boolean,
-    failedHealthProbes: number,
-  ): number {
+  private healthProbeRetryDelay(context: ReadinessAttemptContext, connected: boolean): number {
     if (context.device.platform !== "android" || !connected) {
       return READINESS_RETRY_DELAY_MS;
     }
-    return (
-      this.dependencies.androidHealthProbeBackoff ?? CTRL_PROXY_READINESS_BACKOFF
-    ).delayForAttempt(failedHealthProbes);
+    return context.androidProbeOverload.retryDelayMs();
   }
 
   private async probeResponsiveClient(
@@ -651,14 +653,24 @@ export class RunnerReadinessService {
     attempts: number,
     androidManager?: ReadinessAndroidManager,
   ): Promise<boolean> {
-    if (context.device.platform === "android" && context.ctrlProxyProcessRestartAttempted) {
-      context.ctrlProxyUnresponsiveSinceMs ??= this.dependencies.timer.now();
-    }
+    const timeoutMs = this.phases.probeTimeout(context);
+    const startedMs = this.dependencies.timer.now();
     const ready = await this.phases.runPhase(context, "runner-health", attempts, {
-      operation: () => client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
+      operation: () => client.verifyServiceReady(1, 0, timeoutMs),
+    });
+    if (context.device.platform !== "android") {
+      return ready;
+    }
+    const nowMs = this.dependencies.timer.now();
+    context.androidProbeOverload.recordProbe({
+      ready,
+      connected: client.isConnected(),
+      // Slack for timer granularity: a timed-out probe can resolve a few ms
+      // before its nominal timeout as measured by the wall clock.
+      timedOut: nowMs - startedMs >= timeoutMs - PROBE_TIMEOUT_CLOCK_SLACK_MS,
+      nowMs,
     });
     if (ready) {
-      context.ctrlProxyUnresponsiveSinceMs = null;
       return true;
     }
     await this.recoverConnectedButUnresponsiveAndroid(context, androidManager, client, attempts);
@@ -800,8 +812,8 @@ export class RunnerReadinessService {
     const restarted = await this.phases.runPhase(context, "runner-health", attempts, {
       operation: () => manager.forceRestartProcess!(),
     });
-    context.ctrlProxyUnresponsiveSinceMs = this.dependencies.timer.now();
     if (restarted) {
+      context.androidProbeOverload.recordProcessRestart();
       client.resetConnectionBudget?.();
     }
   }
@@ -811,22 +823,14 @@ export class RunnerReadinessService {
     client: ReadinessClient,
     attempts: number,
   ): Promise<void> {
-    if (!client.isConnected()) {
-      context.ctrlProxyUnresponsiveSinceMs = null;
-      return;
-    }
-    const since = context.ctrlProxyUnresponsiveSinceMs;
-    const limit =
-      this.dependencies.ctrlProxyUnresponsiveAfterRestartFailMs ??
-      CTRL_PROXY_UNRESPONSIVE_AFTER_RESTART_FAIL_MS;
     if (
-      context.device.platform === "android" &&
-      since !== null &&
-      this.dependencies.timer.now() - since >= limit
+      client.isConnected() &&
+      context.androidProbeOverload.shouldFailFast(this.dependencies.timer.now())
     ) {
+      // Time-based like a deadline miss, so callers classify it as a
+      // retryable timeout (RunnerReadinessError.code/retryable).
       await this.failUnresponsiveClient(context, client, "runner-health", {
         attempts,
-        deadlineExhausted: false,
         detail:
           "CtrlProxy accessibility service is connected but not answering hierarchy requests after a process restart. On Android XR, a window such as the XR home environment may not answer accessibility interaction. Retry device acquisition, or kill and restart the device.",
       });

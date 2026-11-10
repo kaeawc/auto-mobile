@@ -2856,110 +2856,170 @@ describe("RunnerReadinessService", () => {
     expect(timer.now()).toBeLessThanOrEqual(2_500);
   });
 
-  test("backs off failed Android health probes and fails promptly after one restart", async () => {
-    const client = new FakeReadinessClient();
+  // #17813: the probe backoff and post-restart fail-fast are for an
+  // overloaded device (probes time out while connected). A phone that is
+  // merely not ready yet keeps the 250 ms cadence and the full window.
+  const androidRequest = (windowMs: number) => ({
+    device: androidDevice(),
+    requestedIdentity: "android",
+    totalDeadlineMs: windowMs,
+    readinessTimeoutMs: windowMs,
+  });
+
+  /** Health probes that fail fast (no timeout) until `readyAtMs`. */
+  const answerAt = (client: FakeReadinessClient, timer: FakeTimer, readyAtMs: number) => {
     client.healthResults = [];
+    const verify = client.verifyServiceReady.bind(client);
+    client.verifyServiceReady = async (attempts, delayMs, timeoutMs) => {
+      await verify(attempts, delayMs, timeoutMs);
+      return timer.now() >= readyAtMs;
+    };
+  };
+
+  /** Every health probe waits out its whole timeout, as on the XR headset. */
+  const timeOutEveryProbe = (client: FakeReadinessClient, timer: FakeTimer) => {
+    client.healthResults = [];
+    client.onHealth = async (timeoutMs) => {
+      timer.advanceTime(timeoutMs ?? 0);
+    };
+  };
+
+  test.each([3_000, 8_000])(
+    "detects an Android phone ready at %pms within one 250ms probe interval",
+    async (readyAtMs) => {
+      const client = new FakeReadinessClient();
+      const manager = new FakeAndroidManager();
+      const { service, timer } = createService({ androidClient: client, androidManager: manager });
+      answerAt(client, timer, readyAtMs);
+
+      await service.ensureReady(androidRequest(30_000));
+
+      expect(timer.now()).toBeGreaterThanOrEqual(readyAtMs);
+      expect(timer.now() - readyAtMs).toBeLessThanOrEqual(250);
+      expect(new Set(timer.getSleepHistory())).toEqual(new Set([250]));
+    },
+  );
+
+  test("lets a slow Android emulator that answers at 200s use its whole 420s window", async () => {
+    const client = new FakeReadinessClient();
+    const manager = new FakeAndroidManager();
+    const { service, timer } = createService({ androidClient: client, androidManager: manager });
+    // Slow but answering: each probe fails after 1s, inside the 2s timeout.
+    answerAt(client, timer, 200_000);
+    const onHealth = async () => {
+      timer.advanceTime(1_000);
+    };
+    client.onHealth = onHealth;
+
+    await service.ensureReady(androidRequest(420_000));
+
+    expect(manager.restartCalls).toBe(1);
+    expect(timer.now()).toBeGreaterThanOrEqual(200_000);
+    expect(timer.now() - 200_000).toBeLessThanOrEqual(1_250);
+    expect(new Set(timer.getSleepHistory())).toEqual(new Set([250]));
+  });
+
+  test("does not arm the Android fail-fast when the process restart did not happen", async () => {
+    const client = new FakeReadinessClient();
+    const manager = new FakeAndroidManager();
+    manager.restartResult = false;
+    const { service, timer } = createService({
+      androidClient: client,
+      androidManager: manager,
+      ctrlProxyUnresponsiveAfterRestartFailMs: 3_000,
+    });
+    timeOutEveryProbe(client, timer);
+
+    const error = await service.ensureReady(androidRequest(60_000)).catch((e: unknown) => e);
+
+    expect(manager.restartCalls).toBe(1);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).message).not.toContain("after a process restart");
+    expect(timer.now()).toBeGreaterThanOrEqual(60_000);
+  });
+
+  test("backs off an overloaded Android client and fails fast after the restart", async () => {
+    const client = new FakeReadinessClient();
     const manager = new FakeAndroidManager();
     let restartedAt = -1;
     const { service, timer } = createService({ androidClient: client, androidManager: manager });
     manager.onRestart = () => {
       restartedAt = timer.now();
     };
-    const error = await service
-      .ensureReady({
-        device: androidDevice(),
-        requestedIdentity: "android",
-        totalDeadlineMs: 420_000,
-        readinessTimeoutMs: 420_000,
-      })
-      .catch((thrown: unknown) => thrown);
+    timeOutEveryProbe(client, timer);
 
-    expect(timer.getSleepHistory().slice(0, 7)).toEqual([250, 500, 1000, 2000, 4000, 4000, 4000]);
-    expect(client.healthCalls).toBeLessThan(30);
+    const error = await service.ensureReady(androidRequest(420_000)).catch((e: unknown) => e);
+
+    const sleeps = timer.getSleepHistory();
+    // The restart runs after the 2nd failed probe and the new process must
+    // show the overload itself: three timeouts in a row at the base cadence,
+    // then the backoff.
+    expect(sleeps.slice(0, 9)).toEqual([250, 250, 250, 250, 250, 500, 1_000, 2_000, 4_000]);
+    expect(sleeps.filter((ms) => ms === 4_000).length).toBeGreaterThan(10);
     expect(manager.restartCalls).toBe(1);
     expect(restartedAt).toBeGreaterThanOrEqual(0);
     expect(timer.now() - restartedAt).toBeGreaterThanOrEqual(90_000);
-    expect(timer.now() - restartedAt).toBeLessThanOrEqual(94_000);
-    expect(timer.now()).toBeLessThan(100_000);
+    expect(timer.now() - restartedAt).toBeLessThanOrEqual(110_000);
+    expect(timer.now()).toBeLessThan(150_000);
+    expect(client.healthCalls).toBeLessThan(60);
     expect(error).toBeInstanceOf(RunnerReadinessError);
     const failure = error as RunnerReadinessError;
-    expect(failure.deadlineExhausted).toBe(false);
+    expect(failure.code).toBe("timeout");
+    expect(failure.retryable).toBe(true);
     expect(failure.message).toContain("connected but not answering hierarchy requests");
     expect(failure.message).toContain("XR home environment");
     expect(failure.message).toContain("Retry device acquisition, or kill and restart the device");
   });
 
-  test("resets Android probe backoff on disconnect and succeeds on a later probe", async () => {
+  test("drops back to the base cadence when an overloaded Android probe fails fast", async () => {
     const client = new FakeReadinessClient();
+    const manager = new FakeAndroidManager();
+    // No restart happens, so the timeout streak is not reset by one.
+    manager.restartResult = false;
+    const { service, timer } = createService({
+      androidClient: client,
+      androidManager: manager,
+      androidHealthProbeBackoff: fixedBackoff(1_000),
+    });
     client.healthResults = [false, false, false, false, false, true];
-    client.onHealth = async () => {
-      if (client.healthCalls === 4) {
-        client.connected = false;
+    client.onHealth = async (timeoutMs) => {
+      // Fast-path probe plus three loop probes time out; the fifth fails fast.
+      if (client.healthCalls <= 4) {
+        timer.advanceTime(timeoutMs ?? 0);
       }
     };
-    const { service, timer } = createService({ androidClient: client });
-    const request = {
-      device: androidDevice(),
-      requestedIdentity: "android",
-      totalDeadlineMs: 30_000,
-      readinessTimeoutMs: 30_000,
-    };
-    await service.ensureReady(request);
-    expect(timer.getSleepHistory()).toEqual([250, 500, 1000, 250]);
-    timer.clearHistory();
-    client.healthResults = [false, false, true];
-    await service.ensureReady(request);
-    expect(timer.getSleepHistory()).toEqual([250]);
+
+    await service.ensureReady(androidRequest(30_000));
+
+    expect(timer.getSleepHistory()).toEqual([250, 250, 1_000, 250]);
   });
 
-  test("restarts the post-restart unresponsive clock after disconnection", async () => {
+  test("restarts the overload clock after an Android disconnect", async () => {
     const client = new FakeReadinessClient();
-    client.healthResults = [];
     const manager = new FakeAndroidManager();
     const { service, timer } = createService({
       androidClient: client,
       androidManager: manager,
-      androidHealthProbeBackoff: fixedBackoff(1000),
-      ctrlProxyUnresponsiveAfterRestartFailMs: 3000,
+      androidHealthProbeBackoff: fixedBackoff(1_000),
+      ctrlProxyUnresponsiveAfterRestartFailMs: 20_000,
     });
-    client.onHealth = async () => {
-      if (client.healthCalls === 5) {
+    timeOutEveryProbe(client, timer);
+    let disconnectedAt = -1;
+    const onHealth = client.onHealth!;
+    client.onHealth = async (timeoutMs) => {
+      await onHealth(timeoutMs);
+      if (manager.restartCalls === 1 && disconnectedAt < 0 && timer.now() >= 30_000) {
+        disconnectedAt = timer.now();
         client.connected = false;
       }
     };
-    const error = await service
-      .ensureReady({
-        device: androidDevice(),
-        requestedIdentity: "android",
-        totalDeadlineMs: 420_000,
-        readinessTimeoutMs: 420_000,
-      })
-      .catch((thrown: unknown) => thrown);
-    expect(error).toBeInstanceOf(RunnerReadinessError);
-    expect(timer.now()).toBe(7000);
-    expect(client.connectionCalls).toBe(1);
-    expect(manager.restartCalls).toBe(1);
-  });
 
-  test("uses the injected Android backoff and post-restart failure budget", async () => {
-    const client = new FakeReadinessClient();
-    client.healthResults = [];
-    const { service, timer } = createService({
-      androidClient: client,
-      androidHealthProbeBackoff: fixedBackoff(1000),
-      ctrlProxyUnresponsiveAfterRestartFailMs: 3000,
-    });
-    const error = await service
-      .ensureReady({
-        device: androidDevice(),
-        requestedIdentity: "android",
-        totalDeadlineMs: 420_000,
-        readinessTimeoutMs: 420_000,
-      })
-      .catch((thrown: unknown) => thrown);
+    const error = await service.ensureReady(androidRequest(420_000)).catch((e: unknown) => e);
+
     expect(error).toBeInstanceOf(RunnerReadinessError);
-    expect(timer.getSleepHistory()).toEqual([1000, 1000, 1000, 1000]);
-    expect(timer.now()).toBe(4000);
+    expect((error as RunnerReadinessError).message).toContain("after a process restart");
+    expect(client.connectionCalls).toBe(1);
+    expect(timer.now() - disconnectedAt).toBeGreaterThanOrEqual(20_000);
   });
 
   // Issue #7533: a connected-but-unresponsive CtrlProxy (WebSocket open,
@@ -3001,10 +3061,10 @@ describe("RunnerReadinessService", () => {
     const client = new FakeReadinessClient();
     client.connected = true;
     // index 0: ensureAndroidReadyAttempt's own fast-path probe (fails).
-    // indices 1-4: the steady-state loop's probes over 1.75s with backoff
+    // indices 1-12: the steady-state loop's probes over ~3s (250ms apart)
     // all fail -- comfortably inside the 5s post-rebind grace period.
-    // index 5: the service finally answers.
-    client.healthResults = [false, ...Array(4).fill(false), true];
+    // index 13: the service finally answers.
+    client.healthResults = [false, ...Array(12).fill(false), true];
     const { service } = createService({ androidManager: manager, androidClient: client });
 
     await service.ensureReady({

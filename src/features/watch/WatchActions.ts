@@ -10,7 +10,15 @@ import type {
   TapOnElementOptions,
   TapOnElementResult,
 } from "../../models";
-import { DefaultElementParser } from "../utility/ElementParser";
+import { defaultTimer } from "../../utils/SystemTimer";
+import {
+  matches,
+  matchWatchTapCandidates,
+  watchHierarchyElements,
+  readOpenSmartStack,
+  tapSmartStackAt,
+  tapSmartStackOn,
+} from "./WatchSmartStackTap";
 import { normalizeWatchHierarchy } from "./WatchHierarchy";
 import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
 import { WatchRunnerError } from "./WatchRunnerError";
@@ -111,57 +119,7 @@ async function elements(
   signal?: AbortSignal,
 ): Promise<{ all: Element[]; available: Element[] }> {
   const hierarchy = normalizeWatchHierarchy(await client.hierarchy(signal));
-  const all = new DefaultElementParser()
-    .flattenViewHierarchy(hierarchy)
-    .map((entry) => entry.element);
-  const available = all.filter((element) => {
-    const { left, top, right, bottom } = element.bounds;
-    return (
-      right > left &&
-      bottom > top &&
-      left >= 0 &&
-      top >= 0 &&
-      right <= hierarchy.screenWidth! &&
-      bottom <= hierarchy.screenHeight!
-    );
-  });
-  return { all, available };
-}
-
-function matches(element: Element, selector: { elementId?: string; text?: string }): boolean {
-  return (
-    (selector.elementId !== undefined || selector.text !== undefined) &&
-    (selector.elementId === undefined ||
-      element["resource-id"] === selector.elementId ||
-      element["view-id"] === selector.elementId) &&
-    (selector.text === undefined || element.text === selector.text)
-  );
-}
-
-/**
- * The runner exposes a populated text field's value (or a placeholder) as a same-type, same-bounds
- * child that repeats the field's identifier. An identifier match must count the field once, or an
- * index over several fields sharing an identifier lands on the first field's alias.
- */
-function dropIdentifierAliases(candidates: readonly Element[]): Element[] {
-  const seen = new Set<string>();
-  return candidates.filter((element) => {
-    const { left, top, right, bottom } = element.bounds;
-    const key = `${element["resource-id"] ?? element["view-id"]}|${element.class}|${left},${top},${right},${bottom}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function matchWatchTapCandidates(
-  available: readonly Element[],
-  selector: { elementId?: string; text?: string },
-): Element[] {
-  const matched = available.filter((element) => matches(element, selector));
-  return selector.elementId !== undefined ? dropIdentifierAliases(matched) : matched;
+  return watchHierarchyElements(hierarchy);
 }
 
 /** Stable input-first ordering for sendKeys; ordinary taps retain hierarchy order. */
@@ -178,12 +136,7 @@ export function orderWatchTapCandidates(
     : [...candidates];
 }
 
-export async function watchTapOn(
-  deviceId: string,
-  options: TapOnElementOptions,
-  signal?: AbortSignal,
-  preferTextInput = false,
-): Promise<TapOnElementResult> {
+function validateWatchTapOn(options: TapOnElementOptions): void {
   // Must precede hierarchy reads, not just the tap itself: long press is never advertised.
   if (options.action !== "tap") {
     unsupportedWatchAction(options.action);
@@ -192,8 +145,21 @@ export async function watchTapOn(
   if (options.index !== undefined && (!Number.isInteger(options.index) || options.index < 0)) {
     throw new ActionableError("watchOS tap index must be a non-negative integer.");
   }
+}
+
+export async function watchTapOn(
+  deviceId: string,
+  options: TapOnElementOptions,
+  signal?: AbortSignal,
+  preferTextInput = false,
+): Promise<TapOnElementResult> {
+  validateWatchTapOn(options);
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
+  const stack = await readOpenSmartStack(client, () => defaultTimer.now(), signal);
+  if (stack) {
+    return tapSmartStackOn(client, stack, options, signal);
+  }
   const { all, available } = await elements(client, signal);
   const candidates = orderWatchTapCandidates(
     matchWatchTapCandidates(available, options),
@@ -218,11 +184,9 @@ export async function watchTapOn(
   return { success: true, action: "tap", element };
 }
 
-export async function watchTapAt(
-  deviceId: string,
+function validateWatchTapAt(
   options: TapAtOptions,
-  signal?: AbortSignal,
-): Promise<TapAtResult> {
+): asserts options is TapAtOptions & { x: number; y: number } {
   if (options.action !== undefined && options.action !== "tap") {
     unsupportedWatchAction(options.action);
   }
@@ -240,8 +204,22 @@ export async function watchTapAt(
   ) {
     throw new ActionableError("watchOS tap requires finite non-negative x/y in XCTest points.");
   }
+}
+
+export async function watchTapAt(
+  deviceId: string,
+  options: TapAtOptions,
+  signal?: AbortSignal,
+): Promise<TapAtResult> {
+  validateWatchTapAt(options);
   signal?.throwIfAborted();
-  await watchRunners.require(deviceId).request({ type: "tap", x: options.x, y: options.y }, signal);
+  const client = watchRunners.require(deviceId);
+  const stack = await readOpenSmartStack(client, () => defaultTimer.now(), signal);
+  if (stack) {
+    await tapSmartStackAt(client, stack.hierarchy, options, signal);
+  } else {
+    await client.request({ type: "tap", x: options.x, y: options.y }, signal);
+  }
   return { success: true, x: options.x, y: options.y, action: "tap" };
 }
 

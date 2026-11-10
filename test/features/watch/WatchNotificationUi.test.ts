@@ -50,7 +50,11 @@ test.each([
 
     expect(result).toEqual({ success: true, action: "tap", element: accept });
     // Both captured Accept nodes have the same center in XCTest points.
-    expect(client.commands).toEqual([{ type: "hierarchy" }, { type: "tap", x: 93.5, y: 131 }]);
+    expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
+      { type: "hierarchy" },
+      { type: "tap", x: 93.5, y: 131 },
+    ]);
   },
 );
 
@@ -72,6 +76,6 @@ test.each([
     await expect(watchTapOn(deviceId, { action: "tap", text })).rejects.toThrow(
       "No watch element matched",
     );
-    expect(client.commands).toEqual([{ type: "hierarchy" }]);
+    expect(client.commands).toEqual([{ type: "face", op: "dump" }, { type: "hierarchy" }]);
   },
 );

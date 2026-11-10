@@ -123,39 +123,83 @@ export async function tapSmartStackAt(
   );
 }
 
+/**
+ * Elements outside every widget cell's subtree. Widget descendants carry cell-local frames, so
+ * their own bounds cannot say whether the owning card is on screen or where to tap it (#17810).
+ */
+function outsideWidgetCells(
+  entries: ReadonlyArray<{ element: Element; depth: number }>,
+): Element[] {
+  const outside: Element[] = [];
+  let cellDepth: number | undefined;
+  // Pre-order flattening: a widget cell's subtree is every following entry deeper than the cell.
+  for (const { element, depth } of entries) {
+    if (cellDepth !== undefined && depth <= cellDepth) {
+      cellDepth = undefined;
+    }
+    const identifier = element["resource-id"];
+    if (
+      cellDepth === undefined &&
+      identifier !== undefined &&
+      parseSmartStackWidgetIdentifier(identifier) !== undefined
+    ) {
+      cellDepth = depth;
+    }
+    if (cellDepth === undefined) {
+      outside.push(element);
+    }
+  }
+  return outside;
+}
+
+function cardMatches(
+  card: ReturnType<typeof parseWatchClockFaceDump>["smartStack"]["cards"][number],
+  cell: Element | undefined,
+  options: TapOnElementOptions,
+): boolean {
+  return (
+    (options.text !== undefined && card.texts.includes(options.text)) ||
+    (options.elementId !== undefined && cell?.["resource-id"] === options.elementId)
+  );
+}
+
 export async function tapSmartStackOn(
   client: WatchRunnerClient,
   { hierarchy, smartStack }: ReturnType<typeof parseWatchClockFaceDump>,
   options: TapOnElementOptions,
   signal?: AbortSignal,
 ): Promise<TapOnElementResult> {
-  const { all, available } = watchHierarchyElements(hierarchy);
+  const entries = new DefaultElementParser().flattenViewHierarchy(hierarchy);
+  const all = entries.map((entry) => entry.element);
+  const withCells = smartStack.cards.map((card) => {
+    const cell = all.find((element) => {
+      const identifier = element["resource-id"];
+      return (
+        identifier !== undefined &&
+        (card.type === "widget"
+          ? parseSmartStackWidgetIdentifier(identifier)?.cellId === card.cellId
+          : identifier === `StackCollectionView${card.cellKind}`)
+      );
+    });
+    return { card, cell };
+  });
   // Card bounds are screen-absolute, so off-screen cards are dropped before the index applies.
-  const cards = smartStack.cards
-    .filter((card) => isOnScreen(card.bounds, hierarchy))
-    .map((card) => {
-      const cell = all.find((element) => {
-        const identifier = element["resource-id"];
-        return (
-          identifier !== undefined &&
-          (card.type === "widget"
-            ? parseSmartStackWidgetIdentifier(identifier)?.cellId === card.cellId
-            : identifier === `StackCollectionView${card.cellKind}`)
-        );
-      });
-      return { card, cell };
-    })
-    .filter(
-      ({ card, cell }) =>
-        (options.text !== undefined && card.texts.includes(options.text)) ||
-        (options.elementId !== undefined && cell?.["resource-id"] === options.elementId),
-    );
-  const matched = matchWatchTapCandidates(available, options)[options.index ?? 0];
+  const cards = withCells.filter(
+    ({ card, cell }) => isOnScreen(card.bounds, hierarchy) && cardMatches(card, cell, options),
+  );
+  // The fallback reaches elements outside widget cells, such as the header buttons.
+  const fallback = outsideWidgetCells(entries).filter((element) =>
+    isOnScreen(element.bounds, hierarchy),
+  );
+  const matched = matchWatchTapCandidates(fallback, options)[options.index ?? 0];
   const selected = cards[options.index ?? 0];
   const element = cards.length > 0 ? (selected?.cell ?? (selected ? matched : undefined)) : matched;
   if (!element) {
+    const offScreen = withCells.some(
+      ({ card, cell }) => !isOnScreen(card.bounds, hierarchy) && cardMatches(card, cell, options),
+    );
     throw new ActionableError(
-      "The Smart Stack is open, but no element matched. To observe it, call the face dump, use tapAt with coordinates in points, or call launchApp to bring the host app forward.",
+      `The Smart Stack is open, but no element matched.${offScreen ? " A matching card is off-screen; scroll the Smart Stack (for example with rotateCrown) until it is wholly on screen, then tap again." : ""} To observe it, call the face dump, use tapAt with coordinates in points, or call launchApp to bring the host app forward.`,
     );
   }
   // Widget descendants use cell-local frames; only the parsed card bounds are screen-absolute.

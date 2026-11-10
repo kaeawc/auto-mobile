@@ -372,9 +372,12 @@ export class ImeCommitTyper implements AndroidModeTyper {
       return enabledResult;
     }
     const prior = keyboardToRestore(priorResult.imeId, enabledResult.enabledImeIds);
-    const priorSubtype = await this.restoration
-      .pinnedImeCatalog()
-      .readSubtype(prior ?? AUTO_MOBILE_IME_ID, signal);
+    // The selected subtype setting belongs to the active (AutoMobile) IME, not to a fallback
+    // keyboard: record the implicit subtype so restore does not demand one it never advertised.
+    const priorSubtype =
+      prior === priorResult.imeId
+        ? await this.restoration.pinnedImeCatalog().readSubtype(prior ?? AUTO_MOBILE_IME_ID, signal)
+        : { id: null };
     return { success: true, prior, wasEnabled: enabledResult.enabled, priorSubtype };
   }
 

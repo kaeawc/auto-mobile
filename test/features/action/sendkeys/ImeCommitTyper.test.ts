@@ -308,10 +308,11 @@ describe("ImeCommitTyper", () => {
       snapshot: {
         prior: "com.google.android.inputmethod.latin/.LatinIME",
         wasEnabled: true,
-        priorSubtype: { id: 3 },
+        priorSubtype: { id: null },
       },
     });
-    expect(subtypeReads).toEqual(["com.google.android.inputmethod.latin/.LatinIME"]);
+    // The selected subtype is the AutoMobile IME's; it is never attributed to the fallback.
+    expect(subtypeReads).toEqual([]);
   });
 
   test("keyboardToRestore keeps a real prior keyboard and the AutoMobile IME only without another", () => {

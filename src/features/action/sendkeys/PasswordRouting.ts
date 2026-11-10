@@ -5,6 +5,7 @@ import type { KeyEventPlan } from "../../../utils/android-cmdline-tools/asciiKey
 import { hasFocusedTextInput } from "../ClearText";
 import { focusedImeFieldClass } from "../imeFailureDiagnostics";
 import { AUTO_MOBILE_IME_ID } from "../AndroidImeCatalog";
+import { getCapturedKeyboard } from "../../observe/output/elementProvenance";
 import {
   NoFocusedEditableError,
   isPrintableAscii,
@@ -27,7 +28,11 @@ const AUTO_MOBILE_IME_PACKAGE = AUTO_MOBILE_IME_ID.split("/")[0];
  * field, so it can never succeed there; the accessibility path finds the input itself (#17801).
  */
 export function unusableImeKeyboard(observation: ObserveResult): string | undefined {
-  const keyboard = observation.keyboard;
+  // A raw observation carries the keyboard the capture vouched for on `elements`; the
+  // top-level field is only filled in by output sanitization.
+  const keyboard =
+    observation.keyboard ??
+    (observation.elements ? getCapturedKeyboard(observation.elements) : undefined);
   if (!keyboard?.visible || keyboard.package === AUTO_MOBILE_IME_PACKAGE) {
     return undefined;
   }

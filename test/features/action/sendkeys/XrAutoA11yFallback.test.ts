@@ -8,6 +8,7 @@ import {
   unusableImeKeyboard,
 } from "../../../../src/features/action/sendkeys/PasswordRouting";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
+import { setCapturedKeyboard } from "../../../../src/features/observe/output/elementProvenance";
 import { android, createSendKeysHarness, focused } from "../SendKeysTestHarness";
 
 interface CapturedSendKeys {
@@ -69,6 +70,27 @@ describe("Auto falls back to a11y when the AutoMobile IME cannot be used (#17801
     expect(harness.committed).toEqual([]);
     // No IME was selected, so there is nothing to restore at session release.
     expect(harness.adb.getExecutedCommands().filter((c) => c.includes("ime set"))).toEqual([]);
+  });
+
+  test("the raw observer shape, with the keyboard only on elements, also falls back", async () => {
+    // The live observer leaves the top-level `keyboard` unset; the response sanitizer adds it.
+    const elements: NonNullable<ObserveResult["elements"]> = {
+      clickable: [],
+      scrollable: [],
+      text: [],
+      media: [],
+    };
+    setCapturedKeyboard(elements, xrObservation.keyboard);
+    const raw: ObserveResult = { ...xrObservation, keyboard: undefined, elements };
+    expect(unusableImeKeyboard(raw)).toBe(GBOARD);
+    const harness = xrHarness(raw);
+    const result = await harness.executor.type({ action: "type", text: "wifi" });
+    expect(result).toMatchObject({
+      success: true,
+      resolvedMode: "a11y",
+      warning: autoA11yFallbackWarning(GBOARD),
+    });
+    expect(harness.inserted).toEqual(["wifi"]);
   });
 
   test("auto replace on the headset sets the text through accessibility", async () => {

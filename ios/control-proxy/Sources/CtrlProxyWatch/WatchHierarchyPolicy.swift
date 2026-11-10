@@ -126,6 +126,7 @@ func watchCrownWakePoint(in hierarchy: SdkViewHierarchy) -> CGVector? {
 /// An unchanged tree alone cannot justify repeating a delta. Retry only when the same focused
 /// accessible value is unchanged, and the safe wake has not changed the screen or focused control.
 /// Without a stable baseline, compare only the last baseline observation's focused value; never wake or retry.
+/// If the hierarchy changes while that value is unchanged, allow one more observation before rejecting the turn.
 /// Missing comparable values or post-rotation snapshots skip this check because the turn may have taken effect.
 @MainActor
 func watchVerifiedCrownRotation(
@@ -134,17 +135,17 @@ func watchVerifiedCrownRotation(
 )
     throws
 {
-    var lastBaselineValue: WatchCrownValue?
+    var lastBaselineObservation: (hierarchy: SdkViewHierarchy, value: WatchCrownValue?)?
     func observation() throws -> (hierarchy: SdkViewHierarchy, value: WatchCrownValue?) {
         let hierarchy = try snapshots.snapshot()
         return (hierarchy, try? focusedValue())
     }
     func baseline() -> (hierarchy: SdkViewHierarchy, value: WatchCrownValue?)? {
         guard var previous = try? observation() else { return nil }
-        lastBaselineValue = previous.value
+        lastBaselineObservation = previous
         for _ in 0 ..< 2 {
             guard let current = try? observation() else { return nil }
-            lastBaselineValue = current.value
+            lastBaselineObservation = current
             if !watchCrownChangedHierarchy(before: previous.hierarchy, after: current.hierarchy),
                previous.value == current.value
             { return current }
@@ -196,7 +197,8 @@ func watchVerifiedCrownRotation(
     }
     try rotate()
     guard let before else {
-        if let old = lastBaselineValue, let after = try? observation(), let new = after.value,
+        if let lastBaselineObservation, let old = lastBaselineObservation.value,
+           let after = rotationObservation(after: lastBaselineObservation), let new = after.value,
            old.elementType == new.elementType, old.identifier == new.identifier, old.value == new.value
         { throw unchanged() }
         return

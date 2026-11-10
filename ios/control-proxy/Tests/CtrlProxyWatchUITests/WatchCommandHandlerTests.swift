@@ -844,9 +844,27 @@ final class WatchCommandHandlerTests: XCTestCase {
         ])
     }
 
-    func testCrownUnstableBaselineRejectsUnchangedFocusedValueWithoutWakeOrRetry() {
-        let source = ScriptedCrownSource(labels: ["launching", "settling", "crown 0", "updated"])
-        source.focusedValues = [crownValue("1"), crownValue("2"), crownValue("0"), crownValue("0")]
+    func testCrownUnstableBaselineAcceptsLaggingFocusedValueOnNextReadWithoutWakeOrRetry() {
+        let source = ScriptedCrownSource(labels: ["launching", "settling", "crown 0", "updated", "updated"])
+        source.focusedValues = [
+            crownValue("1"), crownValue("2"), crownValue("0"), crownValue("0"), crownValue("2"),
+        ]
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":3}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.appliedDelta, 3)
+        XCTAssertEqual(source.taps, 0)
+        XCTAssertEqual(source.events, [
+            "snapshot:launching", "snapshot:settling", "snapshot:crown 0", "rotate",
+            "snapshot:updated", "snapshot:updated",
+        ])
+    }
+
+    func testCrownUnstableBaselineRejectsUnchangedFocusedValueAfterRereadWithoutWakeOrRetry() {
+        let source = ScriptedCrownSource(labels: ["launching", "settling", "crown 0", "updated", "updated"])
+        source.focusedValues = [
+            crownValue("1"), crownValue("2"), crownValue("0"), crownValue("0"), crownValue("0"),
+        ]
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         let response = handler.handle(Data(#"{"type":"crown","delta":3}"#.utf8))
         XCTAssertFalse(response.success)
@@ -856,7 +874,8 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(source.appliedDelta, 3)
         XCTAssertEqual(source.taps, 0)
         XCTAssertEqual(source.events, [
-            "snapshot:launching", "snapshot:settling", "snapshot:crown 0", "rotate", "snapshot:updated",
+            "snapshot:launching", "snapshot:settling", "snapshot:crown 0", "rotate",
+            "snapshot:updated", "snapshot:updated",
         ])
     }
 

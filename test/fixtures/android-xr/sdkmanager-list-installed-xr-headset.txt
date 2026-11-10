@@ -1,0 +1,2 @@
+Installed packages:
+  system-images/android-34/google-xr/arm64-v8a                           canary 8.0.0     ->        7.0.0          Google Play XR API v1 ARM 64 v8a System Image (Developer Preview)

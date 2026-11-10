@@ -84,6 +84,7 @@ portable test/features/action/DragAndDropIos.test.ts                     # route
 portable test/features/action/InputText.iosImeAction.test.ts             # asserts Android failure reporting too
 portable test/features/action/IosClearEntryPoints.test.ts                # asserts Android ClearText keeps acknowledgement-only clearing
 portable test/features/action/IosSelectionScreenSize.test.ts             # tapAny geometry for iOS and Android
+portable test/features/action/iosTypedTextMissingBaseline.test.ts      # pure typed-text comparison and sendKeys executor over fakes
 portable test/features/action/TapOnElement.iosCachedResolution.test.ts   # Android failure text stays byte-identical
 portable test/features/action/TapOnElement.iosClippedTargetOwnership.test.ts # PIN cases for Android dispatch
 portable test/features/action/SetUIState.iosSafariEmptyValue.test.ts      # SetUIState fakes plus committed captures; no iOS host needed

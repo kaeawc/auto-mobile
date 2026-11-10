@@ -149,9 +149,10 @@ direction, so when focus still has not moved the walk presses tab once and tries
 View `EditText` (one not inside a Compose screen, with or without a `resource-id`) never gets tab,
 since tab could type into it. If focus still does not move, `focusNavigation.status` is `stuck`,
 `focusNavigation.blockedBy` is `ime` or `editable`, `focusNavigation.escapes` lists the keys tried
-(`back`, `tab`), and the error names the trapped field and what to do: for a View field, hide the
-keyboard with `pressButton` `back`, press `pressButton` `down`, observe, then retry; for a Compose
-field, hide the keyboard with `pressButton` `back`, then press `sendKeys` key `tab`. An IME action
+(`back`, `tab`), and the error names the trapped field and what to do: for a View field no D-pad
+direction leaves it, so press `pressButton` `back` to leave the screen and reach the target from
+another route (if the keyboard was still shown, hide it with `back` and observe first); for a
+Compose field, hide the keyboard with `pressButton` `back`, then press `sendKeys` key `tab`. An IME action
 such as `sendKeys` key `next` or `done` does not move D-pad focus out of the field.
 `focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
 `accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,

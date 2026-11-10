@@ -616,11 +616,26 @@ function tabEscapes(screen: FocusScreen, focused: Element): boolean {
   return !isEditableElementProperties(focused) || !isViewTextField(screen, focused);
 }
 
-/** The keys a caller presses to leave the field: back then down for a View field, else tab. */
-function trapAdvice(viewField: boolean, escapes: readonly FocusTrapEscape[]): string {
+/** Where a caller goes once no key leaves a View field: off the screen, not another arrow. */
+const LEAVE_SCREEN_ADVICE =
+  "press pressButton back to leave the screen and reach the target from another route, observe, then retry";
+
+/**
+ * What a caller does next: tab for a Compose field, and for a View field only keys no read has
+ * already shown to fail. A View `EditText` on Android TV keeps focus on every direction even with
+ * the keyboard hidden (#17741), so once the arrows were retried without the keyboard, no D-pad
+ * move is advised; before that, only hiding the keyboard is.
+ */
+function trapAdvice(
+  blocker: FocusNavigateBlocker,
+  viewField: boolean,
+  escapes: readonly FocusTrapEscape[],
+): string {
   // An IME action (sendKeys next/done) does not move D-pad focus out of a TV text field (#17378).
   if (viewField) {
-    return "Hide the keyboard with pressButton back, press pressButton down to move focus out of the field, observe, then retry";
+    return blocker === "ime" && !escapes.includes("back")
+      ? `Hide the keyboard with pressButton back and observe; if no D-pad direction then moves focus out of the field, ${LEAVE_SCREEN_ADVICE}`
+      : `No D-pad direction moves focus out of this field; ${LEAVE_SCREEN_ADVICE}`;
   }
   if (escapes.includes("tab")) {
     return "Focus did not leave the field with back, the D-pad or tab; observe, then retry from another route";
@@ -651,7 +666,7 @@ function trapMessage(
       : viewField
         ? "; arrow keys do not leave it and tab would type into it"
         : "; arrow keys do not leave it";
-  return `${trap}${tried}. ${trapAdvice(viewField, escapes)}`;
+  return `${trap}${tried}. ${trapAdvice(blocker, viewField, escapes)}`;
 }
 
 export class FocusNavigate {

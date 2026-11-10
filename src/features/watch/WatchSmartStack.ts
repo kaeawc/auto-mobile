@@ -183,6 +183,27 @@ function toSmartStack(
   };
 }
 
+/** A widget card with every accessibility label inside its cell, such as the app-name label. */
+export interface SmartStackWidgetCellReading {
+  card: SmartStackWidgetCard;
+  labels: string[];
+}
+
+/**
+ * Read only the widget cells of a clockface dump, in hierarchy order, keeping each cell's
+ * labels so a cell whose identifier lost its names can still be tied to an app.
+ * Throws an `ActionableError` when the dump has no element subtree with a window frame.
+ */
+export function readSmartStackWidgetCells(dump: string): SmartStackWidgetCellReading[] {
+  const tree = parseXcuiDebugDescription(dump, {
+    bundleId: WATCH_CLOCK_FACE_BUNDLE_ID,
+    timestamp: 0,
+  });
+  return collectCells(tree.root).flatMap(({ cell, card }) =>
+    card?.type === "widget" ? [{ card, labels: distinctLabels(descendants(cell)) }] : [],
+  );
+}
+
 /**
  * Parse a `com.apple.clockface` XCUI debugDescription dump into the watch observation hierarchy
  * (widget cells carry the `widget` role) and the typed Smart Stack cards.

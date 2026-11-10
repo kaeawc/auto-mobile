@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ENV, readEnvRaw } from "../../config/env";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { execFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
 import { runExecSeam } from "../ExecSeam";
@@ -73,7 +74,7 @@ export class DefaultCarPlayScreenPowerer implements CarPlayScreenPowerer {
   }
 
   private async run(udid: string, action: string, enable: boolean): Promise<CarPlayPowerState> {
-    const path = this.env.AUTOMOBILE_CARPLAY_POWER_HELPER_PATH;
+    const path = readEnvRaw(ENV.CARPLAY_POWER_HELPER_PATH, this.env);
     if (!path?.trim()) {
       throw new ActionableError(
         "Build ios/carplay-power and set AUTOMOBILE_CARPLAY_POWER_HELPER_PATH to its carplay-power-helper executable.",

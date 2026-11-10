@@ -19,7 +19,8 @@ export type FeatureFlagKey =
   | "actions-no-observe"
   | "actions-compact-metadata"
   | "device-condition"
-  | "ios-sdk-observation-bridge";
+  | "ios-sdk-observation-bridge"
+  | "observe-app-interactive";
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
@@ -202,5 +203,12 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     description:
       "On iOS, merge the app's registered AutoMobile SDK observation bridge into observe and route tapOn on its nodes through it, falling back to XCTest only when the bridge is unavailable or the action is unsupported. Disable to use XCTest alone.",
     defaultValue: true,
+  },
+  {
+    key: "observe-app-interactive",
+    label: "Interactive observe App",
+    description:
+      "Spike (#17767): MCP Apps hosts get an observe view with an element picker that shows the tapped element's selector and can ask the host to run tapOn. Off by default; clients that do not render MCP Apps are unaffected.",
+    defaultValue: false,
   },
 ];

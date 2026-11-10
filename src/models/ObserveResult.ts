@@ -258,6 +258,13 @@ export type ObserveResult = {
   screenshotCaptureSource?: "device" | "observation-cache";
   screenshotCapturedAt?: string;
   screenshotAgeMs?: number;
+  /**
+   * Post-action screenshot capture time minus the hierarchy's host receipt time,
+   * in ms (#17765, #17787). Both are host-clock times, so device skew cannot shift it.
+   */
+  screenshotHierarchyLagMs?: number;
+  /** True when that lag exceeded the pairing threshold: the pixels may show a later frame. */
+  screenshotHierarchyMismatch?: boolean;
   screenshotFreshFailure?: { code: string; message: string; retryable: boolean };
   screenshotFormat?: "png" | "jpeg" | "webp";
   screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";
@@ -339,6 +346,9 @@ export type ObserveResult = {
 
   /** View hierarchy data */
   viewHierarchy?: ViewHierarchyResult;
+
+  /** visionOS: bundle ID the connected runner was started for; absent without a runner target or hierarchy. */
+  hierarchyBundleId?: string;
 
   /**
    * Why a served observation or diff may be incomplete (issues #6601, #6933).

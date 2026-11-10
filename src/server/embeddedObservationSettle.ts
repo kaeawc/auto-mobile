@@ -10,6 +10,7 @@ import {
 } from "../utils/PostActionCaptureContext";
 import { isAdoptableCapture } from "../features/observe/isAdoptableCapture";
 import type { ObserveResult } from "../models/ObserveResult";
+import type { Platform } from "../models/Platform";
 import type { SettleObserve, SettleOptions } from "../features/observe/interfaces/SettleObserve";
 import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
 import {
@@ -26,7 +27,9 @@ import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/too
 import {
   EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS,
   EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
+  embeddedObservationSettleTickExtensionMs,
 } from "./embeddedObservationSettleBudget";
+import { stampScreenshotHierarchyLag } from "./screenshotHierarchyLag";
 
 export {
   EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS,
@@ -214,6 +217,11 @@ function settleOptions(
     pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
     signal,
     initialMinTimestampMs: hierarchyUpdatedAtToMillis(input.observation.viewHierarchy),
+    // The action's capture is the first diff for ticking-node detection, and a
+    // screen held unsettled only by a ticking or blinking node gets a bounded
+    // extension to prove it, inside the fence's margin (#17749).
+    referenceObservation: input.observation,
+    volatileExtensionMs: embeddedObservationSettleTickExtensionMs(budgetMs),
     // A still screen pushes nothing newer than the action's capture. Skip
     // the push wait so a rejected cache triggers sync re-extraction (#6099)
     // with a newer device timestamp, leaving time for the second stable read.
@@ -510,6 +518,10 @@ export interface EmbeddedObservationSettleContext {
   signal?: AbortSignal;
   /** Drives the settle gate's abort fence; defaults to the real clock. */
   timer?: Timer;
+  /** Screenshot/hierarchy lag above which the pair is marked mismatched (#17765). */
+  screenshotHierarchyLagThresholdMs?: number;
+  /** The resolved device's platform, which decides the lag's clock fallback (#17787). */
+  platform?: Platform;
 }
 
 /**
@@ -566,14 +578,30 @@ export async function settleEmbeddedObservationInResponse(
       writeToolEnvelopePayload(view, view.payload);
     }
     await finalizePendingPostActionCaptures();
-    if (
-      view &&
-      observation &&
-      applyTerminalCaptureFailure(observation, ctx.args, ctx.signal, view.payload)
-    ) {
+    if (view && observation && markTerminalEvidence(observation, view.payload, ctx)) {
       writeToolEnvelopePayload(view, view.payload);
     }
   }
+}
+
+/**
+ * Mark the published frame's final evidence state: a failed explicit-panel capture,
+ * and how far its screenshot trails its hierarchy (#17765). Returns whether it changed.
+ */
+function markTerminalEvidence(
+  observation: ObserveResult,
+  payload: Record<string, unknown>,
+  ctx: EmbeddedObservationSettleContext,
+): boolean {
+  const failed = applyTerminalCaptureFailure(observation, ctx.args, ctx.signal, payload);
+  const stamped =
+    !ctx.internal &&
+    ctx.name !== "observe" &&
+    stampScreenshotHierarchyLag(observation, {
+      thresholdMs: ctx.screenshotHierarchyLagThresholdMs,
+      platform: ctx.platform,
+    });
+  return failed || stamped;
 }
 
 async function settleEmbeddedObservationResponse(

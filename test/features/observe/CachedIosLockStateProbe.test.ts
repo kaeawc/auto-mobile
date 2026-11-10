@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { CachedIosLockStateProbe } from "../../../src/features/observe/ios/CachedIosLockStateProbe";
 import type { IosLockStateReading } from "../../../src/features/observe/ios/IosLockStateProbe";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 
 const known: IosLockStateReading = { kind: "known", lock: { locked: true, keyguardShowing: true } };
 function harness(options: ConstructorParameters<typeof CachedIosLockStateProbe>[2] = {}) {
@@ -328,4 +329,75 @@ test("invalidation drops the stale reading so a transition is never masked", asy
   const reading = h.cache.read("a");
   fresh.resolve(known);
   expect(await reading).toEqual(known);
+});
+
+// #17770 fixture: the power press acknowledges before SpringBoard publishes the lock, so the
+// first notifyutil read after the press still prints 0; it prints 1 about two seconds later.
+function powerPressHarness(lockAtMs: number, options: { lockTransitionMs?: number } = {}) {
+  const timer = new FakeTimer();
+  let reads = 0;
+  const cache = new CachedIosLockStateProbe(
+    {
+      read: async () => {
+        reads++;
+        return timer.now() >= lockAtMs ? known : unlocked;
+      },
+    },
+    timer,
+    options,
+  );
+  const step = async (ms: number) => {
+    await drainMicrotasks(20);
+    await timer.advanceTimeAsync(ms, () => drainMicrotasks(20));
+  };
+  return { timer, cache, step, reads: () => reads };
+}
+
+test("after a power press an unlocked reading is never served while the lock lands (#17770)", async () => {
+  const h = powerPressHarness(2_000);
+  // Before the press the device was unlocked and cached that way.
+  expect(await h.cache.read("a")).toEqual(unlocked);
+  h.cache.invalidate("a", { expectLocked: true });
+  const view = new BudgetedIosLockStateProbe(h.cache, h.timer);
+  // The press result's embedded observation: the budget expires before the lock lands.
+  const embedded = view.read("a");
+  await h.step(750);
+  expect(await embedded).toEqual({ kind: "unknown", reason: "pending" });
+  // A follow-up observe while the transition is pending is not served unlocked either.
+  const early = view.read("a");
+  await h.step(750);
+  expect(await early).toEqual({ kind: "unknown", reason: "pending" });
+  // The background poll sees lockstate 1 and fills the cache for the next observe.
+  await h.step(500);
+  expect(await view.read("a")).toEqual(known);
+  expect(h.reads()).toBe(1 + 9);
+});
+
+test("a lock that lands within the observe budget is reported locked", async () => {
+  const h = powerPressHarness(250);
+  h.cache.invalidate("a", { expectLocked: true });
+  const reading = new BudgetedIosLockStateProbe(h.cache, h.timer).read("a");
+  await h.step(250);
+  expect(await reading).toEqual(known);
+});
+
+test("the lock-transition wait is bounded and then trusts the host reading", async () => {
+  const h = powerPressHarness(Number.POSITIVE_INFINITY, { lockTransitionMs: 1_000 });
+  h.cache.invalidate("a", { expectLocked: true });
+  const reading = h.cache.read("a");
+  await h.step(1_000);
+  expect(await reading).toEqual(unlocked);
+  expect(h.reads()).toBe(5);
+});
+
+test("a plain invalidation cancels a pending lock transition", async () => {
+  const h = powerPressHarness(Number.POSITIVE_INFINITY);
+  h.cache.invalidate("a", { expectLocked: true });
+  const view = new BudgetedIosLockStateProbe(h.cache, h.timer);
+  const pending = view.read("a");
+  await h.step(750);
+  expect(await pending).toEqual({ kind: "unknown", reason: "pending" });
+  // wakeAndUnlock-style invalidation: an unlocked reading is now the real answer.
+  h.cache.invalidate("a");
+  expect(await h.cache.read("a")).toEqual(unlocked);
 });

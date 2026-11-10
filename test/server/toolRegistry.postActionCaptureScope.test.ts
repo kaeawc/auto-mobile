@@ -101,7 +101,8 @@ describe("ToolRegistry post-action capture scope", () => {
       });
       registry.registerDeviceAware("sendKeys", "sendKeys capture probe", z.object({}), async () => {
         const result = await h.action.execute(h.commands);
-        expect(h.captures).toHaveLength(0);
+        // Only the submitting (settle-gated) sendKeys defers to the response boundary (#17765).
+        expect(h.captures).toHaveLength(scenario === "imeAction" ? 0 : 1);
         return createStructuredToolResponse(result);
       });
       try {

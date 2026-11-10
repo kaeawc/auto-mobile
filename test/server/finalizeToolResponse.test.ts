@@ -1878,6 +1878,8 @@ describe("finalizeToolResponse", () => {
         screenshotExpiresAt: 600_000,
         screenshotCapturedAt: "1970-01-01T00:00:08.000Z",
         screenshotAgeMs: 2_000,
+        screenshotHierarchyLagMs: 3_000,
+        screenshotHierarchyMismatch: true,
         screenshotFreshFailure: {
           code: "SCREENSHOT_CAPTURE_FAILED",
           message: "previous capture failed",

@@ -2,7 +2,8 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
-import { sessionDisplayPinnedHandler } from "../../../src/server/pipeline/deviceCallDispatch";
+import { createKeyboardHandler } from "../../../src/server/interactionToolHandlers";
+import { withInstalledImeRestore } from "../../../src/server/keyboardInstalledImeRestore";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { clearAndroidImeQuarantine } from "../../../src/features/action/androidImeLock";
 import {
@@ -467,7 +468,7 @@ describe("IME failure diagnostics", () => {
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
-  test("deferred span restoration failure reaches the next tool and retains the last IME type's progress", async () => {
+  test("deferred span restoration failure reaches the next keyboard tool and retains the last IME type's progress", async () => {
     const h = harness("@everyone");
     const priors: (string | null)[] = [];
     h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
@@ -483,21 +484,12 @@ describe("IME failure diagnostics", () => {
     expect(result).toMatchObject({ success: true, completedCommands: 3 });
     expect(result.commands[0].success).toBe(true);
     expect(h.pendingImeRestores.hasPending(device.deviceId)).toBe(true);
-    let dispatched = false;
-    const trigger = sessionDisplayPinnedHandler({
-      name: "tapAt",
-      schema: {},
-      pendingImeRestores: h.pendingImeRestores,
-      handler: async () => {
-        dispatched = true;
-        return { content: [] };
-      },
-    });
-    const failure = await trigger(device, {}).catch((error: unknown) => error);
+    // Session release would restore it; an installed-IME keyboard action restores it first (#16428).
+    const keyboard = withInstalledImeRestore(createKeyboardHandler({}), h.pendingImeRestores);
+    const failure = await keyboard(device, { action: "listImes" }).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ActionableError);
     expect(String(failure)).toContain("Could not restore the original keyboard");
     expect(String(failure)).toContain("keyboard setIme com.example.keyboard/.Ime");
-    expect(dispatched).toBe(false);
     expect(h.pendingImeRestores.hasPending(device.deviceId)).toBe(false);
     expect(result.commands[1]).toMatchObject({
       action: "type",

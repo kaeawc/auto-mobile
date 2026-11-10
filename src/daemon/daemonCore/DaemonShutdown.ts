@@ -8,6 +8,8 @@ import {
   settleShutdownMigrations,
 } from "../shutdownSteps";
 import { releaseDaemonTaskLeases } from "../tasks/daemonTaskManager";
+import { restorePendingImesForShutdown } from "../shutdownImeRestore";
+import type { PendingImeRestoreRegistry } from "../../features/action/sendkeys/PendingImeRestore";
 import { logger } from "../../utils/logger";
 import { defaultLocationRouteRegistry } from "../../features/utility/LocationRoutePlayer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -74,6 +76,8 @@ function shutdownStage(
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 const DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS = 2_000;
 const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
+// Bound on restoring keyboards still replaced by the AutoMobile IME at stop (#17768).
+const SHUTDOWN_IME_RESTORE_TIMEOUT_MS = 1_000;
 // Bound on removing recorded CtrlProxy forwards and releasing forwarding leases at stop.
 const CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS = 3_000;
 
@@ -127,6 +131,8 @@ export interface DaemonShutdownHost {
   stopSessionTimers: DaemonSessions["stopSessionTimers"];
   cleanupDaemonFilesForShutdown: DaemonIdentity["cleanupDaemonFilesForShutdown"];
   cancelAndReleaseSession: DaemonSessions["cancelAndReleaseSession"];
+  /** Keyboards to restore at stop; the process-wide registry when omitted. */
+  pendingImeRestores?: Pick<PendingImeRestoreRegistry, "pendingDeviceIds" | "flush">;
 }
 
 /** Runs bounded shutdown stages in order, preserving release notifications and database writes. */
@@ -421,10 +427,17 @@ export class DaemonShutdown {
       shutdownStage(
         "active device sessions",
         "session release teardown and terminal-row persistence",
-        (stage) =>
-          this.releaseActiveSessionsForShutdown(
+        async (stage) => {
+          await this.releaseActiveSessionsForShutdown(
             boundWithinStage(stage, SESSION_RELEASE_DRAIN_TIMEOUT_MS),
-          ),
+          );
+          // Released sessions restored their own keyboard; restore what no session owned.
+          await restorePendingImesForShutdown(
+            this.host.services.timer(),
+            boundWithinStage(stage, SHUTDOWN_IME_RESTORE_TIMEOUT_MS),
+            this.host.pendingImeRestores,
+          );
+        },
       ),
       shutdownStage(
         // Session release broadcasts must be written while subscribed proxy

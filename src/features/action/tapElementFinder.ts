@@ -1,4 +1,4 @@
-import { TapTargetUnavailableError } from "./tapTargetSupport";
+import { exactTextMissMessage, TapTargetUnavailableError } from "./tapTargetSupport";
 import type { TapVerificationOptions } from "./tapVerificationOptions";
 import type { TapPointPlanner } from "./tapPointPlanner";
 import { requireTestTag } from "./tapFocusIdentity";
@@ -212,13 +212,38 @@ export class TapElementFinder {
     text: string,
     ctx: TapSelectionContext,
   ): ElementSelectionResult {
+    // Only the single `text` selector opts out of the substring fallback; `textAny` variants and
+    // siblings keep partial matching.
+    const exact = options.exactText === true && options.text === text;
+    if (!exact) {
+      return this.selectText(options, viewHierarchy, { text, partialMatch: true }, ctx);
+    }
+    try {
+      return this.selectText(options, viewHierarchy, { text, partialMatch: false }, ctx);
+    } catch (error) {
+      if (error instanceof ActionableError && error.message.startsWith("Target not found")) {
+        throw new TapTargetUnavailableError(
+          exactTextMissMessage(text, options.container ? " within container" : ""),
+          "not-found",
+        );
+      }
+      throw error;
+    }
+  }
+
+  private selectText(
+    options: TapVerificationOptions,
+    viewHierarchy: ViewHierarchyResult,
+    { text, partialMatch }: { text: string; partialMatch: boolean },
+    ctx: TapSelectionContext,
+  ): ElementSelectionResult {
     return this.deps.elementSelector().select(
       viewHierarchy,
       { text },
       {
         container: options.container,
         screenSizeOptions: options.screenSizeOptions,
-        partialMatch: true,
+        partialMatch,
         caseSensitive: false,
         strategy: options.selectionStrategy,
         intentAction: ctx.lookupAction,

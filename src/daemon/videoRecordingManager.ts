@@ -236,6 +236,7 @@ interface RecordingDisplaySession {
   unsubscribe: () => void;
   device: BootedDevice;
   warning?: string;
+  seededTransition?: VideoRecordingDisplayTransition;
 }
 
 async function defaultResolveAndroidDisplay(
@@ -359,7 +360,8 @@ function beginRecordingDisplaySession(
     warning: display.warning,
   };
   if (display.activePanel.key !== display.panel.key) {
-    session.transitions.push({ atMs: 0, from: display.panel, to: display.activePanel });
+    session.seededTransition = { atMs: 0, from: display.panel, to: display.activePanel };
+    session.transitions.push(session.seededTransition);
   }
   session.unsubscribe = displayTransitions.subscribe(device.deviceId, (next) => {
     const last = session.transitions.at(-1);

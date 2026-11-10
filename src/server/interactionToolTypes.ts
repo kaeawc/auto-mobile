@@ -54,6 +54,8 @@ export interface TapOnArgs {
     textAny?: string[];
     accessibilityLink?: string;
   };
+  /** Match `selector.text` exactly (case-insensitive) instead of falling back to a substring. */
+  exactText?: boolean;
   sibling?: boolean;
   container?: ElementContainerSelector;
   selectionStrategy?: ElementSelectionStrategy;

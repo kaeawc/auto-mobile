@@ -104,7 +104,18 @@ function hasFileTag(text: string, tag: string): boolean {
   );
 }
 
+// A file that exports AUTOMOBILE_TEST_TS_COVERAGE_DIR into BATS_TEST_TMPDIR
+// relocates the coverage tree that both scripts/test-ts.sh and
+// scripts/ci/run-ts-coverage.sh write, so it never touches the real
+// `coverage/` (#17778).
+function relocatesCoverageDirectory(text: string): boolean {
+  return /^\s*export AUTOMOBILE_TEST_TS_COVERAGE_DIR="\$\{?BATS_TEST_TMPDIR\}?\//m.test(text);
+}
+
 function usesRealCoverageDirectory(text: string): boolean {
+  if (relocatesCoverageDirectory(text)) {
+    return false;
+  }
   return (
     /scripts\/ci\/run-ts-coverage\.sh/.test(text) ||
     (/\bbash\s+(?:"\$SCRIPT"|scripts\/test-ts\.sh)\s+coverage\b/.test(text) &&
@@ -136,6 +147,14 @@ describe("bats serial-pass tagging (scripts/ci/run-bats.sh)", () => {
       .map((f) => f.name);
 
     expect(offenders).toEqual([]);
+  });
+
+  test("a coverage-lane file that relocates the coverage tree is hermetic", () => {
+    const relocated = files.find((f) => f.name === "test-ts-coverage-shards.bats");
+    expect(relocated).toBeDefined();
+    expect(relocatesCoverageDirectory(relocated!.text)).toBe(true);
+    expect(usesRealCoverageDirectory(relocated!.text)).toBe(false);
+    expect(usesRealCoverageDirectory("bash scripts/ci/run-ts-coverage.sh out.log\n")).toBe(true);
   });
 
   test("the tag detector recognizes a src/-fixture mutator (guards against a no-op regex)", () => {

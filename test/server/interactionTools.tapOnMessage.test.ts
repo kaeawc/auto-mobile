@@ -401,6 +401,19 @@ describe("tapOnHandler (registered handler wiring)", () => {
     expect(getStructuredField(response, "warnings")).toEqual([warning]);
   });
 
+  test("passes exactText through to the tap so a text pick cannot substring-match (#17782)", async () => {
+    const seen: Array<boolean | undefined> = [];
+    interactionDeps.tapOnElementFactory = () => ({
+      execute: async (options) => {
+        seen.push(options.exactText);
+        return fakeResult({ success: true });
+      },
+    });
+    await tapOnHandler(fakeDevice, { ...args, exactText: true }, { deps: interactionDeps });
+    await tapOnHandler(fakeDevice, args, { deps: interactionDeps });
+    expect(seen).toEqual([true, undefined]);
+  });
+
   test("a failure without search stats carries no empty summary parenthetical", async () => {
     interactionDeps.tapOnElementFactory = () => ({
       execute: async () => fakeResult({ error: "Element not found with provided text 'Missing'" }),

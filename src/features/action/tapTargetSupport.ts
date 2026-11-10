@@ -11,6 +11,17 @@ import type { SearchableEntry } from "../utility/SearchableNode";
 /** Tap-target helpers shared by TapOnElement and its tap-point planner (#11833). */
 
 /**
+ * The miss for an `exactText` selector: the element the caller saw is gone (#17782), so say so
+ * rather than suggesting a different selector.
+ */
+export function exactTextMissMessage(text: string, containerHint = ""): string {
+  return (
+    `Element with exact text '${text}'${containerHint} is no longer present; ` +
+    "re-observe and pick it again."
+  );
+}
+
+/**
  * Why a focus lookup failed. `not-found-inputs-listed` is a miss whose error already names the
  * editable fields on screen, so the target did not scroll away (#17463).
  */

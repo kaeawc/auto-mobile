@@ -149,11 +149,19 @@ direction, so when focus still has not moved the walk presses tab once and tries
 View `EditText` (one not inside a Compose screen, with or without a `resource-id`) never gets tab,
 since tab could type into it. If focus still does not move, `focusNavigation.status` is `stuck`,
 `focusNavigation.blockedBy` is `ime` or `editable`, `focusNavigation.escapes` lists the keys tried
-(`back`, `tab`), and the error names the trapped field and what to do: for a View field, hide the
-keyboard with `pressButton` `back`, press `pressButton` `down`, observe, then retry; for a Compose
-field, hide the keyboard with `pressButton` `back`, then press `sendKeys` key `tab`. An IME action
+(`back`, `tab`), and the error names the trapped field, the arrows that did not move focus, and
+what to do: for a View field where all four arrows failed, press `pressButton` `back` to leave the
+screen and reach the target from another route (if the keyboard was still shown, hide it with
+`back` and observe first); for a
+Compose field, hide the keyboard with `pressButton` `back`, then press `sendKeys` key `tab`. An IME action
 such as `sendKeys` key `next` or `done` does not move D-pad focus out of the field.
-`focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
+`focusNavigate` returns the same `blockedBy` and `escapes`. The walk can stop before trying every
+arrow (with a `direction` set, or when the target is not on screen), so a View field's error then
+names the arrows not yet pressed to try before leaving the screen. A control that takes arrow keys
+as value changes, such as a slider, counts as not moving focus, so each arrow is pressed on it at
+most once; when no arrow leaves it the walk presses tab once and continues. If focus still does not
+move the status is `stuck` and the message names the control and the arrows it consumed; its value
+may have changed, so check it before continuing. Other selectors (`testTag`, `textAny`,
 `accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
 on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.

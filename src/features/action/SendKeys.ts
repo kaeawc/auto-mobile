@@ -35,7 +35,7 @@ import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { deferTerminalScreenshot } from "../../utils/PostActionCaptureContext";
+import { captureOrDeferTerminalScreenshot } from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { RealObserveScreen } from "../observe/ObserveScreen";
@@ -720,9 +720,9 @@ export class SendKeys {
     const captureObservation = async (observation: ObserveResult) => {
       if (
         capture &&
-        !deferTerminalScreenshot(observation, (chosen, requestSignal) =>
+        !(await captureOrDeferTerminalScreenshot(observation, (chosen, requestSignal) =>
           capture(undefined, { signal: requestSignal ?? signal, observation: chosen }),
-        )
+        ))
       ) {
         await capture(undefined, { signal, observation });
       }

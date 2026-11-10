@@ -78,6 +78,7 @@ describe("dpadTapOnTarget", () => {
     { selector: { text: "Movies" }, ensureChecked: true },
     { selector: { text: "Movies" }, ensureChecked: false },
     { selector: { text: "Movies" }, selectionStrategy: "random" },
+    { selector: { text: "Movies" }, exactText: true },
   ] satisfies DpadTapOnRequest[])("leaves %j to the touch path", (request) => {
     expect(dpadTapOnTarget(request)).toBeUndefined();
   });

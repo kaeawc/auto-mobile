@@ -131,7 +131,7 @@ describe("FocusNavigate Compose TV text-field trap (#17441)", () => {
     expect(result.message).not.toContain("pressButton down");
   });
 
-  test("a View EditText keeps back then down: tab is never pressed into it", async () => {
+  test("a View EditText gets back, never tab, and no D-pad advice (#17741)", async () => {
     const device = new TvDevice({ field: viewSearchField, tabLeaves: true, imeVisible: true });
 
     const result = await navigator(device).execute({ until: { label: "Player" } });
@@ -139,9 +139,8 @@ describe("FocusNavigate Compose TV text-field trap (#17441)", () => {
     expect(result.status).toBe("stuck");
     expect(result.escapes).toEqual(["back"]);
     expect(device.keys).not.toContain("tab");
-    expect(result.message).toContain(
-      "Hide the keyboard with pressButton back, press pressButton down to move focus out of the field",
-    );
+    expect(result.message).not.toContain("pressButton down");
+    expect(result.message).toContain("No D-pad direction moves focus out of this field");
   });
 
   test("a View EditText with no keyboard says tab would type into it", async () => {

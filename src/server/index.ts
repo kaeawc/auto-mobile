@@ -268,7 +268,7 @@ function registerAllResourcesOnce(iosDependencies: IosDoctorDependencies): void 
 function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerObservationResources();
   registerToolOutputResources();
-  registerObserveAppResource();
+  registerObserveAppResource({ featureFlags: () => FeatureFlagService.getInstance() });
   registerBootedDeviceResources();
   registerDeviceImageResources();
   registerAppResources();

@@ -99,7 +99,7 @@ import {
 
 /** Shared by the client transport guard and the tool-level refusal. */
 export function prototypeDisplayUnsupportedMessage(displayId: number): string {
-  return `show_prototype: the connected CtrlProxy does not advertise ${PROTOTYPE_DISPLAY_CAPABILITY}, so it cannot show a prototype on display ${displayId} and would place it on the default display; update the connected CtrlProxy or omit display.`;
+  return `show_prototype: the connected CtrlProxy does not advertise ${PROTOTYPE_DISPLAY_CAPABILITY}, so it cannot show a prototype on display ${displayId} and would place it on the default display. CtrlProxy advertises it only on Android 12L (API 32) and newer; on a newer device update the connected CtrlProxy, otherwise omit display.`;
 }
 
 /** Shared by the client transport guard and the tool-level refusal. */

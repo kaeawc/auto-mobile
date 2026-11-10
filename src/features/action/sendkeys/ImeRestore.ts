@@ -209,8 +209,9 @@ export class ImeRestore {
     }
   }
 
+  /** Whether the commit IME is enabled, with every enabled IME id in `ime list -s` order. */
   async readCommitImeEnabled(): Promise<
-    { success: true; enabled: boolean } | { success: false; error: string }
+    { success: true; enabled: boolean; enabledImeIds: string[] } | { success: false; error: string }
   > {
     try {
       const result = await this.host.adb.executeCommand(`shell ime list${this.imeUserFlag()} -s`);
@@ -218,9 +219,14 @@ export class ImeRestore {
         logger.warn(`[SendKeys] Failed to list enabled IMEs: ${result.stderr.trim()}`);
         return { success: false, error: `Failed to list enabled IMEs: ${result.stderr.trim()}` };
       }
+      const enabledImeIds = result.stdout
+        .split(/\r?\n/)
+        .map((id) => id.trim())
+        .filter(Boolean);
       return {
         success: true,
-        enabled: result.stdout.split(/\r?\n/).some((id) => id.trim() === this.commitImeId),
+        enabled: enabledImeIds.includes(this.commitImeId),
+        enabledImeIds,
       };
     } catch (error) {
       logger.warn("[SendKeys] Failed to list enabled IMEs", error);

@@ -123,16 +123,27 @@ export function compareIosTypedText(
     return { success: true, warning: "iOS typed text check skipped for a secure field." };
   }
   const verifyAppend = typeof options === "boolean" ? options : options.verifyAppend;
+  const baseline = withBlankOmittedNativeValue(before);
   return (
     (verifyAppend
       ? compareIosChunkField(
           text,
-          before,
+          baseline,
           after,
           typeof options !== "boolean" && options.firstChunk === true,
         )
-      : undefined) ?? compareIosNonSecureTypedText(text, before, after)
+      : undefined) ?? compareIosNonSecureTypedText(text, baseline, after)
   );
+}
+
+/**
+ * Runners omit an empty native field's value, so a native baseline with no value is blank (#17764).
+ * Only the baseline: an omitted value after typing still cannot show what was typed.
+ */
+function withBlankOmittedNativeValue(before: FocusedTextField): FocusedTextField {
+  return before.iosNativeValueOmitted === true && before.value === undefined
+    ? { ...before, value: "" }
+    : before;
 }
 
 function compareIosChunkField(

@@ -178,6 +178,26 @@ describe("tapOn payload shape", () => {
     }
   });
 
+  test("a text pick requires an exact text match; an elementId pick does not (#17782)", () => {
+    const [byId, , byText] = pickerTargetsOf(observeResult);
+    const args = (target: typeof byId) =>
+      (pickerTapRequest(target, 1, "").params as { arguments: Record<string, unknown> }).arguments;
+    expect(args(byText)).toEqual({
+      selector: { text: "Settings" },
+      selectionStrategy: "unique",
+      exactText: true,
+    });
+    expect(args(byId)).not.toHaveProperty("exactText");
+  });
+
+  test("the real tapOn schema refuses exactText without a text selector", () => {
+    const parse = (args: Record<string, unknown>) => tapOnSchema.safeParse(args).success;
+    expect(parse({ selector: { text: "Remove" }, exactText: true })).toBe(true);
+    expect(parse({ selector: { elementId: "app:id/ok" }, exactText: true })).toBe(false);
+    expect(parse({ selector: { textAny: ["Remove"] }, exactText: true })).toBe(false);
+    expect(parse({ selector: { text: "Remove" }, exactText: true, sibling: true })).toBe(false);
+  });
+
   test("omits deviceId when the result did not carry one", () => {
     const [target] = pickerTargetsOf(observeResult);
     const params = pickerTapRequest(target, 1, "").params as { arguments: object };
@@ -244,6 +264,24 @@ describe("picker protocol", () => {
     doc.node("tap").click();
     win.deliver({ jsonrpc: "2.0", id: 1002, result: { isError: true } });
     expect(doc.node("tap-status").textContent).toBe("tapOn failed on Settings");
+  });
+
+  test("a picked element that is gone shows tapOn's re-observe message (#17782)", () => {
+    const { win, doc, picks } = boot();
+    picks[2].click();
+    doc.node("tap").click();
+    expect(win.posted.at(-1)!.message).toMatchObject({
+      params: { arguments: { selector: { text: "Settings" }, exactText: true } },
+    });
+    const message =
+      "Failed to tap: Failed to perform tap on element: Element with exact text 'Settings' is " +
+      "no longer present; re-observe and pick it again.";
+    win.deliver({
+      jsonrpc: "2.0",
+      id: 1000,
+      result: { isError: true, content: [], structuredContent: { success: false, message } },
+    });
+    expect(doc.node("tap-status").textContent).toBe(`tapOn failed on Settings: ${message}`);
   });
 
   test("a new result clears the selection; replies from other frames are ignored", () => {

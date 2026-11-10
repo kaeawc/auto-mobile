@@ -184,6 +184,11 @@ function pickerTapRequest(
   // "unique" makes the server refuse rather than tap the first of several matches, covering
   // elements this result did not show (e.g. off-screen rows).
   const args: Record<string, unknown> = { selector: target.selector, selectionStrategy: "unique" };
+  // A text pick must not fall back to a substring match on a different element ("Remove" vs
+  // "Remove all") once the picked one is gone; the server reports it as no longer present.
+  if ("text" in target.selector) {
+    args.exactText = true;
+  }
   if (deviceId) {
     args.deviceId = deviceId;
   }
@@ -226,7 +231,11 @@ function pickerOnReply(doc: PickerDocument, state: PickerState, message: Record<
     const reason = typeof error?.message === "string" ? error.message.slice(0, 200) : "refused";
     status.textContent = `Host did not run tapOn: ${reason}`;
   } else if (result?.isError === true) {
-    status.textContent = `tapOn failed on ${label}`;
+    // tapOn's own message names the cause, e.g. that an exact-text pick is no longer present.
+    const structured = result.structuredContent as Record<string, unknown> | undefined;
+    const reason =
+      typeof structured?.message === "string" ? `: ${structured.message.slice(0, 200)}` : "";
+    status.textContent = `tapOn failed on ${label}${reason}`;
   } else {
     status.textContent = `Tapped ${label}. Run observe again to refresh.`;
   }

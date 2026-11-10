@@ -336,6 +336,7 @@ async function tapOnByTouch(
       display: args.display,
       container: args.container,
       text: args.selector.text,
+      exactText: args.exactText,
       textAny: args.selector.textAny,
       elementId: args.selector.elementId,
       testTag: args.selector.testTag,

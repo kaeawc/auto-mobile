@@ -265,6 +265,7 @@ test/server/plainReadToolSessionActivity.integration.test.ts | safe | hermetic f
 test/server/planExecutionOrchestrator.integration.test.ts | unsafe | DevicePool built without deviceManager (default real one) L298
 test/server/planReleaseTransportBindingTeardown.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L37
 test/server/planTools.executePlanThrow.integration.test.ts | safe | executePlan and startVideoRecording spied to reject L29/L32
+test/server/prototypeWebExportFiles.integration.test.ts | safe | real NodePrototypeWebExportFiles over a private mkdtemp directory removed afterwards L31
 test/server/proxyServerListChanged.integration.test.ts | safe | FakeDaemonClient/FakeDaemonManager; isAvailable mocked L20/L25/L44
 test/server/proxyServerTransportFailure.integration.test.ts | safe | fake client/manager; DaemonClient("/unused") never connects L288
 test/server/resources/read.integration.test.ts | unsafe | unlinks files in hardcoded /tmp/auto-mobile/observe_results L68/L72

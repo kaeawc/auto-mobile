@@ -17,6 +17,8 @@ const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 
 const INTERNAL: Record<string, string> = {
   AUTOMOBILE_TEST_MODE: "ADB test fake activation, not a device configuration option.",
+  AUTOMOBILE_CARPLAY_POWER_HELPER_PATH:
+    "Path to the unreleased carplay-power helper; no user-facing tool consumes it yet (#17784).",
   AUTOMOBILE_ALLOW_IN_MEMORY_DB: "Test-only opt-in to a nonpersistent database.",
   AUTOMOBILE_ALLOW_REAL_CTRL_PROXY_WEBSOCKET: "Test-only opt-in to a real CtrlProxy WebSocket.",
   AUTOMOBILE_ACCEPTANCE_LIVE: "Live acceptance harness activation.",

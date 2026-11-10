@@ -64,6 +64,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   },
   { name: "AUTOMOBILE_CTRL_PROXY_APK_PATH", kind: "input", reason: "Read-only APK artifact." },
   {
+    name: "AUTOMOBILE_CARPLAY_POWER_HELPER_PATH",
+    kind: "input",
+    reason: "Read-only helper executable.",
+  },
+  {
     name: "AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH",
     kind: "input",
     reason: "Read-only runner bundle.",

@@ -1,0 +1,12 @@
+== heart-rate type 3
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=3 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.emulator.complication.datasource/com.google.android.clockwork.emulator.complication.datasource.PlaceholderHeartRateProviderService} isEnabled=true
+== heart-rate type 5
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=3 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.emulator.complication.datasource/com.google.android.clockwork.emulator.complication.datasource.PlaceholderHeartRateProviderService} isEnabled=true
+== heart-rate type 6
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=6 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.emulator.complication.datasource/com.google.android.clockwork.emulator.complication.datasource.PlaceholderHeartRateProviderService} isEnabled=true
+== heart-rate type 4
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=6 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.emulator.complication.datasource/com.google.android.clockwork.emulator.complication.datasource.PlaceholderHeartRateProviderService} isEnabled=true

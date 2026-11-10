@@ -9107,7 +9107,7 @@
     "name": "exportPrototypeWeb",
     "title": "Export Prototype Web Page",
     "annotations": {
-      "destructiveHint": false,
+      "destructiveHint": true,
       "openWorldHint": false
     },
     "description": "Write the automobile:prototype/<id>/web page (same bytes, offline, same CSP) to an HTML file; returns its path and sha256, not the HTML. Refuses to replace a different existing file without overwrite.",

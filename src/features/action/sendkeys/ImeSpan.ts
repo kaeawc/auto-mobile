@@ -7,7 +7,6 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { ImeRestorationError } from "./ImeRestorationError";
 import type { ImeEditorState } from "./ImeEditorState";
-import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { pendingImeRestores, type PendingImeRestoreRegistry } from "./PendingImeRestore";
 
 type SendKeysCommandExecution = Awaited<
@@ -60,7 +59,6 @@ export class ImeSpanService {
 
   constructor(
     private readonly host: ImeSpanHost,
-    private readonly timer: Timer = defaultTimer,
     private readonly pending: PendingImeRestoreRegistry = pendingImeRestores,
   ) {}
 
@@ -131,7 +129,7 @@ export class ImeSpanService {
         }
         this.reportImeSpanRestoreFailure(execution!, restoreError);
       } finally {
-        // Even a timer/registry failure must not strand the per-device mutex.
+        // Even a registry failure must not strand the per-device mutex.
         await this.releaseImeSpanLock(this.imeSpan!);
       }
     }
@@ -180,33 +178,30 @@ export class ImeSpanService {
     execution.restorationFailed = true;
   }
 
+  /** Keep the AutoMobile IME selected; session release restores the recorded keyboard (#16428). */
   private deferImeRestore(span: AndroidImeSpan): void {
     const snapshot = span.snapshot;
     if (!snapshot) {
       return;
     }
     const userId = this.host.getPinnedUser();
-    this.pending.store(
-      this.host.deviceId,
-      {
-        snapshot,
-        userId,
-        restore: async (fence) => {
-          this.host.setPinnedUser(userId);
-          try {
-            await this.host.restoreIme(
-              snapshot.prior,
-              snapshot.wasEnabled,
-              snapshot.priorSubtype,
-              fence,
-            );
-          } finally {
-            this.host.clearPinnedUser();
-          }
-        },
+    this.pending.store(this.host.deviceId, {
+      snapshot,
+      userId,
+      restore: async (fence) => {
+        this.host.setPinnedUser(userId);
+        try {
+          await this.host.restoreIme(
+            snapshot.prior,
+            snapshot.wasEnabled,
+            snapshot.priorSubtype,
+            fence,
+          );
+        } finally {
+          this.host.clearPinnedUser();
+        }
       },
-      this.timer,
-    );
+    });
     span.snapshot = undefined;
   }
 

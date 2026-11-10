@@ -19,10 +19,12 @@ export const auditScopeInput = z
         elementId: z.string().min(1).optional().describe("Container resource id"),
         text: z.string().min(1).optional().describe("Container text or content-desc"),
       })
+      .strict()
       .refine((value) => value.elementId !== undefined || value.text !== undefined, {
         message: "container needs elementId or text",
       }),
   })
+  .strict()
   .optional()
   .describe("Limit the accessibility audit to one container's subtree");
 
@@ -31,6 +33,7 @@ export const auditBaselineInput = z
     name: z.string().min(1).describe("Baseline name"),
     mode: z.enum(["compare", "record"]).describe("record saves; compare reports the diff"),
   })
+  .strict()
   .optional()
   .describe("Named accessibility baseline");
 

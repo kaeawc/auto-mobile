@@ -39,6 +39,7 @@ import { instrumentationTimeoutMs } from "./pointer/instrumentationDispatch";
 import { dispatchRichStylus, strokeRequest, type RichStylusOptions } from "./pointer/richStylus";
 import { DRAG_PATH_DEFAULT_SEGMENT_MS } from "./dragPathPlan";
 import { isStaleFrameContextRejection } from "./tapAtGesture";
+import { StaleDisplayError, withStaleDisplay } from "../observe/StaleDisplayError";
 
 export interface DragPathDependencies extends DisplayFenceDependencies {
   timer?: Timer;
@@ -66,6 +67,11 @@ function canRefreshIosFrame(result: IosPathReply, frameContext: string | undefin
 
 function failure(error: string): DragPathResult {
   return { success: false, error };
+}
+
+/** Attach `staleDisplay` details to an in-stroke failure while keeping its stroke-state note. */
+function withStaleDetails(result: DragPathResult, error: unknown): DragPathResult {
+  return { ...withStaleDisplay(result, error), error: result.error };
 }
 
 /** Drag one finger along a polyline using the CtrlProxy streaming stroke protocol (Android). */
@@ -152,8 +158,26 @@ export class DragPath extends BaseVisualChange {
           this.drive(options, observation, call, {
             assertCurrent: fence && (() => fence.assertCurrent()),
           }),
-        { changeExpected: false, progress, perf, signal },
+        {
+          changeExpected: false,
+          progress,
+          perf,
+          signal,
+          // Names the call a coordinate action, so the base refuses a posture or display change
+          // since the caller's observe exactly as it does for tapAt (#17752).
+          predictionContext: {
+            toolName: "dragPath",
+            toolArgs: { ...options, platform: this.device.platform },
+          },
+        },
       );
+    } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        // Same typed refusal as tapAt: the canonical message plus `staleDisplay` details.
+        logger.warn(`[dragPath] refused after a display change: ${error.message}`);
+        return withStaleDisplay(failure(error.message), error);
+      }
+      throw error;
     } finally {
       perf.end();
     }
@@ -228,11 +252,14 @@ export class DragPath extends BaseVisualChange {
         throw error;
       }
       logger.warn(`[dragPath] stroke failed: ${errorMessage(error)}`, error);
-      return {
-        success: false,
-        points: plan.vertices,
-        error: `dragPath failed: ${errorMessage(error)}. The finger was lifted; verify state with observe before retrying.`,
-      };
+      return withStaleDetails(
+        {
+          success: false,
+          points: plan.vertices,
+          error: `dragPath failed: ${errorMessage(error)}. The finger was lifted; verify state with observe before retrying.`,
+        },
+        error,
+      );
     }
     if (!stroke.success) {
       const note = stroke.indeterminate
@@ -315,11 +342,10 @@ export class DragPath extends BaseVisualChange {
         throw error;
       }
       logger.warn(`[dragPath] stylus stroke failed: ${errorMessage(error)}`, error);
-      return {
-        success: false,
-        points: plan.vertices,
-        error: `dragPath failed: ${errorMessage(error)}`,
-      };
+      return withStaleDetails(
+        { success: false, points: plan.vertices, error: `dragPath failed: ${errorMessage(error)}` },
+        error,
+      );
     }
     return {
       success: true,

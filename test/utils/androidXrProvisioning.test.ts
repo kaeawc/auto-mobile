@@ -115,7 +115,10 @@ describe("pickAndroidSystemImage XR selection (#16838)", () => {
         pickAndroidSystemImage([image(36, "google_apis")], { formFactor }, "x64"),
       );
 
-      expect(message).toContain(`system-images;android-<api>;${tag};x86_64`);
+      const api = formFactor === "xr-headset" ? 34 : 36;
+      expect(message).toContain(
+        `sdkmanager --channel=3 --install "system-images;android-${api};${tag};x86_64"`,
+      );
       expect(message).toContain("--channel=3");
       expect(message).toContain("does not download system images");
     },

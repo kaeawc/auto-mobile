@@ -29,6 +29,10 @@ const XR_SUGGESTED_TAG: Readonly<Record<XrFormFactor, string>> = {
   "xr-headset": "google-xr",
   "xr-glasses": "ai-glasses",
 };
+const XR_SUGGESTED_API: Readonly<Record<XrFormFactor, number>> = {
+  "xr-headset": 34,
+  "xr-glasses": 36,
+};
 
 /** The refusal for an XR request with no image of its family in the requested API range. */
 export function xrMissingImageMessage(
@@ -42,7 +46,7 @@ export function xrMissingImageMessage(
     `No installed ${label} system image (${androidSystemImageTagsFor(kind).join(", ")}) matches ` +
     `the requested API range ${range}. Installed images: ${installed}. ` +
     "AutoMobile does not download system images. Install one with " +
-    `'sdkmanager "system-images;android-<api>;${XR_SUGGESTED_TAG[kind]};${abi}"', then retry. ` +
+    `'sdkmanager --channel=3 --install "system-images;android-${XR_SUGGESTED_API[kind]};${XR_SUGGESTED_TAG[kind]};${abi}"', then retry. ` +
     "XR images are published on the canary channel: 'sdkmanager --list --channel=3' shows the " +
     "API levels and ABIs available."
   );

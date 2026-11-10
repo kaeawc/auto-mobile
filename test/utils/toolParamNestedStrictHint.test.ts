@@ -85,7 +85,7 @@ const cases: readonly NestedCase[] = [
     tool: "setUIState",
     schema: setUIStateSchema,
     valid: { fields: [{ selector: { text: "Name" }, value: "Ada" }] },
-    invalid: { fields: [{ selector: { text: "Name" }, val: "Ada" }] },
+    invalid: { fields: [{ selector: { text: "Name" }, value: "Ada", val: "Ada" }] },
     keysLine: "Allowed fields[] keys: selector, value, selected.",
   },
   {
@@ -99,7 +99,12 @@ const cases: readonly NestedCase[] = [
     tool: "postNotification",
     schema: postNotificationSchema,
     valid: { platform: "android", title: "t", body: "b", actions: [{ label: "A", actionId: "a" }] },
-    invalid: { platform: "android", title: "t", body: "b", actions: [{ label: "A", id: "a" }] },
+    invalid: {
+      platform: "android",
+      title: "t",
+      body: "b",
+      actions: [{ label: "A", actionId: "a", id: "a" }],
+    },
     keysLine: "Allowed actions[] keys: label, actionId.",
   },
 ];
@@ -124,7 +129,10 @@ describe("unknown keys in nested option objects (#17738)", () => {
   for (const { tool, schema, valid, invalid, keysLine } of cases) {
     test(`${tool} accepts its documented nested keys and names them for an unknown one`, () => {
       expect(schema.safeParse(valid).success).toBe(true);
-      const hint = hintOf(messageFor(tool, schema, invalid));
+      const message = messageFor(tool, schema, invalid);
+      // Valid apart from the unknown key, so only strictness can reject it.
+      expect(message).toContain("Unrecognized key");
+      const hint = hintOf(message);
       expect(hint).toContain(keysLine);
       expect(hint.length).toBeLessThanOrEqual(MAX_HINT_CHARS);
     });

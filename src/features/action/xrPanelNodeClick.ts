@@ -23,12 +23,12 @@ type VerifiedNodeTarget = {
 type XrNodeClickOptions = DisplayFenceOption & {
   resolvedHierarchy?: ViewHierarchyResult;
   onTalkBackActivation?: () => void;
-  /**
-   * Set only for container-scoped selections: resolves the requested container in the
-   * click's hierarchy so ancestor activation never leaves it (as TapTargetResolver does).
-   */
-  resolveContainer?: (hierarchy: ViewHierarchyResult) => Element | undefined;
+  /** Set for container-scoped selections; ancestor activation never leaves it. */
+  container?: unknown;
 };
+
+/** Resolves the requested container in the click's hierarchy. */
+type XrContainerResolver = (hierarchy: ViewHierarchyResult) => Element | undefined;
 
 export function xrCoordinateError(): ActionableError {
   return new ActionableError(
@@ -40,6 +40,7 @@ function xrNodeClickSelector(
   action: string,
   element: Element,
   options: XrNodeClickOptions,
+  resolveContainer?: XrContainerResolver,
 ): VerifiedNodeTarget {
   const hierarchy = resolveViewHierarchyForSearch(options.resolvedHierarchy) ?? null;
   if (
@@ -74,13 +75,36 @@ function xrNodeClickSelector(
     throw xrCoordinateError();
   }
 
-  const container = options.resolveContainer?.(hierarchy);
+  // Like TapTargetResolver, a container-scoped selection never promotes past its container.
+  const scoped = options.container !== undefined;
+  const container = scoped ? resolveContainer?.(hierarchy) : undefined;
   const containerEntry = container ? findTapTargetNode(entries, container) : undefined;
   const containerIndex = containerEntry ? entries.indexOf(containerEntry) : -1;
-  return xrAncestorClickSelector(element, entries, uniqueSelector, {
-    scoped: options.resolveContainer !== undefined,
-    containerIndex,
-  });
+  return xrAncestorClickSelector(element, entries, uniqueSelector, { scoped, containerIndex });
+}
+
+/**
+ * The target's ancestor indexes, nearest first. A container-scoped selection may only
+ * activate an owner strictly inside the container, so the walk stops there; an unresolved
+ * container or one off the target's parent chain refuses.
+ */
+function ancestorsWithinScope(
+  entries: readonly SearchableEntry[],
+  target: SearchableEntry,
+  scope: { scoped: boolean; containerIndex: number },
+): number[] {
+  const ancestors: number[] = [];
+  for (let at = target.parentIndex; at !== undefined; at = entries[at].parentIndex) {
+    ancestors.push(at);
+  }
+  if (!scope.scoped) {
+    return ancestors;
+  }
+  const boundary = ancestors.indexOf(scope.containerIndex);
+  if (boundary < 0) {
+    throw xrCoordinateError();
+  }
+  return ancestors.slice(0, boundary);
 }
 
 function xrAncestorClickSelector(
@@ -105,17 +129,7 @@ function xrAncestorClickSelector(
   if (new Set(targets.map((entry) => entry.source)).size !== 1) {
     throw xrCoordinateError();
   }
-  const ancestors: number[] = [];
-  for (let at = targets[0].parentIndex; at !== undefined; at = entries[at].parentIndex) {
-    ancestors.push(at);
-  }
-  // A container-scoped selection may only activate an owner strictly inside the
-  // container; an unresolved container or one off the label's parent chain refuses.
-  const boundary = scope.scoped ? ancestors.indexOf(scope.containerIndex) : ancestors.length;
-  if (boundary < 0) {
-    throw xrCoordinateError();
-  }
-  for (const at of ancestors.slice(0, boundary)) {
+  for (const at of ancestorsWithinScope(entries, targets[0], scope)) {
     const ancestor = entries[at];
     const bounds = ancestor.bounds;
     if (
@@ -136,7 +150,7 @@ function xrAncestorClickSelector(
   throw xrCoordinateError();
 }
 
-export async function executeXrNodeClick(
+export async function executeXrNodeClick<O extends XrNodeClickOptions>(
   accessibilityService: () => Pick<
     TapOnCtrlProxy,
     "supportsNodeActionSelectors" | "requestNodeAction"
@@ -145,22 +159,29 @@ export async function executeXrNodeClick(
     action,
     element,
     signal,
-    options = {},
+    options,
+    resolveContainer,
   }: {
     action: string;
     element: Element;
     signal?: AbortSignal;
-    options?: XrNodeClickOptions;
+    options?: O;
+    resolveContainer?: (hierarchy: ViewHierarchyResult, options: O) => Element | undefined;
   },
 ): Promise<void> {
   throwIfAborted(signal);
-  const { selector, expectedBounds } = xrNodeClickSelector(action, element, options);
+  const { selector, expectedBounds } = xrNodeClickSelector(
+    action,
+    element,
+    options ?? {},
+    options && resolveContainer && ((hierarchy) => resolveContainer(hierarchy, options)),
+  );
   try {
     if (!(await accessibilityService().supportsNodeActionSelectors(undefined, signal, true))) {
       throw xrCoordinateError();
     }
     throwIfAborted(signal);
-    options.displayFence?.assertCurrent();
+    options?.displayFence?.assertCurrent();
     const result = await accessibilityService().requestNodeAction("click", selector, {
       signal,
       expectedBounds,
@@ -169,7 +190,7 @@ export async function executeXrNodeClick(
     if (!result.success) {
       throw xrCoordinateError();
     }
-    options.onTalkBackActivation?.();
+    options?.onTalkBackActivation?.();
   } catch (error) {
     throwIfAborted(signal);
     if (error instanceof StaleDisplayError) {

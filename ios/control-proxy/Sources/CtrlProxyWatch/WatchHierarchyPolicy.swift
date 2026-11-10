@@ -125,7 +125,8 @@ func watchCrownWakePoint(in hierarchy: SdkViewHierarchy) -> CGVector? {
 /// A stable screen without a focused value can receive a neutral wake before rotation.
 /// An unchanged tree alone cannot justify repeating a delta. Retry only when the same focused
 /// accessible value is unchanged, and the safe wake has not changed the screen or focused control.
-/// Missing snapshots skip verification because the rotation may already have taken effect.
+/// Without a stable baseline, compare only the last baseline observation's focused value; never wake or retry.
+/// Missing comparable values or post-rotation snapshots skip this check because the turn may have taken effect.
 @MainActor
 func watchVerifiedCrownRotation(
     snapshots: any WatchSnapshotSource, focusedValue: () throws -> WatchCrownValue?,
@@ -133,14 +134,17 @@ func watchVerifiedCrownRotation(
 )
     throws
 {
+    var lastBaselineValue: WatchCrownValue?
     func observation() throws -> (hierarchy: SdkViewHierarchy, value: WatchCrownValue?) {
         let hierarchy = try snapshots.snapshot()
         return (hierarchy, try? focusedValue())
     }
     func baseline() -> (hierarchy: SdkViewHierarchy, value: WatchCrownValue?)? {
         guard var previous = try? observation() else { return nil }
+        lastBaselineValue = previous.value
         for _ in 0 ..< 2 {
             guard let current = try? observation() else { return nil }
+            lastBaselineValue = current.value
             if !watchCrownChangedHierarchy(before: previous.hierarchy, after: current.hierarchy),
                previous.value == current.value
             { return current }
@@ -191,7 +195,13 @@ func watchVerifiedCrownRotation(
         before = baseline()
     }
     try rotate()
-    guard let before, let after = rotationObservation(after: before), !changed(before, after) else { return }
+    guard let before else {
+        if let old = lastBaselineValue, let after = try? observation(), let new = after.value,
+           old.elementType == new.elementType, old.identifier == new.identifier, old.value == new.value
+        { throw unchanged() }
+        return
+    }
+    guard let after = rotationObservation(after: before), !changed(before, after) else { return }
     // A cold wake already prepared routing; without comparable values, never repeat this delta.
     if proactivelyWoke, before.value == nil || after.value == nil { throw unchanged() }
     guard let point = watchCrownWakePoint(in: before.hierarchy) else { throw unchanged() }

@@ -844,6 +844,35 @@ final class WatchCommandHandlerTests: XCTestCase {
         ])
     }
 
+    func testCrownUnstableBaselineRejectsUnchangedFocusedValueWithoutWakeOrRetry() {
+        let source = ScriptedCrownSource(labels: ["launching", "settling", "crown 0", "updated"])
+        source.focusedValues = [crownValue("1"), crownValue("2"), crownValue("0"), crownValue("0")]
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":3}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.appliedDelta, 3)
+        XCTAssertEqual(source.taps, 0)
+        XCTAssertEqual(source.events, [
+            "snapshot:launching", "snapshot:settling", "snapshot:crown 0", "rotate", "snapshot:updated",
+        ])
+    }
+
+    func testCrownUnstableBaselineAcceptsChangedFocusedValueWithoutWakeOrRetry() {
+        let source = ScriptedCrownSource(labels: ["launching", "settling", "crown 0", "updated"])
+        source.focusedValues = [crownValue("1"), crownValue("2"), crownValue("0"), crownValue("1")]
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":3}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.appliedDelta, 3)
+        XCTAssertEqual(source.taps, 0)
+        XCTAssertEqual(source.events, [
+            "snapshot:launching", "snapshot:settling", "snapshot:crown 0", "rotate", "snapshot:updated",
+        ])
+    }
+
     func testCrownDoesNotRetryWhenAfterSnapshotIsUnavailable() {
         let source = ScriptedCrownSource(labels: ["crown 0", "crown 0"])
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)

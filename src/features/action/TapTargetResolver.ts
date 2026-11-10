@@ -1,5 +1,6 @@
 import type { TapOnCall } from "./ActionCall";
 import {
+  exactTextMissMessage,
   TapTargetUnavailableError,
   findTapTargetNode,
   type TapFocusFailure,
@@ -875,7 +876,9 @@ export class TapTargetResolver {
     if (siblingError !== undefined) {
       return siblingError;
     }
-    if (options.text) {
+    if (options.text && options.exactText === true) {
+      return exactTextMissMessage(options.text, containerHint);
+    } else if (options.text) {
       return `Element not found with provided text '${options.text}'${containerHint}`;
     } else if (options.textAny) {
       return `Element not found with any provided text '${options.textAny.join("', '")}'${containerHint}`;

@@ -43,9 +43,19 @@ function validateLongPressDuration(
 }
 
 function validateTapOnSelectionSchema(
-  value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy" | "sibling" | "selector">,
+  value: Pick<
+    TapOnArgs,
+    "ensureChecked" | "action" | "selectionStrategy" | "sibling" | "selector" | "exactText"
+  >,
   ctx: z.RefinementCtx,
 ): void {
+  if (value.exactText === true && (value.selector.text === undefined || value.sibling)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "exactText requires a text selector and cannot be combined with sibling",
+      path: ["exactText"],
+    });
+  }
   if (value.ensureChecked !== undefined && (value.action ?? "tap") !== "tap") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -80,6 +90,12 @@ export const tapOnSchema = withJsonSchemaOverride(
         selector: tapOnSelectorSchema,
         display: z.string().optional().describe("Target panel key, role, or active"),
         layer: hierarchyLayerSchema.optional(),
+        exactText: z
+          .boolean()
+          .optional()
+          .describe(
+            "Require selector.text to equal the element's text or content-desc (case-insensitive); no substring fallback",
+          ),
         sibling: z
           .boolean()
           .optional()

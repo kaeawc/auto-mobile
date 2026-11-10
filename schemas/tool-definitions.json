@@ -53437,6 +53437,10 @@
           "type": "string",
           "enum": ["app", "prototype"]
         },
+        "exactText": {
+          "description": "Require selector.text to equal the element's text or content-desc (case-insensitive); no substring fallback",
+          "type": "boolean"
+        },
         "sibling": {
           "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",
           "type": "boolean"

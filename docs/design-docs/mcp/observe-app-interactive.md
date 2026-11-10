@@ -44,7 +44,12 @@ A selector only names an element, not one occurrence of it. When two visible ele
 selector (for example, one Remove button per list row), the panel shows the selector but leaves the
 tap button disabled, because `tapOn` would act on the first match and not necessarily the one that
 was picked. Every request also sends `selectionStrategy: "unique"`, so the server refuses instead of
-guessing if more matches exist than the delivered result showed. The request is:
+guessing if more matches exist than the delivered result showed.
+
+A `{ text }` request also sends `exactText: true`. Without it, `tapOn` falls back to a substring
+match when no element has exactly that text, so a picked "Remove" button that has since gone would
+tap a remaining "Remove all" instead. With it, the tap fails with a message that the element is no
+longer present and should be re-observed, and the panel shows that message. The request is:
 
 ```json
 {

@@ -37,6 +37,25 @@ class MediaBrowseTreeTest {
   }
 
   @Test
+  fun `search matches a playable title ignoring case`() {
+    val match = tree.search("TRACK 3")
+    assertEquals("Track 3", match?.title)
+    assertEquals(false, match?.isBrowsable)
+  }
+
+  @Test
+  fun `blank search plays the first playable item`() {
+    val first = tree.childrenOf("album_morning")?.first()
+    assertEquals(first?.mediaId, tree.search(null)?.mediaId)
+    assertEquals(first?.mediaId, tree.search(" ")?.mediaId)
+  }
+
+  @Test
+  fun `search with no match returns null`() {
+    assertNull(tree.search("no such song"))
+  }
+
+  @Test
   fun `duplicate media ids are rejected`() {
     val duplicate = MediaNode("dup", "Dup", "Dup")
     assertThrows(IllegalArgumentException::class.java) {

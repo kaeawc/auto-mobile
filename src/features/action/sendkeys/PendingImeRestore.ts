@@ -31,6 +31,8 @@ export interface ImeFlushOptions {
 export interface PendingImeRestoreRegistry {
   /** True while a restore is stored or being run: its device IME state is not yet settled. */
   hasPending(deviceId: string): boolean;
+  /** Devices with a stored or running restore, for a graceful daemon shutdown to flush. */
+  pendingDeviceIds(): string[];
   take(deviceId: string): PendingImeRestore | undefined;
   store(deviceId: string, pending: PendingImeRestore): void;
   flush(deviceId: string, options?: ImeFlushOptions): Promise<void>;
@@ -44,6 +46,10 @@ export class DevicePendingImeRestores implements PendingImeRestoreRegistry {
 
   hasPending(deviceId: string): boolean {
     return this.entries.has(deviceId) || this.inFlight.has(deviceId);
+  }
+
+  pendingDeviceIds(): string[] {
+    return [...new Set([...this.entries.keys(), ...this.inFlight])];
   }
 
   take(deviceId: string): PendingImeRestore | undefined {

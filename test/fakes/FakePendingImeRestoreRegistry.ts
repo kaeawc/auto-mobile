@@ -11,6 +11,9 @@ export class FakePendingImeRestoreRegistry implements PendingImeRestoreRegistry 
   hasPending(deviceId: string): boolean {
     return this.entries.has(deviceId);
   }
+  pendingDeviceIds(): string[] {
+    return [...this.entries.keys()];
+  }
   take(deviceId: string): PendingImeRestore | undefined {
     const pending = this.entries.get(deviceId);
     this.entries.delete(deviceId);

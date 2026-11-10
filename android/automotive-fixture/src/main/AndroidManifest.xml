@@ -10,6 +10,8 @@
   <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
   <application android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@drawable/ic_fixture" android:label="@string/app_name" android:supportsRtl="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
     <meta-data android:name="com.android.automotive" android:resource="@xml/automotive_app_desc" />
+    <!-- Android Auto on a phone (projected to a head unit or the DHU) reads this key instead. -->
+    <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
     <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1" />
     <activity android:name=".DrivingSafeActivity" android:exported="true">
       <intent-filter>
@@ -17,6 +19,13 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
       <meta-data android:name="distractionOptimized" android:value="true" />
+    </activity>
+    <!-- Android Auto requires media apps to accept voice "play X" searches; this forwards them to the media session. -->
+    <activity android:name=".media.PlayFromSearchActivity" android:exported="true" android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
     </activity>
     <!-- No distractionOptimized meta-data: blocked while driving. -->
     <activity android:name=".ParkedOnlyActivity" android:exported="false" />

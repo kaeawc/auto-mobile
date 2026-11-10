@@ -22,6 +22,7 @@ class FakeClient implements Pick<WatchRunnerClient, "request"> {
   readonly signals: (AbortSignal | undefined)[] = [];
   failure?: Error;
   invalidDump = false;
+  onRequest?: () => void;
   constructor(private readonly dumps: string[] = []) {}
   async request(command: WatchCommand, signal?: AbortSignal): Promise<unknown> {
     if (this.failure) {
@@ -32,6 +33,7 @@ class FakeClient implements Pick<WatchRunnerClient, "request"> {
       return {};
     }
     this.signals.push(signal);
+    this.onRequest?.();
     return command.type === "face" && command.op === "dump"
       ? (this.dumps.shift() ?? "container")
       : undefined;
@@ -42,6 +44,33 @@ function arrange(dumps: string[]) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   return { client, timer };
+}
+
+function openingRound(dumps: number): WatchCommand[] {
+  return [
+    { type: "home" },
+    { type: "face", op: "swipe", direction: "up" },
+    ...Array.from({ length: dumps }, (): WatchCommand => ({ type: "face", op: "dump" })),
+  ];
+}
+const galleryCommands: WatchCommand[] = [
+  { type: "face", op: "tap", x: 0.5, y: 0.92 },
+  { type: "face", op: "tap", x: 0.5, y: 0.44 },
+  { type: "face", op: "swipe", direction: "up" },
+  { type: "face", op: "drag", fromX: 0.5, fromY: 0.5, toX: 0.5, toY: 0.6 },
+  { type: "face", op: "tap", x: 0.5, y: 0.65 },
+  { type: "face", op: "tap", x: 0.5, y: 0.5 },
+  { type: "face", op: "tap", x: 0.16, y: 0.14 },
+];
+function widgetAttempt(verificationDumps: number): WatchCommand[] {
+  return [
+    ...openingRound(1),
+    ...galleryCommands,
+    ...Array.from({ length: verificationDumps }, (): WatchCommand => ({
+      type: "face",
+      op: "dump",
+    })),
+  ];
 }
 
 describe("Smart Stack widget", () => {
@@ -65,6 +94,7 @@ describe("Smart Stack widget", () => {
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result).toMatchObject({
       success: true,
+      attempts: 1,
       steps: 13,
       headerAttempts: 2,
       verificationAttempts: 2,
@@ -86,27 +116,115 @@ describe("Smart Stack widget", () => {
     ]);
     expect(timer.getSleepHistory()).toEqual(Array(11).fill(250));
   });
-  test("returns bounded failure when widget never appears", async () => {
-    const { client, timer } = arrange([captures[0]]);
+  test("recovers a swallowed first home on the second opening round", async () => {
+    const { client, timer } = arrange([...Array(4).fill("container"), captures[0], captures[1]]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result).toMatchObject({
+      success: true,
+      attempts: 1,
+      headerAttempts: 5,
+      verificationAttempts: 1,
+      steps: 17,
+    });
+    expect(client.commands).toEqual([...openingRound(4), ...widgetAttempt(1)]);
+    expect(timer.getSleepHistory()).toEqual(Array(14).fill(250));
+  });
+  test.each([undefined, 0, 1234, 120000])(
+    "delays only between failed verification and retry with retryDelayMs %s",
+    async (retryDelayMs) => {
+      const { client, timer } = arrange([
+        captures[0],
+        ...Array(10).fill("container"),
+        captures[0],
+        captures[1],
+      ]);
+      const commandsAtRetryDelay: number[] = [];
+      const sleep = timer.sleep.bind(timer);
+      timer.sleep = async (ms) => {
+        if (ms !== 250) {
+          commandsAtRetryDelay.push(client.commands.length);
+        }
+        await sleep(ms);
+      };
+      const result = await addWatchSmartStackWidget(
+        client,
+        { ...options, retryDelayMs },
+        { timer },
+      );
+      expect(result).toMatchObject({
+        success: true,
+        attempts: 2,
+        headerAttempts: 2,
+        verificationAttempts: 11,
+        steps: 31,
+      });
+      expect(client.commands).toEqual([...widgetAttempt(10), ...widgetAttempt(1)]);
+      const delay = retryDelayMs ?? 20000;
+      expect(timer.getSleepHistory()).toEqual([
+        ...Array(18).fill(250),
+        ...(delay === 0 ? [] : [delay]),
+        ...Array(9).fill(250),
+      ]);
+      expect(commandsAtRetryDelay).toEqual(delay === 0 ? [] : [20]);
+    },
+  );
+  test.each([undefined, 2, 5])("bounds whole-flow attempts at %s", async (maxAttempts) => {
+    const expectedAttempts = maxAttempts ?? 3;
+    const { client, timer } = arrange(
+      Array.from({ length: expectedAttempts }, () => [
+        captures[0],
+        ...Array(10).fill("container"),
+      ]).flat(),
+    );
+    const result = await addWatchSmartStackWidget(client, { ...options, maxAttempts }, { timer });
+    expect(result).toMatchObject({
       success: false,
+      attempts: expectedAttempts,
+      headerAttempts: expectedAttempts,
+      verificationAttempts: 10 * expectedAttempts,
+      steps: 20 * expectedAttempts,
+    });
+    expect(result.reason).toContain("Widget cell did not appear");
+    expect(client.commands).toEqual(
+      Array.from({ length: expectedAttempts }, () => widgetAttempt(10)).flat(),
+    );
+    expect(timer.getSleepHistory()).toEqual(
+      Array.from({ length: expectedAttempts }, (_, attempt) => [
+        ...Array(18).fill(250),
+        ...(attempt < expectedAttempts - 1 ? [20000] : []),
+      ]).flat(),
+    );
+  });
+  test("returns bounded failure when widget never appears", async () => {
+    const { client, timer } = arrange([captures[0]]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, maxAttempts: 1 },
+      { timer },
+    );
+    expect(result).toMatchObject({
+      success: false,
+      attempts: 1,
       verificationAttempts: 10,
       headerAttempts: 1,
       steps: 20,
     });
     expect(result.reason).toContain("Widget cell did not appear");
-    expect(timer.getSleepHistory()).toHaveLength(18);
+    expect(timer.getSleepHistory()).toEqual(Array(18).fill(250));
   });
   test("stops before editing if the Smart Stack never opens", async () => {
     const { client, timer } = arrange([]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result).toMatchObject({
       success: false,
-      headerAttempts: 10,
+      attempts: 1,
+      headerAttempts: 12,
       verificationAttempts: 0,
-      steps: 12,
+      steps: 18,
     });
+    expect(result.reason).toContain("after 3 home/swipe rounds");
+    expect(client.commands).toEqual(Array.from({ length: 3 }, () => openingRound(4)).flat());
+    expect(timer.getSleepHistory()).toEqual(Array(15).fill(250));
     expect(
       client.commands.every(
         (command) => command.type === "home" || (command.type === "face" && command.op !== "tap"),
@@ -126,6 +244,8 @@ describe("Smart Stack widget", () => {
   test.each([
     { appName: " " },
     { widgetName: "" },
+    ...[0, 6, 1.5, NaN].map((maxAttempts) => ({ maxAttempts })),
+    ...[-1, 120001, 1.5, NaN, Infinity].map((retryDelayMs) => ({ retryDelayMs })),
     ...[-1, 1.5, 101, NaN, Infinity].map((galleryStepsFromBottom) => ({ galleryStepsFromBottom })),
   ])("rejects invalid arguments %j before dispatch", async (invalid) => {
     const { client, timer } = arrange([]);
@@ -142,6 +262,7 @@ describe("Smart Stack widget", () => {
     expect(result.success).toBe(false);
     expect(result.reason).toContain("Runner disconnected");
     expect(result.steps).toBe(1);
+    expect(result.attempts).toBe(1);
   });
   test("rejects malformed dump payloads as a typed failure", async () => {
     const { client, timer } = arrange([]);
@@ -149,6 +270,8 @@ describe("Smart Stack widget", () => {
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result.success).toBe(false);
     expect(result.reason).toContain("dump was not text");
+    expect(result.attempts).toBe(1);
+    expect(client.commands).toHaveLength(3);
   });
   test("an already aborted operation sends no commands", async () => {
     const { client, timer } = arrange([]);
@@ -161,13 +284,51 @@ describe("Smart Stack widget", () => {
     );
     expect(result.success).toBe(false);
     expect(result.reason).toContain("Cancelled");
+    expect(result.attempts).toBe(0);
     expect(client.commands).toEqual([]);
     expect(timer.getSleepHistory()).toEqual([]);
+  });
+  test.each([1, 20])("stops on cancellation after request %i without retrying", async (stopAt) => {
+    const { client, timer } = arrange([captures[0]]);
+    const controller = new AbortController();
+    client.onRequest = () => {
+      if (client.commands.length === stopAt) {
+        controller.abort(new ActionableError("Cancelled"));
+      }
+    };
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, signal: controller.signal },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: false, attempts: 1, steps: stopAt });
+    expect(result.reason).toContain("Cancelled");
+    expect(client.commands).toHaveLength(stopAt);
+    expect(timer.getSleepHistory()).toHaveLength(stopAt === 1 ? 0 : 18);
   });
   test("passes the signal to every request", async () => {
     const { client, timer } = arrange([captures[0], captures[1]]);
     const signal = new AbortController().signal;
     await addWatchSmartStackWidget(client, { ...options, signal }, { timer });
+    expect(client.signals).toHaveLength(client.commands.length);
     expect(client.signals.every((value) => value === signal)).toBe(true);
+  });
+  test("stops after cancellation during the retry delay without another command", async () => {
+    const { client, timer } = arrange([captures[0]]);
+    const controller = new AbortController();
+    client.onRequest = () => {
+      if (client.commands.length === 20) {
+        timer.setTimeout(() => controller.abort(new ActionableError("Cancelled")), 10000);
+      }
+    };
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, signal: controller.signal },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: false, attempts: 1, steps: 20 });
+    expect(result.reason).toContain("Cancelled");
+    expect(client.commands).toEqual(widgetAttempt(10));
+    expect(timer.getSleepHistory()).toEqual([...Array(18).fill(250), 20000]);
   });
 });

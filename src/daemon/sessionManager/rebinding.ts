@@ -88,6 +88,8 @@ export interface SessionRebindingHost {
     | "getPendingClockRestoration"
     | "getPendingRotationRestoration"
     | "getPendingScreenReaderRestoration"
+    | "hasPendingIme"
+    | "restorePendingImeForRebind"
   >;
   trackPendingTeardownCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void;
   registerPendingDeviceCleanup(
@@ -324,7 +326,12 @@ export class SessionRebinding {
     existing: Session,
     mayRestore: () => boolean = () => true,
   ): Promise<Promise<void>[]> {
+    const device = existing.assignedDevice;
     const restores: Array<() => Promise<{ pending: Promise<void> | null }>> = [
+      // The old device's typing IME, kept for the session, goes back like release restores it.
+      ...(this.host.stateRestore.hasPendingIme(device)
+        ? [() => this.host.stateRestore.restorePendingImeForRebind(device, mayRestore)]
+        : []),
       () => this.host.stateRestore.restoreKeepScreenAwakeBestEffort(existing),
       () => this.host.stateRestore.restoreBiometricEnrollmentBestEffort(existing),
       async () => {

@@ -402,6 +402,32 @@ test("session release restores a pending typing IME exactly once before handing 
   }
 });
 
+test("rebinding a session to another device restores the old device's typing IME (#16428)", async () => {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
+  managers.push(manager);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const restored: string[] = [];
+  await manager.createSession("rebind-ime", "rebind-ime-a", "android");
+  pendingImeRestores.store("rebind-ime-a", {
+    snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+    userId: 10,
+    restore: async () => {
+      restored.push("rebind-ime-a");
+    },
+  });
+  try {
+    await manager.rebindSession("rebind-ime", "rebind-ime-b", "android");
+    expect(restored).toEqual(["rebind-ime-a"]);
+    expect(pendingImeRestores.hasPending("rebind-ime-a")).toBe(false);
+  } finally {
+    pendingImeRestores.discard("rebind-ime-a");
+  }
+});
+
 test("a failed IME restore at session release is logged and the release still completes (#16428)", async () => {
   const h = await harness();
   await ownDevice(h, []);

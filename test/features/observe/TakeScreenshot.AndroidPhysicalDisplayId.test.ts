@@ -11,6 +11,7 @@ import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { androidDevice } from "./takeScreenshotTestHelpers";
+import { aaosDumpsysDisplay, aaosGetDisplays } from "../../helpers/aaosMultidisplay";
 
 const fixtureDirectory = "test/features/observe/android/fixtures";
 const singleDisplayId = "4619827259835644673";
@@ -474,6 +475,130 @@ describe("TakeScreenshot Android physical display selection", function () {
       revision++;
       await captureBase64(screenshot, "/screenshots/three.png", { format: "png", displayId: 3 });
       expect(lookups()).toHaveLength(2);
+    });
+
+    describe("AAOS private cluster display hidden from get-displays (#17740)", function () {
+      // Captured AAOS API 34 multidisplay: get-displays lists only logical 0 and 4, while
+      // dumpsys display's Logical Displays section has the FLAG_PRIVATE cluster as logical 2
+      // with uniqueId local:4619827551948147201.
+      const clusterPhysicalId = "4619827551948147201";
+
+      function aaosScreenshotAdb(): FakeAdbExecutor {
+        const adb = adbWithDisplays(aaosGetDisplays);
+        adb.setCommandResponse("dumpsys display", createExecResult(aaosDumpsysDisplay, ""));
+        return adb;
+      }
+
+      const dumpsysReads = (adb: FakeAdbExecutor) =>
+        adb.getExecutedCommands().filter((command) => command.includes("dumpsys display"));
+
+      test("captures the cluster with its physical id from dumpsys display", async function () {
+        const adb = aaosScreenshotAdb();
+
+        await captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/cluster.png", {
+          format: "png",
+          displayId: 2,
+        });
+
+        expect(screencapCommand(adb)).toContain(`screencap -d ${clusterPhysicalId} -p`);
+        expect(screencapCommand(adb)).not.toContain("screencap -d 2 ");
+      });
+
+      test("caches the supplemented list so a repeat capture skips dumpsys display", async function () {
+        const adb = aaosScreenshotAdb();
+        const screenshot = createScreenshot(adb, new FakeTimer());
+
+        await captureBase64(screenshot, "/screenshots/one.png", { format: "png", displayId: 2 });
+        await captureBase64(screenshot, "/screenshots/two.png", { format: "png", displayId: 2 });
+
+        expect(dumpsysReads(adb)).toHaveLength(1);
+        expect(screencapCommand(adb)).toContain(`screencap -d ${clusterPhysicalId} -p`);
+      });
+
+      test("keeps listed displays on get-displays alone", async function () {
+        const adb = aaosScreenshotAdb();
+
+        await captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/main.png", {
+          format: "png",
+          displayId: 0,
+        });
+
+        expect(screencapCommand(adb)).toContain("screencap -d 4619827259835644672 -p");
+        expect(dumpsysReads(adb)).toHaveLength(0);
+      });
+
+      test("does not consult dumpsys display for a listed virtual display", async function () {
+        const adb = adbWithDisplays(virtualDisplays);
+        adb.setCommandResponse("dumpsys display", createExecResult(aaosDumpsysDisplay, ""));
+
+        await expect(
+          captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/virtual.png", {
+            format: "png",
+            displayId: 2,
+          }),
+        ).rejects.toThrow("Cannot screenshot Android display 2");
+        expect(dumpsysReads(adb)).toHaveLength(0);
+        expect(screencapCommand(adb)).toBe("");
+      });
+
+      test("fails with an actionable error when dumpsys display cannot be read", async function () {
+        const adb = aaosScreenshotAdb();
+        adb.setCommandError("dumpsys display", new Error("service unavailable"));
+
+        await expect(
+          captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/cluster.png", {
+            format: "png",
+            displayId: 2,
+          }),
+        ).rejects.toThrow(/Cannot screenshot Android display 2.*"dumpsys display"/);
+        expect(screencapCommand(adb)).toBe("");
+      });
+
+      test("fails when the hidden display has no physical id in dumpsys display either", async function () {
+        const adb = aaosScreenshotAdb();
+
+        // Logical 3 is the private ClusterOsDouble virtual display (virtual: uniqueId).
+        await expect(
+          captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/vd.png", {
+            format: "png",
+            displayId: 3,
+          }),
+        ).rejects.toThrow("Cannot screenshot Android display 3");
+        expect(screencapCommand(adb)).toBe("");
+      });
+    });
+
+    describe("API 30 without get-displays (#17742) and a display it would hide (#17740)", function () {
+      // Android 11 answers `cmd display get-displays` with "Unknown command" (exit 255) and its
+      // dumpsys display Logical Displays records carry no mIsEnabled line.
+      const api30DumpsysDisplay = [
+        "Logical Displays: size=2",
+        "  Display 0:",
+        "    mDisplayId=0",
+        '    mBaseDisplayInfo=DisplayInfo{"Built-in Screen, displayId 0", uniqueId "local:4619827259835644672", real 1080 x 1920, type INTERNAL, state ON}',
+        "  Display 3:",
+        "    mDisplayId=3",
+        '    mBaseDisplayInfo=DisplayInfo{"Cluster, displayId 3", uniqueId "local:4619827259835644673", real 1280 x 720, type INTERNAL, state ON}',
+        "",
+        "DisplayModeDirector",
+      ].join("\n");
+
+      test("captures a display from its dumpsys record when get-displays is unsupported", async function () {
+        const adb = adbWithDisplays("");
+        adb.setCommandError(
+          "cmd display get-displays",
+          new Error("exit code: 255\nUnknown command: get-displays"),
+        );
+        adb.setCommandResponse("dumpsys display", createExecResult(api30DumpsysDisplay, ""));
+
+        await captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/api30.png", {
+          format: "png",
+          displayId: 3,
+        });
+
+        expect(screencapCommand(adb)).toContain("screencap -d 4619827259835644673 -p");
+        expect(screencapCommand(adb)).not.toContain("screencap -d 3 ");
+      });
     });
 
     test("leaves the default-display command unchanged when no display is requested", async function () {

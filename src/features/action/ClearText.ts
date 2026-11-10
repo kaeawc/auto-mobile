@@ -193,6 +193,11 @@ export interface FocusedTextField {
   secure: boolean;
   /** Non-secure native iOS values, used only when native focus is unavailable. */
   nativeEditableValues?: Readonly<Record<string, string>>;
+  /**
+   * A focused native (non-web) iOS input whose runner value is absent. Runners omit an empty
+   * native value, so typing verification treats this field's baseline as blank (#17764).
+   */
+  iosNativeValueOmitted?: true;
   /** Value of the sole native iOS editable above the on-screen keyboard (blank reads as ""). */
   keyboardNativeEditableValue?: string;
   /** Committed token labels of a recipient/token field; absent for an ordinary text field. */
@@ -255,7 +260,8 @@ export function getFocusedTextField(
         // Web content can report its own focused field (a page search box) beside the native
         // one that owns the keyboard (Safari's URL field); the native field is the typing target.
         firstField ??= field;
-        nativeField ??= webViewDepth === undefined ? field : undefined;
+        nativeField ??=
+          webViewDepth === undefined ? markOmittedNativeValue(field, options) : undefined;
       });
       if (nativeField !== undefined) {
         return nativeField;
@@ -269,6 +275,16 @@ export function getFocusedTextField(
     }
   }
   return undefined;
+}
+
+/** Flag a non-secure native iOS focused input whose value the runner left out. */
+function markOmittedNativeValue(
+  field: FocusedTextField,
+  options: FocusedTextFieldOptions,
+): FocusedTextField {
+  return options.includeIosNativeEditableValues && !field.secure && field.value === undefined
+    ? { ...field, iosNativeValueOmitted: true }
+    : field;
 }
 
 /** Snapshot stable native input identities without ever copying secure values. */

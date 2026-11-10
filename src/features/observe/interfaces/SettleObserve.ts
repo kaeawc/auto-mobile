@@ -29,6 +29,20 @@ export interface SettleOptions {
    * would reject every genuinely fresh capture and burn the whole budget.
    */
   initialMinTimestampMs?: number;
+  /**
+   * The capture the caller already holds (an action tool's post-action
+   * observation), whose diff against the first poll seeds the ticking-node
+   * tracker (#17749), so a running clock needs one read fewer. It never counts
+   * as a stable read. Ignored unless it shows the same screen as the first poll.
+   */
+  referenceObservation?: ObserveResult;
+  /**
+   * Extra budget in ms the loop may spend while the only changes between reads
+   * are ticking or blinking nodes (#17749), so a running stopwatch has time to
+   * prove its tick and finish the terminal read. Any other change withdraws it.
+   * Default 0. A caller with a hard outer deadline must leave room for it.
+   */
+  volatileExtensionMs?: number;
   /** Skip the push wait when the cache misses the floor; synchronously re-extract instead. */
   skipWaitForFresh?: boolean;
   /** Embedded gate only: require independent Android extractions for floor-bearing polls. */

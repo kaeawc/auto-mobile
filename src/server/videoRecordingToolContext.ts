@@ -44,20 +44,26 @@ export interface RecordingToolContext {
 
 export type VideoRecordingArgs = z.output<typeof videoRecordingSchema>;
 
-const resolutionSchema = z.object({
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
-});
+const resolutionSchema = z
+  .object({
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+  })
+  .strict();
 
-const highlightTimingSchema = z.object({
-  startTimeMs: z.number().int().nonnegative().optional().describe("Start time in ms"),
-});
+const highlightTimingSchema = z
+  .object({
+    startTimeMs: z.number().int().nonnegative().optional().describe("Start time in ms"),
+  })
+  .strict();
 
-const highlightSchema = z.object({
-  description: z.string().optional().describe("Highlight description"),
-  shape: highlightShapeSchema.describe("Red hand-drawn circle bounds"),
-  timing: highlightTimingSchema.optional().describe("Highlight timing"),
-});
+const highlightSchema = z
+  .object({
+    description: z.string().optional().describe("Highlight description"),
+    shape: highlightShapeSchema.describe("Red hand-drawn circle bounds"),
+    timing: highlightTimingSchema.optional().describe("Highlight timing"),
+  })
+  .strict();
 
 export const videoRecordingSchema = addDeviceTargetingToSchema(
   z

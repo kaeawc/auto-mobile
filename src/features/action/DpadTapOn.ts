@@ -24,6 +24,8 @@ const TOUCH_ONLY_OPTIONS = [
   "subtext",
   "layer",
   "display",
+  // The D-pad resolver matches text by substring; exact matching is a touch-path guarantee (#17782).
+  "exactText",
 ] as const;
 
 /** The tapOn arguments that decide whether the D-pad can stand in for a touch tap. */
@@ -46,6 +48,7 @@ export interface DpadTapOnRequest {
   subtext?: object;
   layer?: string;
   display?: string;
+  exactText?: boolean;
 }
 
 /** How long a D-pad long press holds center when tapOn gives no `duration`. */

@@ -5,6 +5,7 @@ import type {
 } from "../../models";
 import { isPhysicalPanel } from "../../models/DisplayPanel";
 import type { AndroidRecordingDisplay } from "./AndroidRecordingDisplay";
+import { androidPanelTransitionWarnings } from "./AndroidPanelTransitionWarnings";
 
 const UNKNOWN_PANEL: VideoRecordingPanel = { key: "unknown", role: "unknown" };
 
@@ -102,17 +103,33 @@ export function iosPanelTransitionWarnings(
   );
 }
 
-/** The start-time display warning, then one per iOS panel transition the capture missed. */
+function panelTransitionWarnings(session: {
+  device: Pick<BootedDevice, "platform" | "displays">;
+  recordedPanel: VideoRecordingPanel;
+  transitions: readonly VideoRecordingDisplayTransition[];
+  seededTransition?: VideoRecordingDisplayTransition;
+}): string[] {
+  if (session.device.platform === "ios") {
+    return iosPanelTransitionWarnings(session.recordedPanel, session.transitions);
+  }
+  if (session.device.platform === "android") {
+    return androidPanelTransitionWarnings(
+      session.device.displays,
+      session.recordedPanel,
+      session.transitions,
+      session.seededTransition,
+    );
+  }
+  return [];
+}
+
+/** The start-time display warning, then one per panel transition the capture missed. */
 export function recordingDisplayWarnings(session: {
-  device: Pick<BootedDevice, "platform">;
+  device: Pick<BootedDevice, "platform" | "displays">;
   warning?: string;
   recordedPanel: VideoRecordingPanel;
   transitions: readonly VideoRecordingDisplayTransition[];
+  seededTransition?: VideoRecordingDisplayTransition;
 }): string[] {
-  return [
-    ...(session.warning ? [session.warning] : []),
-    ...(session.device.platform === "ios"
-      ? iosPanelTransitionWarnings(session.recordedPanel, session.transitions)
-      : []),
-  ];
+  return [...(session.warning ? [session.warning] : []), ...panelTransitionWarnings(session)];
 }

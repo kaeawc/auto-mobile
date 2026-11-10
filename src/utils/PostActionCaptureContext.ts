@@ -22,6 +22,12 @@ interface CaptureScope {
   pending: PendingCapture[];
   unavailable: UnavailableCapture[];
   multiAction: boolean;
+  /**
+   * False for a non-settle-gated action (#17765): its response always reports the
+   * action's own hierarchy, so deferring the screenshot to the response boundary
+   * only lets it drift to a later frame. Capture at hierarchy time instead.
+   */
+  defer: boolean;
   signal?: AbortSignal;
   closed: boolean;
 }
@@ -32,6 +38,7 @@ export async function runWithPostActionCaptureScope<T>(
   signal: AbortSignal | undefined,
   fn: () => Promise<T>,
   enabled = true,
+  defer = true,
 ): Promise<T> {
   if (!enabled) {
     return scopes.run(undefined, fn);
@@ -42,6 +49,7 @@ export async function runWithPostActionCaptureScope<T>(
     signal,
     closed: false,
     multiAction: false,
+    defer,
   };
   return scopes.run(scope, async () => {
     let completed = false;
@@ -69,10 +77,11 @@ export function postActionCaptures(
   signal: AbortSignal | undefined,
   internal: boolean,
   name: string,
+  defer = true,
 ) {
   return <T>(fn: () => Promise<T>): (() => Promise<T>) =>
     () =>
-      runWithPostActionCaptureScope(signal, fn, !internal && name !== "observe");
+      runWithPostActionCaptureScope(signal, fn, !internal && name !== "observe", defer);
 }
 
 function sameObservation(left: ObserveResult, right: ObserveResult): boolean {
@@ -117,6 +126,30 @@ export function deferTerminalScreenshot(observation: ObserveResult, capture: Cap
     scope.pending.push({ observation, capture });
   }
   return true;
+}
+
+/**
+ * Capture now in a non-deferring scope, with the same retry and failure tracking
+ * as a deferred capture; otherwise defer like {@link deferTerminalScreenshot}.
+ * Resolves `false` when the caller must capture itself (no scope, multi-action).
+ */
+export async function captureOrDeferTerminalScreenshot(
+  observation: ObserveResult,
+  capture: Capture,
+): Promise<boolean> {
+  const scope = scopes.getStore();
+  if (
+    scope &&
+    !scope.defer &&
+    !scope.closed &&
+    !scope.multiAction &&
+    observation.observationId &&
+    observation.deviceId
+  ) {
+    await captureChosenTerminalScreenshot(observation, capture, scope.signal);
+    return true;
+  }
+  return deferTerminalScreenshot(observation, capture);
 }
 
 export function hasPendingTerminalScreenshot(observation: ObserveResult): boolean {
@@ -167,6 +200,8 @@ export async function captureChosenTerminalScreenshot(
       delete observation.screenshotPixelsPerNativeUnit;
       delete observation.screenshotScaleProvenance;
       delete observation.screenshotAgeMs;
+      delete observation.screenshotHierarchyLagMs;
+      delete observation.screenshotHierarchyMismatch;
       delete observation.screenshotFormat;
       delete observation.screenshotMimeType;
       delete observation.screenshotImage;

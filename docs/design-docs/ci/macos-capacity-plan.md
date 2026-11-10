@@ -193,7 +193,9 @@ job does not skip it.
   owner's keychains.
 - Cache keys of the moved jobs include `runner.environment`, so hosted and
   self-hosted runs never restore each other's SwiftPM or DerivedData state.
-- SwiftLint runs on `ubuntu-latest`, not a Mac (#17581). It installs the official
+- SwiftLint runs on `ubuntu-24.04`, not a Mac (#17581). The 0.57.0 Linux binary
+  links `libicuuc.so.74` and `libxml2.so.2`, which Ubuntu 26.04 does not ship, so
+  the job does not follow `ubuntu-latest` (#17777). It installs the official
   `swiftlint_linux.zip` release asset at the version in
   `scripts/swiftlint/swiftlint_linux_pin.sh`, and refuses it unless its SHA-256
   matches the digest committed there. The Linux pin must equal the Mac pin
@@ -247,20 +249,20 @@ ports, so use that fallback only with the heavy runner under a dedicated user.
 
 ## Job → runner
 
-| Job                                                                            | Same-repo PR                               | Fork PR         |
-| ------------------------------------------------------------------------------ | ------------------------------------------ | --------------- |
-| SwiftLint                                                                      | `ubuntu-latest`                            | `ubuntu-latest` |
-| Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `macos-26`      |
-| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest`  |
-| Swift Packages (Xcode 26.5)                                                    | self-hosted `automobile-mac`               | `macos-26`      |
-| Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`      |
-| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`      |
-| Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`      |
-| iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI        |
-| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`      |
-| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `macos-26` (exception, see above)   | `macos-26`      |
-| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a             |
-| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a             |
+| Job                                                                            | Same-repo PR                               | Fork PR        |
+| ------------------------------------------------------------------------------ | ------------------------------------------ | -------------- |
+| SwiftLint                                                                      | `ubuntu-24.04`                             | `ubuntu-24.04` |
+| Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest` |
+| Swift Packages (Xcode 26.5)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`     |
+| Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
+| iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI       |
+| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`     |
+| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `macos-26` (exception, see above)   | `macos-26`     |
+| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a            |
+| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
 
 Self-hosted and Namespace placements take effect once the owner steps below are done; until
 then the moved jobs run on hosted `macos-26`. A self-hosted placement falls back to

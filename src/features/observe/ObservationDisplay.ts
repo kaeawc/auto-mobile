@@ -27,7 +27,10 @@ import {
   parseAndroidDisplayInfos,
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
-import { readAndroidLogicalDisplays } from "../../utils/android-cmdline-tools/AndroidLogicalDisplays";
+import {
+  AndroidDisplayListUnavailableError,
+  readAndroidLogicalDisplays,
+} from "../../utils/android-cmdline-tools/AndroidLogicalDisplays";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
@@ -70,7 +73,8 @@ async function readAndroidDisplayInfos(
   panels: readonly DisplayPanel[],
   signal?: AbortSignal,
 ): Promise<
-  { infos: ReturnType<typeof parseAndroidDisplayInfos> } | { infos: null; reason: string }
+  | { infos: ReturnType<typeof parseAndroidDisplayInfos> }
+  | { infos: null; reason: string; retryable: boolean }
 > {
   try {
     const infos = await readAndroidLogicalDisplays(adb, panels, signal);
@@ -83,8 +87,21 @@ async function readAndroidDisplayInfos(
     // A failed live display-list read cannot establish whether a panel is connected.
     const reason = errorMessage(error);
     logger.warn(`Android display list could not be read: ${reason}`, error);
-    return { infos: null, reason };
+    // No inventory source exists on this OS (#17742): a retry would fail the same way.
+    return {
+      infos: null,
+      reason,
+      retryable: !(error instanceof AndroidDisplayListUnavailableError),
+    };
   }
+}
+
+function displayReadFailureMessage(
+  key: string,
+  failure: { reason: string; retryable: boolean },
+): string {
+  const message = `Android display list could not be read while selecting panel "${key}": ${failure.reason}`;
+  return failure.retryable ? `${message}. Retry the request.` : message;
 }
 
 interface CachedAndroidDisplay {
@@ -188,9 +205,7 @@ export class ObservedAndroidDisplayCache {
     }
     const result = await readAndroidDisplayInfos(adb, device.displays?.panels ?? [], signal);
     if (result.infos === null) {
-      throw new AndroidDisplayReadError(
-        `Android display list could not be read while selecting panel "${key}": ${result.reason}. Retry the request.`,
-      );
+      throw new AndroidDisplayReadError(displayReadFailureMessage(key, result));
     }
     const id = logicalDisplayIdForPanel(result.infos, key);
     if (id === undefined) {

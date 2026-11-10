@@ -5,6 +5,7 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   renderPrototypeIconSymbolData,
   renderPrototypeIconSymbolDoc,
+  narrowPrototypeIconSymbols,
 } from "../../../scripts/ios/generate-prototype-icon-symbols";
 import { IOS_PROTOTYPE_MAPPED_ICON_NAMES } from "../../../src/features/prototype/prototypePlatformNotes";
 
@@ -25,6 +26,16 @@ const mappedSet = new Set(mapped);
 const unmappedSet = new Set(table.unmapped);
 
 describe("canonical iOS icon symbols", () => {
+  test("normalization drops removed mappings and derives missing-name fallbacks", () => {
+    const narrowed = narrowPrototypeIconSymbols({
+      minimumIOS: "17.0",
+      placeholder: "questionmark.square",
+      mapped: { home: { symbol: "house" }, settings_applications: { symbol: "gear" } },
+      unmapped: ["settings_applications"],
+    });
+    expect(narrowed.mapped).toEqual({ home: { symbol: "house" } });
+    expect(narrowed.unmapped).toEqual(names.filter((name) => name !== "home"));
+  });
   test("compiled Swift equals the generator output", () => {
     expect(compiled).toBe(renderPrototypeIconSymbolData(table));
   });

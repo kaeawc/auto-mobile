@@ -155,6 +155,8 @@ The app closes its modules after all renderers using them detach.
 
 ## Shrinking (R8)
 
+Specs accept the [allowed prototype icons](prototype-icons.md), including all five Material styles.
+
 Android icons named in a spec are looked up by reflection, which R8 cannot see. The library ships no
 consumer keep rule for them, because one would retain all of `material-icons-extended` (about 3 MB
 of dex) in every app that embeds a prototype. An app that minifies and renders icons by name adds the

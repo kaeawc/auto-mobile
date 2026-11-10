@@ -19,6 +19,7 @@ import {
 import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/webPage";
 import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
 import { WEB_SCREENSHOT_SPECS } from "./webScreenshotCases";
+import contract from "../../../../schemas/prototype-spec-contract.json";
 
 const FIXTURES = join(import.meta.dir, "../../../fixtures");
 
@@ -71,6 +72,20 @@ describe("icon glyph shapes (#16532)", () => {
 });
 
 describe("Material icon glyph source (#16532)", () => {
+  test.each(contract.definitions.iconName.values)(
+    "curated icon %s has web glyphs in all five styles or its documented placeholder",
+    (name) => {
+      for (const variant of ["filled", "outlined", "rounded", "sharp", "twoTone"] as const) {
+        const glyph = materialIconGlyphs().glyph(name, variant);
+        if (name === "crop_169" || name === "eco") {
+          expect(glyph).toBeUndefined();
+        } else {
+          expect(glyph?.length).toBeGreaterThan(0);
+        }
+      }
+    },
+  );
+
   const files: Record<string, string> = {
     "filled/home": svg('<path d="F"/>'),
     "round/home": svg('<path d="R"/>'),

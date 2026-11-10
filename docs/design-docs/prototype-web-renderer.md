@@ -463,7 +463,7 @@ the host, so the page's script only switches between views it was given and neve
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
   Compose parent does around a `fillMaxSize` child. In an Android frame an icon draws its Material Icons
-  glyph (the set Compose's `material-icons-extended` bundles, read from the Apache-2.0
+  glyph (the contract's curated subset of Compose's `material-icons-extended`, read from the Apache-2.0
   `@material-design-icons/svg` package) as inline SVG in a 24 px box, in its `variant`'s style, else
   `filled` as Android falls back, and tinted by `currentColor` or its style `color`. Only the
   glyphs a still draws are read and inlined. The still takes its glyph source as an option, so it

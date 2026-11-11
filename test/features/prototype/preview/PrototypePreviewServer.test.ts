@@ -119,13 +119,13 @@ describe("PrototypePreviewServer event streams", () => {
     const stream = http.request("/p/a/events", LOCAL);
     expect(stream.status).toBe(200);
     expect(stream.headers["content-type"]).toBe("text/event-stream; charset=utf-8");
-    expect(stream.body).toBe('retry: 1000\n\nevent: ready\ndata: {"generation":0}\n\n');
+    expect(stream.body).toBe('retry: 1000\n\nevent: ready\ndata: {"generation":1}\n\n');
     source.change("a");
     source.change("other");
     source.change("b");
     expect(stream.chunks.slice(1)).toEqual([
-      'event: reload\ndata: {"id":"a","generation":1}\n\n',
-      'event: reload\ndata: {"id":"b","generation":3}\n\n',
+      'event: reload\ndata: {"id":"a","generation":2}\n\n',
+      'event: reload\ndata: {"id":"b","generation":4}\n\n',
     ]);
   });
 
@@ -137,6 +137,17 @@ describe("PrototypePreviewServer event streams", () => {
     source.change("b");
     source.change("b");
     expect(stream.chunks.length).toBe(2);
+  });
+
+  test("a restart advances the generation, so a reconnecting tab reloads", async () => {
+    await server.serve({ port: 8123 });
+    const before = http.request("/p/a/events", { host: "127.0.0.1:8123" });
+    await server.stop();
+    source.change("a");
+    await server.serve({ port: 8123 });
+    const after = http.request("/p/a/events", { host: "127.0.0.1:8123" });
+    expect(before.body).toContain('event: ready\ndata: {"generation":1}');
+    expect(after.body).toContain('event: ready\ndata: {"generation":2}');
   });
 
   test("keepalive comments go to open streams", async () => {
@@ -151,6 +162,7 @@ describe("PrototypePreviewServer requests", () => {
   test("serves the shell and the page", async () => {
     await server.serve({});
     source.change("a");
+    source.groups.set("a", ["a", "b"]);
     const page = http.request("/p/a/page?variant=b&frame=pixel-9", LOCAL);
     await page.done();
     expect(page.status).toBe(200);

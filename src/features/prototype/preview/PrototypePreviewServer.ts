@@ -171,6 +171,9 @@ export class PrototypePreviewServer implements PrototypePreviewControl {
     await this.stopNow("stop");
     const host = remote ? ALL_INTERFACES : LOOPBACK_HOST;
     const listener = await this.bind(host, requestedPort);
+    // Changes while stopped were not counted: a tab reconnecting to the new listener must see a
+    // different generation in ready, so it reloads.
+    this.generation += 1;
     this.served = true;
     this.stoppedReason = undefined;
     this.running = {

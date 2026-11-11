@@ -50,9 +50,20 @@ describe("prototypePreviewResponse", () => {
     expect(waiting.status).toBe(404);
     expect(waiting.body).toContain("&lt;x&gt;");
     source.change("a");
-    source.failPage = new ActionableError('Unknown variant "z"');
-    const bad = await prototypePreviewResponse({ kind: "page", id: "a", variant: "z" }, source);
-    expect(bad).toMatchObject({ status: 400, body: 'Unknown variant "z"' });
+    source.failPage = new ActionableError('Unknown frame "z"');
+    const bad = await prototypePreviewResponse({ kind: "page", id: "a", frame: "z" }, source);
+    expect(bad).toMatchObject({ status: 400, body: 'Unknown frame "z"' });
+  });
+
+  test("a kept variant that left the group falls back to the page's own", async () => {
+    const source = new FakePreviewPageSource();
+    source.change("a");
+    source.groups.set("a", ["a", "b"]);
+    const kept = await prototypePreviewResponse({ kind: "page", id: "a", variant: "b" }, source);
+    expect(kept.body).toBe("<page a b ->");
+    source.groups.set("a", ["a"]);
+    const stale = await prototypePreviewResponse({ kind: "page", id: "a", variant: "b" }, source);
+    expect(stale).toMatchObject({ status: 200, body: "<page a - ->" });
   });
 
   test("the page is the source's HTML unchanged; the index lists ids", async () => {

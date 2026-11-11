@@ -214,6 +214,20 @@ function waitingPage(id: string): PrototypePreviewResponse {
   return html(404, htmlDocument(id, [el("main", {}, [el("p", {}, [note])])]));
 }
 
+/**
+ * A variant the shell kept from an earlier reload that has since left the group falls back to the
+ * page's own first variant, so the live page never sticks on an error.
+ */
+function currentVariant(
+  source: PrototypePreviewPageSource,
+  query: PrototypePreviewPageQuery,
+): PrototypePreviewPageQuery {
+  if (query.variant === undefined || source.related(query.id).includes(query.variant)) {
+    return query;
+  }
+  return { id: query.id, ...(query.frame ? { frame: query.frame } : {}) };
+}
+
 async function prototypePage(
   source: PrototypePreviewPageSource,
   query: PrototypePreviewPageQuery,
@@ -223,7 +237,7 @@ async function prototypePage(
   }
   try {
     // The page carries its own CSP meta; the header only stops other origins framing it.
-    return html(200, await source.page(query), "frame-ancestors 'self'");
+    return html(200, await source.page(currentVariant(source, query)), "frame-ancestors 'self'");
   } catch (error) {
     if (error instanceof ActionableError) {
       return text(400, error.message);

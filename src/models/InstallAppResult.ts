@@ -12,6 +12,12 @@ export interface InstallAppResult extends BaseActionResult {
   packageName?: string;
   /** True if installation replaced an existing package */
   upgrade?: boolean;
+  /**
+   * Android: false when allowDestructiveRecovery uninstalled the existing copy (its app data was
+   * deleted) before installing; true when an installed copy was replaced in place. Omitted for a
+   * fresh install.
+   */
+  dataPreserved?: boolean;
   /** Warning message when best-effort detection was required */
   warning?: string;
   /**

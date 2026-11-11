@@ -26,6 +26,8 @@ static char AMStateKey, AMOutputKey, AMSessionKey, AMTypesKey, AMDeviceKey, AMRe
 @property(nonatomic, weak) id delegate;
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, weak) AVCaptureSession *session;
+// One fake connection per output, reused for every frame: fake instances are never freed.
+@property(nonatomic, strong) AVCaptureConnection *connection;
 @end
 @implementation AMOutputState
 @end
@@ -302,11 +304,16 @@ static void AMTick(AVCaptureSession *session, NSUInteger generation) {
     });
     for (AVCaptureOutput *output in outputs) {
         AMOutputState *binding = AMOutput(output);
-        id delegate; dispatch_queue_t queue;
-        @synchronized (binding) { delegate = binding.delegate; queue = binding.queue; }
+        id delegate; dispatch_queue_t queue; AVCaptureConnection *connection;
+        @synchronized (binding) {
+            delegate = binding.delegate; queue = binding.queue;
+            if (delegate && queue && !binding.connection) {
+                binding.connection = class_createInstance(AMConnectionClass, 0);
+                AMStore(binding.connection, &AMOutputKey, output);
+            }
+            connection = binding.connection;
+        }
         if (!delegate || !queue) continue;
-        AVCaptureConnection *connection = class_createInstance(AMConnectionClass, 0);
-        AMStore(connection, &AMOutputKey, output);
         if ([output isKindOfClass:AVCaptureVideoDataOutput.class] &&
             [delegate respondsToSelector:@selector(captureOutput:didOutputSampleBuffer:fromConnection:)]) {
             CMSampleTimingInfo timing = {CMTimeMake(1, 15), CMClockGetTime(CMClockGetHostTimeClock()), kCMTimeInvalid};

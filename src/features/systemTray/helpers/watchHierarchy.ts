@@ -439,6 +439,21 @@ export function watchReplyInput(hierarchy?: ViewHierarchyResult): boolean {
   return hasId("wear_remote_input") && hasId("extract_edit_text");
 }
 
+/** Preserve whitespace in the committed field; duplicated IME captures must agree. */
+export function watchReplyText(hierarchy?: ViewHierarchyResult): string | undefined {
+  const fields = (hierarchy ? getHierarchyRoots(hierarchy).flatMap(watchNodes) : []).filter(
+    (node) =>
+      matchesCtrlProxyResourceId(
+        toSearchable(getNodeProperties(node) ?? {}).nativeId,
+        "extract_edit_text",
+      ),
+  );
+  // Parsed field values retain whitespace-only text, which searchable labels omit.
+  const parser = new DefaultElementParser();
+  const texts = new Set(fields.map((node) => parser.parseNodeBounds(node)?.text ?? ""));
+  return texts.size === 1 ? [...texts][0] : undefined;
+}
+
 /** The IME action is Close keyboard until composing text has been committed. */
 export function watchReplySend(hierarchy?: ViewHierarchyResult): Element | undefined {
   if (!hierarchy || !watchReplyInput(hierarchy)) {

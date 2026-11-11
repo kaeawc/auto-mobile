@@ -22,6 +22,7 @@ import {
   resolveIosOwnedTapPoint,
 } from "../../action/iosTapTargetOwnership";
 import { visibleTapBounds } from "../../utility/ElementGeometry";
+import { isIosPresentationChrome } from "../iosPresentationChrome";
 import { PROTOTYPE_LAYOUT_KINDS } from "../ownWindowFocus";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
@@ -806,24 +807,18 @@ function removeIosChromeTaps(
   accumulators: SkeletonAccumulator[],
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
 ): void {
-  // A zero-sized fallback is not evidence that artwork extends off screen.
-  if (!viewport || Math.min(viewport.width, viewport.height) <= 0) {
-    return;
-  }
   for (const acc of accumulators) {
-    if (
-      acc.affordances.size !== 1 ||
-      !acc.affordances.has("tap") ||
-      acc.label !== undefined ||
-      acc.sublabel !== undefined ||
-      hasNativeId(acc) ||
-      acc.testTag !== undefined
-    ) {
-      continue;
-    }
     const [left, top, right, bottom] = acc.bounds;
-    const overflowingSides = [left < 0, top < 0, right > viewport.width, bottom > viewport.height];
-    if (overflowingSides.filter(Boolean).length >= 2) {
+    if (
+      isIosPresentationChrome(
+        {
+          ...acc,
+          nativeId: acc.target && searchableNativeId(acc.target),
+          bounds: { left, top, right, bottom },
+        },
+        viewport,
+      )
+    ) {
       acc.affordances.delete("tap");
     }
   }

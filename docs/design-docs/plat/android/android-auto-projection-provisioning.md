@@ -63,11 +63,12 @@ marker in the resolved AVD directory: the next launch skips the unusable quickbo
 restart (#17903). A post-kill stop that outlives the deadline keeps
 the serial's shutdown reservation until it settles, whether the rest of the shutdown succeeds or
 fails, so a replacement never boots under it. When the session holding the phone ends without a kill
-(release, heartbeat reap, idle expiry, a cancelled session), a session-release listener stops its DHU
+(release, heartbeat reap, idle expiry, a cancelled session) or moves to another device, a
+session-release and device-unbound listener stops its DHU
 and removes the redirect this provisioner added, as pending device cleanup, so the emulator keeps
 running with host port 5277 free; a phone another live session already holds is skipped, and a
 replaced serial only stops the old DHU and forgets its redirect, without blocking the new device.
-The redirect stays while a DHU that would not exit still dials it. The stop runs outside the releasing request's context, so a cancelled request cannot cut the removal short, and every provisioning run waits for a removal in progress, so a new projection never reuses a redirect about to be deleted, even after the cleanup's acquisition cap lapses. Only DHUs in this daemon's session map are stopped. A stopped session
+The redirect stays while a DHU that would not exit still dials it. The stop runs outside the releasing request's context, so a cancelled request cannot cut the removal short, and every provisioning run waits for a removal in progress, so a new projection never reuses a redirect about to be deleted, even after the cleanup's acquisition cap lapses. A second release of the same phone chains onto the first, so a stalled `redir del` stays awaited, and a removal clears only the redirect object it was removing, never one a later run added. A release while that phone is still provisioning waits for the run (and counts the phone as held), then stops whatever DHU and redirect it left. Only DHUs in this daemon's session map are stopped. A stopped session
 is forgotten, so a later emulator that reuses the serial launches its own DHU; one whose stop fails
 stays tracked for the single-projection check but is never reused as `already-done`.
 The applier is a process-wide singleton: the provisioner it wraps is what tracks which DHU holds host

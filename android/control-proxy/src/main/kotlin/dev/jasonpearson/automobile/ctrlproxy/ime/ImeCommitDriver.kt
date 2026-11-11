@@ -831,7 +831,7 @@ class ImeCommitDriver(
       var matchedOffset = 0
       var swallowed = false
       while (offset < applied.length) {
-        val unit = dispatched.getOrNull(nextUnit) ?: return null
+        val unit = dispatched.getOrNull(nextUnit) ?: break
         when {
           unit.isNotEmpty() && applied.startsWith(unit, offset) -> {
             offset += unit.length
@@ -848,10 +848,20 @@ class ImeCommitDriver(
           else -> return null
         }
       }
-      // A later match must anchor swallowed units; a transformed tail is ambiguous, not a loss.
-      if (swallowed && matchedOffset != offset) return null
+      if (!confirmsTail(applied, offset, matchedOffset, swallowed)) return null
       return confirmed.takeIf { it > 0 }
     }
+
+    // A later match must anchor swallowed units; a transformed tail is ambiguous, not a loss.
+    // Without swallowed units, editor formatting may follow the last dispatched unit.
+    private fun confirmsTail(
+      applied: String,
+      offset: Int,
+      matchedOffset: Int,
+      swallowed: Boolean,
+    ): Boolean =
+      if (swallowed) matchedOffset == offset && offset == applied.length
+      else FORMATTING.replace(applied.substring(offset), "").isEmpty()
 
     // Match complete editing units first; only formatting may be skipped or swallowed.
     private val FORMATTING = Regex("[^\\p{L}\\p{N}\\p{M}]")

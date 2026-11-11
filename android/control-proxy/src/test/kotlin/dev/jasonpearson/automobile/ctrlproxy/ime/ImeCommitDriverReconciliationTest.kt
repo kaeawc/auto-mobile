@@ -88,15 +88,26 @@ internal class ImeCommitDriverReconciliationTest : ImeCommitDriverFixtures() {
   }
 
   @Test
-  fun `formatting remaining after dispatched units run out is not confirmed`() {
-    // Boundary perturbations, not additional device captures.
-    for ((text, delta) in listOf("a:)b" to "a🙂b-", "ab" to " ab-")) {
-      val units = Regex("\\X").findAll(text).map { it.value }.toList()
+  fun `formatting remaining after swallowed units run out is not confirmed`() {
+    // Boundary perturbation, not an additional device capture.
+    val units = Regex("\\X").findAll("a:)b").map { it.value }.toList()
+    assertEquals(
+      ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", "a🙂b-"),
+      ImeCommitDriver.reconcileDecision(
+        ImeReconciliationState(false, false, "", "a🙂b-", units),
+      ),
+    )
+  }
+
+  @Test
+  fun `trailing editor formatting after every dispatched unit continues without restart`() {
+    // " ab-" is a boundary perturbation; "12/" is a date mask after the first two digits.
+    for ((dispatched, delta) in listOf(listOf("a", "b") to " ab-", listOf("1", "2") to "12/")) {
       assertEquals(
-        text,
-        ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", delta),
+        delta,
+        ImeCommitDriver.Reconciliation.Continue,
         ImeCommitDriver.reconcileDecision(
-          ImeReconciliationState(false, false, "", delta, units),
+          ImeReconciliationState(false, false, "", delta, dispatched),
         ),
       )
     }

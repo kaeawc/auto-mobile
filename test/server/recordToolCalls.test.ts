@@ -144,6 +144,74 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     expect(toolField(endA, "planContent")).toContain("Only A");
   });
 
+  test("one-shot CLI begin refuses before starting a recording", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
+    const response = await runWithToolSelectionContext(
+      { oneShotCli: true, autolockMcpSessionId: "one-shot" },
+      () => tool.handler(tool.schema.parse({ action: "begin", planName: "wear-accept-16830" })),
+    );
+    expect(toolField(response, "success")).toBe(false);
+    expect(toolField(response, "action")).toBe("begin");
+    expect(toolField(response, "error")).toContain("one-shot CLI call cannot hold a recording");
+    expect(toolField(response, "error")).toContain("persistent MCP connection");
+    expect(toolField(response, "error")).toContain("proxy / daemon MCP session");
+    expect(toolField(response, "error")).toContain("Recordings are scoped to the MCP connection");
+    expect(toolIsError(response)).toBe(true);
+    expect(toolStructured(response)).toEqual(toolJson(response));
+    expect(getToolCallRecorder({ connectionId: "one-shot" })).toBeNull();
+    expect(getToolCallRecorder()).toBeNull();
+  });
+
+  test("persistent MCP begin still starts and records on its connection", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
+    const response = await asConnection("persistent", () =>
+      tool.handler({ action: "begin", planName: "wear-accept-16830" }),
+    );
+    expect(toolIsError(response)).toBe(false);
+    expect(toolStructured(response)).toEqual({
+      success: true,
+      action: "begin",
+      recording: true,
+      startedAt: new Date(defaultTimer.now()).toISOString(),
+      planName: "wear-accept-16830",
+    });
+    expect(getToolCallRecorder({ connectionId: "persistent" })?.isRecording()).toBe(true);
+    expect(getToolCallRecorder()).toBeNull();
+  });
+
+  test("one-shot CLI status and end keep their connection-scoped responses", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
+    await asConnection("persistent", () => tool.handler({ action: "begin" }));
+    await runWithToolSelectionContext(
+      { oneShotCli: true, autolockMcpSessionId: "one-shot" },
+      async () => {
+        const status = await tool.handler({ action: "status" });
+        expect(toolIsError(status)).toBe(false);
+        expect(toolStructured(status)).toEqual({
+          success: true,
+          action: "status",
+          recording: false,
+        });
+        const end = await tool.handler({ action: "end" });
+        expect(toolIsError(end)).toBe(true);
+        expect(toolStructured(end)).toEqual({
+          success: false,
+          action: "end",
+          error:
+            "No active tool call recording on this MCP connection. " +
+            'Call recordToolCalls with action: "begin" first. ' +
+            "Recordings are scoped to the MCP connection that began them, so a separate " +
+            "connection (such as a one-shot CLI call) cannot end another connection's recording.",
+        });
+        expect(toolStructured(end)).toEqual(toolJson(end));
+      },
+    );
+    expect(getToolCallRecorder({ connectionId: "persistent" })?.isRecording()).toBe(true);
+  });
+
   test("disabled recording and ending without a recording are errors", async () => {
     const tool = ToolRegistry.getTool("recordToolCalls")!;
     serverConfig.setToolCallRecordingEnabled(false);

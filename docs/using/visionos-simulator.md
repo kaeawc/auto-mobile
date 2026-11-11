@@ -51,6 +51,8 @@ auto-mobile --cli observe --platform visionos --sessionUuid "$SESSION_ID" --scre
 
 The result contains a screenshot path. Read the screenshot to see the screen. Without the window-app runner, the result carries only the screenshot and a message that the runner is unavailable. See the limits below.
 
+Every visionOS observe captures a screenshot, so `screenshot` accepts `"settled"` or `"async"`, not `"none"`. `raw` is not supported: omit it, and pass `project: "full"` with the runner to get every element. An observe that passes an unsupported option fails before capturing. The error names each unsupported option and what to use instead.
+
 ## Read app logs
 
 ```bash

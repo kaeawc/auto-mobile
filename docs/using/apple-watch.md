@@ -13,7 +13,8 @@ up, the supported tools and what is out of scope.
   with `xcodebuild -downloadPlatform watchOS`; AutoMobile never downloads one.
 
 A watch never appears in an iOS listing or iOS tool result. Every watch call names it with
-`platform: "watchos"`.
+`platform: "watchos"`. `startDevice` with `platform: "ios"` and a watch UDID fails with
+`Device '<UDID>' is a watchOS simulator, not an iOS simulator`, naming `platform: "watchos"`.
 
 ## List, create and boot a watch
 

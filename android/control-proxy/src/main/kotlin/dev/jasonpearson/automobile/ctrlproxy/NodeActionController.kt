@@ -264,27 +264,19 @@ internal class NodeActionController(
    * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
    * IDs, and collection coordinates.
    */
-  @Suppress("LongParameterList") // Wire request fields pass through unchanged.
   suspend fun performNodeAction(
     requestId: String?,
     action: String,
-    resourceId: String?,
-    selector: NodeSelector?,
+    target: NodeActionTarget,
     arguments: NodeActionArguments = NodeActionArguments(),
-    expectedBounds: NodeExpectedBounds? = null,
-    identityHints: NodeIdentityHints? = null,
+    boundsConstraint: NodeBoundsConstraint = NodeBoundsConstraint(),
   ) {
     host.forgetRememberedInsert()
     val startTime = timeProvider.currentTimeMillis()
-    val effectiveSelector = selector?.takeIf { it.hasCriteria() }
-    val targetDescription = effectiveSelector?.toString() ?: "resource-id: $resourceId"
-    Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
+    Log.d(TAG, "performAction: action='$action', target='${target.description}'")
     perfProvider.serial("performAction")
 
-    NodeActionOperation(requestId, action, startTime, arguments, expectedBounds, identityHints)
-      .run(
-        NodeActionTarget(effectiveSelector, resourceId, targetDescription),
-      )
+    NodeActionOperation(requestId, action, startTime, arguments, boundsConstraint).run(target)
   }
 
   private inner class NodeActionOperation(
@@ -292,8 +284,7 @@ internal class NodeActionController(
     private val action: String,
     private val startTime: Long,
     private val arguments: NodeActionArguments,
-    private val expectedBounds: NodeExpectedBounds?,
-    private val identityHints: NodeIdentityHints?,
+    private val boundsConstraint: NodeBoundsConstraint,
   ) {
     suspend fun run(target: NodeActionTarget) {
       try {
@@ -310,6 +301,7 @@ internal class NodeActionController(
     }
 
     private suspend fun perform(target: NodeActionTarget) {
+      val expectedBounds = boundsConstraint.expectedBounds
       val boundsOnly = target.selector == null && target.resourceId.isNullOrEmpty()
       if (boundsOnly && (expectedBounds == null || action != "click")) {
         perfProvider.end()
@@ -320,21 +312,7 @@ internal class NodeActionController(
       }
 
       perfProvider.startOperation("findNode")
-      val targetNode =
-        if (expectedBounds != null) {
-          val selector = target.selector ?: NodeSelector(resourceId = target.resourceId)
-          selectNodeWithBounds(
-            host.findNodesInDisplayWindows {
-              if (boundsOnly) findNodesByBounds(it, expectedBounds)
-              else findNodesBySelector(it, selector)
-            },
-            expectedBounds,
-            boundsOnly,
-            identityHints,
-          )
-        } else {
-          findActionNode(target.selector, target.resourceId)
-        }
+      val targetNode = findTargetNode(target, expectedBounds, boundsOnly)
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
@@ -376,6 +354,27 @@ internal class NodeActionController(
         ),
       )
     }
+
+    private fun findTargetNode(
+      target: NodeActionTarget,
+      expectedBounds: NodeExpectedBounds?,
+      boundsOnly: Boolean,
+    ): AccessibilityNodeInfo? =
+      if (expectedBounds != null) {
+        val selector = target.selector ?: NodeSelector(resourceId = target.resourceId)
+        selectNodeWithBounds(
+          host.findNodesInDisplayWindows {
+            if (boundsOnly) findNodesByBounds(it, expectedBounds)
+            else findNodesBySelector(it, selector)
+          },
+          expectedBounds,
+          boundsOnly,
+          boundsConstraint.identityHints,
+          allowInvisible = boundsConstraint.allowInvisible && action == "click",
+        )
+      } else {
+        findActionNode(target.selector, target.resourceId)
+      }
 
     private suspend fun reportFailure(e: Exception) {
       perfProvider.end()
@@ -460,8 +459,7 @@ private fun accessibilityLinkError(text: String, occurrence: Int): String? =
     else -> null
   }
 
-private data class NodeActionTarget(
-  val selector: NodeSelector?,
-  val resourceId: String?,
-  val description: String,
-)
+internal class NodeActionTarget(selector: NodeSelector? = null, val resourceId: String? = null) {
+  val selector: NodeSelector? = selector?.takeIf { it.hasCriteria() }
+  val description: String = this.selector?.toString() ?: "resource-id: $resourceId"
+}

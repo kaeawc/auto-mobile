@@ -152,6 +152,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "putAppFile",
   "recentApps",
   "rotaryScroll",
+  "glassesInput",
   "ambient",
   "wearSurface",
   "resetAppLogs",

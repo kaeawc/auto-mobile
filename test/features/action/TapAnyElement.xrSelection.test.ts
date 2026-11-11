@@ -36,7 +36,12 @@ const hierarchy = identifyObservedHierarchy("android", capture.viewHierarchy, "c
   timer: new FakeTimer(),
 }).hierarchy;
 const selector = new ResolverElementSelector();
-function select(xr: boolean, container?: TapAnyElementOptions["container"], tree = hierarchy) {
+function select(
+  xr: boolean,
+  container?: TapAnyElementOptions["container"],
+  tree = hierarchy,
+  scrollableContainer?: boolean,
+) {
   return findTapAnyClickableElement(
     {
       elementSelector: selector,
@@ -45,7 +50,7 @@ function select(xr: boolean, container?: TapAnyElementOptions["container"], tree
       iosMultiPanel: false,
       xr,
     },
-    { action: "tap", container },
+    { action: "tap", container, scrollableContainer },
     tree,
     { observationScreenSize: capture.screenSize },
   ).element;
@@ -199,7 +204,7 @@ test.each([
 // A live capture shares each window's root between the merged roots and `windows[i]`, and the
 // hidden SystemUI chrome makes XR selection wrap the merged roots in a boundless root.
 // JSON breaks that sharing, so relink it while keeping every SystemUI window.
-function linkedCapture(ownerHeight?: number): ViewHierarchyResult {
+function linkedCapture(ownerHeight?: number, ownerTop = 48): ViewHierarchyResult {
   const raw = structuredClone(capture.viewHierarchy);
   if (ownerHeight !== undefined) {
     const app = raw.windows!.find((window) => window.id === 38)!;
@@ -207,8 +212,8 @@ function linkedCapture(ownerHeight?: number): ViewHierarchyResult {
     label.bounds = { left: 96, top: 320, right: 187, bottom: 374 };
     const section = { ...settingsControl("", 300), clickable: false, node: [label] };
     section.bounds = { left: 0, top: 300, right: 744, bottom: 400 };
-    const owner = { ...settingsControl("fragment_root", 48), node: [section] };
-    owner.bounds = { left: 0, top: 48, right: 744, bottom: 48 + ownerHeight };
+    const owner = { ...settingsControl("fragment_root", ownerTop), node: [section] };
+    owner.bounds = { left: 0, top: ownerTop, right: 744, bottom: ownerTop + ownerHeight };
     app.hierarchy = { ...app.hierarchy!, node: [...childrenOf(app.hierarchy!), owner] };
   }
   // The serialized merged roots are an array under `hierarchy.node`.
@@ -241,6 +246,18 @@ test("XR leaf fallback refuses an owner over a quarter of the Settings pane", ()
 
 test("XR leaf fallback still resolves the real Apps row in a linked capture", () => {
   expect(select(true, { text: "Apps" }, linkedCapture())?.bounds).toEqual({
+    left: 48,
+    top: 548,
+    right: 696,
+    bottom: 724,
+  });
+});
+
+test("XR leaf fallback honours scrollableContainer", () => {
+  const tree = linkedCapture(100, 300);
+  expect(select(true, { text: "Header" }, tree)?.text).toBe("fragment_root");
+  expect(select(true, { text: "Header" }, tree, true)).toBeNull();
+  expect(select(true, { text: "Apps" }, linkedCapture(), true)?.bounds).toEqual({
     left: 48,
     top: 548,
     right: 696,

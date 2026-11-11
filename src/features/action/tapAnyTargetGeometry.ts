@@ -169,10 +169,21 @@ function xrContainerOwner(
     { action: options.action === "longPress" ? "long-press" : "tap", viewport },
     xrContainerScope(node, nodes, viewport),
   );
-  if (owner) {
-    return new DefaultElementParser().parseNodeBounds(owner.source);
+  if (!owner || (options.scrollableContainer && !withinScrollingRoot(owner, nodes))) {
+    return null;
   }
-  return null;
+  return new DefaultElementParser().parseNodeBounds(owner.source);
+}
+
+/** `scrollableContainer` admits only owners inside a scrolling root, as the selector does. */
+function withinScrollingRoot(node: SearchableEntry, nodes: readonly SearchableEntry[]): boolean {
+  for (let entry: SearchableEntry | undefined = node; entry;) {
+    if (entry.affordances.includes("scroll")) {
+      return true;
+    }
+    entry = entry.parentIndex === undefined ? undefined : nodes[entry.parentIndex];
+  }
+  return false;
 }
 
 /** Bound leaf ownership to three ancestors, a quarter window, and no unrelated controls. */

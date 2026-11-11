@@ -308,7 +308,8 @@ internal class NodeActionController(
     }
 
     private suspend fun perform(target: NodeActionTarget) {
-      if (target.selector == null && target.resourceId.isNullOrEmpty()) {
+      val boundsOnly = target.selector == null && target.resourceId.isNullOrEmpty()
+      if (boundsOnly && (expectedBounds == null || action != "click")) {
         perfProvider.end()
         val errorTime = timeProvider.currentTimeMillis()
         val error = "A resource-id or stable node selector is required for accessibility actions"
@@ -321,7 +322,10 @@ internal class NodeActionController(
         if (expectedBounds != null) {
           val selector = target.selector ?: NodeSelector(resourceId = target.resourceId)
           selectNodeWithBounds(
-            host.findNodesInDisplayWindows { findNodesBySelector(it, selector) },
+            host.findNodesInDisplayWindows {
+              if (boundsOnly) findNodesByBounds(it, expectedBounds)
+              else findNodesBySelector(it, selector)
+            },
             expectedBounds,
           )
         } else {

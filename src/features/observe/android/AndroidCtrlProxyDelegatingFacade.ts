@@ -674,7 +674,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
 
   async requestNodeAction(
     action: string,
-    selector: AccessibilityNodeSelector,
+    selector: AccessibilityNodeSelector | undefined,
     {
       timeoutMs,
       perf,

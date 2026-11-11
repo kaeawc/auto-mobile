@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.Point
 import android.graphics.Rect
-import android.os.Build
 import android.view.Display
 import android.view.WindowManager
 import io.mockk.every
@@ -59,11 +58,8 @@ class DisplayLogicalSizeReaderTest {
 
   private fun display(id: Int): Display = mockk { every { displayId } returns id }
 
-  private fun reader(
-    windowManagers: FakeWindowManagers,
-    signal: DisplayRemovalSignal,
-    sdkInt: Int = Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
-  ) = CachingDisplayLogicalSizeReader(windowManagers::create, signal) { sdkInt }
+  private fun reader(windowManagers: FakeWindowManagers, signal: DisplayRemovalSignal) =
+    CachingDisplayLogicalSizeReader(windowManagers::create, signal)
 
   @Test
   fun `reuses one window context per display`() {
@@ -171,10 +167,11 @@ class DisplayLogicalSizeReaderTest {
   }
 
   @Test
+  @Config(sdk = [30])
   fun `returns null below API 31 without creating a context`() {
     val windowManagers = FakeWindowManagers()
     val signal = FakeRemovalSignal()
-    val reader = reader(windowManagers, signal, sdkInt = Build.VERSION_CODES.R)
+    val reader = reader(windowManagers, signal)
 
     assertNull(reader.read(display(0)))
     assertTrue(windowManagers.created.isEmpty())

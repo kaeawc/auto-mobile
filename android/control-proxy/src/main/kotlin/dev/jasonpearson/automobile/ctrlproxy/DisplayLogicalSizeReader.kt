@@ -34,7 +34,6 @@ internal fun interface DisplayRemovalSignal {
 internal class CachingDisplayLogicalSizeReader(
   private val windowManagerFor: (Display) -> WindowManager?,
   private val removalSignal: DisplayRemovalSignal,
-  private val sdkInt: () -> Int = { Build.VERSION.SDK_INT },
 ) : DisplayLogicalSizeReader, AutoCloseable {
   private val windowManagers = ConcurrentHashMap<Int, WindowManager>()
   private val lock = Any()
@@ -43,7 +42,7 @@ internal class CachingDisplayLogicalSizeReader(
   private var closed = false
 
   override fun read(display: Display): Point? {
-    if (sdkInt() < Build.VERSION_CODES.S) return null
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
     val displayId = display.displayId
     return try {
       val windowManager = windowManagers[displayId] ?: createAndCache(display) ?: return null

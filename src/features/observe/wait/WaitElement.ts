@@ -57,8 +57,12 @@ function retryCompoundText<T>(
  */
 function keepDisplayedTextMatches(
   waitFor: ObserveWaitForOptions,
+  negative: boolean,
   predicates: readonly ResolverSelector[],
-  sets: SearchableEntry[][],
+  {
+    sets,
+    resolve,
+  }: { sets: SearchableEntry[][]; resolve: (selector: ResolverSelector) => SearchableEntry[] },
 ): void {
   if (waitFor.textSource !== "displayed" || waitFor.text === undefined) {
     return;
@@ -69,6 +73,13 @@ function keepDisplayedTextMatches(
   }
   const shows = displayedTextMatcher(waitFor.text, waitFor.textMatch);
   sets[textIndex] = sets[textIndex].filter((node) => shows(node.shownText));
+  // The implicit exact tier may come only from a content description; retry contains on
+  // displayed text so unrelated accessibility metadata cannot hide a real match.
+  if (sets[textIndex].length === 0 && waitFor.textMatch === undefined && !negative) {
+    sets[textIndex] = resolve({ text: waitFor.text, match: "contains" }).filter((node) =>
+      shows(node.shownText),
+    );
+  }
 }
 
 function displayedTextMatcher(
@@ -348,7 +359,7 @@ export const findWaitForElement = (
     return candidates;
   });
   retryCompoundText(waitFor, negative, predicates, { sets, resolve });
-  keepDisplayedTextMatches(waitFor, predicates, sets);
+  keepDisplayedTextMatches(waitFor, negative, predicates, { sets, resolve });
   const candidates = [...new Set(sets.flat())].sort(
     (a, b) => a.windowRank - b.windowRank || a.index - b.index,
   );

@@ -170,3 +170,48 @@ describe("displayed-text exact matching is case-sensitive (#17944)", () => {
     expect(holds({ type: "textContains", text: "rea" }, counter("Ready now"))).toBe(true);
   });
 });
+
+// A content description must not pick the implicit exact tier and hide a displayed contains match.
+describe("an implicit displayed-text wait falls back to contains", () => {
+  function twoNodes(): ViewHierarchyResult {
+    const node = (text: string, top: number, contentDescription?: string) => ({
+      $: {
+        class: "android.widget.TextView",
+        text,
+        ...(contentDescription === undefined ? {} : { "content-desc": contentDescription }),
+        bounds: { left: 20, top, right: 220, bottom: top + 60 },
+      },
+    });
+    return {
+      hierarchy: {
+        node: {
+          $: { bounds: { left: 0, top: 0, right: 400, bottom: 800 } },
+          node: [node("Ready now", 100), node("Wrong", 200, "Ready")],
+        },
+      },
+      screenWidth: 400,
+      screenHeight: 800,
+    };
+  }
+
+  test("a description-only exact match does not hide the displayed contains match", () => {
+    const hierarchy = twoNodes();
+    const result = evaluateWaitForObservation(
+      new ElementResolver(),
+      waitForSchema.parse({ text: "Ready", textSource: "displayed" }),
+      createObserveResultForTest({
+        screenSize,
+        viewHierarchy: hierarchy,
+        elements: new ObserveElementsBuilder().build(hierarchy, "android"),
+      }),
+      {
+        devicePlatform: "android",
+        displayInventory: "single",
+        modes: new Map<string, MatchMode>(),
+        iosMultiPanel: false,
+      },
+    );
+    expect(result.matched).toBe(true);
+    expect(result.awaitedElement?.text).toBe("Ready now");
+  });
+});

@@ -63,6 +63,12 @@ run_python_backend() {
   [[ "$output" != *"ok.xml"* ]]
 }
 
+@test "python3 backend rejects an undeclared namespace prefix like xmlstarlet" {
+  run_python_backend 'AndroidManifest.xml=<manifest><application android:label="x"/></manifest>'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AndroidManifest.xml:1.10: unbound prefix"* ]]
+}
+
 @test "python3 is the fallback backend when no xmlstarlet is installed" {
   command -v python3 > /dev/null 2>&1 || skip "python3 not installed"
   ln -s "$(command -v python3)" "$BIN_DIR/python3"

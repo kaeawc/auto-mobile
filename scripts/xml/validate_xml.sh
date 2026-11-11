@@ -47,7 +47,8 @@ import sys
 import xml.parsers.expat
 
 path = sys.argv[1]
-parser = xml.parsers.expat.ParserCreate()
+# Namespace processing rejects an undeclared prefix, as libxml2 does.
+parser = xml.parsers.expat.ParserCreate(namespace_separator=" ")
 try:
     with open(path, "rb") as handle:
         parser.ParseFile(handle)

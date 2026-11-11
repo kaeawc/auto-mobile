@@ -308,7 +308,9 @@ internal object DaemonLauncher {
     if (skew) {
       env.debugLog("Restarting AutoMobile daemon due to version/build skew with runner")
     }
-    env.launch(restart = forcedRestart || skew)
+    // A user-managed socket nothing serves is only ever started: `restart` stops the PID-file
+    // process, which may no longer be the daemon that owner configured.
+    env.launch(restart = !env.userManagedSocket && (forcedRestart || skew))
 
     if (!env.waitForDaemon(env.startTimeoutMs)) {
       throw DaemonUnavailableException("Daemon failed to start within ${env.startTimeoutMs}ms")

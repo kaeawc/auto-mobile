@@ -55,6 +55,18 @@ const osSelector = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("minimum"), version }).strict(),
 ]);
 const osDefaults = z.object({ selector: osSelector, preferredVersion: version }).strict();
+/** Per-archetype iOS OS defaults for requests that omit the OS (#18003); others use `os`. */
+const iosOsDefaults = osDefaults
+  .extend({
+    archetypes: z
+      .array(osDefaults.extend({ archetype }).strict())
+      .refine(
+        (entries) => new Set(entries.map((entry) => entry.archetype)).size === entries.length,
+        { message: "defaults.ios.os.archetypes must list each archetype at most once" },
+      )
+      .optional(),
+  })
+  .strict();
 const iosDefaults = z
   .object({
     platform: z.literal("ios"),
@@ -66,7 +78,7 @@ const iosDefaults = z
         modelTypes: z.array(z.object({ modelType, model: modelReference }).strict()),
       })
       .strict(),
-    os: osDefaults,
+    os: iosOsDefaults,
   })
   .strict();
 const androidDefaults = z

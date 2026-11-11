@@ -378,26 +378,12 @@ export class CarAppTemplateReader {
     const answer = await this.read(device, packageName, userId);
     const current = generation === (this.generations.get(device.deviceId) ?? 0);
     if (answer.kind !== "document" || !answer.document.enabled) {
-      if (current) {
-        this.quiet(key, quietIntervalMs(answer));
-        this.lastUser.set(appKey, userId);
-        if (answer.kind === "failed") {
-          this.failedReads.add(key);
-        } else {
-          // The route is gone or disabled now, so a later failure is no longer a known app's.
-          this.answeredEnabled.delete(key);
-        }
-      }
+      this.recordQuietAnswer(current, { key, appKey, userId }, answer);
       return answer.kind === "failed" && this.answeredEnabled.has(key)
         ? { kind: "failed" }
         : { kind: "none" };
     }
-    if (current) {
-      this.quietUntil.delete(key);
-      this.failedReads.delete(key);
-      this.lastUser.delete(appKey);
-      this.answeredEnabled.add(key);
-    }
+    this.recordEnabledAnswer(current, key, appKey);
     const { document } = answer;
     return {
       kind: "block",
@@ -409,6 +395,36 @@ export class CarAppTemplateReader {
         ...(document.error ? { error: document.error } : {}),
       },
     };
+  }
+
+  /** Clears the quiet state of a route that answered enabled; a stale read writes nothing. */
+  private recordEnabledAnswer(current: boolean, key: string, appKey: string): void {
+    if (!current) {
+      return;
+    }
+    this.quietUntil.delete(key);
+    this.failedReads.delete(key);
+    this.lastUser.delete(appKey);
+    this.answeredEnabled.add(key);
+  }
+
+  /** Remembers a failed, absent or disabled answer for its quiet interval. */
+  private recordQuietAnswer(
+    current: boolean,
+    { key, appKey, userId }: { key: string; appKey: string; userId: number },
+    answer: CarAppRouteRead,
+  ): void {
+    if (!current) {
+      return;
+    }
+    this.quiet(key, quietIntervalMs(answer));
+    this.lastUser.set(appKey, userId);
+    if (answer.kind === "failed") {
+      this.failedReads.add(key);
+    } else {
+      // The route is gone or disabled now, so a later failure is no longer a known app's.
+      this.answeredEnabled.delete(key);
+    }
   }
 
   /**

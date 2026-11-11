@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import {
   projectSkeleton,
@@ -7,6 +8,7 @@ import {
 import { getHierarchyNodeSource } from "../../../../src/features/observe/output/elementProvenance";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
+import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
 import { createHierarchyForTest } from "../observeScreenTestBuilders";
 
 const viewport = { width: 402, height: 874 };
@@ -33,6 +35,30 @@ function imageElements(overrides: Partial<Element> = {}): NonNullable<ObserveRes
 }
 
 describe("iOS compact popover shadow artwork", () => {
+  test.each([
+    { file: "ios18_6-menu-open", labels: ["Item One", "Item Two"] },
+    { file: "ios26_5-confirmationDialog-open", labels: ["Option A", "Delete"] },
+  ])("keeps the captured $file actions tappable", ({ file, labels }) => {
+    const hierarchy: ViewHierarchyResult = JSON.parse(
+      readFileSync(
+        new URL(
+          `../../../fixtures/ios-presentation-chrome/${file}.viewHierarchy.json`,
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios")!;
+    const projection = projectSkeleton(elements, viewport, undefined, { ios: true });
+    for (const label of labels) {
+      const row = projection.skeleton.find((row) => row.label === label);
+      expect(row).toBeDefined();
+      expect(row?.affordances).toContain("tap");
+      expect(row?.occluded).toBeUndefined();
+      expect(projection.context.some((row) => row.label === label && row.occluded)).toBe(false);
+    }
+  });
+
   test("drops the measured shadow without dropping popover context or replaying a tap row", () => {
     const hierarchy = createHierarchyForTest({
       hierarchy: {

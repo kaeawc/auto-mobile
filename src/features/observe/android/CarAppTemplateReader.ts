@@ -62,6 +62,18 @@ export const CAR_APP_ROUTE_FAILED_RETRY_MS = 5_000;
  */
 export const CAR_APP_PROJECTED_SERVICES_TTL_MS = 1_000;
 
+/**
+ * The `error` of a projected app whose route answered enabled before but whose read failed now
+ * (timeout, adb error, bad payload): its screen is unknown for this read, not gone.
+ */
+export const CAR_APP_ROUTE_READ_FAILED = "template_read_failed";
+
+/** One package's read: an enabled block, a failed read, or nothing to report. */
+type PackageRead =
+  | { kind: "block"; block: CarAppForegroundTemplates }
+  | { kind: "failed" }
+  | { kind: "none" };
+
 /** The route's answer: a snapshot document, no route at all, or a read that failed. */
 export type CarAppRouteRead =
   | { kind: "document"; document: CarAppTemplateDocument }
@@ -88,9 +100,13 @@ export function parseCarAppTemplateCallOutput(output: string): unknown {
  */
 export class CarAppTemplateReader {
   private readonly quietUntil = new Map<string, number>();
+  /** Quiet keys whose quiet interval follows a failed read, not an absent or disabled route. */
+  private readonly failedReads = new Set<string>();
+  /** Quiet keys (device, package, user) whose route last answered enabled. */
+  private readonly answeredEnabled = new Set<string>();
   /** The Android user each device's package was last read as; the hint for skipping a lookup. */
   private readonly lastUser = new Map<string, number>();
-  private readonly inFlight = new Map<string, Promise<CarAppForegroundTemplates | undefined>>();
+  private readonly inFlight = new Map<string, Promise<PackageRead>>();
   /** Per device: the last successful services dump, parsed, or the dump still running. */
   /**
    * Per device: the services snapshot the last projected templates read used, the observation it
@@ -128,9 +144,11 @@ export class CarAppTemplateReader {
     if (packageName === ANDROID_AUTO_PACKAGE) {
       return this.resolveProjected(device, result.observationId);
     }
-    return this.shared(device, packageName, result.userId, () =>
+    const read = await this.shared(device, packageName, result.userId, () =>
       this.resolveFor(device, packageName, result.userId),
     );
+    // The foreground block is optional: a failed read omits it, as before.
+    return read.kind === "block" ? read.block : undefined;
   };
 
   /** Overlapping reads of one device, user and package share one promise. */
@@ -138,8 +156,8 @@ export class CarAppTemplateReader {
     device: BootedDevice,
     packageName: string,
     userId: number | undefined,
-    start: () => Promise<CarAppForegroundTemplates | undefined>,
-  ): Promise<CarAppForegroundTemplates | undefined> {
+    start: () => Promise<PackageRead>,
+  ): Promise<PackageRead> {
     const key = `${device.deviceId}\u0000${userId ?? ""}\u0000${packageName}`;
     const pending = this.inFlight.get(key);
     if (pending) {
@@ -190,13 +208,21 @@ export class CarAppTemplateReader {
   }> {
     const services = await this.projectionServices(device);
     const apps = services?.apps ?? [];
-    const blocks = await Promise.all(
+    const reads = await Promise.all(
       apps.map((app) =>
         this.shared(device, app.packageName, app.userId, () =>
           this.readKnownUser(device, app.packageName, app.userId),
         ),
       ),
     );
+    // A known car app whose read failed stays listed with an error, so a head-unit action reads
+    // its screen as unknown instead of gone (#17911).
+    const blocks = reads.map((read, index) => {
+      if (read.kind === "block") {
+        return read.block;
+      }
+      return read.kind === "failed" ? failedBlock(apps[index].packageName) : undefined;
+    });
     return { services, apps, blocks };
   }
 
@@ -294,41 +320,58 @@ export class CarAppTemplateReader {
     device: BootedDevice,
     packageName: string,
     observedUserId: number | undefined,
-  ): Promise<CarAppForegroundTemplates | undefined> {
+  ): Promise<PackageRead> {
     const appKey = `${device.deviceId}\u0000${packageName}`;
     const userId = observedUserId ?? (await this.lookUpUser(device, packageName, appKey));
     if (userId === undefined) {
-      return undefined;
+      return { kind: "none" };
     }
     return this.readKnownUser(device, packageName, userId);
   }
 
-  /** Reads one package as one user, honouring and updating its quiet entry. */
+  /**
+   * Reads one package as one user, honouring and updating its quiet entry. A failed read of a
+   * route that last answered enabled, or the retry interval after one, is `failed`; any other
+   * quiet or non-enabled answer is `none`.
+   */
   private async readKnownUser(
     device: BootedDevice,
     packageName: string,
     userId: number,
-  ): Promise<CarAppForegroundTemplates | undefined> {
+  ): Promise<PackageRead> {
     const appKey = `${device.deviceId}\u0000${packageName}`;
     const key = quietKey(appKey, userId);
     if (this.isQuiet(key)) {
-      return undefined;
+      return this.failedReads.has(key) && this.answeredEnabled.has(key)
+        ? { kind: "failed" }
+        : { kind: "none" };
     }
     const answer = await this.read(device, packageName, userId);
     if (answer.kind !== "document" || !answer.document.enabled) {
       this.quiet(key, quietIntervalMs(answer));
       this.lastUser.set(appKey, userId);
-      return undefined;
+      if (answer.kind === "failed") {
+        this.failedReads.add(key);
+        return this.answeredEnabled.has(key) ? { kind: "failed" } : { kind: "none" };
+      }
+      // The route is gone or disabled now, so a later failure is no longer a known app's.
+      this.answeredEnabled.delete(key);
+      return { kind: "none" };
     }
     this.quietUntil.delete(key);
+    this.failedReads.delete(key);
     this.lastUser.delete(appKey);
+    this.answeredEnabled.add(key);
     const { document } = answer;
     return {
-      packageName,
-      source: "sdk",
-      note: CAR_APP_TEMPLATES_NOTE,
-      sessions: document.sessions,
-      ...(document.error ? { error: document.error } : {}),
+      kind: "block",
+      block: {
+        packageName,
+        source: "sdk",
+        note: CAR_APP_TEMPLATES_NOTE,
+        sessions: document.sessions,
+        ...(document.error ? { error: document.error } : {}),
+      },
     };
   }
 
@@ -393,6 +436,7 @@ export class CarAppTemplateReader {
     for (const [entry, until] of this.quietUntil) {
       if (until <= now) {
         this.quietUntil.delete(entry);
+        this.failedReads.delete(entry);
       }
     }
     for (const [appKey, userId] of this.lastUser) {
@@ -401,6 +445,7 @@ export class CarAppTemplateReader {
       }
     }
     this.quietUntil.set(key, now + intervalMs);
+    this.failedReads.delete(key);
   }
 
   private async read(
@@ -462,6 +507,17 @@ function projectedTemplates(
     projectedBy: ANDROID_AUTO_PACKAGE,
     projectedNote: CAR_APP_PROJECTED_NOTE,
     projected,
+  };
+}
+
+/** A known car app whose read failed: listed with no sessions and an error. */
+function failedBlock(packageName: string): CarAppForegroundTemplates {
+  return {
+    packageName,
+    source: "sdk",
+    note: CAR_APP_TEMPLATES_NOTE,
+    sessions: [],
+    error: CAR_APP_ROUTE_READ_FAILED,
   };
 }
 

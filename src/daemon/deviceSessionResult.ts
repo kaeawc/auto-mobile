@@ -5,6 +5,7 @@ import {
 } from "../models/deviceSessionRecovery";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
+import { PLATFORM_LABELS, type Platform } from "../models/Platform";
 import type { SessionReleaseSnapshot } from "./sessionManager";
 import {
   SESSION_OWNERSHIP_LOST_CODE,
@@ -332,6 +333,14 @@ export function getActiveDeviceSelectionFromResult(
 export function getDevicePlatformFromResult(result: unknown): "android" | "ios" | undefined {
   const platform = readDeviceDescription(result)?.platform;
   return platform === "android" || platform === "ios" ? platform : undefined;
+}
+
+/** Every platform a device-start tool result can describe, including the non-iOS Apple ones (#18013). */
+export function getAnyDevicePlatformFromResult(result: unknown): Platform | undefined {
+  const platform = readDeviceDescription(result)?.platform;
+  return typeof platform === "string" && Object.hasOwn(PLATFORM_LABELS, platform)
+    ? (platform as Platform)
+    : undefined;
 }
 
 /**

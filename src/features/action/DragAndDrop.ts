@@ -300,7 +300,7 @@ export class DragAndDrop extends BaseVisualChange {
             () => this.executeOnAndroidDisplay(options, target, signal),
             {
               ...OBSERVED_INTERACTION_PROFILES.rawCoordinateGesture,
-              display: target.observation.display.key,
+              display: target.followUpDisplay,
               previousObservation: target.observation,
               signal,
             },

@@ -1,4 +1,5 @@
 import { ActionableError, type BootedDevice, type ObserveResult } from "../../models";
+import { displayInventoryOutcome } from "../../models/DeviceInfo";
 import type {
   AdbCommandRunner,
   AdbExecutor,
@@ -6,7 +7,7 @@ import type {
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
-import { resolveTargetDisplay } from "../observe/DisplaySelection";
+import { resolveDeviceTargetDisplay } from "../observe/DisplaySelection";
 import { displayTransitions } from "../observe/DisplayTransition";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { DisplayPanel, DisplayRef } from "../../models/DisplayPanel";
@@ -118,7 +119,7 @@ export async function resolvePressButtonDisplay(
     display === "active" && !focused && (device.displays?.panels.length ?? 0) > 1
       ? await state.liveDisplay(device, adb, signal)
       : undefined;
-  const panel = resolveTargetDisplay(device.displays, display, {
+  const panel = resolveDeviceTargetDisplay(device, display, {
     focusedPanelKey: focused?.key,
     activePanelKey: live?.key,
     posture: live?.posture,
@@ -155,6 +156,16 @@ export async function pressButtonDisplay(
   const target = await (resolver
     ? resolver(display, signal)
     : resolvePressButtonDisplay(device, display, { adb, signal }));
+  // With an unreadable inventory `active` falls back to the default panel. Its fallback key is not
+  // a selector the caller chose, so the press's observations stay unscoped (they read display 0,
+  // where `input -d 0` sends the key) instead of re-checking that key as an explicit selector.
+  if (
+    display === "active" &&
+    device[displayInventoryOutcome]?.kind === "unreadable" &&
+    target.displayId === 0
+  ) {
+    return { displayId: 0 };
+  }
   return target;
 }
 

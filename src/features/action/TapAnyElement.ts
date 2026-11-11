@@ -272,6 +272,8 @@ export class TapAnyElement extends BaseVisualChange {
         featureFlags: this.featureFlags,
         talkBackStrategy: this.talkBackStrategy,
         talkBackDriverFactory: this.talkBackDriverFactory,
+        resolveContainer: (hierarchy, container) =>
+          this.elementSelector.resolveContainer?.(hierarchy, container),
         isAndroidXr: (signal) => xrDetector.isAndroidXr(this.adb, this.device, signal),
         beforeTap: () => this.beforeAndroidTapForTesting?.(),
         refreshViewHierarchy: (timeout, size, signal, forceCapture) =>

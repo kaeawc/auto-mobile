@@ -1008,7 +1008,7 @@
             let selection = Binding<Date>(
                 get: {
                     _ = model.refusedChanges
-                    return bound.flatMap(PrototypeDate.date(from:)) ?? PrototypeDate.range.lowerBound
+                    return PrototypeRecordingMode.current.datePickerSelection(bound: bound)
                 },
                 set: { date in
                     let picked = PrototypeDate.string(from: date)
@@ -1016,24 +1016,94 @@
                 }
             )
             let recording = PrototypeRecordingMode.current
-            DatePicker("", selection: selection, in: PrototypeDate.range, displayedComponents: .date)
-                .labelsHidden()
-                .datePickerStyle(.graphical)
-                .environment(\.calendar, recording.dateCalendar)
-                .environment(\.timeZone, recording.dateCalendar.timeZone)
-                .modifier(PrototypeRecordingLocale(recording: recording))
-                .transaction { if recording.enabled { $0.disablesAnimations = true } }
-                .accessibilityValue(bound ?? "")
+            if recording.enabled {
+                // SwiftUI's graphical picker is a UIKit calendar that keeps scrolling to and laying
+                // out its month after captures match (#17871); recording draws a static one instead.
+                PrototypeStaticCalendarView(selection: selection, calendar: recording.dateCalendar, colors: colors)
+                    .transaction { $0.disablesAnimations = true }
+                    .accessibilityValue(bound ?? "")
+            } else {
+                DatePicker("", selection: selection, in: PrototypeDate.range, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.graphical)
+                    .environment(\.calendar, recording.dateCalendar)
+                    .environment(\.timeZone, recording.dateCalendar.timeZone)
+                    .accessibilityValue(bound ?? "")
+            }
         }
     }
 
-    /// Pins the locale only while recording; normal viewing keeps the inherited environment.
+    /// Recording mode's month grid: laid out synchronously from `PrototypeCalendarMonth`, with no
+    /// UIKit calendar, scrolling or animation, so the first stable frame is the only frame.
     @MainActor
-    private struct PrototypeRecordingLocale: ViewModifier {
-        let recording: PrototypeRecordingMode
+    private struct PrototypeStaticCalendarView: View {
+        let selection: Binding<Date>
+        let calendar: Calendar
+        let colors: ComponentColors
+        /// Months moved from the selection's month by the header chevrons.
+        @State private var offset = 0
+
+        var body: some View {
+            let selected = selection.wrappedValue
+            let shown = PrototypeCalendarMonth.month(of: selected, offset: offset, calendar: calendar)
+            let month = PrototypeCalendarMonth.make(showing: shown, selected: selected, calendar: calendar)
+            VStack(spacing: 8) {
+                HStack {
+                    Text(month.title).font(.headline).foregroundColor(colors.content)
+                    Spacer()
+                    chevron("chevron.left", label: "Previous Month") { offset -= 1 }
+                    chevron("chevron.right", label: "Next Month") { offset += 1 }
+                }
+                .padding(.horizontal, 8)
+                HStack(spacing: 0) {
+                    ForEach(Array(month.weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                        Text(symbol)
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(colors.contentVariant)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                ForEach(Array(month.weeks.enumerated()), id: \.offset) { _, week in
+                    HStack(spacing: 0) {
+                        ForEach(Array(week.enumerated()), id: \.offset) { _, day in
+                            cell(day, month: month).frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }
+            .environment(\.locale, calendar.locale ?? PrototypeRecordingMode.locale)
+            .accessibilityElement(children: .contain)
+        }
+
+        private func chevron(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+            Button(action: action) {
+                Image(systemName: symbol).font(.body.weight(.semibold)).foregroundColor(colors.primary)
+            }
+            .frame(width: 44, height: 44)
+            .accessibilityLabel(label)
+        }
+
         @ViewBuilder
-        func body(content: Content) -> some View {
-            if recording.enabled { content.environment(\.locale, PrototypeRecordingMode.locale) } else { content }
+        private func cell(_ day: Int?, month: PrototypeCalendarMonth) -> some View {
+            if let day {
+                let isSelected = day == month.selectedDay
+                Button {
+                    if let date = month.date(day: day, calendar: calendar) {
+                        offset = 0
+                        selection.wrappedValue = date
+                    }
+                } label: {
+                    Text("\(day)")
+                        .font(isSelected ? Font.title3.weight(.semibold) : Font.title3)
+                        .foregroundColor(isSelected ? colors.onPrimary : colors.content)
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(isSelected ? colors.primary : Color.clear))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            } else {
+                Color.clear.frame(width: 40, height: 40)
+            }
         }
     }
 

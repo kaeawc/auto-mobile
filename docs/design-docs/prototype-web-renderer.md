@@ -273,8 +273,10 @@ viewer per case, loads the emitted spec through `Documents/prototype/`, and sets
 appearance before launch. It launches the viewer with `--automobile-prototype-recording`, which
 turns all motion off as `motion: "none"` does (indeterminate progress draws one fixed frame, and
 dialogs appear without an entrance animation) and pins date-dependent content to the `en_US_POSIX`
-locale, UTC and a fixed clock (2026-01-15T12:00Z) for value formats and the date picker's calendar.
-The system date picker still marks the device's current day, which no launch argument can move.
+locale, UTC and a fixed clock (2026-01-15T12:00Z) for value formats. A `datePicker` draws a static
+six-week month grid instead of the system graphical picker, whose UIKit calendar keeps laying out
+its month after captures match; it opens on the bound date's month (the fixed day when unbound) and
+marks no device "today".
 Without the flag the viewer is unchanged. It refuses the CI iPhone, clears its status override and
 restores light appearance on exit. Optional `--viewer`, `--out` and golden names select the app, destination and cases.
 
@@ -284,6 +286,16 @@ restores light appearance on exit. Optional `--viewer`, `--out` and golden names
   clock and the signal/battery glyph rects, which the simulator draws over the content. The emitter
   `scripts/prototype/ios-golden-specs.ts` writes content-only specs and `cases.json` with the
   shared pixel geometry and case modes. The recorder checks the screenshot size.
+- **Stable capture.** Two identical frames prove the screen is static, not that the viewer has
+  rendered, so the recorder waits a settle floor (`PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS`, default
+  1.5 s) after launch before its first screenshot. It then captures every 0.5 s until two
+  consecutive full screenshots are byte-identical (`capture=stable`), for at most
+  `PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES` (8) captures within `PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS`
+  (15 s, counted from launch). Each screenshot is bounded by the remaining budget, capped at
+  `PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS` (10 s), with a watchdog that needs no GNU `timeout`. A
+  screenshot that fails, times out or writes an empty file is discarded and never compared, so
+  stability needs two good frames in a row. When polling ends unstable, the recorder settles 2 s
+  and records one more bounded screenshot (`capture=fallback`); if that one is bad, it fails.
 - **Rendering.** Chromium draws the `iphone-16` still with its iOS skin and safe-area environment
   in a bare document. CSS removes the frame padding, background and corner radii; the whole
   screen is clipped at 3×. Only the screen default font is pinned to DejaVu Sans.

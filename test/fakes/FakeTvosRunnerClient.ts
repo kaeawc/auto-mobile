@@ -43,4 +43,7 @@ export class FakeTvosRunnerClient implements TvosRunnerClient {
   close(): void {
     this.closed = true;
   }
+  runnerExited(): void {
+    this.close();
+  }
 }

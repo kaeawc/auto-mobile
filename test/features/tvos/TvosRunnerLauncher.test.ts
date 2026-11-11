@@ -10,6 +10,12 @@ import type {
 } from "../../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { WebSocketTvosRunnerClient } from "../../../src/features/tvos/TvosRunnerClient";
+import { TvosAppExit, TvosAppExitError } from "../../../src/features/tvos/TvosAppExit";
+import { FakeTvosAppLiveness } from "../../fakes/FakeTvosAppLiveness";
+import { FakeWatchSocket } from "../../fakes/FakeWatchSocket";
+import connected from "../../fixtures/tvos-xcuitest/tvos-runner-connected.json";
+import hierarchy from "../../fixtures/tvos-xcuitest/tvos-runner-hierarchy-focus-b01.json";
 
 class FakeStreamingXcodebuild implements Pick<Xcodebuild, "startStreaming"> {
   readonly launches: Array<{ args: string[]; options?: XcodebuildStreamingOptions }> = [];
@@ -28,6 +34,92 @@ afterEach(() => {
   stop = undefined;
 });
 const options = { deviceId: "tvos-launch", xctestrun: "/build/Tvos.xctestrun", port: 8765 };
+
+async function connectedRunner() {
+  const timer = new FakeTimer();
+  const child = new FakeChildProcess(timer);
+  const socket = new FakeWatchSocket();
+  const liveness = new FakeTvosAppLiveness();
+  const appExit = new TvosAppExit({
+    timer,
+    liveness,
+    finder: { find: async () => ({ status: "notFound" }) },
+  });
+  const client = new WebSocketTvosRunnerClient("ws://fake/ws", {
+    timer,
+    factory: () => socket,
+    appExit,
+  });
+  socket.receive(connected);
+  const launch = new XcodebuildTvosRunnerLauncher({
+    writeRunnerEnvironment: async (file) => file,
+    xcodebuild: new FakeStreamingXcodebuild(child),
+    timer,
+    connect: () => client,
+  }).launch(options);
+  await drainUntil(() => socket.sent.length === 1, { description: "startup hierarchy" });
+  socket.receive({ ...hierarchy, requestId: socket.sent[0]!.requestId });
+  ({ stop } = await launch);
+  return { client, socket, child, timer, liveness };
+}
+
+test.each([
+  ["socket first", "exit"],
+  ["process first", "exit"],
+  ["socket first", "error"],
+  ["process first", "error"],
+] as const)("%s with process %s diagnoses the dispatched app's exit", async (order, event) => {
+  const f = await connectedRunner();
+  const bundleId = "com.example.crashed";
+  const pending = f.client
+    .request({ type: "request_press_button", action: "select", bundleId })
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  await drainUntil(() => f.socket.sent.length === 2, { description: "dispatched command" });
+  expect(f.socket.sent[1]?.bundleId).toBe(bundleId);
+  const processExited = () => {
+    if (event === "exit") {
+      f.child.simulateExit(1);
+      f.timer.advanceTime(0);
+    } else {
+      f.child.emit("error", new Error("xcodebuild failed"));
+    }
+  };
+  if (order === "socket first") {
+    f.socket.disconnect();
+    processExited();
+  } else {
+    processExited();
+    f.socket.disconnect();
+  }
+  expect(await pending).toBeInstanceOf(TvosAppExitError);
+  expect(await pending).toMatchObject({ bundleId, commandType: "request_press_button" });
+  expect(f.liveness.apps).toEqual([bundleId]);
+  expect(f.client.isUsable()).toBe(false);
+  expect(f.socket.closed).toBe(true);
+  expect(tvosRunners.get(options.deviceId)).toBeUndefined();
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("intentional stop preserves close without app diagnosis after process and socket exit", async () => {
+  const f = await connectedRunner();
+  const pending = f.client
+    .request({ type: "request_press_button", action: "select", bundleId: "com.example.tv" })
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  await drainUntil(() => f.socket.sent.length === 2, { description: "dispatched command" });
+  stop!();
+  f.timer.advanceTime(0);
+  f.socket.disconnect();
+  expect(String(await pending)).toContain("Tvos runner closed; reconnect it.");
+  expect(f.liveness.apps).toEqual([]);
+  expect(f.child.killed).toBe(true);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
 
 test("launches only the service test with the requested port and binds the exact device", async () => {
   const timer = new FakeTimer();

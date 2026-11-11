@@ -204,8 +204,10 @@ test("explicit close and caller abort do not probe the app", async () => {
   const f = fixture();
   const pending = settle(f.client.hierarchy());
   await drainMicrotasks(2);
+  expect(f.socket.sent[0]?.bundleId).toBe(bundleId);
   f.client.close();
-  expect(String(await pending)).toContain("runner closed");
+  f.socket.disconnect();
+  expect(String(await pending)).toContain("Tvos runner closed; reconnect it.");
   expect(f.liveness.apps).toHaveLength(0);
   const other = fixture();
   const controller = new AbortController();

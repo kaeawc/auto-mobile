@@ -38,6 +38,8 @@ export interface TvosRunnerClient {
     options?: { timeoutMs?: number },
   ): Promise<unknown>;
   hierarchy(signal?: AbortSignal): Promise<TvosHierarchy>;
+  /** Unexpected runner-process termination, eligible for app-exit diagnosis. */
+  runnerExited(): void;
   close(): void;
 }
 
@@ -299,6 +301,14 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
     }
     return data;
   }
+  runnerExited(): void {
+    if (!this.failure) {
+      this.connectionLost = true;
+    }
+    this.fail(new ActionableError("Tvos runner process exited; reconnect it."));
+    this.socket.close();
+  }
+
   close(): void {
     this.fail(new ActionableError("Tvos runner closed; reconnect it."));
     this.socket.close();

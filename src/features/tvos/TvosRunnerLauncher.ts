@@ -115,13 +115,18 @@ export class XcodebuildTvosRunnerLauncher implements TvosRunnerLauncher {
     );
     const state: TvosStartup = { exited: false, unregister: () => {} };
     const cleanup = () => {
+      if (!state.exited) {
+        state.client?.runnerExited();
+      } else {
+        state.client?.close();
+      }
       state.exited = true;
       state.unregister();
-      state.client?.close();
       removePrepared();
     };
     const stop = () => {
       const running = !state.exited;
+      state.exited = true;
       cleanup();
       if (running) {
         process.kill("SIGTERM");

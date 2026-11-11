@@ -1,5 +1,8 @@
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { SearchableEntry } from "./SearchableNode";
+import type { BootedDevice } from "../../models/DeviceInfo";
+import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
+import type { TapOnSelectedElement } from "../../models/TapOnElementResult";
 
 type CountedEntry = Pick<SearchableEntry, "affordances" | "bounds" | "label">;
 
@@ -60,4 +63,18 @@ export function countTappableMatches(candidates: readonly CountedEntry[]): numbe
           (!contains(target.bounds, other.bounds) || otherIndex < index),
       ),
   ).length;
+}
+
+/**
+ * Carries the selection's tappable count onto iOS tap metadata. Android keeps its established
+ * count; iOS captures repeat a label in non-tappable context nodes and in a row's own switch.
+ */
+export function withIosTappableMatches(
+  platform: BootedDevice["platform"],
+  selection: Pick<ElementSelectionResult, "tappableMatches">,
+  metadata: TapOnSelectedElement | undefined,
+): TapOnSelectedElement | undefined {
+  return metadata && platform === "ios" && selection.tappableMatches !== undefined
+    ? { ...metadata, tappableMatches: selection.tappableMatches }
+    : metadata;
 }

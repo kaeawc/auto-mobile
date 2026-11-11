@@ -844,19 +844,8 @@ export class TapTargetResolver {
       },
       indexInMatches: selection.indexInMatches,
       totalMatches: selection.totalMatches,
-      ...this.iosTappableMatches(selection),
       selectionStrategy: selection.strategy,
     };
-  }
-
-  /**
-   * Android keeps its established count; iOS captures repeat a label in non-tappable context
-   * nodes and in a row's own switch, so iOS reports the tappable count (#17939).
-   */
-  private iosTappableMatches(selection: ElementSelectionResult): { tappableMatches?: number } {
-    return this.host.device().platform === "ios" && selection.tappableMatches !== undefined
-      ? { tappableMatches: selection.tappableMatches }
-      : {};
   }
 
   rebuildSelectedElementMetadataAfterStability(

@@ -14,6 +14,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
 import type { PrototypeToolDependencies, PrototypeOutput } from "./types";
+import type { PrototypePreviewControl } from "../../features/prototype/preview/PrototypePreviewServer";
 import type { prototypeSchema } from "./schemas";
 
 /** Validates the host-built report as JSON for the output envelope; not a tool argument. */
@@ -105,11 +106,19 @@ export function hostLocalPrototypeOutput(
     recorder: PrototypeTestSessionRecorder;
     store: PrototypeStatusStore;
     events: PrototypeEventCoordinator;
+    /** The preview server status reports once it was first served (#17975). */
+    preview?: () => Pick<PrototypePreviewControl, "info">;
   },
   scope: PrototypeScope,
   args: z.infer<typeof prototypeSchema>,
 ): PrototypeOutput | Promise<PrototypeOutput> {
-  return args.action === "status"
-    ? { success: true, ...statusOutput(host.store, host.events, scope, { deviceDark: "cached" }) }
-    : testSessionAction(host.recorder, scope, args);
+  if (args.action !== "status") {
+    return testSessionAction(host.recorder, scope, args);
+  }
+  const previewServer = host.preview?.().info();
+  return {
+    success: true,
+    ...statusOutput(host.store, host.events, scope, { deviceDark: "cached" }),
+    ...(previewServer ? { previewServer } : {}),
+  };
 }

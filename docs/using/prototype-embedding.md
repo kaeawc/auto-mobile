@@ -259,6 +259,32 @@ To compare design alternatives, show each under its own id with the same `varian
 example `variant: {group: "checkout", label: "Compact"}`. The web page of any of them offers every
 alternative in the group by its label. The device keeps showing whichever was shown last.
 
+### Live preview in a browser
+
+To keep a browser tab on a prototype while an agent iterates, call `prototype` with
+`{action: "serve", id: "<id>"}`. It needs no device request and returns `previewServer` with
+`pageUrl` (the live page for that id) and `url` (an index of every prototype shown in this daemon).
+Each `show` and each `patch` that lands reloads the open page within about a second, keeping the
+variant picked in its switcher. The page is the same HTML as `automobile:prototype/<id>/web`; add
+`?frame=<frame id>` or `?variant=<id>` to the page URL to choose them. Serving an id not shown yet
+succeeds with a warning, and its page loads once it is shown.
+
+| Parameter       | Meaning                                                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`            | The prototype whose page URL to return. Optional: without it, use the index `url`.                                                                                                               |
+| `port`          | TCP port, `0` to `65535`. `0` or absent picks a free port. If the port is in use, the call fails: pass another port or omit it.                                                                  |
+| `remote`        | `true` binds every network interface so other machines can open the preview at this host's address. Anyone who can reach the port sees every shown prototype. Default `false`: `127.0.0.1` only. |
+| `idleTimeoutMs` | Stop after this long with no open preview page and no request, `show` or `patch`. `1000` to `86400000`, default `1800000` (30 minutes).                                                          |
+
+One preview server runs per daemon and every MCP session shares it. Calling `serve` while it runs
+returns the same server; a different `port` or `remote` value restarts it on the new address. A
+loopback server answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`.
+
+`{action: "stop"}` closes the port and the open pages' connections. The server also stops when the
+daemon exits, and after the idle timeout. `status` reports `previewServer` (`running`, `url`,
+`port`, `host`, `remote`, `idleTimeoutMs`, or `stoppedReason`: `stop`, `idle` or `daemon`) after
+the first `serve`. After the server stops, call `serve` again for a new URL.
+
 ### Export the web page to a file
 
 To host the page, attach it to a CI run or send it to someone without a device, call the

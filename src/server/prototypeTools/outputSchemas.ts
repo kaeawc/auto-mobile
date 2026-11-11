@@ -633,6 +633,30 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "show with element anchors: device timestamp of the hierarchy they were resolved against",
     ),
+  previewServer: z
+    .object({
+      running: z.boolean(),
+      url: z
+        .string()
+        .optional()
+        .describe("The index page listing every prototype with web output (loopback address)"),
+      pageUrl: z
+        .string()
+        .optional()
+        .describe("serve with id: that prototype's live page, which reloads on each show or patch"),
+      host: z.string().optional().describe("The bound address: 127.0.0.1, or 0.0.0.0 with remote"),
+      port: z.number().int().optional(),
+      remote: z.boolean().optional(),
+      idleTimeoutMs: z.number().int().optional(),
+      stoppedReason: z
+        .enum(["stop", "idle", "daemon"])
+        .optional()
+        .describe("While not running: whether stop, the idle timeout or daemon exit closed it"),
+    })
+    .optional()
+    .describe(
+      "serve, stop and status: the live preview server. status omits it until the first serve of this daemon",
+    ),
   deviceDroppedEvents: z
     .number()
     .int()

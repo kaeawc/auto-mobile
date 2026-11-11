@@ -1,4 +1,5 @@
 import { stopTemplateBuilds } from "../../features/iosTemplates/defaultSimulatorCreationService";
+import { stopDaemonPrototypePreview } from "../../features/prototype/preview/daemonPrototypePreview";
 import type { DaemonCoreServices, DaemonLifecycleState } from "./DaemonCoreState";
 import { getNativeHelperRegistry } from "../../utils/nativeHelpers/NativeHelperRegistry";
 import { terminateActiveAdbProcesses } from "../../utils/android-cmdline-tools/AdbClient";
@@ -272,6 +273,11 @@ export class DaemonShutdown {
       }),
       shutdownStage("location routes", "nothing (synchronous)", () =>
         defaultLocationRouteRegistry.stopAll(),
+      ),
+      shutdownStage(
+        "prototype preview server",
+        "open preview event streams and the preview port close",
+        () => stopDaemonPrototypePreview(),
       ),
       shutdownStage(
         "shutdown monitors",

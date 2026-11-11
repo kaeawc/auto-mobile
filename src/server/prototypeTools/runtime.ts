@@ -93,6 +93,12 @@ import {
 import type { ProgressCallback } from "../toolRegistry";
 import { stageAssets } from "./assets";
 import {
+  daemonPrototypePreviewBinding,
+  isPrototypePreviewAction,
+  prototypePreviewOutput,
+  type PrototypePreviewBinding,
+} from "./preview";
+import {
   deviceRequestAction,
   isDeviceRequestAction,
   suspendedWaitWarning,
@@ -553,14 +559,19 @@ type HostOnlyAction =
   | "defineBackend"
   | "clearBackend"
   | "backendLog"
-  | "publish";
+  | "publish"
+  | "serve"
+  | "stop";
 
 const isHostOnlyAction = (action: string): action is HostOnlyAction =>
-  action === "screenMap" || action === "share" || isMockBackendAction(action);
+  action === "screenMap" ||
+  action === "share" ||
+  isMockBackendAction(action) ||
+  isPrototypePreviewAction(action);
 
 /** Actions answered by the host alone, before any device or scope is involved. */
 async function hostOnlyOutput(
-  mocks: PrototypeMockBackendRegistry,
+  host: { mocks: PrototypeMockBackendRegistry; preview: () => PrototypePreviewBinding },
   args: z.infer<typeof prototypeSchema>,
   readers: AssetReaders,
   shareFiles: ProtoViewerShareFiles | undefined,
@@ -568,7 +579,12 @@ async function hostOnlyOutput(
   if (args.action === "share") {
     return await shareOutput(args, readers, shareFiles);
   }
-  return args.action === "screenMap" ? screenMapOutput(args.spec) : mockBackendOutput(mocks, args);
+  if (isPrototypePreviewAction(args.action)) {
+    return await prototypePreviewOutput(host.preview(), args);
+  }
+  return args.action === "screenMap"
+    ? screenMapOutput(args.spec)
+    : mockBackendOutput(host.mocks, args);
 }
 
 /** share writes local files only: the spec was validated, and no device or scope is involved. */
@@ -630,6 +646,8 @@ export function createPrototypeToolRuntime(
     installer: dependencies.iosSavedPrototypeInstaller,
     protoViewer: dependencies.protoViewerFactory ?? defaultProtoViewerFactory(dependencies),
   });
+  // Resolved on first use: building the daemon's (unbound) server is deferred until a call needs it.
+  const preview = () => dependencies.preview ?? daemonPrototypePreviewBinding();
   const handler = async (
     device: BootedDevice,
     input: unknown,
@@ -668,11 +686,13 @@ export function createPrototypeToolRuntime(
     }
     if (isHostOnlyAction(args.action)) {
       const shareFiles = dependencies.protoViewerShareFiles;
-      return responseFor(await hostOnlyOutput(host.mocks, args, assetReaders, shareFiles));
+      const hostOnly = { mocks: host.mocks, preview };
+      return responseFor(await hostOnlyOutput(hostOnly, args, assetReaders, shareFiles));
     }
     const scope = prototypeScope(device, args);
     if (isHostLocalPrototypeAction(args.action)) {
-      return responseFor(await hostLocalPrototypeOutput(host, scope, args));
+      const local = { recorder: host.recorder, store, events, preview: () => preview().server };
+      return responseFor(await hostLocalPrototypeOutput(local, scope, args));
     }
     const target = device.platform === "android" ? androidTarget(device) : iosTarget(device);
     if (!target) {

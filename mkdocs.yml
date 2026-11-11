@@ -232,6 +232,7 @@ nav:
       - "Prototype web frames for every form factor": design-docs/prototype-web-frames-v2.md
       - "Prototype web library": design-docs/prototype-web-library.md
       - "Prototype web 3D device view": design-docs/prototype-web-3d.md
+      - "Prototype live preview server": design-docs/prototype-web-preview-server.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "Workflow de-duplication": design-docs/ci/workflow-deduplication.md

@@ -98,6 +98,8 @@ export const DAEMON_SHUTDOWN_STAGES = {
   "active capture and iOS CtrlProxy children": writesDatabase(500),
   "health check timer": writesDatabase(50),
   "location routes": writesDatabase(50),
+  // Ends open preview pages' event streams and closes the port (#17975).
+  "prototype preview server": writesDatabase(25),
   "shutdown monitors": writesDatabase(150),
   "ADB missing-device subscription": writesDatabase(25),
   "session cleanup timer": writesDatabase(25),
@@ -129,7 +131,7 @@ export const DAEMON_SHUTDOWN_STAGES = {
   "CtrlProxy forwarding leases": writesDatabase(400),
   "device allocation claims": writesDatabase(100),
   "managed ADB server": databaseFree(300),
-  "abandoned stage settle": writesDatabase(75),
+  "abandoned stage settle": writesDatabase(50),
   "database write drain": writesDatabase(200),
   "in-flight migrations": writesDatabase(200),
   database: writesDatabase(300),

@@ -4,6 +4,7 @@ import {
   DefaultHostCommandExecutor,
   type HostProcessExecutor,
 } from "../../utils/HostCommandExecutor";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import {
@@ -20,6 +21,7 @@ export interface DhuChildProcess {
   kill(signal?: NodeJS.Signals): boolean;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
   once(event: "error", listener: (error: Error) => void): void;
+  on(event: "error", listener: (error: Error) => void): void;
 }
 
 export type DhuSpawner = (command: string, args: string[]) => DhuChildProcess;
@@ -86,25 +88,53 @@ export const createDefaultDhuSpawner =
     return child;
   };
 
-function childSession(child: DhuChildProcess): DesktopHeadUnitSession {
+interface ChildSession {
+  session: DesktopHeadUnitSession;
+  /** Writes one console command and settles once the pipe accepted or rejected it. */
+  write(command: string): Promise<void>;
+}
+
+/**
+ * Owns the child's lifetime state. Its `error` listeners on the process and on stdin are
+ * attached before the first write, so an EPIPE from a DHU that closed its console is
+ * handled (it marks the session not running) instead of crashing the host process.
+ */
+function childSession(child: DhuChildProcess): ChildSession {
   let running = true;
   child.once("exit", () => {
     running = false;
   });
+  child.on("error", (error) => {
+    logger.warn(`[DHU] process error: ${error.message}`);
+    running = false;
+  });
+  child.stdin.on("error", (error) => {
+    logger.warn(`[DHU] console write failed: ${error.message}`);
+    running = false;
+  });
+  const assertRunning = (command: string) => {
+    if (!running) {
+      throw new ActionableError(`The Desktop Head Unit is not running; cannot send "${command}".`);
+    }
+  };
   return {
-    sendCommand(command) {
-      if (!running) {
-        throw new ActionableError(
-          `The Desktop Head Unit is not running; cannot send "${command}".`,
-        );
-      }
-      child.stdin.write(`${command}\n`);
+    session: {
+      sendCommand(command) {
+        assertRunning(command);
+        child.stdin.write(`${command}\n`);
+      },
+      isRunning: () => running,
+      stop() {
+        if (running) {
+          child.kill("SIGTERM");
+        }
+      },
     },
-    isRunning: () => running,
-    stop() {
-      if (running) {
-        child.kill("SIGTERM");
-      }
+    write(command) {
+      return new Promise<void>((resolve, reject) => {
+        assertRunning(command);
+        child.stdin.write(`${command}\n`, (error) => (error ? reject(error) : resolve()));
+      });
     },
   };
 }
@@ -122,6 +152,7 @@ function watchLaunch(
   signal?: AbortSignal,
 ): Promise<DhuLaunchOutcome> {
   return new Promise<DhuLaunchOutcome>((resolve) => {
+    const dhuConsole = childSession(child);
     let phase: Phase = "connecting";
     let pingTimeouts = 0;
     // One partial-line buffer per stream, so interleaved stdout/stderr chunks never splice a line.
@@ -146,14 +177,24 @@ function watchLaunch(
     };
     const fail = (status: "no-connect" | "stalled", detail: string) => {
       if (phase !== "done") {
-        child.kill("SIGTERM");
+        // Settle first: a synchronous exit from kill() must not replace this reason.
         finish({ status, detail });
+        child.kill("SIGTERM");
       }
     };
+    // Connected only once the pipe accepted `focus video`; a closed console is a stalled start.
     const succeed = () => {
-      const session = childSession(child);
-      session.sendCommand(DHU_FOCUS_VIDEO_COMMAND);
-      finish({ status: "connected", session });
+      dhuConsole.write(DHU_FOCUS_VIDEO_COMMAND).then(
+        () =>
+          dhuConsole.session.isRunning()
+            ? finish({ status: "connected", session: dhuConsole.session })
+            : fail("stalled", `the DHU stopped before "${DHU_FOCUS_VIDEO_COMMAND}" was confirmed`),
+        (error: unknown) =>
+          fail(
+            "stalled",
+            `the DHU console rejected "${DHU_FOCUS_VIDEO_COMMAND}" (${errorMessage(error)}); it likely closed its stdin`,
+          ),
+      );
     };
     const onLine = (line: string) => {
       logger.debug(`[DHU] ${line}`);
@@ -181,7 +222,9 @@ function watchLaunch(
       const tail = last ? `: ${last}` : "";
       finish({ status, detail: `the DHU exited (code ${code ?? "none"})${tail}` });
     });
-    child.once("error", (error) => fail("no-connect", error.message));
+    child.once("error", (error) =>
+      fail(phase === "settling" ? "stalled" : "no-connect", error.message),
+    );
     signal?.addEventListener("abort", () => fail("no-connect", "launch aborted"), { once: true });
     arm(timing.connectTimeoutMs, () =>
       fail("no-connect", `no "${DHU_CONNECTED_MARKER}" within ${timing.connectTimeoutMs} ms`),

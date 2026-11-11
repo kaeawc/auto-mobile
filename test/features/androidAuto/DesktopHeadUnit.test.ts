@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import {
   SpawningDesktopHeadUnitLauncher,
   type DhuChildProcess,
@@ -11,14 +11,22 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 // The DHU's own log line when the head unit server is down (docs/using/android-auto.md).
 const TRANSPORT_EXIT_LINE = "> [E]: Failed to read from transport - disconnect. Exiting...";
 
+/** A console pipe the DHU already closed: every write fails with EPIPE, as Node reports it. */
+function closedConsole(): Writable {
+  return new Writable({
+    write(_chunk, _encoding, callback) {
+      callback(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+    },
+  });
+}
+
 class FakeDhuChild extends EventEmitter implements DhuChildProcess {
-  readonly stdin = new PassThrough();
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   readonly written: string[] = [];
   killed: NodeJS.Signals | undefined;
 
-  constructor() {
+  constructor(readonly stdin: Writable = new PassThrough()) {
     super();
     this.stdin.on("data", (chunk: Buffer) => this.written.push(chunk.toString()));
   }
@@ -36,9 +44,9 @@ class FakeDhuChild extends EventEmitter implements DhuChildProcess {
 
 const TIMING = { connectTimeoutMs: 1_000, settleMs: 500, pingTimeoutLimit: 2 };
 
-function setup() {
+function setup(stdin?: Writable) {
   const timer = new FakeTimer();
-  const child = new FakeDhuChild();
+  const child = new FakeDhuChild(stdin);
   const spawned: Array<{ command: string; args: string[] }> = [];
   const launcher = new SpawningDesktopHeadUnitLauncher(
     (command, args) => {
@@ -132,5 +140,54 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     child.print("connected.\nPing timeout\nPing timeout\n");
     expect(await outcome).toMatchObject({ status: "stalled" });
     expect(child.killed).toBe("SIGTERM");
+  });
+
+  test("an EPIPE on the focus video write is a stalled start, not a connected one", async () => {
+    const { timer, child, launch } = setup(closedConsole());
+    const outcome = launch();
+    child.print("connected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    const result = await outcome;
+    expect(result).toMatchObject({ status: "stalled" });
+    expect(result.status === "stalled" && result.detail).toContain("EPIPE");
+    expect(child.killed).toBe("SIGTERM");
+  });
+
+  test("a later EPIPE marks the session not running instead of escaping", async () => {
+    const { timer, child, launch } = setup();
+    const outcome = launch();
+    child.print("connected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    const result = await outcome;
+    if (result.status !== "connected") {
+      throw new Error(`expected connected, got ${result.status}`);
+    }
+    child.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+    expect(result.session.isRunning()).toBe(false);
+    expect(() => result.session.sendCommand("day")).toThrow("not running");
+  });
+
+  test("a child error event before connecting is a no-connect", async () => {
+    const { child, launch } = setup();
+    const outcome = launch();
+    child.emit("error", new Error("spawn desktop-head-unit EACCES"));
+    expect(await outcome).toMatchObject({
+      status: "no-connect",
+      detail: expect.stringContaining("EACCES"),
+    });
+  });
+
+  test("a child error event after connecting is handled and stops the session", async () => {
+    const { timer, child, launch } = setup();
+    const outcome = launch();
+    child.print("connected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    const result = await outcome;
+    if (result.status !== "connected") {
+      throw new Error(`expected connected, got ${result.status}`);
+    }
+    child.emit("error", new Error("kill ESRCH"));
+    child.emit("error", new Error("kill ESRCH again"));
+    expect(result.session.isRunning()).toBe(false);
   });
 });

@@ -261,10 +261,29 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(ui.changes).toContain("onboarding");
   });
 
-  test("a head unit server that never listens is an actionable error", async () => {
-    const { ui, provisioner } = setup();
+  test("a head unit server that never listens is an actionable error after the bounded wait", async () => {
+    const { ui, timer, provisioner } = setup();
     ui.startHeadUnitServer = async () => {};
     await expect(provisioner.provision(request())).rejects.toThrow("not listening on port 5277");
+    expect(timer.getSleepHistory()).toEqual([250, 500, 1_000, 2_000, 2_000]);
+  });
+
+  test("waits for a head unit server that binds after Start head unit server", async () => {
+    const { ui, phone, timer, provisioner } = setup();
+    let checksAfterStart = 0;
+    const listening = phone.isHeadUnitServerListening.bind(phone);
+    phone.isHeadUnitServerListening = async () => {
+      if (!ui.serverStarted) {
+        return listening();
+      }
+      checksAfterStart++;
+      return checksAfterStart >= 3;
+    };
+    const result = await provisioner.provision(request());
+    expect(result.steps.find((step) => step.step === "head-unit-server")).toMatchObject({
+      status: "applied",
+    });
+    expect(timer.getSleepHistory().slice(0, 2)).toEqual([250, 500]);
   });
 
   test("refuses a second projecting emulator on the same host", async () => {

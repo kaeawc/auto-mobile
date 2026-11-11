@@ -1,5 +1,5 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
-import type { BackoffPolicy } from "../../utils/Backoff";
+import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import type { PortAvailabilityChecker } from "../../utils/PortManager";
 import type { Timer } from "../../utils/SystemTimer";
 import { HEAD_UNIT_SERVER_PORT } from "./androidAutoProjection";
@@ -65,7 +65,18 @@ export interface AndroidAutoProjectionProvisionerDeps {
   recoveryBackoff: BackoffPolicy;
   /** Relaunches after the first DHU attempt fails (default 2). */
   maxDhuRecoveries?: number;
+  /** Delay before each re-check that the head unit server is listening after Start head unit server. */
+  serverBindBackoff?: BackoffPolicy;
+  /** Re-checks after the first one before the head unit server counts as not listening. */
+  serverBindAttempts?: number;
 }
+
+/** 250, 500, 1000, 2000, 2000 ms: about 5.75 s for the server to bind before the step fails. */
+export const DEFAULT_SERVER_BIND_BACKOFF = exponentialBackoff({
+  initialDelayMs: 250,
+  maxDelayMs: 2_000,
+});
+export const DEFAULT_SERVER_BIND_ATTEMPTS = 5;
 
 type Probe = (signal?: AbortSignal) => Promise<boolean>;
 
@@ -206,12 +217,29 @@ export class AndroidAutoProjectionProvisioner {
       return { step: "head-unit-server", status: "already-done" };
     }
     await ui.startHeadUnitServer(signal);
-    if (!(await phone.isHeadUnitServerListening(signal))) {
+    if (!(await this.waitForHeadUnitServer(signal))) {
       throw new ActionableError(
         `Android Auto's head unit server is not listening on port ${HEAD_UNIT_SERVER_PORT} after Start head unit server. Check that developer mode is on and start it from Android Auto's overflow menu.`,
       );
     }
     return { step: "head-unit-server", status: "applied" };
+  }
+
+  /** The server binds tcp:5277 some time after the menu tap, so poll on a bounded backoff. */
+  private async waitForHeadUnitServer(signal?: AbortSignal): Promise<boolean> {
+    const { phone, timer } = this.deps;
+    const backoff = this.deps.serverBindBackoff ?? DEFAULT_SERVER_BIND_BACKOFF;
+    const attempts = this.deps.serverBindAttempts ?? DEFAULT_SERVER_BIND_ATTEMPTS;
+    for (let attempt = 0; attempt <= attempts; attempt++) {
+      if (attempt > 0) {
+        await timer.sleep(backoff.delayForAttempt(attempt));
+        signal?.throwIfAborted();
+      }
+      if (await phone.isHeadUnitServerListening(signal)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

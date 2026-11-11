@@ -44,7 +44,9 @@ changes nothing when it already holds, so a rerun on a provisioned phone reports
 - **Notification access** is granted before the DHU connects, because the DHU's preflight poll does not
   notice a grant made after it timed out.
 - **Developer mode** reads as on when Android Auto's overflow menu lists **Developer settings**.
-- **Head unit server** reads as on when port 5277 is listening on the phone.
+- **Head unit server** reads as on when port 5277 is listening on the phone. The server binds some
+  time after **Start head unit server** is tapped, so the provisioner re-checks on a bounded backoff
+  (250 ms doubling to 2 s, five re-checks) before reporting it as not listening.
 - **Transport** is `adb emu redir add tcp:5277:5277`, not `adb forward`: a forward is dropped with the
   adb transport and takes the projection with it. A bound host port 5277 counts as redirected only when
   this provisioner redirected it to the same device; any other holder, such as another emulator's
@@ -60,6 +62,10 @@ changes nothing when it already holds, so a rerun on a provisioned phone reports
 A launch fails as `no-connect` when no `connected.` line arrives before the connect timeout, and as
 `stalled` when the DHU exits or repeats `Ping timeout` within the settle window after connecting. The
 DHU prints `connected.` even when the head unit server is down, so the settle window is what tells a
-held connection from that case. After a failure the provisioner waits the injected backoff,
+held connection from that case. The launch reports `connected` only after the pipe accepts
+`focus video`; a write the DHU's closed console rejects (EPIPE) is a `stalled` launch. Error
+listeners on the child and on its stdin are attached before the first write, so a later EPIPE or
+process error marks the session not running instead of escaping as an unhandled `error` event.
+After a failure the provisioner waits the injected backoff,
 force-stops Android Auto, starts the head unit server again and relaunches, up to two relaunches by
 default.

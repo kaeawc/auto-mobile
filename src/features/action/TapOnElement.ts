@@ -150,6 +150,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     hashViewHierarchy: (...args) => this.hashViewHierarchy(...args),
     hierarchyCapture: () => this.hierarchyCapture,
     invisibleMatchFailure: (...args) => this.invisibleMatchFailure(...args),
+    isAndroidXr: (signal) =>
+      isAndroidXr({ device: this.device, adb: this.adb, signal }, this.xrDetector),
     isClickableElement: (...args) => this.isClickableElement(...args),
     isElementTapTargetOffScreen: (...args) => this.isElementTapTargetOffScreen(...args),
     isLongClickableElement: (...args) => this.isLongClickableElement(...args),

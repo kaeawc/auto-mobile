@@ -3,6 +3,7 @@ import { holdAcquiringSession } from "../../src/daemon/acquiringSessionHold";
 import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS } from "../../src/daemon/sessionManager/sessionConstants";
 import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -76,7 +77,7 @@ describe("holdAcquiringSession (#17885)", () => {
 
   it("a 30 s provision is not reaped for its missing first heartbeat while it holds the session", async () => {
     await mint("provisioned");
-    const release = holdAcquiringSession(tracker, {
+    const { release } = holdAcquiringSession(tracker, sessionManager, {
       toolName: "provisionDevice",
       sessionUuid: "provisioned",
       deadlineMs: timer.now() + PROVISION_BUDGET_MS,
@@ -97,9 +98,10 @@ describe("holdAcquiringSession (#17885)", () => {
     expect(reaped).toEqual([{ sessionId: "abandoned", reason: "missing-first-heartbeat" }]);
   });
 
-  it("once the run releases its hold, a session nobody heartbeats is reaped as before", async () => {
+  it("releasing the hold restarts the pre-first-heartbeat grace instead of using it up", async () => {
     await mint("provisioned");
-    const release = holdAcquiringSession(tracker, {
+    const generation = sessionManager.getSession("provisioned")!.activityGeneration;
+    const { release } = holdAcquiringSession(tracker, sessionManager, {
       toolName: "provisionDevice",
       sessionUuid: "provisioned",
       deadlineMs: timer.now() + PROVISION_BUDGET_MS,
@@ -108,15 +110,37 @@ describe("holdAcquiringSession (#17885)", () => {
     release();
     release();
     expect(tracker.hasActiveSessionUuidExecutions("provisioned")).toBe(false);
+    expect(sessionManager.getSession("provisioned")!.activityGeneration).toBe(generation);
 
-    await runFor(DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+    // Scans inside the restarted grace keep the session for the client's first heartbeat.
+    await runFor(
+      DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS - DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+    );
+    expect(reaped).toEqual([]);
 
+    // Past the grace with no heartbeat, the abandoned session is reaped as before.
+    await runFor(2 * DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
     expect(reaped).toEqual([{ sessionId: "provisioned", reason: "missing-first-heartbeat" }]);
+  });
+
+  it("the hold's signal aborts when the daemon cancels the held session's work", async () => {
+    await mint("provisioned");
+    const { signal, release } = holdAcquiringSession(tracker, sessionManager, {
+      toolName: "provisionDevice",
+      sessionUuid: "provisioned",
+      deadlineMs: timer.now() + PROVISION_BUDGET_MS,
+    });
+    expect(signal.aborted).toBe(false);
+
+    await tracker.cancelDeviceSessionExecutions("provisioned", "device lost");
+
+    expect(signal.aborted).toBe(true);
+    release();
   });
 
   it("a run that wedges past its deadline stops holding the session", async () => {
     await mint("wedged");
-    holdAcquiringSession(tracker, {
+    holdAcquiringSession(tracker, sessionManager, {
       toolName: "provisionDevice",
       sessionUuid: "wedged",
       deadlineMs: timer.now() + PROVISION_STEPS_MS,

@@ -6,6 +6,7 @@ import {
 } from "../internalToolParams";
 import { holdAcquiringSession } from "../../daemon/acquiringSessionHold";
 import { executionTracker } from "../../daemon/executionTracker";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { captureAutolockPolicy } from "../../daemon/deviceAutolockPolicy";
 import { DeviceInfo } from "../../models";
 import { logger } from "../../utils/logger";
@@ -94,25 +95,27 @@ export async function bindProvisionedDeviceSession(
 /**
  * Run provisionDevice's post-bind steps while holding the session they work on (#17885). The
  * caller learns the session id only when the call returns, so nothing heartbeats it meanwhile;
- * the hold keeps it from the missing-first-heartbeat reap until `deadlineMs`, and is released
- * before any rollback runs, so an abandoned session is still reaped.
+ * the hold keeps it from the missing-first-heartbeat reap until `deadlineMs`, restarts the grace
+ * when it ends, and is released before any rollback runs, so an abandoned session is still
+ * reaped. The steps get the hold's signal, which aborts when the daemon cancels the session's
+ * work (its device was lost).
  */
 export async function whileHoldingProvisionedSession<T>(
   deps: Pick<DeviceToolsDependencies, "holdAcquiringSession">,
   { sessionUuid, deadlineMs }: { sessionUuid: string; deadlineMs: number },
-  steps: () => Promise<T>,
+  steps: (holdSignal: AbortSignal) => Promise<T>,
 ): Promise<T> {
   const hold =
     deps.holdAcquiringSession ??
     ((uuid: string, deadline: number) =>
-      holdAcquiringSession(executionTracker, {
+      holdAcquiringSession(executionTracker, defaultDaemonContext.sessionManager(), {
         toolName: "provisionDevice",
         sessionUuid: uuid,
         deadlineMs: deadline,
       }));
-  const release = hold(sessionUuid, deadlineMs);
+  const { signal, release } = hold(sessionUuid, deadlineMs);
   try {
-    return await steps();
+    return await steps(signal);
   } finally {
     release();
   }

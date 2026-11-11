@@ -59,6 +59,8 @@ const RETAINED_LIVENESS_EXPIRY_READERS: Readonly<Record<string, number>> = {
   adoptCliLivenessPolicy: 1,
   adoptManagedExecutionLivenessPolicy: 1,
   restoreHeartbeatLivenessPolicy: 1,
+  // Like recordHeartbeat: an expired session must expire, not have its grace restarted (#17885).
+  restartPreFirstHeartbeatGrace: 1,
 };
 
 function callsIn(method: ts.MethodDeclaration, onlyThis = false): string[] {

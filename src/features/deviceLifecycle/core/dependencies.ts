@@ -81,7 +81,7 @@ import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { DeviceTeardownService } from "../../../devices/deviceTeardownService";
 import { mergeDeviceToolsDependencies } from "../deviceLifecycleDependencyOverrides";
 import { executionTracker } from "../../../daemon/executionTracker";
-import type { AcquiringSessionRelease } from "../../../daemon/acquiringSessionHold";
+import type { AcquiringSessionHold } from "../../../daemon/acquiringSessionHold";
 import type { ManufacturerProfileApplier } from "../../utility/personaExecutors";
 
 export type { ManufacturerProfileApplier };
@@ -173,9 +173,10 @@ export interface DeviceToolsDependencies {
   androidAutoProjection?: AndroidAutoProjectionApplier;
   /**
    * Keeps the session provisionDevice minted from the missing-first-heartbeat reap while its
-   * post-bind steps run (#17885); defaults to an execution on the process-wide tracker.
+   * post-bind steps run (#17885); defaults to an execution on the process-wide tracker whose
+   * release restarts the daemon session manager's pre-first-heartbeat grace.
    */
-  holdAcquiringSession?: (sessionUuid: string, deadlineMs: number) => AcquiringSessionRelease;
+  holdAcquiringSession?: (sessionUuid: string, deadlineMs: number) => AcquiringSessionHold;
   /**
    * Per-platform boot capacity reporters the `listDevices` `capacity` field samples; defaults to
    * the process-wide admission gates, which probe adb/simctl/ps. Injected by the benchmark so the

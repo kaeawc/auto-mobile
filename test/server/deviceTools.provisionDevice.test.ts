@@ -687,6 +687,8 @@ describe("provisionDevice handler", () => {
     class RecordingAndroidAutoApplier implements AndroidAutoProjectionApplier {
       readonly events: string[] = [];
       failure?: Error;
+      /** Runs inside apply with the signal the projection was given. */
+      duringApply?: (signal: AbortSignal | undefined) => void;
       async resolveInputs() {
         return {
           androidAutoApks: ["/apks/base.apk"],
@@ -694,8 +696,13 @@ describe("provisionDevice handler", () => {
           acceptAndroidAutoTerms: false,
         };
       }
-      async apply(device: BootedDevice): Promise<AndroidAutoProvisionReport> {
+      async apply(
+        device: BootedDevice,
+        _options: unknown,
+        signal?: AbortSignal,
+      ): Promise<AndroidAutoProvisionReport> {
         this.events.push(`apply:${device.deviceId}`);
+        this.duringApply?.(signal);
         if (this.failure) {
           throw this.failure;
         }
@@ -743,6 +750,50 @@ describe("provisionDevice handler", () => {
         desktopHeadUnit: { running: true },
       });
       expect(applier.events).toEqual(["apply:emulator-5554"]);
+    });
+
+    test("projects under a hold on the bound session, released once the steps end (#17885)", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      createdAndroid(applier);
+      setDeviceToolsDependencies({
+        holdAcquiringSession: (sessionUuid) => {
+          applier.events.push(`hold:${sessionUuid}`);
+          return {
+            signal: new AbortController().signal,
+            release: () => applier.events.push(`release:${sessionUuid}`),
+          };
+        },
+      });
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.error).toBeUndefined();
+      expect(applier.events).toEqual([
+        `hold:${payload.sessionId}`,
+        "apply:emulator-5554",
+        `release:${payload.sessionId}`,
+      ]);
+    });
+
+    test("a device lost mid-projection aborts the projection through the hold's signal (#17885)", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      createdAndroid(applier);
+      const deviceLost = new AbortController();
+      setDeviceToolsDependencies({
+        holdAcquiringSession: () => ({ signal: deviceLost.signal, release: () => {} }),
+      });
+      let projectionSignal: AbortSignal | undefined;
+      applier.duringApply = (signal) => {
+        projectionSignal = signal;
+        deviceLost.abort(new ActionableError("device lost during projection"));
+        signal?.throwIfAborted();
+      };
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(projectionSignal?.aborted).toBe(true);
+      expect(payload.success).toBe(false);
+      expect(JSON.stringify(payload)).toContain("device lost during projection");
     });
 
     /** The real applier and provisioner, with fakes only for the phone, its UI and the DHU. */

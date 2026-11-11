@@ -52,6 +52,7 @@ function select(xr: boolean, container?: TapAnyElementOptions["container"], tree
 
 test.each([
   [undefined, { left: 48, top: 60, right: 568, bottom: 164 }],
+  [{ text: "Apps" }, { left: 48, top: 548, right: 696, bottom: 724 }],
   [
     { elementId: "com.android.settings:id/homepage_container" },
     { left: 48, top: 196, right: 696, bottom: 372 },
@@ -68,7 +69,7 @@ test("non-XR selection retains hidden OK, leaf-container miss and smallest Sound
   ).toEqual({ left: 48, top: 1252, right: 696, bottom: 1328 });
 });
 
-test("tapAny refuses the captured Apps label whose owner exceeds the XR area bound", async () => {
+test("tapAny prepares the shared XR verdict before selecting an Apps owner row", async () => {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const detector = new FakeAndroidXrDetector(true);
@@ -101,9 +102,10 @@ test("tapAny refuses the captured Apps label whose owner exceeds the XR area bou
   );
   action.testHooks.setRefreshViewHierarchy(async () => null);
   const result = await action.execute({ action: "tap", container: { text: "Apps" } });
-  expect(result.success).toBe(false);
+  expect(result.success).toBe(true);
+  expect(result.element?.bounds).toEqual({ left: 48, top: 548, right: 696, bottom: 724 });
   expect(detector.queries.length).toBeGreaterThan(0);
-  expect(service.getNodeActionHistory()).toHaveLength(0);
+  expect(service.getNodeActionHistory()).toHaveLength(1);
   expect(adb.getAllCommands()).toHaveLength(0);
 });
 
@@ -136,38 +138,57 @@ test.each([false, true])("topmost same-app window wins before reading order (XR=
 });
 
 test.each([
-  ["non-leaf", 1, 1, false],
-  ["oversized", 1, 5, true],
-  ["full-window", 1, 1, true],
-  ["too-deep", 4, 1, true],
-  ["small-owner", 3, 4, true],
-] as const)("XR leaf fallback bounds its owner: %s", (kind, levels, areaRatio, leaf) => {
+  ["non-leaf", 1, 100, false],
+  ["over-quarter-window", 1, 400, true],
+  ["full-window", 1, 100, true],
+  ["too-deep", 4, 100, true],
+  ["other-clickable-descendant", 2, 100, true],
+  ["small-owner", 3, 100, true],
+  ["quarter-window", 3, 332, true],
+  ["viewport-fallback", 3, 100, true],
+  ["viewport-fallback-oversized", 1, 3000, true],
+] as const)("XR leaf fallback bounds its owner: %s", (kind, levels, height, leaf) => {
   const app = structuredClone(capture.viewHierarchy.windows!.find((window) => window.id === 38)!);
-  const label = { ...settingsControl("Header", 300), clickable: false };
-  const bounds = { ...label.bounds, bottom: label.bounds.top + 100 * areaRatio };
+  const label = {
+    ...settingsControl("Header", 300),
+    clickable: false,
+    bounds: { left: 48, top: 300, right: 68, bottom: 310 },
+  };
+  const bounds = { left: 0, top: 300, right: 744, bottom: 300 + height };
   // The non-leaf child is deliberately not clickable, so only the fallback could select the owner.
   let branch: ViewHierarchyNode = leaf
     ? label
     : { ...label, node: [{ ...settingsControl("Child", 300), clickable: false }] };
   for (let depth = 1; depth < levels; depth++) {
-    branch = { ...settingsControl("", 300), clickable: false, node: [branch] };
+    branch = { ...settingsControl("", 300), clickable: false, bounds, node: [branch] };
   }
-  const owner = { ...settingsControl("Owner", 300), bounds, node: [branch] };
-  app.hierarchy = {
+  const owner = {
+    ...settingsControl("Owner", 300),
+    bounds,
     node: [
-      {
-        ...settingsControl("", 0),
-        clickable: false,
-        node: [owner],
-        bounds: kind === "full-window" ? bounds : { left: 0, top: 0, right: 744, bottom: 1328 },
-      },
+      branch,
+      // Nest the other control so the guard must inspect descendants, not just children.
+      ...(kind === "other-clickable-descendant"
+        ? [{ ...settingsControl("", 300), clickable: false, node: [settingsControl("Other", 350)] }]
+        : []),
     ],
   };
+  const root: ViewHierarchyNode = {
+    ...settingsControl("", 0),
+    clickable: false,
+    node: [owner],
+    bounds: kind === "full-window" ? bounds : { left: 0, top: 0, right: 744, bottom: 1328 },
+  };
+  if (kind.startsWith("viewport-fallback")) {
+    delete root.bounds;
+  }
+  app.hierarchy = { node: [root] };
   app.bounds = kind === "full-window" ? bounds : app.bounds;
   const tree = { ...capture.viewHierarchy, hierarchy: {}, windows: [app] };
   const selected = select(true, { text: "Header" }, tree);
-  if (kind === "small-owner") {
+  if (kind === "small-owner" || kind === "quarter-window" || kind === "viewport-fallback") {
     expect(selected?.text).toBe("Owner");
+    expect(selected?.bounds).toEqual(bounds);
   } else {
     expect(selected).toBeNull();
   }

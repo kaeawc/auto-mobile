@@ -1,7 +1,7 @@
-import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
+import { boundsArea } from "../../utils/bounds";
 import { withoutHiddenXrChrome } from "./xrHiddenChrome";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
-import { promoteClickableAncestor } from "../utility/ElementResolverNodes";
+import { isWithin, promoteClickableAncestor } from "../utility/ElementResolverNodes";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { type CapturedTapTarget } from "./TapAnyAndroidTapper";
@@ -165,7 +165,7 @@ function xrContainerOwner(
     node,
     nodes,
     { action: options.action === "longPress" ? "long-press" : "tap", viewport },
-    xrContainerScope(node, nodes, area),
+    xrContainerScope(node, nodes, viewport),
   );
   if (owner) {
     return new DefaultElementParser().parseNodeBounds(owner.source);
@@ -173,11 +173,11 @@ function xrContainerOwner(
   return null;
 }
 
-/** Promotion's inclusive boundary: three ancestors, small bounds, and no full-window root. */
+/** Bound leaf ownership to three ancestors, a quarter window, and no unrelated controls. */
 function xrContainerScope(
   node: SearchableEntry,
   nodes: readonly SearchableEntry[],
-  area: number,
+  viewport: { width: number; height: number } | undefined,
 ): SearchableEntry {
   const root = nodes.findLast(
     (entry) =>
@@ -185,17 +185,33 @@ function xrContainerScope(
       entry.rootGroup === node.rootGroup &&
       entry.parentIndex === undefined,
   );
-  const rootBounds = root?.bounds;
+  const rootBounds =
+    root?.bounds ??
+    (viewport && {
+      left: 0,
+      top: 0,
+      right: viewport.width,
+      bottom: viewport.height,
+    });
+  const windowArea = rootBounds ? boundsArea(rootBounds) : 0;
+  const chain = new Set([node.index]);
   let scope = node;
   for (let level = 0; level < 3 && scope.parentIndex !== undefined; level++) {
     const parent = nodes[scope.parentIndex];
-    if (parent === root || !parent.bounds || boundsArea(parent.bounds) > 4 * area) {
+    if (parent === root || !parent.bounds || boundsArea(parent.bounds) > windowArea / 4) {
       break;
     }
-    const overlap = rootBounds ? intersectBounds(parent.bounds, rootBounds) : null;
-    if (overlap && rootBounds && boundsEqual(overlap, rootBounds)) {
+    if (
+      nodes.some(
+        (entry) =>
+          !chain.has(entry.index) &&
+          entry.affordances.some((action) => action === "tap" || action === "toggle") &&
+          isWithin(entry, parent, nodes),
+      )
+    ) {
       break;
     }
+    chain.add(parent.index);
     scope = parent;
   }
   return scope;

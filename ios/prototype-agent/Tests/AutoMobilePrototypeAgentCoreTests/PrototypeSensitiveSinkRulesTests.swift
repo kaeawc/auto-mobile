@@ -400,6 +400,137 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
         XCTAssertLessThanOrEqual(result.checks, 8 * (unrelated + 1) + taints)
     }
 
+    private func stateCopySpec(_ copies: String, sink: String = #"{"query":{"q":{"data":"/leak"}}}"#)
+        throws -> [String: JSONValue]
+    {
+        var value = try spec(sink)
+        value["requires"] = try json(#"{"platform":["auth","clipboard"]}"#)
+        value["state"] = try json(#"{"u":"","v":"","sel_3":"","other":""}"#)
+        var root = try XCTUnwrap(value["root"]?.objectFields)
+        var children = PrototypeStrictBindings.array(root["children"])
+        var button = try XCTUnwrap(children[1].objectFields)
+        button["onTap"] = try .array(PrototypeStrictBindings.array(json(copies)) +
+            PrototypeStrictBindings.array(button["onTap"]))
+        children[1] = .object(button)
+        root["children"] = .array(children)
+        value["root"] = .object(root)
+        return value
+    }
+
+    func testStateRequestAndStorageSinks() throws {
+        let copies = #"[{"type":"setState","key":"u","value":{"platform":"/auth/userId"}}]"#
+        for (sink, suffix) in [
+            (#"{"query":{"q":{"state":"u"}}}"#, "query.q.state"),
+            (#"{"query":{"q":"{u}"}}"#, "query.q"),
+            (#"{"url":"https://example.com/{u}"}"#, "url"),
+            (#"{"headers":{"Authorization":{"state":"u"}}}"#, "headers.Authorization.state"),
+            (#"{"method":"POST","body":{"state":"u"}}"#, "body.state"),
+            (#"{"method":"POST","body":{"form":{"q":{"state":"u"}}}}"#, "body.form.q.state"),
+            (
+                #"{"method":"POST","body":{"multipart":[{"name":"q","value":{"state":"u"}}]}}"#,
+                "body.multipart[0].value.state"
+            ),
+        ] {
+            try validate(stateCopySpec(copies, sink: sink), path: "root.children[1].onTap[1].\(suffix)")
+        }
+        var stored = try stateCopySpec(copies)
+        stored["storage"] = try json(#"{"version":1,"keys":["state:u"]}"#)
+        XCTAssertEqual(try errors(stored), [.invalidSpec(
+            path: "storage.keys[0]", message: "Sensitive value cannot be persisted"
+        )])
+        var channel = try stateCopySpec(copies)
+        channel["channels"] = try json(#"{"live":{"kind":"sse","via":"device","url":"https://example.com/{u}"}}"#)
+        XCTAssertEqual(try errors(channel), [.invalidSpec(path: "channels.live.url", message: message)])
+    }
+
+    func testStateTextSourcesAndCleanWrites() throws {
+        for source in [#"{"platform":"/auth/userId"}"#, #""{platform:/auth/userId}""#, #""{data:/code}""#] {
+            let copies =
+                #"[{"type":"setState","key":"u","value":\#(source)},{"type":"setState","key":"u","value":"guest"},{"type":"setData","path":"/data/leak","value":{"state":"u"}}]"#
+            try validate(stateCopySpec(copies), path: "root.children[1].onTap[3].query.q")
+        }
+        for source in [#""guest""#, #""""#, #""{data:/other}""#, #"{"platform":"/auth/signedIn"}"#] {
+            let copies =
+                #"[{"type":"setState","key":"u","value":\#(source)},{"type":"setData","path":"/data/leak","value":{"state":"u"}}]"#
+            try validate(stateCopySpec(copies), path: nil)
+        }
+        let copies = #"[{"type":"setState","key":"u","value":{"platform":"/auth/userId"}}]"#
+        try validate(stateCopySpec(copies, sink: #"{"query":{"q":{"value":"{u}"}}}"#), path: nil)
+        try validate(stateCopySpec(copies, sink: #"{"query":{"q":{"state":"v"}}}"#), path: nil)
+    }
+
+    func testTemplatedStateKeysMatchLiteralPrefixes() throws {
+        for (taint, read, refused) in [
+            ("sel_{index}", "sel_3", true), ("sel_3", "sel_{index}", true),
+            ("sel_{index}", "other", false), ("sel_{index}", "pick_{row.id}", false),
+            ("s{index}", "sel_{row.id}", true), ("{row.key}", "anything", true),
+            ("u", "user", false), ("user", "u", false),
+        ] {
+            // Scan authored keys directly: they may be bound from live rows after validation.
+            let copies =
+                #"[{"type":"setState","key":"\#(taint)","value":{"platform":"/auth/userId"}},{"type":"setData","path":"/data/leak","value":{"state":"\#(read)"}}]"#
+            XCTAssertEqual(try errors(stateCopySpec(copies)), refused ? [.invalidSpec(
+                path: "root.children[1].onTap[2].query.q", message: message
+            )] : [], "\(taint) -> \(read)")
+            let sink = #"{"query":{"q":{"state":"\#(read)"}}}"#
+            let direct = #"[{"type":"setState","key":"\#(taint)","value":{"platform":"/auth/userId"}}]"#
+            XCTAssertEqual(try errors(stateCopySpec(direct, sink: sink)), refused ? [.invalidSpec(
+                path: "root.children[1].onTap[1].query.q.state", message: message
+            )] : [])
+        }
+        let copies = #"[{"type":"setState","key":"sel_{index}","value":{"platform":"/auth/userId"}}]"#
+        XCTAssertEqual(try errors(stateCopySpec(copies, sink: #"{"query":{"q":"{sel_9}"}}"#)), [.invalidSpec(
+            path: "root.children[1].onTap[1].query.q", message: message
+        )])
+    }
+
+    func testStateWorkSpendsCopyAndSinkCheckBudgets() throws {
+        let copies =
+            #"[{"type":"setState","key":"u","value":{"platform":"/auth/userId"}},{"type":"setData","path":"/data/leak","value":{"state":"u"}}]"#
+        let value = try stateCopySpec(copies)
+        let context = try PrototypeContractValidator.inspect(.object(value))
+        let platformTaints = 1 // auth.userId; clipboard has no sensitive platform state
+        let result = PrototypeSensitiveSinkRules.scan(
+            value, nodes: context.locatedNodes, actions: context.actions,
+            repeats: PrototypeStrictRepeats(data: nil), maxChecks: platformTaints
+        )
+        XCTAssertEqual(result.errors, [.invalidSpec(
+            path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks"
+        )])
+        XCTAssertEqual(result.checks, 0) // Propagation, rather than the sink scan, exhausted the cap.
+
+        let direct = try stateCopySpec(
+            #"[{"type":"setState","key":"u","value":{"platform":"/auth/userId"}}]"#,
+            sink: #"{"query":{"q":"{v}{u}"}}"#
+        )
+        let directContext = try PrototypeContractValidator.inspect(.object(direct))
+        let scanned = PrototypeSensitiveSinkRules.scan(
+            direct, nodes: directContext.locatedNodes, actions: directContext.actions,
+            repeats: PrototypeStrictRepeats(data: nil), maxChecks: platformTaints
+        )
+        XCTAssertEqual(scanned.errors, [.invalidSpec(path: "root.children[1].onTap[1].query.q", message: message)])
+        XCTAssertEqual(scanned.checks, 1) // One tainted state key was compared in the text sink.
+
+        for sink in [
+            #"{"query":{"a":"{u}","z":"{u}"}}"#,
+            #"{"query":{"q":{"state":"u{index}"}}}"#,
+        ] {
+            let exhausted = try stateCopySpec(
+                #"[{"type":"setState","key":"u","value":{"platform":"/auth/userId"}}]"#,
+                sink: sink
+            )
+            let inspected = try PrototypeContractValidator.inspect(.object(exhausted))
+            let result = PrototypeSensitiveSinkRules.scan(
+                exhausted, nodes: inspected.locatedNodes, actions: inspected.actions,
+                repeats: PrototypeStrictRepeats(data: nil), maxChecks: platformTaints
+            )
+            XCTAssertEqual(result.errors, [.invalidSpec(
+                path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks"
+            )])
+            XCTAssertEqual(result.checks, 2)
+        }
+    }
+
     func testSharedLibraryFixtures() throws {
         let directory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -409,6 +540,10 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         XCTAssertFalse(files.isEmpty)
         XCTAssertTrue(files.contains { $0.lastPathComponent == "repeat-item-copy.json" })
+        XCTAssertEqual(Set(files.map(\.lastPathComponent).filter { $0.hasPrefix("state-") }), [
+            "state-copy-to-data.json", "state-repeat-index.json", "state-taint-without-sink.json",
+            "state-two-key-chain.json", "state-untainted-copy.json",
+        ])
         for file in files {
             let fixture = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file)).objectFields)
             let value = try XCTUnwrap(fixture["spec"]?.objectFields)

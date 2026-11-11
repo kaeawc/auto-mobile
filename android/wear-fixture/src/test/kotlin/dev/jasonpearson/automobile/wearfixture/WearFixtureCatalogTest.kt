@@ -7,6 +7,11 @@ import org.junit.Test
 
 class WearFixtureCatalogTest {
   @Test
+  fun `inline reply result key is stable`() {
+    assertEquals("reply_text", WearFixtureCatalog.REPLY_INPUT_KEY)
+  }
+
+  @Test
   fun `list has thirty numbered items with stable ids and detail text`() {
     val items = WearFixtureCatalog.items
     assertEquals(WearFixtureCatalog.ITEM_COUNT, items.size)

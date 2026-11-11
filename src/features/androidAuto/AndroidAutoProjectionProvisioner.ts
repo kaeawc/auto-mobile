@@ -274,11 +274,18 @@ export class AndroidAutoProjectionProvisioner {
     if (existing?.isRunning()) {
       return { step: { step: "desktop-head-unit", status: "already-done" }, session: existing };
     }
+    // An unhealthy session can still own a live DHU; wait for it to exit (stop() rejects if it
+    // never does) so a relaunch cannot compete with it for the head unit connection.
+    await existing?.stop();
+    this.sessions.delete(request.deviceId);
     const maxRecoveries = this.deps.maxDhuRecoveries ?? 2;
     const failures: string[] = [];
     for (let attempt = 0; attempt <= maxRecoveries; attempt++) {
-      if (attempt > 0) {
-        await this.recoverHeadUnitServer(attempt, request.signal);
+      if (attempt > 0 && !(await this.recoverHeadUnitServer(attempt, request.signal))) {
+        failures.push(
+          `head-unit-server: not listening on port ${HEAD_UNIT_SERVER_PORT} after the restart`,
+        );
+        continue;
       }
       const outcome: DhuLaunchOutcome = await this.deps.dhu.launch({
         ...request.dhu,
@@ -301,12 +308,17 @@ export class AndroidAutoProjectionProvisioner {
     );
   }
 
-  /** The recovery seen on device: force-stop Android Auto and start its head unit server again. */
-  private async recoverHeadUnitServer(attempt: number, signal?: AbortSignal): Promise<void> {
+  /**
+   * The recovery seen on device: force-stop Android Auto and start its head unit server again.
+   * Resolves false when the restarted server does not bind tcp:5277 within the bounded wait,
+   * so the caller skips a relaunch that could only dial an unbound port.
+   */
+  private async recoverHeadUnitServer(attempt: number, signal?: AbortSignal): Promise<boolean> {
     await this.deps.timer.sleep(this.deps.recoveryBackoff.delayForAttempt(attempt));
     signal?.throwIfAborted();
     await this.deps.phone.forceStopAndroidAuto(signal);
     await this.deps.ui.startHeadUnitServer(signal);
+    return this.waitForHeadUnitServer(signal);
   }
 
   private async handleOnboarding(

@@ -822,6 +822,30 @@ class ImeCommitDriver(
     }
 
     private fun confirmedUnits(applied: String, dispatched: List<String>): Int? {
+      exactConfirmedUnits(applied, dispatched)?.let {
+        return it
+      }
+      var offset = 0
+      var confirmed = 0
+      while (offset < applied.length) {
+        val unit = dispatched.getOrNull(confirmed)
+        when {
+          unit != null && unit.isNotEmpty() && applied.startsWith(unit, offset) -> {
+            offset += unit.length
+            confirmed++
+          }
+          FORMATTING.matchesAt(applied, offset) ->
+            offset += Character.charCount(applied.codePointAt(offset))
+          else -> return null
+        }
+      }
+      return confirmed
+    }
+
+    // Match complete editing units first; only unmatched editor formatting may be skipped.
+    private val FORMATTING = Regex("[^\\p{L}\\p{N}\\p{M}]")
+
+    private fun exactConfirmedUnits(applied: String, dispatched: List<String>): Int? {
       var length = 0
       if (applied.isEmpty()) return 0
       for ((index, unit) in dispatched.withIndex()) {

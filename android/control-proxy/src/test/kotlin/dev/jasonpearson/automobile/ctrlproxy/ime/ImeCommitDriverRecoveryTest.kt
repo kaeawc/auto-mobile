@@ -9,6 +9,73 @@ import org.junit.Test
 
 internal class ImeCommitDriverRecoveryTest : ImeCommitDriverFixtures() {
   @Test
+  fun `captured phone restart resumes only missing digits once`() {
+    for ((kept, delta) in listOf(4 to " 512-5", 7 to " 512-555-0")) {
+      val sink = phoneRestartingSink(kept)
+      val result = commit(sink, "5125550142", PRIOR_IME_ID)
+      assertTrue(result.success)
+      assertNull(result.error)
+      assertEquals("+1 512-555-0142", sink.editorText)
+      assertEquals(" 512-555-0142", result.insertedText)
+      assertEquals("5125550142", sink.appliedChars.joinToString(""))
+      assertEquals("5125550142" + "5125550142".drop(kept), sink.committedChars.joinToString(""))
+      assertEquals(10, result.committedUnits)
+      assertEquals(delta, firstPhoneDelta)
+      assertEquals(List(6) { ImeCommitDriver.POLL_INTERVAL_MS }, sink.delays)
+    }
+  }
+
+  @Test
+  fun `fully applied formatted phone restart has no resend or polls`() {
+    val sink = phoneRestartingSink(10)
+    val result = commit(sink, "5125550142", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertEquals("+1 512-555-0142", sink.editorText)
+    assertEquals(" 512-555-0142", result.insertedText)
+    assertEquals("5125550142", sink.committedChars.joinToString(""))
+    assertEquals(2, sink.editorReads)
+    assertTrue(sink.delays.isEmpty())
+  }
+
+  @Test
+  fun `plain digit run preserves existing reads and synchronous dispatch`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = "+1"
+    val result = commit(sink, "5125550142", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertEquals("+15125550142", sink.editorText)
+    assertEquals(2, sink.editorReads)
+    assertEquals(1, sink.syncCalls)
+    assertTrue(sink.readSizes.isEmpty())
+    assertTrue(sink.delays.isEmpty())
+    assertEquals(List(10) { "char" } + listOf("finish", "sync", "switch"), sink.events)
+  }
+
+  private var firstPhoneDelta: String? = null
+
+  private fun phoneRestartingSink(kept: Int): FakeImeCommitSink {
+    val sink = restartingSink("+1", true, kept)
+    sink.afterCommit = {
+      // Separator positions from captured Contacts deltas, extended for the resumed tail.
+      val digits = sink.appliedChars.joinToString("")
+      sink.editorText =
+        "+1 " +
+          digits.take(3) +
+          (if (digits.length > 3) "-" + digits.drop(3).take(3) else "") +
+          (if (digits.length > 6) "-" + digits.drop(6) else "")
+    }
+    sink.afterSync = {
+      if (sink.generation == 0L) {
+        firstPhoneDelta = requireNotNull(sink.editorText).removePrefix("+1")
+        // Queued onStartInput becomes visible after the synchronous dispatch run.
+        sink.beforeContinuation?.invoke()
+        sink.generation = 1
+      }
+    }
+    return sink
+  }
+
+  @Test
   fun `consume on space with restart continues remaining text`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.editorText = ""

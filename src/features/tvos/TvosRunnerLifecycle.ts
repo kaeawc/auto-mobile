@@ -64,6 +64,11 @@ export class TvosRunnerLifecycle {
     return this.startOwned(request);
   }
 
+  /** Whether this lifecycle launched the device's runner, even after its client unregistered. */
+  ownsRunner(deviceId: string): boolean {
+    return this.runners.has(deviceId);
+  }
+
   /** One replacement per device; cancellation belongs to all waiters and the previous session. */
   async restartOwned(deviceId: string, signal?: AbortSignal): Promise<TvosRunnerRestartResult> {
     return this.restarts.run(

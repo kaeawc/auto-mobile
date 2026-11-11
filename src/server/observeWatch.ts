@@ -15,7 +15,10 @@ import { findFocusedElement } from "../features/observe/HierarchyFocus";
 import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
 import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
 import { requireTvosRunner } from "../features/tvos/TvosRunnerRecovery";
-import type { TvosRunnerLifecycle } from "../features/tvos/TvosRunnerLifecycle";
+import {
+  getTvosRunnerLifecycle,
+  type TvosRunnerLifecycle,
+} from "../features/tvos/TvosRunnerLifecycle";
 import { captureTvosRunnerScreenshot } from "../features/tvos/TvosScreenshot";
 import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
@@ -84,7 +87,7 @@ export interface WatchObserveDependencies {
   screenshots?: WatchScreenshotSource;
   runner?: WatchRunnerClient;
   /** Recovers a disconnected lifecycle-owned tvOS runner; defaults to the shared lifecycle. */
-  tvosRunnerLifecycle?: Pick<TvosRunnerLifecycle, "restartOwned">;
+  tvosRunnerLifecycle?: Pick<TvosRunnerLifecycle, "restartOwned" | "ownsRunner">;
   /** Starts or reuses the visionOS window-app runner; defaults to the shared runner lifecycle. */
   visionosRunner?: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>;
   /** The window app each connected visionOS runner was started for; defaults to the shared registry. */
@@ -326,12 +329,16 @@ async function tvosHierarchyForObserve(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
-  lifecycle?: Pick<TvosRunnerLifecycle, "restartOwned">,
+  injectedLifecycle?: Pick<TvosRunnerLifecycle, "restartOwned" | "ownsRunner">,
 ): Promise<HierarchyOutcome> {
   const displayKey = watchDisplay(device).ref.key;
-  const runner = tvosRunners.get(device.deviceId);
-  assertWatchObserveOptions(args, displayKey, "tvos", runner !== undefined);
-  if (!runner) {
+  const lifecycle = injectedLifecycle ?? getTvosRunnerLifecycle();
+  // An exited xcodebuild unregisters its client while the lifecycle keeps the ownership needed to
+  // restart it; only a device that never owned or registered a runner stays screenshot-only.
+  const hasRunner =
+    tvosRunners.get(device.deviceId) !== undefined || lifecycle.ownsRunner(device.deviceId);
+  assertWatchObserveOptions(args, displayKey, "tvos", hasRunner);
+  if (!hasRunner) {
     return {};
   }
   try {

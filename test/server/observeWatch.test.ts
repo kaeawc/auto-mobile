@@ -390,6 +390,7 @@ describe("observe on an Apple TV simulator", () => {
     const { observe, screenshots } = arrange(undefined, undefined, {
       screenshots: undefined,
       tvosRunnerLifecycle: {
+        ownsRunner: () => true,
         async restartOwned(deviceId, signal) {
           signal?.throwIfAborted();
           restarts.push(deviceId);
@@ -428,6 +429,7 @@ describe("observe on an Apple TV simulator", () => {
     const restarts: string[] = [];
     const { observe, screenshots } = arrange(undefined, undefined, {
       tvosRunnerLifecycle: {
+        ownsRunner: () => true,
         async restartOwned(deviceId) {
           restarts.push(deviceId);
           return { runnerUnavailable: "replacement runner could not connect" };
@@ -447,12 +449,62 @@ describe("observe on an Apple TV simulator", () => {
     }
   });
 
+  test("restarts an owned runner whose exited xcodebuild unregistered its client", async () => {
+    const recovered = new FakeTvosRunnerClient();
+    recovered.screenshotData = pngOfSize(1920, 1080).toString("base64");
+    let unregister: (() => void) | undefined;
+    const restarts: string[] = [];
+    const { observe, screenshots } = arrange(undefined, undefined, {
+      screenshots: undefined,
+      tvosRunnerLifecycle: {
+        ownsRunner: (deviceId) => deviceId === appleTv.deviceId,
+        async restartOwned(deviceId) {
+          restarts.push(deviceId);
+          unregister = tvosRunners.register(deviceId, recovered);
+          return {};
+        },
+      },
+    });
+    try {
+      expect(tvosRunners.get(appleTv.deviceId)).toBeUndefined();
+      const result = getStructuredPayload(await observe({}, appleTv))!;
+      expect(result).toHaveProperty("viewHierarchy");
+      expect(result).not.toHaveProperty("hierarchyUnavailable");
+      expect(restarts).toEqual([appleTv.deviceId]);
+      expect(recovered.commands).toEqual([
+        { type: "request_hierarchy" },
+        { type: "request_screenshot" },
+      ]);
+      expect(screenshots.captures).toEqual([]);
+    } finally {
+      unregister?.();
+    }
+  });
+
+  test("a device that never owned a runner stays screenshot-only without recovery", async () => {
+    const restarts: string[] = [];
+    const { observe, screenshots } = arrange(pngOfSize(1920, 1080), undefined, {
+      tvosRunnerLifecycle: {
+        ownsRunner: () => false,
+        async restartOwned(deviceId) {
+          restarts.push(deviceId);
+          return {};
+        },
+      },
+    });
+    const result = getStructuredPayload<WatchObservation>(await observe({}, appleTv))!;
+    expect(result).not.toHaveProperty("viewHierarchy");
+    expect(restarts).toEqual([]);
+    expect(screenshots.captures).toEqual([`${appleTv.deviceId} undefined`]);
+  });
+
   test("a usable tvOS runner returns hierarchy without recovery", async () => {
     const runner = new FakeTvosRunnerClient();
     const unregister = tvosRunners.register(appleTv.deviceId, runner);
     const restarts: string[] = [];
     const { observe } = arrange(undefined, undefined, {
       tvosRunnerLifecycle: {
+        ownsRunner: () => true,
         async restartOwned(deviceId) {
           restarts.push(deviceId);
           return {};

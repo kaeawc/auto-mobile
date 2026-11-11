@@ -5,19 +5,30 @@ import { openExportHarness, exportConfig } from "./fixtures/exportHarness";
 import { drainUntil, drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 
+const WARM_UP_PASSES = 2;
+
 describe("broker reset readiness lifecycle", () => {
   let harness: Awaited<ReturnType<typeof openExportHarness>>;
   let broker: SessionBroker;
   let finishReset: ReturnType<typeof Promise.withResolvers<ResetResult>>;
   let resetStarted: ReturnType<typeof Promise.withResolvers<void>>;
 
-  // Warm the whole per-test path (harness, broker, seed acquisition and reset) once, so the first
-  // test does not pay first-use costs inside its 100 ms budget.
+  // Warm the whole per-test path (harness, broker, seed acquisition, reset and a concurrent
+  // create/wait admission) before the first test, so it does not pay first-use costs inside its
+  // 100 ms budget. One pass of setup alone still left the first test's setup about twice as slow
+  // as later tests' (#16779); a second pass and the concurrent admission close most of the gap.
   beforeAll(async () => {
-    await openBroker();
-    const { released } = await startRelease();
-    await closeBroker();
-    await released;
+    for (let pass = 0; pass < WARM_UP_PASSES; pass++) {
+      await openBroker();
+      const { released } = await startRelease();
+      const acquisitions = [
+        broker.prepare(exportConfig(`warm-first-${pass}`), "token"),
+        broker.prepare(exportConfig(`warm-second-${pass}`), "token"),
+      ];
+      finishReset.resolve("clean");
+      await Promise.all([...acquisitions, released]);
+      await closeBroker();
+    }
   });
   beforeEach(openBroker);
   afterEach(closeBroker);

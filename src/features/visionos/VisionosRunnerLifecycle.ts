@@ -59,12 +59,17 @@ export class VisionosRunnerLifecycle {
     );
   }
 
-  /** A runner whose automated app (its host app when it has no target) was uninstalled is dead. */
-  appUninstalled(deviceId: string, bundleId: string): void {
+  /**
+   * A runner whose automated app (its host app when it has no target) was uninstalled is dead.
+   * Returns whether a lifecycle-owned runner automated that app and is now marked for restart.
+   */
+  appUninstalled(deviceId: string, bundleId: string): boolean {
     const entry = this.runners.get(deviceId);
     if (entry && (entry.bundleId ?? VISIONOS_RUNNER_HOST_BUNDLE_ID) === bundleId) {
       entry.appRemoved = true;
+      return true;
     }
+    return false;
   }
 
   /** Bind on-demand automation to an existing session when one owns the call. */
@@ -366,6 +371,28 @@ export async function withVisionosHostRecovery<T>(
     );
     return attempt();
   }
+}
+
+/**
+ * launchApp found the runner's own host app missing. When a lifecycle-owned runner automates that
+ * host app, the runner is dead too (the app went outside uninstallApp, #17382), so restart it,
+ * which reinstalls the host app, and return true so the caller launches once more. A runner this
+ * lifecycle does not own, or one automating another app, is left alone and false is returned.
+ */
+export async function restartVisionosRunnerForMissingHost(
+  deviceId: string,
+  signal?: AbortSignal,
+  lifecycle?: Pick<VisionosRunnerLifecycle, "appUninstalled" | "start" | "attach" | "needsRestart">,
+): Promise<boolean> {
+  const owner = lifecycle ?? defaultLifecycle;
+  if (signal?.aborted || !owner?.appUninstalled(deviceId, VISIONOS_RUNNER_HOST_BUNDLE_ID)) {
+    return false;
+  }
+  logger.warn(
+    `[VisionosRunner] launchApp found the host app of the runner for ${deviceId} missing; restarting the runner`,
+  );
+  await requireVisionosRunner(deviceId, signal, owner);
+  return true;
 }
 
 function attachVisionosRunnerToSession(

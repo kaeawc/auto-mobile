@@ -1,3 +1,5 @@
+import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { buildElement } from "../../helpers/elementBuilder";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
@@ -30,7 +32,8 @@ function harness() {
   const strategy = new TalkBackTapStrategy({ timer, executor });
   const detector = new FakeAccessibilityDetector();
   detector.setTalkBackEnabled(true);
-  const tap = new TapOnElement(device, null, {
+  const tap = new TapOnElement(device, new FakeAdbClient(), {
+    xrDetector: new FakeAndroidXrDetector(false),
     timer,
     accessibilityDetector: detector,
     talkBackStrategy: strategy,

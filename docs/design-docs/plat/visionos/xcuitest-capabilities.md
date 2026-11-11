@@ -26,7 +26,12 @@ taps enabled window and ornament elements by identifier (narrowed
 by exact type and label when shared; disabled twins never count as sharers), and appends text to a focused field;
 a missing or disabled target is an invalid `identifier` parameter, and remaining ambiguity is `ambiguous_element`;
 screenshots use `simctl`. iOS inventories exclude xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
-`listApps` use `simctl`. All other device tools remain disabled.
+`listApps` use `simctl`. A runner automating its own host app is restarted, which
+reinstalls that app, when the host app is gone: `uninstallApp` marks it; a removal
+outside that tool is detected when a runner command reports the host app as not running
+or not installed (retried once), or when `launchApp` of the host bundle finds it not
+installed (launched once more). A runner the lifecycle does not own is never restarted.
+All other device tools remain disabled.
 
 ## Environment
 

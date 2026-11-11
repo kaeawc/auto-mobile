@@ -1,3 +1,4 @@
+import type { AndroidXrDisplaySize } from "../observe/android/AndroidXrDisplaySize";
 import { tapOnAppleRunner, usesAppleRunnerHierarchy } from "../visionos/AppleRunnerActionDispatch";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -73,6 +74,7 @@ import { tapPlatformTraits, type TapPlatformTraits } from "./strategies/tapPlatf
  * Dependencies for TapOnElement that can be injected for testing.
  */
 export interface TapOnElementDependencies extends DisplayFenceDependencies {
+  xrDisplaySize?: AndroidXrDisplaySize;
   prototypeAgents?: PrototypeTapAgentConnections;
   displayTransitions?: DisplayTransitionReader &
     Pick<DisplayTransitionTracker, "checkIdentity" | "record">;
@@ -133,6 +135,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     withObservationScreenSize: (...args) => this.withObservationScreenSize(...args),
   });
   private readonly targets = new TapTargetResolver({
+    xrDisplaySize: () => this.xrDisplaySize ?? this.observeScreen.xrDisplaySize,
     accessibilityService: () => this.accessibilityService,
     adb: () => this.adb,
     buildSelectedElementMetadata: (...args) => this.buildSelectedElementMetadata(...args),
@@ -397,6 +400,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private strategy: TapStrategy;
   private longPressMetadataDetector: LongPressMetadataDetector;
   private readonly waitForCondition: WaitForCondition;
+  private readonly xrDisplaySize: AndroidXrDisplaySize | undefined;
   private readonly xrDetector: TapOnElementDependencies["xrDetector"];
 
   constructor(
@@ -409,6 +413,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       timer: options.timer,
       displayFence: options,
     });
+    this.xrDisplaySize = options.xrDisplaySize;
     this.refreshedDisplayTransitions = options.displayTransitions ?? displayTransitions;
     this.lastRenderedObservation = options.lastRenderedObservation;
     this.prototypeAgents = options.prototypeAgents ?? {
@@ -674,27 +679,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     ...args
   ) => this.tapPoints.isElementTapTargetOffScreen(...args);
 
-  private visibleTapBounds(
-    ...args: Parameters<TapTargetResolver["visibleTapBounds"]>
-  ): ReturnType<TapTargetResolver["visibleTapBounds"]> {
-    return this.targets.visibleTapBounds(...args);
-  }
+  private readonly visibleTapBounds: TapTargetResolver["visibleTapBounds"] = (...args) =>
+    this.targets.visibleTapBounds(...args);
 
-  private resolveVisibleTapPoint(
-    ...args: Parameters<TapTargetResolver["resolveVisibleTapPoint"]>
-  ): ReturnType<TapTargetResolver["resolveVisibleTapPoint"]> {
-    return this.targets.resolveVisibleTapPoint(...args);
-  }
+  private readonly resolveVisibleTapPoint: TapTargetResolver["resolveVisibleTapPoint"] = (
+    ...args
+  ) => this.targets.resolveVisibleTapPoint(...args);
 
   private readonly getScreenSizeFromHierarchy: TapPointPlanner["getScreenSizeFromHierarchy"] = (
     ...args
   ) => this.tapPoints.getScreenSizeFromHierarchy(...args);
 
-  private verifyFocusAfterTap(
-    ...args: Parameters<TapTargetResolver["verifyFocusAfterTap"]>
-  ): ReturnType<TapTargetResolver["verifyFocusAfterTap"]> {
-    return this.targets.verifyFocusAfterTap(...args);
-  }
+  private verifyFocusAfterTap: TapTargetResolver["verifyFocusAfterTap"] = (...args) =>
+    this.targets.verifyFocusAfterTap(...args);
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   refreshViewHierarchy(

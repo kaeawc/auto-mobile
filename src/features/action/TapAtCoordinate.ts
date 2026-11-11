@@ -83,7 +83,6 @@ import {
 } from "./pointer/richStylus";
 import { TapAtGeometryError } from "./TapAtGeometryError";
 import {
-  defaultAndroidXrDetector,
   isAndroidXr,
   type AndroidXrDetector,
 } from "../../utils/android-cmdline-tools/androidXrDevice";
@@ -215,7 +214,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly snapshotReferences: SnapshotReferenceStore;
   private readonly androidTalkBack: AndroidCoordinateTalkBack;
   private readonly androidDispatcher: AndroidCoordinateTapDispatcher;
-  private readonly xrDetector: AndroidXrDetector;
+  private readonly xrDetector?: AndroidXrDetector;
   private androidXr?: boolean;
 
   constructor(
@@ -241,7 +240,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.stylusRoutes = dependencies.stylus ?? {};
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
-    this.xrDetector = dependencies.xrDetector ?? defaultAndroidXrDetector;
+    this.xrDetector = dependencies.xrDetector;
     const talkBack = resolveTalkBackDependencies(
       dependencies,
       this.timer,
@@ -311,12 +310,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         error: stale,
       };
     }
-    const resolved = resolveCoordinates(
-      options,
-      observation,
-      this.device.platform,
-      await this.tapAtAndroidXr(options, observation, signal),
-    );
+    const resolved = await this.resolveWithXr(options, observation, signal);
     if ("error" in resolved) {
       return {
         success: false,
@@ -501,12 +495,7 @@ export class TapAtCoordinate extends BaseVisualChange {
               error: stale,
             };
           }
-          const resolved = resolveCoordinates(
-            options,
-            observeResult,
-            this.device.platform,
-            await this.tapAtAndroidXr(options, observeResult, signal),
-          );
+          const resolved = await this.resolveWithXr(options, observeResult, signal);
           if ("error" in resolved) {
             return {
               success: false,
@@ -791,20 +780,23 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
   }
 
-  /** The shared XR predicate, asked only when tapAt maps screenshot pixels on Android. */
-  private async tapAtAndroidXr(
+  /** Resolves with the shared XR predicate, asked only when tapAt maps screenshot pixels on Android. */
+  private async resolveWithXr(
     options: TapAtOptions,
     observation: ObserveResult,
     signal?: AbortSignal,
-  ): Promise<boolean | undefined> {
-    if (this.device.platform !== "android" || options.pointSpace === "native") {
-      return undefined;
+  ): Promise<ReturnType<typeof resolveCoordinates>> {
+    if (this.device.platform === "android" && options.pointSpace !== "native") {
+      this.androidXr = await isAndroidXr(
+        { device: this.device, adb: this.adb, backStack: observation.backStack, signal },
+        this.xrDetector,
+      );
     }
-    this.androidXr = await isAndroidXr(
-      { device: this.device, adb: this.adb, backStack: observation.backStack, signal },
-      this.xrDetector,
+    return resolveCoordinates(
+      { ...options, androidXr: this.androidXr },
+      observation,
+      this.device.platform,
     );
-    return this.androidXr;
   }
 
   private resolveFreshFrameRetry(
@@ -814,7 +806,11 @@ export class TapAtCoordinate extends BaseVisualChange {
     refreshed: ObserveResult,
   ): { point: { x: number; y: number }; frameContext: string } | undefined {
     // The XR answer is a device property, so the retry reuses the one the first resolve read.
-    const resolved = resolveCoordinates(options, refreshed, this.device.platform, this.androidXr);
+    const resolved = resolveCoordinates(
+      { ...options, androidXr: this.androidXr },
+      refreshed,
+      this.device.platform,
+    );
     const frameContext = refreshed.viewHierarchy?.frameContext;
     if (
       "error" in resolved ||

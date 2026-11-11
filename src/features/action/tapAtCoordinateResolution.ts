@@ -146,11 +146,10 @@ function tapAtCoordinateFrame(
   observation: ObserveResult,
   platform: BootedDevice["platform"],
   toolName: string,
-  androidXr: boolean | undefined,
 ) {
   const xr =
     platform === "android" && toolName === "tapAt" && options.pointSpace !== "native"
-      ? detectXrPanel(observation.backStack, androidXr)
+      ? detectXrPanel(observation.backStack, options.androidXr)
       : undefined;
   const screenSize = xr ? xrScreenshotSize(observation) : observation.screenSize;
   const image = xr ? xrScreenshotPoint(options.image, observation, screenSize) : options.image;
@@ -159,16 +158,12 @@ function tapAtCoordinateFrame(
   return { xr, screenSize, image, imageScreenSize };
 }
 
-/**
- * Shared native point resolution for coordinate dispatch and hierarchy preview. `androidXr` is
- * the shared `isAndroidXr` predicate's answer; without it the back stack's XR System UI decides.
- */
+/** Shared native point resolution for coordinate dispatch and hierarchy preview. */
 export function resolveTapAtCoordinates(
   options: TapAtOptions,
   observeResult: ObserveResult,
   platform: BootedDevice["platform"],
   toolName: string = "tapAt",
-  androidXr?: boolean,
 ): ResolvedPoint | { x: number; y: number; error: string } {
   const { x: rawX, y: rawY } = inputPoint(options);
   const optionError = coordinateOptionError(options, toolName);
@@ -182,7 +177,6 @@ export function resolveTapAtCoordinates(
     observeResult,
     platform,
     toolName,
-    androidXr,
   );
   if (!hasPositiveScreenSize(screenSize)) {
     return {
@@ -251,14 +245,13 @@ export function resolveCoordinates(
   options: TapAtOptions,
   observeResult: ObserveResult,
   platform: BootedDevice["platform"],
-  androidXr?: boolean,
 ): ResolvedPoint | { x: number; y: number; error: string } {
   validatePlanGeometry(options, observeResult, platform);
   const gestureError = gestureOptionError(options);
   if (gestureError) {
     return { x: inputPoint(options).x, y: inputPoint(options).y, error: gestureError };
   }
-  const resolved = resolveTapAtCoordinates(options, observeResult, platform, "tapAt", androidXr);
+  const resolved = resolveTapAtCoordinates(options, observeResult, platform);
   if ("error" in resolved) {
     return resolved;
   }

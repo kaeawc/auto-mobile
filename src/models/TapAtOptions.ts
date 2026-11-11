@@ -25,6 +25,11 @@ interface TapAtGestureOptions {
    * element centre from observe), dispatched without XR panel mapping. Absent from the schema.
    */
   pointSpace?: "native" | "screenshot";
+  /**
+   * Internal: the shared `isAndroidXr` predicate's answer, set by tapAt before resolution.
+   * Absent, the back stack's XR System UI decides. Absent from the schema.
+   */
+  androidXr?: boolean;
 }
 
 export type TapAtOptions = TapAtGestureOptions &

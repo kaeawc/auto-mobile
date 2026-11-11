@@ -60,11 +60,7 @@ import type { FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
 import { LongPressMetadataDetector } from "./LongPressMetadataDetector";
-import {
-  defaultAndroidXrDetector,
-  isAndroidXr,
-  type AndroidXrDetector,
-} from "../../utils/android-cmdline-tools/androidXrDevice";
+import { isAndroidXr } from "../../utils/android-cmdline-tools/androidXrDevice";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { resolveTapAccessibilityDependencies } from "./tapAccessibilityDependencies";
@@ -101,7 +97,7 @@ export interface TapOnElementDependencies extends DisplayFenceDependencies {
    */
   tapStrategy?: TapStrategy;
   /** Decides XR node-click routing; tests inject a fake so no `pm has-feature` probe runs. */
-  xrDetector?: AndroidXrDetector;
+  xrDetector?: Parameters<typeof isAndroidXr>[1];
 }
 
 export {
@@ -399,7 +395,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private strategy: TapStrategy;
   private longPressMetadataDetector: LongPressMetadataDetector;
   private readonly waitForCondition: WaitForCondition;
-  private readonly xrDetector: AndroidXrDetector;
+  private readonly xrDetector: TapOnElementDependencies["xrDetector"];
 
   constructor(
     device: BootedDevice,
@@ -473,7 +469,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         screenshotCapturer: this.screenshotCapturer,
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
-    this.xrDetector = options.xrDetector ?? defaultAndroidXrDetector;
+    this.xrDetector = options.xrDetector;
     this.elementSelector = this.createElementSelector(options);
     const accessibility = resolveTapAccessibilityDependencies(options, {
       device,

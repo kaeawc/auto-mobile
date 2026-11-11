@@ -327,7 +327,7 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
     options && resolveContainer && ((hierarchy) => resolveContainer(hierarchy, options)),
   );
   const result = await dispatchXrNodeClick(accessibilityService, {
-    target: { selector, expectedBounds, identityHints },
+    target: { selector, ...verification },
     signal,
     displayFence: options?.displayFence,
   });
@@ -341,7 +341,7 @@ async function dispatchXrNodeClick(
     "supportsNodeActionSelectors" | "requestNodeAction"
   >,
   {
-    target: { selector, expectedBounds, identityHints },
+    target: { selector, ...verification },
     signal,
     displayFence,
   }: {

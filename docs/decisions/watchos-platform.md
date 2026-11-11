@@ -89,8 +89,8 @@ unavailable, and a broker binding never reuses one.
   confined to the watch's device-set directory, remove Documents, Library and tmp), and a failed
   wipe launches nothing. `prototype: true` is refused before any agent preparation. A
   `terminateApp` whose process is already gone is a success with `wasRunning: false`.
-- **Watch and TV logs.** `getLogs` reuses the iOS simulator unified-log path (`simctl spawn <udid> log show` with the app's subsystem and process predicate) for a watch or Apple TV UDID; any other non-Android platform is refused rather than read as logcat.
-- **TV crashes.** `crashApp` reuses the iOS simulator launchctl SIGABRT path and host DiagnosticReports `.ips` lookup for the Apple TV UDID. The result retains `platform: "tvos"`; mechanism and evidence source names use the shared iOS backend vocabulary.
+- **Watch, TV and Vision Pro logs.** `getLogs` reuses the iOS simulator unified-log path (`simctl spawn <udid> log show` with the app's subsystem and process predicate) for a watch, Apple TV or Vision Pro UDID; no Apple platform is read as logcat.
+- **Watch and TV crashes.** `crashApp` reuses the iOS simulator launchctl SIGABRT path and host DiagnosticReports `.ips` lookup for the watch or Apple TV UDID, signalling the app's service in the `system` launchd domain (neither simulator has a `user/<uid>` domain). The result retains `platform: "watchos"` or `"tvos"`; mechanism and evidence source names use the shared iOS backend vocabulary.
 - **Watch notifications.** `postNotification` delivers an APNs payload via `simctl push` to the watch simulator UDID and requires the watch app bundle ID as `appId`.
 - **Runner-backed watch observation and actions.** `observe` retains a simctl PNG. When an
   explicitly registered watch runner is connected, it also returns the hierarchy normalized

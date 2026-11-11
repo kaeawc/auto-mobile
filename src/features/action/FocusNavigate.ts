@@ -21,6 +21,13 @@ import { describeFocus, elementMatchesTarget, stringProp } from "./FocusNavigate
 import { createFocusIdentity, focusKey, type FocusIdentity } from "./FocusIdentity";
 import { FOCUS_NAVIGATE_DIRECTIONS, type FocusNavigateDirection } from "./FocusNavigateDirections";
 import { describeEntry, isViewTextField, trapMessage } from "./FocusTrapMessage";
+import {
+  findRowAnchor,
+  isInRow,
+  notOnScreenMessage,
+  createRowSearch,
+  type FocusRowAnchor,
+} from "./FocusRowSearch";
 
 export { elementMatchesTarget } from "./FocusNavigateMatching";
 
@@ -577,6 +584,31 @@ function stripRetryAdvice(message: string | undefined): string {
   return text.endsWith(STOPPED_SUFFIX) ? text.slice(0, -STOPPED_SUFFIX.length) : text;
 }
 
+/** Per-call state of the search for a target no read has held yet (#18027). */
+interface WalkSearch {
+  /** Whether any read held the target; until one does, a stop says it was not on screen. */
+  seen: boolean;
+  sweep: ReturnType<typeof createRowSearch>;
+  planTarget: ReturnType<typeof createTargetPlanner>;
+}
+
+/**
+ * The row search for a target in no read yet (#18027): with focus in the row whose labels resemble
+ * the target, the next untried direction along it (undefined once both ends refused). Undefined
+ * when no such row holds focus, which leaves the walk to plan toward the row, or scan down.
+ */
+function rowStep(
+  focused: Element | null,
+  row: FocusRowAnchor | undefined,
+  sweep: ReturnType<typeof createRowSearch>,
+  progress: FocusProgress,
+): { direction: FocusNavigateDirection | undefined } | undefined {
+  if (!row || !focused || !isInRow(focused, row)) {
+    return undefined;
+  }
+  return { direction: sweep(progress.blocked) };
+}
+
 /** Whether the walk has run out of presses that could still move focus. */
 function isExhausted(
   options: FocusNavigateOptions,
@@ -638,6 +670,7 @@ export class FocusNavigate {
     const planTarget = createTargetPlanner();
     const trap: ExitContext["trap"] = {};
     let lastDirection: FocusNavigateDirection | undefined;
+    const walk: WalkSearch = { seen: false, sweep: createRowSearch(), planTarget };
 
     for (;;) {
       throwIfAborted(signal);
@@ -652,21 +685,17 @@ export class FocusNavigate {
         distanceToNearest(focused, onScreen),
         containsTarget,
       );
-
-      const direction =
-        options.direction ??
-        this.nextDirection(
-          screen,
-          planTarget(focused, onScreen),
-          progress,
-          containsTarget ? lastDirection : undefined,
-        );
-      const exhausted = !containsTarget && isExhausted(options, progress, direction);
+      walk.seen = walk.seen || matches || containsTarget || onScreen.length > 0;
+      const { direction, stuck } = this.plan(
+        { screen, focusedElement, onScreen, containsTarget, lastDirection },
+        { options, progress, walk },
+      );
       const done = this.exitFor(focusedElement, matches, {
         steps,
-        stuck: exhausted ? stuckMessage(progress, focusedElement) : undefined,
+        stuck,
         maxSteps,
         path,
+        seen: walk.seen,
       });
       if (done) {
         const outcome = await this.exit(done, {
@@ -696,6 +725,47 @@ export class FocusNavigate {
       // The settle is the walk's longest wait (up to the tool's 5 s cap): a cancel ends it.
       await awaitWhileRequestIsLive(this.timer.sleep(settleMs), signal);
     }
+  }
+
+  /**
+   * The next press for one read, and the stuck message when no press is left. Until a read holds
+   * the target, a row labelled like it is searched first ({@link rowStep}).
+   */
+  private plan(
+    read: {
+      screen: FocusScreen;
+      focusedElement: FocusPathEntry | undefined;
+      onScreen: Element[];
+      containsTarget: boolean;
+      lastDirection: FocusNavigateDirection | undefined;
+    },
+    {
+      options,
+      progress,
+      walk,
+    }: { options: FocusNavigateOptions; progress: FocusProgress; walk: WalkSearch },
+  ): { direction: FocusNavigateDirection | undefined; stuck: string | undefined } {
+    const { screen, focusedElement, onScreen, containsTarget, lastDirection } = read;
+    const { focused } = screen;
+    const row = walk.seen ? undefined : findRowAnchor(screen.elements, options.until);
+    const searching = rowStep(focused, row, walk.sweep, progress);
+    const direction =
+      options.direction ??
+      (searching
+        ? searching.direction
+        : this.nextDirection(
+            screen,
+            row ? row.elements : walk.planTarget(focused, onScreen),
+            progress,
+            containsTarget ? lastDirection : undefined,
+          ));
+    if (containsTarget || !isExhausted(options, progress, direction)) {
+      return { direction, stuck: undefined };
+    }
+    const stuck = walk.seen
+      ? stuckMessage(progress, focusedElement)
+      : notOnScreenMessage(options.until, row, searching !== undefined, focusedElement);
+    return { direction, stuck };
   }
 
   /** Re-read transient list focus twice before continuing the last press; maxSteps still bounds it. */
@@ -732,9 +802,10 @@ export class FocusNavigate {
       stuck: string | undefined;
       maxSteps: number;
       path: FocusPathEntry[];
+      seen: boolean;
     },
   ): FocusNavigateResult | undefined {
-    const { steps, stuck, maxSteps, path } = progress;
+    const { steps, stuck, maxSteps, path, seen } = progress;
     if (matches) {
       return { success: true, status: "focused", steps, path, focusedElement };
     }
@@ -744,7 +815,7 @@ export class FocusNavigate {
     if (steps >= maxSteps) {
       return this.stopped("max_steps", steps, path, {
         focusedElement,
-        message: `Reached maxSteps (${maxSteps})`,
+        message: `Reached maxSteps (${maxSteps})${seen ? "" : " and the target was not on screen in any read"}`,
       });
     }
     return undefined;

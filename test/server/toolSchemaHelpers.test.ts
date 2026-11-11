@@ -379,6 +379,17 @@ describe("appId aliases on tool schemas", () => {
     }
   });
 
+  test("crashAppSchema accepts the watch call from #18052", () => {
+    const result = crashAppSchema.safeParse({
+      appId: "dev.dogfood.factorywatch",
+      deviceId: "AEC5C81F-B29B-4A0C-976A-6081F3617E1C",
+      platform: "watchos",
+    });
+
+    expect(result.success).toBe(true);
+    expect(String(result.data?.platform)).toBe("watchos");
+  });
+
   test("launchAppSchema accepts natural app identifier aliases", () => {
     for (const alias of [
       "package",

@@ -313,3 +313,17 @@ test("marking a template stale clears its previous clone failures", async () => 
   expect(fake.manifest?.state).toBe("ready");
   fake.finishBuild();
 });
+test("a template built with apsd log suppression is never cloned for a flag-off request", async () => {
+  const fake = new SimulatorTemplatesHarness();
+  fake.ready();
+  fake.manifest = { ...fake.manifest!, key: { ...fake.manifest!.key, apsdLogSuppressed: true } };
+  expect((await fake.service().create(fake.request)).source).toBe("create");
+  expect(fake.events).not.toContain("clone:11111111-1111-1111-1111-111111111111:work");
+});
+test("an unsuppressed template is never cloned while apsd log suppression is on", async () => {
+  const fake = new SimulatorTemplatesHarness();
+  fake.ready();
+  fake.apsdLogSuppressed = true;
+  expect((await fake.service().create(fake.request)).source).toBe("create");
+  expect(fake.events).not.toContain("clone:11111111-1111-1111-1111-111111111111:work");
+});

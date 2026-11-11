@@ -1,6 +1,8 @@
 import type { Element, ElementBounds, ViewHierarchyResult, ScreenSize } from "../../models";
+import { isFalsy, isTruthy } from "../../models/Element";
 import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { contains, subtractCover, uniqueBySource } from "../observe/ApplicationWindowCover";
+import { isIosPresentationChrome } from "../observe/iosPresentationChrome";
 import type { SearchableEntry } from "../utility/SearchableNode";
 import { isUsableScreenSize } from "../utility/ElementGeometry";
 import {
@@ -372,11 +374,10 @@ function isOverlay(query: OwnershipQuery, node: SearchableEntry, scroll: Searcha
   return (
     !!target &&
     !!node.bounds &&
+    !isIosPresentationChrome(node, query.screen) &&
     node.affordances.some((affordance) => affordance !== "scroll") &&
-    node.properties.visible !== false &&
-    node.properties.visible !== "false" &&
-    node.properties.hidden !== true &&
-    node.properties.hidden !== "true" &&
+    !isFalsy(node.properties.visible) &&
+    !isTruthy(node.properties.hidden) &&
     canCoverTargetLayer(nodes, node, target) &&
     node.rootGroup === target.rootGroup &&
     ![target, ...matched].some((anchor) => isRelated(nodes, node, anchor)) &&

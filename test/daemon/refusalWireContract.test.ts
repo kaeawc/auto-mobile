@@ -263,6 +263,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "portReverse (#17099) catches PortReverseError in its own handler and returns errorCode and ports in its structured result (portReverseResultSchema); it is never thrown through the refusal paths.",
   "features/prototype/bundle/bundleContract":
     "Internal ZIP/manifest parsing control flow caught by readPrototypeBundle and exportPrototypeBundle and returned as corpus-tested BundleRejection values; BundleFailure never escapes as an MCP/tool or daemon refusal.",
+  "features/action/AndroidInstallDowngradeRefusedError":
+    "installApp Android downgrade refusal (#17978) is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "features/action/androidLaunchIntent":
     "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":

@@ -37,6 +37,8 @@ export interface TemplateCreationDependencies {
   xcode: XcodeVersionReader;
   timer: Pick<Timer, "now">;
   profile(): SimulatorTemplateKey["profile"];
+  /** Whether new simulators get the apsd level-off plist; part of template identity. */
+  apsdLogSuppressed?(): boolean;
   builder: TemplateBuildRequester;
   /** Points a fresh clone's recorded paths at itself instead of its template (#15327). */
   relocator: Pick<SimulatorCloneRelocator, "relocate">;
@@ -133,6 +135,7 @@ export class SimulatorCreationService {
       runtimeBuild: runtime.buildversion,
       deviceType: request.deviceType,
       profile: deps.profile(),
+      ...(deps.apsdLogSuppressed?.() ? { apsdLogSuppressed: true as const } : {}),
     };
   }
   private async cloneReady(

@@ -132,9 +132,15 @@ export class AndroidAutoProjectionProvisioner {
   private readonly retired = new WeakSet<DesktopHeadUnitSession>();
   /** The config each tracked DHU was launched with. */
   private readonly launchConfigs = new WeakMap<DesktopHeadUnitSession, string>();
-  /** The device this provisioner redirected host port 5277 to, if any. */
-  private redirectOwner: string | null = null;
-  /** Session-end releases in progress, by device; every provisioning run waits for them. */
+  /**
+   * The host port 5277 redirect this provisioner added, if any: one object per `redir add`, so a
+   * late removal clears only the redirect it was removing, never one added after it.
+   */
+  private redirect: { readonly deviceId: string } | null = null;
+  /**
+   * Session-end releases in progress, by device; every provisioning run waits for them. A second
+   * release of the same device chains onto the first, so this entry always covers both.
+   */
   private readonly releasingRedirects = new Map<string, Promise<boolean>>();
   /** The provisioning run in progress; the host has one port 5277, so at most one runs. */
   private inFlight: { deviceId: string; run: Promise<AndroidAutoProjectionResult> } | null = null;
@@ -288,8 +294,8 @@ export class AndroidAutoProjectionProvisioner {
       releaseRedirect = false,
     }: { deviceStopped?: boolean; releaseRedirect?: boolean } = {},
   ): Promise<boolean> {
-    if (deviceStopped && this.redirectOwner === deviceId) {
-      this.redirectOwner = null;
+    if (deviceStopped && this.redirect?.deviceId === deviceId) {
+      this.redirect = null;
     }
     if (!releaseRedirect || deviceStopped) {
       return await this.stopSession(
@@ -297,11 +303,17 @@ export class AndroidAutoProjectionProvisioner {
         deviceStopped ? "stopped device" : "failed provisioning",
       );
     }
-    // Registered before the first await, so a run that starts during the DHU stop waits too.
-    const release = this.stopSession(deviceId, "released session").then(async (stopped) => {
-      await this.removeOwnedRedirect(deviceId);
-      return stopped;
-    });
+    // Registered before the first await, so a run that starts during the DHU stop waits too. It
+    // first waits for a release of this device still in progress (its `redir del` may be stalled
+    // past the cleanup cap) and for a run still provisioning it, which may yet start a DHU or add
+    // a redirect; neither rejects (#17911).
+    const settled = [this.releasingRedirects.get(deviceId), this.inFlightRunFor(deviceId)];
+    const release = Promise.all(settled)
+      .then(async () => await this.stopSession(deviceId, "released session"))
+      .then(async (stopped) => {
+        await this.removeOwnedRedirect(deviceId);
+        return stopped;
+      });
     this.releasingRedirects.set(deviceId, release);
     try {
       return await release;
@@ -320,21 +332,42 @@ export class AndroidAutoProjectionProvisioner {
     return await this.stopTrackedSession(deviceId, session, context);
   }
 
-  /** Whether a DHU this provisioner spawned, or a redirect it added, is on `deviceId`. */
+  /**
+   * Whether a DHU this provisioner spawned, or a redirect it added, is on `deviceId`, or a run
+   * provisioning `deviceId` is in progress and may yet add them.
+   */
   holdsHostPortFor(deviceId: string): boolean {
-    return this.sessions.has(deviceId) || this.redirectOwner === deviceId;
+    return (
+      this.sessions.has(deviceId) ||
+      this.redirect?.deviceId === deviceId ||
+      this.inFlight?.deviceId === deviceId
+    );
+  }
+
+  /** The run provisioning `deviceId` now, settled whichever way it ends; undefined when none. */
+  private inFlightRunFor(deviceId: string): Promise<unknown> | undefined {
+    if (this.inFlight?.deviceId !== deviceId) {
+      return undefined;
+    }
+    return this.inFlight.run.catch((error: unknown) => {
+      // The run's own caller gets its failure; the release only needs it to have ended.
+      logger.debug(
+        `[AndroidAuto] the release of ${deviceId} waited for a provisioning run that failed: ${errorMessage(error)}`,
+      );
+    });
   }
 
   /** Removes this provisioner's redirect on `deviceId` once no DHU it spawned there is left. */
   private async removeOwnedRedirect(deviceId: string): Promise<void> {
-    if (this.redirectOwner !== deviceId || this.sessions.has(deviceId)) {
+    const redirect = this.redirect;
+    if (redirect?.deviceId !== deviceId || this.sessions.has(deviceId)) {
       // Not ours, or a DHU that would not exit still dials it: the redirect stays.
       return;
     }
     try {
       await this.deps.forDevice(deviceId).phone.removeHeadUnitRedirect();
-      if (this.redirectOwner === deviceId) {
-        this.redirectOwner = null;
+      if (this.redirect === redirect) {
+        this.redirect = null;
       }
     } catch (error) {
       // Kept as the owner, so the next projection's refusal still names this phone's redirect.
@@ -497,14 +530,14 @@ export class AndroidAutoProjectionProvisioner {
   ): Promise<AndroidAutoProvisioningStep> {
     if (this.deps.hostPorts.isPortAvailable(HEAD_UNIT_SERVER_PORT)) {
       await phone.addHeadUnitRedirect(signal);
-      this.redirectOwner = deviceId;
+      this.redirect = { deviceId };
       return { step: "transport", status: "applied" };
     }
-    if (this.redirectOwner === deviceId) {
+    if (this.redirect?.deviceId === deviceId) {
       return { step: "transport", status: "already-done" };
     }
-    const holder = this.redirectOwner
-      ? `${this.redirectOwner}'s redirect`
+    const holder = this.redirect
+      ? `${this.redirect.deviceId}'s redirect`
       : "a redirect or process AutoMobile did not create";
     throw new ActionableError(
       `Host port ${HEAD_UNIT_SERVER_PORT} is held by ${holder}, so the DHU would project that instead of ${deviceId}. Remove it (adb -s <serial> emu redir del tcp:${HEAD_UNIT_SERVER_PORT}) or stop the process holding the port, then retry.`,

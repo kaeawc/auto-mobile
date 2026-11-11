@@ -77,8 +77,9 @@ phone, or provision again with `acceptAndroidAutoTerms: true`.
 A failure after boot fails the whole request: an emulator the request created is rolled back, and a DHU
 that request started is stopped. A DHU an earlier provision started keeps running. `killDevice` on an emulator also stops its DHU.
 When the session holding the phone ends (you release it, its heartbeat lapses, it idles out or is
-cancelled), AutoMobile stops the DHU it started for that phone and removes its port 5277 redirect, so
-another emulator can project. The phone keeps running.
+cancelled) or moves to another device, AutoMobile stops the DHU it started for that phone and removes
+its port 5277 redirect, so another emulator can project. A provision of that phone still running
+finishes first. The phone keeps running.
 
 ## Starting the head unit with `startDevice`
 
@@ -138,8 +139,9 @@ The result gains a `headUnit` block:
 
 - `commands`: the console commands sent.
 - `effect`: `screenChanged` and its `basis`. The change is read from the projected apps' template
-  stacks (`carAppTemplates.projected[]`): each app's top screen class, template type and title, and
-  stack depth. Without the AutoMobile template route in any projected app, `basis` is
+  stacks (`carAppTemplates.projected[]`): each app's top screen class and stack depth, and the top
+  template's content, so a tab switch or a changed item on the same screen counts as a change. A
+  list scroll counts only when the app's template reports different items. Without the AutoMobile template route in any projected app, `basis` is
   `no template data` and `screenChanged` is absent: the input was sent, but whether it changed the
   screen is unknown.
 - `idle`: whether two template reads in a row agreed (`stable`) and how long the wait took
@@ -254,6 +256,8 @@ default values, the same as `default.ini`: 800x480 at 160 dpi and 30 fps.
 - While projecting, the phone's foreground app is Android Auto, not your app. If your app enabled the
   AutoMobile template route, `observe` reads it from every app Android Auto has bound and returns
   `carAppTemplates.projected[]`, one entry per app (`packageName`, `sessions`, `error`), with
+  `error: "template_read_failed"` and no sessions when an app that answered before could not be
+  read this time, and
   `projectedBy` naming Android Auto. Android Auto does not report which bound app the head unit shows,
   so with several apps bound, check each entry's top screen rather than assuming the first is visible.
   The entries are what the app built, not what the head unit rendered.

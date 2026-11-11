@@ -1,3 +1,4 @@
+import type { InstallAppResult } from "../../models/InstallAppResult";
 import { type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { type HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { type PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -34,15 +35,33 @@ export interface AndroidInstallAttempt {
 
 export interface AndroidInstallStepOptions {
   signal?: AbortSignal;
-  /** False refuses the uninstall-and-reinstall downgrade recovery. Default true. */
+  /** True opts into the uninstall-and-reinstall downgrade recovery. Default false. */
   allowDestructiveRecovery?: boolean;
+  /** The install already passed `-d`; only shapes the refusal message. */
+  allowDowngrade?: boolean;
 }
 
 export function installStepOptions(
   guard: InstallGuardOptions | undefined,
   signal: AbortSignal | undefined,
+  allowDowngrade?: boolean,
 ): AndroidInstallStepOptions {
-  return { signal, allowDestructiveRecovery: guard?.allowDestructiveRecovery !== false };
+  return {
+    signal,
+    allowDestructiveRecovery: guard?.allowDestructiveRecovery === true,
+    allowDowngrade: allowDowngrade === true,
+  };
+}
+
+/** False after a destructive downgrade recovery, true for an in-place replace, else omitted. */
+export function dataPreservedField(
+  removedPriorCopy: boolean | undefined,
+  replacedInPlace: boolean,
+): Pick<InstallAppResult, "dataPreserved"> {
+  if (removedPriorCopy) {
+    return { dataPreserved: false };
+  }
+  return replacedInPlace ? { dataPreserved: true } : {};
 }
 
 export interface AndroidInstallRecovery {
@@ -131,8 +150,9 @@ export interface InstallGuardOptions {
    */
   expectedSigningSha256?: string[];
   /**
-   * False refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE;
-   * the downgrade then fails and the existing package stays installed. Default true.
+   * True opts into the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE,
+   * which deletes the app's data. Default false: the downgrade fails with
+   * `install_downgrade_refused` and the existing package and its data stay installed.
    */
   allowDestructiveRecovery?: boolean;
 }

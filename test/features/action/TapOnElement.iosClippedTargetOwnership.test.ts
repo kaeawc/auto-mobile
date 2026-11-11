@@ -3,18 +3,22 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { resolveIosOwnedTapPoint } from "../../../src/features/action/iosTapTargetOwnership";
+import { contains } from "../../../src/features/observe/ApplicationWindowCover";
+import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import {
   SearchableHierarchy,
   type SearchableEntry,
 } from "../../../src/features/utility/SearchableNode";
-import type { ElementBounds, ObserveResult } from "../../../src/models";
+import type { ElementBounds, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { buildObserveResult } from "../../helpers/observeFixture";
 
 // Captured iPhone 17 nested-selection screen; off-scroll rows remain in accessibility (#11947).
 const capture = JSON.parse(
@@ -26,6 +30,43 @@ const capture = JSON.parse(
     "utf8",
   ),
 ) as ObserveResult;
+
+const presentations = [
+  { file: "ios18_6-menu-open", label: "Item One", point: { x: 269, y: 769 } },
+  { file: "ios26_5-confirmationDialog-open", label: "Option A", point: { x: 201, y: 444 } },
+].map(({ file, ...scenario }) => {
+  const viewHierarchy: ViewHierarchyResult = JSON.parse(
+    readFileSync(
+      new URL(`../../fixtures/ios-presentation-chrome/${file}.viewHierarchy.json`, import.meta.url),
+      "utf8",
+    ),
+  );
+  const observation = buildObserveResult({
+    viewHierarchy,
+    updatedAt: viewHierarchy.updatedAt!,
+    screenSize: { width: 402, height: 874 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    elements: new DefaultObserveElementCollector().collect(viewHierarchy, "ios"),
+  });
+  return { ...scenario, observation };
+});
+
+const menu = presentations[0];
+const identifiedShadows = [
+  { name: "native id", fields: { "resource-id": "presentation-control" } },
+  { name: "label", fields: { text: "Presentation control" } },
+].map(({ name, fields }) => {
+  const observation = structuredClone(menu.observation);
+  const shadow = new SearchableHierarchy()
+    .project(observation.viewHierarchy!)
+    .find((node) => node.className === "UIImageView")!;
+  Object.assign(shadow.source.$!, fields);
+  observation.elements = new DefaultObserveElementCollector().collect(
+    observation.viewHierarchy!,
+    "ios",
+  );
+  return { name, observation };
+});
 
 const remove = (row: number, cart = "cart_A"): TapOnElementOptions => ({
   action: "tap",
@@ -208,6 +249,82 @@ test("Drop A/42 owning the only reliable area is named without dispatching", asy
   expect(result.error).toContain("UIButton at [307,267,392,301]");
   expect(result.error).toContain("swipeOn");
   expect(points).toEqual([]);
+});
+
+test.each(presentations)(
+  "tapOn resolves $label through captured presentation chrome",
+  async ({ label, observation }) => {
+    const { result, points } = await tapOn(observation, { action: "tap", text: label });
+    expect(result.success).toBe(true);
+    expect(points).toHaveLength(1);
+    const target = new SearchableHierarchy()
+      .project(observation.viewHierarchy!)
+      .find((node) => node.label === label)!;
+    expect(contains(target.bounds!, points[0].x, points[0].y)).toBe(true);
+  },
+);
+
+test.each(identifiedShadows)(
+  "PIN: an overflowing image with a $name still covers the menu item",
+  async ({ observation }) => {
+    const { result, points } = await tapOn(observation, { action: "tap", text: menu.label });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("is covered by");
+    expect(points).toEqual([]);
+  },
+);
+
+test("PIN: a later-drawn labeled button outside the scroll container still covers the item", () => {
+  const nodes = new SearchableHierarchy().project(menu.observation.viewHierarchy!);
+  const target = nodes.find((node) => node.label === menu.label)!;
+  const shadow = nodes.find((node) => node.className === "UIImageView")!;
+  const bounds = target.bounds!;
+  const button: SearchableEntry = {
+    ...shadow,
+    source: {},
+    index: nodes.length,
+    className: "UIButton",
+    label: "Covering button",
+    bounds,
+  };
+  expect(button.index).toBeGreaterThan(target.index);
+  expect(nodes[button.parentIndex!].categories.scrollable).toBe(false);
+  expect(
+    resolveIosOwnedTapPoint({
+      nodes: [...nodes, button],
+      target,
+      matched: [target],
+      screen: menu.observation.screenSize,
+      visibleBounds: bounds,
+      candidates: [menu.point],
+      isValid: (point): point is { x: number; y: number } =>
+        point !== null && contains(bounds, point.x, point.y),
+    }),
+  ).toMatchObject({ point: null, coveredBy: button });
+});
+
+test.each([
+  undefined,
+  { width: 0, height: 0 },
+  { width: 0, height: 874 },
+  { width: 402, height: 0 },
+])("PIN: ownership keeps the shadow without usable screen evidence: %j", (screen) => {
+  const nodes = new SearchableHierarchy().project(menu.observation.viewHierarchy!);
+  const target = nodes.find((node) => node.label === menu.label)!;
+  const shadow = nodes.find((node) => node.className === "UIImageView")!;
+  const bounds = target.bounds!;
+  expect(
+    resolveIosOwnedTapPoint({
+      nodes,
+      target,
+      matched: [target],
+      screen,
+      visibleBounds: bounds,
+      candidates: [menu.point],
+      isValid: (point): point is { x: number; y: number } =>
+        point !== null && contains(bounds, point.x, point.y),
+    }),
+  ).toMatchObject({ point: null, coveredBy: shadow });
 });
 
 test("partial overlay moves the tap to the centre of the exclusively owned region", async () => {

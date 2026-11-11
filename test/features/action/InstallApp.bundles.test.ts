@@ -157,6 +157,7 @@ describe("InstallApp split APKs", () => {
 
     const result = await build().execute("/apps/base.apk", {
       android: { splits: ["/apps/split_config.arm64_v8a.apk"] },
+      guard: { allowDestructiveRecovery: true },
     });
 
     expect(result.success).toBe(true);
@@ -331,26 +332,32 @@ describe("InstallApp app bundles", () => {
       return realExecute(command, args, options);
     };
 
-    const result = await build().execute("/apps/app.apks");
+    const result = await build().execute("/apps/app.apks", {
+      guard: { allowDestructiveRecovery: true },
+    });
 
     expect(result.success).toBe(true);
+    expect(result.dataPreserved).toBe(false);
     expect(adb.wasCommandExecuted(`uninstall ${APP}`)).toBe(true);
     expect(hostCalls("install-apks")).toHaveLength(2);
     expect(result.warning).toContain("was newer than the artifact");
   });
 
-  test("allowDestructiveRecovery=false leaves the newer copy installed", async () => {
-    adb.setCommandResponseSequence("shell pm list packages --user 0", [exec(`package:${APP}`)]);
-    host.setCommandError(
-      "install-apks",
-      commandFailure("INSTALL_FAILED_VERSION_DOWNGRADE: Downgrade detected"),
-    );
+  test.each([undefined, false])(
+    "allowDestructiveRecovery=%s leaves the newer copy installed",
+    async (allowDestructiveRecovery) => {
+      adb.setCommandResponseSequence("shell pm list packages --user 0", [exec(`package:${APP}`)]);
+      host.setCommandError(
+        "install-apks",
+        commandFailure("INSTALL_FAILED_VERSION_DOWNGRADE: Downgrade detected"),
+      );
 
-    await expect(
-      build().execute("/apps/app.apks", { guard: { allowDestructiveRecovery: false } }),
-    ).rejects.toThrow("bundletool install-apks failed");
-    expect(adb.wasCommandExecuted("uninstall")).toBe(false);
-  });
+      await expect(
+        build().execute("/apps/app.apks", { guard: { allowDestructiveRecovery } }),
+      ).rejects.toThrow("install_downgrade_refused");
+      expect(adb.wasCommandExecuted("uninstall")).toBe(false);
+    },
+  );
 
   test("the signing guard checks the installed copy of the base split's package", async () => {
     adb.setCommandResponseSequence("shell pm list packages --user 0", [exec(`package:${APP}`)]);

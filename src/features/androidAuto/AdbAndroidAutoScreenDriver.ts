@@ -4,7 +4,12 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { parseBoundsString } from "../../utils/bounds";
 import type { Timer } from "../../utils/SystemTimer";
 import { uiautomatorDumpLock } from "../action/uiautomatorDumpLock";
-import type { AndroidAutoScreenDriver } from "./AndroidAutoSettingsUi";
+import {
+  describeScreenText,
+  screenTextVariants,
+  type AndroidAutoScreenDriver,
+  type ScreenText,
+} from "./AndroidAutoSettingsUi";
 
 /** One node of a `uiautomator dump`, reduced to what text-level driving reads. */
 export interface ScreenNode {
@@ -51,8 +56,10 @@ export async function parseScreenNodes(xml: string): Promise<ScreenNode[]> {
   return flatten(parsed.hierarchy?.node ?? []);
 }
 
-export function findByText(nodes: readonly ScreenNode[], text: string): ScreenNode | undefined {
-  return nodes.find((node) => node.text === text || node.contentDesc === text);
+/** The first node whose text or content description reads exactly as any variant of `text`. */
+export function findByText(nodes: readonly ScreenNode[], text: ScreenText): ScreenNode | undefined {
+  const variants = screenTextVariants(text);
+  return nodes.find((node) => variants.includes(node.text) || variants.includes(node.contentDesc));
 }
 
 /** The checkable node on the same row as `label` (its vertical centre falls inside the row). */
@@ -111,11 +118,11 @@ export class AdbAndroidAutoScreenDriver implements AndroidAutoScreenDriver {
     return findByText(await this.readScreen(signal), text) !== undefined;
   }
 
-  async tapText(text: string, signal?: AbortSignal): Promise<void> {
+  async tapText(text: ScreenText, signal?: AbortSignal): Promise<void> {
     await this.tap(await this.waitFor(text, signal), signal);
   }
 
-  async scrollToText(text: string, signal?: AbortSignal): Promise<void> {
+  async scrollToText(text: ScreenText, signal?: AbortSignal): Promise<void> {
     for (let scroll = 0; scroll <= this.options.maxScrolls; scroll++) {
       const nodes = await this.readScreen(signal);
       if (findByText(nodes, text)) {
@@ -126,7 +133,7 @@ export class AdbAndroidAutoScreenDriver implements AndroidAutoScreenDriver {
       }
     }
     throw new ActionableError(
-      `"${text}" did not appear on the phone screen after ${this.options.maxScrolls} scrolls. Check that the emulator's language is English and that Android Auto's settings are open.`,
+      `${describeScreenText(text)} did not appear on the phone screen after ${this.options.maxScrolls} scrolls. Check that the emulator's language is English and that Android Auto's settings are open.`,
     );
   }
 
@@ -150,7 +157,7 @@ export class AdbAndroidAutoScreenDriver implements AndroidAutoScreenDriver {
     await this.shell(["input", "keyevent", "KEYCODE_BACK"], signal);
   }
 
-  private async waitFor(text: string, signal?: AbortSignal): Promise<ScreenNode> {
+  private async waitFor(text: ScreenText, signal?: AbortSignal): Promise<ScreenNode> {
     for (let attempt = 0; attempt < this.options.findAttempts; attempt++) {
       const node = findByText(await this.readScreen(signal), text);
       if (node) {
@@ -158,7 +165,7 @@ export class AdbAndroidAutoScreenDriver implements AndroidAutoScreenDriver {
       }
     }
     throw new ActionableError(
-      `"${text}" is not on the phone screen after ${this.options.findAttempts} reads. Check that the emulator's language is English and that Android Auto's settings are open.`,
+      `${describeScreenText(text)} is not on the phone screen after ${this.options.findAttempts} reads. Check that the emulator's language is English and that Android Auto's settings are open.`,
     );
   }
 

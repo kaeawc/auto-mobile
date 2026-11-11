@@ -4,6 +4,8 @@ import {
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
 } from "../internalToolParams";
+import { holdAcquiringSession } from "../../daemon/acquiringSessionHold";
+import { executionTracker } from "../../daemon/executionTracker";
 import { captureAutolockPolicy } from "../../daemon/deviceAutolockPolicy";
 import { DeviceInfo } from "../../models";
 import { logger } from "../../utils/logger";
@@ -87,6 +89,33 @@ export async function bindProvisionedDeviceSession(
       },
     },
   );
+}
+
+/**
+ * Run provisionDevice's post-bind steps while holding the session they work on (#17885). The
+ * caller learns the session id only when the call returns, so nothing heartbeats it meanwhile;
+ * the hold keeps it from the missing-first-heartbeat reap until `deadlineMs`, and is released
+ * before any rollback runs, so an abandoned session is still reaped.
+ */
+export async function whileHoldingProvisionedSession<T>(
+  deps: Pick<DeviceToolsDependencies, "holdAcquiringSession">,
+  { sessionUuid, deadlineMs }: { sessionUuid: string; deadlineMs: number },
+  steps: () => Promise<T>,
+): Promise<T> {
+  const hold =
+    deps.holdAcquiringSession ??
+    ((uuid: string, deadline: number) =>
+      holdAcquiringSession(executionTracker, {
+        toolName: "provisionDevice",
+        sessionUuid: uuid,
+        deadlineMs: deadline,
+      }));
+  const release = hold(sessionUuid, deadlineMs);
+  try {
+    return await steps();
+  } finally {
+    release();
+  }
 }
 
 function provisionSessionBindingOptions(

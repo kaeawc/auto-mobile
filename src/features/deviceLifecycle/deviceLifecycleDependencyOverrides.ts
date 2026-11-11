@@ -13,8 +13,10 @@ export function provisionDeviceDependencyOverrides(
   | "provisionAndroidIdentityBackoff"
   | "manufacturerProfileApplier"
   | "androidAutoProjection"
+  | "holdAcquiringSession"
 > {
   return {
+    holdAcquiringSession: deps.holdAcquiringSession ?? currentDeps.holdAcquiringSession,
     androidAutoProjection: deps.androidAutoProjection ?? currentDeps.androidAutoProjection,
     manufacturerProfileApplier:
       deps.manufacturerProfileApplier ?? currentDeps.manufacturerProfileApplier,

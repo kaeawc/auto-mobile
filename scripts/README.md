@@ -700,6 +700,20 @@ must be at the matching API level or the script exits 2 before installing. Each 
 is bounded by `AAOS_SMOKE_SDKMANAGER_TIMEOUT_SECONDS` (default 900). A setup failure still
 collects emulator diagnostics and adds a failure line to the job step summary.
 
+### Android XR Emulator Smoke (advisory)
+
+`.github/workflows/xr-emulator-smoke.yml` runs nightly, on dispatch, and on a pull request
+labelled `run-xr`; it is not a required check. `scripts/ci/xr-smoke/run-xr-smoke.sh` installs an
+API 34 XR headset image (`google-xr`, selected for the host ABI) and runs
+`scripts/ci/xr-smoke/xrSmoke.ts`, which creates the AVD through `startDevice` `createIfMissing`,
+observes and launches Android Settings, taps the "Connected devices" row (`XR_SMOKE_TAP_TEXT` overrides it; `XR_SMOKE_AVD_NAME` boots a named AVD instead of `createIfMissing`), taps native screen coordinate
+(1320, 1056), the Settings panel heading, then returns home. That coordinate is a fixed in-bounds point for the default headset
+panel because the shared runner does not pass prior observe payloads into later steps. Step JSON,
+screenshots, `summary.md` and emulator diagnostics land in `XR_SMOKE_OUT_DIR` (default
+`scratch/xr-smoke`). `XR_SMOKE_BREAK_ASSERTION=1` swaps in an impossible assertion, and
+`XR_SMOKE_CTRLPROXY_APK` supplies a prebuilt debug CtrlProxy APK (otherwise `:control-proxy:assembleDebug` runs and the daemon installs that build), and `XR_SMOKE_OS_VERSION` (default `14`) pins `startDevice`; image API must match. Each `sdkmanager`
+call is bounded by `XR_SMOKE_SDKMANAGER_TIMEOUT_SECONDS` (default 900) and uses `--channel=${XR_SMOKE_SDK_CHANNEL}` (default `3`, canary, where XR images are published). The smoke runs on a private daemon (`AUTOMOBILE_AUX_SOCKET_DIR` under `XR_SMOKE_OUT_DIR/daemon`, harness-marked) that the script stops on exit, so it never joins a resident daemon.
+
 ### Wear OS Emulator Smoke (advisory)
 
 `.github/workflows/wear-emulator-smoke.yml` runs nightly, on dispatch, and on a pull request

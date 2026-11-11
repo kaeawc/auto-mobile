@@ -22,7 +22,7 @@ import {
 } from "../utility/ElementGeometry";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { scopeHierarchyForSelector } from "../observe/hierarchyLayer";
-import { ownPrototypeSafeGesturePoint } from "../observe/ApplicationWindowCover";
+import { ownPrototypeSafeGesturePoint, uniqueBySource } from "../observe/ApplicationWindowCover";
 
 export function findTapAnyClickableElement(
   context: {
@@ -153,7 +153,9 @@ function xrContainerOwner(
   const container = selector.resolveContainer?.(viewHierarchy, options.container!);
   const source = container && getHierarchyNodeSource(container);
   const nodes = new SearchableHierarchy().project(viewHierarchy);
-  const node = nodes.find((entry) => entry.source === source);
+  // Live captures share nodes between the merged roots and each window; resolve the owning
+  // window's copy so the scope below is bounded by that window's root, not the merged wrapper.
+  const node = uniqueBySource(nodes).find((entry) => entry.source === source);
   if (!node?.bounds || nodes.some((entry) => entry.parentIndex === node.index)) {
     return null;
   }

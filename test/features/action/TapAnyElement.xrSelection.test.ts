@@ -17,6 +17,7 @@ import type {
   TapAnyElementOptions,
 } from "../../../src/models";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { childrenOf, nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const capture: {
@@ -193,4 +194,52 @@ test.each([
     expect(selected).toBeNull();
   }
   expect(select(false, { text: "Header" }, tree)).toBeNull();
+});
+
+// A live capture shares each window's root between the merged roots and `windows[i]`, and the
+// hidden SystemUI chrome makes XR selection wrap the merged roots in a boundless root.
+// JSON breaks that sharing, so relink it while keeping every SystemUI window.
+function linkedCapture(ownerHeight?: number): ViewHierarchyResult {
+  const raw = structuredClone(capture.viewHierarchy);
+  if (ownerHeight !== undefined) {
+    const app = raw.windows!.find((window) => window.id === 38)!;
+    const label = { ...settingsControl("Header", 300), clickable: false };
+    label.bounds = { left: 96, top: 320, right: 187, bottom: 374 };
+    const section = { ...settingsControl("", 300), clickable: false, node: [label] };
+    section.bounds = { left: 0, top: 300, right: 744, bottom: 400 };
+    const owner = { ...settingsControl("fragment_root", 48), node: [section] };
+    owner.bounds = { left: 0, top: 48, right: 744, bottom: 48 + ownerHeight };
+    app.hierarchy = { ...app.hierarchy!, node: [...childrenOf(app.hierarchy!), owner] };
+  }
+  const roots = childrenOf(raw.hierarchy).map(
+    (root) =>
+      raw.windows!.find((window) => window.id === nodeAttributes(root).windowId)?.hierarchy ?? root,
+  );
+  return identifyObservedHierarchy(
+    "android",
+    { ...raw, hierarchy: { ...raw.hierarchy, node: roots } },
+    "cached-ok",
+    { timer: new FakeTimer() },
+  ).hierarchy;
+}
+
+test("XR leaf fallback stops at the Settings window root, not the merged display wrapper", () => {
+  const tree = linkedCapture(1280);
+  expect(tree.windows!.filter((w) => w.packageName === "com.android.systemui").length).toBe(8);
+  expect(select(true, { text: "Header" }, tree)).toBeNull();
+  expect(select(false, { text: "Header" }, tree)).toBeNull();
+});
+
+test("XR leaf fallback refuses an owner over a quarter of the Settings pane", () => {
+  // 744x400 is 31% of the 744x1280 pane but under a quarter of the 2560x2558 display.
+  expect(select(true, { text: "Header" }, linkedCapture(400))).toBeNull();
+});
+
+test("XR leaf fallback still resolves the real Apps row in a linked capture", () => {
+  expect(select(true, { text: "Apps" }, linkedCapture())?.bounds).toEqual({
+    left: 48,
+    top: 548,
+    right: 696,
+    bottom: 724,
+  });
 });

@@ -271,4 +271,24 @@ test("phone hidden application windows do not take touches", () => {
   const point = { x: 372, y: 1164 };
   expect(applicationWindowSafeTapPoint(full, target, target.bounds, { point })).toEqual({ point });
   expect(isFullyCoveredByApplicationWindow(full, target, target.bounds)).toBe(false);
+
+  // A visible dialog over the point makes the cover list matter: the hidden window above it
+  // spans the whole row, so counting it would leave no exposed point.
+  const dialog = structuredClone(app);
+  dialog.id = 91;
+  dialog.windowLayer = 50;
+  dialog.hierarchy = {
+    windowId: 91,
+    "visible-to-user": true,
+    bounds: { left: 0, top: 1100, right: 744, bottom: 1200 },
+  };
+  const withDialog = { ...capture, windows: [hidden, dialog, app] };
+  const covered = identifyObservedHierarchy("android", withDialog, "cached-ok", {
+    timer: new FakeTimer(),
+  }).hierarchy;
+  const safe = applicationWindowSafeTapPoint(covered, target, target.bounds, { point });
+  expect(safe.coveredByKind).toBe("window");
+  expect(safe.point).not.toBeNull();
+  expect(safe.point!.y < 1100 || safe.point!.y >= 1200).toBe(true);
+  expect(isFullyCoveredByApplicationWindow(covered, target, target.bounds)).toBe(false);
 });

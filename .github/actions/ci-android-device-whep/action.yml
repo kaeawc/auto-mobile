@@ -38,9 +38,14 @@ runs:
         path: android/video-server/build/libs
     - name: "Install Chrome for WHEP decoding"
       shell: bash
+      # ubuntu-latest ships google-chrome, so apt is only a fallback, and it goes
+      # through the bounded helper so a mirror stall cannot hang the job (#17930).
       run: |
-        sudo apt-get update
-        sudo apt-get install --yes google-chrome-stable || sudo apt-get install --yes chromium-browser
+        if command -v google-chrome > /dev/null 2>&1 || command -v google-chrome-stable > /dev/null 2>&1; then
+          echo "Chrome already installed: $(google-chrome --version 2> /dev/null || google-chrome-stable --version)"
+        else
+          scripts/ci/install-apt-packages.sh google-chrome-stable || scripts/ci/install-apt-packages.sh chromium-browser
+        fi
     - uses: ./.github/actions/android-emulator
       with:
         script: |

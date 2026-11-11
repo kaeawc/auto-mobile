@@ -105,10 +105,14 @@ describe("recorded plan platform (#17938)", () => {
   });
 
   test("a platform the plan schema does not accept is left out with the reason", () => {
-    expect(resolveRecordedPlanPlatform(["watchos"])).toEqual({
-      platformNote: expect.stringContaining("watchos is not a plan platform"),
+    expect(resolveRecordedPlanPlatform(["fuchsia"])).toEqual({
+      platformNote: expect.stringContaining("fuchsia is not a plan platform"),
     });
     expect(resolveRecordedPlanPlatform(["tvos"])).toEqual({ platform: "tvos" });
+  });
+
+  test("preserves watchOS as a recorded plan platform (#18051)", () => {
+    expect(resolveRecordedPlanPlatform(["watchos", "watchos"])).toEqual({ platform: "watchos" });
   });
 
   test("preserves visionOS as a recorded plan platform", () => {

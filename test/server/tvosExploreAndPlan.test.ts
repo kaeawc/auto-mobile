@@ -197,7 +197,7 @@ describe("executePlan on an Apple TV", () => {
     expect(videoRecorder.stopVideoRecording).not.toHaveBeenCalled();
   });
 
-  test("still refuses a plan on an Apple Watch", () => {
+  test("accepts a plan on an Apple Watch", () => {
     const videoRecorder: VideoRecorder = {
       startVideoRecording: mock(async () => {
         throw new Error("unused");
@@ -208,6 +208,6 @@ describe("executePlan on an Apple TV", () => {
     };
     expect(() =>
       run({ platform: "watchos", deviceId: "WATCH", name: "Apple Watch" }, videoRecorder),
-    ).toThrow("executePlan");
+    ).not.toThrow();
   });
 });

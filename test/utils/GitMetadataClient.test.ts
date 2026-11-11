@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { DefaultGitMetadataClient, type GitCommandRunner } from "../../src/utils/GitMetadataClient";
 import { FakeGitMetadataReader } from "../fakes/FakeFileSystem";
 
@@ -22,8 +24,13 @@ const fixture = (
   responses: Record<string, string | null> = {},
   env: NodeJS.ProcessEnv = {},
 ) => {
-  const calls: Array<{ command: string; args: readonly string[]; cwd: string; timeoutMs: number }> =
-    [];
+  const calls: Array<{
+    command: string;
+    args: readonly string[];
+    cwd: string;
+    timeoutMs: number;
+    maxBufferBytes?: number;
+  }> = [];
   const run: GitCommandRunner = (command, args, options) => {
     calls.push({ command, args, ...options });
     if (args[0] === "rev-parse") {
@@ -427,5 +434,109 @@ describe("DefaultGitMetadataClient", () => {
         expect(fs.reads).toEqual([]);
       },
     );
+  });
+
+  describe("readTrackedModifiedAt (#17991)", () => {
+    const timedRepo = (times: Record<string, number>) =>
+      new FakeGitMetadataReader(
+        {
+          [`${ROOT}/.git`]: null,
+          [`${ROOT}/.git/HEAD`]: "ref: refs/heads/main\n",
+          [`${ROOT}/.git/refs/heads/main`]: `${SHA}\n`,
+        },
+        times,
+      );
+
+    test("returns the latest write time among every tracked path", async () => {
+      const { client, calls } = fixture(
+        timedRepo({ [`${ROOT}/src/a.ts`]: 100, [`${ROOT}/src/b.ts`]: 300 }),
+        { "ls-files": "src/a.ts\0src/b.ts\0", diff: "" },
+      );
+      expect(await client.readTrackedModifiedAt(ROOT)).toBe(300);
+      const listing = { cwd: ROOT, timeoutMs: 2_000, maxBufferBytes: 64 * 1024 * 1024 };
+      expect(calls.filter(({ args }) => args[0] === "ls-files" || args[0] === "diff")).toEqual([
+        { command: "git", args: ["ls-files", "-z", "--full-name", "--", ":/"], ...listing },
+        {
+          command: "git",
+          args: ["diff", "HEAD", "--name-only", "--no-renames", "-z", "--", ":/"],
+          ...listing,
+        },
+      ]);
+    });
+
+    test("counts a staged deletion that ls-files no longer lists", async () => {
+      // After `git rm src/gone.ts` only the diff names it; its directory's time shows the delete.
+      const { client } = fixture(timedRepo({ [`${ROOT}/src`]: 800, [`${ROOT}/src/a.ts`]: 100 }), {
+        "ls-files": "src/a.ts\0",
+        diff: "src/gone.ts\0",
+      });
+      expect(await client.readTrackedModifiedAt(ROOT)).toBe(800);
+    });
+
+    test("is unknown when the changed-path listing fails", async () => {
+      const { client } = fixture(timedRepo({ [`${ROOT}/src/a.ts`]: 100 }), {
+        "ls-files": "src/a.ts\0",
+        diff: null,
+      });
+      expect(await client.readTrackedModifiedAt(ROOT)).toBeNull();
+    });
+
+    test("counts a clean file written later, such as an edit reverted to HEAD", async () => {
+      // `src/b.ts` is no longer dirty, but its newer write time must still show.
+      const { client } = fixture(
+        timedRepo({ [`${ROOT}/src/dirty.ts`]: 100, [`${ROOT}/src/b.ts`]: 900 }),
+        { "ls-files": "src/dirty.ts\0src/b.ts\0", diff: "src/dirty.ts\0" },
+      );
+      expect(await client.readTrackedModifiedAt(ROOT)).toBe(900);
+    });
+
+    test("uses the parent directory's time for a deleted path", async () => {
+      const { client } = fixture(timedRepo({ [`${ROOT}/src`]: 700, [`${ROOT}/src/a.ts`]: 100 }), {
+        "ls-files": "src/a.ts\0src/gone.ts\0",
+        diff: "src/gone.ts\0",
+      });
+      expect(await client.readTrackedModifiedAt(ROOT)).toBe(700);
+    });
+
+    test("is unknown when a path and its directory are unreadable", async () => {
+      const { client } = fixture(timedRepo({ [`${ROOT}/src/a.ts`]: 100 }), {
+        "ls-files": "src/a.ts\0missing/b.ts\0",
+        diff: "",
+      });
+      expect(await client.readTrackedModifiedAt(ROOT)).toBeNull();
+    });
+
+    test("is unknown when the listing fails or is empty", async () => {
+      const failed = fixture(timedRepo({}), { "ls-files": null, diff: "" });
+      expect(await failed.client.readTrackedModifiedAt(ROOT)).toBeNull();
+      const empty = fixture(timedRepo({}), { "ls-files": "", diff: "" });
+      expect(await empty.client.readTrackedModifiedAt(ROOT)).toBeNull();
+    });
+
+    test("counts a file renamed into place with an older mtime", async () => {
+      // `mv backup.ts a.ts` keeps the backup's old mtime, but rename always bumps ctime.
+      const root = mkdtempSync(join(tmpdir(), "git-meta-ctime-"));
+      try {
+        mkdirSync(join(root, ".git"));
+        writeFileSync(join(root, "a.ts"), "export {};\n");
+        utimesSync(join(root, "a.ts"), 1_000, 1_000);
+        const before = Date.now() - 60_000;
+        const client = new DefaultGitMetadataClient(
+          () => null,
+          undefined,
+          async (_command, args) => (args[0] === "ls-files" ? "a.ts\0" : ""),
+          {},
+        );
+        expect(await client.readTrackedModifiedAt(root)).toBeGreaterThan(before);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    test("is unknown outside a repository", async () => {
+      const { client, calls } = fixture(new FakeGitMetadataReader({}, {}));
+      expect(await client.readTrackedModifiedAt("/elsewhere")).toBeNull();
+      expect(calls.filter(({ args }) => args[0] === "ls-files")).toEqual([]);
+    });
   });
 });

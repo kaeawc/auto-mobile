@@ -138,13 +138,18 @@ final class TVCommandRouter {
     )
         -> UIElementInfo
     {
-        UIElementInfo(
+        let state = TVCheckableState.attributes(
+            elementType: Int(snapshot.elementType.rawValue), value: snapshot.value as? String
+        )
+        return UIElementInfo(
             text: resolution.text(for: node),
             resourceId: snapshot.identifier,
             className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),
             enabled: String(snapshot.isEnabled),
             focused: String(snapshot.hasFocus),
+            checkable: state.checkable,
+            checked: state.checked,
             selected: String(snapshot.isSelected),
             node: snapshot.children.enumerated().map { index, child in
                 element(child, node: node.children[index], resolution: resolution)

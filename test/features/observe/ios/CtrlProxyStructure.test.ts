@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   convertToViewHierarchyResult,
+  cleanAttributes,
   hasContentProperties,
   isRedundantStaticTextChild,
   noiseSiblingKey,
@@ -70,4 +71,14 @@ test("captured SpringBoard icon conversion retains field order and wrapper promo
   expect(JSON.stringify(result)).toBe(
     '{"hierarchy":{"node":{"$":{"text":"Photos","class":"SBIconView","bounds":{"left":120,"top":288,"right":188,"bottom":379},"clickable":"true","role":"button"},"node":[{"$":{"resource-id":"label-view","class":"UIView","bounds":{"left":126,"top":357,"right":182,"bottom":377}}}]}},"packageName":"com.apple.springboard","updatedAt":0}',
   );
+});
+
+test("cleaning retains known on/off state and leaves unknown state absent", () => {
+  for (const checked of ["true", "false"]) {
+    expect(cleanAttributes({ checkable: "true", checked, focused: "false" })).toEqual({
+      checkable: "true",
+      checked,
+    });
+  }
+  expect(cleanAttributes({ checkable: "true" })).toEqual({ checkable: "true" });
 });

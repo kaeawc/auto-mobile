@@ -11,6 +11,7 @@ import {
   getLaunchObservationPackageNames,
   isLaunchPermissionDialogObservation,
 } from "./launchObservationPackages";
+import { describeLaunchDrivingRestriction } from "./launchDrivingRestriction";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -60,10 +61,14 @@ export class LaunchObservation {
       return this.withoutStaleLaunchObservation(result, expectedPackageName, result.observation);
     }
 
-    if (
-      this.settleLaunchObservation(result, result.observation, expectedPackageName, expectedUserId)
-    ) {
-      return result;
+    const initiallySettled = this.settleOrFailLaunchObservation(
+      result,
+      result.observation,
+      expectedPackageName,
+      expectedUserId,
+    );
+    if (initiallySettled) {
+      return initiallySettled;
     }
 
     const startTime = this.deps.timer.now();
@@ -97,10 +102,14 @@ export class LaunchObservation {
       );
       latestObservation = collapseRetry.observation;
       nextShadeCollapseTime = collapseRetry.nextShadeCollapseTime;
-      if (
-        this.settleLaunchObservation(result, latestObservation, expectedPackageName, expectedUserId)
-      ) {
-        return result;
+      const settled = this.settleOrFailLaunchObservation(
+        result,
+        latestObservation,
+        expectedPackageName,
+        expectedUserId,
+      );
+      if (settled) {
+        return settled;
       }
     }
 
@@ -108,6 +117,53 @@ export class LaunchObservation {
       timeoutMs,
       options: { coldBoot, expectedUserId, signal },
     });
+  }
+
+  /**
+   * The launch result to return now for this observation: the driving-restriction failure, or the
+   * settled result once the observation matches. `undefined` means keep waiting.
+   */
+  private settleOrFailLaunchObservation(
+    result: LaunchAppResult,
+    observation: ObserveResult,
+    expectedPackageName: string,
+    expectedUserId?: number,
+  ): LaunchAppResult | undefined {
+    const drivingRestricted = this.failIfDrivingRestricted(
+      result,
+      observation,
+      expectedPackageName,
+    );
+    if (drivingRestricted) {
+      return drivingRestricted;
+    }
+    return this.settleLaunchObservation(result, observation, expectedPackageName, expectedUserId)
+      ? result
+      : undefined;
+  }
+
+  /**
+   * A launch the car's blocking activity covers will not reach the foreground until the vehicle
+   * parks, so fail at once with the driving restriction named rather than waiting out the timeout
+   * and blaming the system UI (#18046).
+   */
+  private failIfDrivingRestricted(
+    result: LaunchAppResult,
+    observation: ObserveResult,
+    expectedPackageName: string,
+  ): LaunchAppResult | undefined {
+    if (this.deps.device.platform !== "android") {
+      return undefined;
+    }
+    const restriction = describeLaunchDrivingRestriction(observation, expectedPackageName);
+    return restriction
+      ? {
+          ...result,
+          success: false,
+          observation,
+          error: `Launch of ${expectedPackageName} is blocked by driving restrictions — ${restriction}`,
+        }
+      : undefined;
   }
 
   private async retryNotificationShadeCollapseIfDue(

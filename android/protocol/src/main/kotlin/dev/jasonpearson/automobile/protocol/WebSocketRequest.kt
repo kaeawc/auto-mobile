@@ -322,6 +322,8 @@ data class RequestAction(
   val identityContentDesc: String? = null,
   val identityLabelText: String? = null,
   val identityLabelContentDesc: String? = null,
+  /** Selector clicks may opt into nonempty invisible nodes at exact expected bounds. */
+  val allowInvisible: Boolean = false,
   /** For action `custom`: the label of the app-defined accessibility action to perform. */
   val customAction: String? = null,
   /** For action `set_progress`: the value passed as ACTION_ARGUMENT_PROGRESS_VALUE. */

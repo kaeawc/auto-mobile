@@ -1,0 +1,837 @@
+{
+ "requestId": "2",
+ "timestamp": 1794426615413,
+ "data": {
+  "screenHeight": 1080,
+  "hierarchy": {
+   "resource-id": "",
+   "selected": "false",
+   "className": "2",
+   "bounds": {
+    "bottom": 1080,
+    "left": 0,
+    "top": 0,
+    "right": 1920
+   },
+   "node": [
+    {
+     "resource-id": "",
+     "selected": "false",
+     "className": "4",
+     "bounds": {
+      "right": 1920,
+      "left": 0,
+      "bottom": 1080,
+      "top": 0
+     },
+     "node": [
+      {
+       "resource-id": "",
+       "selected": "false",
+       "className": "1",
+       "bounds": {
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0,
+        "top": 0
+       },
+       "node": [
+        {
+         "resource-id": "",
+         "selected": "false",
+         "className": "1",
+         "bounds": {
+          "bottom": 1080,
+          "left": 0,
+          "right": 1920,
+          "top": 0
+         },
+         "node": [
+          {
+           "resource-id": "",
+           "selected": "false",
+           "className": "1",
+           "bounds": {
+            "top": 0,
+            "bottom": 1080,
+            "right": 1920,
+            "left": 0
+           },
+           "node": [
+            {
+             "resource-id": "",
+             "selected": "false",
+             "className": "1",
+             "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 1920,
+              "bottom": 1080
+             },
+             "node": [
+              {
+               "resource-id": "",
+               "selected": "false",
+               "className": "1",
+               "bounds": {
+                "top": 0,
+                "right": 1920,
+                "bottom": 1080,
+                "left": 0
+               },
+               "node": [
+                {
+                 "resource-id": "",
+                 "selected": "false",
+                 "className": "1",
+                 "bounds": {
+                  "top": 0,
+                  "left": 0,
+                  "bottom": 1080,
+                  "right": 1920
+                 },
+                 "node": [
+                  {
+                   "resource-id": "",
+                   "selected": "false",
+                   "className": "1",
+                   "bounds": {
+                    "top": 0,
+                    "right": 1920,
+                    "left": 0,
+                    "bottom": 1080
+                   },
+                   "node": [
+                    {
+                     "resource-id": "",
+                     "selected": "false",
+                     "className": "1",
+                     "bounds": {
+                      "right": 1920,
+                      "bottom": 1080,
+                      "top": 0,
+                      "left": 0
+                     },
+                     "node": [
+                      {
+                       "resource-id": "",
+                       "selected": "false",
+                       "className": "1",
+                       "bounds": {
+                        "left": 0,
+                        "right": 1920,
+                        "bottom": 1080,
+                        "top": 0
+                       },
+                       "node": [
+                        {
+                         "resource-id": "",
+                         "selected": "false",
+                         "className": "26",
+                         "bounds": {
+                          "left": 0,
+                          "bottom": 1080,
+                          "right": 1920,
+                          "top": 0
+                         },
+                         "node": [
+                          {
+                           "focused": "false",
+                           "enabled": "true",
+                           "selected": "false",
+                           "node": [
+                            {
+                             "text": "",
+                             "enabled": "true",
+                             "className": "1",
+                             "focused": "false",
+                             "selected": "false",
+                             "resource-id": "",
+                             "node": [
+                              {
+                               "text": "",
+                               "enabled": "true",
+                               "className": "1",
+                               "focused": "false",
+                               "selected": "false",
+                               "resource-id": "",
+                               "node": [
+                                {
+                                 "enabled": "true",
+                                 "text": "Settings",
+                                 "className": "48",
+                                 "focused": "false",
+                                 "selected": "false",
+                                 "resource-id": "",
+                                 "node": [],
+                                 "bounds": {
+                                  "top": 111,
+                                  "left": 100,
+                                  "right": 208,
+                                  "bottom": 146
+                                 }
+                                }
+                               ],
+                               "bounds": {
+                                "left": 80,
+                                "bottom": 161,
+                                "top": 95,
+                                "right": 1840
+                               }
+                              }
+                             ],
+                             "bounds": {
+                              "top": 95,
+                              "bottom": 161,
+                              "right": 1840,
+                              "left": 80
+                             }
+                            },
+                            {
+                             "focused": "false",
+                             "enabled": "true",
+                             "selected": "false",
+                             "node": [
+                              {
+                               "focused": "false",
+                               "enabled": "true",
+                               "selected": "false",
+                               "node": [],
+                               "text": "",
+                               "bounds": {
+                                "right": 1840,
+                                "top": 95,
+                                "bottom": 161,
+                                "left": 80
+                               },
+                               "className": "1",
+                               "resource-id": ""
+                              },
+                              {
+                               "node": [
+                                {
+                                 "selected": "false",
+                                 "focused": "false",
+                                 "resource-id": "",
+                                 "bounds": {
+                                  "right": 1850,
+                                  "bottom": 171,
+                                  "left": 70,
+                                  "top": 85
+                                 },
+                                 "text": "",
+                                 "className": "43",
+                                 "node": [],
+                                 "enabled": "true"
+                                }
+                               ],
+                               "bounds": {
+                                "right": 1840,
+                                "bottom": 161,
+                                "left": 80,
+                                "top": 95
+                               },
+                               "resource-id": "",
+                               "enabled": "true",
+                               "text": "",
+                               "className": "1",
+                               "selected": "false",
+                               "focused": "false"
+                              }
+                             ],
+                             "text": "",
+                             "bounds": {
+                              "top": 95,
+                              "left": 80,
+                              "right": 1840,
+                              "bottom": 161
+                             },
+                             "className": "1",
+                             "resource-id": ""
+                            }
+                           ],
+                           "text": "Settings",
+                           "bounds": {
+                            "top": 95,
+                            "left": 80,
+                            "bottom": 161,
+                            "right": 1840
+                           },
+                           "className": "75",
+                           "resource-id": ""
+                          },
+                          {
+                           "resource-id": "",
+                           "selected": "false",
+                           "className": "75",
+                           "bounds": {
+                            "bottom": 241,
+                            "left": 80,
+                            "right": 1840,
+                            "top": 175
+                           },
+                           "node": [
+                            {
+                             "focused": "false",
+                             "text": "",
+                             "selected": "false",
+                             "enabled": "true",
+                             "bounds": {
+                              "left": 75,
+                              "right": 1844,
+                              "bottom": 241,
+                              "top": 174
+                             },
+                             "className": "1",
+                             "node": [
+                              {
+                               "focused": "false",
+                               "text": "",
+                               "selected": "false",
+                               "enabled": "true",
+                               "className": "1",
+                               "bounds": {
+                                "top": 174,
+                                "bottom": 241,
+                                "left": 75,
+                                "right": 1844
+                               },
+                               "node": [
+                                {
+                                 "focused": "false",
+                                 "text": "Autoplay",
+                                 "selected": "false",
+                                 "enabled": "true",
+                                 "bounds": {
+                                  "left": 96,
+                                  "top": 190,
+                                  "right": 1823,
+                                  "bottom": 226
+                                 },
+                                 "className": "40",
+                                 "node": [
+                                  {
+                                   "focused": "false",
+                                   "text": "Autoplay",
+                                   "selected": "false",
+                                   "enabled": "true",
+                                   "bounds": {
+                                    "bottom": 226,
+                                    "left": 96,
+                                    "top": 190,
+                                    "right": 211
+                                   },
+                                   "className": "48",
+                                   "node": [],
+                                   "resource-id": ""
+                                  },
+                                  {
+                                   "focused": "false",
+                                   "text": "Autoplay",
+                                   "selected": "false",
+                                   "node": [],
+                                   "className": "48",
+                                   "bounds": {
+                                    "top": 190,
+                                    "bottom": 226,
+                                    "left": 96,
+                                    "right": 1823
+                                   },
+                                   "resource-id": "",
+                                   "enabled": "true"
+                                  }
+                                 ],
+                                 "resource-id": "autoplay-toggle"
+                                }
+                               ],
+                               "resource-id": ""
+                              }
+                             ],
+                             "resource-id": ""
+                            },
+                            {
+                             "resource-id": "",
+                             "selected": "false",
+                             "className": "1",
+                             "bounds": {
+                              "left": 76,
+                              "right": 1843,
+                              "bottom": 241,
+                              "top": 174
+                             },
+                             "node": [
+                              {
+                               "resource-id": "",
+                               "selected": "false",
+                               "className": "1",
+                               "bounds": {
+                                "top": 175,
+                                "left": 80,
+                                "right": 1840,
+                                "bottom": 241
+                               },
+                               "node": [
+                                {
+                                 "resource-id": "",
+                                 "selected": "false",
+                                 "className": "1",
+                                 "bounds": {
+                                  "top": 171,
+                                  "bottom": 245,
+                                  "left": 75,
+                                  "right": 1844
+                                 },
+                                 "node": [
+                                  {
+                                   "focused": "false",
+                                   "className": "1",
+                                   "node": [
+                                    {
+                                     "focused": "false",
+                                     "className": "1",
+                                     "node": [
+                                      {
+                                       "focused": "false",
+                                       "className": "1",
+                                       "node": [
+                                        {
+                                         "className": "1",
+                                         "enabled": "true",
+                                         "bounds": {
+                                          "left": 75,
+                                          "right": 1844,
+                                          "bottom": 245,
+                                          "top": 171
+                                         },
+                                         "resource-id": "",
+                                         "text": "",
+                                         "focused": "false",
+                                         "node": [
+                                          {
+                                           "selected": "false",
+                                           "enabled": "true",
+                                           "bounds": {
+                                            "left": 75,
+                                            "bottom": 237,
+                                            "top": 171,
+                                            "right": 1836
+                                           },
+                                           "resource-id": "",
+                                           "text": "",
+                                           "focused": "false",
+                                           "node": [],
+                                           "className": "1"
+                                          }
+                                         ],
+                                         "selected": "false"
+                                        },
+                                        {
+                                         "className": "1",
+                                         "selected": "false",
+                                         "resource-id": "",
+                                         "text": "",
+                                         "focused": "false",
+                                         "bounds": {
+                                          "left": 75,
+                                          "bottom": 245,
+                                          "top": 171,
+                                          "right": 1844
+                                         },
+                                         "node": [
+                                          {
+                                           "bounds": {
+                                            "left": 75,
+                                            "bottom": 237,
+                                            "right": 1836,
+                                            "top": 171
+                                           },
+                                           "focused": "false",
+                                           "className": "1",
+                                           "text": "",
+                                           "enabled": "true",
+                                           "selected": "false",
+                                           "node": [],
+                                           "resource-id": ""
+                                          }
+                                         ],
+                                         "enabled": "true"
+                                        },
+                                        {
+                                         "focused": "false",
+                                         "className": "1",
+                                         "node": [
+                                          {
+                                           "focused": "false",
+                                           "className": "1",
+                                           "node": [
+                                            {
+                                             "focused": "false",
+                                             "className": "1",
+                                             "node": [],
+                                             "bounds": {
+                                              "left": 75,
+                                              "right": 1836,
+                                              "top": 171,
+                                              "bottom": 237
+                                             },
+                                             "selected": "false",
+                                             "enabled": "true",
+                                             "resource-id": "",
+                                             "text": ""
+                                            }
+                                           ],
+                                           "bounds": {
+                                            "right": 1844,
+                                            "bottom": 245,
+                                            "left": 75,
+                                            "top": 171
+                                           },
+                                           "enabled": "true",
+                                           "selected": "false",
+                                           "resource-id": "",
+                                           "text": ""
+                                          }
+                                         ],
+                                         "selected": "false",
+                                         "enabled": "true",
+                                         "bounds": {
+                                          "top": 171,
+                                          "left": 75,
+                                          "right": 1844,
+                                          "bottom": 245
+                                         },
+                                         "resource-id": "",
+                                         "text": ""
+                                        }
+                                       ],
+                                       "bounds": {
+                                        "right": 1844,
+                                        "bottom": 245,
+                                        "left": 75,
+                                        "top": 171
+                                       },
+                                       "enabled": "true",
+                                       "selected": "false",
+                                       "resource-id": "",
+                                       "text": ""
+                                      }
+                                     ],
+                                     "selected": "false",
+                                     "bounds": {
+                                      "bottom": 245,
+                                      "left": 75,
+                                      "right": 1844,
+                                      "top": 171
+                                     },
+                                     "enabled": "true",
+                                     "resource-id": "",
+                                     "text": ""
+                                    }
+                                   ],
+                                   "selected": "false",
+                                   "enabled": "true",
+                                   "bounds": {
+                                    "left": 75,
+                                    "right": 1844,
+                                    "top": 171,
+                                    "bottom": 245
+                                   },
+                                   "resource-id": "",
+                                   "text": ""
+                                  },
+                                  {
+                                   "focused": "false",
+                                   "className": "1",
+                                   "node": [],
+                                   "selected": "false",
+                                   "enabled": "true",
+                                   "bounds": {
+                                    "top": 171,
+                                    "left": 75,
+                                    "right": 1844,
+                                    "bottom": 245
+                                   },
+                                   "resource-id": "",
+                                   "text": ""
+                                  },
+                                  {
+                                   "resource-id": "",
+                                   "selected": "false",
+                                   "className": "1",
+                                   "bounds": {
+                                    "top": 174,
+                                    "left": 75,
+                                    "right": 1844,
+                                    "bottom": 241
+                                   },
+                                   "node": [
+                                    {
+                                     "selected": "false",
+                                     "resource-id": "",
+                                     "focused": "false",
+                                     "enabled": "true",
+                                     "text": "",
+                                     "bounds": {
+                                      "left": 75,
+                                      "bottom": 241,
+                                      "right": 1844,
+                                      "top": 174
+                                     },
+                                     "node": [
+                                      {
+                                       "selected": "false",
+                                       "resource-id": "",
+                                       "focused": "false",
+                                       "enabled": "true",
+                                       "text": "",
+                                       "bounds": {
+                                        "top": 174,
+                                        "left": 75,
+                                        "right": 1844,
+                                        "bottom": 241
+                                       },
+                                       "node": [
+                                        {
+                                         "selected": "false",
+                                         "resource-id": "",
+                                         "focused": "false",
+                                         "enabled": "true",
+                                         "text": "",
+                                         "bounds": {
+                                          "bottom": 241,
+                                          "left": 75,
+                                          "top": 174,
+                                          "right": 1844
+                                         },
+                                         "node": [
+                                          {
+                                           "selected": "false",
+                                           "resource-id": "autoplay-toggle",
+                                           "focused": "false",
+                                           "enabled": "true",
+                                           "text": "Autoplay",
+                                           "bounds": {
+                                            "bottom": 226,
+                                            "right": 1823,
+                                            "top": 190,
+                                            "left": 96
+                                           },
+                                           "node": [
+                                            {
+                                             "selected": "false",
+                                             "resource-id": "",
+                                             "focused": "false",
+                                             "enabled": "true",
+                                             "text": "Autoplay",
+                                             "bounds": {
+                                              "left": 96,
+                                              "top": 190,
+                                              "right": 211,
+                                              "bottom": 226
+                                             },
+                                             "node": [],
+                                             "className": "48"
+                                            },
+                                            {
+                                             "node": [],
+                                             "focused": "false",
+                                             "selected": "false",
+                                             "bounds": {
+                                              "left": 96,
+                                              "top": 190,
+                                              "right": 1823,
+                                              "bottom": 226
+                                             },
+                                             "enabled": "true",
+                                             "text": "Autoplay",
+                                             "className": "48",
+                                             "resource-id": ""
+                                            }
+                                           ],
+                                           "className": "40"
+                                          }
+                                         ],
+                                         "className": "1"
+                                        }
+                                       ],
+                                       "className": "1"
+                                      }
+                                     ],
+                                     "className": "1"
+                                    },
+                                    {
+                                     "resource-id": "",
+                                     "selected": "false",
+                                     "className": "1",
+                                     "bounds": {
+                                      "left": 75,
+                                      "bottom": 241,
+                                      "right": 1844,
+                                      "top": 174
+                                     },
+                                     "node": [
+                                      {
+                                       "resource-id": "",
+                                       "selected": "false",
+                                       "className": "1",
+                                       "bounds": {
+                                        "top": 174,
+                                        "bottom": 241,
+                                        "left": 75,
+                                        "right": 1844
+                                       },
+                                       "node": [],
+                                       "text": "",
+                                       "enabled": "true",
+                                       "focused": "false"
+                                      }
+                                     ],
+                                     "text": "",
+                                     "enabled": "true",
+                                     "focused": "false"
+                                    }
+                                   ],
+                                   "text": "",
+                                   "enabled": "true",
+                                   "focused": "false"
+                                  }
+                                 ],
+                                 "text": "",
+                                 "enabled": "true",
+                                 "focused": "false"
+                                },
+                                {
+                                 "resource-id": "",
+                                 "selected": "false",
+                                 "className": "1",
+                                 "bounds": {
+                                  "top": 171,
+                                  "bottom": 245,
+                                  "left": 75,
+                                  "right": 1844
+                                 },
+                                 "node": [],
+                                 "text": "",
+                                 "enabled": "true",
+                                 "focused": "false"
+                                }
+                               ],
+                               "text": "",
+                               "enabled": "true",
+                               "focused": "false"
+                              }
+                             ],
+                             "text": "",
+                             "enabled": "true",
+                             "focused": "false"
+                            }
+                           ],
+                           "text": "Autoplay",
+                           "enabled": "true",
+                           "focused": "true"
+                          },
+                          {
+                           "resource-id": "",
+                           "selected": "false",
+                           "className": "1",
+                           "bounds": {
+                            "bottom": 0,
+                            "left": 0,
+                            "right": 0,
+                            "top": 0
+                           },
+                           "node": [
+                            {
+                             "resource-id": "",
+                             "selected": "false",
+                             "className": "1",
+                             "bounds": {
+                              "top": 801,
+                              "left": 1834,
+                              "right": 1837,
+                              "bottom": 1017
+                             },
+                             "node": [],
+                             "text": "",
+                             "enabled": "true",
+                             "focused": "false"
+                            }
+                           ],
+                           "text": "0 pages",
+                           "enabled": "true",
+                           "focused": "false"
+                          }
+                         ],
+                         "text": "",
+                         "enabled": "true",
+                         "focused": "false"
+                        }
+                       ],
+                       "text": "",
+                       "enabled": "true",
+                       "focused": "false"
+                      }
+                     ],
+                     "text": "",
+                     "enabled": "true",
+                     "focused": "false"
+                    }
+                   ],
+                   "text": "",
+                   "enabled": "true",
+                   "focused": "false"
+                  }
+                 ],
+                 "text": "",
+                 "enabled": "true",
+                 "focused": "false"
+                }
+               ],
+               "text": "",
+               "enabled": "true",
+               "focused": "false"
+              }
+             ],
+             "text": "",
+             "enabled": "true",
+             "focused": "false"
+            }
+           ],
+           "text": "",
+           "enabled": "true",
+           "focused": "false"
+          }
+         ],
+         "text": "",
+         "enabled": "true",
+         "focused": "false"
+        }
+       ],
+       "text": "",
+       "enabled": "true",
+       "focused": "false"
+      }
+     ],
+     "text": "",
+     "enabled": "true",
+     "focused": "false"
+    }
+   ],
+   "text": "TVDog",
+   "enabled": "true",
+   "focused": "false"
+  },
+  "screenWidth": 1920,
+  "insets": {
+   "source": "unavailable",
+   "displayCutoutInfo": {
+    "classification": "unknown"
+   },
+   "units": "unknown",
+   "available": false
+  },
+  "packageName": "dev.dogfood.tvdog",
+  "updatedAt": 1794426615413
+ },
+ "type": "hierarchy_update"
+}

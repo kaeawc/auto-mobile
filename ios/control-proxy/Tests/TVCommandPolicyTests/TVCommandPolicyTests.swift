@@ -14,6 +14,40 @@ private final class FakeTVUptimeClock: TVUptimeClock {
 }
 
 final class TVCommandPolicyTests: XCTestCase {
+    func testSwitchLikeElementsExposeKnownBooleanValues() {
+        // XCUIElement.ElementType: radioButton = 10, checkBox = 12, switch = 40.
+        for elementType in [10, 12, 40] {
+            for value in ["1", "true", "TRUE", "on", "On"] {
+                let state = TVCheckableState.attributes(elementType: elementType, value: value)
+                XCTAssertEqual(state.checkable, "true")
+                XCTAssertEqual(state.checked, "true")
+            }
+            for value in ["0", "false", "FALSE", "off", "Off"] {
+                let state = TVCheckableState.attributes(elementType: elementType, value: value)
+                XCTAssertEqual(state.checkable, "true")
+                XCTAssertEqual(state.checked, "false")
+            }
+        }
+    }
+
+    func testSwitchLikeElementsOmitUnknownState() {
+        for elementType in [10, 12, 40] {
+            for value in [nil, "", "mixed", "2", "enabled"] as [String?] {
+                let state = TVCheckableState.attributes(elementType: elementType, value: value)
+                XCTAssertEqual(state.checkable, "true")
+                XCTAssertNil(state.checked)
+            }
+        }
+    }
+
+    func testOtherElementsDoNotExposeCheckableState() {
+        for elementType in [1, 9, 48, 75] {
+            let state = TVCheckableState.attributes(elementType: elementType, value: "1")
+            XCTAssertNil(state.checkable)
+            XCTAssertNil(state.checked)
+        }
+    }
+
     func testTextInputEmitsValueWhenLabelIsEmpty() {
         XCTAssertEqual(TVElementText.text(label: "", value: "hello", isTextInput: true, isSecure: false), "hello")
     }

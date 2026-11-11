@@ -42,36 +42,48 @@ internal class PointerInjectionExecutor(
       val wait = start + event.atMs - clock.nowMs()
       if (wait > 0) sleeper.sleep(wait)
       if (isCancelled()) {
-        return failed("injection was cancelled", events, injected, start, request.hover)
+        val closeAt = events.getOrNull(injected - 1)
+        return failed("injection was cancelled", closeAt, start, injected, request.hover)
       }
-      if (!sink.inject(event, start)) {
-        return failed(
-          "the system refused ${event.action} at ${event.atMs} ms",
-          events,
-          injected,
-          start,
-          request.hover,
-        )
+      val problem = deliver(event, start)
+      if (problem != null) {
+        // A delivery that threw may have reached the dispatcher, so that pointer is closed too.
+        val closeAt = if (problem.threw) event else events.getOrNull(injected - 1)
+        return failed(problem.reason, closeAt, start, injected, request.hover)
       }
       injected++
     }
     return PointerInjectionResult(true, injected = injected, elapsedMs = clock.nowMs() - start)
   }
 
+  private class DeliveryProblem(val reason: String, val threw: Boolean)
+
+  /** Null when [event] was injected; otherwise why not. */
+  private fun deliver(event: PlannedPointerEvent, start: Long): DeliveryProblem? =
+    try {
+      if (sink.inject(event, start)) null
+      else DeliveryProblem("the system refused ${event.action} at ${event.atMs} ms", threw = false)
+    } catch (@Suppress("TooGenericExceptionCaught") error: RuntimeException) {
+      // UiAutomation documents no exception type (a lost connection throws IllegalStateException);
+      // the run must still close its pointer, or virtual device -1 keeps it down (#16028).
+      DeliveryProblem(
+        "injecting ${event.action} at ${event.atMs} ms failed: ${error.message}",
+        true,
+      )
+    }
+
+  /** Reports a failed run, first closing the pointer at [closeAt] if one may be open. */
   private fun failed(
     reason: String,
-    events: List<PlannedPointerEvent>,
-    injected: Int,
+    closeAt: PlannedPointerEvent?,
     start: Long,
+    injected: Int,
     hover: Boolean,
   ): PointerInjectionResult {
-    val opened = injected > 0
     val closer = if (hover) PointerAction.HOVER_EXIT else PointerAction.CANCEL
     var note = ""
-    if (opened) {
-      val last = events[injected - 1]
-      val closed = sink.inject(last.copy(action = closer), start)
-      if (!closed) note = "; the pointer could not be closed, so it may still be down or hovering"
+    if (closeAt != null && deliver(closeAt.copy(action = closer), start) != null) {
+      note = "; the pointer could not be closed, so it may still be down or hovering"
     }
     return PointerInjectionResult(
       success = false,

@@ -3,6 +3,16 @@ import CoreGraphics
 import Foundation
 import os
 
+/// Convert screen points to the clockface coordinate space without querying XCTest.
+func watchTapNormalizedOffset(x: Double, y: Double, frame: CGRect) throws -> CGVector {
+    let width = Double(frame.size.width)
+    let height = Double(frame.size.height)
+    guard width.isFinite, height.isFinite, width > 0, height > 0,
+          x.isFinite, y.isFinite, x >= 0, y >= 0, x <= width, y <= height
+    else { throw WatchCommandError.invalidRequest("tap is outside the watch screen") }
+    return CGVector(dx: x / width, dy: y / height)
+}
+
 /// XCTest may record gesture failures without throwing. Deflect only while a gesture runs.
 final class WatchCommandFailureCoordinator: Sendable {
     static let maxFailures = 16

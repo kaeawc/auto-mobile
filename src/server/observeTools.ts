@@ -1,4 +1,4 @@
-import { PLAN_RELEVANT } from "./toolRegistryTypes";
+import { ADVERTISES_DEVICE_ID, PLAN_RELEVANT } from "./toolRegistryTypes";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -523,6 +523,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     {
       handler: withWatchObserve(observeHandler, dependencies),
       ...PLAN_RELEVANT,
+      ...ADVERTISES_DEVICE_ID,
       defaultEnabled: true,
       // Watching is allowed on any device, whichever session holds it (#10730).
       deviceReadOnly: true,

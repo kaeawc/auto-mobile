@@ -1,6 +1,10 @@
 # swipeOn
 
 `swipeOn` swipes in a `direction` on the screen or a selected `container`.
+On iOS, a container thinner than 48 pt along the swipe axis (such as a sheet
+grabber) starts the drag at its centre and travels 240 pt in that direction,
+clamped to the screen bounds. The result includes a `warning` explaining the
+extended drag and warns if clamping leaves less than 120 pt of travel.
 Use `lookFor` to scroll until an element appears.
 
 On an Android XR headset in home space, screen swipes stay inside the topmost

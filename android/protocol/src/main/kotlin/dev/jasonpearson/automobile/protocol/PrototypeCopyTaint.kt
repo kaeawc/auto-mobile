@@ -1,48 +1,91 @@
 package dev.jasonpearson.automobile.protocol
 
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
-/**
- * R2 copy propagation: a data action copying a tainted `/data` or sensitive `/platform` read into
- * `/data` taints its destination, transitively. A worklist over copies bucketed by their source's
- * first segment keeps long chains linear; a null result means the check cap was exceeded, so
- * callers fail closed.
- */
+/** Copy propagation through data pointers and state keys; null means the check cap was spent. */
 internal object PrototypeCopyTaint {
   private const val MAX_CHECKS = 4_000_000L
   private val DATA_WRITES = setOf("setData", "appendData", "prependData", "upsertData")
 
-  private data class Copy(val into: String, val source: String, val from: String)
+  data class Taints(val data: List<String>, val state: List<String>)
+
+  private data class Copy(
+    val into: String,
+    val source: String,
+    val from: String,
+    val intoState: Boolean = false,
+  )
+
+  private data class Taint(val at: String, val state: Boolean = false)
 
   private class Walk(
     seeds: List<String>,
     val overlaps: (String, String, Boolean) -> Boolean,
+    val maxChecks: Long,
   ) {
     val taints = seeds.toMutableList()
-    val known = seeds.toMutableSet()
-    val queue = ArrayDeque(seeds)
+    val stateTaints = mutableListOf<String>()
+    private val known = seeds.toMutableSet()
+    private val knownState = mutableSetOf<String>()
+    private val queue = ArrayDeque(seeds.map { Taint(it) })
     var checks = 0L
-    val buckets = mutableMapOf<String, MutableList<Copy>>()
+    val data = mutableMapOf<String, MutableList<Copy>>()
+    val state = mutableMapOf<String, MutableList<Copy>>()
+    val templatedState = mutableListOf<Copy>()
 
-    fun mark(pointer: String) {
-      if (known.add(pointer)) {
-        taints.add(pointer)
-        queue.add(pointer)
+    fun mark(copy: Copy) {
+      val seen = if (copy.intoState) knownState else known
+      if (seen.add(copy.into)) {
+        (if (copy.intoState) stateTaints else taints).add(copy.into)
+        queue.add(Taint(copy.into, copy.intoState))
       }
     }
 
+    private fun drain(bucket: MutableList<Copy>, hit: (Copy) -> Boolean) {
+      checks += bucket.size
+      bucket.removeAll { copy ->
+        val reached = hit(copy)
+        if (reached) mark(copy)
+        reached
+      }
+    }
+
+    private fun drainData(taint: String) {
+      val key = firstSegment(taint)
+      // A leading {index} taint segment matches any source segment.
+      for (name in if (key == "{index}") data.keys.toList() else listOf(key)) {
+        data[name]?.let { bucket -> drain(bucket) { overlaps(taint, it.from, false) } }
+      }
+    }
+
+    private fun drainState(taint: String) {
+      for (name in if ('{' in taint) state.keys.toList() else listOf(taint)) {
+        state[name]?.let { bucket ->
+          drain(bucket) { PrototypeStateTaintIndex.overlaps(taint, it.from) }
+        }
+      }
+      drain(templatedState) { PrototypeStateTaintIndex.overlaps(taint, it.from) }
+    }
+
     fun drain() {
-      while (queue.isNotEmpty() && checks <= MAX_CHECKS) {
+      while (queue.isNotEmpty() && checks <= maxChecks) {
         val taint = queue.removeFirst()
-        val key = firstSegment(taint)
-        // A leading {index} taint segment matches any source segment.
-        for (name in if (key == "{index}") buckets.keys.toList() else listOf(key)) {
-          val bucket = buckets[name].orEmpty()
-          checks += bucket.size
-          val (hit, rest) = bucket.partition { overlaps(taint, it.from, false) }
-          hit.forEach { mark(it.into) }
-          buckets[name] = rest.toMutableList()
+        if (taint.state) drainState(taint.at) else drainData(taint.at)
+      }
+    }
+
+    fun add(copy: Copy, platformTaints: List<String>) {
+      when (copy.source) {
+        "data" -> data.getOrPut(firstSegment(copy.from)) { mutableListOf() }.add(copy)
+        "state" ->
+          if ('{' in copy.from) templatedState.add(copy)
+          else state.getOrPut(copy.from) { mutableListOf() }.add(copy)
+        else -> {
+          checks += platformTaints.size
+          if (platformTaints.any { overlaps(it, copy.from, false) }) mark(copy)
         }
       }
     }
@@ -53,49 +96,66 @@ internal object PrototypeCopyTaint {
     platformTaints: List<String>,
     context: PrototypeStateChecks.Context,
     overlaps: (String, String, Boolean) -> Boolean,
-  ): List<String>? {
-    val walk = Walk(seeds, overlaps)
-    for (copy in copies(context)) {
-      if (copy.source == "data") {
-        walk.buckets.getOrPut(firstSegment(copy.from)) { mutableListOf() }.add(copy)
-      } else {
-        walk.checks += platformTaints.size
-        if (platformTaints.any { overlaps(it, copy.from, false) }) walk.mark(copy.into)
-      }
-    }
+    maxChecks: Long = MAX_CHECKS,
+  ): Taints? {
+    val walk = Walk(seeds, overlaps, maxChecks)
+    for (copy in copies(context)) walk.add(copy, platformTaints)
     walk.drain()
-    return if (walk.checks > MAX_CHECKS) null else walk.taints
+    return if (walk.checks > maxChecks) null else Taints(walk.taints, walk.stateTaints)
   }
 
   private fun copies(context: PrototypeStateChecks.Context): List<Copy> =
     context.actions
-      .filter { it.value.text("type") in DATA_WRITES }
       .flatMap { action ->
+        val state = action.value.text("type") == "setState"
         val into =
-          action.value.text("path")?.let(PrototypeDataWriter::pathPointer)
-            ?: return@flatMap emptyList()
-        val read = action.value["value"] as? JsonObject
-        val data = read?.text("data")
-        val platform = read?.text("platform")
-        when {
-          data != null -> listOf(Copy(into, "data", data))
-          platform != null -> listOf(Copy(into, "platform", platform))
-          read?.text("item") != null ->
-            context.nodes.mapNotNull { node ->
-              val repeat = node.value["repeat"] as? JsonObject
-              val pointer = (repeat?.get("items") as? JsonObject)?.text("path")
-              pointer
-                ?.takeIf {
-                  action.path.startsWith("${node.path}.children[") &&
-                    repeat != null &&
-                    repeat.text("as") != null &&
-                    PrototypeDataPointer.isValid(it)
-                }
-                ?.let { Copy(into, "data", it) }
-            }
-          else -> emptyList()
-        }
+          if (state) action.value.text("key")
+          else if (action.value.text("type") in DATA_WRITES)
+            action.value.text("path")?.let(PrototypeDataWriter::pathPointer)
+          else null
+        if (into == null) return@flatMap emptyList()
+        val raw = action.value["value"]
+        val read = raw as? JsonObject
+        val sources =
+          if (state) stateReads(raw, action.path, context)
+          else
+            listOf("data", "platform", "state").mapNotNull { source ->
+              read?.text(source)?.let { source to it }
+            } + if (read?.text("item") != null) repeatReads(action.path, context) else emptyList()
+        sources.map { (source, from) -> Copy(into, source, from, state) }
       }
+      .sortedBy { it.intoState }
+
+  private fun stateReads(
+    raw: JsonElement?,
+    path: String,
+    context: PrototypeStateChecks.Context,
+  ): List<Pair<String, String>> {
+    (raw as? JsonObject)?.text("platform")?.let {
+      return listOf("platform" to it)
+    }
+    val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return emptyList()
+    return listOf("data", "platform").flatMap { source ->
+      PrototypeDataText.pointers(text, source).map { source to it }
+    } + repeatReads(path, context, text)
+  }
+
+  private fun repeatReads(
+    path: String,
+    context: PrototypeStateChecks.Context,
+    text: String? = null,
+  ): List<Pair<String, String>> =
+    context.nodes.mapNotNull { node ->
+      val repeat = node.value["repeat"] as? JsonObject
+      val pointer = (repeat?.get("items") as? JsonObject)?.text("path")
+      val alias = repeat?.text("as")
+      if (pointer == null || alias == null) return@mapNotNull null
+      if (!PrototypeDataPointer.isValid(pointer) || !path.startsWith("${node.path}.children["))
+        return@mapNotNull null
+      if (text != null && PrototypeRepeatTemplate.fieldReferences(text, alias).isEmpty())
+        return@mapNotNull null
+      "data" to pointer
+    }
 
   private fun firstSegment(pointer: String): String = pointer.drop(1).substringBefore('/')
 }

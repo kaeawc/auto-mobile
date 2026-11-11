@@ -43,6 +43,22 @@ steps:
     expect(result.valid).toBe(true);
   });
 
+  it("accepts a visionOS plan platform and device platform", () => {
+    const result = validator.validateYaml(`
+name: vision-plan
+platform: visionos
+devices:
+  - label: headset
+    platform: visionos
+steps:
+  - tool: tapOn
+    device: headset
+    params: { action: tap, selector: { elementId: BackButton } }
+`);
+    expect(result.errors).toBeUndefined();
+    expect(result.valid).toBe(true);
+  });
+
   it("keeps timestamps and YAML 1.1 boolean words as strings", () => {
     for (const quoted of [false, true]) {
       for (const label of ["yes", "no", "on", "off", "YES", "ON"]) {

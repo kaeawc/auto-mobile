@@ -1,0 +1,548 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"observationId\":\"d2ff2dd8-edad-41d3-b987-a96ca9e02d02\",\"deviceId\":\"emulator-5558\",\"display\":{\"key\":\"4619827259835644672\",\"role\":\"unknown\",\"posture\":\"unknown\",\"generation\":0},\"updatedAt\":1794430727705,\"screenSize\":{\"width\":1080,\"height\":600,\"units\":\"physical-pixels\"},\"systemInsets\":{\"top\":57,\"bottom\":72,\"left\":0,\"right\":0},\"insets\":{\"available\":true,\"source\":\"android-window-metrics\",\"units\":\"physical-pixels\",\"systemBars\":{\"visible\":{\"top\":57,\"bottom\":72,\"left\":0,\"right\":0},\"stable\":{\"top\":57,\"bottom\":72,\"left\":0,\"right\":0}},\"displayCutout\":{\"top\":0,\"bottom\":0,\"left\":0,\"right\":0},\"displayCutoutInfo\":{\"classification\":\"none\",\"bounds\":null},\"systemGestures\":{\"top\":57,\"bottom\":72,\"left\":0,\"right\":0},\"mandatorySystemGestures\":{\"top\":57,\"bottom\":72,\"left\":0,\"right\":0},\"tappableElement\":{\"top\":0,\"bottom\":0,\"left\":0,\"right\":0},\"systemChrome\":{\"visibility\":\"visible\",\"statusBar\":\"visible\",\"navigationBar\":\"visible\",\"homeIndicatorAutoHideRequested\":null,\"source\":\"android-window-insets\"}},\"intentChooserDetected\":false,\"notificationPermissionDetected\":false,\"rotation\":0,\"wakefulness\":\"Awake\",\"wakefulnessSource\":\"hierarchy\",\"deviceLock\":{\"locked\":false,\"keyguardShowing\":false,\"secure\":false},\"backStack\":{\"depth\":0,\"activities\":[{\"name\":\"com.android.systemui.car.activity.ActivityBlockingActivity\",\"taskId\":1000037,\"userId\":0,\"taskAffinity\":\"10210:com.android.systemui\",\"isTaskRoot\":true},{\"name\":\"dev.dogfood.garage.SettingsActivity\",\"taskId\":1000036,\"userId\":10,\"taskAffinity\":\"1010233:dev.dogfood.garage\",\"isTaskRoot\":false},{\"name\":\"androidx.car.app.activity.CarAppActivity\",\"taskId\":1000036,\"userId\":10,\"taskAffinity\":\"1010233:dev.dogfood.garage\",\"isTaskRoot\":true},{\"name\":\"com.android.car.carlauncher.CarLauncher\",\"taskId\":1000025,\"userId\":10,\"taskAffinity\":\"1010167:com.android.car.carlauncher\",\"isTaskRoot\":true},{\"name\":\"com.android.car.cluster.osdouble.ClusterOsDoubleActivity\",\"taskId\":1000002,\"userId\":0,\"taskAffinity\":\"1000:com.android.car.cluster.osdouble\",\"isTaskRoot\":true},{\"name\":\"com.android.car.cluster.home.ClusterHomeActivity\",\"taskId\":1000004,\"userId\":0,\"taskAffinity\":\"10142:com.android.car.cluster.home\",\"isTaskRoot\":true}],\"tasks\":[{\"id\":1000037,\"userId\":0,\"affinity\":\"10210:com.android.systemui\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.car\",\"rootActivity\":\"com.android.systemui/.car.activity.ActivityBlockingActivity\",\"packageName\":\"com.android.systemui\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,1080,600]},{\"id\":1000036,\"userId\":10,\"affinity\":\"1010233:dev.dogfood.garage\",\"numActivities\":2,\"launchedFromPackage\":\"com.android.shell\",\"rootActivity\":\"dev.dogfood.garage/androidx.car.app.activity.CarAppActivity\",\"packageName\":\"dev.dogfood.garage\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,1080,600]},{\"id\":1000025,\"userId\":10,\"affinity\":\"1010167:com.android.car.carlauncher\",\"numActivities\":1,\"rootActivity\":\"com.android.car.carlauncher/.CarLauncher\",\"packageName\":\"com.android.car.carlauncher\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,1080,600]},{\"id\":1000002,\"userId\":0,\"affinity\":\"1000:com.android.car.cluster.osdouble\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.car.cluster.osdouble\",\"rootActivity\":\"com.android.car.cluster.osdouble/.ClusterOsDoubleActivity\",\"packageName\":\"com.android.car.cluster.osdouble\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,400,600]},{\"id\":1000004,\"userId\":0,\"affinity\":\"10142:com.android.car.cluster.home\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.car\",\"rootActivity\":\"com.android.car.cluster.home/.ClusterHomeActivity\",\"packageName\":\"com.android.car.cluster.home\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,400,525]}],\"currentActivity\":{\"name\":\"com.android.systemui.car.activity.ActivityBlockingActivity\",\"taskId\":1000037,\"userId\":0},\"displayCount\":4,\"currentTaskId\":1000037,\"capturedAt\":1794430728103,\"source\":\"adb\"},\"activeWindow\":{\"appId\":\"com.android.systemui\",\"activityName\":\"\",\"layoutSeqSum\":2220,\"systemOverlay\":true},\"automotive\":{\"drivingState\":\"moving\",\"uxRestrictions\":{\"requiresDistractionOptimization\":true,\"activeRestrictions\":255},\"blocked\":false},\"otherDisplays\":[{\"key\":\"4619827551948147201\",\"role\":\"cluster\",\"size\":{\"width\":400,\"height\":600},\"units\":\"physical-pixels\"},{\"key\":\"virtual:com.android.car.cluster.osdouble:ClusterDisplay\",\"role\":\"virtual\",\"size\":{\"width\":400,\"height\":525},\"units\":\"physical-pixels\"},{\"key\":\"virtual:dev.dogfood.garage:CarAppService\",\"role\":\"virtual\",\"size\":{\"width\":1440,\"height\":704},\"units\":\"physical-pixels\"}],\"accessibilityState\":{\"enabled\":true,\"service\":\"unknown\",\"detectionSkipped\":false},\"freshness\":{\"actualTimestamp\":1794430727705,\"ageMs\":157,\"verified\":true,\"isFresh\":true},\"snapshotReference\":{\"snapshotId\":\"2774dc74-d6e2-402f-9da1-51cb36b227c9\",\"expiresAt\":1794431028234},\"skeleton\":[{\"bounds\":[384,328,528,385],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/exit_button\",\"label\":\"Back\"},{\"bounds\":[552,328,696,385],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/toggle_debug_info\",\"label\":\"Debug Info\"},{\"bounds\":[0,0,1080,57],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/car_top_bar\",\"label\":\"2:58\"},{\"bounds\":[9,7,71,51],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/qc_bluetooth_status_icon\",\"label\":\"Bluetooth Setting: Disconnected\"},{\"bounds\":[89,7,151,51],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/qc_signal_status_icon\",\"label\":\"Signal Settings: Wifi On\"},{\"bounds\":[169,7,231,51],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/qc_display_status_icon\",\"label\":\"Display Settings\"},{\"bounds\":[952,7,1068,51],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"com.android.systemui:id/user_name\",\"label\":\"User Avatar\",\"sublabel\":\"Driver\"},{\"bounds\":[0,528,1080,600],\"affordances\":[\"tap\"],\"elementId\":\"s2-40a9f6f15a749255\",\"label\":\"63°\"},{\"bounds\":[13,535,70,592],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/hvac_decrease_button\",\"label\":\"Lower temperature\",\"index\":0},{\"bounds\":[146,535,203,592],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/hvac_increase_button\",\"label\":\"Raise temperature\",\"index\":0},{\"bounds\":[297,535,354,592],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/home\",\"label\":\"Home Screen\"},{\"bounds\":[378,535,435,592],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/phone_nav\",\"label\":\"Phone\"},{\"bounds\":[459,535,516,592],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"com.android.systemui:id/grid_nav\",\"label\":\"Applications\"},{\"bounds\":[540,535,597,592],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/hvac\",\"label\":\"Climate Control\"},{\"bounds\":[621,535,678,592],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"com.android.systemui:id/notifications\",\"label\":\"Notifications\"},{\"bounds\":[702,535,759,592],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/assistant\",\"label\":\"Assistant\"},{\"bounds\":[878,535,935,592],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/hvac_decrease_button\",\"label\":\"Lower temperature\",\"index\":1},{\"bounds\":[1011,535,1068,592],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/hvac_increase_button\",\"label\":\"Raise temperature\",\"index\":1}],\"context\":[{\"bounds\":[275,259,805,292],\"affordances\":[],\"elementId\":\"com.android.systemui:id/blocking_text\",\"label\":\"You can’t use this feature while driving\"}],\"observationScreenshotResourceUri\":\"automobile:observation/emulator-5558/d2ff2dd8-edad-41d3-b987-a96ca9e02d02/screenshot\"}"
+    }
+  ],
+  "structuredContent": {
+    "observationId": "d2ff2dd8-edad-41d3-b987-a96ca9e02d02",
+    "deviceId": "emulator-5558",
+    "display": {
+      "key": "4619827259835644672",
+      "role": "unknown",
+      "posture": "unknown",
+      "generation": 0
+    },
+    "updatedAt": 1794430727705,
+    "screenSize": {
+      "width": 1080,
+      "height": 600,
+      "units": "physical-pixels"
+    },
+    "systemInsets": {
+      "top": 57,
+      "bottom": 72,
+      "left": 0,
+      "right": 0
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 57,
+          "bottom": 72,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 57,
+          "bottom": 72,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "none",
+        "bounds": null
+      },
+      "systemGestures": {
+        "top": 57,
+        "bottom": 72,
+        "left": 0,
+        "right": 0
+      },
+      "mandatorySystemGestures": {
+        "top": 57,
+        "bottom": 72,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "visible",
+        "statusBar": "visible",
+        "navigationBar": "visible",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "rotation": 0,
+    "wakefulness": "Awake",
+    "wakefulnessSource": "hierarchy",
+    "deviceLock": {
+      "locked": false,
+      "keyguardShowing": false,
+      "secure": false
+    },
+    "backStack": {
+      "depth": 0,
+      "activities": [
+        {
+          "name": "com.android.systemui.car.activity.ActivityBlockingActivity",
+          "taskId": 1000037,
+          "userId": 0,
+          "taskAffinity": "10210:com.android.systemui",
+          "isTaskRoot": true
+        },
+        {
+          "name": "dev.dogfood.garage.SettingsActivity",
+          "taskId": 1000036,
+          "userId": 10,
+          "taskAffinity": "1010233:dev.dogfood.garage",
+          "isTaskRoot": false
+        },
+        {
+          "name": "androidx.car.app.activity.CarAppActivity",
+          "taskId": 1000036,
+          "userId": 10,
+          "taskAffinity": "1010233:dev.dogfood.garage",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.android.car.carlauncher.CarLauncher",
+          "taskId": 1000025,
+          "userId": 10,
+          "taskAffinity": "1010167:com.android.car.carlauncher",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.android.car.cluster.osdouble.ClusterOsDoubleActivity",
+          "taskId": 1000002,
+          "userId": 0,
+          "taskAffinity": "1000:com.android.car.cluster.osdouble",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.android.car.cluster.home.ClusterHomeActivity",
+          "taskId": 1000004,
+          "userId": 0,
+          "taskAffinity": "10142:com.android.car.cluster.home",
+          "isTaskRoot": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": 1000037,
+          "userId": 0,
+          "affinity": "10210:com.android.systemui",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.car",
+          "rootActivity": "com.android.systemui/.car.activity.ActivityBlockingActivity",
+          "packageName": "com.android.systemui",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            1080,
+            600
+          ]
+        },
+        {
+          "id": 1000036,
+          "userId": 10,
+          "affinity": "1010233:dev.dogfood.garage",
+          "numActivities": 2,
+          "launchedFromPackage": "com.android.shell",
+          "rootActivity": "dev.dogfood.garage/androidx.car.app.activity.CarAppActivity",
+          "packageName": "dev.dogfood.garage",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            1080,
+            600
+          ]
+        },
+        {
+          "id": 1000025,
+          "userId": 10,
+          "affinity": "1010167:com.android.car.carlauncher",
+          "numActivities": 1,
+          "rootActivity": "com.android.car.carlauncher/.CarLauncher",
+          "packageName": "com.android.car.carlauncher",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            1080,
+            600
+          ]
+        },
+        {
+          "id": 1000002,
+          "userId": 0,
+          "affinity": "1000:com.android.car.cluster.osdouble",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.car.cluster.osdouble",
+          "rootActivity": "com.android.car.cluster.osdouble/.ClusterOsDoubleActivity",
+          "packageName": "com.android.car.cluster.osdouble",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            400,
+            600
+          ]
+        },
+        {
+          "id": 1000004,
+          "userId": 0,
+          "affinity": "10142:com.android.car.cluster.home",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.car",
+          "rootActivity": "com.android.car.cluster.home/.ClusterHomeActivity",
+          "packageName": "com.android.car.cluster.home",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            400,
+            525
+          ]
+        }
+      ],
+      "currentActivity": {
+        "name": "com.android.systemui.car.activity.ActivityBlockingActivity",
+        "taskId": 1000037,
+        "userId": 0
+      },
+      "displayCount": 4,
+      "currentTaskId": 1000037,
+      "capturedAt": 1794430728103,
+      "source": "adb"
+    },
+    "activeWindow": {
+      "appId": "com.android.systemui",
+      "activityName": "",
+      "layoutSeqSum": 2220,
+      "systemOverlay": true
+    },
+    "automotive": {
+      "drivingState": "moving",
+      "uxRestrictions": {
+        "requiresDistractionOptimization": true,
+        "activeRestrictions": 255
+      },
+      "blocked": false
+    },
+    "otherDisplays": [
+      {
+        "key": "4619827551948147201",
+        "role": "cluster",
+        "size": {
+          "width": 400,
+          "height": 600
+        },
+        "units": "physical-pixels"
+      },
+      {
+        "key": "virtual:com.android.car.cluster.osdouble:ClusterDisplay",
+        "role": "virtual",
+        "size": {
+          "width": 400,
+          "height": 525
+        },
+        "units": "physical-pixels"
+      },
+      {
+        "key": "virtual:dev.dogfood.garage:CarAppService",
+        "role": "virtual",
+        "size": {
+          "width": 1440,
+          "height": 704
+        },
+        "units": "physical-pixels"
+      }
+    ],
+    "accessibilityState": {
+      "enabled": true,
+      "service": "unknown",
+      "detectionSkipped": false
+    },
+    "freshness": {
+      "actualTimestamp": 1794430727705,
+      "ageMs": 157,
+      "verified": true,
+      "isFresh": true
+    },
+    "snapshotReference": {
+      "snapshotId": "2774dc74-d6e2-402f-9da1-51cb36b227c9",
+      "expiresAt": 1794431028234
+    },
+    "skeleton": [
+      {
+        "bounds": [
+          384,
+          328,
+          528,
+          385
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/exit_button",
+        "label": "Back"
+      },
+      {
+        "bounds": [
+          552,
+          328,
+          696,
+          385
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/toggle_debug_info",
+        "label": "Debug Info"
+      },
+      {
+        "bounds": [
+          0,
+          0,
+          1080,
+          57
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/car_top_bar",
+        "label": "2:58"
+      },
+      {
+        "bounds": [
+          9,
+          7,
+          71,
+          51
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/qc_bluetooth_status_icon",
+        "label": "Bluetooth Setting: Disconnected"
+      },
+      {
+        "bounds": [
+          89,
+          7,
+          151,
+          51
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/qc_signal_status_icon",
+        "label": "Signal Settings: Wifi On"
+      },
+      {
+        "bounds": [
+          169,
+          7,
+          231,
+          51
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/qc_display_status_icon",
+        "label": "Display Settings"
+      },
+      {
+        "bounds": [
+          952,
+          7,
+          1068,
+          51
+        ],
+        "affordances": [
+          "tap",
+          "long-press"
+        ],
+        "elementId": "com.android.systemui:id/user_name",
+        "label": "User Avatar",
+        "sublabel": "Driver"
+      },
+      {
+        "bounds": [
+          0,
+          528,
+          1080,
+          600
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "s2-40a9f6f15a749255",
+        "label": "63°"
+      },
+      {
+        "bounds": [
+          13,
+          535,
+          70,
+          592
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/hvac_decrease_button",
+        "label": "Lower temperature",
+        "index": 0
+      },
+      {
+        "bounds": [
+          146,
+          535,
+          203,
+          592
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/hvac_increase_button",
+        "label": "Raise temperature",
+        "index": 0
+      },
+      {
+        "bounds": [
+          297,
+          535,
+          354,
+          592
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/home",
+        "label": "Home Screen"
+      },
+      {
+        "bounds": [
+          378,
+          535,
+          435,
+          592
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/phone_nav",
+        "label": "Phone"
+      },
+      {
+        "bounds": [
+          459,
+          535,
+          516,
+          592
+        ],
+        "affordances": [
+          "tap",
+          "long-press"
+        ],
+        "elementId": "com.android.systemui:id/grid_nav",
+        "label": "Applications"
+      },
+      {
+        "bounds": [
+          540,
+          535,
+          597,
+          592
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/hvac",
+        "label": "Climate Control"
+      },
+      {
+        "bounds": [
+          621,
+          535,
+          678,
+          592
+        ],
+        "affordances": [
+          "tap",
+          "long-press"
+        ],
+        "elementId": "com.android.systemui:id/notifications",
+        "label": "Notifications"
+      },
+      {
+        "bounds": [
+          702,
+          535,
+          759,
+          592
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/assistant",
+        "label": "Assistant"
+      },
+      {
+        "bounds": [
+          878,
+          535,
+          935,
+          592
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/hvac_decrease_button",
+        "label": "Lower temperature",
+        "index": 1
+      },
+      {
+        "bounds": [
+          1011,
+          535,
+          1068,
+          592
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.systemui:id/hvac_increase_button",
+        "label": "Raise temperature",
+        "index": 1
+      }
+    ],
+    "context": [
+      {
+        "bounds": [
+          275,
+          259,
+          805,
+          292
+        ],
+        "affordances": [],
+        "elementId": "com.android.systemui:id/blocking_text",
+        "label": "You can’t use this feature while driving"
+      }
+    ],
+    "observationScreenshotResourceUri": "automobile:observation/emulator-5558/d2ff2dd8-edad-41d3-b987-a96ca9e02d02/screenshot"
+  }
+}
+

@@ -11,7 +11,6 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import {
-  createExitTracker,
   getFileSize,
   PROCESS_EXIT_TIMEOUT_MS,
   type ProcessExitState,
@@ -30,23 +29,18 @@ import { capBitrateKbps, VideoCaptureFinalizationError } from "./VideoRecorderSe
 import {
   ANDROID_SCREENRECORD_MAX_SECONDS,
   SCREENRECORD_MS,
-  waitForStderrDrain,
+  describeAbnormalExit,
+  recordingStderrTail,
+  startScreenrecordProcess,
+  type ScreenrecordStartContext,
 } from "./androidScreenrecord";
-import {
-  buildPidReportingScreenrecordArgs,
-  isOwnRecorderCmdline,
-  trackDeviceRecorderPid,
-  type DeviceRecorderPid,
-} from "./androidRecorderPid";
+import { isOwnRecorderCmdline, type DeviceRecorderPid } from "./androidRecorderPid";
 import {
   defaultRecordingCodecProbe,
   probeDurationMs,
   type RecordingCodecProbe,
 } from "./recordingCodec";
-import {
-  probeScreenrecordDisplayFlag,
-  resolveAndroidRecordingDisplay,
-} from "./AndroidRecordingDisplay";
+import { resolveAndroidRecordingDisplay } from "./AndroidRecordingDisplay";
 
 // screenrecord needs time to finish writing the device file.
 const SCREENRECORD_FINALIZE_SETTLE_MS = 1000;
@@ -70,7 +64,13 @@ interface AndroidBackendHandle {
    * backend's own SIGINT/SIGKILL caused for a crash, so this is recorded, not inferred.
    */
   stopRequested?: boolean;
+  stopRequestedAtMs?: number;
   exitedBeforeStop?: boolean;
+  /**
+   * Injected-timer time the accepted recorder was launched. The recording window is measured
+   * from here, so a failed first attempt and its cleanup never count against the retry's video.
+   */
+  launchedAtMs: number;
 }
 
 const gracefulExitTimeout = new Error("Video capture graceful exit deadline elapsed");
@@ -93,138 +93,6 @@ const SIGNAL_RECORDER_COMMAND_TIMEOUT_MS = 4000;
 // Bound for the whole failed-start cleanup (cmdline probe, kill, temp-file removal). It runs
 // detached from the request that started the recording, so it needs its own limit.
 const FAILED_START_CLEANUP_TIMEOUT_MS = 10000;
-// How long a fresh recorder must stay alive before `start` reports a recording (#10186).
-// A recorder that cannot run (an unsupported `--size`, no encoder, a device that dropped
-// off adb, a full /sdcard) exits promptly, but how promptly was not measured on a device;
-// this is a deliberately short bound that costs every healthy start this much latency. A
-// failure that takes longer is still reported at stop, with the recorder's exit and stderr.
-const SCREENRECORD_STARTUP_SETTLE_MS = 300;
-// The recorder can run for minutes, so the stderr kept for diagnostics is bounded to its
-// most recent output, and an error message carries only the tail of it.
-const SCREENRECORD_STDERR_MAX_CHARS = 8192;
-const SCREENRECORD_STDERR_REPORT_CHARS = 1000;
-const DEVICE_RECORDING_PATH_PATTERN = /\/sdcard\/auto-mobile-[^\s'":]+\.mp4/g;
-const STDERR_TRACKER_OPTIONS = { maxStderrChars: SCREENRECORD_STDERR_MAX_CHARS };
-
-/**
- * Describes a recorder exit that is not a normal finish, or undefined when the recorder is
- * still running or exited 0 (its own time limit, or a clean stop). Built from the tool's
- * own exit state and stderr only, never from the launch command line.
- */
-function describeAbnormalExit(exitState: ProcessExitState, stderr: string[]): string | undefined {
-  const code = exitState.exitCode;
-  const failedWithCode = code !== undefined && code !== null && code !== 0;
-  if (!failedWithCode && !exitState.signal) {
-    return undefined;
-  }
-  const how = exitState.signal ? `signal ${exitState.signal}` : `code ${code}`;
-  const at = exitState.endedAt ? ` at ${exitState.endedAt}` : "";
-  // screenrecord can quote its output file; the device temp path stays diagnostic-only.
-  const detail = stderr
-    .join("")
-    .replace(DEVICE_RECORDING_PATH_PATTERN, "<device recording file>")
-    .trim()
-    .slice(-SCREENRECORD_STDERR_REPORT_CHARS);
-  return `exited${at} with ${how}${detail ? `: ${detail}` : ""}`;
-}
-
-/** What a start needs beyond adb and argv: its target, time and failed-start cleanup. */
-interface ScreenrecordStartContext {
-  device: BootedDevice;
-  physicalDisplayId: string | undefined;
-  timer: Timer;
-  /**
-   * Called when the start fails after the recorder was launched, with the device pid the
-   * launch shell reported (possibly still unknown). Best-effort: it must not throw.
-   */
-  cleanupFailedStart(devicePid: DeviceRecorderPid): Promise<void>;
-}
-
-async function startScreenrecordProcess(
-  adb: Pick<AdbExecutor, "spawn">,
-  screenrecordArgv: string[],
-  config: VideoCaptureConfig,
-  { device, physicalDisplayId, timer, cleanupFailedStart }: ScreenrecordStartContext,
-): Promise<{
-  process: TrackedChildProcess;
-  exitState: ProcessExitState;
-  exitPromise: Promise<void>;
-  stderr: string[];
-  devicePid: DeviceRecorderPid;
-  warning?: string;
-  physicalDisplayId?: string;
-}> {
-  let process = await adb.spawn(buildPidReportingScreenrecordArgs(screenrecordArgv), {
-    signal: config.abortSignal,
-    abortSignalScope: "startup",
-  });
-  let devicePid = trackDeviceRecorderPid(process.stdout);
-  const abortStartup = () => process.kill("SIGTERM");
-  config.abortSignal?.addEventListener("abort", abortStartup, { once: true });
-  try {
-    if (config.abortSignal?.aborted) {
-      abortStartup();
-    }
-    let stderr: string[] = [];
-    let { exitState, exitPromise } = createExitTracker(process, stderr, STDERR_TRACKER_OPTIONS);
-    let warning: string | undefined;
-    let effectivePhysicalId = physicalDisplayId;
-    const displayRejected = await probeScreenrecordDisplayFlag(
-      { exitPromise, exitState, stderr },
-      timer,
-      SCREENRECORD_STARTUP_SETTLE_MS,
-    );
-    if (displayRejected && physicalDisplayId !== undefined && device.apiLevel === undefined) {
-      warning = "Android screenrecord rejected --display-id; recording the default display.";
-      logger.warn(`[VideoCapture] ${warning}`);
-      process = await adb.spawn(
-        buildPidReportingScreenrecordArgs(
-          screenrecordArgv.filter(
-            (arg, index) =>
-              arg !== "--display-id" && screenrecordArgv[index - 1] !== "--display-id",
-          ),
-        ),
-        { signal: config.abortSignal, abortSignalScope: "startup" },
-      );
-      devicePid = trackDeviceRecorderPid(process.stdout);
-      stderr = [];
-      ({ exitState, exitPromise } = createExitTracker(process, stderr, STDERR_TRACKER_OPTIONS));
-      effectivePhysicalId = undefined;
-      await probeScreenrecordDisplayFlag(
-        { exitPromise, exitState, stderr },
-        timer,
-        SCREENRECORD_STARTUP_SETTLE_MS,
-      );
-    }
-    if (describeAbnormalExit(exitState, stderr)) {
-      // An aborted start killed the recorder itself; report the cancellation, not a crash.
-      config.abortSignal?.throwIfAborted();
-      await waitForStderrDrain(process.stderr, timer);
-      // Described again after the drain so stderr that trailed the exit is included.
-      throw new ActionableError(
-        `Android screenrecord ${describeAbnormalExit(exitState, stderr)} within ${SCREENRECORD_STARTUP_SETTLE_MS} ms of launch, so no recording was started.`,
-      );
-    }
-    return {
-      process,
-      exitState,
-      exitPromise,
-      stderr,
-      devicePid,
-      warning,
-      physicalDisplayId: effectivePhysicalId,
-    };
-  } catch (error) {
-    // The recorder runs on the device, so a dead host `adb shell` (a dropped transport, an
-    // adb server restart) does not mean it stopped. No handle is returned, so nothing would
-    // ever stop it or remove its temp file; do it here.
-    await cleanupFailedStart(devicePid);
-    throw error;
-  } finally {
-    config.abortSignal?.removeEventListener("abort", abortStartup);
-  }
-}
-
 export function clampBitrateKbps(config: VideoCaptureConfig): number {
   return capBitrateKbps(config.targetBitrateKbps, config.maxThroughputMbps);
 }
@@ -329,11 +197,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     // host process dying (an adb server restart, a dropped transport) does not mean the
     // device recorder did, and a recorder that wrote a complete file before dying is still
     // a recording.
-    if (!backendHandle.stopRequested) {
-      backendHandle.stopRequested = true;
-      backendHandle.exitedBeforeStop =
-        describeAbnormalExit(backendHandle.exitState, backendHandle.stderr) !== undefined;
-    }
+    this.markStopRequested(backendHandle);
 
     // Stop screenrecord on the *device* with SIGINT first. If we only SIGINT the host
     // `adb shell screenrecord` process, ADB can drop the session before the device writes
@@ -413,8 +277,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       const codec = await this.codecProbe.codec(handle.outputPath);
       const videoDurationMs = await probeDurationMs(this.codecProbe, handle.outputPath);
 
-      this.logRecordingExit(backendHandle);
-      const earlyExit = this.earlyExitDescription(backendHandle);
+      if (backendHandle.stderr.length > 0) {
+        logger.info(`[VideoCapture] Stderr output: ${recordingStderrTail(backendHandle.stderr)}`);
+      }
+      const warnings = this.recordingWarnings(backendHandle, sizeBytes, videoDurationMs);
       return {
         recordingId: handle.recordingId,
         outputPath: handle.outputPath,
@@ -423,17 +289,47 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         sizeBytes,
         codec,
         videoDurationMs,
-        ...(earlyExit && {
-          warnings: [
-            `The Android recorder ${earlyExit} before the stop was requested; the recording may end sooner than requested.`,
-          ],
-        }),
+        ...(warnings.length > 0 && { warnings }),
       };
     } catch (error) {
       // This point is reached only after awaiting the tracked host exit above.
       // Artifact finalization cannot revive that process, so make the proof
       // available to the ownership layer instead of retaining a dead handle.
       throw this.finalizationError(backendHandle, retainDeviceFile, error);
+    }
+  }
+
+  private recordingWarnings(
+    backendHandle: AndroidBackendHandle,
+    sizeBytes: number,
+    videoDurationMs: number | undefined,
+  ): string[] {
+    const warnings: string[] = [];
+    const earlyExit = this.earlyExitDescription(backendHandle);
+    if (earlyExit) {
+      warnings.push(
+        `The Android recorder ${earlyExit} before the stop was requested; the recording may end sooner than requested.`,
+      );
+    }
+    const windowMs =
+      (backendHandle.stopRequestedAtMs ?? this.timer.now()) - backendHandle.launchedAtMs;
+    if (
+      sizeBytes < 10_000 ||
+      (videoDurationMs !== undefined && windowMs >= 3000 && videoDurationMs < windowMs / 2)
+    ) {
+      warnings.push(
+        "The Android video is much shorter than the recording window and should not be used as evidence.",
+      );
+    }
+    return warnings;
+  }
+
+  private markStopRequested(backendHandle: AndroidBackendHandle): void {
+    if (!backendHandle.stopRequested) {
+      backendHandle.stopRequested = true;
+      backendHandle.stopRequestedAtMs = this.timer.now();
+      backendHandle.exitedBeforeStop =
+        describeAbnormalExit(backendHandle.exitState, backendHandle.stderr) !== undefined;
     }
   }
 
@@ -618,17 +514,6 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
   }
 
-  private logRecordingExit(backendHandle: AndroidBackendHandle): void {
-    if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
-      logger.warn(
-        `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`,
-      );
-    }
-    if (backendHandle.stderr.length > 0) {
-      logger.info(`[VideoCapture] Stderr output: ${backendHandle.stderr.join("")}`);
-    }
-  }
-
   /**
    * Reads the on-device file's size via `stat`. Returns null when the result
    * cannot be observed, which is distinct from a confirmed zero-byte file.
@@ -809,6 +694,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     if (!backendHandle || backendHandle.kind !== "android") {
       throw new Error("Missing backend handle for video recording.");
     }
+    this.markStopRequested(backendHandle);
 
     if (options?.hostOnly) {
       try {
@@ -895,7 +781,11 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
     // Android screenrecord doesn't support stdout on all versions
     // Record to a temp file on the device, then pull it
-    const deviceTempPath = `/sdcard/auto-mobile-${config.recordingId}.mp4`;
+    // The retry gets its own file so a late failed-start `rm` of the first cannot unlink it.
+    const deviceTempPaths = [
+      `/sdcard/auto-mobile-${config.recordingId}.mp4`,
+      `/sdcard/auto-mobile-${config.recordingId}-retry.mp4`,
+    ] as const;
 
     const args = [
       "screenrecord",
@@ -913,13 +803,11 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       args.push("--size", `${config.resolution.width}x${config.resolution.height}`);
     }
 
-    args.push(deviceTempPath);
-
     logger.info(`[VideoCapture] Starting Android recording`);
     // The argv, device temp path and host output path embed the recording id
     // and local username; keep them diagnostic-only.
     logger.debug(`[VideoCapture] Screenrecord argv: ${args.join(" ")}`);
-    logger.debug(`[VideoCapture] Device temp path: ${deviceTempPath}`);
+    logger.debug(`[VideoCapture] Device temp paths: ${deviceTempPaths.join(", ")}`);
     logger.debug(`[VideoCapture] Output path: ${config.outputPath}`);
     logger.info(
       `[VideoCapture] Bitrate: ${bitrateKbps}kbps (${bitrateBps}bps), Time limit: ${timeLimitSeconds}s`,
@@ -932,7 +820,8 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       device,
       physicalDisplayId,
       timer: this.timer,
-      cleanupFailedStart: (pid) => this.cleanupFailedAndroidStartDetached(adb, deviceTempPath, pid),
+      deviceTempPaths,
+      cleanupFailedStart: (pid, path) => this.cleanupFailedAndroidStartDetached(adb, path, pid),
     };
     const {
       process,
@@ -941,7 +830,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       stderr,
       devicePid,
       warning,
+      launchedAtMs,
       physicalDisplayId: effectivePhysicalId,
+      deviceTempPath,
     } = await startScreenrecordProcess(adb, args, config, start);
 
     const backendHandle: AndroidBackendHandle = {
@@ -953,7 +844,27 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       device,
       deviceTempPath,
       devicePid,
+      launchedAtMs,
     };
+    // Observe both outcomes: a process error must never become an unhandled rejection
+    // while the recording owner is still running its plan, before it calls stop.
+    void exitPromise
+      .then(() => {
+        if (
+          (!backendHandle.stopRequested || backendHandle.exitedBeforeStop) &&
+          describeAbnormalExit(exitState, stderr)
+        ) {
+          logger.warn(
+            `[VideoCapture] Android recorder exited with code ${exitState.exitCode}, signal ${exitState.signal} after ${this.timer.now() - launchedAtMs} ms since launch: ${recordingStderrTail(stderr) || "stderr was empty"}`,
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        logger.warn(
+          `[VideoCapture] Could not track Android recorder exit: ${errorMessage(error)}`,
+          error,
+        );
+      });
     return {
       recordingId: config.recordingId,
       outputPath: config.outputPath,

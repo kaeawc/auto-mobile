@@ -75,6 +75,7 @@ import {
 } from "./deviceDiscoveryContracts";
 import { isUnresolvedAndroidEmulatorName } from "./deviceIdentityEvidence";
 import { PhysicalIosScanBudgetExceeded } from "./PhysicalIosScanBudgetExceeded";
+import { listAppleSimulatorFamilyImages } from "./appleSimulatorFamilyImages";
 import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
@@ -307,19 +308,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
   /** List the device images available for a platform, or both for `"either"`. */
   async listDeviceImages(platform: SomePlatform, signal?: AbortSignal): Promise<DeviceInfo[]> {
-    if (platform === "tvos") {
-      if (!this.appleTvSimulators) {
-        throw new ActionableError("Apple TV simulator inventory is unavailable on this host.");
-      }
-      return this.appleTvSimulators.listAppleTvSimulators(signal);
-    }
-    if (platform === "visionos") {
-      if (!this.appleVisionSimulators) {
-        throw new ActionableError(
-          "Apple Vision Pro simulator inventory is unavailable on this host.",
-        );
-      }
-      return this.appleVisionSimulators.listAppleVisionSimulators(signal);
+    if (platform === "watchos" || platform === "tvos" || platform === "visionos") {
+      const inventories = {
+        watch: this.watchSimulators,
+        tv: this.appleTvSimulators,
+        vision: this.appleVisionSimulators,
+      };
+      return listAppleSimulatorFamilyImages(platform, inventories, signal);
     }
     switch (requireAndroidOrIosSelector(platform, "Listing device images")) {
       case "android":

@@ -78,7 +78,7 @@ unavailable, and a broker binding never reuses one.
   resolved platform at the registry gate. Plain tools look up tvOS targets through their own
   platform-specific paths; unsupported plain tools refuse tvOS before lookup
   (`assertRequestNotTvos`). `provisionDevice` uses a per-platform union with platform-specific
-  spec fields, including a tvOS branch. Output schemas list `tvos` only where they already list `watchos`.
+  spec fields, including a tvOS branch. Output schemas list non-iOS Apple platforms only for tools that support them.
 - **Allowlisted app tools.** `installApp`, `uninstallApp`, `listApps`, `launchApp` and
   `terminateApp` route a watch to `WatchAppManager` (`simctl install|uninstall|listapps|launch|
   terminate` on the watch UDID) through their executor factories; Android and iOS keep their
@@ -89,7 +89,8 @@ unavailable, and a broker binding never reuses one.
   confined to the watch's device-set directory, remove Documents, Library and tmp), and a failed
   wipe launches nothing. `prototype: true` is refused before any agent preparation. A
   `terminateApp` whose process is already gone is a success with `wasRunning: false`.
-- **Watch logs.** `getLogs` reuses the iOS simulator unified-log path (`simctl spawn <udid> log show` with the app's subsystem and process predicate) for a watch UDID; any other non-Android platform is refused rather than read as logcat.
+- **Watch and TV logs.** `getLogs` reuses the iOS simulator unified-log path (`simctl spawn <udid> log show` with the app's subsystem and process predicate) for a watch or Apple TV UDID; any other non-Android platform is refused rather than read as logcat.
+- **TV crashes.** `crashApp` reuses the iOS simulator launchctl SIGABRT path and host DiagnosticReports `.ips` lookup for the Apple TV UDID. The result retains `platform: "tvos"`; mechanism and evidence source names use the shared iOS backend vocabulary.
 - **Watch notifications.** `postNotification` delivers an APNs payload via `simctl push` to the watch simulator UDID and requires the watch app bundle ID as `appId`.
 - **Runner-backed watch observation and actions.** `observe` retains a simctl PNG. When an
   explicitly registered watch runner is connected, it also returns the hierarchy normalized

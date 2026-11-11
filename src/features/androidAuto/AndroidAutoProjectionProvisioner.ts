@@ -1,11 +1,13 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { sleepUnlessAborted } from "../deviceLifecycle/core/deadlines";
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { PortAvailabilityChecker } from "../../utils/PortManager";
 import type { Timer } from "../../utils/SystemTimer";
 import { HEAD_UNIT_SERVER_PORT } from "./androidAutoProjection";
-import type { AndroidAutoPhone } from "./AndroidAutoPhone";
+import { ADB_STATE_TIMEOUT_MS, type AndroidAutoPhone } from "./AndroidAutoPhone";
+import { AndroidAutoPhoneOfflineError } from "./AndroidAutoPhoneOfflineError";
 import type { AndroidAutoSettingsUi } from "./AndroidAutoSettingsUi";
 import type { AndroidAutoSignerCheck } from "./AndroidAutoSignerCheck";
 import type {
@@ -50,6 +52,11 @@ export interface AndroidAutoProjectionRequest {
    */
   acceptAndroidAutoTerms?: boolean;
   signal?: AbortSignal;
+  /**
+   * When the caller's deadline expires, on `deps.timer.now()`'s clock. The adb-online wait ends
+   * early enough before it to report a phone that stays offline instead of a generic timeout.
+   */
+  deadlineMs?: number;
 }
 
 export interface AndroidAutoProjectionResult {
@@ -102,6 +109,11 @@ export const DEFAULT_ADB_ONLINE_BACKOFF = exponentialBackoff({
   maxDelayMs: 4_000,
 });
 export const DEFAULT_ADB_ONLINE_BUDGET_MS = 60_000;
+/**
+ * Time the adb-online wait leaves before the caller's deadline: one more `adb get-state` check
+ * plus a margin, so the offline error is raised before the deadline's generic timeout.
+ */
+export const ADB_ONLINE_DEADLINE_RESERVE_MS = ADB_STATE_TIMEOUT_MS + 1_000;
 const ADB_ONLINE_STATE = "device";
 
 type Probe = (signal?: AbortSignal) => Promise<boolean>;
@@ -180,7 +192,7 @@ export class AndroidAutoProjectionProvisioner {
     const { phone, ui } = device;
     const signal = request.signal;
     // A just-booted emulator can still read `offline` to adb; every step below needs `device`.
-    await this.waitForAdbOnline(phone, request.deviceId, signal);
+    await this.waitForAdbOnline(phone, request);
     const steps: AndroidAutoProvisioningStep[] = [await this.installAndroidAuto(device, request)];
     steps.push(
       await ensure(
@@ -359,13 +371,12 @@ export class AndroidAutoProjectionProvisioner {
 
   /**
    * Polls `adb get-state` on a bounded backoff until the phone is `device`. Runs before any
-   * step, so a phone that stays offline fails having changed nothing. The request's signal (the
-   * provision deadline) still cuts the wait short.
+   * step, so a phone that stays offline fails having changed nothing. The wait is capped by the
+   * request's deadline (less one more check), and its signal cuts each sleep short.
    */
   private async waitForAdbOnline(
     phone: AndroidAutoPhone,
-    deviceId: string,
-    signal?: AbortSignal,
+    { deviceId, signal, deadlineMs }: AndroidAutoProjectionRequest,
   ): Promise<void> {
     const backoff = this.deps.adbOnlineBackoff ?? DEFAULT_ADB_ONLINE_BACKOFF;
     const budgetMs = this.deps.adbOnlineBudgetMs ?? DEFAULT_ADB_ONLINE_BUDGET_MS;
@@ -376,14 +387,22 @@ export class AndroidAutoProjectionProvisioner {
       if (state === ADB_ONLINE_STATE) {
         return;
       }
-      const delayMs = Math.min(backoff.delayForAttempt(attempt), budgetMs - waitedMs);
+      const deadlineLeftMs =
+        deadlineMs === undefined
+          ? Number.POSITIVE_INFINITY
+          : deadlineMs - this.deps.timer.now() - ADB_ONLINE_DEADLINE_RESERVE_MS;
+      const delayMs = Math.min(
+        backoff.delayForAttempt(attempt),
+        budgetMs - waitedMs,
+        Math.floor(deadlineLeftMs),
+      );
       if (delayMs <= 0) {
-        throw new ActionableError(
-          `adb still reports ${deviceId} as not ready (${state}) after ${Math.round(waitedMs / 1000)} s, so Android Auto provisioning changed nothing on it. Wait until \`adb -s ${deviceId} get-state\` prints device (restart adb with \`adb kill-server\` if it stays offline), then retry.`,
-        );
+        throw adbOfflineError(deviceId, state, waitedMs, deadlineLeftMs < budgetMs - waitedMs);
       }
       logger.debug(`[AndroidAuto] ${deviceId} adb state is ${state}; re-checking in ${delayMs} ms`);
-      await this.deps.timer.sleep(delayMs);
+      if (await sleepUnlessAborted(this.deps.timer, delayMs, signal)) {
+        signal?.throwIfAborted();
+      }
       waitedMs += delayMs;
     }
   }
@@ -572,4 +591,20 @@ async function ensure(
   }
   await apply(signal);
   return { step, status: "applied" };
+}
+
+function adbOfflineError(
+  deviceId: string,
+  state: string,
+  waitedMs: number,
+  deadlineReached: boolean,
+): AndroidAutoPhoneOfflineError {
+  const waited = `after ${Math.round(waitedMs / 1000)} s${deadlineReached ? ", when the provision deadline left no more time" : ""}`;
+  const retry = deadlineReached
+    ? "then retry, with a larger timeoutMs if the phone needs longer"
+    : "then retry";
+  return new AndroidAutoPhoneOfflineError(
+    deviceId,
+    `adb still reports ${deviceId} as not ready (${state}) ${waited}, so Android Auto provisioning changed nothing on it. Wait until \`adb -s ${deviceId} get-state\` prints device (restart adb with \`adb kill-server\` if it stays offline), ${retry}.`,
+  );
 }

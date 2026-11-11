@@ -41,7 +41,8 @@ export interface AndroidAutoPhone {
 export type AndroidAutoPhoneAdb = Pick<AdbExecutor, "execute">;
 
 const QUERY_TIMEOUT_MS = 15_000;
-const STATE_TIMEOUT_MS = 5_000;
+/** Bound on one `adb get-state` check. */
+export const ADB_STATE_TIMEOUT_MS = 5_000;
 const INSTALL_TIMEOUT_MS = 300_000;
 const YES = "yes";
 
@@ -73,7 +74,7 @@ export class AdbAndroidAutoPhone implements AndroidAutoPhone {
   async adbState(signal?: AbortSignal): Promise<string> {
     try {
       const result = await this.adb.execute(["get-state"], {
-        timeoutMs: STATE_TIMEOUT_MS,
+        timeoutMs: ADB_STATE_TIMEOUT_MS,
         signal,
         noRetry: true,
       });

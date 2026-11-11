@@ -159,6 +159,31 @@ describe("GetLogs", () => {
     expect(android.requests[0]?.refreshSinceSeconds?.()).toBe(13);
   });
 
+  test("iOS: an anchored since is re-derived after the process-name probe", async () => {
+    let now = 100_000;
+    const seconds: number[] = [];
+    const ios: IosUnifiedLogSource = {
+      resolveProcessName: async () => {
+        // A slow `simctl listapps` takes 3 fake seconds.
+        now += 3_000;
+        return "Playground";
+      },
+      collect: async (_appId, sinceSeconds) => {
+        seconds.push(sinceSeconds);
+        return { text: "", truncated: false };
+      },
+    };
+    await new GetLogs({
+      clock: clock({ now: () => now, planStartMs: () => 90_000 }),
+      android: () => {
+        throw new Error("unused");
+      },
+      ios: () => ios,
+    }).execute(SIMULATOR, { appId: "com.example", since: "run-start" });
+    // 10s at request time plus the 3s probe: the window must cover the whole 13s.
+    expect(seconds).toEqual([13]);
+  });
+
   test("iOS: reads the app's unified log, applies grep and reports ignored filters", async () => {
     const calls: unknown[] = [];
     const ios: IosUnifiedLogSource = {

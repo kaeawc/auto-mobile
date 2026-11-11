@@ -109,6 +109,18 @@ function sinceAnchorMs(
   return since === "sessionStart" ? clock.sessionStartMs() : undefined;
 }
 
+/** Re-derives an anchored look-back at read time, or undefined when `since` is not anchored. */
+function sinceRefresher(
+  since: GetLogsSince | undefined,
+  deviceId: string,
+  clock: GetLogsClock,
+): (() => number) | undefined {
+  const anchor = sinceAnchorMs(since, deviceId, clock);
+  return anchor === undefined
+    ? undefined
+    : () => Math.min(secondsSince(anchor, clock.now()), GET_LOGS_MAX_SECONDS);
+}
+
 /** Resolve `since` into a device-relative window; run-start requires an executing plan. */
 export function resolveSinceSeconds(
   since: GetLogsSince | undefined,
@@ -211,6 +223,8 @@ export function parseUnifiedCompact(text: string): GetLogsLine[] {
 /** The resolved read window shared by the per-platform `getLogs` paths. */
 interface GetLogsWindow {
   sinceSeconds: number;
+  /** Re-derives an anchored look-back right before the read, after any awaited probes. */
+  refreshSinceSeconds?: () => number;
   maxLines: number;
   minPriority: LogcatPriority;
 }
@@ -233,23 +247,18 @@ export class GetLogs {
     );
     const maxLines = Math.min(request.maxLines ?? GET_LOGS_DEFAULT_MAX_LINES, GET_LOGS_MAX_LINES);
     const minPriority = request.minPriority ?? "V";
+    const refreshSinceSeconds = sinceRefresher(request.since, device.deviceId, this.deps.clock);
+    const refresh = refreshSinceSeconds ? { refreshSinceSeconds } : {};
     if (device.platform !== "android") {
       // Every Apple simulator reads its unified log; none falls through to logcat.
-      const window = { platform: device.platform, sinceSeconds, maxLines, minPriority };
+      const window = { platform: device.platform, sinceSeconds, maxLines, minPriority, ...refresh };
       return this.ios(request, window, warnings, signal);
     }
-    const anchor = sinceAnchorMs(request.since, device.deviceId, this.deps.clock);
-    const { clock } = this.deps;
     const result = await this.deps.android().read(
       {
         appId: request.appId,
         sinceSeconds,
-        ...(anchor === undefined
-          ? {}
-          : {
-              refreshSinceSeconds: () =>
-                Math.min(secondsSince(anchor, clock.now()), GET_LOGS_MAX_SECONDS),
-            }),
+        ...refresh,
         tags: request.tags,
         minPriority,
         grep: request.grep,
@@ -277,7 +286,7 @@ export class GetLogs {
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
-    const { platform, sinceSeconds, maxLines, minPriority } = window;
+    const { platform, sinceSeconds, refreshSinceSeconds, maxLines, minPriority } = window;
     const label = PLATFORM_LABELS[platform];
     if (!request.appId) {
       throw new ActionableError(
@@ -297,7 +306,7 @@ export class GetLogs {
     const processName = await resolveProcessName(source, request.appId, warnings, signal);
     const collected = await source.collect(
       request.appId,
-      sinceSeconds,
+      refreshSinceSeconds?.() ?? sinceSeconds,
       unifiedLogLevel(minPriority),
       { signal, processName },
     );

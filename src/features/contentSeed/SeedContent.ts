@@ -7,7 +7,12 @@ import {
   outputLooksLikeShellFailure,
   packageListingContains,
 } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
-import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
+import {
+  DefaultFileSystem,
+  pathExists,
+  type FileSystem,
+} from "../../utils/filesystem/DefaultFileSystem";
+import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimensions";
 import { shellQuote } from "../../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { parseBroadcastOutput } from "../intent/SendBroadcast";
@@ -31,6 +36,8 @@ import {
 } from "./seedContentInput";
 
 const PACKAGE = "dev.jasonpearson.automobile.contentseeder";
+const DATA = "content://com.android.contacts/data";
+const MAX_PHOTO_BYTES = 512 * 1024;
 
 /** Drop `content query` result rows so row values cannot read as shell diagnostics. */
 export function withoutProviderRows(stdout: string): string {
@@ -51,6 +58,7 @@ export interface SeedContentDependencies {
   /** Environment for the APK override and daemon launch directory; defaults to process.env. */
   env?: NodeJS.ProcessEnv;
   exists?: (path: string) => Promise<boolean>;
+  photoFiles?: Pick<FileSystem, "stat" | "readFileHead">;
 }
 
 interface NamespaceReadBack {
@@ -64,7 +72,7 @@ export function parseSeedBroadcast(output: string): z.output<typeof countsSchema
   const reply = parseBroadcastOutput(output);
   if (!reply.delivered || reply.resultCode !== -1 || !reply.resultData) {
     throw new ActionableError(
-      `Content seeder broadcast failed: ${reply.delivered ? (reply.resultData ?? output) : reply.error}. Check the SMS role and calendar/SMS permission grants.`,
+      `Content seeder broadcast failed: ${reply.delivered ? (reply.resultData ?? output) : reply.error}. Check the staged photo, SMS role and Contacts/calendar/SMS permission grants; rebuild and reinstall the debug seeder APK if needed.`,
     );
   }
   try {
@@ -87,6 +95,7 @@ export class SeedContent {
       throw new ActionableError(`Invalid seedContent input: ${parsed.error.message}`);
     }
     const request = parsed.data;
+    await this.validatePhotos(request.contacts ?? []);
     const tag = `automobile.${request.namespace}`;
     const resetKinds = this.resetKinds(request);
     const appNeeded = (["contacts", "calendarEvents", "smsInbox"] as const).some(
@@ -109,7 +118,8 @@ export class SeedContent {
       await this.broadcast("reset", request.namespace, { dropAccount: "true" }, signal);
     }
     const readBack = await this.prepareReadBack(request, tag, signal);
-    result.inserted.contacts = await this.insertContacts(request.contacts ?? [], tag, signal);
+    const photoIds: number[] = [];
+    result.inserted.contacts = await this.insertContacts(request, tag, photoIds, signal);
     result.inserted.callLog = await this.insertCalls(request.callLog ?? [], tag, signal);
     for (const kind of ["calendarEvents", "smsInbox"] as const) {
       result.inserted[kind] = await this.insertAppKind(kind, request, signal);
@@ -118,7 +128,50 @@ export class SeedContent {
     for (const check of readBack) {
       await this.verifyRows(check, result.inserted[check.kind], signal);
     }
+    for (const id of photoIds) {
+      const where = `${this.contactWhere(tag)} AND raw_contact_id=${id} AND mimetype='vnd.android.cursor.item/photo' AND (photo_id>0 OR photo_file_id>0)`;
+      if ((await this.countRows(DATA, where, signal)) === 0) {
+        throw new ActionableError(
+          `seedContent photo read-back failed for raw contact ${id}: no photo_id / photo_file_id. Rebuild and reinstall the content seeder APK, check Contacts permissions and image validity, then retry with reset; partial writes may remain.`,
+        );
+      }
+    }
     return result;
+  }
+
+  private async validatePhotos(contacts: NonNullable<SeedContentInput["contacts"]>): Promise<void> {
+    const files = this.deps.photoFiles ?? new DefaultFileSystem();
+    for (const contact of contacts) {
+      if (contact.photoPath === undefined) {
+        continue;
+      }
+      const path = resolvePathFromDaemonLaunchWorkingDirectory(
+        contact.photoPath,
+        this.deps.env ?? process.env,
+      );
+      try {
+        const stat = await files.stat(path);
+        if (!stat.isFile?.() || stat.size > MAX_PHOTO_BYTES) {
+          throw new Error("Use a regular PNG/JPEG file of at most 512 KB (524288 bytes)");
+        }
+        // Bound the read even if the file grows after stat; the app checks the pushed copy too.
+        const bytes = await files.readFileHead(path, MAX_PHOTO_BYTES + 1);
+        const mime = detectImageMimeType(bytes);
+        if (bytes.length > MAX_PHOTO_BYTES || (mime !== "image/png" && mime !== "image/jpeg")) {
+          throw new Error("Use PNG/JPEG magic bytes and at most 512 KB (524288 bytes)");
+        }
+        contact.photoPath = path;
+      } catch (error) {
+        throw toActionableError(
+          error,
+          `Invalid contact photoPath ${path}; check that the host file exists and is readable`,
+        );
+      }
+    }
+  }
+
+  private contactWhere(tag: string): string {
+    return `account_name='${tag}' AND (account_type='${ACCOUNT_TYPE}' OR account_type='${tag}')`;
   }
 
   private async prepareReadBack(
@@ -235,10 +288,12 @@ export class SeedContent {
   }
 
   private async insertContacts(
-    contacts: NonNullable<SeedContentInput["contacts"]>,
+    request: SeedContentInput,
     tag: string,
+    photoIds: number[],
     signal?: AbortSignal,
   ): Promise<number> {
+    const contacts = request.contacts ?? [];
     for (const contact of contacts) {
       await this.shell(
         [insertCommand(RAW_CONTACTS, [`account_name:s:${tag}`, `account_type:s:${ACCOUNT_TYPE}`])],
@@ -252,8 +307,51 @@ export class SeedContent {
       );
       const id = highestRawContactId(output, tag);
       await this.shell(contactDataCommands(contact, id), signal);
+      if (contact.photoPath !== undefined) {
+        await this.insertPhoto(contact.photoPath, request.namespace, id, signal);
+        photoIds.push(id);
+      }
     }
     return contacts.length;
+  }
+
+  private async insertPhoto(
+    path: string,
+    namespace: string,
+    id: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const name = `automobile.${namespace}.${id}.photo`;
+    const staged = `/data/local/tmp/${name}`;
+    const cache = `cache/${name}`;
+    try {
+      await this.run(["push", path, staged], signal);
+      // SELinux can deny app access to shell_data_file. Shell reads it and pipes bytes to
+      // run-as; the debug app uid creates a correctly labelled private cache file.
+      await this.shell(
+        [
+          `cat ${shellQuote(staged)} | run-as ${shellQuote(PACKAGE)} sh -c ${shellQuote(`mkdir -p cache && cat > ${shellQuote(cache)}`)}`,
+        ],
+        signal,
+      );
+      const reply = await this.broadcast(
+        "photo",
+        namespace,
+        { rawContactId: String(id), photoFile: name },
+        signal,
+      );
+      if (reply.inserted !== 1) {
+        throw new ActionableError(
+          "Content seeder did not confirm the contact photo; rebuild and reinstall the APK and retry with reset.",
+        );
+      }
+    } finally {
+      // Cleanup must still run after cancellation, including a partially failed push.
+      await this.shell([
+        `rm -f ${shellQuote(staged)}`,
+        `run-as ${shellQuote(PACKAGE)} rm -f ${shellQuote(cache)}`,
+      ]);
+    }
   }
 
   private async run(args: string[], signal?: AbortSignal): Promise<string> {
@@ -328,7 +426,7 @@ export class SeedContent {
     await this.shell(
       [
         `cmd role add-role-holder --user 0 android.app.role.SMS ${shellQuote(PACKAGE)}`,
-        ...["READ_CALENDAR", "WRITE_CALENDAR", "READ_SMS"].map(
+        ...["READ_CALENDAR", "WRITE_CALENDAR", "READ_SMS", "READ_CONTACTS", "WRITE_CONTACTS"].map(
           (permission) =>
             `pm grant --user 0 ${shellQuote(PACKAGE)} ${shellQuote(`android.permission.${permission}`)}`,
         ),
@@ -374,11 +472,9 @@ export class SeedContent {
     }
     const uri = kind === "contacts" ? `${RAW_CONTACTS}?caller_is_syncadapter=true` : CALLS;
     // Include the old unregistered type for bounded cleanup of legacy contacts.
-    const where = shellQuote(
-      kind === "contacts"
-        ? `account_name='${tag}' AND (account_type='${ACCOUNT_TYPE}' OR account_type='${tag}')`
-        : `subscription_component_name='${tag}'`,
-    );
+    const selection =
+      kind === "contacts" ? this.contactWhere(tag) : `subscription_component_name='${tag}'`;
+    const where = shellQuote(selection);
     const before = contentRowCount(
       await this.shell(
         [
@@ -399,6 +495,27 @@ export class SeedContent {
     if (after !== 0) {
       throw new ActionableError(
         "Namespace rows remain after deletion; check the provider permissions before retrying reset.",
+      );
+    }
+    if (kind === "contacts") {
+      // Physical raw-contact deletion cascades to Data (including photo BLOBs).
+      if (
+        (await this.countRows(
+          DATA,
+          `${selection} AND mimetype='vnd.android.cursor.item/photo'`,
+          signal,
+        )) !== 0
+      ) {
+        throw new ActionableError(
+          "Namespace photo rows remain after deletion; check Contacts provider permissions and retry reset.",
+        );
+      }
+      await this.shell(
+        [
+          `rm -f /data/local/tmp/automobile.${namespace}.*.photo`,
+          `run-as ${shellQuote(PACKAGE)} sh -c ${shellQuote(`rm -f cache/automobile.${namespace}.*.photo`)}`,
+        ],
+        signal,
       );
     }
     return before;

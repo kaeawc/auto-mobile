@@ -39950,7 +39950,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Seed Android contacts, calendar events, call history and SMS inbox, tagged automobile.<namespace>. reset removes only this namespace before inserts (supplied kinds, or all kinds if no arrays). Contacts/calendar/SMS require the debug content-seeder APK and grant its SMS role and runtime permissions. Dates are ISO 8601 with timezone; all-day events use UTC midnight and exclusive end. Data persists until reset; contact photos are unsupported. iOS is unsupported.",
+    "description": "Seed Android contacts, calendar events, call history and SMS inbox, tagged automobile.<namespace>. reset removes only this namespace before inserts (supplied kinds, or all kinds if no arrays). Contacts/calendar/SMS require the debug content-seeder APK and grant its SMS role and runtime permissions. Optional contact photoPath reads a host PNG/JPEG up to 512 KB. Dates are ISO 8601 with timezone; all-day events use UTC midnight and exclusive end. Data persists until reset. iOS is unsupported.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -39985,6 +39985,12 @@
                   "type": "string",
                   "minLength": 1
                 }
+              },
+              "photoPath": {
+                "description": "Host PNG/JPEG file path, at most 512 KB (524288 bytes); checked by signature before writes.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\.(?:[pP][nN][gG]|[jJ][pP][eE]?[gG])$"
               }
             },
             "required": ["name"],

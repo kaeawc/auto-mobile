@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   SeedContent,
+  type SeedContentDependencies,
   parseSeedBroadcast,
   withoutProviderRows,
 } from "../../../src/features/contentSeed/SeedContent";
@@ -56,6 +57,9 @@ class FakeAdb implements Pick<AdbExecutor, "execute"> {
         ? success(0, command.includes("dropAccount") ? 0 : 3)
         : success();
     }
+    if (command.includes("content query") && command.includes("contacts/data")) {
+      return "No result found.";
+    }
     const provider = command.includes("raw_contacts") ? "contacts" : "calls";
     if (command.includes("content delete")) {
       this.rows[provider] = 0;
@@ -94,6 +98,186 @@ class FakeAdb implements Pick<AdbExecutor, "execute"> {
   }
 }
 const client = (adb: FakeAdb) => new SeedContent({ adb, exists: async () => false });
+
+type PhotoFiles = NonNullable<SeedContentDependencies["photoFiles"]>;
+class FakePhotoFiles implements PhotoFiles {
+  bytes = Buffer.from("89504e470d0a1a0a", "hex");
+  size = this.bytes.length;
+  missing = false;
+  regular = true;
+  reads: string[] = [];
+  async stat(_path: string) {
+    if (this.missing) {
+      throw new Error("ENOENT");
+    }
+    return { size: this.size, mtimeMs: 0, isFile: () => this.regular };
+  }
+  async readFileHead(path: string, length: number) {
+    this.reads.push(path);
+    return this.bytes.subarray(0, length);
+  }
+}
+
+describe("contact photos", () => {
+  const input = { namespace: "ns1", contacts: [{ name: "Ada", photoPath: "/host/Ada.png" }] };
+  test("rejects bad extensions, signatures, missing files and oversized photos before resets", async () => {
+    for (const problem of ["extension", "magic", "missing", "oversize", "grew", "directory"]) {
+      const adb = new FakeAdb();
+      const photoFiles = new FakePhotoFiles();
+      if (problem === "magic") {
+        photoFiles.bytes = Buffer.from("not an image");
+      }
+      if (problem === "missing") {
+        photoFiles.missing = true;
+      }
+      if (problem === "oversize") {
+        photoFiles.size = 512 * 1024 + 1;
+      }
+      if (problem === "grew") {
+        photoFiles.bytes = Buffer.alloc(512 * 1024 + 1);
+      }
+      if (problem === "directory") {
+        photoFiles.regular = false;
+      }
+      await expect(
+        new SeedContent({ adb, photoFiles }).seed({
+          ...input,
+          reset: true,
+          contacts: [
+            { name: "Ada", photoPath: problem === "extension" ? "/host/a.gif" : "/host/Ada.png" },
+          ],
+        }),
+      ).rejects.toThrow(/photoPath/);
+      expect(adb.calls).toEqual([]);
+    }
+  });
+
+  test("pushes then copies through run-as before photo broadcast, verifies and cleans up", async () => {
+    const adb = new FakeAdb();
+    adb.reply = (args) => (args.join(" ").includes("photo_id") ? "Row: 0 _id=90" : undefined);
+    const photoFiles = new FakePhotoFiles();
+    const result = await new SeedContent({ adb, photoFiles }).seed(input);
+    expect(result.inserted.contacts).toBe(1);
+    const push = adb.calls.findIndex((args) => args[0] === "push");
+    expect(adb.calls[push]).toEqual([
+      "push",
+      "/host/Ada.png",
+      "/data/local/tmp/automobile.ns1.3.photo",
+    ]);
+    const commands = adb.calls.map((args) => args.join(" "));
+    const copy = commands.findIndex(
+      (command) => command.includes("run-as") && command.includes("cat >"),
+    );
+    const broadcast = commands.findIndex(
+      (command) => command.includes("am broadcast") && command.includes("rawContactId"),
+    );
+    expect(push).toBeGreaterThan(0);
+    expect(copy).toBeGreaterThan(push);
+    expect(broadcast).toBeGreaterThan(copy);
+    expect(commands[broadcast]).toContain(`${PACKAGE}.SEED`);
+    expect(commands[broadcast]).toContain("photo");
+    expect(commands[broadcast]).toContain("photoFile");
+    expect(commands[broadcast]).toContain("automobile.ns1.3.photo");
+    expect(
+      commands.some(
+        (command) => command.includes("rm -f") && command.includes("cache/automobile.ns1.3.photo"),
+      ),
+    ).toBe(true);
+    expect(commands.at(-1)).toContain("photo_id");
+    expect(commands.at(-1)).toContain("automobile.ns1");
+    expect(photoFiles.reads).toEqual(["/host/Ada.png"]);
+  });
+
+  test("accepts JPEG and the exact size cap, resolving relative paths against launch cwd", async () => {
+    const adb = new FakeAdb();
+    adb.reply = (args) => (args.join(" ").includes("photo_id") ? "Row: 0 _id=90" : undefined);
+    const photoFiles = new FakePhotoFiles();
+    photoFiles.bytes = Buffer.alloc(512 * 1024);
+    photoFiles.bytes.set([0xff, 0xd8, 0xff]);
+    photoFiles.size = photoFiles.bytes.length;
+    await new SeedContent({
+      adb,
+      photoFiles,
+      env: { AUTOMOBILE_DAEMON_LAUNCH_CWD: "/launch" },
+    }).seed({
+      namespace: "ns1",
+      contacts: [{ name: "Ada", photoPath: "Ada.JPEG" }],
+    });
+    expect(adb.calls.find((args) => args[0] === "push")?.[1]).toBe(
+      path.resolve("/launch/Ada.JPEG"),
+    );
+  });
+
+  test("missing photo read-back fails with recovery guidance", async () => {
+    const adb = new FakeAdb();
+    adb.reply = (args) => (args.join(" ").includes("photo_id") ? "No result found." : undefined);
+    await expect(
+      new SeedContent({ adb, photoFiles: new FakePhotoFiles() }).seed(input),
+    ).rejects.toThrow("photo read-back failed");
+  });
+
+  test("rejects an unconfirmed photo broadcast and removes the staged file", async () => {
+    const adb = new FakeAdb();
+    adb.reply = (args) => (args.join(" ").includes("rawContactId") ? success(0) : undefined);
+    await expect(
+      new SeedContent({ adb, photoFiles: new FakePhotoFiles() }).seed(input),
+    ).rejects.toThrow("did not confirm the contact photo");
+    expect(adb.calls.at(-1)?.join(" ")).toContain("rm -f");
+  });
+
+  test("cleans staged files even if push or broadcast fails, without reusing an aborted signal", async () => {
+    for (const stage of ["push", "copy", "broadcast", "cancel"]) {
+      const adb = new FakeAdb();
+      const controller = new AbortController();
+      adb.reply = (args) => {
+        const command = args.join(" ");
+        const fails =
+          stage === "push"
+            ? args[0] === "push"
+            : stage === "copy"
+              ? command.includes("cat >")
+              : command.includes("rawContactId");
+        if (!fails) {
+          return undefined;
+        }
+        if (stage === "cancel") {
+          controller.abort();
+        }
+        return "Error: rejected photo";
+      };
+      await expect(
+        new SeedContent({ adb, photoFiles: new FakePhotoFiles() }).seed(input, controller.signal),
+      ).rejects.toThrow("rejected photo");
+      expect(adb.calls.at(-1)?.join(" ")).toContain("rm -f");
+      expect(adb.options.at(-1)?.signal).toBeUndefined();
+      if (stage === "cancel") {
+        expect(controller.signal.aborted).toBe(true);
+      }
+    }
+  });
+
+  test("contact reset checks photo cascade and removes only namespace staged files", async () => {
+    const adb = new FakeAdb();
+    adb.reply = (args) =>
+      args.join(" ").includes("contacts/data") ? "No result found." : undefined;
+    await client(adb).seed({ namespace: "ns1", reset: true, contacts: [] });
+    const commands = adb.calls.map((args) => args.join(" "));
+    expect(
+      commands.some(
+        (command) => command.includes("contacts/data") && command.includes("automobile.ns1"),
+      ),
+    ).toBe(true);
+    expect(
+      commands.some(
+        (command) => command.includes("rm -f") && command.includes("automobile.ns1.*.photo"),
+      ),
+    ).toBe(true);
+    adb.reply = (args) => (args.join(" ").includes("contacts/data") ? "Row: 0 _id=90" : undefined);
+    await expect(client(adb).seed({ namespace: "ns1", reset: true, contacts: [] })).rejects.toThrow(
+      "photo rows remain",
+    );
+  });
+});
 
 describe("seedContent", () => {
   test("namespace validation rejects shell syntax before any adb access", async () => {

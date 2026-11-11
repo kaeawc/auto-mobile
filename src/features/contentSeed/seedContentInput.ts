@@ -29,6 +29,15 @@ export const seedContentInput = z.object({
           name: bindingText,
           phones: z.array(bindingText).optional(),
           emails: z.array(bindingText).optional(),
+          photoPath: text
+            .regex(
+              /\.(?:[pP][nN][gG]|[jJ][pP][eE]?[gG])$/,
+              "photoPath must end in .png, .jpg or .jpeg",
+            )
+            .optional()
+            .describe(
+              "Host PNG/JPEG file path, at most 512 KB (524288 bytes); checked by signature before writes.",
+            ),
         })
         .strict(),
     )

@@ -4,7 +4,16 @@ import { TapTargetUnavailableError } from "./tapTargetSupport";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { childrenOf, nodeAttributes } from "../../models/ViewHierarchyResult";
-import { attachRawViewHierarchy, getRawViewHierarchy } from "../utility/viewHierarchySearch";
+import {
+  attachRawViewHierarchy,
+  getRawViewHierarchy,
+  resolveViewHierarchyForSearch,
+} from "../utility/viewHierarchySearch";
+import { SearchableHierarchy, matchesCtrlProxyNodeSelector } from "../utility/SearchableNode";
+import { stableNodeSelectorForElement } from "../talkback/nodeActionTarget";
+import { isCompleteHierarchy } from "../talkback/resourceIdActionError";
+import { hasAccessibilityAction } from "../utility/elementProperties";
+import { boundsNearlyEqual } from "../../utils/bounds";
 
 /**
  * Selection-only projection: preserve visible descendants, never promote hidden XR chrome.
@@ -15,10 +24,18 @@ export function withoutHiddenXrChrome(hierarchy: ViewHierarchyResult): {
   hierarchy: ViewHierarchyResult;
   hiddenNodes: ReadonlySet<ViewHierarchyNode>;
 } {
+  return projectWithoutHiddenXrChrome(hierarchy);
+}
+
+function projectWithoutHiddenXrChrome(
+  hierarchy: ViewHierarchyResult,
+  nodeClickTargets: ReadonlySet<ViewHierarchyNode> = new Set(),
+) {
   const hiddenNodes = new Set<ViewHierarchyNode>();
   const raw = getRawViewHierarchy(hierarchy);
-  const projected = projectTree(hierarchy, hiddenNodes);
-  const projectedRaw = raw && raw !== hierarchy ? projectTree(raw, hiddenNodes) : undefined;
+  const projected = projectTree(hierarchy, hiddenNodes, nodeClickTargets);
+  const projectedRaw =
+    raw && raw !== hierarchy ? projectTree(raw, hiddenNodes, nodeClickTargets) : undefined;
   if (hiddenNodes.size === 0) {
     return { hierarchy, hiddenNodes };
   }
@@ -31,6 +48,7 @@ export function withoutHiddenXrChrome(hierarchy: ViewHierarchyResult): {
 function projectTree(
   hierarchy: ViewHierarchyResult,
   hiddenNodes: Set<ViewHierarchyNode>,
+  nodeClickTargets: ReadonlySet<ViewHierarchyNode>,
 ): ViewHierarchyResult {
   const hiddenBefore = hiddenNodes.size;
   const systemWindows = new Set(
@@ -49,6 +67,7 @@ function projectTree(
     const children = childrenOf(node).flatMap((child) => filter(child, owner));
     if (
       attrs["visible-to-user"] === false &&
+      !nodeClickTargets.has(node) &&
       (owner ||
         (typeof attrs["resource-id"] === "string" &&
           attrs["resource-id"].startsWith("com.android.systemui")))
@@ -89,6 +108,41 @@ interface ChromeSelection {
 }
 type Select = (options: TapVerificationOptions, hierarchy: ViewHierarchyResult) => ChromeSelection;
 
+/** Mirror the stable-selector branch of xrPanelNodeClick; hidden nodes never use bounds alone. */
+function hiddenNodeClickTargets(hierarchy: ViewHierarchyResult): ReadonlySet<ViewHierarchyNode> {
+  const capture = resolveViewHierarchyForSearch(hierarchy) ?? null;
+  if (!isCompleteHierarchy(capture)) {
+    return new Set();
+  }
+  const entries = new SearchableHierarchy().project(capture);
+  return new Set(
+    entries
+      .filter((entry) => {
+        if (
+          entry.properties["visible-to-user"] !== false ||
+          !entry.bounds ||
+          entry.properties["hierarchy-source"] === "uiautomator" ||
+          !hasAccessibilityAction(entry.properties.actions, "click")
+        ) {
+          return false;
+        }
+        const selector = stableNodeSelectorForElement(entry.properties);
+        if (!selector) {
+          return false;
+        }
+        const matches = entries.filter((candidate) =>
+          matchesCtrlProxyNodeSelector(candidate.properties, selector),
+        );
+        return (
+          new Set(matches.map((candidate) => candidate.source)).size === 1 &&
+          !!matches[0]?.bounds &&
+          boundsNearlyEqual(matches[0].bounds, entry.bounds, 0)
+        );
+      })
+      .map((entry) => entry.source),
+  );
+}
+
 function hiddenChromeFailure(
   options: TapVerificationOptions,
   original: ChromeSelection,
@@ -108,13 +162,36 @@ function hiddenChromeFailure(
   );
 }
 
+function withHiddenChromeFailure(
+  result: ChromeSelection,
+  hiddenFailure: () => TapTargetUnavailableError | undefined,
+): ChromeSelection {
+  const match = result.selection.matchedElement ?? result.selection.element;
+  // Do not turn a refused exact hidden match ("Launcher") into a different
+  // hidden substring match ("Open Launcher Panel"). Visible matches still win.
+  const refused = match?.["visible-to-user"] === false ? hiddenFailure() : undefined;
+  if (refused) {
+    return {
+      ...result,
+      selection: { ...result.selection, element: null, matchedElement: undefined },
+      visibilityError: refused,
+    };
+  }
+  return result.selection.element || result.selection.matchedElement
+    ? result
+    : { ...result, visibilityError: hiddenFailure() };
+}
+
 /** Pure selection with the caller's synchronous selector; observations remain unmodified. */
 export function selectWithoutHiddenXrChrome(
   options: TapVerificationOptions,
   hierarchy: ViewHierarchyResult,
   select: Select,
 ): ChromeSelection {
-  const filtered = withoutHiddenXrChrome(hierarchy);
+  const filtered = projectWithoutHiddenXrChrome(
+    hierarchy,
+    options.action === "tap" ? hiddenNodeClickTargets(hierarchy) : undefined,
+  );
   if (filtered.hiddenNodes.size === 0) {
     return select(options, hierarchy);
   }
@@ -122,10 +199,7 @@ export function selectWithoutHiddenXrChrome(
   const hiddenFailure = () =>
     hiddenChromeFailure(options, select(inspectOptions, hierarchy), filtered.hiddenNodes);
   try {
-    const result = select(options, filtered.hierarchy);
-    return result.selection.element || result.selection.matchedElement
-      ? result
-      : { ...result, visibilityError: hiddenFailure() };
+    return withHiddenChromeFailure(select(options, filtered.hierarchy), hiddenFailure);
   } catch (error) {
     if (!(error instanceof ActionableError)) {
       throw error;

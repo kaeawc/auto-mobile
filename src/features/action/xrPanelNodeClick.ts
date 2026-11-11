@@ -20,6 +20,7 @@ type VerifiedNodeTarget = {
   selector?: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
   expectedBounds: Element["bounds"];
   identityHints?: AndroidActionRequestOptions["identityHints"];
+  allowInvisible?: boolean;
 };
 
 type XrNodeClickOptions = DisplayFenceOption & {
@@ -121,7 +122,12 @@ function xrNodeClickSelector(
   if (hasAccessibilityAction(element.actions, "click")) {
     const selector = uniqueSelector(element);
     if (selector) {
-      return selector;
+      return {
+        ...selector,
+        ...(selector.selector && element["visible-to-user"] === false
+          ? { allowInvisible: true }
+          : {}),
+      };
     }
     throw xrCoordinateError();
   }
@@ -265,7 +271,7 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
   },
 ): Promise<void> {
   throwIfAborted(signal);
-  const { selector, expectedBounds, identityHints } = xrNodeClickSelector(
+  const { selector, ...verification } = xrNodeClickSelector(
     action,
     element,
     options ?? {},
@@ -279,8 +285,7 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
     options?.displayFence?.assertCurrent();
     const result = await accessibilityService().requestNodeAction("click", selector, {
       signal,
-      expectedBounds,
-      identityHints,
+      ...verification,
     });
     throwIfAborted(signal);
     if (!result.success) {

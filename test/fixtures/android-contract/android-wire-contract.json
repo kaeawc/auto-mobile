@@ -642,6 +642,12 @@
           "hasDefault": true
         },
         {
+          "name": "allowInvisible",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
           "name": "customAction",
           "type": "string",
           "nullable": true,

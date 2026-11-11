@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { SeedContent, parseSeedBroadcast } from "../../../src/features/contentSeed/SeedContent";
 import {
   ACCOUNT_TYPE,
@@ -333,11 +335,21 @@ describe("seedContent", () => {
   test("finds the debug APK under the package root without an override", async () => {
     const adb = new FakeAdb();
     adb.installed = false;
-    const root = new URL("../../../", import.meta.url).pathname;
-    const apk = `${root}android/content-seeder/build/outputs/apk/debug/content-seeder-debug.apk`;
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const apk = path.join(
+      root,
+      "android",
+      "content-seeder",
+      "build",
+      "outputs",
+      "apk",
+      "debug",
+      "content-seeder-debug.apk",
+    );
     const seed = new SeedContent({
       adb,
-      exists: async (path) => path === `${root}package.json` || path === apk,
+      exists: async (candidate) =>
+        candidate === path.join(root, "package.json") || candidate === apk,
     });
     await seed.seed({ namespace: "ns1", smsInbox: [{ address: "555", body: "hi", date }] });
     expect(adb.calls[1]).toEqual(["install", "-t", apk]);

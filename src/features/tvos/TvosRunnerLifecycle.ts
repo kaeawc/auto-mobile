@@ -13,6 +13,7 @@ import { tvosRunners } from "./TvosRunnerRegistry";
 import { SingleFlight } from "../../utils/cache/SingleFlight";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { TvosRunnerClient } from "./TvosRunnerClient";
 
 type TvosRunnerSessions = Pick<
   SessionManager,
@@ -24,12 +25,16 @@ interface OwnedRunner {
   stop?: () => void;
   port?: number;
 }
+interface TvosRunnerRestartResult {
+  runnerUnavailable?: string;
+  unownedRunner?: TvosRunnerClient;
+}
 
 /** Owns only runners launched here; a pre-registered runner is reused without taking ownership. */
 export class TvosRunnerLifecycle {
   private readonly runners = new Map<string, OwnedRunner>();
   private readonly observedSessions = new WeakSet<TvosRunnerSessions>();
-  private readonly restarts = new SingleFlight<string, { runnerUnavailable?: string }>();
+  private readonly restarts = new SingleFlight<string, TvosRunnerRestartResult>();
   constructor(
     private readonly dependencies: {
       artifacts: Pick<TvosRunnerArtifacts, "resolve">;
@@ -60,10 +65,7 @@ export class TvosRunnerLifecycle {
   }
 
   /** One replacement per device; cancellation belongs to all waiters and the previous session. */
-  async restartOwned(
-    deviceId: string,
-    signal?: AbortSignal,
-  ): Promise<{ runnerUnavailable?: string }> {
+  async restartOwned(deviceId: string, signal?: AbortSignal): Promise<TvosRunnerRestartResult> {
     return this.restarts.run(
       deviceId,
       async (flightSignal) => {
@@ -72,6 +74,11 @@ export class TvosRunnerLifecycle {
         }
         const previous = this.runners.get(deviceId);
         if (!previous) {
+          // External clients retain their own command errors; only owned runners can recover.
+          const unownedRunner = tvosRunners.get(deviceId);
+          if (unownedRunner) {
+            return { unownedRunner };
+          }
           return { runnerUnavailable: "the runner is not owned by this lifecycle" };
         }
         const controller = new AbortController();

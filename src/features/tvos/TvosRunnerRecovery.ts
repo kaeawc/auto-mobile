@@ -11,6 +11,9 @@ export async function requireTvosRunner(
   if (!tvosRunners.get(deviceId)?.isUsable()) {
     const result = await (lifecycle ?? getTvosRunnerLifecycle()).restartOwned(deviceId, signal);
     signal?.throwIfAborted();
+    if (result.unownedRunner) {
+      return result.unownedRunner;
+    }
     if (result.runnerUnavailable || !tvosRunners.get(deviceId)?.isUsable()) {
       throw new ActionableError(
         `tvOS runner unavailable for ${deviceId}: ${result.runnerUnavailable ?? "recovery did not connect a usable runner"}. Call startDevice to restart the runner, then retry.`,

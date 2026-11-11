@@ -302,20 +302,33 @@ test("restart failure is actionable and names startDevice", async () => {
   expect(String(error)).toContain("missing tvOS artifacts");
 });
 
-test("an unowned disconnected runner cannot be restarted by require", async () => {
-  const f = fixture();
-  f.client.close();
-  const unregister = tvosRunners.register("owned-tvos", f.client);
-  try {
-    await expect(requireTvosRunner("owned-tvos", undefined, f.owner)).rejects.toThrow(
-      "startDevice",
-    );
-    expect(f.launcher.launches).toHaveLength(0);
-    expect(tvosRunners.get("owned-tvos")).toBe(f.client);
-  } finally {
-    unregister();
-  }
-});
+test.each(["disconnected", "failed"])(
+  "an externally registered %s runner passes through require without recovery",
+  async (state) => {
+    const f = fixture();
+    const failure = new Error("runner gone");
+    f.client.failure = failure;
+    if (state === "disconnected") {
+      f.client.close();
+    }
+    const unregister = tvosRunners.register("owned-tvos", f.client);
+    try {
+      expect(f.client.isUsable()).toBe(false);
+      const client = await requireTvosRunner("owned-tvos", undefined, f.owner);
+      expect(client).toBe(f.client);
+      await expect(client.request({ type: "request_press_button", action: "home" })).rejects.toBe(
+        failure,
+      );
+      expect(f.launcher.launches).toHaveLength(0);
+      expect(f.allocated).toEqual([]);
+      expect(f.released).toEqual([]);
+      expect(f.launcher.stops).toBe(0);
+      expect(tvosRunners.get("owned-tvos")).toBe(f.client);
+    } finally {
+      unregister();
+    }
+  },
+);
 
 test.each(["timeout", "abort", "release", "unbind"])(
   "%s bounds recovery and retires a late startup handle",

@@ -152,27 +152,117 @@ class NodeActionControllerTest {
     }
 
   @Test
-  fun `verified click skips an earlier invisible duplicate and clicks the visible bounds match`() =
-    runTest {
+  fun `verified click refuses an invisible duplicate at the same bounds`() = runTest {
+    val (controller, host) = setup()
+    val hidden = boundsNode(visible = false)
+    val visible = boundsNode()
+    host.windowRoots = listOf(tree(hidden, visible))
+
+    controller.performNodeAction(
+      "bounds",
+      "click",
+      null,
+      selector,
+      expectedBounds = expectedBounds,
+    )
+
+    assertFalse(host.results.single().success)
+    assertTrue(host.results.single().error?.startsWith("node_bounds_ambiguous:") == true)
+    verify(exactly = 0) { hidden.performAction(any()) }
+    verify(exactly = 0) { visible.performAction(any()) }
+    verify(exactly = 1) { hidden.recycle() }
+    verify(exactly = 1) { visible.recycle() }
+  }
+
+  @Test
+  fun `bounds-only click accepts the captured invisible row`() = runTest {
+    val (controller, host) = setup()
+    val target = capturedRow()
+    host.windowRoots = listOf(tree(target))
+
+    controller.performNodeAction(
+      "bounds-only",
+      "click",
+      null,
+      null,
+      expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+    )
+
+    assertTrue(host.results.single().success)
+    verify(exactly = 1) { target.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+    verify(exactly = 1) { target.recycle() }
+  }
+
+  private fun capturedRow(right: Int = 696, clickable: Boolean = true): AccessibilityNodeInfo =
+    node(actions = if (clickable) listOf(AccessibilityNodeInfo.ACTION_CLICK) else emptyList())
+      .also {
+        every { it.isVisibleToUser } returns false
+        every { it.getBoundsInScreen(any()) } answers
+          {
+            firstArg<Rect>().set(48, 372, right, 548)
+          }
+      }
+
+  @Test
+  fun `bounds-only click refuses duplicate captured rows across windows`() = runTest {
+    val (controller, host) = setup()
+    val first = capturedRow()
+    val second = capturedRow()
+    host.windowRoots = listOf(tree(first), tree(second))
+
+    controller.performNodeAction(
+      "duplicate",
+      "click",
+      null,
+      null,
+      expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+    )
+
+    assertTrue(host.results.single().error?.startsWith("node_bounds_ambiguous:") == true)
+    verify(exactly = 0) { first.performAction(any()) }
+    verify(exactly = 0) { second.performAction(any()) }
+    verify(exactly = 1) { first.recycle() }
+    verify(exactly = 1) { second.recycle() }
+  }
+
+  @Test
+  fun `bounds-only click refuses mismatched empty and non-clickable rows`() = runTest {
+    for (mode in listOf("mismatch", "empty", "non-clickable")) {
       val (controller, host) = setup()
-      val hidden = boundsNode(visible = false)
-      val visible = boundsNode()
-      host.windowRoots = listOf(tree(hidden, visible))
+      val target =
+        capturedRow(right = if (mode == "empty") 48 else 696, clickable = mode != "non-clickable")
+      host.windowRoots = listOf(tree(target))
+      val bounds =
+        when (mode) {
+          "mismatch" -> NodeExpectedBounds(49, 372, 696, 548)
+          "empty" -> NodeExpectedBounds(48, 372, 48, 548)
+          else -> NodeExpectedBounds(48, 372, 696, 548)
+        }
 
-      controller.performNodeAction(
-        "bounds",
-        "click",
-        null,
-        selector,
-        expectedBounds = expectedBounds,
-      )
+      controller.performNodeAction("refuse", "click", null, null, expectedBounds = bounds)
 
-      assertTrue(host.results.single().success)
-      verify(exactly = 0) { hidden.performAction(any()) }
-      verify(exactly = 1) { visible.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
-      verify(exactly = 1) { hidden.recycle() }
-      verify(exactly = 1) { visible.recycle() }
+      assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
+      verify(exactly = 0) { target.performAction(any()) }
+      verify(exactly = 1) { target.recycle() }
     }
+  }
+
+  @Test
+  fun `bounds alone never authorize a non-click action`() = runTest {
+    val (controller, host) = setup()
+    controller.performNodeAction(
+      "refuse",
+      "long_click",
+      null,
+      null,
+      expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+    )
+    advanceUntilIdle()
+    assertEquals(
+      "A resource-id or stable node selector is required for accessibility actions",
+      host.results.single().error,
+    )
+  }
 
   @Test
   fun `bounds mismatch refuses without performing an action`() = runTest {

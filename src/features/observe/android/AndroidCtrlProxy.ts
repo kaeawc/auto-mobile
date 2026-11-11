@@ -240,9 +240,10 @@ export interface AndroidCtrlProxy
     signal?: AbortSignal,
   ): Promise<A11yActionResult>;
 
+  /** A missing selector is accepted only for a click with expectedBounds. */
   requestNodeAction(
     action: string,
-    selector: AccessibilityNodeSelector,
+    selector: AccessibilityNodeSelector | undefined,
     options?: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker },
   ): Promise<A11yActionResult>;
 

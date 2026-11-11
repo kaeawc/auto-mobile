@@ -208,6 +208,16 @@ internal interface DaemonLaunchEnvironment {
 
   val clientIdentity: DaemonClientIdentity
 
+  /** The control socket this runner uses, named in errors and in the reuse log line (#17953). */
+  val socketPath: String
+
+  /**
+   * True when the socket path comes from an explicit `AUTOMOBILE_DAEMON_SOCKET_PATH` (what a
+   * sourced private-daemon `env.sh` sets): that daemon belongs to whoever configured it, so the
+   * runner reuses it and never restarts it, even on a forced restart (#17953).
+   */
+  val userManagedSocket: Boolean
+
   fun probeDaemon(): DaemonProbe
 
   fun readPidRecord(): DaemonPidRecord
@@ -231,8 +241,12 @@ internal object DaemonLauncher {
    * skipped when the running daemon started after this run
    * ([DaemonLaunchEnvironment.runnerStartedAtMs]: the build-wide run start, else this runner JVM's
    * start): another runner of the same run (a parallel Gradle fork) already replaced the stale
-   * daemon, and stopping it again would fail that runner's in-flight plans (#10170). The version,
-   * build and asset-version skew checks are unchanged.
+   * daemon, and stopping it again would fail that runner's in-flight plans (#10170).
+   *
+   * A live daemon the runner did not start is never replaced just because its version or build
+   * differs (#17953): that restart is only made when a forced restart was requested (explicit flag,
+   * or `CI`), and never for a [DaemonLaunchEnvironment.userManagedSocket] daemon. Otherwise the
+   * runner fails with both versions named instead of killing the daemon.
    */
   fun ensureRunning(env: DaemonLaunchEnvironment) {
     env.withRunnerRestartLock { ensureRunningLocked(env) }
@@ -280,6 +294,11 @@ internal object DaemonLauncher {
       )
     }
 
+    if (daemonAvailable && (env.userManagedSocket || (skew && !forceRestartRequested))) {
+      reuseLiveDaemon(env, record, skew, forcedRestart)
+      return
+    }
+
     if (!forcedRestart && daemonAvailable && !skew) {
       return
     }
@@ -305,6 +324,54 @@ internal object DaemonLauncher {
     // The daemon initializes its device pool at startup, and tests will wait for
     // devices as needed when they call executePlan.
   }
+
+  /**
+   * Reuse a live daemon this runner must not replace (#17953), or fail naming both builds when it
+   * cannot serve this runner (its handshake gate would reject every request).
+   */
+  private fun reuseLiveDaemon(
+    env: DaemonLaunchEnvironment,
+    record: DaemonPidRecord,
+    skew: Boolean,
+    forcedRestart: Boolean,
+  ) {
+    val identity = env.clientIdentity
+    if (skew) {
+      val owner =
+        if (env.userManagedSocket) {
+          "the daemon configured by AUTOMOBILE_DAEMON_SOCKET_PATH"
+        } else {
+          "the running shared daemon"
+        }
+      val remedy =
+        if (env.userManagedSocket) {
+          "Restart that daemon with the runner's version, or run the tests with an " +
+            "auto-mobile-junit-runner matching the daemon."
+        } else {
+          "Stop it (auto-mobile --daemon stop), use a runner matching the daemon, or set " +
+            "-Dautomobile.daemon.force.restart=true to let the runner replace it."
+        }
+      throw DaemonUnavailableException(
+        "AutoMobile daemon at ${env.socketPath} differs from this runner: daemon " +
+          "${describeBuild(record.version, record.buildId)}, runner " +
+          "${describeBuild(identity.version, identity.buildId)}. Not replacing $owner, " +
+          "which this runner did not start. $remedy",
+      )
+    }
+    if (forcedRestart) {
+      println(
+        "AutoMobile: not force-restarting the daemon configured by " +
+          "AUTOMOBILE_DAEMON_SOCKET_PATH; reusing it",
+      )
+    }
+    println(
+      "AutoMobile: using running daemon at ${env.socketPath} " +
+        "(version ${record.version ?: "unknown"})",
+    )
+  }
+
+  private fun describeBuild(version: String?, buildId: String?): String =
+    "version ${version ?: "unknown"}" + (buildId?.let { " (build $it)" } ?: "")
 
   private fun verifyLaunchedDaemon(env: DaemonLaunchEnvironment, identity: DaemonClientIdentity) {
     val started = env.readPidRecord()
@@ -378,7 +445,8 @@ internal object DaemonLauncher {
 internal class DefaultDaemonLaunchEnvironment(
   private val environmentOverrides: Map<String, String>,
 ) : DaemonLaunchEnvironment {
-  private val socketPath = DaemonSocketPaths.socketPath()
+  override val socketPath = DaemonSocketPaths.socketPath()
+  override val userManagedSocket: Boolean = DaemonSocketPaths.socketPathOverridden()
   private val pidFilePath = DaemonSocketPaths.pidFilePath()
   private val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
 

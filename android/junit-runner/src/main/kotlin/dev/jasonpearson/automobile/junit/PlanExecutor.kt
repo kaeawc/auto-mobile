@@ -27,6 +27,7 @@ internal class PlanExecutor(
   private val collaborators: PlanExecutorCollaborators = PlanExecutorCollaborators(),
 ) {
   private val agent by lazy { collaborators.agent() }
+  private val failureDiagnostics = PlanFailureDiagnostics(collaborators)
 
   /** Execute an AutoMobile plan with parameter substitution. */
   fun execute(
@@ -44,12 +45,17 @@ internal class PlanExecutor(
       // Check device availability after plan file validation
       if (!collaborators.deviceChecker.areDevicesAvailable()) {
         val executionTime = System.currentTimeMillis() - startTime
-        return AutoMobilePlanExecutionResult(
-          success = false,
-          exitCode = -1,
-          errorMessage = "No Android devices available for plan execution",
-          executionTimeMs = executionTime,
-          parametersUsed = parameters,
+        return failureDiagnostics.annotate(
+          AutoMobilePlanExecutionResult(
+            success = false,
+            exitCode = -1,
+            errorMessage =
+              "No Android devices available for plan execution" +
+                (collaborators.deviceChecker.getLastError()?.let { ": $it" } ?: ""),
+            executionTimeMs = executionTime,
+            parametersUsed = parameters,
+          ),
+          options,
         )
       }
 
@@ -88,25 +94,31 @@ internal class PlanExecutor(
 
       val executionTime = System.currentTimeMillis() - startTime
 
-      return AutoMobilePlanExecutionResult(
-        success = result.success,
-        exitCode = result.exitCode,
-        output = result.output,
-        errorMessage = result.errorMessage,
-        executionTimeMs = executionTime,
-        aiRecoveryAttempted = result.aiRecoveryAttempted,
-        aiRecoverySuccessful = result.aiRecoverySuccessful,
-        parametersUsed = parameters,
-        toolResults = result.toolResults,
+      return failureDiagnostics.annotate(
+        AutoMobilePlanExecutionResult(
+          success = result.success,
+          exitCode = result.exitCode,
+          output = result.output,
+          errorMessage = result.errorMessage,
+          executionTimeMs = executionTime,
+          aiRecoveryAttempted = result.aiRecoveryAttempted,
+          aiRecoverySuccessful = result.aiRecoverySuccessful,
+          parametersUsed = parameters,
+          toolResults = result.toolResults,
+        ),
+        options,
       )
     } catch (e: Exception) {
       val executionTime = System.currentTimeMillis() - startTime
-      return AutoMobilePlanExecutionResult(
-        success = false,
-        exitCode = -1,
-        errorMessage = "Plan execution failed: ${e.message}",
-        executionTimeMs = executionTime,
-        parametersUsed = parameters,
+      return failureDiagnostics.annotate(
+        AutoMobilePlanExecutionResult(
+          success = false,
+          exitCode = -1,
+          errorMessage = "Plan execution failed: ${e.message}",
+          executionTimeMs = executionTime,
+          parametersUsed = parameters,
+        ),
+        options,
       )
     }
   }

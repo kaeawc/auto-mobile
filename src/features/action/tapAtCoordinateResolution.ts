@@ -151,7 +151,7 @@ function tapAtCoordinateFrame(
   // guard; hitTest, hoverAt, dragPath, multiTouch and swipeAt resolve native pixels (#17819).
   const xr =
     platform === "android" && toolName === "tapAt" && options.pointSpace !== "native"
-      ? detectXrPanel(observation.backStack)
+      ? detectXrPanel(observation.backStack, options.androidXr)
       : undefined;
   const screenSize = xr ? xrScreenshotSize(observation) : observation.screenSize;
   const image = xr ? xrScreenshotPoint(options.image, observation, screenSize) : options.image;
@@ -211,7 +211,7 @@ export function resolveTapAtCoordinates(
       ? Math.min(Math.round(resolvedY), Math.ceil(limits.height) - 1)
       : resolvedY;
   if (xr) {
-    const warning = xrDefaultPoseWarning(observeResult);
+    const warning = xrDefaultPoseWarning(observeResult, true);
     const mapped = screenshotPointToPanelPoint({ x, y }, xr.panel, screenSize);
     return {
       ...mapped,

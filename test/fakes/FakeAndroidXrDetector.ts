@@ -1,6 +1,6 @@
 import type {
   AndroidXrDetector,
-  XrDeviceIdentity,
+  AndroidXrEvidence,
 } from "../../src/utils/android-cmdline-tools/androidXrDevice";
 
 /** Answers a configured XR verdict without a `pm has-feature` probe; records every query. */
@@ -13,11 +13,7 @@ export class FakeAndroidXrDetector implements AndroidXrDetector {
     this.xr = xr;
   }
 
-  async isAndroidXr(
-    _adb: unknown,
-    device: XrDeviceIdentity,
-    _signal?: AbortSignal,
-  ): Promise<boolean> {
+  async isAndroidXr({ device }: AndroidXrEvidence): Promise<boolean> {
     this.queries.push(device.deviceId);
     return device.platform === "android" && this.xr;
   }

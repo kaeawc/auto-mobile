@@ -52,6 +52,10 @@ import {
   loadAndroidHomeObserve,
   loadIosFractionalObserve,
 } from "../../fixtures/observe/observeFixture";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
+
+/** tapAt asks the shared XR predicate; these phone tests answer it without a probe. */
+const notXr = new FakeAndroidXrDetector(false);
 
 const androidDevice = {
   name: "Android test device",
@@ -77,6 +81,7 @@ function createAndroidTapAtWithClient(
   const timer = new FakeTimer();
   const tapAt = new TapAtCoordinate(androidDevice, adb, {
     timer,
+    xrDetector: notXr,
     androidClient,
     iosClient: { ...androidClient, requestDoubleTapCoordinates: async () => ({ success: true }) },
     snapshotReferences,
@@ -386,6 +391,7 @@ describe("TapAtCoordinate", () => {
     };
     const tapAt = new TapAtCoordinate(device, adb, {
       timer,
+      xrDetector: notXr,
       androidClient: client,
       iosClient,
       invalidateIosCache: () => {},
@@ -463,7 +469,11 @@ describe("TapAtCoordinate", () => {
         return { success: true };
       },
     };
-    const tapAt = new TapAtCoordinate(androidDevice, adb, { timer, androidClient: client });
+    const tapAt = new TapAtCoordinate(androidDevice, adb, {
+      timer,
+      androidClient: client,
+      xrDetector: notXr,
+    });
     setFakeTapAtWindow(tapAt);
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation(100, 200));
@@ -507,6 +517,7 @@ describe("TapAtCoordinate", () => {
       };
       const tapAt = new TapAtCoordinate(iosDevice, new FakeAdbExecutor(), {
         timer,
+        xrDetector: notXr,
         snapshotReferences,
         androidClient: unused,
         iosClient: { ...unused, requestDoubleTapCoordinates: async () => ({ success: true }) },
@@ -788,6 +799,7 @@ describe("TapAtCoordinate", () => {
       };
       const tapAt = new TapAtCoordinate(device, adb, {
         timer,
+        xrDetector: notXr,
         androidClient: client,
         iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
         lastRenderedObservation: () => ({ display: { key: "0" }, displayRevision: 0 }),
@@ -841,6 +853,7 @@ describe("TapAtCoordinate", () => {
     };
     const tapAt = new TapAtCoordinate(androidDevice, adb, {
       timer,
+      xrDetector: notXr,
       androidClient: client,
       displayTransitions: transitions,
       lastRenderedObservation: () => ({
@@ -1455,6 +1468,7 @@ describe("TapAtCoordinate", () => {
         adb,
         {
           timer,
+          xrDetector: notXr,
           androidClient: client,
           iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
           lastRenderedObservation: () => ({ display: { key: "inner" } }),
@@ -2575,6 +2589,7 @@ describe("TapAtCoordinate TalkBack", () => {
     };
     const tapAt = new TapAtCoordinate(device, adb, {
       timer,
+      xrDetector: notXr,
       androidClient: client,
       iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
       accessibilityDetector: detector,

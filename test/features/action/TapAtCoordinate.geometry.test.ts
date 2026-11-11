@@ -1,6 +1,7 @@
 import { cropSource } from "../../helpers/imageRelativePoint";
 import { resolveTapAtCoordinates } from "../../../src/features/action/tapAtCoordinateResolution";
 import { xrBackStack } from "../../helpers/xrHeadset";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { recordPlanCall } from "../../helpers/recordPlanCall";
 import { expect, test } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -201,6 +202,45 @@ test("non-XR freeform tasks preserve absolute coordinates", async () => {
   expect(fake.androidDispatches[0]).toMatchObject({ x: 551, y: 1175 });
   expect(result.xrPanel).toBeUndefined();
   expect(result.warning).toBeUndefined();
+});
+
+test("tapAt maps screenshot pixels by the shared XR predicate, not the back stack (#17811)", async () => {
+  const device = { deviceId: "test", name: "test", platform: "android" } as const;
+  const panelOnly = xrBackStack();
+  panelOnly.activities = panelOnly.activities.filter((activity) => activity.taskId === 6);
+  panelOnly.tasks = panelOnly.tasks.filter((task) => task.id === 6);
+  // The device declares the spatial feature, though the observation has no XR System UI.
+  const headset = createTapAt(
+    device,
+    10,
+    10,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    new FakeAndroidXrDetector(true),
+  );
+  headset.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: panelOnly });
+  const mapped = await headset.tapAt.execute({ x: 553, y: 1178 });
+  expect(headset.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
+  expect(mapped.xrPanel).toMatchObject({ taskId: 6 });
+  // A device without the feature keeps absolute coordinates despite XR System UI windows.
+  const phone = createTapAt(
+    device,
+    10,
+    10,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    new FakeAndroidXrDetector(false),
+  );
+  phone.observeScreen.setObserveResult({ ...observation(2560, 2558), backStack: xrBackStack() });
+  const absolute = await phone.tapAt.execute({ x: 551, y: 1175 });
+  expect(phone.androidDispatches[0]).toMatchObject({ x: 551, y: 1175 });
+  expect(absolute.xrPanel).toBeUndefined();
 });
 
 test("XR records screenshot coordinates for replay without mapping twice", async () => {

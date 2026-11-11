@@ -10,6 +10,11 @@ import type { BootedDevice, ObserveResult } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  CachedAndroidXrDetector,
+  isAndroidXr,
+  type AndroidXrDetector,
+} from "../../src/utils/android-cmdline-tools/androidXrDevice";
 import { FakeWindow } from "../fakes/FakeWindow";
 
 export function setFakeTapAtWindow(tapAt: TapAtCoordinate): void {
@@ -50,6 +55,7 @@ export function createTapAt(
   snapshotReferences?: SnapshotReferenceStore,
   rejectIosDispatchAt?: number,
   lastRenderedObservation?: RenderedObservationReader,
+  xrDetector?: AndroidXrDetector,
 ) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation(width, height));
@@ -76,6 +82,11 @@ export function createTapAt(
   const adb = new FakeAdbExecutor();
   const tapAt = new TapAtCoordinate(device, adb, {
     timer,
+    // Without an injected answer the back stack decides, as for a caller with no device handle.
+    xrDetector: xrDetector ?? {
+      isAndroidXr: ({ device, backStack }) =>
+        isAndroidXr({ device, backStack }, new CachedAndroidXrDetector(timer)),
+    },
     renderedDisplayRevision,
     snapshotReferences,
     lastRenderedObservation,

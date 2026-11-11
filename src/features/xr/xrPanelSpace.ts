@@ -7,6 +7,7 @@ import type {
   TaskInfo,
 } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
+import { hasXrSystemUi } from "../../utils/android-cmdline-tools/androidXrDevice";
 
 // Measured on the API 34 google-xr headset AVD (#17799/#17800): default-pose,
 // home-space panels render at 61/64 around (shotWidth/2, 0.552*shotHeight).
@@ -17,32 +18,19 @@ type Point = { x: number; y: number };
 type Size = { width: number; height: number };
 export type XrPanel = TaskInfo & { packageName: string; bounds: ElementBounds };
 
-const isXrSystemUiName = (name: string | undefined): boolean =>
-  !!name &&
-  (name.startsWith("com.android.systemui.xr") || name.startsWith("com.android.systemui/.xr"));
-
-/** Whether the observed back stack holds Android XR System UI tasks or activities. */
-export function hasXrSystemUi(backStack: BackStackInfo | undefined): backStack is BackStackInfo {
-  return (
-    !!backStack &&
-    (backStack.activities.some((activity) => isXrSystemUiName(activity.name)) ||
-      backStack.tasks.some(
-        (task) =>
-          isXrSystemUiName(task.packageName) ||
-          isXrSystemUiName(task.rootActivity) ||
-          isXrSystemUiName(task.topActivity),
-      ))
-  );
-}
-
-/** Undefined means non-XR; a null panel means XR system UI without an app panel. */
+/**
+ * Undefined means non-XR; a null panel means XR without an app panel. `androidXr` is the answer
+ * of the shared `isAndroidXr` predicate; callers with no device handle (swipes) omit it and the
+ * back stack's XR System UI decides, the same fallback the predicate uses.
+ */
 export function detectXrPanel(
   backStack: BackStackInfo | undefined,
+  androidXr: boolean = hasXrSystemUi(backStack),
 ): { panel: XrPanel | null } | undefined {
-  if (!hasXrSystemUi(backStack)) {
+  if (!androidXr) {
     return undefined;
   }
-  return { panel: appPanels(backStack)[0] ?? null };
+  return { panel: (backStack && appPanels(backStack)[0]) ?? null };
 }
 
 function appPanels(backStack: BackStackInfo): XrPanel[] {
@@ -93,8 +81,9 @@ function nonDefaultPoseReason(
 export function xrDefaultPoseWarning(
   // Undefined when the interaction ran without a pre-dispatch observation: nothing to check.
   observation: Pick<ObserveResult, "backStack" | "screenSize" | "screenshotImageSize"> | undefined,
+  androidXr?: boolean,
 ): string | undefined {
-  const xr = detectXrPanel(observation?.backStack);
+  const xr = detectXrPanel(observation?.backStack, androidXr);
   if (!xr || !observation?.backStack) {
     return undefined;
   }

@@ -2,6 +2,7 @@ import {
   existingDefaultAndroidAutoHostPortHolder,
   type AndroidAutoHostPortHolder,
 } from "../features/androidAuto/AndroidAutoProjectionService";
+import { runOutsideRequestContext } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { SessionManager } from "./sessionManager";
@@ -64,7 +65,11 @@ async function stop(
   options: { deviceStopped?: boolean; releaseRedirect?: boolean },
 ): Promise<void> {
   try {
-    await provisioner.stopDesktopHeadUnit(deviceId, options);
+    // Not part of whichever request triggered the release (a cancelled plan's auto-release):
+    // its abort must not cut the redirect removal short and leave port 5277 held.
+    await runOutsideRequestContext(
+      async () => await provisioner.stopDesktopHeadUnit(deviceId, options),
+    );
   } catch (error) {
     // The stop never rejects by contract; a broken one must not fail the release.
     logger.warn(

@@ -109,6 +109,8 @@ export class AndroidAutoProjectionProvisioner {
   private readonly launchConfigs = new WeakMap<DesktopHeadUnitSession, string>();
   /** The device this provisioner redirected host port 5277 to, if any. */
   private redirectOwner: string | null = null;
+  /** Session-end releases in progress, by device; every provisioning run waits for them. */
+  private readonly releasingRedirects = new Map<string, Promise<void>>();
   /** The provisioning run in progress; the host has one port 5277, so at most one runs. */
   private inFlight: { deviceId: string; run: Promise<AndroidAutoProjectionResult> } | null = null;
 
@@ -144,6 +146,9 @@ export class AndroidAutoProjectionProvisioner {
   private async runProvisioning(
     request: AndroidAutoProjectionRequest,
   ): Promise<AndroidAutoProjectionResult> {
+    // A session-end release still removing a redirect must finish first: a run that reused that
+    // redirect would have its projection cut when the removal lands (#17901).
+    await Promise.all(this.releasingRedirects.values());
     const device = this.deps.forDevice(request.deviceId);
     const { phone, ui } = device;
     const signal = request.signal;
@@ -239,16 +244,28 @@ export class AndroidAutoProjectionProvisioner {
     if (deviceStopped && this.redirectOwner === deviceId) {
       this.redirectOwner = null;
     }
+    if (!releaseRedirect || deviceStopped) {
+      await this.stopSession(deviceId, deviceStopped ? "stopped device" : "failed provisioning");
+      return;
+    }
+    // Registered before the first await, so a run that starts during the DHU stop waits too.
+    const release = this.stopSession(deviceId, "released session").then(
+      async () => await this.removeOwnedRedirect(deviceId),
+    );
+    this.releasingRedirects.set(deviceId, release);
+    try {
+      await release;
+    } finally {
+      if (this.releasingRedirects.get(deviceId) === release) {
+        this.releasingRedirects.delete(deviceId);
+      }
+    }
+  }
+
+  private async stopSession(deviceId: string, context: string): Promise<void> {
     const session = this.sessions.get(deviceId);
     if (session) {
-      await this.stopTrackedSession(
-        deviceId,
-        session,
-        deviceStopped ? "stopped device" : "failed provisioning",
-      );
-    }
-    if (releaseRedirect && !deviceStopped) {
-      await this.removeOwnedRedirect(deviceId);
+      await this.stopTrackedSession(deviceId, session, context);
     }
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { registerAndroidAutoSessionCleanup } from "../../src/daemon/androidAutoSessionCleanup";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import {
   AndroidAutoProjectionProvisioner,
   type AndroidAutoProjectionRequest,
@@ -66,6 +67,23 @@ describe("registerAndroidAutoSessionCleanup", () => {
 
     expect(dhu.isAlive()).toBe(false);
     expect(h.phone.changes).toContain("redirect-removed");
+    await expectHostPortFree(h);
+  });
+
+  test("a release inside a cancelled request still removes the redirect", async () => {
+    const h = setup();
+    await h.provisioner.provision(request());
+    // A real adb call combines the ambient request signal; the fake reads it the same way.
+    h.phone.removeHeadUnitRedirect = async () => {
+      getAbortSignal()?.throwIfAborted();
+      h.phone.redirected = false;
+    };
+    const cancelled = new AbortController();
+    cancelled.abort(new Error("Operation cancelled"));
+
+    await runWithAbortSignal(cancelled.signal, async () => h.manager.release("s-1", PHONE));
+    await h.manager.settle();
+
     await expectHostPortFree(h);
   });
 

@@ -18,6 +18,8 @@ export interface DhuChildProcess {
   stdin: Writable;
   stdout: Readable;
   stderr: Readable;
+  /** Undefined when the spawn itself failed, so there is no process to signal or wait for. */
+  readonly pid?: number;
   kill(signal?: NodeJS.Signals): boolean;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
   once(event: "error", listener: (error: Error) => void): void;
@@ -30,6 +32,11 @@ export interface DesktopHeadUnitSession {
   /** Writes one console command (for example `screenshot /tmp/hu.png`). */
   sendCommand(command: string): void;
   isRunning(): boolean;
+  /**
+   * True until the DHU process exits, healthy or not. A live but unhealthy DHU still dials
+   * host port 5277, so it blocks another projection until `stop()` resolves.
+   */
+  isAlive(): boolean;
   /**
    * Ends the DHU and resolves once its process exited: SIGTERM, then SIGKILL after
    * `stopTimeoutMs`. Rejects when the process still has not exited, so a caller never
@@ -115,12 +122,13 @@ function childSession(child: DhuChildProcess, timer: Timer, stopTimeoutMs: numbe
   let healthy = true;
   let exited = false;
   const exitWaiters = new Set<() => void>();
-  child.once("exit", () => {
+  const markExited = () => {
     exited = true;
     healthy = false;
     exitWaiters.forEach((notify) => notify());
     exitWaiters.clear();
-  });
+  };
+  child.once("exit", markExited);
   const waitForExit = (ms: number) =>
     new Promise<boolean>((resolve) => {
       if (exited) {
@@ -146,6 +154,10 @@ function childSession(child: DhuChildProcess, timer: Timer, stopTimeoutMs: numbe
   child.on("error", (error) => {
     logger.warn(`[DHU] process error: ${error.message}`);
     healthy = false;
+    // A failed spawn has no pid and may never emit `exit`: no process exists to wait for.
+    if (child.pid === undefined) {
+      markExited();
+    }
   });
   child.stdin.on("error", (error) => {
     logger.warn(`[DHU] console write failed: ${error.message}`);
@@ -164,6 +176,7 @@ function childSession(child: DhuChildProcess, timer: Timer, stopTimeoutMs: numbe
         child.stdin.write(`${command}\n`);
       },
       isRunning,
+      isAlive: () => !exited,
       async stop() {
         healthy = false;
         if ((await terminate("SIGTERM")) || (await terminate("SIGKILL"))) {
@@ -187,7 +200,9 @@ type Phase = "connecting" | "settling" | "done";
 
 /**
  * One launch attempt: wait for `connected.`, then watch a settle window in which an
- * exit or repeated ping timeouts mark the projection as stalled.
+ * exit or repeated ping timeouts mark the projection as stalled. A failed attempt settles
+ * only once its DHU exited (the session's bounded SIGTERM-then-SIGKILL stop), so a relaunch
+ * never races the old process for host port 5277; it rejects when the DHU never exits.
  */
 function watchLaunch(
   child: DhuChildProcess,
@@ -195,7 +210,7 @@ function watchLaunch(
   timing: DhuLaunchTiming,
   signal?: AbortSignal,
 ): Promise<DhuLaunchOutcome> {
-  return new Promise<DhuLaunchOutcome>((resolve) => {
+  return new Promise<DhuLaunchOutcome>((resolve, reject) => {
     const dhuConsole = childSession(child, timer, timing.stopTimeoutMs);
     let phase: Phase = "connecting";
     let pingTimeouts = 0;
@@ -209,21 +224,26 @@ function watchLaunch(
       }
       timeout = timer.setTimeout(onTimeout, ms);
     };
-    const finish = (outcome: DhuLaunchOutcome) => {
+    /** Claims the attempt's single outcome; false when another path already claimed it. */
+    const settle = (): boolean => {
       if (phase === "done") {
-        return;
+        return false;
       }
       phase = "done";
       if (timeout) {
         timer.clearTimeout(timeout);
       }
-      resolve(outcome);
+      return true;
+    };
+    const finish = (outcome: DhuLaunchOutcome) => {
+      if (settle()) {
+        resolve(outcome);
+      }
     };
     const fail = (status: "no-connect" | "stalled", detail: string) => {
-      if (phase !== "done") {
-        // Settle first: a synchronous exit from kill() must not replace this reason.
-        finish({ status, detail });
-        child.kill("SIGTERM");
+      // Settle first: a synchronous exit from the kill must not replace this reason.
+      if (settle()) {
+        dhuConsole.session.stop().then(() => resolve({ status, detail }), reject);
       }
     };
     // Connected only once the pipe accepted `focus video`; a closed console is a stalled start.

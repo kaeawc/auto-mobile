@@ -106,12 +106,18 @@ class FakeUi implements AndroidAutoSettingsUi {
 
 class FakeSession implements DesktopHeadUnitSession {
   running = true;
+  /** The DHU process has not exited; an unhealthy session can still be alive. */
+  alive = true;
   sendCommand() {}
   isRunning() {
-    return this.running;
+    return this.running && this.alive;
+  }
+  isAlive() {
+    return this.alive;
   }
   async stop() {
     this.running = false;
+    this.alive = false;
   }
 }
 
@@ -361,6 +367,38 @@ describe("AndroidAutoProjectionProvisioner", () => {
     await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
       "only one emulator per host",
     );
+  });
+
+  test("refuses another device while one device's unhealthy DHU is still alive", async () => {
+    const unhealthy = new FakeSession();
+    let stops = 0;
+    unhealthy.stop = async () => {
+      stops++;
+    };
+    const { launcher, provisioner } = setup([{ status: "connected", session: unhealthy }]);
+    await provisioner.provision(request());
+    unhealthy.running = false;
+    const refused = provisioner.provision(request({ deviceId: "emulator-5556" }));
+    await expect(refused).rejects.toBeInstanceOf(ActionableError);
+    await expect(refused).rejects.toThrow("for emulator-5554 is unhealthy but still running");
+    expect(stops).toBe(0);
+    expect(launcher.launches).toBe(1);
+  });
+
+  test("provisions another device once the first device's DHU has exited", async () => {
+    const first = new FakeSession();
+    const { phone, launcher, provisioner } = setup([{ status: "connected", session: first }]);
+    await provisioner.provision(request());
+    first.running = false;
+    first.alive = false;
+    // The first emulator is gone, taking its host port 5277 redirect with it.
+    phone.redirected = false;
+    const second = await provisioner.provision(request({ deviceId: "emulator-5556" }));
+    expect(second.session).not.toBe(first);
+    expect(second.steps.find((step) => step.step === "transport")).toMatchObject({
+      status: "applied",
+    });
+    expect(launcher.launches).toBe(2);
   });
 
   test("refuses a host port 5277 it did not redirect to this device", async () => {

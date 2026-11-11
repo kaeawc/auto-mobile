@@ -24,6 +24,8 @@ class FakeDhuChild extends EventEmitter implements DhuChildProcess {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   readonly written: string[] = [];
+  /** Undefined models a spawn that failed before any process existed. */
+  pid: number | undefined = 4242;
   killed: NodeJS.Signals | undefined;
   readonly signals: NodeJS.Signals[] = [];
   /** Signals the process survives, as a DHU stuck in teardown does. */
@@ -170,7 +172,10 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     }
     child.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
     expect(result.session.isRunning()).toBe(false);
+    expect(result.session.isAlive()).toBe(true);
     expect(() => result.session.sendCommand("day")).toThrow("not running");
+    child.emit("exit", 0, null);
+    expect(result.session.isAlive()).toBe(false);
   });
 
   test("stop() still kills a live DHU after a later EPIPE marked the session unhealthy", async () => {
@@ -241,6 +246,50 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     await result.session.stop();
     expect(child.killed).toBeUndefined();
     expect(result.session.isRunning()).toBe(false);
+  });
+
+  test("a failed launch settles only once the DHU exited, escalating to SIGKILL", async () => {
+    const { timer, child, launch } = setup();
+    child.ignoredSignals.add("SIGTERM");
+    let settled = false;
+    const outcome = launch().then((result) => {
+      settled = true;
+      return result;
+    });
+    timer.advanceTime(TIMING.connectTimeoutMs);
+    await flushStdin();
+    expect(child.signals).toEqual(["SIGTERM"]);
+    expect(settled).toBe(false);
+    timer.advanceTime(TIMING.stopTimeoutMs);
+    expect(await outcome).toMatchObject({
+      status: "no-connect",
+      detail: expect.stringContaining('no "connected."'),
+    });
+    expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  test("a failed launch whose DHU never exits rejects instead of allowing a relaunch", async () => {
+    const { timer, child, launch } = setup();
+    child.ignoredSignals = new Set(["SIGTERM", "SIGKILL"]);
+    const outcome = launch();
+    timer.advanceTime(TIMING.connectTimeoutMs);
+    await flushStdin();
+    timer.advanceTime(TIMING.stopTimeoutMs);
+    await flushStdin();
+    timer.advanceTime(TIMING.stopTimeoutMs);
+    await expect(outcome).rejects.toThrow("did not exit");
+  });
+
+  test("a spawn that failed before a process existed is a no-connect without any signal", async () => {
+    const { child, launch } = setup();
+    child.pid = undefined;
+    const outcome = launch();
+    child.emit("error", new Error("spawn desktop-head-unit ENOENT"));
+    expect(await outcome).toMatchObject({
+      status: "no-connect",
+      detail: expect.stringContaining("ENOENT"),
+    });
+    expect(child.signals).toEqual([]);
   });
 
   test("a child error event before connecting is a no-connect", async () => {

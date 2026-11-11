@@ -6081,7 +6081,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6243,7 +6243,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -37389,7 +37389,7 @@
         "platform": {
           "description": "action=end only: the platform written at the top of the plan",
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos", "watchos"]
         },
         "platformNote": {
           "description": "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",

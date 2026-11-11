@@ -130,7 +130,13 @@ const formatPlanName = (planName?: string, timer: Timer = defaultTimer): string 
   return `mcp-recorded-plan-${timestamp}`;
 };
 
-const PLAN_TOP_LEVEL_PLATFORMS: ReadonlySet<string> = new Set(["android", "ios", "tvos"]);
+const PLAN_TOP_LEVEL_PLATFORMS: ReadonlySet<string> = new Set([
+  "android",
+  "ios",
+  "tvos",
+  "visionos",
+  "watchos",
+]);
 
 function isPlanTopLevelPlatform(value: string): value is PlanTopLevelPlatform {
   return PLAN_TOP_LEVEL_PLATFORMS.has(value);
@@ -160,7 +166,7 @@ export function resolveRecordedPlanPlatform(
   const [only] = distinct;
   if (only === undefined || !isPlanTopLevelPlatform(only)) {
     return {
-      platformNote: `${omitted}: ${only ?? "no platform"} is not a plan platform (android, ios or tvos); ${remedy}.`,
+      platformNote: `${omitted}: ${only ?? "no platform"} is not a plan platform (android, ios, tvos, visionos or watchos); ${remedy}.`,
     };
   }
   return { platform: only };

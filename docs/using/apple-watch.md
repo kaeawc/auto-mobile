@@ -106,6 +106,7 @@ Besides the device management above, these tools accept a watch:
 - `launchApp`
 - `terminateApp`
 - `getLogs`
+- `executePlan`
 
 <!-- watchos-supported-tools:end -->
 
@@ -208,6 +209,10 @@ Every other tool refuses a watch before doing anything, with:
   has no warning level), `E` error and fault, and `F` fault only. `tags`, `buffers` and
   `includeSystem` are Android-only and are ignored with a warning. It is not listed by default;
   enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
+- `executePlan` replays a plan on a watch with `platform: "watchos"`, including a plan
+  `recordToolCalls` recorded on a watch. Each step runs as the same tool called directly, so a
+  step whose tool is not in the list above fails with the refusal below. Plans on a watch record
+  no video.
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with
 `tapOn` first, or provide a selector with an exact `elementId` or `text` to focus it before typing.

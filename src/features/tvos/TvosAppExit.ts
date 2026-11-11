@@ -6,6 +6,7 @@ import {
   type SimulatorCrashCommandRunner,
 } from "../../utils/ios-cmdline-tools/IosCrashBackend";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -14,6 +15,9 @@ import {
   nodeCrashReportFileSystem,
 } from "../crashReports/IosSimulatorCrashReportFinder";
 import type { NativeCrashReportFinder } from "../crashReports/NativeCrashReport";
+
+const LIVENESS_PROBE_TIMEOUT_MS = 4000;
+const APP_EXIT_DIAGNOSIS_TIMEOUT_MS = 6000;
 
 export interface TvosAppLiveness {
   isRunning(bundleId: string, signal?: AbortSignal): Promise<boolean>;
@@ -27,7 +31,7 @@ export function simulatorTvosAppLiveness(
   const backend = new SimulatorIosCrashBackend(deviceId, simctl, "system");
   return {
     async isRunning(bundleId, signal) {
-      const result = await backend.listProcesses({ timeoutMs: 1000, signal });
+      const result = await backend.listProcesses({ timeoutMs: LIVENESS_PROBE_TIMEOUT_MS, signal });
       return findIosSimulatorAppProcess(result.stdout, bundleId) !== null;
     },
   };
@@ -55,7 +59,21 @@ export class TvosAppExit {
     try {
       return await raceWithDeadline(
         async () => {
-          if (await this.dependencies.liveness.isRunning(bundleId, combined)) {
+          let running: boolean;
+          try {
+            running = await this.dependencies.liveness.isRunning(bundleId, combined);
+          } catch (error) {
+            if (!(error instanceof SimctlCommandTimeoutError)) {
+              throw error;
+            }
+            combined.throwIfAborted();
+            logger.warn(
+              `[TvosRunner] App liveness probe timed out for ${bundleId}; retrying`,
+              error,
+            );
+            running = await this.dependencies.liveness.isRunning(bundleId, combined);
+          }
+          if (running) {
             return undefined;
           }
           combined.throwIfAborted();
@@ -73,7 +91,7 @@ export class TvosAppExit {
         },
         {
           timer: this.dependencies.timer ?? defaultTimer,
-          timeoutMs: 2000,
+          timeoutMs: APP_EXIT_DIAGNOSIS_TIMEOUT_MS,
           signal: combined,
           label: "tvOS app-exit diagnosis",
           onTimeout: () => controller.abort(),

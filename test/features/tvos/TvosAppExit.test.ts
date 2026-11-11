@@ -8,11 +8,12 @@ import {
 } from "../../../src/features/tvos/TvosAppExit";
 import { WebSocketTvosRunnerClient } from "../../../src/features/tvos/TvosRunnerClient";
 import { TvosRunnerTimeoutError } from "../../../src/features/tvos/TvosRunnerTimeoutError";
+import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { IosSimulatorCrashReportFinder } from "../../../src/features/crashReports/IosSimulatorCrashReportFinder";
 import { FakeTvosAppLiveness } from "../../fakes/FakeTvosAppLiveness";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWatchSocket } from "../../fakes/FakeWatchSocket";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import connected from "../../fixtures/tvos-xcuitest/tvos-runner-connected.json";
 
 const reportPath = "CrashTv.ips";
@@ -46,7 +47,7 @@ function fixture() {
     appExit,
   });
   socket.receive(connected);
-  return { client, timer, socket, liveness, finder };
+  return { client, timer, socket, liveness, finder, appExit };
 }
 
 const settle = (promise: Promise<unknown>) =>
@@ -78,6 +79,7 @@ test.each(["timeout", "disconnect"])(
     expect(String(error)).toContain("launchApp");
     expect(f.client.isUsable()).toBe(false);
     expect(f.socket.sent).toHaveLength(1);
+    expect(f.liveness.apps).toEqual([bundleId]);
     expect(f.timer.getPendingTimeoutCount()).toBe(0);
   },
 );
@@ -113,6 +115,71 @@ test("probe failure preserves the runner error instead of claiming an app exit",
   await drainMicrotasks(2);
   f.socket.disconnect();
   expect(String(await pending)).toContain("Tvos runner connection failed");
+  expect(f.liveness.apps).toEqual([bundleId]);
+});
+
+test("a timed-out probe retries once and reports an app exit when the retry finds no process", async () => {
+  const f = fixture();
+  const simctl = new FakeSimctl();
+  simctl.setCommandArgsResultSequence(
+    ["spawn", deviceId, "launchctl", "list"],
+    [new SimctlCommandTimeoutError("host busy"), { stdout: "" }],
+  );
+  const appExit = new TvosAppExit({
+    liveness: simulatorTvosAppLiveness(deviceId, simctl),
+    finder: f.finder,
+    timer: f.timer,
+  });
+  expect(await appExit.diagnose(bundleId, "request_press_button", crashedAt - 100)).toBeInstanceOf(
+    TvosAppExitError,
+  );
+  expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.timeoutMs)).toEqual([
+    4000, 4000,
+  ]);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("two timed-out probes return undefined and preserve the runner error path", async () => {
+  const f = fixture();
+  f.liveness.failure = new SimctlCommandTimeoutError("host busy");
+  expect(
+    await f.appExit.diagnose(bundleId, "request_press_button", crashedAt - 100),
+  ).toBeUndefined();
+  expect(f.liveness.apps).toEqual([bundleId, bundleId]);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test.each(["deadline", "caller abort"])("the retry remains bounded by %s", async (mode) => {
+  const f = fixture();
+  let calls = 0;
+  let probeSignal: AbortSignal | undefined;
+  f.liveness.isRunning = async (_appId, signal) => {
+    calls += 1;
+    probeSignal = signal;
+    if (calls === 1) {
+      await f.timer.sleep(4000);
+      throw new SimctlCommandTimeoutError("host busy");
+    }
+    return new Promise(() => {});
+  };
+  const controller = new AbortController();
+  const pending = settle(
+    f.appExit.diagnose(bundleId, "request_press_button", crashedAt - 100, controller.signal),
+  );
+  f.timer.advanceTime(4000);
+  await drainUntil(() => calls === 2, { description: "liveness retry" });
+  f.timer.advanceTime(1999);
+  expect(probeSignal?.aborted).toBe(false);
+  if (mode === "deadline") {
+    f.timer.advanceTime(1);
+    expect(await pending).toBeUndefined();
+  } else {
+    controller.abort();
+    expect(await pending).toBe(controller.signal.reason);
+  }
+  expect(probeSignal?.aborted).toBe(true);
+  expect(calls).toBe(2);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
 });
 
 test("a slow crash finder is bounded and retains the confirmed app exit", async () => {
@@ -126,7 +193,7 @@ test("a slow crash finder is bounded and retains the confirmed app exit", async 
   await drainMicrotasks(2);
   f.socket.disconnect();
   await drainMicrotasks(20);
-  f.timer.advanceTime(2000);
+  f.timer.advanceTime(6000);
   expect(await pending).toBeInstanceOf(TvosAppExitError);
   expect(signal?.aborted).toBe(true);
   expect(f.timer.getPendingTimeoutCount()).toBe(0);
@@ -162,6 +229,7 @@ test("simulator liveness uses the captured launchctl listing and exact bundle id
   );
   const probe = simulatorTvosAppLiveness(deviceId, simctl);
   expect(await probe.isRunning(bundleId)).toBe(true);
+  expect(simctl.getMethodCalls("executeCommandArgs")[0]?.timeoutMs).toBe(4000);
   expect(await probe.isRunning(`${bundleId}.other`)).toBe(false);
   simctl.setCommandArgsResult(args, `-\t5\tUIKitApplication:${bundleId}[2a7d][rb-legacy]`);
   expect(await probe.isRunning(bundleId)).toBe(false);
@@ -176,7 +244,7 @@ test("a liveness probe that never settles is bounded without inventing an app ex
   await drainMicrotasks(2);
   f.socket.disconnect();
   await drainMicrotasks(20);
-  f.timer.advanceTime(2000);
+  f.timer.advanceTime(6000);
   expect(String(await pending)).toContain("Tvos runner connection failed");
   expect(f.timer.getPendingTimeoutCount()).toBe(0);
 });

@@ -277,11 +277,7 @@ test("phone hidden application windows do not take touches", () => {
   const dialog = structuredClone(app);
   dialog.id = 91;
   dialog.windowLayer = 50;
-  dialog.hierarchy = {
-    windowId: 91,
-    "visible-to-user": true,
-    bounds: { left: 0, top: 1100, right: 744, bottom: 1200 },
-  };
+  dialog.hierarchy = { bounds: { left: 0, top: 1100, right: 744, bottom: 1200 } };
   const withDialog = { ...capture, windows: [hidden, dialog, app] };
   const covered = identifyObservedHierarchy("android", withDialog, "cached-ok", {
     timer: new FakeTimer(),

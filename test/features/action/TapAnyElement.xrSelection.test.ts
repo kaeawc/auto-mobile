@@ -211,13 +211,17 @@ function linkedCapture(ownerHeight?: number): ViewHierarchyResult {
     owner.bounds = { left: 0, top: 48, right: 744, bottom: 48 + ownerHeight };
     app.hierarchy = { ...app.hierarchy!, node: [...childrenOf(app.hierarchy!), owner] };
   }
-  const roots = childrenOf(raw.hierarchy).map(
-    (root) =>
-      raw.windows!.find((window) => window.id === nodeAttributes(root).windowId)?.hierarchy ?? root,
-  );
+  // The serialized merged roots are an array under `hierarchy.node`.
+  const roots = [raw.hierarchy.node!]
+    .flat()
+    .map(
+      (root) =>
+        raw.windows!.find((window) => window.id === nodeAttributes(root).windowId)?.hierarchy ??
+        root,
+    );
   return identifyObservedHierarchy(
     "android",
-    { ...raw, hierarchy: { ...raw.hierarchy, node: roots } },
+    { ...raw, hierarchy: { ...raw.hierarchy, node: { node: roots } } },
     "cached-ok",
     { timer: new FakeTimer() },
   ).hierarchy;

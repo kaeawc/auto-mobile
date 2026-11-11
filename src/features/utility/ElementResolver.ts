@@ -333,6 +333,29 @@ export class ElementResolver {
     if (selector.sibling || intent.action === "scroll") {
       return;
     }
+    if (intent.readingOrder) {
+      const partial = (node: SearchableEntry) => {
+        const bounds = node.bounds;
+        return (
+          bounds !== undefined &&
+          result.candidates.some(
+            (other) =>
+              other.parentIndex === node.parentIndex &&
+              other.bounds !== undefined &&
+              other.bounds.right - other.bounds.left === bounds.right - bounds.left &&
+              other.bounds.bottom - other.bounds.top > bounds.bottom - bounds.top,
+          )
+        );
+      };
+      result.candidates.sort(
+        (a, b) =>
+          Number(partial(a)) - Number(partial(b)) ||
+          (a.bounds?.top ?? Infinity) - (b.bounds?.top ?? Infinity) ||
+          (a.bounds?.left ?? Infinity) - (b.bounds?.left ?? Infinity) ||
+          a.index - b.index,
+      );
+      return;
+    }
     const rawTextMatch = new Set(
       result.matches.filter((match) => match.textOrigin === "raw").map((match) => match.node),
     );

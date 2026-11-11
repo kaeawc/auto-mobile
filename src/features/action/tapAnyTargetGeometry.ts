@@ -1,3 +1,8 @@
+import { withoutHiddenXrChrome } from "./xrHiddenChrome";
+import { SearchableHierarchy } from "../utility/SearchableNode";
+import { promoteClickableAncestor } from "../utility/ElementResolverNodes";
+import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
+import { DefaultElementParser } from "../utility/ElementParser";
 import { type CapturedTapTarget } from "./TapAnyAndroidTapper";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
@@ -27,12 +32,16 @@ export function findTapAnyClickableElement(
     ) => boolean;
     platform: AndroidOrIosPlatform;
     iosMultiPanel: boolean;
+    xr?: boolean;
   },
   options: TapAnyElementOptions,
   viewHierarchy: ViewHierarchyResult,
   sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
 ): { element: Element | null; containerFound: boolean } {
   viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
+  if (context.xr) {
+    viewHierarchy = xrTapAnyHierarchy(viewHierarchy, options);
+  }
   const containerFound = context.isContainerAvailable(viewHierarchy, options.container);
   const screenSizeOptions = {
     ...sizeOptions,
@@ -44,6 +53,7 @@ export function findTapAnyClickableElement(
     viewHierarchy,
     {},
     {
+      readingOrder: context.xr,
       screenSizeOptions,
       container: options.container,
       strategy: options.selectionStrategy,
@@ -51,6 +61,14 @@ export function findTapAnyClickableElement(
       scrollableContainer: options.scrollableContainer,
     },
   );
+  if (context.xr && !selection.element && options.container) {
+    selection.element = xrContainerOwner(
+      context.elementSelector,
+      viewHierarchy,
+      options,
+      effectiveScreenSize,
+    );
+  }
   if (selection.element && !hasVisibleScreenPart(selection.element.bounds, effectiveScreenSize)) {
     return { element: null, containerFound };
   }
@@ -97,4 +115,52 @@ export function resolveTapAnyPoint(
     );
   }
   return safe;
+}
+
+/** Prefer the foreground app's controls to its separate, window-local caption buttons. */
+function xrTapAnyHierarchy(
+  viewHierarchy: ViewHierarchyResult,
+  options: TapAnyElementOptions,
+): ViewHierarchyResult {
+  viewHierarchy = withoutHiddenXrChrome(viewHierarchy).hierarchy;
+  const appWindows = viewHierarchy.windows?.filter(
+    (window) =>
+      window.hierarchy &&
+      window.packageName === viewHierarchy.packageName &&
+      !window.packageName?.startsWith("com.android.systemui"),
+  );
+  if (!options.container && appWindows?.length) {
+    viewHierarchy = {
+      ...viewHierarchy,
+      hierarchy: {
+        node: {
+          node: appWindows.flatMap((window) => (window.hierarchy ? [window.hierarchy] : [])),
+        },
+      },
+      windows: appWindows,
+    };
+  }
+  return viewHierarchy;
+}
+
+function xrContainerOwner(
+  selector: ElementSelector,
+  viewHierarchy: ViewHierarchyResult,
+  options: TapAnyElementOptions,
+  viewport: { width: number; height: number } | undefined,
+): Element | null {
+  const container = selector.resolveContainer?.(viewHierarchy, options.container!);
+  const source = container && getHierarchyNodeSource(container);
+  const nodes = new SearchableHierarchy().project(viewHierarchy);
+  const node = nodes.find((entry) => entry.source === source);
+  const owner =
+    node &&
+    promoteClickableAncestor(node, nodes, {
+      action: options.action === "longPress" ? "long-press" : "tap",
+      viewport,
+    });
+  if (owner) {
+    return new DefaultElementParser().parseNodeBounds(owner.source);
+  }
+  return null;
 }

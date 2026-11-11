@@ -176,16 +176,25 @@ function windowCoverAt(
     return { covers: () => [] };
   }
   const prototypeCovers = ownPrototypeCoversAbove(hierarchy, entries, owner, ownWindows);
+  // XR windows have independent panel coordinates: another app or SystemUI panel's
+  // node rectangles cannot establish either a hit or an exposed fallback region here.
+  const windowEntries = isAndroidXrCapture(hierarchy) ? [] : entries;
   const covers = () => [
-    ...entries
+    ...windowEntries
       .filter(
         (entry) =>
-          entry.bounds && entry.windowRank < owner.windowRank && types.get(entry.source) === 1,
+          entry.bounds &&
+          !isHiddenFromUser(entry) &&
+          entry.windowRank < owner.windowRank &&
+          types.get(entry.source) === 1,
       )
       .map((entry) => entry.bounds!),
     ...prototypeCovers,
   ];
-  const first = hitEntries(entries, point)[0];
+  const first = hitEntries(
+    windowEntries.filter((entry) => !isHiddenFromUser(entry)),
+    point,
+  )[0];
   if (first !== undefined && first.windowRank < owner.windowRank && types.get(first.source) === 1) {
     return { hit: { coveredBy: coveringLabel(first, target), coveredByKind: "window" }, covers };
   }
@@ -193,6 +202,14 @@ function windowCoverAt(
     return { hit: { coveredBy: OWN_PROTOTYPE_COVER_LABEL, coveredByKind: "window" }, covers };
   }
   return { covers };
+}
+
+function isAndroidXrCapture(hierarchy: ViewHierarchyResult): boolean {
+  return (
+    hierarchy.windows?.some((window) =>
+      window.packageName?.startsWith("com.android.systemui.xrhomeenv"),
+    ) ?? false
+  );
 }
 
 /**

@@ -72,7 +72,7 @@ export function buildScaler(ranges: AxisRanges): CoordScaler {
 }
 
 /**
- * Parse the physical display size from `adb shell wm size` output.
+ * Parse the effective display size from `adb shell wm size` output (override wins).
  * Returns { width, height } in physical pixels (before rotation).
  */
 export async function queryDisplaySize(
@@ -84,7 +84,8 @@ export async function queryDisplaySize(
     options.timeoutMs === undefined
       ? await adb.executeCommand("shell wm size")
       : await adb.executeCommand("shell wm size", { timeoutMs: options.timeoutMs, noRetry: true });
-  const match = stdout.match(/Physical size:\s*(\d+)x(\d+)/);
+  const match =
+    stdout.match(/Override size:\s*(\d+)x(\d+)/) ?? stdout.match(/Physical size:\s*(\d+)x(\d+)/);
   if (!match) {
     throw new Error(`Could not parse display size from wm size output: ${stdout}`);
   }

@@ -1,0 +1,215 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": "Matrix",
+        "class": "XCUIApplication",
+        "bounds": [
+          0,
+          0,
+          402,
+          874
+        ],
+        "view-id": "s2-df3335a5b96b304f"
+      },
+      "node": [
+        {
+          "$": {
+            "text": "App underneath",
+            "class": "UILabel",
+            "bounds": [
+              124,
+              390,
+              277,
+              416
+            ],
+            "role": "text",
+            "view-id": "s2-4906c5c783613e09"
+          }
+        },
+        {
+          "$": {
+            "text": "app-tap 0",
+            "resource-id": "app-button",
+            "class": "UIButton",
+            "bounds": [
+              151,
+              437,
+              250,
+              471
+            ],
+            "clickable": "true",
+            "role": "button",
+            "view-id": "app-button"
+          }
+        },
+        {
+          "$": {
+            "text": "tapcount 0",
+            "resource-id": "app-count",
+            "class": "UILabel",
+            "bounds": [
+              159,
+              491,
+              242,
+              511
+            ],
+            "role": "text",
+            "view-id": "app-count"
+          }
+        },
+        {
+          "$": {
+            "class": "UIImageView",
+            "bounds": [
+              -6,
+              553,
+              544,
+              941
+            ],
+            "clickable": "true",
+            "role": "image",
+            "view-id": "s2-7edfbf5215a4f07c"
+          }
+        },
+        {
+          "$": {
+            "class": "UICollectionView",
+            "bounds": [
+              144,
+              703,
+              394,
+              1577
+            ],
+            "scrollable": "true",
+            "role": "list",
+            "view-id": "s2-81db243be8194008"
+          },
+          "node": [
+            {
+              "$": {
+                "class": "UITableViewCell",
+                "bounds": [
+                  144,
+                  703,
+                  394,
+                  747
+                ],
+                "clickable": "true",
+                "role": "listitem",
+                "view-id": "s2-6d37011ae6ade5b0~2c6345fe"
+              },
+              "node": {
+                "$": {
+                  "text": "Item Two",
+                  "class": "UIButton",
+                  "bounds": [
+                    144,
+                    703,
+                    394,
+                    747
+                  ],
+                  "clickable": "true",
+                  "role": "button",
+                  "view-id": "s2-e1758886f0d3c285"
+                }
+              }
+            },
+            {
+              "$": {
+                "class": "UITableViewCell",
+                "bounds": [
+                  144,
+                  747,
+                  394,
+                  791
+                ],
+                "clickable": "true",
+                "role": "listitem",
+                "view-id": "s2-6d37011ae6ade5b0~02415e7e"
+              },
+              "node": {
+                "$": {
+                  "text": "Item One",
+                  "class": "UIButton",
+                  "bounds": [
+                    144,
+                    747,
+                    394,
+                    791
+                  ],
+                  "clickable": "true",
+                  "role": "button",
+                  "view-id": "s2-ed41697a47e8d0ef"
+                }
+              }
+            },
+            {
+              "$": {
+                "text": "Vertical scroll bar, 1 page",
+                "class": "UIView",
+                "bounds": [
+                  361,
+                  714,
+                  391,
+                  780
+                ],
+                "view-id": "s2-edd1e9ee444fedac"
+              }
+            },
+            {
+              "$": {
+                "text": "Horizontal scroll bar, 1 page",
+                "class": "UIView",
+                "bounds": [
+                  144,
+                  747,
+                  394,
+                  777
+                ],
+                "view-id": "s2-a79830a9c63cf5c5"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "packageName": "dev.vq.l24.matrix",
+  "updatedAt": 1794418412252,
+  "windows": [
+    {
+      "bounds": [
+        0,
+        0,
+        402,
+        874
+      ],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "screenScale": 3,
+  "screenWidth": 402,
+  "screenHeight": 874,
+  "nativeScale": 3,
+  "pixelWidth": 1206,
+  "pixelHeight": 2622,
+  "insets": {
+    "available": false,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "receivedAt": 1794418412253,
+  "fresh": true,
+  "frameContext": "95E23937-A28C-4A97-B948-C3B5B7526F85:1:cb940bd3747a9b99",
+  "projectedScreenSize": {
+    "width": 402,
+    "height": 874
+  }
+}

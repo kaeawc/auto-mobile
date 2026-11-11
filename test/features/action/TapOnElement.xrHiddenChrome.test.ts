@@ -12,6 +12,8 @@ import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { buildObserveResult } from "../../helpers/observeFixture";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import { attachRawViewHierarchy } from "../../../src/features/utility/viewHierarchySearch";
 
 const capture: Pick<ViewHierarchyResult, "windows"> & {
   content: { type: string; text: string }[];
@@ -204,6 +206,36 @@ describe("XR hidden system chrome target resolution", () => {
       const result = await setup().search({ hierarchy: { node } });
       expect(result.selection.element?.["content-desc"]).toBe("Environment");
       expect(result.visibilityError).toBeUndefined();
+    }
+  });
+
+  test("raw search still finds an app target beyond the output cap with hidden chrome", async () => {
+    const previous = serverConfig.isRawElementSearchEnabled();
+    serverConfig.setRawElementSearchEnabled(true);
+    try {
+      // Synthetic app node on the captured node shape; only the raw capture carries it.
+      const app = {
+        ...target(tree(), "Environment").source,
+        "content-desc": "Beyond Cap",
+        "resource-id": "example.app:id/beyond_cap",
+        "visible-to-user": true,
+        bounds: { left: 100, top: 100, right: 200, bottom: 200 },
+      };
+      const raw = tree();
+      raw.windows!.push({ id: 999, packageName: "example.app", hierarchy: app });
+      const output = tree();
+      attachRawViewHierarchy(output, raw);
+      const { search, detector } = setup();
+      const found = await search(output, "Beyond Cap");
+      expect(found.selection.element?.["resource-id"]).toBe("example.app:id/beyond_cap");
+      expect(found.visibilityError).toBeUndefined();
+      expect(detector.queries).toEqual(["fake"]);
+      // Hidden chrome stays excluded from the raw universe too.
+      const hidden = await setup().search(output, "Environment");
+      expect(hidden.selection.element).toBeNull();
+      expect(hidden.visibilityError?.message).toContain("hidden XR system chrome");
+    } finally {
+      serverConfig.setRawElementSearchEnabled(previous);
     }
   });
 

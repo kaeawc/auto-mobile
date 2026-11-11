@@ -4,13 +4,35 @@ import { TapTargetUnavailableError } from "./tapTargetSupport";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { childrenOf, nodeAttributes } from "../../models/ViewHierarchyResult";
+import { attachRawViewHierarchy, getRawViewHierarchy } from "../utility/viewHierarchySearch";
 
-/** Selection-only projection: preserve visible descendants, never promote hidden XR chrome. */
+/**
+ * Selection-only projection: preserve visible descendants, never promote hidden XR chrome.
+ * The non-enumerable raw capture (raw element search) is projected the same way and
+ * re-attached, so the uncapped search universe survives without the hidden chrome.
+ */
 export function withoutHiddenXrChrome(hierarchy: ViewHierarchyResult): {
   hierarchy: ViewHierarchyResult;
   hiddenNodes: ReadonlySet<ViewHierarchyNode>;
 } {
   const hiddenNodes = new Set<ViewHierarchyNode>();
+  const raw = getRawViewHierarchy(hierarchy);
+  const projected = projectTree(hierarchy, hiddenNodes);
+  const projectedRaw = raw && raw !== hierarchy ? projectTree(raw, hiddenNodes) : undefined;
+  if (hiddenNodes.size === 0) {
+    return { hierarchy, hiddenNodes };
+  }
+  if (projectedRaw) {
+    attachRawViewHierarchy(projected, projectedRaw);
+  }
+  return { hierarchy: projected, hiddenNodes };
+}
+
+function projectTree(
+  hierarchy: ViewHierarchyResult,
+  hiddenNodes: Set<ViewHierarchyNode>,
+): ViewHierarchyResult {
+  const hiddenBefore = hiddenNodes.size;
   const systemWindows = new Set(
     hierarchy.windows
       ?.filter((window) => window.packageName?.startsWith("com.android.systemui"))
@@ -49,16 +71,14 @@ export function withoutHiddenXrChrome(hierarchy: ViewHierarchyResult): {
       ? { node: filter(window.hierarchy, window.packageName?.startsWith("com.android.systemui")) }
       : undefined,
   }));
-  if (hiddenNodes.size === 0) {
-    return { hierarchy, hiddenNodes };
+  if (hiddenNodes.size === hiddenBefore) {
+    // Nothing hidden here: copy the shell so a carrier can attach without mutating input.
+    return { ...hierarchy };
   }
   return {
-    hierarchy: {
-      ...hierarchy,
-      hierarchy: { ...hierarchy.hierarchy, node: { node: roots } },
-      windows,
-    },
-    hiddenNodes,
+    ...hierarchy,
+    hierarchy: { ...hierarchy.hierarchy, node: { node: roots } },
+    windows,
   };
 }
 

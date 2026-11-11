@@ -6,6 +6,7 @@ import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProt
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import duoSessionlessObserve from "../../fixtures/ios-duo/observe-sessionless-inner-landscape-17846.json";
+import duoRunnerLaunchQueuedObserve from "../../fixtures/ios-duo/observe-runner-launch-queued-inner-landscape-17880.json";
 
 // The Duo inventory stores both panels portrait, in pixels (cover 466x678 pt, inner 669x951 pt).
 const duo: BootedDevice = {
@@ -106,4 +107,68 @@ test("a single-panel iOS screenshot never reorients the geometry", async () => {
   });
   expect(observation.screenSize).toEqual({ width: 669, height: 951, units: "points" });
   expect(observation.errors).toBeUndefined();
+});
+
+/**
+ * The #17880 observe right after the runner was killed: the read is typed `runner_launch_queued`,
+ * so the observation carries an error-shaped hierarchy rather than none.
+ */
+function runnerLaunchQueuedObservation(
+  panel: { key: string; role: "cover" | "inner"; width: number; height: number } = {
+    key: "primary-1",
+    role: "inner",
+    width: 669,
+    height: 951,
+  },
+): ObserveResult {
+  const observation = structuredClone(duoRunnerLaunchQueuedObserve) as ObserveResult;
+  delete observation.screenshotImageSize;
+  observation.display = { ...observation.display, key: panel.key, role: panel.role };
+  observation.screenSize = { width: panel.width, height: panel.height, units: "points" };
+  observation.viewHierarchy = {
+    hierarchy: {
+      error:
+        "Failed to retrieve iOS view hierarchy from CtrlProxy iOS: runner_launch_queued: launch pending",
+      unavailableReason: "runner_launch_queued",
+      iosUnavailableReason: "runner_launch_queued",
+    },
+  };
+  return observation;
+}
+
+const cover = { key: "primary", role: "cover", width: 466, height: 678 } as const;
+const inner = { key: "primary-1", role: "inner", width: 669, height: 951 } as const;
+
+test.each([
+  ["inner", "landscape", inner, { width: 2853, height: 2007 }, { width: 951, height: 669 }, 1],
+  ["inner", "portrait", inner, { width: 2007, height: 2853 }, { width: 669, height: 951 }, 0],
+  ["cover", "landscape", cover, { width: 2034, height: 1398 }, { width: 678, height: 466 }, 1],
+  ["cover", "portrait", cover, { width: 1398, height: 2034 }, { width: 466, height: 678 }, 0],
+] as const)(
+  "an unavailable-hierarchy Duo %s panel follows a %s screenshot (#17880)",
+  async (_role, _orientation, panel, raster, expectedSize, expectedRotation) => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const observation = runnerLaunchQueuedObservation(panel);
+    await capture().attachScreenshotRaster(observation, raster);
+    expect(observation.screenSize).toEqual({ ...expectedSize, units: "points" });
+    expect(observation.rotation).toBe(expectedRotation);
+    expect(observation.screenshotImageSize).toEqual(raster);
+    expect(observation.screenshotPixelsPerNativeUnit).toEqual({ x: 3, y: 3 });
+    expect(observation.errors).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  },
+);
+
+test("the #17880 fixture raster orients its runner_launch_queued inner panel", async () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const observation = runnerLaunchQueuedObservation();
+  await capture().attachScreenshotRaster(
+    observation,
+    duoRunnerLaunchQueuedObserve.screenshotImageSize,
+  );
+  expect(observation.screenSize).toEqual({ width: 951, height: 669, units: "points" });
+  expect(observation.rotation).toBe(1);
+  expect(
+    warn.mock.calls.some((call) => String(call[0]).includes("incompatible aspect ratios")),
+  ).toBe(false);
 });

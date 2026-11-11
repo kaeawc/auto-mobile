@@ -1,0 +1,59 @@
+{
+  "observationId": "02afc506-971f-48be-93e2-b78361b9a942",
+  "deviceId": "812D7244-9E29-4CDA-90C2-C9F60EA1C26B",
+  "display": {
+    "key": "primary-1",
+    "role": "inner",
+    "posture": "opened",
+    "generation": 29
+  },
+  "updatedAt": "2026-11-11T09:20:34.543Z",
+  "screenSize": {
+    "width": 669,
+    "height": 951,
+    "units": "points"
+  },
+  "systemInsets": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "insets": {
+    "available": false,
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "rotation": 0,
+  "otherDisplays": [
+    {
+      "key": "primary",
+      "role": "cover",
+      "size": {
+        "width": 466,
+        "height": 678
+      },
+      "units": "points"
+    }
+  ],
+  "deviceLock": {
+    "locked": false,
+    "keyguardShowing": false
+  },
+  "screenshotOrientation": "native",
+  "screenshotPath": "<screenshots>/screenshot_1794388850213_812D7244-9E29-4CDA-90C2-C9F60EA1C26B-784ab834ac4c_73be1fab-c3f9-4519-b15e-25cf76716444.png",
+  "screenshotExpiresAt": 1794389452485,
+  "screenshotSource": "fresh",
+  "screenshotCaptureSource": "device",
+  "screenshotCapturedAt": "2026-11-11T09:20:52.483Z",
+  "screenshotAgeMs": 1.314208984375,
+  "screenshotFormat": "png",
+  "screenshotMimeType": "image/png",
+  "screenshotImageSize": {
+    "width": 2853,
+    "height": 2007
+  },
+  "screenshotSettled": true,
+  "skeleton": [],
+  "observationScreenshotResourceUri": "automobile:observation/812D7244-9E29-4CDA-90C2-C9F60EA1C26B/02afc506-971f-48be-93e2-b78361b9a942/screenshot"
+}

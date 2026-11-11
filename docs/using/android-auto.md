@@ -98,7 +98,8 @@ against it and reports it. It never installs Android Auto here.
 | `androidAuto.acceptAndroidAutoTerms` | no       | Tap **Continue** on **Welcome to Android Auto**, as for `provisionDevice`. Without it, a pending welcome screen is reported, not tapped. |
 
 The response gains the same `androidAuto` block as `provisionDevice` (`steps` and `desktopHeadUnit`). If
-a DHU is already projecting this phone, it is reused and reported as `already-done`.
+a DHU is already projecting this phone, it is reused and reported as `already-done`, with the config
+it started with; to use another config, call `killDevice` first.
 
 If the head unit does not start, `startDevice` fails with a message that names the phone and its
 session. The phone stays ready and held by that session: fix the cause and call `startDevice` again,

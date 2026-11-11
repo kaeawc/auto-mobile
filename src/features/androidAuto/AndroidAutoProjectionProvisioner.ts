@@ -54,6 +54,8 @@ export interface AndroidAutoProjectionRequest {
 export interface AndroidAutoProjectionResult {
   steps: AndroidAutoProvisioningStep[];
   session: DesktopHeadUnitSession;
+  /** The config `session`'s DHU was launched with, which a reused DHU keeps. */
+  configPath: string;
 }
 
 /** The adapters that act on one phone emulator. */
@@ -103,6 +105,8 @@ export class AndroidAutoProjectionProvisioner {
    * are never reused as `already-done`: the next provision of that serial retries their stop.
    */
   private readonly retired = new WeakSet<DesktopHeadUnitSession>();
+  /** The config each tracked DHU was launched with. */
+  private readonly launchConfigs = new WeakMap<DesktopHeadUnitSession, string>();
   /** The device this provisioner redirected host port 5277 to, if any. */
   private redirectOwner: string | null = null;
   /** The provisioning run in progress; the host has one port 5277, so at most one runs. */
@@ -117,7 +121,7 @@ export class AndroidAutoProjectionProvisioner {
   provision(request: AndroidAutoProjectionRequest): Promise<AndroidAutoProjectionResult> {
     if (this.inFlight) {
       if (this.inFlight.deviceId === request.deviceId) {
-        return this.inFlight.run;
+        return this.inFlight.run.then(joinedResult);
       }
       return Promise.reject(
         new ActionableError(
@@ -196,7 +200,11 @@ export class AndroidAutoProjectionProvisioner {
       }
       throw error;
     }
-    return { steps, session: dhu.session };
+    return {
+      steps,
+      session: dhu.session,
+      configPath: this.launchConfigs.get(dhu.session) ?? request.dhu.configPath,
+    };
   }
 
   /**
@@ -367,13 +375,29 @@ export class AndroidAutoProjectionProvisioner {
     return existing?.isRunning() && !this.retired.has(existing) ? existing : undefined;
   }
 
+  /** A reused DHU keeps its launch config; a request for another config is told how to get it. */
+  private reusedStep(
+    session: DesktopHeadUnitSession,
+    requestedConfig: string,
+  ): AndroidAutoProvisioningStep {
+    const running = this.launchConfigs.get(session);
+    if (!running || running === requestedConfig) {
+      return { step: "desktop-head-unit", status: "already-done" };
+    }
+    return {
+      step: "desktop-head-unit",
+      status: "already-done",
+      detail: `reused the running DHU, started with ${running}; killDevice stops it so one can start with ${requestedConfig}`,
+    };
+  }
+
   private async ensureDesktopHeadUnit(
     device: AndroidAutoDeviceAdapters,
     request: AndroidAutoProjectionRequest,
   ): Promise<{ step: AndroidAutoProvisioningStep; session: DesktopHeadUnitSession }> {
     const reusable = this.reusableSession(request.deviceId);
     if (reusable) {
-      return { step: { step: "desktop-head-unit", status: "already-done" }, session: reusable };
+      return { step: this.reusedStep(reusable, request.dhu.configPath), session: reusable };
     }
     const existing = this.sessions.get(request.deviceId);
     // An unhealthy session can still own a live DHU; wait for it to exit (stop() rejects if it
@@ -395,6 +419,7 @@ export class AndroidAutoProjectionProvisioner {
       });
       if (outcome.status === "connected") {
         this.sessions.set(request.deviceId, outcome.session);
+        this.launchConfigs.set(outcome.session, request.dhu.configPath);
         const detail = failures.length
           ? `connected after ${failures.length} relaunches`
           : undefined;
@@ -453,6 +478,21 @@ export class AndroidAutoProjectionProvisioner {
     await ui.acceptOnboarding(request.signal);
     return { step: "onboarding", status: "applied" };
   }
+}
+
+/**
+ * A call that joined another call's run did not start that run's DHU: report it as already done,
+ * so the joiner never counts itself the DHU's owner (and a timed-out joiner never stops it).
+ */
+function joinedResult(result: AndroidAutoProjectionResult): AndroidAutoProjectionResult {
+  return {
+    ...result,
+    steps: result.steps.map((step) =>
+      step.step === "desktop-head-unit" && step.status === "applied"
+        ? { step: step.step, status: "already-done", detail: "joined the run in progress" }
+        : step,
+    ),
+  };
 }
 
 async function ensure(

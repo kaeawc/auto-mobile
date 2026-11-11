@@ -97,7 +97,7 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
       acceptAndroidAutoTerms: inputs.acceptAndroidAutoTerms,
       signal,
     });
-    return report(result, inputs.dhu.configPath);
+    return report(result);
   }
 
   resolveHeadUnitInputs(options: StartDeviceAndroidAutoOptions): Promise<DesktopHeadUnitInputs> {
@@ -117,7 +117,7 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
       acceptAndroidAutoTerms: inputs.acceptAndroidAutoTerms,
       signal,
     });
-    return report(result, inputs.dhu.configPath);
+    return report(result);
   }
 
   stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }): Promise<void> {
@@ -125,13 +125,10 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
   }
 }
 
-function report(
-  result: AndroidAutoProjectionResult,
-  configPath: string,
-): AndroidAutoProvisionReport {
+function report(result: AndroidAutoProjectionResult): AndroidAutoProvisionReport {
   return {
     steps: result.steps,
-    desktopHeadUnit: { running: result.session.isRunning(), configPath },
+    desktopHeadUnit: { running: result.session.isRunning(), configPath: result.configPath },
   };
 }
 

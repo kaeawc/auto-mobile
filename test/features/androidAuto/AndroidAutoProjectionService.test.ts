@@ -31,6 +31,7 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
             isAlive: () => true,
             stop: async () => {},
           },
+          configPath: request.dhu.configPath,
         };
       },
       stopDesktopHeadUnit: async () => {},
@@ -94,6 +95,7 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
             isAlive: () => true,
             stop: async () => {},
           },
+          configPath: request.dhu.configPath,
         };
       },
       stopDesktopHeadUnit: async () => {},

@@ -7,7 +7,8 @@ setup() {
   export STUB_ROOT="${BATS_TEST_TMPDIR}"
   export CALLS="${STUB_ROOT}/calls"
   export HOST_OS=Darwin DEVICE_STATE=Booted DEVICE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPhone-16
-  export RAW_WIDTH=1179
+  export RAW_WIDTH=1179 STABLE_AT=1 CLOCK_STEP=0
+  unset PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS
   mkdir -p "${STUB_ROOT}/bin" "${STUB_ROOT}/Viewer.app" "${STUB_ROOT}/container"
   cat > "${STUB_ROOT}/bin/uname" <<'STUB'
 #!/usr/bin/env bash
@@ -25,7 +26,15 @@ printf 'xcrun %s\n' "$*" >> "${CALLS}"
 case "$2" in
   list) printf '{"devices":{"runtime":[{"udid":"test-udid","state":"%s","deviceTypeIdentifier":"%s"}]}}\n' "${DEVICE_STATE}" "${DEVICE_TYPE}" ;;
   get_app_container) printf '%s/container\n' "${STUB_ROOT}" ;;
-  io) printf 'not image data\n' > "${@: -1}" ;;
+  io)
+    count=0
+    if [[ -f "${STUB_ROOT}/capture-count" ]]; then read -r count < "${STUB_ROOT}/capture-count"; fi
+    count=$((count + 1))
+    printf '%s\n' "${count}" > "${STUB_ROOT}/capture-count"
+    frame="${count}"
+    if (( STABLE_AT > 0 && count >= STABLE_AT )); then frame="${STABLE_AT}"; fi
+    printf 'frame %s\n' "${frame}" > "${@: -1}"
+    ;;
 esac
 STUB
   cat > "${STUB_ROOT}/bin/sips" <<'STUB'
@@ -38,12 +47,19 @@ if [[ "$1" == -g ]]; then
     printf 'pixelWidth: 1179\npixelHeight: 2556\n'
   fi
 else
-  printf 'not image data\n' > "${@: -1}"
+  cp "$7" "${@: -1}"
 fi
 STUB
   cat > "${STUB_ROOT}/bin/sleep" <<'STUB'
 #!/usr/bin/env bash
 printf 'sleep %s\n' "$*" >> "${CALLS}"
+STUB
+  cat > "${STUB_ROOT}/bin/date" <<'STUB'
+#!/usr/bin/env bash
+[[ "$*" == +%s ]] || exit 1
+count=0
+if [[ -f "${STUB_ROOT}/capture-count" ]]; then read -r count < "${STUB_ROOT}/capture-count"; fi
+printf '%s\n' "$((count * CLOCK_STEP))"
 STUB
   chmod +x "${STUB_ROOT}/bin/"*
   export PATH="${STUB_ROOT}/bin:${PATH}"
@@ -127,4 +143,59 @@ record() {
   grep -q 'simctl status_bar test-udid clear' "${CALLS}"
   grep -q 'simctl ui test-udid appearance light' "${CALLS}"
   grep -q 'simctl terminate test-udid' "${CALLS}"
+}
+
+@test "recorder captures stable on second screenshot without fallback" {
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(cat "${STUB_ROOT}/capture-count")" -eq 2 ]
+  [[ "${output}" == *"prototype-record-goldens: sample: capture=stable (2 captures)"* ]]
+  run grep -qx 'sleep 2' "${CALLS}"
+  [ "${status}" -eq 1 ]
+  [ "$(grep -c '^sleep 0.5$' "${CALLS}")" -eq 2 ]
+  grep -qx 'frame 1' "${STUB_ROOT}/out/sample.png"
+}
+
+@test "recorder captures stable after four screenshots at the count bound" {
+  export STABLE_AT=3 PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES=4
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(cat "${STUB_ROOT}/capture-count")" -eq 4 ]
+  [[ "${output}" == *"capture=stable (4 captures)"* ]]
+  run grep -qx 'sleep 2' "${CALLS}"
+  [ "${status}" -eq 1 ]
+  grep -qx 'frame 3' "${STUB_ROOT}/out/sample.png"
+}
+
+@test "recorder falls back after default maximum captures and uses final screenshot" {
+  export STABLE_AT=0
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(cat "${STUB_ROOT}/capture-count")" -eq 9 ]
+  [[ "${output}" == *"prototype-record-goldens: sample: capture=fallback (not stable after 8 captures)"* ]]
+  [ "$(grep -c '^sleep 2$' "${CALLS}")" -eq 1 ]
+  grep -qx 'frame 9' "${STUB_ROOT}/out/sample.png"
+}
+
+@test "recorder falls back at the time budget before the maximum captures" {
+  export STABLE_AT=0 CLOCK_STEP=3 PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS=2
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(cat "${STUB_ROOT}/capture-count")" -eq 2 ]
+  [[ "${output}" == *"capture=fallback (not stable after 1 captures)"* ]]
+  grep -qx 'sleep 2' "${CALLS}"
+  grep -qx 'frame 2' "${STUB_ROOT}/out/sample.png"
+}
+
+@test "recorder rejects invalid stability bounds before invoking simctl" {
+  export PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES=0
+  record sample
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES must be a positive integer"* ]]
+  unset PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES
+  export PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS=-1
+  record sample
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS must be a nonnegative integer"* ]]
+  [ ! -e "${CALLS}" ]
 }

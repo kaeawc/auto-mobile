@@ -23,7 +23,7 @@ enum TVRemoteButton: String, CaseIterable {
 enum TVRemoteHold {
     static func seconds(durationMs: Int?) throws -> TimeInterval? {
         guard let durationMs else { return nil }
-        guard (100...10000).contains(durationMs) else {
+        guard (100 ... 10000).contains(durationMs) else {
             throw CommandError.invalidParameter("durationMs", "\(durationMs); expected 100...10000 ms")
         }
         return TimeInterval(durationMs) / 1000

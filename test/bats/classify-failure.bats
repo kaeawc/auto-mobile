@@ -189,6 +189,62 @@ JSON
   [[ "$output" == *"RERUN-DONT-FIX — Ubuntu mirror stalled"* ]]
 }
 
+@test "Ubuntu apt mirror stalls in the XMLStarlet and fast-validation installs classify as rerun (#17930)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17930-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":64,"name":"Validate XML","conclusion":"failure","steps":[{"name":"Run XMLStarlet","conclusion":"failure"}]}]}
+JSON
+  # Pre-#17930 plain `sudo apt-get install xmlstarlet` against a failing mirror.
+  local legacy_log=$'Err:1 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 xmlstarlet amd64 1.6.1-4\n  Could not connect to azure.archive.ubuntu.com:80 (52.252.75.106), connection timed out\nE: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/pool/universe/x/xmlstarlet/xmlstarlet_1.6.1-4_amd64.deb  Could not connect to azure.archive.ubuntu.com:80\nE: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?'
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 100.' FAKE_NO_TIMESTAMP_LOG="$legacy_log" bash "$SCRIPT" 608
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Validate XML → Run XMLStarlet → "*"RERUN-DONT-FIX — pre-#17930 plain apt-get"* ]]
+
+  # The bounded helper's final failure, now used by Validate XML and the
+  # fast-validation installer.
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='could not install xmlstarlet: the default mirror and http://archive.ubuntu.com/ubuntu both failed or stalled (see the timed attempts above); rerun the job' FAKE_NO_TIMESTAMP_LOG='' bash "$SCRIPT" 608
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — Ubuntu apt mirror outage"* ]]
+
+  # The pre-#17930 install-fast-validation-deps.sh, whose failed update was fatal.
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Shell Changed Files","conclusion":"failure","steps":[{"name":"Install BATS","conclusion":"failure"}]}]}
+JSON
+  local deps_log=$'[install-fast-validation-deps] apt-get update failed with exit 100\n[install-fast-validation-deps] apt-get update failed after 2 attempts (last exit 100)\n[install-fast-validation-deps] ERROR: apt-get update failed after 2 attempts'
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' FAKE_NO_TIMESTAMP_LOG="$deps_log" bash "$SCRIPT" 608
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17930 install-fast-validation-deps.sh"* ]]
+}
+
+@test "a recovered GNU parallel install failure does not mask a real BATS failure (#17930)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17930-bats-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"BATS Shell Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run BATS Unit Tests","conclusion":"failure"}]}]}
+JSON
+  # run-bats.sh falls back to a serial run when parallel cannot be installed, so
+  # the helper's annotation sits next to a genuine test failure.
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='could not install parallel: the default mirror and http://archive.ubuntu.com/ubuntu both failed or stalled (see the timed attempts above); rerun the job' FAKE_NO_TIMESTAMP_LOG='not ok 3 a real regression' bash "$SCRIPT" 610
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Install fast validation dependencies","conclusion":"failure"}]}]}
+JSON
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='could not install xmlstarlet: the default mirror and http://archive.ubuntu.com/ubuntu both failed or stalled (see the timed attempts above); rerun the job' FAKE_NO_TIMESTAMP_LOG='' bash "$SCRIPT" 610
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — Ubuntu apt mirror outage"* ]]
+}
+
+@test "an exit-100 failure without an apt mirror fetch error stays unclassified (#17930)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17930-negative-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":64,"name":"Validate XML","conclusion":"failure","steps":[{"name":"Run XMLStarlet","conclusion":"failure"}]}]}
+JSON
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 100.' FAKE_NO_TIMESTAMP_LOG='E: Unable to locate package xmlstarlett' bash "$SCRIPT" 609
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
 @test "a WHEP artifact-download GetSignedArtifactURL reset classifies as rerun (#17369)" {
   fixture="$BATS_TEST_TMPDIR/issue-17369-run.json"
   cat > "$fixture" <<'JSON'

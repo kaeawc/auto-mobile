@@ -843,6 +843,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId", "action"],
@@ -2587,6 +2591,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -9868,6 +9876,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId"],
@@ -11247,7 +11259,7 @@
           }
         },
         "minPriority": {
-          "description": "Lowest priority shown (default V)",
+          "description": "Lowest priority shown (default V). Apple unified log: V/D debug and up, I info and up, W default and up (no warning level), E error and fault, F fault",
           "type": "string",
           "enum": ["V", "D", "I", "W", "E", "F"]
         },
@@ -15001,6 +15013,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId"],
@@ -15313,6 +15329,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -16072,6 +16092,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -18029,6 +18053,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -21831,6 +21859,7 @@
           "type": "string"
         },
         "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -37495,6 +37524,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId"],
@@ -43059,6 +43092,10 @@
           "type": "boolean"
         },
         "device": {
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -56920,6 +56957,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId"],
@@ -58796,6 +58837,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },

@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   boundLines,
   GetLogs,
+  meetsUnifiedPriority,
   parseUnifiedCompact,
+  unifiedLinePriority,
   resolveSinceSeconds,
   type AndroidLogSource,
   type GetLogsClock,
@@ -16,6 +18,11 @@ import { unifiedLogPredicate } from "../../../src/server/unifiedLogWindow";
 
 const ANDROID: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const SIMULATOR: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "SIM-UDID" };
+const WATCH_SIMULATOR: BootedDevice = {
+  name: "Watch",
+  platform: "watchos",
+  deviceId: "WATCH-UDID",
+};
 
 function clock(overrides: Partial<GetLogsClock> = {}): GetLogsClock {
   return {
@@ -258,3 +265,66 @@ for (const maxLines of [1, 100]) {
     );
   });
 }
+
+// The four lines verbatim from #17963 (iPhone 17, iOS 26.5), plus an `In`, a `Db`, an `A` and a `Fa` line.
+const CAPTURED_17963 = [
+  "Timestamp               Ty Process[PID:TID]",
+  "2026-11-11 09:14:42.351 Df Fix[11444:a60d473] [dev.am17547.iosfixture:fixture] IOSFIXTURE-ALPHA one",
+  "2026-11-11 09:14:42.352 E  Fix[11444:a60d473] [dev.am17547.iosfixture:fixture] IOSFIXTURE-BETA two",
+  "2026-11-11 09:14:42.374 Df Fix[11444:a60d473] (libMobileGestalt.dylib) No persisted cache on this platform.",
+  "2026-11-11 09:14:42.374 Df Fix[11444:a60d484] [com.apple.xpc:connection] [0x1011fb950] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon",
+  "2026-11-11 09:14:42.380 In Fix[11444:a60d473] [dev.am17547.iosfixture:fixture] IOSFIXTURE-INFO three",
+  "2026-11-11 09:14:42.381 Db Fix[11444:a60d473] [dev.am17547.iosfixture:fixture] IOSFIXTURE-DEBUG four",
+  "2026-11-11 09:14:42.382 A  Fix[11444:a60d473] activity created: 0x1234",
+  "2026-11-11 09:14:42.383 Fa Fix[11444:a60d473] [dev.am17547.iosfixture:fixture] IOSFIXTURE-FAULT five",
+].join("\n");
+
+describe("Apple unified-log minPriority (#17963)", () => {
+  test("type columns map to the documented priority scale", () => {
+    expect(
+      ["Db x", "In x", "Df x", "A  x", "E  x", "Fa x", "Sp x", "no-type"].map(unifiedLinePriority),
+    ).toEqual(["D", "I", "W", "W", "E", "F", "W", "W"]);
+  });
+
+  test("each minPriority keeps its own rank and above", () => {
+    const kept = (min: "V" | "D" | "I" | "W" | "E" | "F") =>
+      parseUnifiedCompact(CAPTURED_17963)
+        .filter((line) => meetsUnifiedPriority(line.message, min))
+        .map((line) => line.message.slice(0, 2).trim());
+    expect(kept("V")).toEqual(["Df", "E", "Df", "Df", "In", "Db", "A", "Fa"]);
+    expect(kept("D")).toEqual(kept("V"));
+    expect(kept("I")).toEqual(["Df", "E", "Df", "Df", "In", "A", "Fa"]);
+    expect(kept("W")).toEqual(["Df", "E", "Df", "Df", "A", "Fa"]);
+    expect(kept("E")).toEqual(["E", "Fa"]);
+    expect(kept("F")).toEqual(["Fa"]);
+  });
+
+  for (const device of [SIMULATOR, WATCH_SIMULATOR]) {
+    test(`${device.platform}: minPriority E returns only error and fault lines`, async () => {
+      const levels: unknown[] = [];
+      const result = await new GetLogs({
+        clock: clock(),
+        android: () => {
+          throw new Error("unused");
+        },
+        ios: () => ({
+          collect: async (_appId, _seconds, level) => {
+            levels.push(level);
+            return { text: CAPTURED_17963, truncated: false };
+          },
+        }),
+      }).execute(device, { appId: "dev.am17547.iosfixture", minPriority: "E" });
+      expect(levels).toEqual(["default"]);
+      expect(result.lines).toEqual([
+        {
+          timestamp: "2026-11-11 09:14:42.352",
+          message: "E  Fix[11444:a60d473] [dev.am17547.iosfixture:fixture] IOSFIXTURE-BETA two",
+        },
+        {
+          timestamp: "2026-11-11 09:14:42.383",
+          message: "Fa Fix[11444:a60d473] [dev.am17547.iosfixture:fixture] IOSFIXTURE-FAULT five",
+        },
+      ]);
+    });
+  }
+});

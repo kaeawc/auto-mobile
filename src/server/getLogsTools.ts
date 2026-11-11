@@ -42,7 +42,12 @@ const getLogsInput = z.object({
     .max(32)
     .optional()
     .describe('Android logcat tag filters, "Tag" or "Tag:P" (other tags are silenced)'),
-  minPriority: z.enum(LOGCAT_PRIORITIES).optional().describe("Lowest priority shown (default V)"),
+  minPriority: z
+    .enum(LOGCAT_PRIORITIES)
+    .optional()
+    .describe(
+      "Lowest priority shown (default V). Apple unified log: V/D debug and up, I info and up, W default and up (no warning level), E error and fault, F fault",
+    ),
   grep: z.string().min(1).optional().describe("Regular expression applied host-side to each line"),
   buffers: z
     .array(z.enum(LOGCAT_BUFFERS))

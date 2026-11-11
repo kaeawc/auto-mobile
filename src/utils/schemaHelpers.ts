@@ -24,6 +24,9 @@ export const watchAwarePlatformSchema = () =>
 
 export const DEVICE_LABEL_DESCRIPTION = "Device label";
 
+export const DEVICE_ID_DESCRIPTION =
+  "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted";
+
 export const includeExtrasSchema = z
   .boolean()
   .optional()
@@ -500,7 +503,7 @@ const deviceTargetingShape = {
   platform: platformSchema.optional(),
   ...sessionUuidShape,
   device: z.string().optional().describe(DEVICE_LABEL_DESCRIPTION),
-  deviceId: z.string().optional(),
+  deviceId: z.string().optional().describe(DEVICE_ID_DESCRIPTION),
 };
 
 /**

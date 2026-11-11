@@ -19,7 +19,7 @@ export const aaosDevice: BootedDevice = {
   apiLevel: 34,
   displays: {
     panels: [
-      { key: "4619827259835644672", role: "inner", sizePx: { width: 1024, height: 768 } },
+      { key: "4619827259835644672", role: "unknown", sizePx: { width: 1024, height: 768 } },
       { key: "4619827551948147201", role: "cluster", sizePx: { width: 400, height: 600 } },
       {
         key: "virtual:com.android.car.cluster.osdouble:ClusterDisplay",

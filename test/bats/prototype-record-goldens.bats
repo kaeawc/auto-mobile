@@ -10,7 +10,7 @@ setup() {
   export RAW_WIDTH=1179 STABLE_AT=1 CLOCK_STEP=0
   unset PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS
   unset PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS
-  unset CAPTURE_FAIL_AT CAPTURE_EMPTY_AT CAPTURE_HANG_AT CAPTURE_BLOCK_AT REAL_SLEEP
+  unset CAPTURE_FAIL_AT CAPTURE_EMPTY_AT CAPTURE_HANG_AT CAPTURE_BLOCK_AT REAL_SLEEP CLOCK_PER_CALL
   unset AUTOMOBILE_FORCE_PORTABLE_TIMEOUT AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS
   mkdir -p "${STUB_ROOT}/bin" "${STUB_ROOT}/Viewer.app" "${STUB_ROOT}/container"
   cat > "${STUB_ROOT}/bin/uname" <<'STUB'
@@ -74,6 +74,14 @@ STUB
   cat > "${STUB_ROOT}/bin/date" <<'STUB'
 #!/usr/bin/env bash
 [[ "$*" == +%s ]] || exit 1
+# CLOCK_PER_CALL advances the clock on every read, so a second read in one iteration sees a later time.
+if [[ -n "${CLOCK_PER_CALL:-}" ]]; then
+  reads=0
+  if [[ -f "${STUB_ROOT}/date-reads" ]]; then read -r reads < "${STUB_ROOT}/date-reads"; fi
+  printf '%s\n' "$((reads + 1))" > "${STUB_ROOT}/date-reads"
+  printf '%s\n' "$((reads * CLOCK_PER_CALL))"
+  exit 0
+fi
 count=0
 if [[ -f "${STUB_ROOT}/capture-count" ]]; then read -r count < "${STUB_ROOT}/capture-count"; fi
 printf '%s\n' "$((count * CLOCK_STEP))"
@@ -190,6 +198,15 @@ record() {
   [ "${status}" -eq 0 ]
   [ "$(grep '^timeout ' "${CALLS}" | awk '{print $4}' | tr '\n' ' ')" = '15 12 9 6 ' ]
   [[ "${output}" == *"capture=stable (4 captures)"* ]]
+}
+
+@test "recorder never starts a capture with a zero timeout at the budget edge" {
+  # Reads: start 0, then 1 (1 s left) and 2 (budget spent). A second read per iteration would give 0.
+  export STABLE_AT=0 CLOCK_PER_CALL=1 PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS=2
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(grep '^timeout ' "${CALLS}" | awk '{print $4}' | tr '\n' ' ')" = '1 10 ' ]
+  [[ "${output}" == *"capture=fallback (not stable after 1 captures)"* ]]
 }
 
 @test "recorder discards failed captures and needs two good frames after them" {

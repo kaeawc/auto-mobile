@@ -112,10 +112,12 @@ capture_until_stable() {
   started="$(date +%s)"
   sleep "${stable_settle_secs}"
   rm -f "${tmp_dir}/screen.prev.png"
-  while (( captures < stable_max_captures && $(date +%s) - started < stable_budget_secs )); do
-    # Bound each capture by the budget left, so a hung screenshot cannot overrun it.
+  while (( captures < stable_max_captures )); do
+    # Bound each capture by the budget left, so a hung screenshot cannot overrun it. Read the clock
+    # once: a second read could cross the deadline and yield 0, which GNU timeout treats as no limit.
     elapsed=$(($(date +%s) - started))
     timeout_secs=$((stable_budget_secs - elapsed))
+    if (( timeout_secs <= 0 )); then break; fi
     if (( timeout_secs > capture_timeout_secs )); then timeout_secs="${capture_timeout_secs}"; fi
     captures=$((captures + 1))
     take_screenshot "${timeout_secs}"

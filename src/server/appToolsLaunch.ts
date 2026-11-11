@@ -1,3 +1,11 @@
+import {
+  iosCameraPosterRegistry,
+  type IosCameraPosterRegistry,
+} from "../features/utility/ios/IosCameraPosterRegistry";
+import {
+  iosCameraPosterDylibProvider,
+  type IosCameraPosterDylibProvider,
+} from "../features/utility/ios/IosCameraPosterDylibProvider";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { ExecNetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
 import { prearmSessionAppNetwork } from "./sessionNetworkCondition";
@@ -55,6 +63,9 @@ export interface PrototypeAgentLaunchInjector {
 // handler wiring with a fake LaunchApp, so the already-foreground response shape
 // is covered by a test rather than only the response builder (issue #6868).
 export interface LaunchAppToolDependencies {
+  iosCameraPosterRegistry: IosCameraPosterRegistry;
+  iosCameraPosterDylibProvider: IosCameraPosterDylibProvider;
+  hostEnv: NodeJS.ProcessEnv;
   createLaunchApp(device: BootedDevice): LaunchAppExecutor;
   prearmNetwork(device: BootedDevice, args: LaunchAppActionArgs): Promise<void>;
   idGenerator: IdGenerator;
@@ -83,6 +94,9 @@ function createDefaultPrototypeAgentInjector(
 export function createDefaultLaunchAppToolDependencies(): LaunchAppToolDependencies {
   let viewerAttacher: ReturnType<typeof createPrototypeViewerAttacher> | undefined;
   return {
+    iosCameraPosterRegistry,
+    iosCameraPosterDylibProvider,
+    hostEnv: process.env,
     createLaunchApp: (device) => new LaunchApp(device),
     prearmNetwork: async (device, args) => {
       if (
@@ -327,15 +341,26 @@ export function executeLaunch(
   launchApp: LaunchAppExecutor,
   args: LaunchAppActionArgs,
   launchArguments: string[] | undefined,
-  { prototypeLaunch, signal }: { prototypeLaunch?: PrototypeLaunch; signal?: AbortSignal } = {},
+  {
+    prototypeLaunch,
+    cameraPosterEnvironment,
+    signal,
+  }: {
+    prototypeLaunch?: PrototypeLaunch;
+    cameraPosterEnvironment?: Record<string, string>;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<LaunchAppResult> {
   return launchApp.execute(args.appId, {
     clearAppData: args.clearAppData ?? false,
     // Injection takes effect only in a fresh process.
-    coldBoot: (args.coldBoot ?? false) || prototypeLaunch !== undefined,
+    coldBoot:
+      (args.coldBoot ?? false) ||
+      prototypeLaunch !== undefined ||
+      cameraPosterEnvironment !== undefined,
     signal,
     launchArguments,
-    launchEnvironment: prototypeLaunch?.environment,
+    launchEnvironment: cameraPosterEnvironment ?? prototypeLaunch?.environment,
     intent: args.intent,
   });
 }
@@ -415,4 +440,17 @@ export async function beginPrototypeLaunch(
       }
     },
   };
+}
+
+export function withCameraPosterApplied<T extends { message: string }>(
+  response: T,
+  environment: Record<string, string> | undefined,
+): T & { cameraPosterApplied?: boolean } {
+  return environment
+    ? {
+        ...response,
+        cameraPosterApplied: true,
+        message: `${response.message}; camera poster applied (cold launch)`,
+      }
+    : response;
 }

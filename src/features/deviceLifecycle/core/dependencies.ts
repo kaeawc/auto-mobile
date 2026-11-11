@@ -1,3 +1,4 @@
+import type { IosCameraPosterRegistry } from "../../utility/ios/IosCameraPosterRegistry";
 import type { SimulatorPairService } from "../../../utils/ios-cmdline-tools/SimulatorPairs";
 import type { AndroidAutoProjectionApplier } from "../../androidAuto/AndroidAutoProjectionService";
 import type { AppleVisionSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorProvisioner";
@@ -106,6 +107,8 @@ export interface DeviceToolsDependencies {
   androidEmulatorProcessStopper: EmulatorProcessStopper;
   /** Renders `cameraPosterQr` payloads to a poster image; defaults to a file writer under the data dir. */
   cameraPosterQrWriter?: QrPosterWriter;
+  iosCameraPosterRegistry?: IosCameraPosterRegistry;
+  cameraPosterFileExists?: (path: string) => boolean;
   androidAdbFactory: AdbClientFactory;
   env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;

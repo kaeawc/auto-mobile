@@ -65,7 +65,14 @@ iOS URIs have no user query.
   enrollment, an Android lock-screen PIN, password, or pattern (`screenLock`)
   that the session clears on release, or Android power constraints (`power`:
   battery, battery saver, Doze, standby buckets, Data Saver, thermal status)
-  that the session restores on release.
+  that the session restores on release. `cameraPoster` accepts `mode: "image"` with a host
+  PNG/JPG/JPEG `path`, `mode: "qr"` with `text`, or `mode: "clear"`. Android emulators
+  update the virtual-scene poster live (`surface: "wall"` or `"table"`). On iOS Simulator,
+  it records the poster for each app's next `launchApp` and returns
+  `method: "ios_simulator_dyld_injection"`, `path` when set, and `relaunchRequired: true`.
+  Running apps must be relaunched; `surface` is accepted and ignored. After clearing,
+  use `launchApp` with `coldBoot: true` to remove injection from an already-running app.
+  Physical iOS and Android devices are unsupported.
 - `biometricAuth` simulates a match or failure on supported emulators and iOS
   simulators, and every result in apps that embed the AutoMobile SDK.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.
@@ -187,6 +194,15 @@ Errors come back with `errorCode`:
 
 On iOS the tool returns `status: "not_applicable"`: a simulator shares the
 host's network, so `localhost:<port>` already reaches your machine.
+
+`startDevice` accepts mutually exclusive `cameraPosterPath` or `cameraPosterQr: { text }`.
+Android requires a stopped emulator; iOS Simulator also accepts posters when already running.
+On iOS, `launchApp` applies a registered poster with a cold launch and reports
+`cameraPosterApplied: true`. Poster settings last until cleared or the daemon restarts.
+Use a PNG/JPG/JPEG file that exists on the host. If the injection library is unavailable,
+launch fails: install Xcode or set `AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB` to a prebuilt library.
+Building automatically requires a repository checkout, or `AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE`
+pointing to the injection source. Other Apple platforms do not support camera posters.
 
 For a clean app start, use `launchApp` with `clearAppData: true` where the
 platform supports it. Use `observe` after preparation to confirm the expected

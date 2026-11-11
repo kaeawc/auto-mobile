@@ -1,3 +1,5 @@
+import { FakeIosCameraPosterRegistry } from "../fakes/FakeIosCameraPoster";
+import { resolve } from "node:path";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
@@ -468,22 +470,78 @@ describe("startDevice handler", () => {
     ).rejects.toThrow("mutually exclusive");
   });
 
-  it("rejects cameraPosterQr on iOS with an actionable unsupported error", async () => {
-    await expect(
-      callStartDevice({ platform: "ios", cameraPosterQr: { text: "hello" } }),
-    ).rejects.toThrow("cameraPosterQr is unsupported on iOS");
+  for (const running of [true, false]) {
+    for (const mode of ["image", "qr"] as const) {
+      it(`records iOS ${mode} camera poster on ${running ? "running" : "cold"} simulator`, async () => {
+        const registry = new FakeIosCameraPosterRegistry();
+        const payloads: string[] = [];
+        const posterDevice = { ...iosDevice, deviceId: "11111111-2222-3333-4444-555555555555" };
+        const image: DeviceInfo = { ...posterDevice, isRunning: running };
+        fakeDeviceUtils.setBootedDevices("ios", running ? [posterDevice] : []);
+        fakeDeviceUtils.setDeviceImages("ios", [image]);
+        fakeMatcher.setBootedResult(running ? posterDevice : null);
+        fakeMatcher.setImageResult(image);
+        setDeviceToolsDependencies({
+          iosCameraPosterRegistry: registry,
+          cameraPosterFileExists: () => true,
+          cameraPosterQrWriter: {
+            writePoster: async (text) => {
+              payloads.push(text);
+              return resolve("/qr.png");
+            },
+          },
+        });
+        await callStartDevice({
+          platform: "ios",
+          deviceId: posterDevice.deviceId,
+          ...(mode === "image"
+            ? { cameraPosterPath: "/poster.png" }
+            : { cameraPosterQr: { text: "hello" } }),
+        });
+        expect(payloads).toEqual(mode === "qr" ? ["hello"] : []);
+        expect(registry.get(posterDevice.deviceId)).toEqual(
+          mode === "image"
+            ? { kind: "image", path: resolve("/poster.png") }
+            : { kind: "qr", text: "hello", path: resolve("/qr.png") },
+        );
+      });
+    }
+  }
+
+  it("rejects camera posters on physical iOS with an actionable error before discovery", async () => {
+    for (const poster of [
+      { cameraPosterPath: "/poster.png" },
+      { cameraPosterQr: { text: "hello" } },
+    ]) {
+      await expect(
+        callStartDevice({ platform: "ios", deviceId: "00008110-001A2B3C4D5E6F70", ...poster }),
+      ).rejects.toBeInstanceOf(ActionableError);
+      await expect(
+        callStartDevice({ platform: "ios", deviceId: "00008110-001A2B3C4D5E6F70", ...poster }),
+      ).rejects.toThrow("unsupported on physical iOS");
+    }
     expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
   });
 
-  it("rejects camera posters on iOS with an actionable unsupported error", async () => {
+  it("rejects both camera poster inputs on iOS", async () => {
     await expect(
-      callStartDevice({ platform: "ios", cameraPosterPath: "/poster.png" }),
-    ).rejects.toBeInstanceOf(ActionableError);
-    await expect(
-      callStartDevice({ platform: "ios", cameraPosterPath: "/poster.png" }),
-    ).rejects.toThrow("unsupported on iOS");
-    expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
+      callStartDevice({
+        platform: "ios",
+        cameraPosterPath: "/poster.png",
+        cameraPosterQr: { text: "hello" },
+      }),
+    ).rejects.toThrow("mutually exclusive");
   });
+
+  it.each(["tvos", "watchos", "visionos"])(
+    "refuses camera posters on %s before its separate boot path",
+    async (platform) => {
+      await expect(
+        callStartDevice({ platform, cameraPosterPath: "/poster.png" }),
+      ).rejects.toBeInstanceOf(ActionableError);
+      expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
+    },
+  );
 
   it("rejects camera posters on physical Android with an actionable unsupported error", async () => {
     const physical = { ...androidDevice, deviceId: "physical-serial" };

@@ -1,3 +1,4 @@
+import type { IosCameraPosterRegistry } from "../ios/IosCameraPosterRegistry";
 import type { IosRequestedHingeAngleStore } from "../../device/DuoHingeLayout";
 import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { IosRunnerLocationClient } from "./LocationOperations";
@@ -191,6 +192,7 @@ export interface DeviceStateDependencies {
   onLocationApplied?: () => void;
   /** Renders `cameraPoster` QR payloads; defaults to the file-backed poster writer. */
   cameraPosterQrWriter?: QrPosterWriter;
+  iosCameraPosterRegistry?: IosCameraPosterRegistry;
   cameraPosterFileExists?: (path: string) => boolean;
   clockAdapter?: DeviceClockAdapter;
   clockRestoreRegistry?: DeviceClockRestoreRegistry;

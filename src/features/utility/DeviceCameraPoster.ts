@@ -7,6 +7,8 @@
  * an OK does not prove the poster is visible: the virtual scene's default camera pose
  * may not face it. The result says so instead of claiming a verified frame.
  */
+import { writeIosCameraPoster } from "./ios/IosCameraPoster";
+import type { IosCameraPosterRegistry } from "./ios/IosCameraPosterRegistry";
 import { existsSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import type { BootedDevice } from "../../models";
@@ -33,7 +35,8 @@ export interface DeviceCameraPosterState {
   surface?: CameraPosterSurface;
   /** Host image the console was told to load; absent when clearing. */
   path?: string;
-  method?: "android_emulator_console";
+  method?: "android_emulator_console" | "ios_simulator_dyld_injection";
+  relaunchRequired?: boolean;
   /** Console acceptance is not a camera read-back, so this is never set to true. */
   verified?: boolean;
   warning?: string;
@@ -42,6 +45,7 @@ export interface DeviceCameraPosterState {
 
 export interface CameraPosterDependencies {
   adbFactory: AdbClientFactory;
+  iosCameraPosterRegistry?: IosCameraPosterRegistry;
   qrWriter?: QrPosterWriter;
   fileExists?: (path: string) => boolean;
 }
@@ -100,9 +104,16 @@ export async function writeDeviceCameraPoster(
   input: SetDeviceCameraPosterInput,
   deps: CameraPosterDependencies,
 ): Promise<DeviceCameraPosterState> {
+  if (device.platform === "ios") {
+    return writeIosCameraPoster(device, input, {
+      registry: deps.iosCameraPosterRegistry,
+      qrWriter: deps.qrWriter,
+      fileExists: deps.fileExists,
+    });
+  }
   if (device.platform !== "android") {
     return unsupported(
-      "cameraPoster is unsupported on iOS. Use a running Android emulator booted with a virtual-scene back camera.",
+      "cameraPoster requires an Android emulator or an iOS Simulator. Use startDevice to select a supported device.",
     );
   }
   if (consolePortFromSerial(device.deviceId) === null) {

@@ -51,9 +51,17 @@ export function iosSimulatorCapabilityInventory(
       biometricCapability,
       {
         id: "ios.simulator.cameraPoster",
-        state: "unsupported",
+        state: !supportsBiometricControls
+          ? "unsupported"
+          : options.isAvailable === false
+            ? "unavailable"
+            : "available",
         source: "platform",
-        reason: "Camera posters are only supported at Android emulator boot.",
+        reason: !supportsBiometricControls
+          ? "Camera injection requires an iOS Simulator app process; other Apple platforms are unsupported."
+          : options.isAvailable === false
+            ? (options.availabilityError ?? "The iOS Simulator runtime is unavailable.")
+            : "Camera posters apply on the next launchApp cold launch through simulator process injection.",
       },
       {
         id: "ios.simulator.nfc",

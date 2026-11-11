@@ -67,7 +67,7 @@ function discoveryDependencyOverrides(
 ) {
   return {
     androidAdbFactory: deps.androidAdbFactory ?? currentDeps.androidAdbFactory,
-    cameraPosterQrWriter: deps.cameraPosterQrWriter ?? currentDeps.cameraPosterQrWriter,
+    ...cameraPosterDependencyOverrides(deps, currentDeps),
     env: deps.env ?? currentDeps.env,
     deviceResourceObserverFactory:
       deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,
@@ -159,5 +159,16 @@ export function mergeDeviceToolsDependencies(
     },
     resolveRunningAndroidAvdName:
       deps.resolveRunningAndroidAvdName ?? currentDeps.resolveRunningAndroidAvdName,
+  };
+}
+
+function cameraPosterDependencyOverrides(
+  deps: Partial<DeviceToolsDependencies>,
+  currentDeps: DeviceToolsDependencies,
+) {
+  return {
+    cameraPosterQrWriter: deps.cameraPosterQrWriter ?? currentDeps.cameraPosterQrWriter,
+    iosCameraPosterRegistry: deps.iosCameraPosterRegistry ?? currentDeps.iosCameraPosterRegistry,
+    cameraPosterFileExists: deps.cameraPosterFileExists ?? currentDeps.cameraPosterFileExists,
   };
 }

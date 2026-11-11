@@ -1,4 +1,8 @@
 import {
+  validateCameraPosterTarget,
+  validateRunningCameraPosterTarget,
+} from "./deviceCameraPosterTarget";
+import {
   discoverAppleSimulatorDeviceImages,
   discoverWatchDeviceImages,
 } from "./appleSimulatorImageDiscovery";
@@ -768,23 +772,6 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     };
   }
 
-  private validateCameraPosterTarget(device: DeviceInfo, options: DeviceStartOptions): void {
-    if (options.cameraPosterPath !== undefined && device.platform !== "android") {
-      throw new ActionableError(
-        "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
-      );
-    }
-    if (
-      options.cameraPosterPath !== undefined &&
-      device.deviceId &&
-      !isAndroidEmulatorSerial(device.deviceId)
-    ) {
-      throw new ActionableError(
-        "cameraPosterPath is unsupported on physical Android devices. Use a stopped Android emulator.",
-      );
-    }
-  }
-
   /**
    * Start a device
    * @param device - The device to start
@@ -803,7 +790,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
     options: DeviceStartOptions = {},
   ): Promise<DeviceStartResult> {
-    this.validateCameraPosterTarget(device, options);
+    validateCameraPosterTarget(device, options.cameraPosterPath);
     assertAndroidImageRunningStateKnown(device);
     // Validate the UDID before any simctl running-state probe: a slow/hung
     // 'simctl list' would otherwise burn the boot budget, and an already-booted
@@ -826,11 +813,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       );
     }
     if (isRunning) {
-      if (options.cameraPosterPath !== undefined) {
-        throw new ActionableError(
-          "cameraPosterPath is unsupported on a running Android emulator. Stop it first.",
-        );
-      }
+      validateRunningCameraPosterTarget(device, options.cameraPosterPath);
       throw new DeviceAlreadyRunningError(
         `${device.platform} device '${device.name}' is already running`,
         device.platform,

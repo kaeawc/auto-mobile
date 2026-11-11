@@ -1,3 +1,4 @@
+import { prepareCameraPosterLaunch } from "../features/utility/ios/iosCameraPosterLaunch";
 import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 import type { ActionCall } from "../features/action/ActionCall";
@@ -62,6 +63,7 @@ import {
   buildLaunchAppResponse,
   createDefaultLaunchAppToolDependencies,
   executeLaunch,
+  withCameraPosterApplied,
   type LaunchAppToolDependencies,
   prepareLaunchArguments,
   type PrototypeLaunch,
@@ -427,6 +429,15 @@ const createLaunchAppHandler =
         ? await beginPrototypeLaunch(dependencies, device, args.appId)
         : undefined;
       signal?.throwIfAborted();
+      const cameraPosterEnvironment = await prepareCameraPosterLaunch(
+        device,
+        {
+          registry: dependencies.iosCameraPosterRegistry,
+          provider: dependencies.iosCameraPosterDylibProvider,
+          hostEnv: dependencies.hostEnv,
+        },
+        prototypeLaunch?.environment,
+      );
       const prepared = prepareLaunchArguments(device, args, dependencies.idGenerator);
       mutationToken = prepared.mutationToken;
       await dependencies.prearmNetwork(device, args);
@@ -435,6 +446,7 @@ const createLaunchAppHandler =
       mutationMayHaveHappened = true;
       const result = await executeLaunch(launchApp, args, prepared.launchArguments, {
         prototypeLaunch,
+        cameraPosterEnvironment,
         signal,
       });
       signal?.throwIfAborted();
@@ -442,7 +454,8 @@ const createLaunchAppHandler =
       const safeResult = result.error
         ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
         : result;
-      const response = buildLaunchAppResponse(args.appId, safeResult);
+      const launchResponse = buildLaunchAppResponse(args.appId, safeResult);
+      const response = withCameraPosterApplied(launchResponse, cameraPosterEnvironment);
       await attachLaunchedViewer(
         dependencies.prototypeViewerAttacher,
         dependencies.timer,

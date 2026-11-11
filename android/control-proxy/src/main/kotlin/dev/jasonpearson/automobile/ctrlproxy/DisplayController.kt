@@ -13,7 +13,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 
-// A secondary display's real size differs from the service window's metrics, including on API 30+.
+// A display's real size can differ from the service window's metrics, including on API 30+.
 @Suppress("DEPRECATION")
 private fun readRealDisplaySize(display: Display, size: Point) = display.getRealSize(size)
 
@@ -52,19 +52,26 @@ internal class DisplayController(private val host: Host) {
     private const val TAG = "CtrlProxy"
   }
 
-  /** Get current screen dimensions for offscreen filtering. */
+  /**
+   * Get the target display's real size in its current fold state and rotation for offscreen
+   * filtering, never a service or IME window frame. On API 30+, fall back to maximum window bounds
+   * only when the default display is unavailable; missing secondary displays return null.
+   */
   fun getScreenDimensions(displayId: Int = Display.DEFAULT_DISPLAY): ScreenDimensions? {
     return try {
-      if (displayId != Display.DEFAULT_DISPLAY && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val display = host.displayManager()?.getDisplay(displayId) ?: return null
-        val size = Point()
-        readRealDisplaySize(display, size)
-        return ScreenDimensions(size.x, size.y)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val display = host.displayManager()?.getDisplay(displayId)
+        if (display != null) {
+          val size = Point()
+          readRealDisplaySize(display, size)
+          return ScreenDimensions(size.x, size.y)
+        }
+        if (displayId != Display.DEFAULT_DISPLAY) return null
       }
       val windowManager = host.windowManager()
       if (windowManager != null) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-          val bounds = windowManager.currentWindowMetrics.bounds
+          val bounds = windowManager.maximumWindowMetrics.bounds
           ScreenDimensions(bounds.width(), bounds.height())
         } else {
           val displayMetrics = DisplayMetrics()

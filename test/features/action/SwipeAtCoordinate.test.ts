@@ -1,3 +1,4 @@
+import { xrTwoPanelBackStack } from "../../helpers/xrHeadset";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
@@ -636,5 +637,19 @@ describe("swipeAt device lock (#4280)", () => {
 
     expect(result).not.toHaveProperty("deviceLock");
     expect(result).not.toHaveProperty("deviceLockWarning");
+  });
+});
+
+describe("swipeAt XR default-pose guard (#17819)", () => {
+  test("a two-panel XR back stack swipes native pixels without a pose refusal or warning", async () => {
+    const { swipeAt, swipes, observeScreen } = createSwipeAt(androidDevice, 2560, 2558);
+    observeScreen.setObserveResult({
+      ...observation(2560, 2558),
+      backStack: xrTwoPanelBackStack(),
+    });
+    const result = await swipeAt.execute({ from: { x: 553, y: 1178 }, to: { x: 553, y: 1500 } });
+    expect(result).toMatchObject({ success: true, x1: 553, y1: 1178, x2: 553, y2: 1500 });
+    expect(JSON.stringify(result)).not.toContain("default pose");
+    expect(swipes).toEqual([{ x1: 553, y1: 1178, x2: 553, y2: 1500, duration: 300 }]);
   });
 });

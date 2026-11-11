@@ -1,4 +1,20 @@
+import { exponentialBackoff } from "../utils/Backoff";
+
 export const READINESS_RETRY_DELAY_MS = 250;
+export const CTRL_PROXY_READINESS_BACKOFF = exponentialBackoff({
+  initialDelayMs: READINESS_RETRY_DELAY_MS,
+  multiplier: 2,
+  maxDelayMs: 4_000,
+});
+/**
+ * Consecutive Android health probes that must time out with the client still
+ * connected before readiness treats the device as overloaded (#17813). Below
+ * this the poll keeps {@link READINESS_RETRY_DELAY_MS}, so phone readiness is
+ * detected at the base cadence.
+ */
+export const CTRL_PROXY_OVERLOAD_MIN_PROBE_TIMEOUTS = 3;
+/** Continuous overload after the one process restart that ends readiness early. */
+export const CTRL_PROXY_UNRESPONSIVE_AFTER_RESTART_FAIL_MS = 90_000;
 
 export const IOS_RUNNER_SETUP_MAX_ATTEMPTS = 3;
 

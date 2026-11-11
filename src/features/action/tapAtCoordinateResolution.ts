@@ -147,6 +147,8 @@ function tapAtCoordinateFrame(
   platform: BootedDevice["platform"],
   toolName: string,
 ) {
+  // Only tapAt maps XR screenshot pixels to the panel, so only it carries the default-pose
+  // guard; hitTest, hoverAt, dragPath, multiTouch and swipeAt resolve native pixels (#17819).
   const xr =
     platform === "android" && toolName === "tapAt" && options.pointSpace !== "native"
       ? detectXrPanel(observation.backStack, options.androidXr)

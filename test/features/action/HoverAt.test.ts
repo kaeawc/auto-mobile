@@ -1,3 +1,4 @@
+import { xrTwoPanelBackStack } from "../../helpers/xrHeadset";
 import { describe, expect, test } from "bun:test";
 import { HoverAt } from "../../../src/features/action/HoverAt";
 import { InstrumentationRoute } from "../../../src/features/action/pointer/InstrumentationRoute";
@@ -252,5 +253,24 @@ describe("hoverAtSchema", () => {
     expect(parse({ points: [{ x: 2, y: 0.5 }], coordinateSpace: "normalized" }).success).toBe(
       false,
     );
+  });
+});
+
+describe("HoverAt XR default-pose guard (#17819)", () => {
+  test("a two-panel XR back stack hovers native points without a pose refusal or warning", async () => {
+    const route = new FakePointerInjector("uinput");
+    const hover = create(android, [route]);
+    hover.observeScreen = observeWith({
+      ...observation(2560, 2558),
+      backStack: xrTwoPanelBackStack(),
+    });
+    const points = [
+      { x: 553, y: 1178 },
+      { x: 600, y: 1300 },
+    ];
+    const result = await hover.execute(hoverAtSchema.parse({ points }));
+    expect(result.success).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("default pose");
+    expect(route.injected[0].points.map(({ x, y }) => ({ x, y }))).toEqual(points);
   });
 });

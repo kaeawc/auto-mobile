@@ -1,3 +1,4 @@
+import { xrTwoPanelBackStack } from "../../helpers/xrHeadset";
 import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
 import type { GestureStartRequest } from "../../../src/features/observe/android/CtrlProxyGestures";
 import { describe, expect, test } from "bun:test";
@@ -703,6 +704,28 @@ describe("DragPath", () => {
       });
       expect(result.success).toBe(false);
       expect(fake.getPathGestureHistory()).toEqual([]);
+    });
+  });
+});
+
+describe("dragPath XR default-pose guard (#17819)", () => {
+  test("points resolve as native pixels on a two-panel XR back stack", () => {
+    const xr = { ...observation(2560, 2558), backStack: xrTwoPanelBackStack() };
+    const resolved = resolveDragPathPoints(
+      {
+        points: [
+          { x: 553, y: 1178 },
+          { x: 600, y: 1300 },
+        ],
+      },
+      xr,
+      "android",
+    );
+    expect(resolved).toEqual({
+      points: [
+        { x: 553, y: 1178 },
+        { x: 600, y: 1300 },
+      ],
     });
   });
 });

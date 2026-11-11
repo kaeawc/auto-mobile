@@ -269,17 +269,16 @@ internal object DaemonLauncher {
         )
     }
 
-  private fun ensureRunningLocked(env: DaemonLaunchEnvironment) {
-    val identity = env.clientIdentity
+  /**
+   * Whether a requested forced restart must actually replace the live daemon, logging when another
+   * runner of this run already restarted it after this runner started.
+   */
+  private fun resolveForcedRestart(
+    env: DaemonLaunchEnvironment,
+    record: DaemonPidRecord,
+    daemonAvailable: Boolean,
+  ): Boolean {
     val forceRestartRequested = env.forceRestartRequested
-    val daemonAvailable = isDaemonAvailable(env)
-    val record = env.readPidRecord()
-
-    // A daemon of a different build already owning the shared per-uid socket would silently serve
-    // the wrong tool set (#2744). Before reusing it, compare the version, build identity and asset
-    // version it recorded in its PID file against this runner's and restart on skew, mirroring the
-    // MCP proxy's ensureVersionMatches/ensureBuildMatches.
-    val skew = restartSkew(env, record, daemonAvailable, forceRestartRequested)
     val forcedRestart =
       DaemonRestartPolicy.requiresForcedRestart(
         forceRestartRequested,
@@ -293,6 +292,21 @@ internal object DaemonLauncher {
           "already restarted it)",
       )
     }
+    return forcedRestart
+  }
+
+  private fun ensureRunningLocked(env: DaemonLaunchEnvironment) {
+    val identity = env.clientIdentity
+    val forceRestartRequested = env.forceRestartRequested
+    val daemonAvailable = isDaemonAvailable(env)
+    val record = env.readPidRecord()
+
+    // A daemon of a different build already owning the shared per-uid socket would silently serve
+    // the wrong tool set (#2744). Before reusing it, compare the version, build identity and asset
+    // version it recorded in its PID file against this runner's and restart on skew, mirroring the
+    // MCP proxy's ensureVersionMatches/ensureBuildMatches.
+    val skew = restartSkew(env, record, daemonAvailable, forceRestartRequested)
+    val forcedRestart = resolveForcedRestart(env, record, daemonAvailable)
 
     // Only a requested forced restart may replace a skewed shared daemon; never a user-managed one.
     val mustNotReplace = env.userManagedSocket || (skew && !forceRestartRequested)

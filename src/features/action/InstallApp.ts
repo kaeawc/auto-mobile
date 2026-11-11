@@ -65,6 +65,7 @@ import {
   type InstallAppOptions,
   type InstallGuardOptions,
   installStepOptions,
+  dataPreservedField,
 } from "./InstallAppTypes";
 import { IosAppInstaller } from "./IosAppInstaller";
 import { checkSigningIdentity, type PackageSigningInspector } from "./SigningIdentityGuard";
@@ -91,6 +92,7 @@ import {
   type AndroidPriorPackageState,
   type TimedOutInstallVerdict,
 } from "./androidInstallTimeoutRecovery";
+import { AndroidInstallDowngradeRefusedError } from "./AndroidInstallDowngradeRefusedError";
 import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 
 export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
@@ -253,7 +255,11 @@ export class InstallApp {
     );
     try {
       return await withAndroidPackageMutationLock(this.device.deviceId, signal, () =>
-        this.executeAndroid(plan, userId, perf, { signal, guard }),
+        this.executeAndroid(plan, userId, perf, {
+          signal,
+          guard,
+          allowDowngrade: android.allowDowngrade,
+        }),
       );
     } finally {
       await plan.cleanup();
@@ -275,7 +281,11 @@ export class InstallApp {
     plan: AndroidInstallPlan,
     userId: number | undefined,
     perf: PerformanceTracker,
-    { signal, guard }: { signal?: AbortSignal; guard?: InstallGuardOptions },
+    {
+      signal,
+      guard,
+      allowDowngrade,
+    }: { signal?: AbortSignal; guard?: InstallGuardOptions; allowDowngrade?: boolean },
   ): Promise<InstallAppResult> {
     const preparation = await this.prepareAndroidInstall(plan, userId, perf, signal);
     let { packageName, isInstalled } = preparation;
@@ -289,7 +299,7 @@ export class InstallApp {
       packageName,
       targetUserId,
       this.installRunner(plan, targetUserId),
-      { prior, ...installStepOptions(guard, signal), perf },
+      { prior, ...installStepOptions(guard, signal, allowDowngrade), perf },
     );
     const installAttempt = installation.installAttempt;
     isInstalled = this.absorbInstallRecovery(installation, warnings, isInstalled);
@@ -317,13 +327,15 @@ export class InstallApp {
 
     perf.end();
     const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
+    const upgrade = isInstalled && success;
     return {
       success: success,
       error: success ? undefined : installAttempt.output || undefined,
-      upgrade: isInstalled && success,
+      upgrade,
       userId: targetUserId,
       packageName: packageName,
       warning: warning,
+      ...dataPreservedField(installation.removedPriorCopy, upgrade),
       ...(signingGuard ? { signingGuard } : {}),
       ...installRouteField(plan),
     };
@@ -478,7 +490,8 @@ export class InstallApp {
       prior,
       perf,
       signal,
-      allowDestructiveRecovery = true,
+      allowDestructiveRecovery = false,
+      allowDowngrade = false,
     }: AndroidInstallStepOptions & {
       perf: PerformanceTracker;
     } & { prior: AndroidPriorPackageState },
@@ -498,12 +511,11 @@ export class InstallApp {
       return { installAttempt };
     }
     if (!allowDestructiveRecovery) {
-      return {
-        installAttempt,
-        warning:
-          "Downgrade recovery is disabled (allowDestructiveRecovery=false); the existing " +
-          "package was left installed.",
-      };
+      // Recovery is opt-in: a downgrade never silently uninstalls the app and deletes its data.
+      throw new AndroidInstallDowngradeRefusedError(packageName, {
+        triedAllowDowngrade: allowDowngrade,
+        cause: installAttempt.error,
+      });
     }
     // APK versions are package-wide, so a per-user uninstall cannot enable a downgrade.
     if (!packageName) {

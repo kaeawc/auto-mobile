@@ -227,8 +227,9 @@ const installAppInput = z.object({
     .boolean()
     .optional()
     .describe(
-      "Android: false refuses the uninstall-and-reinstall recovery after " +
-        "INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
+      "Android: true uninstalls the installed copy, deleting its app data, and reinstalls " +
+        "after INSTALL_FAILED_VERSION_DOWNGRADE (result dataPreserved: false). Default false: " +
+        "a downgrade fails with install_downgrade_refused and leaves the app untouched",
     ),
 });
 

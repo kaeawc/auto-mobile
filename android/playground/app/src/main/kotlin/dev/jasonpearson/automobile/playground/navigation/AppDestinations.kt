@@ -56,4 +56,6 @@ data class HomeDestination(
 
 @Serializable data object DemoCollapsingComposerDestination : AppDestination
 
+@Serializable data object DemoSharedRowIdListDestination : AppDestination
+
 @Serializable data object DesignSystemDemoDestination : AppDestination

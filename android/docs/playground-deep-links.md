@@ -53,6 +53,7 @@ Use these for stable, repeatable AutoMobile demos tied to docs/using workflows.
 - **Bug Repro Demo**: `automobile://playground/demos/bugs/repro`
 - **Pointer Probe Demo**: `automobile://playground/demos/input/pointer_probe`
 - **Collapsing Composer Demo**: `automobile://playground/demos/input/collapsing_composer` — hides the composer and clears focus after the keyboard goes from visible to hidden. Tap **Tap to write** to reopen it; **Draft: <text>** retains the text.
+- **Shared Row Id List Demo**: `automobile://playground/demos/lists/shared_row_id` — an XML RecyclerView of 60 rows that all use the resource id `shared_row_id_row` and differ only by their text (**Shared row 01** to **Shared row 60**). Tapping a row shows **Selected: <row>**.
 
 ## Testing with ADB
 

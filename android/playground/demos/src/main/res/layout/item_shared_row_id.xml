@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Every row reuses this one id on purpose: the screen is a fixture for rows that share a resource id. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/shared_row_id_row"
+    android:layout_width="match_parent"
+    android:layout_height="72dp"
+    android:foreground="?android:attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:textAppearance="?attr/textAppearanceBodyLarge" />

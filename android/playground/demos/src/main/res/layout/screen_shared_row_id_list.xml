@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/shared_row_id_selection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp"
+        android:text="@string/shared_row_id_none_selected"
+        android:textAppearance="?attr/textAppearanceBodyLarge" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/shared_row_id_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:descendantFocusability="afterDescendants"
+        android:scrollbars="vertical" />
+</LinearLayout>

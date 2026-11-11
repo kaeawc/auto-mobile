@@ -18,14 +18,17 @@ const zeroRandom: Random = { next: () => 0, pick: <T>(items: readonly T[]) => it
 const WRITE = CompiledQuery.raw("insert into t values (1)");
 const MAX_BACKOFF_MS = 50;
 
-function contendedConnection(releaseAtMs = Infinity) {
+function contendedConnection(
+  releaseAtMs = Infinity,
+  attemptWaitMs = SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS,
+) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const busy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
   const attempts: { durationMs: number; sleepsBefore: number }[] = [];
   const attempt = () => {
     const start = timer.now();
-    timer.advanceTime(SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS);
+    timer.advanceTime(attemptWaitMs);
     attempts.push({
       durationMs: timer.now() - start,
       sleepsBefore: timer.getSleepHistory().length,
@@ -52,6 +55,7 @@ function contendedConnection(releaseAtMs = Infinity) {
   };
   const state = new BunSqliteConnectionState(db, undefined, {
     maxAttempts: APP_CONNECTION_MAX_RETRY_ATTEMPTS,
+    minAttemptMs: SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS,
     timer,
     random: zeroRandom,
   });
@@ -87,6 +91,37 @@ describe("app connection busy retry", () => {
       });
     });
   }
+
+  // SQLite can return BUSY without running its busy handler (#17902): the attempt
+  // cap must not end retries before the total-wait budget does.
+  for (const operation of ["write", "begin"] as const) {
+    it(`paces an immediate BUSY ${operation} so the attempt cap outlasts a 3 s peer hold`, async () => {
+      const { state, timer, attempts } = contendedConnection(3000, 0);
+      if (operation === "write") {
+        await state.executeQuery(WRITE, Symbol("write"));
+      } else {
+        await state.beginTransaction(Symbol("begin"));
+      }
+      expect(timer.now()).toBeGreaterThanOrEqual(3000);
+      expect(attempts.length).toBeLessThanOrEqual(APP_CONNECTION_MAX_RETRY_ATTEMPTS);
+      for (const delayMs of timer.getSleepHistory()) {
+        expect(delayMs).toBeGreaterThanOrEqual(SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS);
+      }
+    });
+  }
+
+  it("ends immediate BUSY retries at the deadline, not early on the attempt cap", async () => {
+    const { state, timer, busy } = contendedConnection(Infinity, 0);
+    const error = await state.executeQuery(WRITE, Symbol("write")).then(
+      () => {
+        throw new Error("Expected BUSY");
+      },
+      (error: unknown) => error,
+    );
+    expect((error as Error).cause).toBe(busy);
+    expect(timer.now()).toBeGreaterThanOrEqual(DEFAULT_RETRY_TOTAL_WAIT_MS);
+    expect(timer.now()).toBeLessThanOrEqual(DEFAULT_RETRY_TOTAL_WAIT_MS + MAX_BACKOFF_MS);
+  });
 
   it("stops at the deadline plus one short attempt and backoff, preserving BUSY", async () => {
     const { state, timer, busy, attempts } = contendedConnection();

@@ -12,6 +12,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ExecutePlanResult
 import dev.jasonpearson.automobile.desktop.core.daemon.FeatureFlagState
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.daemon.KillDeviceResult
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.ObserveResult
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryResult
 import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueRequest
@@ -310,16 +311,25 @@ internal class FakeFeatureOperations(private val state: FakeAutoMobileClientStat
     limit: Int?,
     offset: Int?,
     deviceId: String?,
+    deviceSessionUuid: String?,
   ): PerformanceAuditHistoryResult {
     return with(state) {
       calls.add("listPerformanceAuditResults")
       lastListPerformanceAuditResultsDeviceId = deviceId
-      // Mirror the performance-results resource's server-side deviceId filter so device-scoped
-      // reads only surface their own device's entries.
-      if (deviceId == null) {
-        return@with listPerformanceAuditResultsResult
+      lastListPerformanceAuditResultsDeviceSessionUuid = deviceSessionUuid
+      if (deviceSessionUuid != null && !performanceResultsSupportsDeviceSessionUuid) {
+        // What a daemon that predates the filter answers: it fails closed on unknown keys.
+        throw McpConnectionException(
+          "Invalid performance query parameters: Error: Unknown query parameters: deviceSessionUuid",
+        )
       }
-      val scoped = listPerformanceAuditResultsResult.results.filter { it.deviceId == deviceId }
+      // Mirror the performance-results resource's server-side filters so scoped reads only
+      // surface their own device's (and epoch's) entries. Unstamped audits match no epoch.
+      val scoped =
+        listPerformanceAuditResultsResult.results.filter {
+          (deviceId == null || it.deviceId == deviceId) &&
+            (deviceSessionUuid == null || it.deviceSessionUuid == deviceSessionUuid)
+        }
       return@with listPerformanceAuditResultsResult.copy(results = scoped)
     }
   }

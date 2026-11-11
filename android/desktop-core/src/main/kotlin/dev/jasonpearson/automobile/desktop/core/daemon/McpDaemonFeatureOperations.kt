@@ -45,9 +45,11 @@ internal class McpDaemonFeatureOperations(private val owner: () -> McpDaemonClie
     limit: Int?,
     offset: Int?,
     deviceId: String?,
+    deviceSessionUuid: String?,
   ): PerformanceAuditHistoryResult {
     with(owner()) {
-      val uri = buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId)
+      val uri =
+        buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId, deviceSessionUuid)
       val contents = readResource(uri)
       return decodePerformanceAuditResource(json, contents)
     }

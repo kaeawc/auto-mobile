@@ -32,6 +32,8 @@ data class PerformanceAuditHistoryEntry(
   val passed: Boolean,
   val metrics: PerformanceAuditMetrics,
   val diagnostics: String? = null,
+  /** Device epoch the audit ran against; null for audits recorded before daemons stamped it. */
+  val deviceSessionUuid: String? = null,
 )
 
 @Serializable
@@ -57,6 +59,7 @@ internal fun buildPerformanceResultsUri(
   limit: Int?,
   offset: Int?,
   deviceId: String?,
+  deviceSessionUuid: String? = null,
 ): String {
   return ResourceUriBuilder(PERFORMANCE_RESULTS_RESOURCE_URI)
     .apply {
@@ -65,8 +68,18 @@ internal fun buildPerformanceResultsUri(
       add("limit", limit)
       add("offset", offset)
       add("deviceId", deviceId)
+      add("deviceSessionUuid", deviceSessionUuid)
     }
     .build()
+}
+
+/**
+ * Whether [this] is a daemon that predates the `deviceSessionUuid` filter rejecting it: its
+ * performance-results resource fails closed on any query key it does not know.
+ */
+fun McpConnectionException.isUnknownDeviceSessionUuidFilter(): Boolean {
+  val text = message ?: return false
+  return text.contains("Unknown query parameters") && text.contains("deviceSessionUuid")
 }
 
 internal fun decodePerformanceAuditResource(

@@ -405,6 +405,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     limit: Int?,
     offset: Int?,
     deviceId: String?,
+    deviceSessionUuid: String?,
   ) = notImplemented()
 
   override fun getTestTimings(

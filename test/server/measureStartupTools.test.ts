@@ -32,6 +32,7 @@ function setup() {
     createShell: () => adb,
     timer,
     repository: { recordAudit: async (record) => void records.push(record) },
+    resolveDeviceSessionUuid: (deviceId) => (deviceId === "emulator-5554" ? "epoch-1" : null),
   });
   return { handler, records };
 }
@@ -64,6 +65,7 @@ describe("measureStartup tool", () => {
       timestamp: "2026-10-21T12:00:04.000Z",
       passed: true,
       metrics: { timeToFirstFrameMs: 900, timeToInteractiveMs: null },
+      deviceSessionUuid: "epoch-1",
     });
     expect(JSON.parse(records[0].diagnostics ?? "{}")).toMatchObject({
       kind: "startup",

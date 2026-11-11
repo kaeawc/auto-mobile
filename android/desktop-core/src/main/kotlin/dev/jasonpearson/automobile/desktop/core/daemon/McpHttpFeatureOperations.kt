@@ -42,8 +42,10 @@ internal class McpHttpFeatureOperations(private val transport: McpHttpTransport)
     limit: Int?,
     offset: Int?,
     deviceId: String?,
+    deviceSessionUuid: String?,
   ): PerformanceAuditHistoryResult {
-    val uri = buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId)
+    val uri =
+      buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId, deviceSessionUuid)
     val contents = resources.readResource(uri)
     return decodePerformanceAuditResource(json, contents)
   }

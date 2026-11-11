@@ -19,6 +19,7 @@ import { isTouchLatencySamplingEnabled } from "./performanceAuditConfig";
 import { serverConfig } from "../../utils/ServerConfig";
 import { PerformanceAuditRepository } from "../../db/performanceAuditRepository";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { currentDeviceSessionUuid } from "../../utils/deviceIncarnation";
 import { selectTopContributors } from "../../utils/topContributors";
 import { shellQuote } from "../../utils/shellQuote";
 import {
@@ -942,6 +943,7 @@ export class PerformanceAudit {
         touchLatencyMs: metrics.touchLatencyMs,
       },
       diagnostics,
+      deviceSessionUuid: currentDeviceSessionUuid(this.device.deviceId),
     });
 
     return {

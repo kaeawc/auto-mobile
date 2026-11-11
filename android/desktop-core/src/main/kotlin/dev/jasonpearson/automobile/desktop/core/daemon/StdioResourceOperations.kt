@@ -51,8 +51,10 @@ abstract class StdioResourceOperations : AutoMobileClient {
     limit: Int?,
     offset: Int?,
     deviceId: String?,
+    deviceSessionUuid: String?,
   ): PerformanceAuditHistoryResult {
-    val uri = buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId)
+    val uri =
+      buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId, deviceSessionUuid)
     val contents = readResource(uri)
     return decodePerformanceAuditResource(json, contents)
   }

@@ -125,5 +125,10 @@ interface AutoMobileFeatureOperations {
     limit: Int? = null,
     offset: Int? = null,
     deviceId: String? = null,
+    /**
+     * Only audits stamped with this device epoch. A daemon that predates the filter rejects it as
+     * an unknown query parameter ([isUnknownDeviceSessionUuidFilter]).
+     */
+    deviceSessionUuid: String? = null,
   ): PerformanceAuditHistoryResult
 }

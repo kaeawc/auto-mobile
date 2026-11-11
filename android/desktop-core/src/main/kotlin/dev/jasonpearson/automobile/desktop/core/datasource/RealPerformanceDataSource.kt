@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryResult
+import dev.jasonpearson.automobile.desktop.core.daemon.isUnknownDeviceSessionUuidFilter
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceRun
 
 /**
@@ -11,17 +13,21 @@ import dev.jasonpearson.automobile.desktop.core.performance.PerformanceRun
  * When [deviceId] is set, the audit-history read is scoped to that device so a pane in a
  * multi-device workspace only surfaces its own device's audit history (the performance-results
  * resource filters server-side by `deviceId`). Null = unscoped (all devices).
+ *
+ * When [deviceSessionUuid] is also set, the read is scoped to that device epoch, so a rebooted
+ * device that reuses its serial shows only this boot's audits. A daemon that predates the epoch
+ * filter rejects it; the read then falls back to device-scoped history.
  */
 class RealPerformanceDataSource(
   private val clientProvider: (() -> AutoMobileClient)? = null,
   private val deviceId: String? = null,
+  private val deviceSessionUuid: String? = null,
 ) : PerformanceDataSource {
   override suspend fun getPerformanceRun(): Result<PerformanceRun> {
     val provider = clientProvider ?: return Result.Success(createEmptyRun())
 
     return try {
-      val client = provider()
-      val auditResult = client.listPerformanceAuditResults(limit = 50, deviceId = deviceId)
+      val auditResult = readHistory(provider())
 
       if (auditResult.results.isEmpty()) {
         return Result.Success(createEmptyRun())
@@ -33,5 +39,25 @@ class RealPerformanceDataSource(
     } catch (e: IllegalArgumentException) {
       Result.Error(e, "Failed to load performance data: ${e.message}")
     }
+  }
+
+  private fun readHistory(client: AutoMobileClient): PerformanceAuditHistoryResult {
+    if (deviceSessionUuid == null) {
+      return client.listPerformanceAuditResults(limit = HISTORY_LIMIT, deviceId = deviceId)
+    }
+    return try {
+      client.listPerformanceAuditResults(
+        limit = HISTORY_LIMIT,
+        deviceId = deviceId,
+        deviceSessionUuid = deviceSessionUuid,
+      )
+    } catch (e: McpConnectionException) {
+      if (!e.isUnknownDeviceSessionUuidFilter()) throw e
+      client.listPerformanceAuditResults(limit = HISTORY_LIMIT, deviceId = deviceId)
+    }
+  }
+
+  private companion object {
+    const val HISTORY_LIMIT = 50
   }
 }

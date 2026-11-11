@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.datasource
 
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryEntry
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryResult
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditMetrics
@@ -16,7 +18,12 @@ import org.junit.Test
  */
 class RealPerformanceDataSourceTest {
 
-  private fun entry(id: Long, deviceId: String, touchLatencyMs: Double) =
+  private fun entry(
+    id: Long,
+    deviceId: String,
+    touchLatencyMs: Double,
+    deviceSessionUuid: String? = null,
+  ) =
     PerformanceAuditHistoryEntry(
       id = id,
       deviceId = deviceId,
@@ -25,6 +32,7 @@ class RealPerformanceDataSourceTest {
       timestamp = "2026-01-01T00:00:0${id}Z",
       passed = true,
       metrics = PerformanceAuditMetrics(touchLatencyMs = touchLatencyMs),
+      deviceSessionUuid = deviceSessionUuid,
     )
 
   private fun clientWithTwoDevices(): FakeAutoMobileClient {
@@ -82,5 +90,79 @@ class RealPerformanceDataSourceTest {
     assertTrue(values.contains(50f))
     assertTrue(values.contains(999f))
     assertEquals(null, client.lastListPerformanceAuditResultsDeviceId)
+  }
+
+  /** One serial across two boots, plus an audit recorded before daemons stamped the epoch. */
+  private fun clientWithTwoEpochs(): FakeAutoMobileClient {
+    return FakeAutoMobileClient().apply {
+      listPerformanceAuditResultsResult =
+        PerformanceAuditHistoryResult(
+          results =
+            listOf(
+              entry(1, "emulator-5554", touchLatencyMs = 11.0, deviceSessionUuid = "epoch-1"),
+              entry(2, "emulator-5554", touchLatencyMs = 22.0, deviceSessionUuid = "epoch-2"),
+              entry(3, "emulator-5554", touchLatencyMs = 33.0),
+            ),
+        )
+    }
+  }
+
+  private suspend fun touchLatencies(source: RealPerformanceDataSource): List<Float> {
+    val result = source.getPerformanceRun()
+    assertTrue("expected success, got $result", result is Result.Success)
+    val metric = (result as Result.Success).data.metrics.first { it.id == "touch_latency" }
+    return metric.history.map { it.value }
+  }
+
+  @Test
+  fun `each epoch of a reused serial shows only its own audit history`() = runBlocking {
+    val client = clientWithTwoEpochs()
+    fun source(epoch: String) =
+      RealPerformanceDataSource({ client }, deviceId = "emulator-5554", deviceSessionUuid = epoch)
+
+    assertEquals(listOf(11f), touchLatencies(source("epoch-1")))
+    assertEquals(listOf(22f), touchLatencies(source("epoch-2")))
+    assertEquals("epoch-2", client.lastListPerformanceAuditResultsDeviceSessionUuid)
+  }
+
+  @Test
+  fun `a daemon that predates the epoch filter still returns device-scoped history`() =
+    runBlocking {
+      val client =
+        clientWithTwoEpochs().apply { performanceResultsSupportsDeviceSessionUuid = false }
+      val source =
+        RealPerformanceDataSource(
+          { client },
+          deviceId = "emulator-5554",
+          deviceSessionUuid = "epoch-2",
+        )
+
+      assertEquals(listOf(11f, 22f, 33f), touchLatencies(source).sorted())
+      assertEquals("emulator-5554", client.lastListPerformanceAuditResultsDeviceId)
+      assertEquals(null, client.lastListPerformanceAuditResultsDeviceSessionUuid)
+    }
+
+  @Test
+  fun `other daemon errors are not retried without the epoch filter`() = runBlocking {
+    val calls = mutableListOf<String?>()
+    val client =
+      object : AutoMobileClient by FakeAutoMobileClient() {
+        override fun listPerformanceAuditResults(
+          startTime: String?,
+          endTime: String?,
+          limit: Int?,
+          offset: Int?,
+          deviceId: String?,
+          deviceSessionUuid: String?,
+        ): PerformanceAuditHistoryResult {
+          calls += deviceSessionUuid
+          throw McpConnectionException("Failed to retrieve performance audit results: boom")
+        }
+      }
+    val source =
+      RealPerformanceDataSource({ client }, deviceId = "emulator-5554", deviceSessionUuid = "e1")
+
+    assertTrue(source.getPerformanceRun() is Result.Error)
+    assertEquals(listOf<String?>("e1"), calls)
   }
 }

@@ -245,6 +245,13 @@ export interface ToolTraits {
    * `_meta["automobile/opaquePersistentState"]` for the daemon's reset policy.
    */
   changesOpaquePersistentState?: boolean;
+  /**
+   * Advertises the `deviceId` input field that every device-targeted schema accepts but most hide
+   * so plans prefer labels. Declared by tools a direct call must be able to aim at one of several
+   * booted devices (`observe`, the app-management tools), because `device` is an executePlan label,
+   * not a serial (#17954).
+   */
+  advertisesDeviceId?: boolean;
 }
 
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
@@ -258,6 +265,9 @@ export const PLAN_RELEVANT = { planRelevant: true } as const;
 
 /** Both {@link PLAN_RELEVANT} and {@link SKELETON_OBSERVATION}, for the many tools that declare the pair. */
 export const PLAN_SKELETON = { ...PLAN_RELEVANT, ...SKELETON_OBSERVATION } as const;
+
+/** Spread into the options of a tool that declares {@link ToolTraits.advertisesDeviceId}. */
+export const ADVERTISES_DEVICE_ID = { advertisesDeviceId: true } as const;
 
 /** Spread into the options of a tool that declares {@link ToolTraits.selectsActiveDevice}. */
 export const SELECTS_ACTIVE_DEVICE = { selectsActiveDevice: true } as const;
@@ -278,6 +288,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     hostInventory,
     changesHostSideState,
     changesOpaquePersistentState,
+    advertisesDeviceId,
   } = options;
   return {
     stopsApp,
@@ -293,6 +304,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     hostInventory,
     changesHostSideState,
     changesOpaquePersistentState,
+    advertisesDeviceId,
   };
 }
 

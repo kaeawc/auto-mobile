@@ -807,6 +807,65 @@ describe("provisionDevice handler", () => {
       expect(events).toEqual(["dhu-stop"]);
     });
 
+    test("a provision that applied its DHU and then fails at a later step stops it before rollback", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      createdAndroid(applier);
+      // The step after the bound session and its projection, building the result, fails once.
+      const provision = exactProvisioner.provision.bind(exactProvisioner);
+      let resultBuildingFailed = false;
+      exactProvisioner.provision = async (...provisionArgs) => {
+        const provisioned = await provision(...provisionArgs);
+        const { resolvedSpec } = provisioned;
+        return Object.defineProperty({ ...provisioned }, "resolvedSpec", {
+          get: () => {
+            if (applier.events.includes("apply:emulator-5554") && !resultBuildingFailed) {
+              resultBuildingFailed = true;
+              applier.events.push("later-step-failed");
+              throw new ActionableError("result building failed");
+            }
+            return resolvedSpec;
+          },
+        });
+      };
+      setDeviceToolsDependencies({
+        // The rollback's own shutdown detaches observers before it stops the DHU again.
+        stopAndroidObservers: async () => {
+          applier.events.push("rollback");
+        },
+      });
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.success).toBe(false);
+      // The projection resolved `applied`, so the provision itself stops its DHU, before the
+      // rollback's shutdown starts.
+      const rollbackStarts = applier.events.indexOf("rollback");
+      expect(applier.events.slice(0, rollbackStarts + 1)).toEqual([
+        "apply:emulator-5554",
+        "later-step-failed",
+        "stop:emulator-5554",
+        "rollback",
+      ]);
+      expect(applier.events).toContain("destroy");
+    });
+
+    test("a resource notification that throws synchronously stays best-effort", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      createdAndroid(applier);
+      setDeviceToolsDependencies({
+        notifyResourcesChanged: () => {
+          applier.events.push("notify");
+          throw new ActionableError("resource notification failed");
+        },
+      });
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.sessionId).toEqual(expect.any(String));
+      expect(applier.events).toEqual(["apply:emulator-5554", "notify"]);
+    });
+
     test("a failed rerun on a reused emulator leaves the DHU an earlier provision started", async () => {
       const events: string[] = [];
       const { ui, applier, sessions } = realProjectionStack(events);

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ExecResult, ObserveResult } from "../../../../src/models";
 import type { ForegroundApp } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
+  CAR_APP_PROJECTED_SERVICES_TTL_MS,
   CarAppTemplateReader,
   type CarAppAdb,
 } from "../../../../src/features/observe/android/CarAppTemplateReader";
@@ -26,7 +27,10 @@ const MISSING =
 class FakeProjectionAdb implements CarAppAdb {
   readonly commands: string[] = [];
   dump: string | Error;
+  /** Keyed by package, or `<package>@<user>` for one user only. */
   readonly routes = new Map<string, string>();
+  /** Runs during every route read, before it answers. */
+  onRouteRead: () => void = () => {};
   constructor(bound: ProjectionServicesFixture) {
     this.dump = projectionServicesDump(bound);
   }
@@ -38,8 +42,11 @@ class FakeProjectionAdb implements CarAppAdb {
       }
       return createExecResult(this.dump, "");
     }
+    this.onRouteRead();
     const packageName = /content:\/\/(.+)\.automobile\.carapptemplates/.exec(command)?.[1] ?? "";
-    return createExecResult(this.routes.get(packageName) ?? MISSING, "");
+    const user = /--user (\d+)/.exec(command)?.[1] ?? "";
+    const answer = this.routes.get(`${packageName}@${user}`) ?? this.routes.get(packageName);
+    return createExecResult(answer ?? MISSING, "");
   }
   async getForegroundApp(): Promise<ForegroundApp | null> {
     return { packageName: ANDROID_AUTO_PACKAGE, userId: 0 };
@@ -70,8 +77,22 @@ async function observeProjection(reader: CarAppTemplateReader, result: ObserveRe
 
 function setup(bound: ProjectionServicesFixture) {
   const adb = new FakeProjectionAdb(bound);
-  const reader = new CarAppTemplateReader(() => adb, new FakeTimer());
-  return { adb, reader };
+  const timer = new FakeTimer();
+  const reader = new CarAppTemplateReader(() => adb, timer);
+  return { adb, timer, reader };
+}
+
+/** The captured dump plus the fixture's ServiceRecord block repeated as Android user 10. */
+function dumpWithFixtureAlsoBoundForUser10(): string {
+  const lines = projectionServicesDump("one").split(/\r?\n/);
+  const start = lines.findIndex((line) =>
+    line.includes(`u0 ${FIXTURE_APP}/.car.FixtureCarAppService`),
+  );
+  const end = lines.findIndex((line, index) => index > start && line.includes("* ServiceRecord{"));
+  const user10 = lines
+    .slice(start, end)
+    .map((line, index) => (index === 0 ? line.replace(" u0 ", " u10 ") : line));
+  return [...lines.slice(0, end), ...user10, ...lines.slice(end)].join("\n");
 }
 
 describe("androidAuto projection block (#17841)", () => {
@@ -130,5 +151,38 @@ describe("androidAuto projection block (#17841)", () => {
     const { adb, reader } = setup("one");
     adb.dump = new Error("adb: device offline");
     expect(await observeProjection(reader, observation(ANDROID_AUTO_PACKAGE))).toBeUndefined();
+  });
+
+  test("a route read slower than the dump's TTL still uses the observation's one snapshot", async () => {
+    const { adb, timer, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
+    adb.onRouteRead = () => timer.advanceTime(CAR_APP_PROJECTED_SERVICES_TTL_MS + 1);
+
+    const block = await observeProjection(reader, observation(ANDROID_AUTO_PACKAGE));
+
+    expect(block).toMatchObject({ projecting: true, apps: [{ packageName: FIXTURE_APP }] });
+    expect(adb.dumps()).toBe(1);
+  });
+
+  test("an app bound for two users is listed only for the user whose route answered", async () => {
+    const { adb, reader } = setup("one");
+    adb.dump = dumpWithFixtureAlsoBoundForUser10();
+    adb.routes.set(`${FIXTURE_APP}@0`, fixtureListBundle());
+
+    const block = await observeProjection(reader, observation(ANDROID_AUTO_PACKAGE));
+
+    expect(block?.apps.map(({ packageName, userId }) => ({ packageName, userId }))).toEqual([
+      { packageName: FIXTURE_APP, userId: 0 },
+    ]);
+  });
+
+  test("without a templates read for the same observation there is no block and no dump", async () => {
+    const { adb, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
+    await reader.resolve(phone, observation(ANDROID_AUTO_PACKAGE));
+
+    const other = { ...observation(ANDROID_AUTO_PACKAGE), observationId: "bb" };
+    expect(await reader.resolveAndroidAuto(phone, other)).toBeUndefined();
+    expect(adb.dumps()).toBe(1);
   });
 });

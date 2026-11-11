@@ -5,7 +5,6 @@ import {
   CAR_APP_TEMPLATES_NOTE,
   carAppTemplateDocumentSchema,
   type CarAppForegroundTemplates,
-  type CarAppProjectedTemplates,
   type CarAppTemplateDocument,
   type CarAppTemplates,
 } from "../../../models/CarAppTemplates";
@@ -92,6 +91,15 @@ export class CarAppTemplateReader {
   private readonly lastUser = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<CarAppForegroundTemplates | undefined>>();
   /** Per device: the last successful services dump, parsed, or the dump still running. */
+  /**
+   * Per device: the services snapshot the last projected templates read used, the observation it
+   * was taken for, and the bound apps (package and user) whose route answered, so the
+   * `androidAuto` block of that observation uses the same snapshot even after the dump's TTL.
+   */
+  private readonly projectionSnapshots = new Map<
+    string,
+    { observationId: string; services: AndroidAutoProjectionServices; answered: Set<string> }
+  >();
   private readonly projectionCache = new Map<
     string,
     { services: Promise<AndroidAutoProjectionServices | undefined>; until: number }
@@ -117,7 +125,7 @@ export class CarAppTemplateReader {
       return undefined;
     }
     if (packageName === ANDROID_AUTO_PACKAGE) {
-      return this.resolveProjected(device);
+      return this.resolveProjected(device, result.observationId);
     }
     return this.shared(device, packageName, result.userId, () =>
       this.resolveFor(device, packageName, result.userId),
@@ -147,8 +155,13 @@ export class CarAppTemplateReader {
    * Every app Android Auto has bound, read as the user its service runs as. Undefined when none
    * answers enabled, so the payload is unchanged.
    */
-  private async resolveProjected(device: BootedDevice): Promise<CarAppTemplates | undefined> {
-    const apps = (await this.projectionServices(device))?.apps ?? [];
+  private async resolveProjected(
+    device: BootedDevice,
+    observationId: string,
+  ): Promise<CarAppTemplates | undefined> {
+    this.projectionSnapshots.delete(device.deviceId);
+    const services = await this.projectionServices(device);
+    const apps = services?.apps ?? [];
     const blocks = await Promise.all(
       apps.map((app) =>
         this.shared(device, app.packageName, app.userId, () =>
@@ -156,6 +169,12 @@ export class CarAppTemplateReader {
         ),
       ),
     );
+    if (services) {
+      const answered = new Set(
+        apps.flatMap((app, index) => (blocks[index] ? [appUserKey(app)] : [])),
+      );
+      this.projectionSnapshots.set(device.deviceId, { observationId, services, answered });
+    }
     const projected = blocks.flatMap((block) =>
       block
         ? [
@@ -181,8 +200,9 @@ export class CarAppTemplateReader {
 
   /**
    * The `androidAuto` block while Android Auto is the foreground app and one of its Car App Library
-   * template hosts is bound, which means a head unit session is hosting car app templates. Reuses
-   * the services dump {@link resolve} just read. `apps` keeps the bound apps whose route answered,
+   * template hosts is bound, which means a head unit session is hosting car app templates. Uses
+   * the services snapshot {@link resolve} took for this same observation, never a second dump, and
+   * is undefined without one. `apps` keeps the bound apps (package and user) whose route answered,
    * the only ones known to be Car App Library apps; none is marked visible, because a bound app
    * stays bound while another app is on the head unit (#17827).
    */
@@ -190,20 +210,20 @@ export class CarAppTemplateReader {
     if (device.platform !== "android" || result.activeWindow?.appId !== ANDROID_AUTO_PACKAGE) {
       return undefined;
     }
-    const services = await this.projectionServices(device);
-    if (!services || services.templateHosts.length === 0) {
+    const snapshot = this.projectionSnapshots.get(device.deviceId);
+    if (!snapshot || snapshot.observationId !== result.observationId) {
       return undefined;
     }
-    const block = result.carAppTemplates;
-    const answered = new Set(
-      block && isProjectedTemplates(block) ? block.projected.map((app) => app.packageName) : [],
-    );
+    const { services, answered } = snapshot;
+    if (services.templateHosts.length === 0) {
+      return undefined;
+    }
     return {
       projecting: true,
       projectedBy: ANDROID_AUTO_PACKAGE,
       templateHosts: services.templateHosts,
       apps: services.apps
-        .filter((app) => answered.has(app.packageName))
+        .filter((app) => answered.has(appUserKey(app)))
         .map(({ packageName, userId, services: bound }) => ({
           packageName,
           userId,
@@ -416,9 +436,9 @@ export class CarAppTemplateReader {
   }
 }
 
-/** The projection shape of the block: it names the projecting host. */
-function isProjectedTemplates(block: CarAppTemplates): block is CarAppProjectedTemplates {
-  return "projectedBy" in block;
+/** A bound app's package and Android user, as one key. */
+function appUserKey(app: { packageName: string; userId: number }): string {
+  return `${app.packageName}\u0000${app.userId}`;
 }
 
 /** Quiet-map user segment for a foreground lookup that named no usable user. */

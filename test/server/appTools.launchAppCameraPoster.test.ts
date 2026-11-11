@@ -92,7 +92,9 @@ test.each(["image", "qr"] as const)(
     expect(h.calls[0]?.coldBoot).toBe(true);
     expect(h.calls[0]?.launchEnvironment).toEqual({
       SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: `/existing.dylib:${h.provider.path}`,
-      SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: kind === "image" ? "/image.png" : "/qr.png",
+      ...(kind === "image"
+        ? { SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/image.png" }
+        : { SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "hello" }),
     });
     expect(h.timer.getSleepHistory()).toEqual([]);
     expect(response.cameraPosterApplied).toBe(true);

@@ -32,8 +32,9 @@ test.each([
     );
     expect(await prepareCameraPosterLaunch(device, { registry, provider, hostEnv: {} })).toEqual({
       SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: "/camera/libAMCameraPoster.dylib",
-      SIMCTL_CHILD_AM_CAMERA_POSTER_PATH:
-        kind === "image" ? "/fixture/poster.png" : "/fixture/generated-qr.png",
+      ...(kind === "image"
+        ? { SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/fixture/poster.png" }
+        : { SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "fixture" }),
     });
   },
 );

@@ -1,4 +1,4 @@
-/** QR records retain their payload for reporting; injection always uses the generated PNG. */
+/** A QR record injects its payload (the library renders the code); `path` is the host PNG preview. */
 export type IosCameraPoster =
   | { kind: "image"; path: string }
   | { kind: "qr"; text: string; path: string };

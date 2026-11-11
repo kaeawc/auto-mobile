@@ -10,8 +10,9 @@ The library is activated by launching the app with
 `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=<libAMCameraPoster.dylib>` and one of `SIMCTL_CHILD_AM_CAMERA_POSTER_PATH=<png|jpeg>` / `SIMCTL_CHILD_AM_CAMERA_POSTER_QR=<text>`.
 The path wins when both are set; an unreadable path disables the injection rather than falling
 back. With neither variable the library does nothing. No app change or SDK is needed.
-AutoMobile generates QR PNGs through the shared QR writer and always supplies
-`SIMCTL_CHILD_AM_CAMERA_POSTER_PATH`; QR text remains in the registry for reporting.
+For an image poster AutoMobile supplies `SIMCTL_CHILD_AM_CAMERA_POSTER_PATH`. For a QR poster it supplies
+`SIMCTL_CHILD_AM_CAMERA_POSTER_QR` with the text: the library renders the code on a white portrait canvas
+with a quiet zone, whereas a host PNG is aspect-filled and its edges (the quiet zone) are cropped.
 `ios/CameraPosterInjection/build.sh` also builds a fixture app for direct validation.
 
 The library swizzles the public AVFoundation surface:

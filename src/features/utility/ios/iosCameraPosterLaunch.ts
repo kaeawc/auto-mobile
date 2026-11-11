@@ -8,6 +8,7 @@ import type { IosCameraPosterDylibProvider } from "./IosCameraPosterDylibProvide
 import type { IosCameraPosterRegistry } from "./IosCameraPosterRegistry";
 
 export const SIMCTL_CHILD_AM_CAMERA_POSTER_PATH = "SIMCTL_CHILD_AM_CAMERA_POSTER_PATH";
+export const SIMCTL_CHILD_AM_CAMERA_POSTER_QR = "SIMCTL_CHILD_AM_CAMERA_POSTER_QR";
 
 /** Only registered simulator posters resolve a dylib. Prototype env entries take precedence over the host. */
 export async function prepareCameraPosterLaunch(
@@ -34,6 +35,10 @@ export async function prepareCameraPosterLaunch(
         deps.hostEnv[SIMCTL_CHILD_DYLD_INSERT_LIBRARIES],
       dylib,
     ),
-    [SIMCTL_CHILD_AM_CAMERA_POSTER_PATH]: poster.path,
+    // The library renders a QR itself with a quiet zone; a host PNG would be aspect-filled and
+    // cropped at the edges, which breaks decoding.
+    ...(poster.kind === "qr"
+      ? { [SIMCTL_CHILD_AM_CAMERA_POSTER_QR]: poster.text }
+      : { [SIMCTL_CHILD_AM_CAMERA_POSTER_PATH]: poster.path }),
   };
 }

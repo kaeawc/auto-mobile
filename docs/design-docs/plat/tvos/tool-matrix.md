@@ -81,7 +81,7 @@ fields identified by secure metadata, always redact their values.
 | `clearMockNetwork`            | not-supported     |                                                                                                                                                  |
 | `clipboard`                   | refused-by-design | The tvOS simulator runtime has no pasteboard service; the refusal says so.                                                                       |
 | `compareScreenshot`           | pass              | Record and compare via `simctl io` screenshots.                                                                                                  |
-| `crashApp`                    | not-supported     | [#16723].                                                                                                                                        |
+| `crashApp`                    | pass              | `simctl spawn launchctl kill` in the `system/` domain (tvOS app services are not under `user/<uid>/`).                                           |
 | `criticalSection`             | not-supported     | Plan-only multi-device primitive.                                                                                                                |
 | `deleteDevice`                | pass              | Destroy with verified inventory absence.                                                                                                         |
 | `deleteKeychainItem`          | not-supported     |                                                                                                                                                  |
@@ -101,7 +101,7 @@ fields identified by secure metadata, always redact their values.
 | `getDeepLinks`                | pass              |                                                                                                                                                  |
 | `getDeviceState`              | not-supported     |                                                                                                                                                  |
 | `getIosSimulatorCapabilities` | host-only         |                                                                                                                                                  |
-| `getLogs`                     | not-supported     | `simctl spawn log show` works on tvOS; [#16723].                                                                                                 |
+| `getLogs`                     | pass              | `simctl spawn log show`; `appId` is required and Android-only filters are ignored with a warning.                                                |
 | `getNavigationGraph`          | not-supported     |                                                                                                                                                  |
 | `getNetworkGraph`             | not-supported     |                                                                                                                                                  |
 | `getNotificationPolicy`       | not-supported     |                                                                                                                                                  |
@@ -187,10 +187,9 @@ fields identified by secure metadata, always redact their values.
 | `wakeAndUnlock`               | refused-by-design | No keyguard.                                                                                                                                     |
 | `windowMode`                  | refused-by-design | Android-only.                                                                                                                                    |
 
-Totals: 25 pass, 51 not-supported, 40 refused-by-design, 6 host-only. The tvOS
+Totals: 27 pass, 49 not-supported, 40 refused-by-design, 6 host-only. The tvOS
 allowlist also holds `startDevice`, which is not in the published tool
 definitions; it boots the simulator and connects the runner.
 
-[#16723]: https://github.com/kaeawc/auto-mobile/issues/16723
 [#16726]: https://github.com/kaeawc/auto-mobile/issues/16726
 [#17528]: https://github.com/kaeawc/auto-mobile/issues/17528

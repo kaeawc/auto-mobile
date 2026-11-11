@@ -49,6 +49,7 @@ const createDefaultTapOnElement = (
       name: "test-device",
       platform: "android",
       deviceId: "emulator-5554",
+      formFactor: "phone",
     },
     adb,
     { xrDetector: new FakeAndroidXrDetector(), timer: new FakeTimer(), ...extraOptions },

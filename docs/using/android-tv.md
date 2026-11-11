@@ -161,9 +161,14 @@ names the arrows not yet pressed to try before leaving the screen. A control tha
 as value changes, such as a slider, counts as not moving focus, so each arrow is pressed on it at
 most once; when no arrow leaves it the walk presses tab once and continues. If focus still does not
 move the status is `stuck` and the message names the control and the arrows it consumed; its value
-may have changed, so check it before continuing. Other selectors (`testTag`, `textAny`,
-`accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
-`subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
+may have changed, so check it before continuing. A link inside text (`selector.accessibilityLink`
+or `subtext`) is activated directly, without touch or D-pad focus, so it works on a TV as on a phone.
+Other selectors (`testTag`, `textAny`), actions other than `tap` and `longPress`, and the options
+`sibling`, `container`, `index`, `searchUntil`, `ensureChecked`, `layer`, `display`, `exactText`
+and a `selectionStrategy` other than `first` need a touchscreen.
+On a TV, `tapOn` with any of them fails without tapping, and the error names each one; name the
+element to activate with only `selector.text` or `selector.elementId` instead, or move focus with
+`focusNavigate` and press `pressButton` `select`. `swipeOn` needs a touchscreen too;
 on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.
 
 Prototype overlay buttons support D-pad navigation and show a visible outline when focused.

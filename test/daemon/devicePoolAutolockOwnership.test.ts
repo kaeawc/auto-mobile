@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { makePool } from "../helpers/makePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { expect, spyOn, test } from "bun:test";
@@ -297,6 +298,7 @@ test("registered getAndroid preserves its caller's UUID and rejects a different 
     matcher.setBootedResult(h.devices.bootedDevices[0]);
     DaemonState.getInstance().initialize(h.manager, h.pool);
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       deviceManagerFactory: () => deviceUtils,
       deviceMatcherFactory: () => matcher,
       ensureCtrlProxyReady: async () => {},
@@ -353,6 +355,7 @@ test.each(["agent-B", "agent-A"])(
       let recoveredOutputListeners = 0;
       DaemonState.getInstance().initialize(h.manager, h.pool);
       setDeviceToolsDependencies({
+        androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
         deviceManagerFactory: () => deviceUtils,
         deviceMatcherFactory: () => matcher,
         timer: h.timer,
@@ -424,6 +427,7 @@ test("System UI recovery rejects a remapped client while its first target is idl
     let secondOwner: string | undefined;
     DaemonState.getInstance().initialize(h.manager, h.pool);
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       deviceManagerFactory: () => deviceUtils,
       deviceMatcherFactory: () => matcher,
       timer: h.timer,
@@ -490,6 +494,7 @@ test.each([false, true])(
       let remapError: unknown;
       DaemonState.getInstance().initialize(h.manager, h.pool);
       setDeviceToolsDependencies({
+        androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
         deviceManagerFactory: () => deviceUtils,
         deviceMatcherFactory: () => matcher,
         timer: h.timer,

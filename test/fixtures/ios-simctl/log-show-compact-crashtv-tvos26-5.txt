@@ -1,0 +1,4 @@
+getpwuid_r did not find a match for uid 501
+Timestamp               Ty Process[PID:TID]
+2026-11-11 07:50:26.806 E  CrashTv[80815:a48f749] [dev.jasonpearson.automobile.crashtv:lifecycle] CrashTv launched; crashing deliberately in 2s
+2026-11-11 07:50:28.873 F  CrashTv[80815:a48f749] [dev.jasonpearson.automobile.crashtv:lifecycle] CrashTv about to index out of range

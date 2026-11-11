@@ -1,6 +1,6 @@
-import type { Kysely } from "kysely";
+import type { Kysely, Selectable } from "kysely";
 import { getDatabase } from "./database";
-import type { Database, NewPerformanceAuditResult } from "./types";
+import type { Database, NewPerformanceAuditResult, PerformanceAuditResultsTable } from "./types";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -43,6 +43,8 @@ export interface PerformanceAuditRecord {
   metrics: PerformanceAuditMetricsRecord;
   diagnostics: string | null;
   nodeId?: number | null;
+  /** Device epoch the audit ran against; omitted/null when no epoch was live. */
+  deviceSessionUuid?: string | null;
 }
 
 interface PerformanceAuditQuery {
@@ -51,6 +53,12 @@ interface PerformanceAuditQuery {
   limit?: number;
   offset?: number;
   deviceId?: string;
+  /**
+   * Only audits stamped with this device epoch. Rows with no epoch (recorded
+   * before the column existed, or with no live epoch) never match: which boot
+   * they came from is unknown, so they cannot be "this boot only".
+   */
+  deviceSessionUuid?: string;
 }
 
 export interface PerformanceAuditHistoryEntry {
@@ -63,6 +71,7 @@ export interface PerformanceAuditHistoryEntry {
   metrics: PerformanceAuditMetricsRecord;
   diagnostics: string | null;
   nodeId: number | null;
+  deviceSessionUuid: string | null;
 }
 
 interface PerformanceAuditHistoryPage {
@@ -83,6 +92,62 @@ interface PerformanceAuditStreamQuery {
 }
 
 const STREAM_LIMIT_MAX = 500;
+
+const HISTORY_COLUMNS = [
+  "id",
+  "device_id",
+  "session_id",
+  "package_name",
+  "timestamp",
+  "passed",
+  "p50_ms",
+  "p90_ms",
+  "p95_ms",
+  "p99_ms",
+  "jank_count",
+  "missed_vsync_count",
+  "slow_ui_thread_count",
+  "frame_deadline_missed_count",
+  "cpu_usage_percent",
+  "touch_latency_ms",
+  "diagnostics_json",
+  "time_to_first_frame_ms",
+  "time_to_interactive_ms",
+  "frame_rate_fps",
+  "node_id",
+  "device_session_uuid",
+] as const;
+
+type HistoryRow = Pick<Selectable<PerformanceAuditResultsTable>, (typeof HISTORY_COLUMNS)[number]>;
+
+function toHistoryEntry(row: HistoryRow): PerformanceAuditHistoryEntry {
+  return {
+    id: row.id,
+    deviceId: row.device_id,
+    sessionId: row.session_id,
+    packageName: row.package_name,
+    timestamp: row.timestamp,
+    passed: row.passed === 1,
+    metrics: {
+      p50Ms: row.p50_ms,
+      p90Ms: row.p90_ms,
+      p95Ms: row.p95_ms,
+      p99Ms: row.p99_ms,
+      jankCount: row.jank_count,
+      missedVsyncCount: row.missed_vsync_count,
+      slowUiThreadCount: row.slow_ui_thread_count,
+      frameDeadlineMissedCount: row.frame_deadline_missed_count,
+      cpuUsagePercent: row.cpu_usage_percent,
+      touchLatencyMs: row.touch_latency_ms,
+      timeToFirstFrameMs: row.time_to_first_frame_ms,
+      timeToInteractiveMs: row.time_to_interactive_ms,
+      frameRateFps: row.frame_rate_fps,
+    },
+    diagnostics: row.diagnostics_json,
+    nodeId: row.node_id,
+    deviceSessionUuid: row.device_session_uuid,
+  };
+}
 
 export class PerformanceAuditRepository {
   private timer: Timer;
@@ -125,6 +190,7 @@ export class PerformanceAuditRepository {
         time_to_interactive_ms: record.metrics.timeToInteractiveMs ?? null,
         frame_rate_fps: record.metrics.frameRateFps ?? null,
         node_id: record.nodeId ?? null,
+        device_session_uuid: record.deviceSessionUuid ?? null,
       };
 
       await db.insertInto("performance_audit_results").values(entry).execute();
@@ -139,34 +205,13 @@ export class PerformanceAuditRepository {
     const limit = Math.max(1, query.limit ?? 50);
     const offset = Math.max(0, query.offset ?? 0);
 
-    let builder = db
-      .selectFrom("performance_audit_results")
-      .select([
-        "id",
-        "device_id",
-        "session_id",
-        "package_name",
-        "timestamp",
-        "passed",
-        "p50_ms",
-        "p90_ms",
-        "p95_ms",
-        "p99_ms",
-        "jank_count",
-        "missed_vsync_count",
-        "slow_ui_thread_count",
-        "frame_deadline_missed_count",
-        "cpu_usage_percent",
-        "touch_latency_ms",
-        "diagnostics_json",
-        "time_to_first_frame_ms",
-        "time_to_interactive_ms",
-        "frame_rate_fps",
-        "node_id",
-      ]);
+    let builder = db.selectFrom("performance_audit_results").select(HISTORY_COLUMNS);
 
     if (query.deviceId) {
       builder = builder.where("device_id", "=", query.deviceId);
+    }
+    if (query.deviceSessionUuid) {
+      builder = builder.where("device_session_uuid", "=", query.deviceSessionUuid);
     }
     if (query.startTime) {
       builder = builder.where("timestamp", ">=", query.startTime);
@@ -185,31 +230,7 @@ export class PerformanceAuditRepository {
     const hasMore = rows.length > limit;
     const trimmed = hasMore ? rows.slice(0, limit) : rows;
 
-    const results: PerformanceAuditHistoryEntry[] = trimmed.map((row) => ({
-      id: row.id,
-      deviceId: row.device_id,
-      sessionId: row.session_id,
-      packageName: row.package_name,
-      timestamp: row.timestamp,
-      passed: row.passed === 1,
-      metrics: {
-        p50Ms: row.p50_ms,
-        p90Ms: row.p90_ms,
-        p95Ms: row.p95_ms,
-        p99Ms: row.p99_ms,
-        jankCount: row.jank_count,
-        missedVsyncCount: row.missed_vsync_count,
-        slowUiThreadCount: row.slow_ui_thread_count,
-        frameDeadlineMissedCount: row.frame_deadline_missed_count,
-        cpuUsagePercent: row.cpu_usage_percent,
-        touchLatencyMs: row.touch_latency_ms,
-        timeToFirstFrameMs: row.time_to_first_frame_ms,
-        timeToInteractiveMs: row.time_to_interactive_ms,
-        frameRateFps: row.frame_rate_fps,
-      },
-      diagnostics: row.diagnostics_json,
-      nodeId: row.node_id,
-    }));
+    const results = trimmed.map(toHistoryEntry);
 
     return {
       results,
@@ -224,31 +245,7 @@ export class PerformanceAuditRepository {
     const db = this.getDb();
     const limit = Math.min(Math.max(1, query.limit ?? 50), STREAM_LIMIT_MAX);
 
-    let builder = db
-      .selectFrom("performance_audit_results")
-      .select([
-        "id",
-        "device_id",
-        "session_id",
-        "package_name",
-        "timestamp",
-        "passed",
-        "p50_ms",
-        "p90_ms",
-        "p95_ms",
-        "p99_ms",
-        "jank_count",
-        "missed_vsync_count",
-        "slow_ui_thread_count",
-        "frame_deadline_missed_count",
-        "cpu_usage_percent",
-        "touch_latency_ms",
-        "diagnostics_json",
-        "time_to_first_frame_ms",
-        "time_to_interactive_ms",
-        "frame_rate_fps",
-        "node_id",
-      ]);
+    let builder = db.selectFrom("performance_audit_results").select(HISTORY_COLUMNS);
 
     if (query.deviceId) {
       builder = builder.where("device_id", "=", query.deviceId);
@@ -282,31 +279,7 @@ export class PerformanceAuditRepository {
       .limit(limit)
       .execute();
 
-    return rows.map((row) => ({
-      id: row.id,
-      deviceId: row.device_id,
-      sessionId: row.session_id,
-      packageName: row.package_name,
-      timestamp: row.timestamp,
-      passed: row.passed === 1,
-      metrics: {
-        p50Ms: row.p50_ms,
-        p90Ms: row.p90_ms,
-        p95Ms: row.p95_ms,
-        p99Ms: row.p99_ms,
-        jankCount: row.jank_count,
-        missedVsyncCount: row.missed_vsync_count,
-        slowUiThreadCount: row.slow_ui_thread_count,
-        frameDeadlineMissedCount: row.frame_deadline_missed_count,
-        cpuUsagePercent: row.cpu_usage_percent,
-        touchLatencyMs: row.touch_latency_ms,
-        timeToFirstFrameMs: row.time_to_first_frame_ms,
-        timeToInteractiveMs: row.time_to_interactive_ms,
-        frameRateFps: row.frame_rate_fps,
-      },
-      diagnostics: row.diagnostics_json,
-      nodeId: row.node_id,
-    }));
+    return rows.map(toHistoryEntry);
   }
 
   private async cleanupRetention(): Promise<void> {

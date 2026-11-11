@@ -16,7 +16,30 @@ internal object PrototypeSensitiveSinkRules {
     val path: String,
     val pointerSource: String? = null,
     val itemBinding: Boolean = false,
+    val stateKey: Boolean = false,
   ) {
+    fun reached(
+      texts: List<String>,
+      rows: List<Pair<String, String>>,
+      data: PrototypeSensitiveSinkIndex,
+      platform: PrototypeSensitiveSinkIndex,
+      state: PrototypeStateTaintIndex,
+    ): Boolean {
+      val stateRead =
+        if (stateKey) texts.any(state::key) else pointerSource == null && texts.any(state::text)
+      if (stateKey) return stateRead
+      val rowRead = rows.any { (path, alias) ->
+        this.path.startsWith("$path.children[") &&
+          (itemBinding ||
+            (pointerSource == null &&
+              PrototypeRepeatTemplate.fieldReferences(text, alias).isNotEmpty()))
+      }
+      return rowRead ||
+        stateRead ||
+        reaches(texts, "data", data) ||
+        reaches(texts, "platform", platform)
+    }
+
     fun reaches(
       texts: List<String>,
       source: String,
@@ -48,9 +71,13 @@ internal object PrototypeSensitiveSinkRules {
           ),
           budget.checks,
         )
-    val dataIndex = PrototypeSensitiveSinkIndex(dataTaints, budget::visit)
+    val dataIndex = PrototypeSensitiveSinkIndex(dataTaints.data, budget::visit)
     val platformIndex = PrototypeSensitiveSinkIndex(platformTaints, budget::visit)
-    val fields = sinkFields(spec, context).sortedBy { it.path }
+    val stateIndex = PrototypeStateTaintIndex(dataTaints.state, budget::visit)
+    val fields =
+      sinkFields(spec, context)
+        .filter { !it.stateKey || dataTaints.state.isNotEmpty() }
+        .sortedBy { it.path }
     val validRepeats = PrototypeRepeatValidator.validate(spec) == null
     val scopes = if (validRepeats) PrototypeRepeatValidator.scopes(spec) else emptyList()
     budgetError(fields, scopes, validRepeats)?.let {
@@ -61,16 +88,13 @@ internal object PrototypeSensitiveSinkRules {
       fields
         .filter { field ->
           if (budget.checks > MAX_COPY_TAINT_CHECKS) return@filter false
-          val rowRead = taintedRows.any { (path, alias) ->
-            field.path.startsWith("$path.children[") &&
-              (field.itemBinding ||
-                (field.pointerSource == null &&
-                  PrototypeRepeatTemplate.fieldReferences(field.text, alias).isNotEmpty()))
-          }
-          val texts = boundTexts(field, scopes, validRepeats)
-          rowRead ||
-            field.reaches(texts, "data", dataIndex) ||
-            field.reaches(texts, "platform", platformIndex)
+          field.reached(
+            boundTexts(field, scopes, validRepeats),
+            taintedRows,
+            dataIndex,
+            platformIndex,
+            stateIndex,
+          )
         }
         .map { field ->
           PrototypeSpecError(
@@ -163,7 +187,10 @@ internal object PrototypeSensitiveSinkRules {
     val fields = mutableListOf<Field>()
     if (text && raw is JsonPrimitive && raw.isString) fields.add(Field(raw.content, path))
     val form = raw as? JsonObject ?: return fields
-    if ("state" in form) return fields
+    form.text("state")?.let {
+      fields.add(Field(it, "$path.state", stateKey = true))
+      return fields
+    }
     for (source in listOf("data", "platform")) {
       form.text(source)?.let { fields.add(Field(it, path, pointerSource = source)) }
     }
@@ -198,8 +225,12 @@ internal object PrototypeSensitiveSinkRules {
       index,
       raw ->
       val key = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
-      if (key.startsWith("data:") && PrototypeDataPointer.isValid(key.drop(5))) {
-        fields.add(Field(key.drop(5), "storage.keys[$index]", pointerSource = "data"))
+      when (val parsed = PrototypeStorageKey.parse(key)) {
+        is PrototypeStorageKey.Data ->
+          fields.add(Field(parsed.pointer, "storage.keys[$index]", pointerSource = "data"))
+        is PrototypeStorageKey.State ->
+          fields.add(Field(parsed.key, "storage.keys[$index]", stateKey = true))
+        null -> Unit
       }
     }
     return fields.distinctBy { it.path }

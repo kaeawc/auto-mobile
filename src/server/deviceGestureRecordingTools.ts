@@ -25,7 +25,12 @@ import {
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { assertDeviceGestureRecordingStartHeldDevice } from "../daemon/deviceGestureRecordingStartAdmission";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  currentAutolockMcpSessionId,
+  getToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
+import { getToolCallRecorder, stopToolCallRecording } from "../daemon/toolCallRecordingManager";
+import { serverConfig } from "../utils/ServerConfig";
 
 // Start device gesture recording tool schema (empty - uses active device)
 const recordDeviceGesturesSchema = addSessionUuidToSchema(z.object({}).strict());
@@ -75,7 +80,7 @@ const exportPlanSchema = addSessionUuidToSchema(
         .string()
         .optional()
         .describe(
-          "recordDeviceGestures recordingId; defaults to the active recording. For recordToolCalls plans use recordToolCalls action=end",
+          "recordDeviceGestures recordingId; defaults to the active recording. Omit it to end this connection's recordToolCalls recording",
         ),
       planName: z.string().optional().describe("Plan name"),
       resourceLink: resourceLinkField(),
@@ -90,9 +95,47 @@ const exportPlanResultSchema = z.object({
   planContent: z.string().optional(),
   stepCount: z.number().int().optional(),
   durationMs: z.number().int().optional(),
+  warnings: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "recordToolCalls recordings only, present when non-empty: calls skipped or recorded in a weakened form",
+    ),
   error: z.string().optional(),
   reason: z.string().optional(),
 });
+
+const NO_ACTIVE_RECORDING_ERROR =
+  "No active recording on this MCP connection. Start one with recordDeviceGestures or " +
+  'recordToolCalls action: "begin" before exporting.';
+
+/**
+ * Ends this connection's recordToolCalls recording, as `recordToolCalls end` does, so exportPlan
+ * exports either recorder (#17950). A recordingId names a device gesture recording, so a call
+ * that passes one never ends tool calls; with no recording to export it is the no-recording error.
+ */
+function exportToolCallRecording(params: { recordingId?: string; planName?: string }) {
+  const connectionId = currentAutolockMcpSessionId();
+  if (
+    params.recordingId ||
+    !serverConfig.isToolCallRecordingEnabled() ||
+    !getToolCallRecorder({ connectionId })
+  ) {
+    return withIsErrorOnFailure(
+      createStructuredToolResponse({ success: false, error: NO_ACTIVE_RECORDING_ERROR }),
+      false,
+    );
+  }
+  const result = stopToolCallRecording({ connectionId, planName: params.planName });
+  return createStructuredToolResponse({
+    success: true,
+    planName: result.planName,
+    planContent: result.planContent,
+    stepCount: result.stepCount,
+    durationMs: result.durationMs,
+    ...(result.warnings.length > 0 && { warnings: result.warnings }),
+  });
+}
 
 /**
  * exportPlan stops the daemon's one live device gesture recording, so it is a control call on that
@@ -220,13 +263,7 @@ const exportPlanTool = async (params: {
       return exportedDeviceGestureRecordingResponse(retained);
     }
     if (!status) {
-      return withIsErrorOnFailure(
-        createStructuredToolResponse({
-          success: false,
-          error: "No active recording. Start a recording before exporting.",
-        }),
-        false,
-      );
+      return exportToolCallRecording(params);
     }
 
     // Validate recording ID if provided
@@ -265,7 +302,7 @@ export const registerDeviceGestureRecordingTools = () => {
 
   ToolRegistry.register(
     "exportPlan",
-    "Stop active recording and export a YAML plan.",
+    "Stop the active recordDeviceGestures or recordToolCalls recording and export a YAML plan.",
     exportPlanSchema,
     {
       handler: exportPlanTool,

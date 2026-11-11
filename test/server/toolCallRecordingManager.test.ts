@@ -306,8 +306,9 @@ describe("toolCallRecordingManager", () => {
       stopTimer.setCurrentTime(2000);
       const result = stopToolCallRecording({ planName: "stripped-test", timer: stopTimer });
 
-      // Internal params should not appear in YAML
-      expect(result.planContent).not.toContain("platform:");
+      // Internal params should not appear in step params; the plan declares platform once
+      expect(result.planContent).not.toContain("    platform:");
+      expect(result.planContent).toContain("\nplatform: android\n");
       expect(result.planContent).not.toContain("deviceId:");
       expect(result.planContent).not.toContain("sessionUuid:");
       // But real params should

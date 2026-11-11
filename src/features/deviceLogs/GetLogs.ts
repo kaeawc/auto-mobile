@@ -91,6 +91,24 @@ function secondsSince(startMs: number, nowMs: number): number {
   return Math.max(1, Math.ceil((nowMs - startMs) / 1000));
 }
 
+/**
+ * A `since` that is an absolute host-clock instant rather than a duration. The device-relative
+ * window must be recomputed when the log is actually read, after any awaited probes.
+ */
+function sinceAnchorMs(
+  since: GetLogsSince | undefined,
+  deviceId: string,
+  clock: GetLogsClock,
+): number | undefined {
+  if (since === "run-start") {
+    return clock.planStartMs?.();
+  }
+  if (since === "lastAction") {
+    return clock.lastActionStartMs(deviceId);
+  }
+  return since === "sessionStart" ? clock.sessionStartMs() : undefined;
+}
+
 /** Resolve `since` into a device-relative window; run-start requires an executing plan. */
 export function resolveSinceSeconds(
   since: GetLogsSince | undefined,
@@ -220,10 +238,18 @@ export class GetLogs {
       const window = { platform: device.platform, sinceSeconds, maxLines, minPriority };
       return this.ios(request, window, warnings, signal);
     }
+    const anchor = sinceAnchorMs(request.since, device.deviceId, this.deps.clock);
+    const { clock } = this.deps;
     const result = await this.deps.android().read(
       {
         appId: request.appId,
         sinceSeconds,
+        ...(anchor === undefined
+          ? {}
+          : {
+              refreshSinceSeconds: () =>
+                Math.min(secondsSince(anchor, clock.now()), GET_LOGS_MAX_SECONDS),
+            }),
         tags: request.tags,
         minPriority,
         grep: request.grep,

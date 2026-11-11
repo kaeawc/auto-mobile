@@ -144,6 +144,21 @@ describe("GetLogs", () => {
     });
   });
 
+  test("Android: an anchored since is re-derived at read time, not frozen at request time", async () => {
+    let now = 100_000;
+    const android = new RecordingAndroid();
+    await new GetLogs({
+      clock: clock({ now: () => now, planStartMs: () => 90_000 }),
+      android: () => android,
+      ios: () => {
+        throw new Error("unused");
+      },
+    }).execute(ANDROID, { appId: "com.example", since: "run-start" });
+    expect(android.requests[0]?.sinceSeconds).toBe(10);
+    now = 103_000;
+    expect(android.requests[0]?.refreshSinceSeconds?.()).toBe(13);
+  });
+
   test("iOS: reads the app's unified log, applies grep and reports ignored filters", async () => {
     const calls: unknown[] = [];
     const ios: IosUnifiedLogSource = {

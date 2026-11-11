@@ -171,6 +171,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "pinchOn",
       "recentApps",
       "rotaryScroll",
+      "glassesInput",
       "rotateCrown",
       "selectAllText",
       "shake",

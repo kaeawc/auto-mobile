@@ -178,6 +178,7 @@ const CLASSIFICATION: Classification = {
     "putAppFile",
     "recentApps",
     "rotaryScroll",
+    "glassesInput",
     "ambient",
     "rotateCrown",
     "reconcileDeviceResources",

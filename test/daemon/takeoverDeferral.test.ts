@@ -46,6 +46,7 @@ function fixture(store = new FakeStartupFailureStore()) {
       portFreeProbe: unused,
       launchLogFileSystem: { openSync: unused, closeSync: unused },
       launchWorkingDirectory: unused,
+      probeLaunchCheckoutVersion: unused,
     },
     acquireLock: () => true,
     releaseLock: () => {},

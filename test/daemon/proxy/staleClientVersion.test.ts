@@ -21,8 +21,6 @@ function harness(options: {
   buildIdentity?: BuildIdentity;
   daemonBuild?: BuildIdentity;
   readCheckoutVersion?: () => Promise<string | null>;
-  readCheckoutModifiedAt?: () => Promise<number | null>;
-  processStartedAt?: number;
 }) {
   const manager = new FakeDaemonManager();
   const timer = new FakeTimer();
@@ -31,9 +29,6 @@ function harness(options: {
     running: true,
     pid: 1234,
     startedAt: 1,
-    ...(options.processStartedAt === undefined
-      ? {}
-      : { processStartedAt: options.processStartedAt }),
     version: options.runningVersion,
     options: { debug: true, port: 3195 },
     ...(options.daemonBuild ?? BUILD),
@@ -48,7 +43,6 @@ function harness(options: {
     clientAssetVersion: null,
     buildIdentity: options.buildIdentity ?? BUILD,
     readCheckoutVersion: options.readCheckoutVersion,
-    readCheckoutModifiedAt: options.readCheckoutModifiedAt,
     invalidateCache: () => {},
     assertDaemonLifecycleUnfenced: () => {},
     reconciliationStatus: () => reconciler.reconciliationStatus(),
@@ -235,148 +229,41 @@ describe("stale MCP client version convergence", () => {
   });
 });
 
-// #17991: a private daemon started from a dirty checkout reported only its commit
-// stamp, so each one-shot `--cli` process restarted it (PIDs 21024 -> 22801 -> 24257).
-describe("up-to-date dirty-checkout daemon reuse (#17991)", () => {
+// #17991 / #18071: a daemon whose own dirty probe timed out reported only its commit
+// stamp, so each one-shot `--cli` process restarted it. The relaunched daemon now
+// reports the content key its manager probed at launch, compared by content.
+describe("dirty-checkout daemon reuse by content key (#18071)", () => {
   let settled: ReturnType<typeof spyOn<typeof constants, "syncSettledDaemonVersion">>;
   beforeEach(() => {
     settled = spyOn(constants, "syncSettledDaemonVersion").mockReturnValue(true);
   });
   afterEach(() => settled.mockRestore());
 
-  const DAEMON_STARTED_AT = 5_000;
-  const consecutiveCliCalls = async (
-    count: number,
-    options: Parameters<typeof harness>[0],
-  ): Promise<number> => {
-    let restarts = 0;
-    for (let call = 0; call < count; call++) {
-      // Each `--cli` invocation is a new process: nothing learnt in memory survives.
-      const { manager, reconciler, restarted } = harness(options);
-      manager.statusResults = [manager.statusResult, restarted(options.runningVersion)];
-      await reconciler.ensureVersionMatches();
-      restarts += manager.restartCallCount;
-    }
-    return restarts;
+  const cliCall = async (runningVersion: string, relaunchedVersion: string) => {
+    // Each `--cli` invocation is a new process: nothing learnt in memory survives.
+    const { manager, reconciler, restarted } = harness({
+      clientVersion: DIRTY,
+      runningVersion,
+      readCheckoutVersion: async () => DIRTY,
+    });
+    manager.statusResults = [manager.statusResult, restarted(relaunchedVersion)];
+    await reconciler.ensureVersionMatches();
+    return manager.restartCallCount;
   };
 
-  test("consecutive CLI calls reuse a daemon started after the last edit", async () => {
-    let probes = 0;
-    const restarts = await consecutiveCliCalls(3, {
-      clientVersion: DIRTY,
-      runningVersion: CLEAN,
-      processStartedAt: DAEMON_STARTED_AT,
-      readCheckoutVersion: async () => DIRTY,
-      readCheckoutModifiedAt: async () => {
-        probes++;
-        return DAEMON_STARTED_AT - 1;
-      },
-    });
-    expect(restarts).toBe(0);
-    expect(probes).toBe(3);
+  test("a hashless daemon restarts once, then its launch key is reused by every later call", async () => {
+    // The relaunched daemon's own probe timed out again; it reports the launch key.
+    expect(await cliCall(CLEAN, DIRTY)).toBe(1);
+    expect(await cliCall(DIRTY, DIRTY)).toBe(0);
+    expect(await cliCall(DIRTY, DIRTY)).toBe(0);
   });
 
-  test("a daemon reporting a hashless dirty stamp is reused the same way", async () => {
-    const restarts = await consecutiveCliCalls(2, {
-      clientVersion: DIRTY,
-      runningVersion: `${CLEAN}.dirty`,
-      processStartedAt: DAEMON_STARTED_AT,
-      readCheckoutVersion: async () => DIRTY,
-      readCheckoutModifiedAt: async () => DAEMON_STARTED_AT - 1,
-    });
-    expect(restarts).toBe(0);
+  test("a touched or reverted file leaves the key unchanged, so the daemon is reused", async () => {
+    // A checkout, formatter run, editor save, or edit-then-revert keeps the content at DIRTY.
+    expect(await cliCall(DIRTY, DIRTY)).toBe(0);
   });
 
-  test("an edit written after the daemon started still restarts it once", async () => {
-    const { manager, reconciler, restarted } = harness({
-      clientVersion: DIRTY,
-      runningVersion: CLEAN,
-      processStartedAt: DAEMON_STARTED_AT,
-      readCheckoutVersion: async () => DIRTY,
-      readCheckoutModifiedAt: async () => DAEMON_STARTED_AT,
-    });
-    manager.statusResults = [manager.statusResult, restarted(DIRTY)];
-    await reconciler.ensureVersionMatches();
-    expect(manager.restartCallCount).toBe(1);
-  });
-
-  test("a daemon with a different working-tree hash restarts regardless of edit time", async () => {
-    const { manager, reconciler, restarted } = harness({
-      clientVersion: DIRTY,
-      runningVersion: `${CLEAN}.dirty.000000000000`,
-      processStartedAt: DAEMON_STARTED_AT,
-      readCheckoutVersion: async () => DIRTY,
-      readCheckoutModifiedAt: async () => DAEMON_STARTED_AT - 1,
-    });
-    manager.statusResults = [manager.statusResult, restarted(DIRTY)];
-    await reconciler.ensureVersionMatches();
-    expect(manager.restartCallCount).toBe(1);
-  });
-
-  test("a daemon at another commit is never reused on edit time", async () => {
-    const { manager, reconciler, restarted } = harness({
-      clientVersion: DIRTY,
-      runningVersion: "0.0.87+gbbbbbbbbbbbb",
-      processStartedAt: DAEMON_STARTED_AT,
-      readCheckoutVersion: async () => DIRTY,
-      readCheckoutModifiedAt: async () => DAEMON_STARTED_AT - 1,
-    });
-    manager.statusResults = [manager.statusResult, restarted(DIRTY)];
-    await reconciler.ensureVersionMatches();
-    expect(manager.restartCallCount).toBe(1);
-  });
-
-  test("an unknown edit time keeps the restart", async () => {
-    const restarts = await consecutiveCliCalls(1, {
-      clientVersion: DIRTY,
-      runningVersion: CLEAN,
-      processStartedAt: DAEMON_STARTED_AT,
-      readCheckoutVersion: async () => DIRTY,
-      readCheckoutModifiedAt: async () => null,
-    });
-    expect(restarts).toBe(1);
-  });
-
-  test("a failed edit-time probe warns and keeps the restart", async () => {
-    const error = new Error("git unavailable");
-    const warning = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const restarts = await consecutiveCliCalls(1, {
-        clientVersion: DIRTY,
-        runningVersion: CLEAN,
-        processStartedAt: DAEMON_STARTED_AT,
-        readCheckoutVersion: async () => DIRTY,
-        readCheckoutModifiedAt: async () => {
-          throw error;
-        },
-      });
-      expect(restarts).toBe(1);
-      expect(warning).toHaveBeenCalledWith(
-        "[DaemonMcpProxy] Checkout edit-time probe failed; restarting daemon",
-        error,
-      );
-    } finally {
-      warning.mockRestore();
-    }
-  });
-
-  test("another checkout's daemon is not reused on edit time", async () => {
-    let probes = 0;
-    const { manager, reconciler } = harness({
-      clientVersion: DIRTY,
-      runningVersion: CLEAN,
-      processStartedAt: DAEMON_STARTED_AT,
-      daemonBuild: { ...BUILD, entryScript: "/other/src/index.ts" },
-      readCheckoutVersion: async () => DIRTY,
-      readCheckoutModifiedAt: async () => {
-        probes++;
-        return DAEMON_STARTED_AT - 1;
-      },
-    });
-    await expect(reconciler.ensureVersionMatches()).rejects.toMatchObject({
-      reason: "restartMismatch",
-    });
-    expect(manager.restartCallCount).toBe(1);
-    expect(probes).toBe(0);
+  test("a genuinely stale daemon, launched on another working tree, still restarts", async () => {
+    expect(await cliCall(`${CLEAN}.dirty.000000000000`, DIRTY)).toBe(1);
   });
 });

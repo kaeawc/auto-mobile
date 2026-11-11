@@ -18,6 +18,7 @@ systemTray({
     body?: string,
     appId?: string,
     tapActionLabel?: string
+    replyText?: string // Watch-only inline reply for tap; defaults the action label to Keyboard input
   },
   awaitTimeout?: number
 })

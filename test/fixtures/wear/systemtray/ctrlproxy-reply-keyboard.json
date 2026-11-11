@@ -1,0 +1,3641 @@
+{
+  "screenSize": {
+    "width": 384,
+    "height": 384,
+    "units": "physical-pixels"
+  },
+  "viewHierarchy": {
+    "displayId": 0,
+    "hierarchy": {
+      "node": [
+        {
+          "windowId": 16,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-920ed40973a28c76",
+          "bounds": [
+            0,
+            0,
+            384,
+            384
+          ],
+          "node": [
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "android:id/content",
+              "visible-to-user": true,
+              "bounds": [
+                0,
+                0,
+                384,
+                384
+              ]
+            },
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.google.android.inputmethod.latin:id/wear_remote_input",
+              "visible-to-user": true,
+              "bounds": [
+                0,
+                0,
+                384,
+                384
+              ],
+              "node": {
+                "actions": [
+                  "clear_focus",
+                  "select",
+                  "clear_selection",
+                  "click",
+                  "accessibility_focus",
+                  "set_text"
+                ],
+                "resource-id": "com.google.android.inputmethod.latin:id/remote_ime_input",
+                "visible-to-user": true,
+                "class": "android.widget.EditText",
+                "className": "android.widget.EditText",
+                "clickable": "true",
+                "focusable": "true",
+                "focused": "true",
+                "bounds": [
+                  0,
+                  0,
+                  2,
+                  2
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "windowId": 17,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-40f3fec97fa9fc12",
+          "bounds": [
+            0,
+            0,
+            384,
+            384
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "bounds": [
+              0,
+              0,
+              384,
+              384
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "android:id/parentPanel",
+              "visible-to-user": true,
+              "class": "android.widget.LinearLayout",
+              "className": "android.widget.LinearLayout",
+              "bounds": [
+                0,
+                0,
+                384,
+                384
+              ],
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "android:id/inputArea",
+                "visible-to-user": true,
+                "bounds": [
+                  0,
+                  0,
+                  384,
+                  384
+                ],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.google.android.inputmethod.latin:id/input_view",
+                  "visible-to-user": true,
+                  "bounds": [
+                    0,
+                    0,
+                    384,
+                    384
+                  ],
+                  "node": [
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.google.android.inputmethod.latin:id/extract_container",
+                      "visible-to-user": true,
+                      "bounds": [
+                        0,
+                        0,
+                        384,
+                        83
+                      ],
+                      "node": {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.google.android.inputmethod.latin:id/extract_scroll_view",
+                        "visible-to-user": true,
+                        "focusable": "true",
+                        "bounds": [
+                          0,
+                          0,
+                          384,
+                          83
+                        ],
+                        "node": {
+                          "actions": [
+                            "clear_focus",
+                            "select",
+                            "clear_selection",
+                            "click",
+                            "accessibility_focus",
+                            "set_text"
+                          ],
+                          "resource-id": "com.google.android.inputmethod.latin:id/extract_edit_text",
+                          "visible-to-user": true,
+                          "class": "android.widget.EditText",
+                          "className": "android.widget.EditText",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "focused": "true",
+                          "bounds": [
+                            0,
+                            42,
+                            384,
+                            83
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.google.android.inputmethod.latin:id/keyboard_area",
+                      "visible-to-user": true,
+                      "bounds": [
+                        0,
+                        83,
+                        384,
+                        384
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.google.android.inputmethod.latin:id/keyboard_holder",
+                        "visible-to-user": true,
+                        "class": "android.widget.LinearLayout",
+                        "className": "android.widget.LinearLayout",
+                        "bounds": [
+                          0,
+                          83,
+                          384,
+                          384
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "resource-id": "com.google.android.inputmethod.latin:id/keyboard_header_view_holder",
+                            "visible-to-user": true,
+                            "bounds": [
+                              0,
+                              83,
+                              384,
+                              140
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "focus",
+                                  "select",
+                                  "clear_selection",
+                                  "click",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "content-desc": "Show suggestions menu",
+                                "resource-id": "com.google.android.inputmethod.latin:id/key_pos_header_entry_button",
+                                "visible-to-user": true,
+                                "clickable": "true",
+                                "focusable": "true",
+                                "bounds": [
+                                  34,
+                                  83,
+                                  82,
+                                  140
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                  "visible-to-user": true,
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    38,
+                                    87,
+                                    78,
+                                    136
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.google.android.inputmethod.latin:id/suggestions_strip",
+                                "visible-to-user": true,
+                                "bounds": [
+                                  82,
+                                  83,
+                                  287,
+                                  140
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.inputmethod.latin:id/keyboard_top_row",
+                                  "visible-to-user": true,
+                                  "class": "android.widget.HorizontalScrollView",
+                                  "className": "android.widget.HorizontalScrollView",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    82,
+                                    83,
+                                    287,
+                                    140
+                                  ],
+                                  "node": [
+                                    {
+                                      "actions": [
+                                        "focus",
+                                        "select",
+                                        "clear_selection",
+                                        "click",
+                                        "accessibility_focus",
+                                        "next_at_movement_granularity",
+                                        "previous_at_movement_granularity",
+                                        "set_selection"
+                                      ],
+                                      "content-desc": "Emoji button",
+                                      "resource-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_emoji",
+                                      "visible-to-user": true,
+                                      "clickable": "true",
+                                      "focusable": "true",
+                                      "bounds": [
+                                        82,
+                                        83,
+                                        139,
+                                        140
+                                      ],
+                                      "node": {
+                                        "actions": [
+                                          "select",
+                                          "clear_selection",
+                                          "accessibility_focus"
+                                        ],
+                                        "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                        "visible-to-user": true,
+                                        "class": "android.widget.ImageView",
+                                        "className": "android.widget.ImageView",
+                                        "bounds": [
+                                          84,
+                                          87,
+                                          137,
+                                          136
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "actions": [
+                                        "focus",
+                                        "select",
+                                        "clear_selection",
+                                        "click",
+                                        "accessibility_focus",
+                                        "next_at_movement_granularity",
+                                        "previous_at_movement_granularity",
+                                        "set_selection"
+                                      ],
+                                      "content-desc": "Digit keyboard",
+                                      "resource-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_non_prime",
+                                      "visible-to-user": true,
+                                      "clickable": "true",
+                                      "focusable": "true",
+                                      "bounds": [
+                                        139,
+                                        83,
+                                        230,
+                                        140
+                                      ],
+                                      "node": {
+                                        "actions": [
+                                          "select",
+                                          "clear_selection",
+                                          "accessibility_focus"
+                                        ],
+                                        "content-desc": "?123",
+                                        "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                        "visible-to-user": true,
+                                        "bounds": [
+                                          141,
+                                          87,
+                                          228,
+                                          136
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "actions": [
+                                        "focus",
+                                        "select",
+                                        "clear_selection",
+                                        "click",
+                                        "accessibility_focus",
+                                        "next_at_movement_granularity",
+                                        "previous_at_movement_granularity",
+                                        "set_selection"
+                                      ],
+                                      "content-desc": "Use voice typing",
+                                      "resource-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_voice",
+                                      "visible-to-user": true,
+                                      "clickable": "true",
+                                      "focusable": "true",
+                                      "bounds": [
+                                        230,
+                                        83,
+                                        287,
+                                        140
+                                      ],
+                                      "node": {
+                                        "actions": [
+                                          "select",
+                                          "clear_selection",
+                                          "accessibility_focus"
+                                        ],
+                                        "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                        "visible-to-user": true,
+                                        "class": "android.widget.ImageView",
+                                        "className": "android.widget.ImageView",
+                                        "bounds": [
+                                          232,
+                                          87,
+                                          285,
+                                          136
+                                        ]
+                                      }
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "focus",
+                                  "select",
+                                  "clear_selection",
+                                  "click",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "content-desc": "Close keyboard",
+                                "resource-id": "com.google.android.inputmethod.latin:id/key_pos_ime_action",
+                                "visible-to-user": true,
+                                "clickable": "true",
+                                "focusable": "true",
+                                "bounds": [
+                                  287,
+                                  83,
+                                  350,
+                                  140
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                  "visible-to-user": true,
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    289,
+                                    87,
+                                    348,
+                                    136
+                                  ]
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "resource-id": "com.google.android.inputmethod.latin:id/keyboard_body_view_holder",
+                            "visible-to-user": true,
+                            "bounds": [
+                              0,
+                              140,
+                              384,
+                              384
+                            ],
+                            "node": {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.inputmethod.latin:id/input_area",
+                              "visible-to-user": true,
+                              "class": "android.view.ViewGroup",
+                              "className": "android.view.ViewGroup",
+                              "bounds": [
+                                0,
+                                140,
+                                384,
+                                370
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Q",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_0",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    15,
+                                    140,
+                                    50,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "Q",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      15,
+                                      140,
+                                      50,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "W",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_1",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    50,
+                                    140,
+                                    86,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "W",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      50,
+                                      140,
+                                      86,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "E",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_2",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    86,
+                                    140,
+                                    121,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "E",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      86,
+                                      140,
+                                      121,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "R",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_3",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    121,
+                                    140,
+                                    157,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "R",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      121,
+                                      140,
+                                      157,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "T",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_4",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    157,
+                                    140,
+                                    192,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "T",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      157,
+                                      140,
+                                      192,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Y",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_5",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    192,
+                                    140,
+                                    227,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "Y",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      192,
+                                      140,
+                                      227,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "U",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_6",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    227,
+                                    140,
+                                    263,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "U",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      227,
+                                      140,
+                                      263,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "I",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_7",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    263,
+                                    140,
+                                    298,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "I",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      263,
+                                      140,
+                                      298,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "O",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_8",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    298,
+                                    140,
+                                    334,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "O",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      298,
+                                      140,
+                                      334,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "P",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_9",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    334,
+                                    140,
+                                    369,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "P",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      334,
+                                      140,
+                                      369,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "A",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_1",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    18,
+                                    197,
+                                    57,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "A",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      18,
+                                      197,
+                                      57,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "S",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_2",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    57,
+                                    197,
+                                    95,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "S",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      57,
+                                      197,
+                                      95,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "D",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_3",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    95,
+                                    197,
+                                    134,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "D",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      95,
+                                      197,
+                                      134,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "F",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_4",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    134,
+                                    197,
+                                    173,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "F",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      134,
+                                      197,
+                                      173,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "G",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_5",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    173,
+                                    197,
+                                    211,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "G",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      173,
+                                      197,
+                                      211,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "H",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_6",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    211,
+                                    197,
+                                    250,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "H",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      211,
+                                      197,
+                                      250,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "J",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_7",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    250,
+                                    197,
+                                    289,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "J",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      250,
+                                      197,
+                                      289,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "K",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_8",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    289,
+                                    197,
+                                    327,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "K",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      289,
+                                      197,
+                                      327,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "L",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_9",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    327,
+                                    197,
+                                    366,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "L",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      327,
+                                      197,
+                                      366,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Z",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_2",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    49,
+                                    254,
+                                    90,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "Z",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      49,
+                                      254,
+                                      90,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "X",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_3",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    90,
+                                    254,
+                                    131,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "X",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      90,
+                                      254,
+                                      131,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "C",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_4",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    131,
+                                    254,
+                                    172,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "C",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      131,
+                                      254,
+                                      172,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "V",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_5",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    172,
+                                    254,
+                                    212,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "V",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      172,
+                                      254,
+                                      212,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "B",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_6",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    212,
+                                    254,
+                                    253,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "B",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      212,
+                                      254,
+                                      253,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "N",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_7",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    253,
+                                    254,
+                                    294,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "N",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      253,
+                                      254,
+                                      294,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "M",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_8",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    294,
+                                    254,
+                                    335,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "M",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      294,
+                                      254,
+                                      335,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Shift enabled",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_shift",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    41,
+                                    311,
+                                    136,
+                                    368
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.inputmethod.latin:id/host",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      79,
+                                      311,
+                                      136,
+                                      358
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                      "visible-to-user": true,
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        79,
+                                        311,
+                                        136,
+                                        358
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Space. Double tap and hold to launch language settings",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_space",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    136,
+                                    311,
+                                    248,
+                                    368
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      174,
+                                      315,
+                                      210,
+                                      363
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Delete",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_del",
+                                  "visible-to-user": true,
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    248,
+                                    311,
+                                    343,
+                                    368
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.inputmethod.latin:id/host",
+                                    "visible-to-user": true,
+                                    "bounds": [
+                                      248,
+                                      311,
+                                      305,
+                                      358
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                      "visible-to-user": true,
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        248,
+                                        311,
+                                        305,
+                                        358
+                                      ]
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "packageName": "com.google.android.inputmethod.latin",
+    "windows": [
+      {
+        "id": 17,
+        "displayId": 0,
+        "type": 2,
+        "windowLayer": 1,
+        "isActive": false,
+        "isFocused": false,
+        "bounds": [
+          0,
+          0,
+          384,
+          384
+        ],
+        "packageName": "com.google.android.inputmethod.latin",
+        "hierarchy": {
+          "windowId": 17,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-40f3fec97fa9fc12",
+          "bounds": [
+            0,
+            0,
+            384,
+            384
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "view-id": "android:id/content",
+            "bounds": [
+              0,
+              0,
+              384,
+              384
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "android:id/parentPanel",
+              "visible-to-user": true,
+              "view-id": "android:id/parentPanel",
+              "class": "android.widget.LinearLayout",
+              "className": "android.widget.LinearLayout",
+              "bounds": [
+                0,
+                0,
+                384,
+                384
+              ],
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "android:id/inputArea",
+                "visible-to-user": true,
+                "view-id": "android:id/inputArea",
+                "bounds": [
+                  0,
+                  0,
+                  384,
+                  384
+                ],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.google.android.inputmethod.latin:id/input_view",
+                  "visible-to-user": true,
+                  "view-id": "com.google.android.inputmethod.latin:id/input_view",
+                  "bounds": [
+                    0,
+                    0,
+                    384,
+                    384
+                  ],
+                  "node": [
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.google.android.inputmethod.latin:id/extract_container",
+                      "visible-to-user": true,
+                      "view-id": "com.google.android.inputmethod.latin:id/extract_container",
+                      "bounds": [
+                        0,
+                        0,
+                        384,
+                        83
+                      ],
+                      "node": {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.google.android.inputmethod.latin:id/extract_scroll_view",
+                        "visible-to-user": true,
+                        "view-id": "com.google.android.inputmethod.latin:id/extract_scroll_view",
+                        "focusable": "true",
+                        "bounds": [
+                          0,
+                          0,
+                          384,
+                          83
+                        ],
+                        "node": {
+                          "actions": [
+                            "clear_focus",
+                            "select",
+                            "clear_selection",
+                            "click",
+                            "accessibility_focus",
+                            "set_text"
+                          ],
+                          "resource-id": "com.google.android.inputmethod.latin:id/extract_edit_text",
+                          "visible-to-user": true,
+                          "view-id": "com.google.android.inputmethod.latin:id/extract_edit_text",
+                          "class": "android.widget.EditText",
+                          "className": "android.widget.EditText",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "focused": "true",
+                          "bounds": [
+                            0,
+                            42,
+                            384,
+                            83
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.google.android.inputmethod.latin:id/keyboard_area",
+                      "visible-to-user": true,
+                      "view-id": "com.google.android.inputmethod.latin:id/keyboard_area",
+                      "bounds": [
+                        0,
+                        83,
+                        384,
+                        384
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.google.android.inputmethod.latin:id/keyboard_holder",
+                        "visible-to-user": true,
+                        "view-id": "com.google.android.inputmethod.latin:id/keyboard_holder",
+                        "class": "android.widget.LinearLayout",
+                        "className": "android.widget.LinearLayout",
+                        "bounds": [
+                          0,
+                          83,
+                          384,
+                          384
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "resource-id": "com.google.android.inputmethod.latin:id/keyboard_header_view_holder",
+                            "visible-to-user": true,
+                            "view-id": "com.google.android.inputmethod.latin:id/keyboard_header_view_holder",
+                            "bounds": [
+                              0,
+                              83,
+                              384,
+                              140
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "focus",
+                                  "select",
+                                  "clear_selection",
+                                  "click",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "content-desc": "Show suggestions menu",
+                                "resource-id": "com.google.android.inputmethod.latin:id/key_pos_header_entry_button",
+                                "visible-to-user": true,
+                                "view-id": "com.google.android.inputmethod.latin:id/key_pos_header_entry_button",
+                                "clickable": "true",
+                                "focusable": "true",
+                                "bounds": [
+                                  34,
+                                  83,
+                                  82,
+                                  140
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/icon",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    38,
+                                    87,
+                                    78,
+                                    136
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "resource-id": "com.google.android.inputmethod.latin:id/suggestions_strip",
+                                "visible-to-user": true,
+                                "view-id": "com.google.android.inputmethod.latin:id/suggestions_strip",
+                                "bounds": [
+                                  82,
+                                  83,
+                                  287,
+                                  140
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.inputmethod.latin:id/keyboard_top_row",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/keyboard_top_row",
+                                  "class": "android.widget.HorizontalScrollView",
+                                  "className": "android.widget.HorizontalScrollView",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    82,
+                                    83,
+                                    287,
+                                    140
+                                  ],
+                                  "node": [
+                                    {
+                                      "actions": [
+                                        "focus",
+                                        "select",
+                                        "clear_selection",
+                                        "click",
+                                        "accessibility_focus",
+                                        "next_at_movement_granularity",
+                                        "previous_at_movement_granularity",
+                                        "set_selection"
+                                      ],
+                                      "content-desc": "Emoji button",
+                                      "resource-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_emoji",
+                                      "visible-to-user": true,
+                                      "view-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_emoji",
+                                      "clickable": "true",
+                                      "focusable": "true",
+                                      "bounds": [
+                                        82,
+                                        83,
+                                        139,
+                                        140
+                                      ],
+                                      "node": {
+                                        "actions": [
+                                          "select",
+                                          "clear_selection",
+                                          "accessibility_focus"
+                                        ],
+                                        "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                        "visible-to-user": true,
+                                        "view-id": "com.google.android.inputmethod.latin:id/icon",
+                                        "class": "android.widget.ImageView",
+                                        "className": "android.widget.ImageView",
+                                        "bounds": [
+                                          84,
+                                          87,
+                                          137,
+                                          136
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "actions": [
+                                        "focus",
+                                        "select",
+                                        "clear_selection",
+                                        "click",
+                                        "accessibility_focus",
+                                        "next_at_movement_granularity",
+                                        "previous_at_movement_granularity",
+                                        "set_selection"
+                                      ],
+                                      "content-desc": "Digit keyboard",
+                                      "resource-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_non_prime",
+                                      "visible-to-user": true,
+                                      "view-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_non_prime",
+                                      "clickable": "true",
+                                      "focusable": "true",
+                                      "bounds": [
+                                        139,
+                                        83,
+                                        230,
+                                        140
+                                      ],
+                                      "node": {
+                                        "actions": [
+                                          "select",
+                                          "clear_selection",
+                                          "accessibility_focus"
+                                        ],
+                                        "content-desc": "?123",
+                                        "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                        "visible-to-user": true,
+                                        "view-id": "com.google.android.inputmethod.latin:id/label",
+                                        "bounds": [
+                                          141,
+                                          87,
+                                          228,
+                                          136
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "actions": [
+                                        "focus",
+                                        "select",
+                                        "clear_selection",
+                                        "click",
+                                        "accessibility_focus",
+                                        "next_at_movement_granularity",
+                                        "previous_at_movement_granularity",
+                                        "set_selection"
+                                      ],
+                                      "content-desc": "Use voice typing",
+                                      "resource-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_voice",
+                                      "visible-to-user": true,
+                                      "view-id": "com.google.android.inputmethod.latin:id/key_pos_switch_to_voice",
+                                      "clickable": "true",
+                                      "focusable": "true",
+                                      "bounds": [
+                                        230,
+                                        83,
+                                        287,
+                                        140
+                                      ],
+                                      "node": {
+                                        "actions": [
+                                          "select",
+                                          "clear_selection",
+                                          "accessibility_focus"
+                                        ],
+                                        "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                        "visible-to-user": true,
+                                        "view-id": "com.google.android.inputmethod.latin:id/icon",
+                                        "class": "android.widget.ImageView",
+                                        "className": "android.widget.ImageView",
+                                        "bounds": [
+                                          232,
+                                          87,
+                                          285,
+                                          136
+                                        ]
+                                      }
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "focus",
+                                  "select",
+                                  "clear_selection",
+                                  "click",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "content-desc": "Close keyboard",
+                                "resource-id": "com.google.android.inputmethod.latin:id/key_pos_ime_action",
+                                "visible-to-user": true,
+                                "view-id": "com.google.android.inputmethod.latin:id/key_pos_ime_action",
+                                "clickable": "true",
+                                "focusable": "true",
+                                "bounds": [
+                                  287,
+                                  83,
+                                  350,
+                                  140
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/icon",
+                                  "class": "android.widget.ImageView",
+                                  "className": "android.widget.ImageView",
+                                  "bounds": [
+                                    289,
+                                    87,
+                                    348,
+                                    136
+                                  ]
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "resource-id": "com.google.android.inputmethod.latin:id/keyboard_body_view_holder",
+                            "visible-to-user": true,
+                            "view-id": "com.google.android.inputmethod.latin:id/keyboard_body_view_holder",
+                            "bounds": [
+                              0,
+                              140,
+                              384,
+                              384
+                            ],
+                            "node": {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.inputmethod.latin:id/input_area",
+                              "visible-to-user": true,
+                              "view-id": "com.google.android.inputmethod.latin:id/input_area",
+                              "class": "android.view.ViewGroup",
+                              "className": "android.view.ViewGroup",
+                              "bounds": [
+                                0,
+                                140,
+                                384,
+                                370
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Q",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_0",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_0",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    15,
+                                    140,
+                                    50,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "Q",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      15,
+                                      140,
+                                      50,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "W",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_1",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_1",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    50,
+                                    140,
+                                    86,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "W",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      50,
+                                      140,
+                                      86,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "E",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_2",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_2",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    86,
+                                    140,
+                                    121,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "E",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      86,
+                                      140,
+                                      121,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "R",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_3",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_3",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    121,
+                                    140,
+                                    157,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "R",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      121,
+                                      140,
+                                      157,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "T",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_4",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_4",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    157,
+                                    140,
+                                    192,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "T",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      157,
+                                      140,
+                                      192,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Y",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_5",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_5",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    192,
+                                    140,
+                                    227,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "Y",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      192,
+                                      140,
+                                      227,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "U",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_6",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_6",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    227,
+                                    140,
+                                    263,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "U",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      227,
+                                      140,
+                                      263,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "I",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_7",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_7",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    263,
+                                    140,
+                                    298,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "I",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      263,
+                                      140,
+                                      298,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "O",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_8",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_8",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    298,
+                                    140,
+                                    334,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "O",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      298,
+                                      140,
+                                      334,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "P",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_9",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_9",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    334,
+                                    140,
+                                    369,
+                                    197
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "P",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      334,
+                                      140,
+                                      369,
+                                      197
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "A",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_1",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_1",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    18,
+                                    197,
+                                    57,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "A",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      18,
+                                      197,
+                                      57,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "S",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_2",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_2",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    57,
+                                    197,
+                                    95,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "S",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      57,
+                                      197,
+                                      95,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "D",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_3",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_3",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    95,
+                                    197,
+                                    134,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "D",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      95,
+                                      197,
+                                      134,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "F",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_4",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_4",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    134,
+                                    197,
+                                    173,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "F",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      134,
+                                      197,
+                                      173,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "G",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_5",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_5",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    173,
+                                    197,
+                                    211,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "G",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      173,
+                                      197,
+                                      211,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "H",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_6",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_6",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    211,
+                                    197,
+                                    250,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "H",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      211,
+                                      197,
+                                      250,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "J",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_7",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_7",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    250,
+                                    197,
+                                    289,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "J",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      250,
+                                      197,
+                                      289,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "K",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_8",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_8",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    289,
+                                    197,
+                                    327,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "K",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      289,
+                                      197,
+                                      327,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "L",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_9",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_1_9",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    327,
+                                    197,
+                                    366,
+                                    254
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "L",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      327,
+                                      197,
+                                      366,
+                                      254
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Z",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_2",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_2_2",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    49,
+                                    254,
+                                    90,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "Z",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      49,
+                                      254,
+                                      90,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "X",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_3",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_2_3",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    90,
+                                    254,
+                                    131,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "X",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      90,
+                                      254,
+                                      131,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "C",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_4",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_2_4",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    131,
+                                    254,
+                                    172,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "C",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      131,
+                                      254,
+                                      172,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "V",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_5",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_2_5",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    172,
+                                    254,
+                                    212,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "V",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      172,
+                                      254,
+                                      212,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "B",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_6",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_2_6",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    212,
+                                    254,
+                                    253,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "B",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      212,
+                                      254,
+                                      253,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "N",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_7",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_2_7",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    253,
+                                    254,
+                                    294,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "N",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      253,
+                                      254,
+                                      294,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "M",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_2_8",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_2_8",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    294,
+                                    254,
+                                    335,
+                                    311
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "content-desc": "M",
+                                    "resource-id": "com.google.android.inputmethod.latin:id/label",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/label",
+                                    "bounds": [
+                                      294,
+                                      254,
+                                      335,
+                                      311
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Shift enabled",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_shift",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_shift",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    41,
+                                    311,
+                                    136,
+                                    368
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.inputmethod.latin:id/host",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/host",
+                                    "bounds": [
+                                      79,
+                                      311,
+                                      136,
+                                      358
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                      "visible-to-user": true,
+                                      "view-id": "com.google.android.inputmethod.latin:id/icon",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        79,
+                                        311,
+                                        136,
+                                        358
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Space. Double tap and hold to launch language settings",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_space",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_space",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    136,
+                                    311,
+                                    248,
+                                    368
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/icon",
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      174,
+                                      315,
+                                      210,
+                                      363
+                                    ]
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "long_click",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "Delete",
+                                  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_del",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.inputmethod.latin:id/key_pos_del",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "bounds": [
+                                    248,
+                                    311,
+                                    343,
+                                    368
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.inputmethod.latin:id/host",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.inputmethod.latin:id/host",
+                                    "bounds": [
+                                      248,
+                                      311,
+                                      305,
+                                      358
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.google.android.inputmethod.latin:id/icon",
+                                      "visible-to-user": true,
+                                      "view-id": "com.google.android.inputmethod.latin:id/icon",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        248,
+                                        311,
+                                        305,
+                                        358
+                                      ]
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": 16,
+        "displayId": 0,
+        "type": 1,
+        "windowLayer": 0,
+        "isActive": true,
+        "isFocused": true,
+        "bounds": [
+          0,
+          0,
+          384,
+          384
+        ],
+        "packageName": "com.google.android.inputmethod.latin",
+        "hierarchy": {
+          "windowId": 16,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-920ed40973a28c76",
+          "bounds": [
+            0,
+            0,
+            384,
+            384
+          ],
+          "node": [
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "android:id/content",
+              "visible-to-user": true,
+              "view-id": "android:id/content",
+              "bounds": [
+                0,
+                0,
+                384,
+                384
+              ]
+            },
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.google.android.inputmethod.latin:id/wear_remote_input",
+              "visible-to-user": true,
+              "view-id": "com.google.android.inputmethod.latin:id/wear_remote_input",
+              "bounds": [
+                0,
+                0,
+                384,
+                384
+              ],
+              "node": {
+                "actions": [
+                  "clear_focus",
+                  "select",
+                  "clear_selection",
+                  "click",
+                  "accessibility_focus",
+                  "set_text"
+                ],
+                "resource-id": "com.google.android.inputmethod.latin:id/remote_ime_input",
+                "visible-to-user": true,
+                "view-id": "com.google.android.inputmethod.latin:id/remote_ime_input",
+                "class": "android.widget.EditText",
+                "className": "android.widget.EditText",
+                "clickable": "true",
+                "focusable": "true",
+                "focused": "true",
+                "bounds": [
+                  0,
+                  0,
+                  2,
+                  2
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "ctrlProxyIncomplete": null,
+    "sources": [
+      "control-proxy"
+    ],
+    "screenWidth": 384,
+    "screenHeight": 384,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 0,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "none",
+        "bounds": null
+      },
+      "systemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "mandatorySystemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "hidden",
+        "statusBar": "hidden",
+        "navigationBar": "hidden",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": "com.google.android.inputmethod.latin/android.inputmethodservice.SoftInputWindow",
+    "density": 320,
+    "sdkInt": 37,
+    "deviceModel": "sdk_gwear_arm64",
+    "isEmulator": true,
+    "accessibilityTool": true,
+    "nativeScale": 1,
+    "pixelWidth": 384,
+    "pixelHeight": 384,
+    "updatedAt": 1794407975139,
+    "receivedAt": 1794407974934,
+    "fresh": true,
+    "frameContext": "e1aa1e83-95c8-4fb0-8d69-5edf7a4eece4:488"
+  }
+}

@@ -86,6 +86,7 @@ export class StaleHierarchyRecovery {
       hierarchy.packageName === foreground &&
       this.platformValidator.validate(this.hierarchyPlatform, hierarchy).valid
     ) {
+      await this.reconciler.primeRecapturedHierarchy?.(result, hierarchy, options?.signal);
       this.reconciler.applyRecapturedHierarchy(result, hierarchy);
       this.reconciler.recorrelateActiveWindowToRecapture(result, hierarchy);
       // Earlier back-stack/lock samples describe the discarded window.
@@ -208,6 +209,7 @@ export class StaleHierarchyRecovery {
       return;
     }
     const sameWindow = treeNamesWindow(hierarchy, result.activeWindow);
+    await this.reconciler.primeRecapturedHierarchy?.(result, hierarchy, options.signal);
     this.reconciler.applyRecapturedHierarchy(result, hierarchy);
     if (!sameWindow) {
       // A same-package A->B move between the adb reads and this read would publish

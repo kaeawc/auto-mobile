@@ -164,7 +164,7 @@ function safeTapPoint(query: SafeTapPointQuery): SafeTapPointResult {
  * `owner`'s window holds `point`, and every such window's bounds.
  */
 function windowCoverAt(
-  { hierarchy, target, point, ownWindows, index: { entries, types } }: SafeTapPointQuery,
+  { hierarchy, target, point, ownWindows, index: { entries, types, windows } }: SafeTapPointQuery,
   owner: SearchableEntry,
 ): {
   hit?: { coveredBy: string; coveredByKind: "window" };
@@ -176,16 +176,33 @@ function windowCoverAt(
     return { covers: () => [] };
   }
   const prototypeCovers = ownPrototypeCoversAbove(hierarchy, entries, owner, ownWindows);
+  // XR SystemUI home/caption panels use independent coordinates. Application dialogs,
+  // including other packages' permission prompts, still cover controls behind them.
+  const windowEntries = isAndroidXrCapture(hierarchy)
+    ? entries.filter((entry) => {
+        const position = windows.get(entry.source);
+        return !(
+          position !== undefined &&
+          hierarchy.windows?.[position]?.packageName?.startsWith("com.android.systemui")
+        );
+      })
+    : entries;
   const covers = () => [
-    ...entries
+    ...windowEntries
       .filter(
         (entry) =>
-          entry.bounds && entry.windowRank < owner.windowRank && types.get(entry.source) === 1,
+          entry.bounds &&
+          !isHiddenFromUser(entry) &&
+          entry.windowRank < owner.windowRank &&
+          types.get(entry.source) === 1,
       )
       .map((entry) => entry.bounds!),
     ...prototypeCovers,
   ];
-  const first = hitEntries(entries, point)[0];
+  const first = hitEntries(
+    windowEntries.filter((entry) => !isHiddenFromUser(entry)),
+    point,
+  )[0];
   if (first !== undefined && first.windowRank < owner.windowRank && types.get(first.source) === 1) {
     return { hit: { coveredBy: coveringLabel(first, target), coveredByKind: "window" }, covers };
   }
@@ -193,6 +210,14 @@ function windowCoverAt(
     return { hit: { coveredBy: OWN_PROTOTYPE_COVER_LABEL, coveredByKind: "window" }, covers };
   }
   return { covers };
+}
+
+function isAndroidXrCapture(hierarchy: ViewHierarchyResult): boolean {
+  return (
+    hierarchy.windows?.some((window) =>
+      window.packageName?.startsWith("com.android.systemui.xrhomeenv"),
+    ) ?? false
+  );
 }
 
 /**

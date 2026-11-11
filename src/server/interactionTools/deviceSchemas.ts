@@ -166,6 +166,13 @@ const systemTrayNotificationSchema = z
     body: z.string().optional().describe("Notification body to match"),
     appId: z.string().optional().describe("App package ID to match"),
     tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)"),
+    replyText: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Inline reply text on watches (tap only; defaults tapActionLabel to Keyboard input)",
+      ),
   })
   .strict();
 
@@ -193,35 +200,44 @@ const systemTraySchemaBase = z
 
 export const systemTraySchema = withJsonSchemaOverride(
   withAppIdAliases(
-    addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
-      const notification = value.notification ?? {};
+    addDeviceTargetingToSchema(systemTraySchemaBase)
+      .superRefine((value, ctx) => {
+        if (value.notification?.replyText !== undefined && value.action !== "tap") {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "notification.replyText is only valid for tap action",
+          });
+        }
+      })
+      .superRefine((value, ctx) => {
+        const notification = value.notification ?? {};
 
-      if (value.action === "open" || value.action === "close") {
-        return;
-      }
+        if (value.action === "open" || value.action === "close") {
+          return;
+        }
 
-      const hasCriteria = notification.title || notification.body || notification.appId;
-      if (!hasCriteria) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
-        });
-      }
+        const hasCriteria = notification.title || notification.body || notification.appId;
+        if (!hasCriteria) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
+          });
+        }
 
-      if ((value.action === "clearAll" || value.action === "list") && !notification.appId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `${value.action} action requires notification.appId`,
-        });
-      }
+        if ((value.action === "clearAll" || value.action === "list") && !notification.appId) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${value.action} action requires notification.appId`,
+          });
+        }
 
-      if (notification.tapActionLabel && value.action !== "tap") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "notification.tapActionLabel is only valid for tap action",
-        });
-      }
-    }),
+        if (notification.tapActionLabel && value.action !== "tap") {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "notification.tapActionLabel is only valid for tap action",
+          });
+        }
+      }),
   ),
   (jsonSchema) => {
     const notificationSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>)

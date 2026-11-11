@@ -23,6 +23,7 @@
 
 # --- portable: path has an iOS token but the test needs no iOS host --------------
 
+portable test/utils/ios/carPlayProjection.test.ts                        # JSON contract and injected exec only; no host processes
 portable test/utils/ios/carPlayScreenPower.test.ts                       # JSON contract and injected exec only; no host processes
 
 # Source, workflow and script scans read repository files and run no iOS code.

@@ -4284,6 +4284,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -6851,6 +6856,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -12911,6 +12921,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -16326,6 +16341,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -21349,6 +21369,11 @@
               "enum": ["exact", "contains", "regex"],
               "description": "How to match waitFor.text; does not affect contentDescription"
             },
+            "textSource": {
+              "type": "string",
+              "enum": ["displayed"],
+              "description": "displayed: match text only against the element's shown text or value"
+            },
             "activeWindow": {
               "type": "object",
               "additionalProperties": false,
@@ -23288,6 +23313,11 @@
         "isScreenRound": {
           "description": "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
           "type": "boolean"
+        },
+        "surface": {
+          "description": "Wear OS watch devices only: the captured foreground surface. Omitted when it cannot be identified, including the notification tray.",
+          "type": "string",
+          "enum": ["tile", "watchface", "launcher", "app"]
         },
         "hierarchyUnavailable": {
           "description": "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen.",
@@ -25510,6 +25540,11 @@
               "enum": ["exact", "contains", "regex"],
               "description": "How to match waitFor.text; does not affect contentDescription"
             },
+            "textSource": {
+              "type": "string",
+              "enum": ["displayed"],
+              "description": "displayed: match text only against the element's shown text or value"
+            },
             "activeWindow": {
               "type": "object",
               "additionalProperties": false,
@@ -26651,6 +26686,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -29102,6 +29142,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -34884,6 +34929,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -38091,6 +38141,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -40035,6 +40090,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -46980,6 +47040,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -48851,6 +48916,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -52132,6 +52202,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -54950,6 +55025,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -56955,6 +57035,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",

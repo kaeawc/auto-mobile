@@ -821,7 +821,8 @@ async function preparePlatformShutdown(
       dependencies.daemonState,
     );
     stopWatchRunnerBeforeShutdown(context.device, dependencies);
-    await stopAndroidAutoBeforeShutdown(shutdownContext, dependencies);
+    // Mark the AVD the kill will stop, not an `Unknown (emulator-NNNN)` entry placeholder.
+    await stopAndroidAutoBeforeShutdown(shutdownContext, dependencies, target.killTarget.name);
     return { ...target, androidObserverState };
   } catch (error) {
     clearFence();

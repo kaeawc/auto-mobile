@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ActionableError } from "../../src/models/ActionableError";
 import type { DpadTapOnResult } from "../../src/features/action/DpadTapOn";
 import type { FocusNavigateTarget } from "../../src/features/action/FocusNavigate";
 import type { BootedDevice, TapOnElementOptions } from "../../src/models";
@@ -105,18 +106,16 @@ describe("tapOn keeps touching when", () => {
     expect(response.structuredContent).not.toHaveProperty("inputMethod");
   });
 
-  test("the request needs a touch tap, without probing the device", async () => {
-    const { deps, fallback, touchTaps } = harness(false);
+  test("a phone gets the touch tap for a touch-only option", async () => {
+    const { deps, fallback, touchTaps } = harness(true);
     await tapOnHandler(tv, args({ selector: { text: "Movies" }, sibling: true }), { deps });
-    expect(fallback.probes).toBe(0);
-    expect(touchTaps).toHaveLength(1);
+    expect(fallback.taps).toEqual([]);
+    expect(touchTaps).toMatchObject([{ text: "Movies", sibling: true }]);
   });
 
-  test("exactText needs the touch path's exact match, which the D-pad resolver lacks (#17782)", async () => {
-    const { deps, fallback, touchTaps } = harness(false);
+  test("an unreadable touchscreen probe keeps the touch tap for a touch-only option", async () => {
+    const { deps, touchTaps } = harness(null);
     await tapOnHandler(tv, args({ selector: { text: "Remove" }, exactText: true }), { deps });
-    expect(fallback.probes).toBe(0);
-    expect(fallback.taps).toEqual([]);
     expect(touchTaps).toMatchObject([{ text: "Remove", exactText: true }]);
   });
 
@@ -134,5 +133,57 @@ describe("tapOn keeps touching when", () => {
     delete deps.tapOnDpadFallbackFactory;
     await tapOnHandler(tv, args({ selector: { text: "Movies" } }), { deps });
     expect(touchTaps).toHaveLength(1);
+  });
+});
+
+describe("tapOn on a device without a touchscreen refuses a touch-only request (#17913)", () => {
+  test.each([
+    ["selector.accessibilityLink", { selector: { accessibilityLink: "Terms" } }],
+    [
+      "owner-scoped subtext",
+      { selector: { elementId: "app:id/legal" }, subtext: { text: "Terms" } },
+    ],
+  ] as const)("still activates a semantic link natively: %s", async (_label, raw) => {
+    const { deps, fallback, touchTaps } = harness(false);
+    const response = await tapOnHandler(tv, args(raw), { deps });
+    expect(fallback.probes).toBe(0);
+    expect(fallback.taps).toEqual([]);
+    expect(touchTaps).toHaveLength(1);
+    expect(response.isError).toBeUndefined();
+  });
+
+  test.each([
+    [{ selector: { text: "Play" }, sibling: true }, "sibling"],
+    [{ selector: { text: "Remove" }, exactText: true }, "exactText"],
+    [{ selector: { text: "Movies" }, index: 1 }, "index"],
+    [{ selector: { text: "Movies" }, container: { elementId: "list" } }, "container"],
+    [{ selector: { text: "Movies" }, searchUntil: { duration: 1000 } }, "searchUntil"],
+    [{ selector: { text: "Wi-Fi" }, ensureChecked: false }, "ensureChecked"],
+    [{ selector: { text: "Movies" }, selectionStrategy: "random" }, 'selectionStrategy: "random"'],
+    [{ selector: { text: "Movies" }, action: "doubleTap" }, 'action: "doubleTap"'],
+    [{ selector: { testTag: "row" } }, "selector.testTag"],
+    [{ selector: { text: "Movies" }, layer: "app" }, "layer"],
+    [{ selector: { textAny: ["Movies", "Shows"] } }, "selector.textAny"],
+  ] as const)("%j names %s and the D-pad form", async (raw, option) => {
+    const { deps, fallback, touchTaps } = harness(false);
+    const call = tapOnHandler(tv, args(raw), { deps });
+    await expect(call).rejects.toBeInstanceOf(ActionableError);
+    const message = await call.then(
+      () => "",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(message).toContain(`cannot use ${option}`);
+    expect(message).toContain("no touchscreen");
+    expect(message).toContain("selector.text or selector.elementId");
+    expect(message).toContain("focusNavigate");
+    expect(fallback.taps).toEqual([]);
+    expect(touchTaps).toEqual([]);
+  });
+
+  test("names every touch-only part of the request", async () => {
+    const { deps } = harness(false);
+    await expect(
+      tapOnHandler(tv, args({ selector: { text: "Play" }, sibling: true, index: 0 }), { deps }),
+    ).rejects.toThrow("cannot use sibling, index on this device");
   });
 });

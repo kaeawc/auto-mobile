@@ -4,6 +4,7 @@ import {
   withVisionosHostRecovery,
 } from "../visionos/VisionosRunnerLifecycle";
 import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
+import { UntrackedAndroidDisplayError } from "./UntrackedAndroidDisplayError";
 import { normalizeTvosHierarchy } from "../tvos/TvosHierarchy";
 import { tvosRunners } from "../tvos/TvosRunnerRegistry";
 import { normalizeWatchHierarchy } from "../watch/WatchHierarchy";
@@ -458,6 +459,11 @@ async function readAndNormalizeHierarchy(
       );
     } catch (fallbackError) {
       request.signal?.throwIfAborted();
+      if (fallbackError instanceof UntrackedAndroidDisplayError) {
+        // The display service proved the display is one accessibility never tracks: that names
+        // the cause, where the CtrlProxy refusal alone reads like a transient window gap.
+        throw fallbackError;
+      }
       logger.warn(
         "[HierarchyCapture] Untracked-display UIAutomator fallback failed",
         fallbackError,

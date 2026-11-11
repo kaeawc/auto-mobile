@@ -326,7 +326,7 @@ describe("startDevice handler", () => {
           desktopHeadUnit: { running: true, configPath: "/hu.ini" },
         };
       },
-      stopDesktopHeadUnit: async () => {},
+      stopDesktopHeadUnit: async () => false,
     };
     setDeviceToolsDependencies({ androidAutoProjection: applier });
     return started;
@@ -385,7 +385,7 @@ describe("startDevice handler", () => {
         signal?.throwIfAborted();
         throw new Error("the run ignored the lost device");
       },
-      stopDesktopHeadUnit: async () => {},
+      stopDesktopHeadUnit: async () => false,
     };
     setDeviceToolsDependencies({
       androidAutoProjection: applier,

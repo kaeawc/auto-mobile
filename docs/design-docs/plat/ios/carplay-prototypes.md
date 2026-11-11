@@ -45,6 +45,30 @@ uses `AUTOMOBILE_CARPLAY_POWER_HELPER_PATH`. Its JSON includes screen dimensions
 CarPlay enablement is unknown (`null`) unless this invocation enabled it. Powering the screen does
 not resolve black capture frames (#17561) or add observation, interaction, or prototype support.
 
+## Projection readiness contract
+
+`ios/carplay-projection-probe` is an arm64 iOS 27.0 simulator executable, run inside the
+selected simulator with `xcrun simctl spawn <udid> <absolute-probe-path>`. Build and ad-hoc sign
+it with `bash ios/carplay-projection-probe/build.sh [output-path]`; set
+`AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH` to the result. It enumerates `+[CADisplay displays]`,
+selects `deviceName == "wireless0"`, and reads only `tag`, `displayType` and `displayId` through
+typed `objc_msgSend` casts. It never constructs `FBSDisplayConfiguration`: initializing that
+configuration for a powered-off, tag-zero display can segfault. Unavailable selectors fail
+on stderr with a nonzero exit; absence of wireless0 is a successful `found: false` result.
+
+The single JSON line contains `found`, nullable `tag`, `displayId`, `displayType`, `identity`,
+and boolean `isCarDisplay` / `isCarInstrumentsDisplay`. Missing displays have null metadata
+and false flags. Car is bit `0x20`; instruments is bit `0x40`. Identity is seed-free, choosing
+`Car[id]`, `CarInstruments[id]`, `AirPlay[id]` (bit `0x4`), `Untagged[id]` (tag zero), then
+`Tag0x<hex>[id]`, in that priority order. Both Car flags are computed independently.
+
+`carPlayProjection.ts` validates the strict JSON contract over the injectable exec seam with
+a 15-second timeout. `requireCarPlayProjection` probes and refuses capture unless either Car
+flag is true, reporting the identity, black-frame reason and recovery action. Attachment,
+`displayType == 2`, and power-on alone are insufficient: wireless0 can remain AirPlay tagged.
+The module is available for future CarPlay capture integration; no `observe` display selector
+is wired. A positive tag is a readiness signal, not verification of a captured image.
+
 ## Revisit when
 
 - #14924's CarPlay observation tools are shipped and used, and

@@ -44,10 +44,19 @@ export interface AndroidAutoProjectionApplier {
     options: ProvisionAndroidAutoOptions,
     signal?: AbortSignal,
   ): Promise<AndroidAutoProvisionReport>;
+  /**
+   * Stops the DHU this daemon spawned for `deviceId` (bounded; never rejects) and forgets it.
+   * DHUs this daemon did not spawn are never touched. `deviceStopped` means the emulator itself
+   * is going away, so its host port redirect is forgotten too.
+   */
+  stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }): Promise<void>;
 }
 
-/** The projection run, narrowed to the one call the applier makes. */
-export type AndroidAutoProvisionRunner = Pick<AndroidAutoProjectionProvisioner, "provision">;
+/** The projection run, narrowed to the calls the applier makes. */
+export type AndroidAutoProvisionRunner = Pick<
+  AndroidAutoProjectionProvisioner,
+  "provision" | "stopDesktopHeadUnit"
+>;
 
 export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectionApplier {
   constructor(
@@ -73,6 +82,10 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
       signal,
     });
     return { steps: result.steps, desktopHeadUnit: { running: result.session.isRunning() } };
+  }
+
+  stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }): Promise<void> {
+    return this.provisioner.stopDesktopHeadUnit(deviceId, options);
   }
 }
 
@@ -132,5 +145,15 @@ export function defaultAndroidAutoProjectionApplier(): AndroidAutoProjectionAppl
     { env: process.env, platform: process.platform, files: nodeAndroidAutoHostFiles },
     createDefaultAndroidAutoProjectionProvisioner(),
   );
+  return defaultApplier;
+}
+
+/**
+ * The process-wide applier only when something already created it. Teardown uses this: a daemon
+ * that never projected has no DHU to stop, so it must not build a provisioner just to look.
+ */
+export function existingDefaultAndroidAutoProjectionApplier():
+  | AndroidAutoProjectionApplier
+  | undefined {
   return defaultApplier;
 }

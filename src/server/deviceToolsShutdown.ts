@@ -51,6 +51,7 @@ import {
 import { waitForEmulatorShutdownWithEscalation } from "../features/deviceLifecycle/teardown/stuckEmulatorEscalation";
 import { exponentialBackoff } from "../utils/Backoff";
 import { stopWatchRunnerBeforeShutdown } from "../features/deviceLifecycle/teardown/shutdownPreparation";
+import { stopProvisionedAndroidAuto } from "./provisioning/provisioningAndroidAuto";
 import {
   AndroidObserverShutdownState,
   stopIosCtrlProxyBeforeShutdown,
@@ -813,6 +814,8 @@ async function preparePlatformShutdown(
       dependencies.daemonState,
     );
     stopWatchRunnerBeforeShutdown(context.device, dependencies);
+    // Only a DHU this daemon spawned for this emulator; it would otherwise outlive it (#17839).
+    await stopProvisionedAndroidAuto(dependencies, context.device, { deviceStopped: true });
     return { ...target, androidObserverState };
   } catch (error) {
     clearFence();

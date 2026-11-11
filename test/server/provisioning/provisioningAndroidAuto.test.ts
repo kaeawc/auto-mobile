@@ -10,7 +10,9 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import {
   applyProvisionAndroidAuto,
   assertAndroidAutoInputsPresent,
+  stopProvisionedAndroidAuto,
 } from "../../../src/server/provisioning/provisioningAndroidAuto";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const ANDROID_AUTO = { apkDirectory: "/apks" };
 const ANDROID_DEVICE = {
@@ -44,7 +46,13 @@ const REPORT: AndroidAutoProvisionReport = {
 
 class FakeApplier implements AndroidAutoProjectionApplier {
   readonly applied: string[] = [];
+  readonly stopped: Array<{ deviceId: string; deviceStopped?: boolean }> = [];
+  /** When set, apply waits on it (and on its signal) instead of returning at once. */
+  pending?: Promise<void>;
   constructor(private readonly missing?: string) {}
+  async stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }) {
+    this.stopped.push({ deviceId, ...options });
+  }
   async resolveInputs() {
     if (this.missing) {
       throw new ActionableError(`Android Auto projection is missing ${this.missing}.`);
@@ -55,13 +63,21 @@ class FakeApplier implements AndroidAutoProjectionApplier {
       acceptAndroidAutoTerms: false,
     };
   }
-  async apply(device: { deviceId: string }) {
+  async apply(device: { deviceId: string }, _options: unknown, signal?: AbortSignal) {
     this.applied.push(device.deviceId);
+    if (this.pending) {
+      await this.pending;
+      signal?.throwIfAborted();
+    }
     return REPORT;
   }
 }
 
 const androidDevice = { deviceId: "emulator-5554", platform: "android" as const, name: "Pixel" };
+
+function bounds(timer: FakeTimer, signal = new AbortController().signal, budgetMs = 60_000) {
+  return { signal, totalDeadlineMs: timer.now() + budgetMs };
+}
 
 describe("provisionDevice androidAuto", () => {
   test("the schema accepts androidAuto on an Android request", () => {
@@ -105,10 +121,12 @@ describe("provisionDevice androidAuto", () => {
 
   test("applies to the booted device and returns its report", async () => {
     const applier = new FakeApplier();
+    const timer = new FakeTimer();
     const report = await applyProvisionAndroidAuto(
       args(),
-      { androidAutoProjection: applier },
+      { androidAutoProjection: applier, timer },
       androidDevice,
+      bounds(timer),
     );
     expect(report).toEqual(REPORT);
     expect(applier.applied).toEqual(["emulator-5554"]);
@@ -119,13 +137,91 @@ describe("provisionDevice androidAuto", () => {
     await assertAndroidAutoInputsPresent(args({ androidAuto: undefined }), {
       androidAutoProjection: applier,
     });
+    const timer = new FakeTimer();
     expect(
       await applyProvisionAndroidAuto(
         args({ androidAuto: undefined }),
-        { androidAutoProjection: applier },
+        { androidAutoProjection: applier, timer },
         androidDevice,
+        bounds(timer),
       ),
     ).toBeUndefined();
     expect(applier.applied).toEqual([]);
+  });
+
+  test("an abort that lands before it does not fail a request without androidAuto", async () => {
+    const applier = new FakeApplier();
+    const timer = new FakeTimer();
+    const aborted = new AbortController();
+    aborted.abort(new Error("late abort after the session was bound"));
+    expect(
+      await applyProvisionAndroidAuto(
+        args({ androidAuto: undefined }),
+        { androidAutoProjection: applier, timer },
+        androidDevice,
+        bounds(timer, aborted.signal),
+      ),
+    ).toBeUndefined();
+    expect(applier.applied).toEqual([]);
+  });
+
+  test("an abort that lands before it refuses an androidAuto request without projecting", async () => {
+    const applier = new FakeApplier();
+    const timer = new FakeTimer();
+    const aborted = new AbortController();
+    aborted.abort(new Error("cancelled"));
+    await expect(
+      applyProvisionAndroidAuto(
+        args(),
+        { androidAutoProjection: applier, timer },
+        androidDevice,
+        bounds(timer, aborted.signal),
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(applier.applied).toEqual([]);
+  });
+
+  test("the provision's total deadline bounds the projection and stops a DHU it connects late", async () => {
+    const applier = new FakeApplier();
+    let release!: () => void;
+    applier.pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const timer = new FakeTimer();
+    const run = applyProvisionAndroidAuto(
+      args(),
+      { androidAutoProjection: applier, timer },
+      androidDevice,
+      bounds(timer, new AbortController().signal, 1_000),
+    );
+    const settled = run.then(
+      () => "resolved",
+      (error: unknown) => error,
+    );
+    timer.advanceTime(1_000);
+    expect(await settled).toMatchObject({ code: "timeout" });
+    expect(applier.stopped).toEqual([]);
+    release();
+    for (let tick = 0; tick < 5 && applier.stopped.length === 0; tick++) {
+      await Promise.resolve();
+    }
+    expect(applier.stopped).toEqual([{ deviceId: "emulator-5554" }]);
+  });
+
+  test("stopProvisionedAndroidAuto stops only the Android device's DHU and never rejects", async () => {
+    const applier = new FakeApplier();
+    await stopProvisionedAndroidAuto({ androidAutoProjection: applier }, androidDevice, {
+      deviceStopped: true,
+    });
+    await stopProvisionedAndroidAuto(
+      { androidAutoProjection: applier },
+      { deviceId: "SIM-1", platform: "ios", name: "iPhone" },
+    );
+    expect(applier.stopped).toEqual([{ deviceId: "emulator-5554", deviceStopped: true }]);
+
+    applier.stopDesktopHeadUnit = async () => {
+      throw new Error("broken applier");
+    };
+    await stopProvisionedAndroidAuto({ androidAutoProjection: applier }, androidDevice);
   });
 });

@@ -38,6 +38,13 @@ A flow that needs a signed-in device uses an AVD snapshot that a person signed i
 `unsupported` error naming every missing path, because the run could only fail after a long boot.
 The projection runs after the session is bound (beside the manufacturer profile), inside the
 provision's try block, so its failure rolls back a created emulator like any other post-boot step.
+It is bounded by the provision's total deadline as well as its abort signal; a request without
+`androidAuto` never reaches it, so its abort handling is unchanged. Once the run starts, a failed
+provision stops the DHU this daemon spawned for that emulator before rollback (bounded; a run that
+outlives the deadline is stopped once it settles), and `killDevice` of that emulator does the same and
+forgets its host port redirect. Only DHUs in this daemon's session map are stopped. A stopped session
+is forgotten, so a later emulator that reuses the serial launches its own DHU; one whose stop fails
+stays tracked for the single-projection check but is never reused as `already-done`.
 The applier is a process-wide singleton: the provisioner it wraps is what tracks which DHU holds host
 port 5277, so two instances would each think the port was theirs.
 

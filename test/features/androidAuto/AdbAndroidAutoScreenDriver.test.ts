@@ -4,6 +4,7 @@ import {
   OVERFLOW_MENU_LABEL,
   parseScreenNodes,
 } from "../../../src/features/androidAuto/AdbAndroidAutoScreenDriver";
+import { uiautomatorDumpLock } from "../../../src/features/action/uiautomatorDumpLock";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { ExecResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -61,6 +62,22 @@ function setup(screens: string[]) {
 }
 
 describe("AdbAndroidAutoScreenDriver", () => {
+  test("every dump waits for the device's uiautomatorDumpLock", async () => {
+    const { driver, commands } = setup([screen(VERSION_ROW)]);
+    const release = await uiautomatorDumpLock("emulator-5554").acquire();
+    const read = driver.isTextVisible("Version");
+    try {
+      for (let tick = 0; tick < 5; tick++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      expect(commands().filter((command) => command.includes("uiautomator"))).toEqual([]);
+    } finally {
+      release();
+    }
+    expect(await read).toBe(true);
+    expect(commands().some((command) => command.includes("uiautomator dump"))).toBe(true);
+  });
+
   test("parses text, content-desc, switches and bounds from a uiautomator dump", async () => {
     const nodes = await parseScreenNodes(
       `UI hierchary dumped to: /dev/tty${screen(UNKNOWN_SOURCES_ON)}`,

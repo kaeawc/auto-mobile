@@ -98,6 +98,11 @@ type Probe = (signal?: AbortSignal) => Promise<boolean>;
  */
 export class AndroidAutoProjectionProvisioner {
   private readonly sessions = new Map<string, DesktopHeadUnitSession>();
+  /**
+   * Sessions whose stop failed. They stay tracked (the live DHU still holds host port 5277), but
+   * are never reused as `already-done`: the next provision of that serial retries their stop.
+   */
+  private readonly retired = new WeakSet<DesktopHeadUnitSession>();
   /** The device this provisioner redirected host port 5277 to, if any. */
   private redirectOwner: string | null = null;
   /** The provisioning run in progress; the host has one port 5277, so at most one runs. */
@@ -203,14 +208,47 @@ export class AndroidAutoProjectionProvisioner {
     deviceId: string,
     session: DesktopHeadUnitSession,
   ): Promise<void> {
+    await this.stopTrackedSession(deviceId, session, "failed provisioning");
+  }
+
+  /**
+   * Stops the DHU this provisioner spawned for `deviceId`, through the session's bounded
+   * SIGTERM-then-SIGKILL stop, and forgets it so a later emulator that reuses the serial starts
+   * its own. Does nothing when this provisioner never spawned one for `deviceId`. Never rejects:
+   * a DHU that will not exit stays tracked (it still holds host port 5277) but is never reused.
+   * `deviceStopped` also forgets the host port redirect, which ended with that emulator.
+   */
+  async stopDesktopHeadUnit(
+    deviceId: string,
+    { deviceStopped = false }: { deviceStopped?: boolean } = {},
+  ): Promise<void> {
+    if (deviceStopped && this.redirectOwner === deviceId) {
+      this.redirectOwner = null;
+    }
+    const session = this.sessions.get(deviceId);
+    if (session) {
+      await this.stopTrackedSession(
+        deviceId,
+        session,
+        deviceStopped ? "stopped device" : "failed provisioning",
+      );
+    }
+  }
+
+  private async stopTrackedSession(
+    deviceId: string,
+    session: DesktopHeadUnitSession,
+    context: string,
+  ): Promise<void> {
     try {
       await session.stop();
       if (this.sessions.get(deviceId) === session) {
         this.sessions.delete(deviceId);
       }
     } catch (stopError) {
+      this.retired.add(session);
       logger.warn(
-        `[AndroidAuto] failed provisioning of ${deviceId} could not stop its Desktop Head Unit; it stays tracked: ${errorMessage(stopError)}`,
+        `[AndroidAuto] ${context} ${deviceId} could not stop its Desktop Head Unit; it stays tracked: ${errorMessage(stopError)}`,
         stopError,
       );
     }
@@ -323,14 +361,21 @@ export class AndroidAutoProjectionProvisioner {
     );
   }
 
+  /** A tracked, healthy DHU whose stop never failed; a retired one is stopped, not reused. */
+  private reusableSession(deviceId: string): DesktopHeadUnitSession | undefined {
+    const existing = this.sessions.get(deviceId);
+    return existing?.isRunning() && !this.retired.has(existing) ? existing : undefined;
+  }
+
   private async ensureDesktopHeadUnit(
     device: AndroidAutoDeviceAdapters,
     request: AndroidAutoProjectionRequest,
   ): Promise<{ step: AndroidAutoProvisioningStep; session: DesktopHeadUnitSession }> {
-    const existing = this.sessions.get(request.deviceId);
-    if (existing?.isRunning()) {
-      return { step: { step: "desktop-head-unit", status: "already-done" }, session: existing };
+    const reusable = this.reusableSession(request.deviceId);
+    if (reusable) {
+      return { step: { step: "desktop-head-unit", status: "already-done" }, session: reusable };
     }
+    const existing = this.sessions.get(request.deviceId);
     // An unhealthy session can still own a live DHU; wait for it to exit (stop() rejects if it
     // never does) so a relaunch cannot compete with it for the head unit connection.
     await existing?.stop();

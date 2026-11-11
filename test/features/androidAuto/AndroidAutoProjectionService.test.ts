@@ -32,6 +32,7 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
           },
         };
       },
+      stopDesktopHeadUnit: async () => {},
     };
     const applier = new DefaultAndroidAutoProjectionApplier(environment, runner);
     const report = await applier.apply(device, { apkDirectory: "/apks" });
@@ -54,11 +55,27 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
         runs++;
         throw new Error("unreachable");
       },
+      stopDesktopHeadUnit: async () => {},
     };
     const applier = new DefaultAndroidAutoProjectionApplier(environment, runner);
     await expect(applier.apply(device, { apkDirectory: "/missing" })).rejects.toThrow(
       "does not exist",
     );
     expect(runs).toBe(0);
+  });
+
+  test("stopDesktopHeadUnit forwards the device and its stop reason to the provisioner", async () => {
+    const stops: Array<[string, unknown]> = [];
+    const runner: AndroidAutoProvisionRunner = {
+      provision: async () => {
+        throw new Error("unreachable");
+      },
+      stopDesktopHeadUnit: async (deviceId, options) => {
+        stops.push([deviceId, options]);
+      },
+    };
+    const applier = new DefaultAndroidAutoProjectionApplier(environment, runner);
+    await applier.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true });
+    expect(stops).toEqual([["emulator-5554", { deviceStopped: true }]]);
   });
 });

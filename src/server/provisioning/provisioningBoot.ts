@@ -422,8 +422,10 @@ export async function bootExactProvisionedDevice(
           boundSessionId: bound,
           signal: operationSignal,
         });
-        operationSignal.throwIfAborted();
-        androidAuto = await applyProvisionAndroidAuto(args, deps, boot!.device, operationSignal);
+        androidAuto = await applyProvisionAndroidAuto(args, deps, boot!.device, {
+          ...mappingOptions,
+          settlementState,
+        });
         return bound;
       },
     );

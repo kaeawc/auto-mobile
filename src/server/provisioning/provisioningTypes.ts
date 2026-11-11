@@ -97,6 +97,8 @@ export type ProvisionSettlementState = {
   unownedColdBootSettlement?: Promise<void>;
   bindingSettlements: Promise<unknown>[];
   readinessReservation?: DeviceReadinessReservation;
+  /** Set once an `androidAuto` run starts, so a failed provision stops the DHU it connected. */
+  androidAutoDevice?: BootedDevice;
 };
 
 export type ProvisionBootResult = {

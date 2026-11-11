@@ -46,7 +46,7 @@ function dhuBinaryName(platform: NodeJS.Platform): string {
  * daemon itself runs from the home directory.
  */
 function userPath(target: string, env: AndroidSdkEnvironment): string {
-  return path.resolve(resolvePathFromDaemonLaunchWorkingDirectory(target, env));
+  return resolvePathFromDaemonLaunchWorkingDirectory(target, env);
 }
 
 async function resolveApks(

@@ -527,4 +527,75 @@ describe("AndroidAutoProjectionProvisioner", () => {
     );
     await first;
   });
+
+  test("stopDesktopHeadUnit stops the spawned DHU, so a reused serial launches its own", async () => {
+    const first = new FakeSession();
+    let stops = 0;
+    const stop = first.stop.bind(first);
+    first.stop = async () => {
+      stops++;
+      await stop();
+    };
+    const { phone, launcher, provisioner } = setup([{ status: "connected", session: first }]);
+    await provisioner.provision(request());
+
+    await provisioner.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true });
+    expect(stops).toBe(1);
+    // The emulator and its redirect are gone; a new emulator takes the same serial.
+    phone.redirected = false;
+    const again = await provisioner.provision(request());
+    const status = (name: string) => again.steps.find((step) => step.step === name)?.status;
+    expect(status("desktop-head-unit")).toBe("applied");
+    expect(status("transport")).toBe("applied");
+    expect(launcher.launches).toBe(2);
+    expect(again.session).not.toBe(first);
+  });
+
+  test("stopDesktopHeadUnit after a failed provision frees the host for another device", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    phone.redirected = false;
+    const other = await provisioner.provision(request({ deviceId: "emulator-5556" }));
+    expect(other.session.isRunning()).toBe(true);
+  });
+
+  test("stopDesktopHeadUnit never touches a DHU it did not spawn for that device", async () => {
+    const first = new FakeSession();
+    let stops = 0;
+    first.stop = async () => {
+      stops++;
+    };
+    const { provisioner } = setup([{ status: "connected", session: first }]);
+    await provisioner.provision(request());
+    await provisioner.stopDesktopHeadUnit("emulator-5556", { deviceStopped: true });
+    expect(stops).toBe(0);
+    expect(first.isRunning()).toBe(true);
+  });
+
+  test("a DHU whose stop fails stays tracked but is never reused as already-done", async () => {
+    const stuck = new FakeSession();
+    let stops = 0;
+    stuck.stop = async () => {
+      stops++;
+      if (stops === 1) {
+        throw new ActionableError("The Desktop Head Unit did not exit");
+      }
+      stuck.running = false;
+      stuck.alive = false;
+    };
+    const { phone, launcher, provisioner } = setup([{ status: "connected", session: stuck }]);
+    await provisioner.provision(request());
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    // Still alive, so another device is refused...
+    phone.redirected = false;
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "is already projecting emulator-5554",
+    );
+    // ...and the same serial retries the stop and launches a fresh DHU instead of reusing it.
+    const again = await provisioner.provision(request());
+    expect(stops).toBe(2);
+    expect(again.session).not.toBe(stuck);
+    expect(launcher.launches).toBe(2);
+  });
 });

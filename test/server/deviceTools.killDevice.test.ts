@@ -932,6 +932,32 @@ describe("killDevice handler", () => {
     ).toBe(false);
   });
 
+  test("killDevice stops the Desktop Head Unit this daemon spawned for that emulator", async () => {
+    const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+    manager = new SuccessfulKillDeviceManager();
+    manager.setBootedDevices("android", [device]);
+    const stops: Array<{ deviceId: string; deviceStopped?: boolean }> = [];
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      timer: new FakeTimer(),
+      androidAutoProjection: {
+        resolveInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        stopDesktopHeadUnit: async (deviceId, options) => {
+          stops.push({ deviceId, ...options });
+        },
+      },
+    });
+
+    await ToolRegistry.getTool("killDevice")!.handler({ device });
+
+    expect(stops).toEqual([{ deviceId: "emulator-5554", deviceStopped: true }]);
+  });
+
   test("confirmed direct-mode kill keeps IME quarantine without a pool", async () => {
     const device: BootedDevice = {
       deviceId: "ime-direct-kill",

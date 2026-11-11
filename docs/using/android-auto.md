@@ -62,16 +62,17 @@ phone, or provision again with `acceptAndroidAutoTerms: true`.
 
 ### Errors
 
-| Error                                                                                                  | What to do                                                                                                                                                            |
-| ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unsupported`: Android Auto projection is missing the APK directory, `base.apk`, the DHU or the config | Nothing was created or booted. The message names every missing path. Install the DHU with `sdkmanager "extras;google;auto"`, or pass `dhuPath`.                       |
-| The phone still runs the Android Auto stub and the APK signer check fails                              | Supply the APKs of an official Android Auto release. Android rejects an update signed by a different key.                                                             |
-| A Desktop Head Unit is already projecting another emulator, or one is unhealthy but still running      | One emulator per host can project, because the DHU dials host port 5277. Stop that emulator's DHU, or provision that emulator again, which restarts an unhealthy DHU. |
-| The DHU did not exit after SIGTERM and SIGKILL                                                         | End the `desktop-head-unit` process yourself, then provision again. Until it exits, other emulators are refused.                                                      |
-| Host port 5277 is held by a redirect or process AutoMobile did not create                              | Remove it (`adb -s <serial> emu redir del tcp:5277`) or stop the process, then retry.                                                                                 |
-| The head unit server is not listening, or the DHU did not hold a connection                            | Check developer mode in Android Auto and start the head unit server from its overflow menu, then retry.                                                               |
+| Error                                                                                                  | What to do                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unsupported`: Android Auto projection is missing the APK directory, `base.apk`, the DHU or the config | Nothing was created or booted. The message names every missing path. Install the DHU with `sdkmanager "extras;google;auto"`, or pass `dhuPath`.                                                      |
+| The phone still runs the Android Auto stub and the APK signer check fails                              | Supply the APKs of an official Android Auto release. Android rejects an update signed by a different key.                                                                                            |
+| A Desktop Head Unit is already projecting another emulator, or one is unhealthy but still running      | One emulator per host can project, because the DHU dials host port 5277. Call `killDevice` on that emulator, which stops its DHU, or provision that emulator again, which restarts an unhealthy DHU. |
+| The DHU did not exit after SIGTERM and SIGKILL                                                         | End the `desktop-head-unit` process yourself, then provision again. Until it exits, other emulators are refused.                                                                                     |
+| Host port 5277 is held by a redirect or process AutoMobile did not create                              | Remove it (`adb -s <serial> emu redir del tcp:5277`) or stop the process, then retry.                                                                                                                |
+| The head unit server is not listening, or the DHU did not hold a connection                            | Check developer mode in Android Auto and start the head unit server from its overflow menu, then retry.                                                                                              |
 
-A failure after boot fails the whole request: an emulator the request created is rolled back.
+A failure after boot fails the whole request: an emulator the request created is rolled back, and a DHU
+AutoMobile started for that emulator is stopped. `killDevice` on an emulator also stops its DHU.
 
 ## Setting up projection by hand
 

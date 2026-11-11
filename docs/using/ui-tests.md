@@ -4,8 +4,9 @@ AutoMobile UI tests keep the test assertion in Kotlin or Swift and the device
 steps in a YAML plan. The same plan can be reviewed, reused, and run locally or
 in CI.
 
-`executePlan` accepts Android, iOS, tvOS, and visionOS sessions. Each step must
-use a tool supported on the target platform. visionOS plans do not record video.
+`executePlan` accepts Android, iOS, tvOS, visionOS, and watchOS sessions. Each step
+must use a tool supported on the target platform. visionOS and watchOS plans do
+not record video.
 
 ## 1. Install a test runner
 

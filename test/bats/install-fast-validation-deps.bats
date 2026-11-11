@@ -74,6 +74,8 @@ STUB
   export FAST_VALIDATION_DEPS_RETRY_BASE_DELAY_SECONDS=1
   # Hosts may have a real xmlstarlet; probe a name that cannot exist instead.
   export FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND=xmlstarlet-not-installed-stub
+  # python3 would skip the apt install too (#17930); exercise the apt path.
+  export FAST_VALIDATION_DEPS_PYTHON_COMMAND=python3-not-installed-stub
   export FAST_VALIDATION_DEPS_UBUNTU_CODENAME=noble
   export FAST_VALIDATION_DEPS_FALLBACK_MIRROR=http://fallback.example.test/ubuntu
 }
@@ -315,6 +317,16 @@ STUB
   run env FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND=xmlstarlet bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"xmlstarlet already on PATH"* ]]
+  [ ! -f "$STATE_FILE" ]
+}
+
+@test "skips apt-get when python3 can validate the XML instead (#17930)" {
+  make_apt_get 99
+  printf '#!/usr/bin/env bash\nexit 0\n' > "${MOCK_BIN}/python3"
+  chmod +x "${MOCK_BIN}/python3"
+  run env FAST_VALIDATION_DEPS_PYTHON_COMMAND=python3 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"python3 on PATH validates XML; skipping the xmlstarlet apt install"* ]]
   [ ! -f "$STATE_FILE" ]
 }
 

@@ -108,3 +108,18 @@ teardown() {
   grep -Fq 'scripts/ci/install-apt-packages.sh xmlstarlet' "$repo_root/.github/workflows/merge.yml"
   grep -Fq 'install-apt-packages.sh' "$repo_root/scripts/ci/install-fast-validation-deps.sh"
 }
+
+@test "timeout runs under sudo so it can kill a stalled root apt-get (#17930)" {
+  # A timeout outside sudo could not signal the root apt-get, which kept the
+  # apt lists lock and failed the retry with "Could not get lock".
+  cat > "${MOCK_BIN}/sudo" <<'STUB'
+#!/usr/bin/env bash
+echo "sudo $1" >> "$CALLS"
+exec env -u APT_INSTALL_FALLBACK_MIRROR -u APT_INSTALL_UBUNTU_CODENAME "$@"
+STUB
+  chmod +x "${MOCK_BIN}/sudo"
+  APT_FAIL_DEFAULT=1 run bash "$SCRIPT" xmlstarlet
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^sudo ' "$CALLS")" -eq "$(grep -c '^timeout ' "$CALLS")" ]
+  ! grep -qv '^sudo timeout$' <(grep '^sudo ' "$CALLS")
+}

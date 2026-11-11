@@ -216,6 +216,25 @@ JSON
   [[ "$output" == *"RERUN-DONT-FIX — pre-#17930 install-fast-validation-deps.sh"* ]]
 }
 
+@test "a recovered GNU parallel install failure does not mask a real BATS failure (#17930)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17930-bats-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"BATS Shell Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run BATS Unit Tests","conclusion":"failure"}]}]}
+JSON
+  # run-bats.sh falls back to a serial run when parallel cannot be installed, so
+  # the helper's annotation sits next to a genuine test failure.
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='could not install parallel: the default mirror and http://archive.ubuntu.com/ubuntu both failed or stalled (see the timed attempts above); rerun the job' FAKE_NO_TIMESTAMP_LOG='not ok 3 a real regression' bash "$SCRIPT" 610
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Install fast validation dependencies","conclusion":"failure"}]}]}
+JSON
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='could not install xmlstarlet: the default mirror and http://archive.ubuntu.com/ubuntu both failed or stalled (see the timed attempts above); rerun the job' FAKE_NO_TIMESTAMP_LOG='' bash "$SCRIPT" 610
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — Ubuntu apt mirror outage"* ]]
+}
+
 @test "an exit-100 failure without an apt mirror fetch error stays unclassified (#17930)" {
   fixture="$BATS_TEST_TMPDIR/issue-17930-negative-run.json"
   cat > "$fixture" <<'JSON'

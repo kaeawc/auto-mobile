@@ -15,14 +15,14 @@
 # and ultimately loud failure. The workflow step also carries `timeout-minutes`
 # as a hard backstop.
 #
-# xmlstarlet comes from apt through scripts/ci/install-apt-packages.sh, the
-# shared bounded installer: a failed or stalled `apt-get update` or install on
-# the default Azure Ubuntu mirror falls back to an alternate mirror
-# (FAST_VALIDATION_DEPS_FALLBACK_MIRROR) through a throwaway sources list,
-# leaving the system sources untouched (#17131, #17930). Before #17930 a failed
-# `apt-get update` here was fatal, so a mirror outage that broke the index
-# fetch never reached the fallback. When xmlstarlet is already on PATH, apt is
-# skipped entirely.
+# The XML check (scripts/xml/validate_xml.sh) is well-formedness only and runs
+# on python3's bundled parser when xmlstarlet is absent, so apt is skipped
+# whenever xmlstarlet or python3 is on PATH, as python3 always is on
+# ubuntu-latest. An Ubuntu apt mirror outage, in which the default and
+# archive.ubuntu.com mirrors both stalled, then cannot fail this step (#17930).
+# Only a host with neither installs xmlstarlet, through
+# scripts/ci/install-apt-packages.sh, the shared bounded installer with its
+# alternate-mirror fallback (FAST_VALIDATION_DEPS_FALLBACK_MIRROR; #17131).
 set -euo pipefail
 
 # Tunables (overridable for tuning and for the BATS tests).
@@ -54,6 +54,7 @@ BATS_INSTALL_PREFIX="${FAST_VALIDATION_DEPS_BATS_INSTALL_PREFIX:-/usr/local}"
 BATS_CORE_TAG="v1.14.0"
 BATS_CORE_COMMIT="eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
 XMLSTARLET_COMMAND="${FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND:-xmlstarlet}"
+PYTHON_COMMAND="${FAST_VALIDATION_DEPS_PYTHON_COMMAND:-python3}"
 FALLBACK_MIRROR="${FAST_VALIDATION_DEPS_FALLBACK_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 APT_INSTALLER="$(dirname "${BASH_SOURCE[0]}")/install-apt-packages.sh"
 
@@ -143,6 +144,8 @@ main() {
 
   if command -v "$XMLSTARLET_COMMAND" > /dev/null 2>&1; then
     log "xmlstarlet already on PATH; skipping apt-get"
+  elif command -v "$PYTHON_COMMAND" > /dev/null 2>&1; then
+    log "python3 on PATH validates XML; skipping the xmlstarlet apt install"
   else
     # The helper owns its retries and mirror fallback; hand it this script's
     # tunables so the step budget above covers its three bounded operations.

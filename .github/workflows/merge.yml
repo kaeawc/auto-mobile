@@ -152,13 +152,14 @@ jobs:
         with:
           lfs: false
 
-      # xmlstarlet is not preinstalled on ubuntu-latest. A plain apt-get here
-      # failed with exit 100 during a mirror outage (#17930); the helper bounds
-      # each apt call and falls back to archive.ubuntu.com (#17131).
+      # The well-formedness check runs on python3, which ubuntu-latest ships,
+      # so no apt install is needed: a plain apt-get here failed with exit 100
+      # during a mirror outage (#17930). The bounded helper (#17131) is only a
+      # fallback for an image without python3.
       - name: "Run XMLStarlet"
         shell: "bash"
         run: |
-          if ! command -v xmlstarlet > /dev/null 2>&1; then
+          if ! command -v xmlstarlet > /dev/null 2>&1 && ! command -v python3 > /dev/null 2>&1; then
             scripts/ci/install-apt-packages.sh xmlstarlet
           fi
           scripts/xml/validate_xml.sh

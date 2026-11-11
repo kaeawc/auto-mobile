@@ -1,3 +1,4 @@
+import { TvosRunnerError } from "../../src/features/tvos/TvosRunnerError";
 import type { TvosRunnerClient, TvosCommand } from "../../src/features/tvos/TvosRunnerClient";
 import { isTvosHierarchy, type TvosHierarchy } from "../../src/features/tvos/TvosHierarchy";
 import capture from "../fixtures/tvos-xcuitest/tvos-runner-hierarchy-focus-b01.json";
@@ -16,7 +17,7 @@ export class FakeTvosRunnerClient implements TvosRunnerClient {
     this.tree = tree;
   }
   isUsable(): boolean {
-    return !this.closed && !this.failure;
+    return !this.closed && (!this.failure || this.failure instanceof TvosRunnerError);
   }
   async request(
     command: TvosCommand,

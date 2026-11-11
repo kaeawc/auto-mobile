@@ -1,3 +1,7 @@
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { requireTvosRunner } from "../../../src/features/tvos/TvosRunnerRecovery";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { afterEach, expect, test } from "bun:test";
 import { TvosRunnerLifecycle } from "../../../src/features/tvos/TvosRunnerLifecycle";
 import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
@@ -56,7 +60,9 @@ function fixture() {
   const artifacts = {
     resolve: async () => "/products/AutoMobileTVTest_appletvsimulator.xctestrun",
   };
+  const timer = new FakeTimer();
   const owner = new TvosRunnerLifecycle({
+    timer,
     launcher,
     artifacts,
     ports: {
@@ -72,7 +78,7 @@ function fixture() {
   owners.push(owner);
   const sessions = new FakeSessions();
   const request = { deviceId: "owned-tvos", ownerSession: "tvos-session", sessions };
-  return { owner, launcher, client, artifacts, allocated, released, sessions, request };
+  return { owner, launcher, client, artifacts, allocated, released, sessions, request, timer };
 }
 
 test("owns one launch and port per tvos and reuses a registered runner", async () => {
@@ -253,4 +259,136 @@ test("failure cleanup from an old launch cannot stop a replacement runner", asyn
   first.stop?.();
   expect(f.launcher.stops).toBe(1);
   expect(tvosRunners.get("owned-tvos")).toBeDefined();
+});
+
+// Recovery keeps the lifecycle owner while replacing the unusable transport.
+test("concurrent require calls restart once, proceed, and preserve the previous owner", async () => {
+  const f = fixture();
+  await f.owner.ensure(f.request);
+  f.client.close();
+  const replacement = new FakeTvosRunnerClient();
+  const launcher = new FakeTvosRunnerLauncher(replacement);
+  const gate = Promise.withResolvers<void>();
+  f.launcher.launch = async (options) => {
+    await gate.promise;
+    return launcher.launch(options);
+  };
+  const first = requireTvosRunner("owned-tvos", undefined, f.owner);
+  const second = requireTvosRunner("owned-tvos", undefined, f.owner);
+  gate.resolve();
+  const clients = await Promise.all([first, second]);
+  expect(clients).toEqual([replacement, replacement]);
+  expect(launcher.launches).toHaveLength(1);
+  await clients[0]!.request({ type: "request_press_button", action: "select" });
+  expect(replacement.commands).toHaveLength(1);
+  f.owner.stopSession("other-session");
+  expect(replacement.closed).toBe(false);
+  f.sessions.releases[0]!("tvos-session");
+  expect(replacement.closed).toBe(true);
+});
+
+test("restart failure is actionable and names startDevice", async () => {
+  const f = fixture();
+  await f.owner.ensure(f.request);
+  f.client.close();
+  f.artifacts.resolve = async () => {
+    throw new Error("missing tvOS artifacts");
+  };
+  const error = await requireTvosRunner("owned-tvos", undefined, f.owner).catch(
+    (error: unknown) => error,
+  );
+  expect(error).toBeInstanceOf(ActionableError);
+  expect(String(error)).toContain("startDevice");
+  expect(String(error)).toContain("missing tvOS artifacts");
+});
+
+test("an unowned disconnected runner cannot be restarted by require", async () => {
+  const f = fixture();
+  f.client.close();
+  const unregister = tvosRunners.register("owned-tvos", f.client);
+  try {
+    await expect(requireTvosRunner("owned-tvos", undefined, f.owner)).rejects.toThrow(
+      "startDevice",
+    );
+    expect(f.launcher.launches).toHaveLength(0);
+    expect(tvosRunners.get("owned-tvos")).toBe(f.client);
+  } finally {
+    unregister();
+  }
+});
+
+test.each(["timeout", "abort", "release", "unbind"])(
+  "%s bounds recovery and retires a late startup handle",
+  async (mode) => {
+    const f = fixture();
+    await f.owner.ensure(f.request);
+    f.client.close();
+    const gate = Promise.withResolvers<{ stop(): void }>();
+    let launchSignal: AbortSignal | undefined;
+    let lateStops = 0;
+    f.launcher.launch = async (options) => {
+      launchSignal = options.signal;
+      return gate.promise;
+    };
+    const controller = new AbortController();
+    const pending = requireTvosRunner("owned-tvos", controller.signal, f.owner).catch(
+      (error: unknown) => error,
+    );
+    await drainMicrotasks(20);
+    expect(launchSignal).toBeDefined();
+    if (mode === "timeout") {
+      f.timer.advanceTime(65_000);
+    } else if (mode === "abort") {
+      controller.abort();
+    } else if (mode === "release") {
+      f.sessions.releases[0]!("tvos-session");
+    } else {
+      f.sessions.unbindings[0]!("tvos-session", "owned-tvos");
+    }
+    const error = await pending;
+    if (mode === "abort") {
+      expect(error).toBe(controller.signal.reason);
+    } else {
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(String(error)).toContain("startDevice");
+    }
+    expect(launchSignal?.aborted).toBe(true);
+    expect(tvosRunners.get("owned-tvos")).toBeUndefined();
+    gate.resolve({
+      stop: () => {
+        lateStops++;
+      },
+    });
+    await drainMicrotasks(20);
+    expect(lateStops).toBe(1);
+    expect(f.released).toEqual(["owned-tvos", "owned-tvos"]);
+    expect(f.timer.getPendingTimeoutCount()).toBe(0);
+  },
+);
+
+test("one aborted recovery waiter does not cancel another", async () => {
+  const f = fixture();
+  await f.owner.ensure(f.request);
+  f.client.close();
+  const replacement = new FakeTvosRunnerClient();
+  const launcher = new FakeTvosRunnerLauncher(replacement);
+  const gate = Promise.withResolvers<void>();
+  let launchSignal: AbortSignal | undefined;
+  f.launcher.launch = async (options) => {
+    launchSignal = options.signal;
+    await gate.promise;
+    return launcher.launch(options);
+  };
+  const controller = new AbortController();
+  const first = requireTvosRunner("owned-tvos", controller.signal, f.owner).catch(
+    (error: unknown) => error,
+  );
+  const second = requireTvosRunner("owned-tvos", undefined, f.owner);
+  await drainMicrotasks(20);
+  controller.abort();
+  expect(await first).toBe(controller.signal.reason);
+  expect(launchSignal?.aborted).toBe(false);
+  gate.resolve();
+  expect(await second).toBe(replacement);
+  expect(launcher.launches).toHaveLength(1);
 });

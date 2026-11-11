@@ -10,6 +10,9 @@ import { TvosRunnerReleaseProvider } from "./TvosRunnerReleaseProvider";
 import { TvosRunnerArtifacts } from "./TvosRunnerArtifacts";
 import { XcodebuildTvosRunnerLauncher, type TvosRunnerLauncher } from "./TvosRunnerLauncher";
 import { tvosRunners } from "./TvosRunnerRegistry";
+import { SingleFlight } from "../../utils/cache/SingleFlight";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
 type TvosRunnerSessions = Pick<
   SessionManager,
@@ -26,11 +29,13 @@ interface OwnedRunner {
 export class TvosRunnerLifecycle {
   private readonly runners = new Map<string, OwnedRunner>();
   private readonly observedSessions = new WeakSet<TvosRunnerSessions>();
+  private readonly restarts = new SingleFlight<string, { runnerUnavailable?: string }>();
   constructor(
     private readonly dependencies: {
       artifacts: Pick<TvosRunnerArtifacts, "resolve">;
       launcher: TvosRunnerLauncher;
       ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
+      timer?: Timer;
     },
   ) {}
 
@@ -51,6 +56,65 @@ export class TvosRunnerLifecycle {
     sessions?: TvosRunnerSessions;
     signal?: AbortSignal;
   }): Promise<{ runnerUnavailable?: string; stop?: () => void }> {
+    return this.startOwned(request);
+  }
+
+  /** One replacement per device; cancellation belongs to all waiters and the previous session. */
+  async restartOwned(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<{ runnerUnavailable?: string }> {
+    return this.restarts.run(
+      deviceId,
+      async (flightSignal) => {
+        if (tvosRunners.get(deviceId)?.isUsable()) {
+          return {};
+        }
+        const previous = this.runners.get(deviceId);
+        if (!previous) {
+          return { runnerUnavailable: "the runner is not owned by this lifecycle" };
+        }
+        const controller = new AbortController();
+        try {
+          const startup = this.startOwned(
+            {
+              deviceId,
+              signal: combineAbortSignals(flightSignal, controller.signal),
+            },
+            previous.ownerSession,
+          );
+          return await raceWithDeadline(startup, {
+            timer: this.dependencies.timer ?? defaultTimer,
+            timeoutMs: 65_000,
+            signal: combineAbortSignals(
+              flightSignal,
+              this.runners.get(deviceId)?.controller.signal,
+            ),
+            label: "tvOS runner recovery",
+            onTimeout: () => controller.abort(),
+          });
+        } catch (error) {
+          throw new ActionableError(
+            `tvOS runner recovery failed: ${errorMessage(error)}. Call startDevice to restart the runner.`,
+            { cause: error },
+          );
+        } finally {
+          controller.abort();
+        }
+      },
+      signal,
+      { cancelWhenAllWaitersAbort: true },
+    );
+  }
+
+  private async startOwned(
+    request: {
+      deviceId: string;
+      sessions?: TvosRunnerSessions;
+      signal?: AbortSignal;
+    },
+    ownerSession?: string,
+  ): Promise<{ runnerUnavailable?: string; stop?: () => void }> {
     const { deviceId, sessions } = request;
     if (sessions) {
       this.observeSessions(sessions);
@@ -59,10 +123,17 @@ export class TvosRunnerLifecycle {
       return {};
     }
     this.stop(deviceId);
-    const entry: OwnedRunner = { controller: new AbortController() };
+    const entry: OwnedRunner = { controller: new AbortController(), ownerSession };
     const signal = combineAbortSignals(request.signal, entry.controller.signal)!;
     this.runners.set(deviceId, entry);
+    const onAbort = () => {
+      if (this.runners.get(deviceId) === entry) {
+        this.stop(deviceId);
+      }
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
     try {
+      signal.throwIfAborted();
       const xctestrun = await this.dependencies.artifacts.resolve(signal);
       signal.throwIfAborted();
       entry.port = this.dependencies.ports.allocate(deviceId);
@@ -88,11 +159,13 @@ export class TvosRunnerLifecycle {
       };
     } catch (error) {
       if (this.runners.get(deviceId) === entry) {
-        this.stop(deviceId);
+        this.stop(deviceId, error);
       }
       const reason = errorMessage(error);
       logger.warn(`[TvosRunner] Runner unavailable for ${deviceId}: ${reason}`, error);
       return { runnerUnavailable: reason };
+    } finally {
+      signal.removeEventListener("abort", onAbort);
     }
   }
 
@@ -118,13 +191,16 @@ export class TvosRunnerLifecycle {
     return undefined;
   }
 
-  stop(deviceId: string): void {
+  stop(
+    deviceId: string,
+    reason: unknown = new ActionableError("Tvos runner lifecycle ended"),
+  ): void {
     const entry = this.runners.get(deviceId);
     if (!entry) {
       return;
     }
     this.runners.delete(deviceId);
-    entry.controller.abort(new ActionableError("Tvos runner lifecycle ended"));
+    entry.controller.abort(reason);
     try {
       entry.stop?.();
     } catch (error) {

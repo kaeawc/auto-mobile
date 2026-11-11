@@ -286,6 +286,16 @@ restores light appearance on exit. Optional `--viewer`, `--out` and golden names
   clock and the signal/battery glyph rects, which the simulator draws over the content. The emitter
   `scripts/prototype/ios-golden-specs.ts` writes content-only specs and `cases.json` with the
   shared pixel geometry and case modes. The recorder checks the screenshot size.
+- **Stable capture.** Two identical frames prove the screen is static, not that the viewer has
+  rendered, so the recorder waits a settle floor (`PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS`, default
+  1.5 s) after launch before its first screenshot. It then captures every 0.5 s until two
+  consecutive full screenshots are byte-identical (`capture=stable`), for at most
+  `PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES` (8) captures within `PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS`
+  (15 s, counted from launch). Each screenshot is bounded by the remaining budget, capped at
+  `PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS` (10 s), with a watchdog that needs no GNU `timeout`. A
+  screenshot that fails, times out or writes an empty file is discarded and never compared, so
+  stability needs two good frames in a row. When polling ends unstable, the recorder settles 2 s
+  and records one more bounded screenshot (`capture=fallback`); if that one is bad, it fails.
 - **Rendering.** Chromium draws the `iphone-16` still with its iOS skin and safe-area environment
   in a bare document. CSS removes the frame padding, background and corner radii; the whole
   screen is clipped at 3×. Only the screen default font is pinned to DejaVu Sans.

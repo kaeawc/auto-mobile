@@ -9,6 +9,9 @@ setup() {
   export HOST_OS=Darwin DEVICE_STATE=Booted DEVICE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPhone-16
   export RAW_WIDTH=1179 STABLE_AT=1 CLOCK_STEP=0
   unset PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS
+  unset PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS
+  unset CAPTURE_FAIL_AT CAPTURE_EMPTY_AT CAPTURE_HANG_AT CAPTURE_BLOCK_AT REAL_SLEEP CLOCK_PER_CALL
+  unset AUTOMOBILE_FORCE_PORTABLE_TIMEOUT AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS
   mkdir -p "${STUB_ROOT}/bin" "${STUB_ROOT}/Viewer.app" "${STUB_ROOT}/container"
   cat > "${STUB_ROOT}/bin/uname" <<'STUB'
 #!/usr/bin/env bash
@@ -31,6 +34,11 @@ case "$2" in
     if [[ -f "${STUB_ROOT}/capture-count" ]]; then read -r count < "${STUB_ROOT}/capture-count"; fi
     count=$((count + 1))
     printf '%s\n' "${count}" > "${STUB_ROOT}/capture-count"
+    # Comma lists of capture numbers that fail, write nothing, or hang (the timeout's 124).
+    case ",${CAPTURE_FAIL_AT:-}," in *",${count},"*) exit 1 ;; esac
+    case ",${CAPTURE_HANG_AT:-}," in *",${count},"*) exit 124 ;; esac
+    case ",${CAPTURE_BLOCK_AT:-}," in *",${count},"*) exec /bin/sleep 30 ;; esac
+    case ",${CAPTURE_EMPTY_AT:-}," in *",${count},"*) : > "${@: -1}"; exit 0 ;; esac
     frame="${count}"
     if (( STABLE_AT > 0 && count >= STABLE_AT )); then frame="${STABLE_AT}"; fi
     printf 'frame %s\n' "${frame}" > "${@: -1}"
@@ -53,10 +61,27 @@ STUB
   cat > "${STUB_ROOT}/bin/sleep" <<'STUB'
 #!/usr/bin/env bash
 printf 'sleep %s\n' "$*" >> "${CALLS}"
+# Only the watchdog deadline under test really waits; every recorder sleep is instant.
+if [[ -n "${REAL_SLEEP:-}" && "$*" == "${REAL_SLEEP}" ]]; then exec /bin/sleep "$@"; fi
+STUB
+  # Shadow GNU timeout so every host takes the same deterministic path; the hang is the stub's 124.
+  cat > "${STUB_ROOT}/bin/timeout" <<'STUB'
+#!/usr/bin/env bash
+printf 'timeout %s\n' "$*" >> "${CALLS}"
+shift 3
+exec "$@"
 STUB
   cat > "${STUB_ROOT}/bin/date" <<'STUB'
 #!/usr/bin/env bash
 [[ "$*" == +%s ]] || exit 1
+# CLOCK_PER_CALL advances the clock on every read, so a second read in one iteration sees a later time.
+if [[ -n "${CLOCK_PER_CALL:-}" ]]; then
+  reads=0
+  if [[ -f "${STUB_ROOT}/date-reads" ]]; then read -r reads < "${STUB_ROOT}/date-reads"; fi
+  printf '%s\n' "$((reads + 1))" > "${STUB_ROOT}/date-reads"
+  printf '%s\n' "$((reads * CLOCK_PER_CALL))"
+  exit 0
+fi
 count=0
 if [[ -f "${STUB_ROOT}/capture-count" ]]; then read -r count < "${STUB_ROOT}/capture-count"; fi
 printf '%s\n' "$((count * CLOCK_STEP))"
@@ -152,8 +177,93 @@ record() {
   [[ "${output}" == *"prototype-record-goldens: sample: capture=stable (2 captures)"* ]]
   run grep -qx 'sleep 2' "${CALLS}"
   [ "${status}" -eq 1 ]
-  [ "$(grep -c '^sleep 0.5$' "${CALLS}")" -eq 2 ]
+  [ "$(grep -c '^sleep 0.5$' "${CALLS}")" -eq 1 ]
   grep -qx 'frame 1' "${STUB_ROOT}/out/sample.png"
+}
+
+@test "recorder waits the settle floor before the first capture" {
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(grep -m1 -E '^sleep |^xcrun simctl io ' "${CALLS}")" = 'sleep 1.5' ]
+  rm -f "${CALLS}" "${STUB_ROOT}/capture-count"
+  export PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS=3
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(grep -m1 -E '^sleep |^xcrun simctl io ' "${CALLS}")" = 'sleep 3' ]
+}
+
+@test "recorder bounds each capture by the remaining budget" {
+  export STABLE_AT=3 CLOCK_STEP=3 PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS=20
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(grep '^timeout ' "${CALLS}" | awk '{print $4}' | tr '\n' ' ')" = '15 12 9 6 ' ]
+  [[ "${output}" == *"capture=stable (4 captures)"* ]]
+}
+
+@test "recorder never starts a capture with a zero timeout at the budget edge" {
+  # Reads: start 0, then 1 (1 s left) and 2 (budget spent). A second read per iteration would give 0.
+  export STABLE_AT=0 CLOCK_PER_CALL=1 PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS=2
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(grep '^timeout ' "${CALLS}" | awk '{print $4}' | tr '\n' ' ')" = '1 10 ' ]
+  [[ "${output}" == *"capture=fallback (not stable after 1 captures)"* ]]
+}
+
+@test "recorder discards failed captures and needs two good frames after them" {
+  export CAPTURE_FAIL_AT=1
+  record sample
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"sample: capture 1 failed with status 1; discarding it"* ]]
+  [[ "${output}" == *"capture=stable (3 captures)"* ]]
+  grep -qx 'frame 1' "${STUB_ROOT}/out/sample.png"
+}
+
+@test "recorder never treats two empty captures as stable" {
+  export CAPTURE_EMPTY_AT=1,2
+  record sample
+  [ "${status}" -eq 0 ]
+  [ "$(grep -c 'wrote an empty file; discarding it' <<< "${output}")" -eq 2 ]
+  [[ "${output}" == *"capture=stable (4 captures)"* ]]
+  grep -qx 'frame 1' "${STUB_ROOT}/out/sample.png"
+}
+
+@test "recorder discards a timed-out capture" {
+  export CAPTURE_HANG_AT=1
+  record sample
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"sample: capture 1 timed out after 10s; discarding it"* ]]
+  [[ "${output}" == *"capture=stable (3 captures)"* ]]
+}
+
+@test "recorder kills a capture that really hangs on the portable watchdog path" {
+  # A real 2 s watchdog deadline (normal stub captures finish far sooner); the kill grace is instant.
+  export CAPTURE_BLOCK_AT=1 AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS=2.0 REAL_SLEEP=2.0
+  export AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="${STUB_ROOT}/watchdog-snapshot.txt"
+  started="${SECONDS}"
+  record sample
+  [ "${status}" -eq 0 ]
+  (( SECONDS - started < 10 ))
+  [[ "${output}" == *"sample: capture 1 timed out after 10s; discarding it"* ]]
+  [[ "${output}" == *"capture=stable (3 captures)"* ]]
+  run ! grep -q '^timeout -k ' "${CALLS}"
+}
+
+@test "recorder fails and cleans up when the fallback capture is empty or fails" {
+  export STABLE_AT=0 PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES=2 CAPTURE_EMPTY_AT=3
+  record sample
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"sample: fallback screenshot wrote an empty file"* ]]
+  [ ! -e "${STUB_ROOT}/out/sample.png" ]
+  grep -q 'simctl terminate test-udid' "${CALLS}"
+  grep -q 'simctl status_bar test-udid clear' "${CALLS}"
+  rm -f "${CALLS}" "${STUB_ROOT}/capture-count"
+  unset CAPTURE_EMPTY_AT
+  export CAPTURE_FAIL_AT=3
+  record sample
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"sample: fallback screenshot failed with status 1"* ]]
+  [ ! -e "${STUB_ROOT}/out/sample.png" ]
+  grep -q 'simctl ui test-udid appearance light' "${CALLS}"
 }
 
 @test "recorder captures stable after four screenshots at the count bound" {
@@ -197,5 +307,15 @@ record() {
   record sample
   [ "${status}" -eq 2 ]
   [[ "${output}" == *"PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS must be a nonnegative integer"* ]]
+  unset PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS
+  export PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS=1.
+  record sample
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS must be a nonnegative number of seconds"* ]]
+  unset PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS
+  export PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS=0
+  record sample
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS must be a positive integer"* ]]
   [ ! -e "${CALLS}" ]
 }

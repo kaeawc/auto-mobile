@@ -7,29 +7,23 @@ class PerformanceAuditResultsUriTest {
 
   @Test
   fun `omits absent parameters`() {
-    assertEquals(
-      "automobile:performance-results",
-      buildPerformanceResultsUri(
-        startTime = null,
-        endTime = null,
-        limit = null,
-        offset = null,
-        deviceId = null,
-      ),
-    )
+    assertEquals("automobile:performance-results", PerformanceAuditQuery().toResourceUri())
   }
 
   @Test
   fun `scopes audit-history read to a device`() {
     assertEquals(
       "automobile:performance-results?limit=50&deviceId=emulator-5554",
-      buildPerformanceResultsUri(
-        startTime = null,
-        endTime = null,
-        limit = 50,
-        offset = null,
-        deviceId = "emulator-5554",
-      ),
+      PerformanceAuditQuery(limit = 50, deviceId = "emulator-5554").toResourceUri(),
+    )
+  }
+
+  @Test
+  fun `scopes audit-history read to a device epoch`() {
+    assertEquals(
+      "automobile:performance-results?deviceId=emulator-5554&deviceSessionUuid=epoch-1",
+      PerformanceAuditQuery(deviceId = "emulator-5554", deviceSessionUuid = "epoch-1")
+        .toResourceUri(),
     )
   }
 }

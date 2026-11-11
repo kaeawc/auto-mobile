@@ -40,6 +40,8 @@ export interface SwipeOnOptions {
     text?: string;
     container?: ElementContainerSelector;
     selectionStrategy?: ElementSelectionStrategy;
+    /** Consecutive unchanged search swipes before reporting reachedEnd (default: 2). */
+    maxUnchangedSwipes?: number;
     maxTime?: number; // Max time to search (default 15000ms) - internal only
     maxSwipes?: number; // Max search swipes before giving up (default: unbounded) - internal only
   };

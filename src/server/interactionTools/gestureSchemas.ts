@@ -74,6 +74,14 @@ const swipeOnLookForSelector = createElementIdTextSelectorSchema({
 });
 
 const swipeOnLookForScope = {
+  maxUnchangedSwipes: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Stop after this many consecutive unchanged swipes (default: 2); increase for slow content",
+    ),
   container: nestedElementContainerSchema
     .optional()
     .describe(

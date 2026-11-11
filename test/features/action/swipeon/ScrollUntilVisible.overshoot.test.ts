@@ -148,7 +148,7 @@ const BASE_OPTIONS: SwipeOnResolvedOptions = {
   lookFor: { text: "Skills" },
 };
 
-describe("ScrollUntilVisible overshoot recovery", () => {
+describe("ScrollUntilVisible search progress", () => {
   let detector: FakeAccessibilityDetector;
   let lookup: ScriptedElementLookup;
   let scrollResolver: FakeScrollElementResolver;
@@ -381,15 +381,14 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     );
   });
 
-  test("element found in reverse after forward end-of-list", async () => {
+  test("target found after one unchanged swipe stays in the requested direction", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
-    // Forward phase: obs[1] same as obs[0] → 1 unchanged scroll → switch to reverseMode
-    // Reverse phase: obs[2] is different fingerprint → element found
+    // One unchanged swipe is tolerated before a changed page reveals the target.
     let findCount = 0;
     lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
-      // found on the 3rd call (initial check + 1 forward miss + found after reverse)
+      // found on the 3rd call (initial check + 1 forward miss + found after another swipe)
       return findCount >= 3 ? TARGET_ELEMENT : null;
     };
 
@@ -399,7 +398,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       scrollResolver,
       timer,
       accessibilityService,
-      // [0]=initial, [1]=same fingerprint (forward end), [2]=different (reverse finds element)
+      // [0]=initial, [1]=same fingerprint, [2]=different (target appears)
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
       talkBackExecutor,
     });
@@ -411,11 +410,11 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(result.scrollIterations).toBeGreaterThan(0);
   });
 
-  test("throws when both forward and reverse directions exhaust without finding element", async () => {
+  test("reports reachedEnd when consecutive unchanged swipes exhaust the requested direction", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     lookup.nextElementByText = null; // never found
 
-    // All observations identical — both forward and reverse end-of-list trigger
+    // All observations identical — two unchanged swipes establish end-of-list.
     const sameObs = makeObserveResult(99);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
@@ -426,7 +425,12 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       talkBackExecutor,
     });
 
-    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(/Scroll reached end of container/);
+    expect(await suv.execute(BASE_OPTIONS)).toMatchObject({
+      success: false,
+      reachedEnd: true,
+      movedSwipes: 0,
+      scrollIterations: 2,
+    });
   });
 
   test("element found in forward direction without entering reverse mode", async () => {
@@ -495,10 +499,10 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect<unknown>(terminalEvidence).toEqual([result.observation]);
   });
 
-  test("switches to opposite direction after forward end-of-list", async () => {
+  test("continues in the requested direction after a single unchanged swipe", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
-    // Forward phase triggers end-of-list (1 same), then reverse finds element
+    // One unchanged swipe is followed by a changed page containing the target.
     let findCount = 0;
     lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
@@ -519,15 +523,10 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     const allDirections = talkBackExecutor.getDirections();
 
-    // Forward swipes should be "up", reverse swipe should be "down"
-    expect(allDirections).toContain("up");
-    expect(allDirections).toContain("down");
-
-    // The last call should be the reversed direction
-    expect(allDirections[allDirections.length - 1]).toBe("down");
+    expect(allDirections).toEqual(["up", "up"]);
   });
 
-  test("stale unchanged observation is re-observed before deciding to reverse", async () => {
+  test("stale unchanged observation is freshly re-observed before deciding reachedEnd", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     // Tie the synthetic target to the final page, regardless of how many earlier pages are searched.
     lookup.findElementByText = (hierarchy) =>
@@ -565,11 +564,16 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(result.success).toBe(true);
     expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
     expect(observeOptions).toHaveLength(4); // initial, idle, corroboration, next idle
-    expect(observeOptions.map((options) => options?.freshness)).toEqual(Array(4).fill("cached-ok"));
+    expect(observeOptions.map((options) => options?.freshness)).toEqual([
+      "cached-ok",
+      "cached-ok",
+      "fresh",
+      "cached-ok",
+    ]);
     expect(repeatedObservationReads).toBeGreaterThanOrEqual(3);
   });
 
-  test("fresh unchanged observation still enters reverse mode", async () => {
+  test("one fresh unchanged observation refreshes container bounds without reversing", async () => {
     const firstContainer = {
       ...CONTAINER_ELEMENT,
       bounds: { left: 0, top: 0, right: 400, bottom: 900 },
@@ -592,17 +596,18 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       accessibilityService,
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
       talkBackExecutor,
+      geometry: new DefaultElementGeometry(),
     });
 
     const result = await suv.execute(BASE_OPTIONS);
 
     expect(result.success).toBe(true);
-    expect(talkBackExecutor.getDirections()).toEqual(["up", "down"]);
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
     expect(talkBackExecutor.getSwipeCalls()[1]).toMatchObject({
       x1: 200,
-      y1: 250,
+      y1: 640,
       x2: 200,
-      y2: 550,
+      y2: 160,
     });
   });
 
@@ -668,11 +673,11 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(result.success).toBe(true);
     expect(containerLookups).toBeGreaterThan(1);
     expect(talkBackExecutor.getSwipeCalls()[1]).toMatchObject({
-      direction: "down",
+      direction: "up",
       x1: 200,
-      y1: 250,
+      y1: 700,
       x2: 200,
-      y2: 550,
+      y2: 200,
       containerElement: lastKnownContainer,
     });
   });
@@ -790,10 +795,10 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(timer.getPendingSleepCount()).toBe(0);
   });
 
-  test("reverse mode uses slow speed even when original options had fast speed", async () => {
+  test("a paused search retains the viewport speed limit for fast options", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
-    // Forward phase triggers end-of-list (1 same), reverse finds element
+    // An unchanged swipe does not change the viewport speed limit.
     let findCount = 0;
     lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
@@ -817,12 +822,12 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       getDuration,
     });
 
-    // Use fast speed to verify it gets overridden to slow in reverse mode
+    // A full-screen container limits fast search strokes to normal speed.
     await suv.execute({ ...BASE_OPTIONS, speed: "fast" });
 
-    // The last getDuration call corresponds to the reverse swipe — must use "slow"
+    // The next forward swipe retains the same limit.
     const lastCall = getDurationCalls[getDurationCalls.length - 1];
-    expect(lastCall.speed).toBe("slow");
+    expect(lastCall.speed).toBe("normal");
   });
 
   test("uses safe swipe coordinates from overlay detector when overlay is present", async () => {
@@ -967,7 +972,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(talkBackExecutor.getDirections()).toEqual(["up"]);
   });
 
-  test("successful unchanged swipes preserve the end-of-container message", async () => {
+  test("successful unchanged swipes return actionable end-of-container evidence", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
@@ -978,11 +983,84 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       talkBackExecutor,
     });
 
-    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(
-      'Scroll reached end of container (no change after 1 scrolls). text "Skills" not found after 2 iterations (0ms).',
-    );
-    expect(talkBackExecutor.getDirections()).toEqual(["up", "down"]);
+    expect(await suv.execute(BASE_OPTIONS)).toMatchObject({
+      success: false,
+      reachedEnd: true,
+      movedSwipes: 0,
+      error:
+        'Scroll reached end of container (no change after 2 consecutive swipes). text "Skills" not found. 0 swipes moved the screen. Try the opposite direction.',
+    });
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
   });
+
+  test("a target found on the last unchanged swipe wins over end detection", async () => {
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
+    let searches = 0;
+    lookup.findElementByText = () => (++searches === 3 ? TARGET_ELEMENT : null);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      scrollResolver,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+    });
+    expect(await suv.execute(BASE_OPTIONS)).toMatchObject({
+      success: true,
+      found: true,
+      scrollIterations: 2,
+      movedSwipes: 0,
+    });
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("stale unchanged captures cannot establish reachedEnd", async () => {
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
+    const stale = { ...makeObserveResult(), freshness: { isFresh: false } };
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      scrollResolver,
+      timer,
+      accessibilityService,
+      observeResults: [stale],
+      talkBackExecutor,
+      onInteraction: () => timer.advanceTime(1000),
+    });
+    await expect(
+      suv.execute({ ...BASE_OPTIONS, lookFor: { text: "Skills", maxTime: 4000 } }),
+    ).rejects.toThrow(
+      'text "Skills" not found after scrolling for 4000ms (4 iterations, timeout=4000ms).',
+    );
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up", "up", "up"]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test.each([
+    ["up", "down"],
+    ["down", "up"],
+    ["left", "right"],
+    ["right", "left"],
+  ] as const)(
+    "a stationary %s search stops without switching to %s",
+    async (direction, opposite) => {
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
+      const suv = makeScrollUntilVisible({
+        accessibilityDetector: detector,
+        scrollResolver,
+        timer,
+        accessibilityService,
+        observeResults: [makeObserveResult()],
+        talkBackExecutor,
+      });
+      const result = await suv.execute({ ...BASE_OPTIONS, direction });
+      expect(result).toMatchObject({ success: false, reachedEnd: true, movedSwipes: 0 });
+      expect(result.error).toContain("Try the opposite direction.");
+      expect(talkBackExecutor.getDirections()).not.toContain(opposite);
+      expect(talkBackExecutor.getDirections()).toEqual([direction, direction]);
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
 
   test("failed iOS swipe still returns the original failure after one swipe", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
@@ -1301,7 +1379,7 @@ describe("iOS chrome scroll-end guard", () => {
       expect(executor.getCallCount()).toBe(1);
     });
   }
-  test("uses chrome-free bounds for screen fallback and reverse recovery", async () => {
+  test("uses chrome-free bounds for consecutive screen fallback swipes", async () => {
     const fixture = loadIosRemindersNoiseObservePair().after;
     const observation = { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
     const timer = new FakeTimer();
@@ -1317,9 +1395,9 @@ describe("iOS chrome scroll-end guard", () => {
       observeResults: [observation],
       talkBackExecutor: executor,
     });
-    await expect(
-      scroll.execute({ direction: "down", lookFor: { text: "General", maxTime: 5000 } }),
-    ).rejects.toThrow("Scroll reached end of container");
+    expect(
+      await scroll.execute({ direction: "down", lookFor: { text: "General", maxTime: 5000 } }),
+    ).toMatchObject({ success: false, reachedEnd: true });
     const swipes = executor.getSwipeCalls();
     expect(swipes).toHaveLength(2);
     for (const swipe of swipes) {

@@ -29,15 +29,19 @@ function listHarness({
   stuckRecovery = false,
   platform = "android",
   backStackAfterFirstSwipe,
+  initialOffset = 0,
+  pauseSwipes = [],
 }: {
   overshoot?: boolean;
   stuckRecovery?: boolean;
   platform?: "android" | "ios";
   backStackAfterFirstSwipe?: BackStackInfo;
+  initialOffset?: number;
+  pauseSwipes?: number[];
 } = {}) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  let offset = 0;
+  let offset = initialOffset;
   const steps: Step[] = [];
   const observe = (): ObserveResult => ({
     updatedAt: timer.now(),
@@ -106,7 +110,7 @@ function listHarness({
         ? 12
         : Math.max(1, Math.floor(distance / PITCH));
     const delta = step.y2 < step.y1 ? rows : -rows;
-    if (!(stuckRecovery && steps.length > 1)) {
+    if (!(stuckRecovery && steps.length > 1) && !pauseSwipes.includes(steps.length)) {
       offset = Math.max(0, Math.min(24, offset + delta));
     }
     timer.advanceTime(step.duration + (step.holdDurationMs ?? 0));
@@ -122,7 +126,84 @@ function listHarness({
 
 test("lookFor row 11 is found without a fling", async () => {
   const h = listHarness();
-  expect(await h.search("row 11")).toMatchObject({ found: true, element: { text: "row 11" } });
+  expect(await h.search("row 11")).toMatchObject({
+    found: true,
+    movedSwipes: 2,
+    element: { text: "row 11" },
+  });
+});
+
+test("a search already past its target stops after two unchanged swipes with an opposite-direction hint", async () => {
+  const h = listHarness({ initialOffset: 24 });
+  const result = await h.search("Item 12");
+  expect(result).toMatchObject({
+    success: false,
+    found: false,
+    reachedEnd: true,
+    movedSwipes: 0,
+    scrollIterations: 2,
+    error:
+      'Scroll reached end of container (no change after 2 consecutive swipes). text "Item 12" not found. 0 swipes moved the screen. Try the opposite direction.',
+  });
+  expect(h.steps).toHaveLength(2);
+  expect(h.steps.every((step) => step.y2 < step.y1)).toBe(true);
+  expect(h.timer.now()).toBe(1400);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("end detection counts only swipes that changed the settled screen", async () => {
+  const h = listHarness();
+  const result = await h.search("absent");
+  expect(result).toMatchObject({
+    success: false,
+    reachedEnd: true,
+    movedSwipes: 6,
+    scrollIterations: 8,
+  });
+  expect(h.steps).toHaveLength(8);
+  expect(h.timer.now()).toBe(5600);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test.each([1, 3])(
+  "a stationary list stops at the configured threshold of %i swipes",
+  async (maxUnchangedSwipes) => {
+    const h = listHarness({ initialOffset: 24 });
+    expect(
+      await h.search("absent", { lookFor: { text: "absent", maxUnchangedSwipes } }),
+    ).toMatchObject({
+      success: false,
+      reachedEnd: true,
+      movedSwipes: 0,
+      scrollIterations: maxUnchangedSwipes,
+    });
+    expect(h.steps).toHaveLength(maxUnchangedSwipes);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  },
+);
+
+test("an isolated unchanged swipe and later changing content still reach the target", async () => {
+  const h = listHarness({ pauseSwipes: [1, 3] });
+  expect(await h.search("row 15")).toMatchObject({
+    success: true,
+    found: true,
+    scrollIterations: 5,
+  });
+  expect(h.steps.every((step) => step.y2 < step.y1)).toBe(true);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("the consecutive-no-change threshold is configurable for slower content", async () => {
+  const h = listHarness({ pauseSwipes: [1, 2] });
+  expect(
+    await h.search("row 11", { lookFor: { text: "row 11", maxUnchangedSwipes: 3 } }),
+  ).toMatchObject({
+    success: true,
+    found: true,
+    scrollIterations: 4,
+  });
+  expect(h.steps.every((step) => step.y2 < step.y1)).toBe(true);
+  expect(h.timer.getSleepHistory()).toEqual([]);
 });
 
 test("maxSwipes stops the search after that many swipes", async () => {
@@ -178,20 +259,18 @@ test("overlap recovery refuses its back-scroll when the post-swipe XR pose is in
 
 test("unrecoverable zero overlap falls back to the normal end-of-list detector", async () => {
   const h = listHarness({ overshoot: true, stuckRecovery: true });
-  await expect(h.search("row 11")).rejects.toThrow("Scroll reached end of container");
-  expect(h.steps.filter((step) => step.y2 < step.y1)).toHaveLength(2);
+  expect(await h.search("row 11")).toMatchObject({ success: false, reachedEnd: true });
+  expect(h.steps.filter((step) => step.y2 < step.y1)).toHaveLength(3);
   expect(h.steps).toHaveLength(6);
 });
 
-test("an absent target retains the two-observation end detector and error shape", async () => {
+test("an absent target reports the requested-direction end without reverse swipes", async () => {
   const h = listHarness();
-  await expect(h.search("absent")).rejects.toThrow(
-    'Scroll reached end of container (no change after 1 scrolls). text "absent" not found',
-  );
+  expect(await h.search("absent")).toMatchObject({ success: false, reachedEnd: true });
   expect(h.steps.length).toBeLessThan(20);
   expect(h.timer.now()).toBeLessThan(15000);
   const last = h.steps.at(-1)!;
-  expect(last.y2).toBeGreaterThan(last.y1);
+  expect(last.y2).toBeLessThan(last.y1);
 });
 
 test("iOS skips the Android overlap guard while preserving its gesture parameters", async () => {

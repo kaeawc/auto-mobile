@@ -173,9 +173,14 @@ describe("scroll-until-visible synthetic iOS navigation occlusion (#9096)", () =
     ).toBe(1);
   });
 
-  test("a permanently covered row exhausts the existing reverse bound honestly", async () => {
+  test("a permanently covered row reports reachedEnd without claiming it was found", async () => {
     const scroll = harness([syntheticNavigationHierarchy()]);
-    await expect(scroll.execute()).rejects.toThrow("not found");
+    expect(await scroll.execute()).toMatchObject({
+      success: false,
+      found: false,
+      reachedEnd: true,
+      movedSwipes: 0,
+    });
     expect(scroll.swipeCount()).toBe(2);
   });
 

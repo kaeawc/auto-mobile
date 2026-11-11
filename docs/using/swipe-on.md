@@ -5,7 +5,13 @@ On iOS, a container thinner than 48 pt along the swipe axis (such as a sheet
 grabber) starts the drag at its centre and travels 240 pt in that direction,
 clamped to the screen bounds. The result includes a `warning` explaining the
 extended drag and warns if clamping leaves less than 120 pt of travel.
-Use `lookFor` to scroll until an element appears.
+Use `lookFor` to scroll until an element appears. The search stops when two
+consecutive swipes leave the content unchanged, returning `success: false`,
+`found: false`, and `reachedEnd: true`. `scrollIterations` counts search swipes;
+`movedSwipes` counts successful search swipes whose settled content changed,
+excluding overlap recovery. The error suggests trying the opposite direction
+if the target may be behind the current position. For content that changes
+slowly, increase `lookFor.maxUnchangedSwipes` (a positive integer; default `2`).
 
 On an Android XR headset in home space, screen swipes stay inside the topmost
 app panel. Coordinate targeting uses screenshot pixels, as with `tapAt`; the

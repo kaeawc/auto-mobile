@@ -170,15 +170,16 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       );
       expect(h.legs()).toHaveLength(2);
     });
-    test("unchanged list reverses then reports shared end-of-container failure", async () => {
+    test("unchanged list reports reachedEnd without reversing", async () => {
       const h = harness({ route, foundAfter: Infinity, unchanged: true });
       const result = await h.action.execute(search);
       expect(result.success).toBe(false);
       expect(result.error).toBe(
-        'Scroll reached end of container (no change after 1 scrolls). text "Found" not found after 2 iterations (600ms).',
+        'Scroll reached end of container (no change after 2 consecutive swipes). text "Found" not found. 0 swipes moved the screen. Try the opposite direction.',
       );
       expect(h.legs()).toHaveLength(2);
-      expect(h.legs()[1].y1).toBeLessThan(h.legs()[1].y2);
+      expect(h.legs()[1].y1).toBeGreaterThan(h.legs()[1].y2);
+      expect(result).toMatchObject({ reachedEnd: true, movedSwipes: 0, scrollIterations: 2 });
     });
     test("dispatch failure is a failure result and stops the search", async () => {
       const h = harness({ route });

@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
@@ -45,10 +46,7 @@ const createTapAnyElement = (selector: FakeElementSelector) => {
       deviceId: "emulator-5554",
     },
     new FakeAdbClient(),
-    {
-      timer: new FakeTimer(),
-      elementSelector: selector,
-    },
+    { xrDetector: new FakeAndroidXrDetector(), timer: new FakeTimer(), elementSelector: selector },
   );
 };
 
@@ -67,7 +65,11 @@ describe("TapAnyElement", () => {
     const tapAny = new TapAnyElement(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
       adb,
-      { timer, elementSelector: new FakeElementSelector(makeElement()) },
+      {
+        xrDetector: new FakeAndroidXrDetector(),
+        timer,
+        elementSelector: new FakeElementSelector(makeElement()),
+      },
     );
     tapAny.testHooks.setRefreshViewHierarchy(async () => null);
     tapAny.observedInteraction = runBlockWith(() =>
@@ -229,6 +231,7 @@ describe("TapAnyElement", () => {
         { name: "test-device", platform: "android", deviceId: "emulator-5554" },
         adb,
         {
+          xrDetector: new FakeAndroidXrDetector(),
           timer,
           elementSelector: new FakeElementSelector(element),
           accessibilityDetector,
@@ -323,6 +326,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
       adb,
       {
+        xrDetector: new FakeAndroidXrDetector(),
         timer,
         elementSelector: new FakeElementSelector(element),
         accessibilityDetector: detector,
@@ -637,6 +641,7 @@ test.each([false, true])(
       { deviceId: "capture-tapany", name: "Test", platform: "android" },
       adb,
       {
+        xrDetector: new FakeAndroidXrDetector(),
         timer,
         hierarchyCapture: capture,
         accessibilityService: {
@@ -700,6 +705,7 @@ describe("TapAnyElement node long press fallbacks", () => {
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
       adb,
       {
+        xrDetector: new FakeAndroidXrDetector(),
         timer,
         elementSelector: new FakeElementSelector(element),
         accessibilityService: proxy,
@@ -871,6 +877,7 @@ describe("tapAny long press safety", () => {
       { name: "test-device", platform: "android", deviceId: "tap-any-long-press-bound" },
       adb,
       {
+        xrDetector: new FakeAndroidXrDetector(),
         timer,
         elementSelector: new FakeElementSelector(element),
         accessibilityDetector: new FakeAccessibilityDetector(),

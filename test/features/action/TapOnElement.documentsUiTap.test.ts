@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, test, spyOn, afterEach, mock, beforeEach } from "bun:test";
 import type { Element } from "../../../src/models";
@@ -53,6 +54,7 @@ function createTap(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
       adb,
       {
+        xrDetector: new FakeAndroidXrDetector(),
         timer,
         talkBackStrategy: options.talkBackStrategy,
         talkBackDriverFactory: options.talkBackDriverFactory,

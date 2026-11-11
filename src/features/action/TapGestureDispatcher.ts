@@ -52,11 +52,8 @@ import {
   dispatchIosDoubleTap,
 } from "./coordinateTapDispatch";
 import { executeTouchscreenInput } from "./touchscreenInput";
-import {
-  checkAndroidTapHierarchyChange,
-  POST_TAP_REFRESH_TIMEOUT_MS,
-  PRE_RETRY_DELAY_MS,
-} from "./androidGhostTapRetry";
+import { PRE_RETRY_DELAY_MS } from "./androidGhostTapRetry";
+import { unchangedHierarchyAfterTap } from "./tapGhostRetryProbe";
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { TapTargetResolver } from "./TapTargetResolver";
 
@@ -109,6 +106,8 @@ export interface TapGestureDispatcherHost {
   readonly accessibilityService: () => TapOnCtrlProxy;
   readonly adb: () => AdbExecutor;
   readonly device: () => BootedDevice;
+  /** The shared XR predicate (`android.software.xr.api.spatial`, cached per device). */
+  readonly isAndroidXr: (signal?: AbortSignal) => Promise<boolean>;
   dispatchCoordinateTapOrAdbFallback: TapGestureDispatcher["dispatchCoordinateTapOrAdbFallback"];
   executeAndroidLongPress: TapGestureDispatcher["executeAndroidLongPress"];
   executeAndroidTap: TapGestureDispatcher["executeAndroidTap"];
@@ -163,7 +162,7 @@ export class TapGestureDispatcher {
       isTalkBackEnabled?: boolean;
     } & { element: Element },
   ): Promise<ScreenReaderNavigationResult | undefined> {
-    if (this.host.device().formFactor === "xr-headset") {
+    if (await this.host.isAndroidXr(signal)) {
       await executeXrNodeClick(() => this.host.accessibilityService(), {
         action,
         element,
@@ -323,7 +322,7 @@ export class TapGestureDispatcher {
       fenceOptions?: ResolvedAndroidTapOptions,
     ]
   ): Promise<void> {
-    if (this.host.device().formFactor === "xr-headset") {
+    if (await this.host.isAndroidXr(signal)) {
       throw xrCoordinateError();
     }
     const fence = fenceOptions.displayFence;
@@ -530,59 +529,38 @@ export class TapGestureDispatcher {
       selection?: ElementSelectionResult;
     } & { longPressDuration: number },
   ): Promise<void> {
-    const probe = await checkAndroidTapHierarchyChange(
-      this.host.timer(),
-      this.host.tapVerificationRefresh({
-        refresh: options.verification?.refresh,
-        screenSize,
-        signal,
-      }),
-      (hierarchy) => this.host.hashViewHierarchy(hierarchy),
-      { preTapHash, signal },
-    );
-
-    if (probe.status === "unavailable") {
-      // Hierarchy unreadable — we can't tell whether the tap registered. A retry
-      // here is more likely to land on a transitioning screen and bounce us
-      // off-path than to recover a real ghost tap. Bail and let the next
-      // step's waitFor/observe surface a real failure.
-      logger.warn(
-        `[TapOnElement][retryIfNoChange] Tap hierarchy unreadable or could not be fingerprinted ` +
-          `(post-tap refresh budget ${POST_TAP_REFRESH_TIMEOUT_MS}ms) — skipping retry`,
-      );
+    const hierarchy = await unchangedHierarchyAfterTap(this.host, preTapHash, {
+      options,
+      screenSize,
+      signal,
+    });
+    if (!hierarchy) {
       return;
     }
-
-    if (probe.status === "changed") {
-      logger.info(`[TapOnElement][retryIfNoChange] Hierarchy changed after tap — tap registered`);
-      return;
-    }
-
     const retryOptions = this.host.withRetryScreenSize(options, screenSize);
     const refreshedSelection = this.host.refreshedRetrySelection(
       retryOptions,
-      probe.hierarchy,
+      hierarchy,
       tapElement,
       selection,
     );
-    const retryTarget = this.host.resolveRefreshedRetryTarget(
-      retryOptions,
-      probe.hierarchy,
-      action,
-      { isTalkBackEnabled, selection: refreshedSelection, previousTarget: tapElement },
-    );
+    const retryTarget = this.host.resolveRefreshedRetryTarget(retryOptions, hierarchy, action, {
+      isTalkBackEnabled,
+      selection: refreshedSelection,
+      previousTarget: tapElement,
+    });
     if (!retryTarget) {
       return;
     }
     const retryScreenSize = this.host.getScreenSizeFromHierarchy(
-      probe.hierarchy,
+      hierarchy,
       retryOptions.screenSizeOptions,
     );
     const retryBounds = this.host.visibleTapBounds(
       refreshedSelection.element
         ? refreshedSelection
         : (selection ?? { ...refreshedSelection, element: retryTarget }),
-      probe.hierarchy,
+      hierarchy,
       { screenSize: retryScreenSize, options: retryOptions, tapTarget: retryTarget },
     );
     if (!retryBounds) {
@@ -593,7 +571,7 @@ export class TapGestureDispatcher {
     }
     const retryPoint = pointInTapBounds(tapPoint, retryBounds)
       ? tapPoint
-      : this.host.resolveVisibleTapPoint(retryTarget, probe.hierarchy, retryBounds, {
+      : this.host.resolveVisibleTapPoint(retryTarget, hierarchy, retryBounds, {
           options,
           screenSize: retryScreenSize,
         });
@@ -617,7 +595,7 @@ export class TapGestureDispatcher {
     await this.host.executeAndroidTap(action, retryPoint, longPressDuration, {
       element: retryTarget,
       signal,
-      options: { ...options, resolvedHierarchy: probe.hierarchy },
+      options: { ...options, resolvedHierarchy: hierarchy },
       isTalkBackEnabled,
     });
   }

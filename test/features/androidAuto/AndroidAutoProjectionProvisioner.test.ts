@@ -567,6 +567,90 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(phone.changes.slice(-2)).toEqual(["redirect-removed", "redirect"]);
   });
 
+  test("a second release of the same phone chains onto a stalled removal, so no run slips in (#17911)", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    const removal = Promise.withResolvers<void>();
+    let removals = 0;
+    phone.removeHeadUnitRedirect = async () => {
+      removals++;
+      await removal.promise;
+      phone.changes.push("redirect-removed");
+      phone.redirected = false;
+    };
+    let runStarted = false;
+    const isKeyguardDisabled = phone.isKeyguardDisabled.bind(phone);
+    phone.isKeyguardDisabled = async () => {
+      runStarted = true;
+      return await isKeyguardDisabled();
+    };
+    // The first `redir del` stalls past the cleanup cap, and the phone's next session ends too.
+    const first = provisioner.stopDesktopHeadUnit("emulator-5554", { releaseRedirect: true });
+    await drainMicrotasks(20);
+    const second = provisioner.stopDesktopHeadUnit("emulator-5554", { releaseRedirect: true });
+    const next = provisioner.provision(request());
+    await drainMicrotasks(50);
+    expect(removals).toBe(1);
+    expect(runStarted).toBe(false);
+
+    removal.resolve();
+    await Promise.all([first, second]);
+    const again = await next;
+    // The late first removal landed before the run's fresh redirect, which stays tracked.
+    expect(removals).toBe(1);
+    expect(again.steps.find((step) => step.step === "transport")?.status).toBe("applied");
+    expect(phone.changes.slice(-2)).toEqual(["redirect-removed", "redirect"]);
+    expect(provisioner.holdsHostPortFor("emulator-5554")).toBe(true);
+  });
+
+  test("a release during an in-flight run waits for it, then stops what it started (#17911)", async () => {
+    const dhu = new FakeSession();
+    const { phone, provisioner } = setup([{ status: "connected", session: dhu }]);
+    const gate = Promise.withResolvers<void>();
+    const isKeyguardDisabled = phone.isKeyguardDisabled.bind(phone);
+    phone.isKeyguardDisabled = async () => {
+      await gate.promise;
+      return await isKeyguardDisabled();
+    };
+    const run = provisioner.provision(request());
+    await drainMicrotasks(20);
+    // No DHU or redirect yet, but the run may add both, so the phone counts as held.
+    expect(phone.redirected).toBe(false);
+    expect(provisioner.holdsHostPortFor("emulator-5554")).toBe(true);
+
+    let released = false;
+    const release = provisioner
+      .stopDesktopHeadUnit("emulator-5554", { releaseRedirect: true })
+      .then(() => {
+        released = true;
+      });
+    await drainMicrotasks(50);
+    expect(released).toBe(false);
+
+    gate.resolve();
+    await run;
+    await release;
+    expect(dhu.isAlive()).toBe(false);
+    expect(phone.changes.slice(-2)).toEqual(["redirect", "redirect-removed"]);
+    expect(provisioner.holdsHostPortFor("emulator-5554")).toBe(false);
+  });
+
+  test("a release during a run that fails still settles and frees the phone", async () => {
+    const { phone, provisioner } = setup();
+    const gate = Promise.withResolvers<void>();
+    phone.isKeyguardDisabled = async () => {
+      await gate.promise;
+      throw new ActionableError("keyguard read failed");
+    };
+    const run = provisioner.provision(request());
+    await drainMicrotasks(20);
+    const release = provisioner.stopDesktopHeadUnit("emulator-5554", { releaseRedirect: true });
+    gate.resolve();
+    await expect(run).rejects.toThrow("keyguard read failed");
+    await release;
+    expect(provisioner.holdsHostPortFor("emulator-5554")).toBe(false);
+  });
+
   test("releaseRedirect never removes a redirect this provisioner added for another device", async () => {
     const { phone, provisioner } = setup();
     await provisioner.provision(request());

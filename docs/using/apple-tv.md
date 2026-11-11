@@ -177,7 +177,7 @@ focused one.
 <!-- apple-tv-remote-buttons:end -->
 
 `tapOn` replaces tapping: it moves focus to a matched element with directional presses and then
-presses `select`. A non-focusable match inside the focused row activates that row with one
+presses `select`. A matched checkable control inside the focused row's bounds activates that row with one
 `select`; the result's `element` remains the matched child.
 
 - Match with an exact `text` or `elementId`, and an optional zero-based `index`. Only the `tap`

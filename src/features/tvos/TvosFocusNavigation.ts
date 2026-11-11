@@ -1,6 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { Element, TapOnElementOptions, TapOnElementResult } from "../../models";
-import { isTruthy } from "../../models/Element";
 import { boundsArea } from "../../utils/bounds";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { compareSelectionRank, selectableCandidates } from "../utility/selectionRank";
@@ -106,11 +105,11 @@ function focusOwner(target: Element, matches: Element[]): Element {
   }, target);
 }
 
-/** A row can select its non-focusable child without another focus move. */
+/** tvOS rows own focus for nested checkable controls reported by the runner. */
 function canSelectAtFocus(focus: Element, target: Element): boolean {
   return (
     sameBounds(focus, target) ||
-    (!isTruthy(target.focusable) && focusOwner(target, [focus]) === focus)
+    (target.checkable === "true" && focusOwner(target, [focus]) === focus)
   );
 }
 

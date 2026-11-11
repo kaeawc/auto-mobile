@@ -8,6 +8,7 @@ import { tvosTapOn } from "../../../src/features/tvos/TvosFocusNavigation";
 import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
 import type { TvosCommand, TVRemoteButton } from "../../../src/features/tvos/TvosRunnerClient";
 import type { TapOnElementOptions } from "../../../src/models";
+import type { CtrlProxyNode } from "../../../src/features/observe/ios/types";
 import { FocusAwareFakeTvosRunnerClient } from "../../fakes/FocusAwareFakeTvosRunnerClient";
 import {
   itemId,
@@ -467,14 +468,31 @@ test.each<TapOnElementOptions>([
   expect(client.commands).toEqual([]);
 });
 
-test("selects the focused row for its captured nested toggle identifier", async () => {
+function registerToggleReplay() {
   unregister();
   const replay = new FakeTvosRunnerClient(structuredClone(toggleCapture.data));
+  const pending: CtrlProxyNode[] = [replay.tree.hierarchy];
+  const switches: CtrlProxyNode[] = [];
+  for (const node of pending) {
+    if (node.className === "40") {
+      switches.push(node);
+      // The old capture has no state. Add only the new runner wire fields; preserve geometry and focus.
+      node.checkable = "true";
+      node.checked = "false";
+    }
+    pending.push(...[node.node ?? []].flat());
+  }
+  expect(switches).toHaveLength(2);
   unregister = tvosRunners.register(deviceId, replay);
+  return { replay, switches };
+}
+
+test("selects the focused row for its captured nested toggle identifier", async () => {
+  const { replay } = registerToggleReplay();
   const result = await tvosTapOn(deviceId, { action: "tap", elementId: "autoplay-toggle" });
   expect(result).toMatchObject({
     success: true,
-    element: { "resource-id": "autoplay-toggle", class: "40" },
+    element: { "resource-id": "autoplay-toggle", class: "40", checkable: "true" },
   });
   expect(result.debug?.activatedAncestor).toMatchObject({
     text: "Autoplay",
@@ -494,25 +512,13 @@ test("a captured target outside the focused row still reports refused focus prog
   expect(replay.commands).toEqual([hierarchy, press("up"), hierarchy]);
 });
 
-test("a separately focusable child inside focus still requires a focus move", async () => {
-  const owner = client.buttons.find((button) => button.focused === "true")!;
-  const child = {
-    ...owner,
-    "resource-id": "focusable-child",
-    focusable: "true",
-    focused: "false",
-    bounds: {
-      left: owner.bounds.left + 5,
-      top: owner.bounds.top + 5,
-      right: owner.bounds.right - 5,
-      bottom: owner.bounds.bottom - 5,
-    },
-    node: [],
-  };
-  owner.node = [child];
-  client.ignorePresses = true;
+test("a captured nested non-checkable target requires a focus move without selecting its row", async () => {
+  const { replay, switches } = registerToggleReplay();
+  // Mutate only the matched captured node; the other switch still has the runner's state fields.
+  delete switches[0].checkable;
+  delete switches[0].checked;
   await expect(
-    tvosTapOn(deviceId, { action: "tap", elementId: "focusable-child" }),
-  ).rejects.toThrow("focus stopped making progress");
-  expect(client.commands).not.toContainEqual(press("select"));
+    tvosTapOn(deviceId, { action: "tap", elementId: "autoplay-toggle" }),
+  ).rejects.toThrow("focus stopped making progress from Autoplay toward autoplay-toggle");
+  expect(replay.commands).toEqual([hierarchy, press("left"), hierarchy]);
 });

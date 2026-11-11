@@ -102,7 +102,7 @@ ${expectations}
         expect(stepCalls[0]).not.toHaveProperty("expectations");
         expect(observeCalls.map((call) => call.waitFor)).toEqual([
           { testTag: "bug_repro_content" },
-          { elementId: "counter", text: "3", textMatch: "exact" },
+          { elementId: "counter", text: "3", textMatch: "exact", textSource: "displayed" },
         ]);
         expect(observeCalls[0].platform).toBe(platform);
       });
@@ -123,7 +123,7 @@ ${expectations}
         expect(stepCalls).toHaveLength(1);
         expect(observeCalls.map((call) => call.waitFor)).toEqual([
           { absent: { text: "Loading" } },
-          { text: "Welcome", textMatch: "contains", timeout: 1500 },
+          { text: "Welcome", textMatch: "contains", textSource: "displayed", timeout: 1500 },
         ]);
         expect(result.failedStep?.stepIndex).toBe(0);
         expect(result.failedStep?.error).toBe(

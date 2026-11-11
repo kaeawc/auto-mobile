@@ -9,6 +9,7 @@ import type { AndroidAutoPhone } from "./AndroidAutoPhone";
 import type { AndroidAutoSettingsUi } from "./AndroidAutoSettingsUi";
 import type { AndroidAutoSignerCheck } from "./AndroidAutoSignerCheck";
 import type {
+  DesktopHeadUnitConsole,
   DesktopHeadUnitLauncher,
   DesktopHeadUnitSession,
   DhuLaunchOutcome,
@@ -151,6 +152,25 @@ export class AndroidAutoProjectionProvisioner {
     });
     this.inFlight = { deviceId: request.deviceId, run };
     return run;
+  }
+
+  /**
+   * The console of the healthy DHU this provisioner runs for `deviceId`, for head-unit input
+   * (#17842). Undefined while that device is still being provisioned, when it has no DHU, or when
+   * its DHU is unhealthy or retired. The caller only writes commands: it never starts or stops
+   * the DHU, which stays owned here.
+   */
+  desktopHeadUnitConsole(deviceId: string): DesktopHeadUnitConsole | undefined {
+    if (this.inFlight?.deviceId === deviceId) {
+      return undefined;
+    }
+    const session = this.reusableSession(deviceId);
+    return session
+      ? {
+          sendCommand: (command) => session.sendCommand(command),
+          isRunning: () => session.isRunning(),
+        }
+      : undefined;
   }
 
   private async runProvisioning(

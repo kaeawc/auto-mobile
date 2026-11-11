@@ -258,6 +258,12 @@ export const tapAtSchema = withJsonSchemaOverride(
     .extend({
       platform: watchAwarePlatformSchema(),
       includeExtras: responseShapeControlFields.includeExtras,
+      display: z
+        .string()
+        .optional()
+        .describe(
+          'Target panel key, role, or active; "headUnit" taps the Android Auto head unit at x, y in head-unit pixels',
+        ),
       x: coordinatePointInputSchema().shape.x.optional(),
       y: coordinatePointInputSchema().shape.y.optional(),
       image: imageRelativePointSchema

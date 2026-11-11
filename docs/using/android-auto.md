@@ -3,8 +3,8 @@
 Android Auto projects a phone app's car UI to a head unit. The Desktop Head Unit (DHU) is Google's
 desktop stand-in for that head unit. `provisionDevice` can set up projection on a phone emulator and
 start a headless DHU for you, and `startDevice` can start the DHU again for a phone that is already set
-up. AutoMobile does not read the projected car screen; this page covers the
-setup, the manual steps it automates, and what to expect.
+up. `tapAt` and `pressButton` can then act on the head unit. This page covers the setup, the manual
+steps it automates, acting on the head unit, and what to expect.
 
 For a full car Android build that AutoMobile drives directly, use an
 [Android Automotive OS emulator](android-automotive.md) instead.
@@ -114,6 +114,42 @@ or release the device. The errors are the ones in the `provisionDevice` table ab
 
 `killDevice` on the phone stops its DHU. AutoMobile only ever stops a DHU it started itself.
 
+## Acting on the head unit
+
+Pass `display: "headUnit"` to `tapAt` or `pressButton` to send input to the head unit instead of the
+phone. It uses the DHU that `provisionDevice` or `startDevice` started for that phone; it never starts
+or stops one.
+
+```json
+{ "x": 640, "y": 200, "display": "headUnit" }
+```
+
+| Tool          | Head unit input                                                                                                                                                                                                                                      |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tapAt`       | `x` and `y` in head-unit pixels (1280x720 with `default_720p.ini`), sent as `tap <x> <y>`. Only a plain tap: `action`, `durationMs`, `coordinateSpace`, `image`, `pointer`, `layer` and `snapshotId` are refused.                                    |
+| `pressButton` | `up`, `down`, `left`, `right`, `select` and `back` as `dpad` input; `home`, `playPause`, `next` and `previous` as `keycode` input; the `rotary_*` buttons as `dpad` rotate, nudge and click (`steps` repeats a rotation). Other buttons are refused. |
+
+The result gains a `headUnit` block:
+
+- `commands`: the console commands sent.
+- `effect`: `screenChanged` and its `basis`. The change is read from the projected apps' template
+  stacks (`carAppTemplates.projected[]`): each app's top screen class, template type and title, and
+  stack depth. Without the AutoMobile template route in any projected app, `basis` is
+  `no template data` and `screenChanged` is absent: the input was sent, but whether it changed the
+  screen is unknown.
+- `idle`: whether two template reads in a row agreed (`stable`) and how long the wait took
+  (`waitedMs`). A screen that still looks the same is waited on for about a second, so a slow screen
+  push is not reported as no change. The wait ends after about three seconds either way.
+- `before` and `after`: the top screen of each projected session, read before and after the input.
+
+`dpad back` pops the current screen on the head unit, so `pressButton back` needs no fallback.
+
+| Error                                          | What to do                                                                                                    |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| No Desktop Head Unit is running for the device | Start one with `startDevice` and `androidAuto.headUnit`, or `provisionDevice` with `androidAuto`, then retry. |
+| The Desktop Head Unit is not running           | The DHU exited. Call `startDevice` with `androidAuto.headUnit` again.                                         |
+| A button or field has no head unit equivalent  | Use one of the inputs in the table above.                                                                     |
+
 ## Setting up projection by hand
 
 1. Use a phone emulator with a Google Play system image, such as `google_apis_playstore`. No Google
@@ -208,6 +244,8 @@ default values, the same as `default.ini`: 800x480 at 160 dpi and 30 fps.
   `otherDisplays` (for example `TemplateCarFragment`, `Dashboard` and `GhFacetBar`) and may report the
   projection display as the active one, with a warning that it has no accessible content. The projected
   UI is not in the accessibility tree; `observe`, `tapOn` and other tools act only on the phone screen.
+  To act on the head unit, use `tapAt` or `pressButton` with `display: "headUnit"` (see
+  [Acting on the head unit](#acting-on-the-head-unit)).
 - While projecting, the phone's foreground app is Android Auto, not your app. If your app enabled the
   AutoMobile template route, `observe` reads it from every app Android Auto has bound and returns
   `carAppTemplates.projected[]`, one entry per app (`packageName`, `sessions`, `error`), with

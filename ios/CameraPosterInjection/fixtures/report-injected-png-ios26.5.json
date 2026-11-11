@@ -1,0 +1,29 @@
+{
+  "authorizationStatus" : "authorized",
+  "complete" : true,
+  "dataScannerAvailable" : true,
+  "dataScannerSupported" : false,
+  "defaultVideoDevicePresent" : true,
+  "deviceInputCreated" : true,
+  "discoverySessionDeviceCount" : 1,
+  "imagePickerCameraAvailable" : true,
+  "iosVersion" : "26.5",
+  "metadataQrStrings" : [
+
+  ],
+  "photo" : {
+    "byteCount" : 44620,
+    "error" : null,
+    "height" : 1440,
+    "received" : true,
+    "sha256" : "e40e07276ba3a86d3f9d85a5df355a909eaaa924b542ec46486d092fa310fd3d",
+    "width" : 1080
+  },
+  "photoDecodedQr" : [
+
+  ],
+  "previewLayerHasContent" : true,
+  "sessionCanAddMetadataOutput" : true,
+  "sessionCanAddPhotoOutput" : true,
+  "timestamp" : "2026-11-11T17:06:22Z"
+}

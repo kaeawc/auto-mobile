@@ -28,6 +28,29 @@ describe("parseProjectedCarApps (#17826)", () => {
     expect(parseProjectedCarApps(dump)).toEqual([]);
   });
 
+  test("a started and bound service keeps its bindings past its indent-1 startCommandResult line", () => {
+    const lines = projectionServicesDump("one").split(/\r?\n/);
+    const start = lines.findIndex((line) =>
+      line.includes(
+        "* ServiceRecord{5215844 u0 com.google.android.gms/com.google.android.location.internal.GoogleLocationManagerService",
+      ),
+    );
+    const end = lines.findIndex(
+      (line, index) => index > start && line.includes("* ServiceRecord{"),
+    );
+    const service = lines.slice(start, end);
+    const startCommandAt = service.indexOf(" startCommandResult=1");
+    const gearheadAt = service.findIndex((line) =>
+      line.includes(":com.google.android.projection.gearhead:car/"),
+    );
+    expect(startCommandAt).toBeGreaterThan(0);
+    expect(gearheadAt).toBeGreaterThan(startCommandAt);
+
+    expect(parseProjectedCarApps(service.join("\n"))).toEqual([
+      { packageName: "com.google.android.gms", userId: 0 },
+    ]);
+  });
+
   test("a c: caller header without a live Android Auto binding is not projected", () => {
     const dump = [
       "  * ServiceRecord{1 u0 com.example.car/.CarSvc c:com.google.android.projection.gearhead}",

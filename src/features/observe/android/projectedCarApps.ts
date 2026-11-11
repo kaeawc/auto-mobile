@@ -9,7 +9,7 @@ export interface ProjectedCarApp {
 
 /** `* ServiceRecord{<hash> u<user> <package>/<class>[ c:<client>]}` */
 const SERVICE_RECORD_HEADER =
-  /^(\s*)\* ServiceRecord\{[0-9a-f]+ u(\d+) ([A-Za-z0-9_.]+)\/[^\s}]+(?: [^}]*)?\}/;
+  /^\s*\* ServiceRecord\{[0-9a-f]+ u(\d+) ([A-Za-z0-9_.]+)\/[^\s}]+(?: [^}]*)?\}/;
 
 const escapedHost = ANDROID_AUTO_PACKAGE.replace(/\./g, "\\.");
 /**
@@ -26,25 +26,30 @@ interface ServiceBlock {
   lines: string[];
 }
 
-function indentOf(line: string): number {
-  return line.length - line.trimStart().length;
+/**
+ * The indented `dumpsys activity services` section headers (AOSP `ActiveServices.dumpLocked`). A
+ * ServiceRecord block ends only at one of these, an unindented line, or the next ServiceRecord,
+ * never at a low-indent field inside the record: API 36 prints ` startCommandResult=N` at indent
+ * 1, before `Bindings:`.
+ */
+const SECTION_HEADER =
+  /^\s+(?:User \d+ active services|Pending services|Restarting services|Destroying services|Connection bindings to services):$/;
+
+function isSectionHeader(line: string): boolean {
+  // An unindented line (`Active foreground apps - user 0:`, the next dumpsys section) is outer too.
+  return SECTION_HEADER.test(line) || /^\S/.test(line);
 }
 
-/** Splits the dump into ServiceRecord blocks; a block ends at its next sibling or outer line. */
+/** Splits the dump into ServiceRecord blocks; a block ends at the next record or section header. */
 function serviceBlocks(dump: string): ServiceBlock[] {
   const blocks: ServiceBlock[] = [];
-  let current: (ServiceBlock & { indent: number }) | undefined;
+  let current: ServiceBlock | undefined;
   for (const line of dump.split(/\r?\n/)) {
     const header = SERVICE_RECORD_HEADER.exec(line);
     if (header) {
-      current = {
-        indent: header[1].length,
-        userId: Number(header[2]),
-        packageName: header[3],
-        lines: [line],
-      };
+      current = { userId: Number(header[1]), packageName: header[2], lines: [line] };
       blocks.push(current);
-    } else if (current && line.trim() !== "" && indentOf(line) <= current.indent) {
+    } else if (isSectionHeader(line)) {
       current = undefined;
     } else {
       current?.lines.push(line);

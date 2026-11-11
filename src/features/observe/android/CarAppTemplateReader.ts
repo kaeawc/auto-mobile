@@ -39,6 +39,12 @@ export const CAR_APP_ROUTE_DISABLED_TTL_MS = 30_000;
 /** A read that failed (timeout, adb error, bad payload) is retried after this short interval. */
 export const CAR_APP_ROUTE_FAILED_RETRY_MS = 5_000;
 
+/**
+ * Back-to-back observations during projection reuse one `dumpsys activity services` read for this
+ * long, so they do not re-dump every service on the device each time.
+ */
+export const CAR_APP_PROJECTED_SERVICES_TTL_MS = 1_000;
+
 /** The route's answer: a snapshot document, no route at all, or a read that failed. */
 export type CarAppRouteRead =
   | { kind: "document"; document: CarAppTemplateDocument }
@@ -68,6 +74,11 @@ export class CarAppTemplateReader {
   /** The Android user each device's package was last read as; the hint for skipping a lookup. */
   private readonly lastUser = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<CarAppForegroundTemplates | undefined>>();
+  /** Per device: the last successful services dump's projected apps, or the dump still running. */
+  private readonly projectedAppsCache = new Map<
+    string,
+    { apps: Promise<ProjectedCarApp[] | undefined>; until: number }
+  >();
 
   constructor(
     private readonly adbFor: (device: BootedDevice) => CarAppAdb,
@@ -151,7 +162,35 @@ export class CarAppTemplateReader {
     };
   }
 
+  /**
+   * The apps Android Auto has bound, from a services dump reused for
+   * {@link CAR_APP_PROJECTED_SERVICES_TTL_MS}; overlapping observations share the running dump. A
+   * failed dump is not cached, so the next observation dumps again.
+   */
   private async projectedApps(device: BootedDevice): Promise<ProjectedCarApp[]> {
+    const now = this.timer.now();
+    for (const [deviceId, entry] of this.projectedAppsCache) {
+      if (entry.until <= now) {
+        this.projectedAppsCache.delete(deviceId);
+      }
+    }
+    const cached = this.projectedAppsCache.get(device.deviceId);
+    if (cached) {
+      return (await cached.apps) ?? [];
+    }
+    const entry = { apps: this.dumpProjectedApps(device), until: Number.POSITIVE_INFINITY };
+    this.projectedAppsCache.set(device.deviceId, entry);
+    const apps = await entry.apps;
+    if (apps === undefined) {
+      this.projectedAppsCache.delete(device.deviceId);
+      return [];
+    }
+    entry.until = this.timer.now() + CAR_APP_PROJECTED_SERVICES_TTL_MS;
+    return apps;
+  }
+
+  /** One services dump, parsed; undefined when it failed. */
+  private async dumpProjectedApps(device: BootedDevice): Promise<ProjectedCarApp[] | undefined> {
     try {
       const result = await raceWithDeadline(
         () =>
@@ -170,7 +209,7 @@ export class CarAppTemplateReader {
     } catch (error) {
       // The block is optional; an unreadable services dump just omits it for this observation.
       logger.debug(`car app services dump failed during projection: ${errorMessage(error)}`);
-      return [];
+      return undefined;
     }
   }
 

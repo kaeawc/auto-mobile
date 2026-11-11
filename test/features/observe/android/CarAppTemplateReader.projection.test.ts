@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ExecResult, ObserveResult } from "../../../../src/models";
 import type { ForegroundApp } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
+  CAR_APP_PROJECTED_SERVICES_TTL_MS,
   CAR_APP_ROUTE_ABSENT_TTL_MS,
   CarAppTemplateReader,
   type CarAppAdb,
@@ -157,6 +158,36 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
       contentCallBundle({ schemaVersion: 1, enabled: false, sessions: [] }),
     );
     expect(await reader.resolve(phone, projecting)).toBeUndefined();
+  });
+
+  test("back-to-back observations reuse one services dump until its TTL passes", async () => {
+    const { adb, timer, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
+    const dumps = () => adb.commands.filter((command) => command === DUMP).length;
+
+    await Promise.all([reader.resolve(phone, projecting), reader.resolve(phone, projecting)]);
+    expect(dumps()).toBe(1);
+    timer.advanceTime(CAR_APP_PROJECTED_SERVICES_TTL_MS - 1);
+    expect(await reader.resolve(phone, projecting)).toMatchObject({
+      projected: [{ packageName: FIXTURE_APP }],
+    });
+    expect(dumps()).toBe(1);
+    timer.advanceTime(1);
+    await reader.resolve(phone, projecting);
+    expect(dumps()).toBe(2);
+  });
+
+  test("a failed services dump is not cached", async () => {
+    const { adb, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
+    adb.dump = new Error("adb: device offline");
+    expect(await reader.resolve(phone, projecting)).toBeUndefined();
+
+    adb.dump = projectionServicesDump("one");
+    expect(await reader.resolve(phone, projecting)).toMatchObject({
+      projected: [{ packageName: FIXTURE_APP }],
+    });
+    expect(adb.commands.filter((command) => command === DUMP)).toHaveLength(2);
   });
 
   test("a failed services dump omits the block", async () => {

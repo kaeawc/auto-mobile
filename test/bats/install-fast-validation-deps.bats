@@ -17,6 +17,8 @@ setup() {
   # it. Run a copy of the script from a scratch repo-shaped directory instead.
   mkdir -p "${MOCK_BIN}/workspace/scripts/ci" "${MOCK_BIN}/workspace/scripts/lychee"
   cp "$SCRIPT" "${MOCK_BIN}/workspace/scripts/ci/install-fast-validation-deps.sh"
+  # xmlstarlet goes through the shared bounded apt helper beside it (#17930).
+  cp scripts/ci/install-apt-packages.sh "${MOCK_BIN}/workspace/scripts/ci/install-apt-packages.sh"
   SCRIPT="${MOCK_BIN}/workspace/scripts/ci/install-fast-validation-deps.sh"
   cat > "${MOCK_BIN}/workspace/scripts/lychee/install_lychee.sh" <<'STUB'
 #!/usr/bin/env bash
@@ -46,7 +48,8 @@ STUB
   # fallback overrides: they only survive when passed explicitly (via `env`).
   cat > "${MOCK_BIN}/sudo" <<'STUB'
 #!/usr/bin/env bash
-exec env -u FAST_VALIDATION_DEPS_FALLBACK_MIRROR -u FAST_VALIDATION_DEPS_UBUNTU_CODENAME "$@"
+exec env -u FAST_VALIDATION_DEPS_FALLBACK_MIRROR -u FAST_VALIDATION_DEPS_UBUNTU_CODENAME \
+  -u APT_INSTALL_FALLBACK_MIRROR -u APT_INSTALL_UBUNTU_CODENAME "$@"
 STUB
   chmod +x "${MOCK_BIN}/sudo"
   # Deterministic timeout/sleep stubs: no wall-clock delay or process signaling.
@@ -175,7 +178,13 @@ STUB
   local operation_count step_timeout_minutes
   operation_count=$(grep -cE '^[[:space:]]*(run_capture_status )?(run|try)_with_retry "[^$]' "$SCRIPT")
   step_timeout_minutes=$(grep -oE 'timeout-minutes: [0-9]+' "$SCRIPT" | head -1 | grep -oE '[0-9]+$')
-  [ "$operation_count" -eq 5 ]
+  # bats clone + bats install here, plus the apt helper's update, install and
+  # fallback, each handed CMD_TIMEOUT_SECONDS.
+  [ "$operation_count" -eq 2 ]
+  local helper_timeouts
+  helper_timeouts=$(grep -cE '^[[:space:]]*APT_INSTALL_(UPDATE_|FALLBACK_)?TIMEOUT_SECONDS="\$CMD_TIMEOUT_SECONDS"' "$SCRIPT")
+  [ "$helper_timeouts" -eq 3 ]
+  operation_count=$((operation_count + helper_timeouts))
   # The lychee install runs once under its own timeout (#17641).
   local lychee_timeout
   lychee_timeout=$(grep -oE 'LYCHEE_TIMEOUT_SECONDS:-[0-9]+' "$SCRIPT" | grep -oE '[0-9]+$')
@@ -245,8 +254,8 @@ echo "\$calls" > "${STATE_FILE}"
 echo "\$*" >> "${MOCK_BIN}/apt-args"
 if [ "\$calls" -eq 2 ] || [ "\$calls" -eq 3 ]; then exit 100; fi
 if [ "\$1" = "update" ] && [ "\$calls" -gt 1 ]; then
-  grep -q "fallback.example.test/ubuntu noble main universe" "\${2#*=}" 2>/dev/null || \
-    grep -q "fallback.example.test/ubuntu noble main universe" "\${3#*=}" 2>/dev/null || exit 99
+  # \$2 is "-o"; \$3 is Dir::Etc::sourcelist=<throwaway list>.
+  grep -q "fallback.example.test/ubuntu noble main universe" -- "\${3#*=}" < /dev/null 2>/dev/null || exit 99
 fi
 exit 0
 STUB
@@ -255,9 +264,34 @@ STUB
   echo "$output"
   [ "$status" -eq 0 ]
   [[ "$output" == *"falling back to http://fallback.example.test/ubuntu"* ]]
-  [[ "$output" == *"from fallback mirror"* ]]
+  [[ "$output" == *"Installed xmlstarlet from http://fallback.example.test/ubuntu"* ]]
   [[ "$output" == *"Fast Validation dependencies ready"* ]]
   [ "$(cat "$STATE_FILE")" -eq 5 ]
+}
+
+@test "falls back to the alternate mirror when the default apt-get update keeps failing" {
+  # The #17930 outage: the default mirror's index fetch exits 100 on every
+  # attempt. Calls 1-2 = default update fails, then the fallback's update +
+  # install (calls 3-4) succeed; the default install is never attempted.
+  cat > "${MOCK_BIN}/apt-get" <<STUB
+#!/usr/bin/env bash
+calls=0
+[ -f "${STATE_FILE}" ] && calls="\$(cat "${STATE_FILE}")"
+calls=\$((calls + 1))
+echo "\$calls" > "${STATE_FILE}"
+echo "\$*" >> "${MOCK_BIN}/apt-args"
+if [ "\$calls" -le 2 ]; then exit 100; fi
+exit 0
+STUB
+  chmod +x "${MOCK_BIN}/apt-get"
+  run bash "$SCRIPT"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"apt-get update failed after 2 attempts"* ]]
+  [[ "$output" == *"Installed xmlstarlet from http://fallback.example.test/ubuntu"* ]]
+  [[ "$output" == *"Fast Validation dependencies ready"* ]]
+  [ "$(cat "$STATE_FILE")" -eq 4 ]
+  grep -q 'Dir::Etc::sourcelist=' "${MOCK_BIN}/apt-args"
 }
 
 @test "fails loudly when the fallback mirror also fails" {
@@ -270,7 +304,8 @@ STUB
   chmod +x "${MOCK_BIN}/apt-get"
   run env FAST_VALIDATION_DEPS_MAX_ATTEMPTS=1 bash "$SCRIPT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"from fallback mirror failed after 1 attempts"* ]]
+  [[ "$output" == *"from http://fallback.example.test/ubuntu failed after 1 attempts"* ]]
+  [[ "$output" == *"could not install xmlstarlet"*"both failed or stalled"* ]]
 }
 
 @test "skips apt-get entirely when xmlstarlet is already on PATH" {

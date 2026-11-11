@@ -143,18 +143,24 @@ jobs:
   validate-xml:
     name: "Validate XML"
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # install-apt-packages.sh bounds its worst case (default and fallback
+    # mirror both stalled) at 615 s, so leave room to report it.
+    timeout-minutes: 15
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
 
+      # xmlstarlet is not preinstalled on ubuntu-latest. A plain apt-get here
+      # failed with exit 100 during a mirror outage (#17930); the helper bounds
+      # each apt call and falls back to archive.ubuntu.com (#17131).
       - name: "Run XMLStarlet"
         shell: "bash"
         run: |
-          sudo apt-get update
-          sudo apt-get install xmlstarlet
+          if ! command -v xmlstarlet > /dev/null 2>&1; then
+            scripts/ci/install-apt-packages.sh xmlstarlet
+          fi
           scripts/xml/validate_xml.sh
 
   ktfmt:

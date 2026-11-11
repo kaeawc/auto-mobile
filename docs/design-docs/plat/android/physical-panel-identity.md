@@ -44,7 +44,9 @@ the panel id, and pushed display transitions have never carried a panel key.
   A failed inventory read is retained as an unreadable outcome: explicit display keys, roles and
   aggregate observations fail with retryable `DisplayInventoryUnavailableError` rather than treating
   a fallback panel as a successful inventory. Unknown-key errors list real panels only after a
-  successful read; omitted and `active` selectors retain their default routing.
+  successful read; omitted and `active` selectors retain their default routing. A `pressButton`
+  whose `active` falls back to logical display 0 sends `input -d 0` and keeps its observations
+  unscoped, since the fallback key is not a selector the caller chose.
 - Overlay displays (`overlay_display_devices`, `type OVERLAY`, `uniqueId="overlay:N"`) have no
   SurfaceFlinger physical id, so they join the inventory after the physical panels under role
   `overlay` with the whole `overlay:N` as key: a bare `N` could be mistaken for a logical display

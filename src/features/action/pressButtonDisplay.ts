@@ -1,4 +1,5 @@
 import { ActionableError, type BootedDevice, type ObserveResult } from "../../models";
+import { displayInventoryOutcome } from "../../models/DeviceInfo";
 import type {
   AdbCommandRunner,
   AdbExecutor,
@@ -155,6 +156,16 @@ export async function pressButtonDisplay(
   const target = await (resolver
     ? resolver(display, signal)
     : resolvePressButtonDisplay(device, display, { adb, signal }));
+  // With an unreadable inventory `active` falls back to the default panel. Its fallback key is not
+  // a selector the caller chose, so the press's observations stay unscoped (they read display 0,
+  // where `input -d 0` sends the key) instead of re-checking that key as an explicit selector.
+  if (
+    display === "active" &&
+    device[displayInventoryOutcome]?.kind === "unreadable" &&
+    target.displayId === 0
+  ) {
+    return { displayId: 0 };
+  }
   return target;
 }
 

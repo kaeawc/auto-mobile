@@ -181,7 +181,8 @@ describe("scroll-until-visible synthetic iOS navigation occlusion (#9096)", () =
       reachedEnd: true,
       movedSwipes: 0,
     });
-    expect(scroll.swipeCount()).toBe(2);
+    // Two unchanged swipes forward, then two in the bounded reverse sweep.
+    expect(scroll.swipeCount()).toBe(4);
   });
 
   for (const overlay of ["bottomBar", "keyboard"] as const) {

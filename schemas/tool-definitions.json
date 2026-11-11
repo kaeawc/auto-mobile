@@ -51860,7 +51860,7 @@
                   "type": "string"
                 },
                 "maxUnchangedSwipes": {
-                  "description": "Stop after this many consecutive unchanged swipes (default: 2); increase for slow content",
+                  "description": "Consecutive unchanged swipes that end each search direction (default: 2): forward, then a reverse sweep; increase for slow content",
                   "type": "integer",
                   "exclusiveMinimum": 0,
                   "maximum": 9007199254740991
@@ -51886,7 +51886,7 @@
                   "type": "string"
                 },
                 "maxUnchangedSwipes": {
-                  "description": "Stop after this many consecutive unchanged swipes (default: 2); increase for slow content",
+                  "description": "Consecutive unchanged swipes that end each search direction (default: 2): forward, then a reverse sweep; increase for slow content",
                   "type": "integer",
                   "exclusiveMinimum": 0,
                   "maximum": 9007199254740991

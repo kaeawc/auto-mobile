@@ -80,7 +80,7 @@ const swipeOnLookForScope = {
     .positive()
     .optional()
     .describe(
-      "Stop after this many consecutive unchanged swipes (default: 2); increase for slow content",
+      "Consecutive unchanged swipes that end each search direction (default: 2): forward, then a reverse sweep; increase for slow content",
     ),
   container: nestedElementContainerSchema
     .optional()

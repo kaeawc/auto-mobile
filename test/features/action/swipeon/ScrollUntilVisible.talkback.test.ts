@@ -629,7 +629,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
     talkBackExecutor = new FakeTalkBackSwipeExecutor();
   });
 
-  test("reports reachedEnd when hierarchy is unchanged for two consecutive swipes", async () => {
+  test("reports reachedEnd when hierarchy is unchanged for two consecutive swipes each way", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     lookup.nextElementByText = null; // never found
 
@@ -648,7 +648,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
       success: false,
       reachedEnd: true,
       movedSwipes: 0,
-      scrollIterations: 2,
+      scrollIterations: 4,
     });
   });
 

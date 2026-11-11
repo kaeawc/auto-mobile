@@ -7,6 +7,7 @@ import {
   ActionableError,
   Element,
   ObserveResult,
+  SwipeDirection,
   SwipeOnOptions,
   SwipeOnResult,
   SwipeResult,
@@ -22,7 +23,7 @@ import { waitForScrollIdle } from "../../../utils/scrollIdle";
 import type { DisplayFence, ProgressCallback } from "../BaseVisualChange";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { type SwipeCounter } from "./searchCancellation";
-import { capLookForTravel, visibleScrollKeys } from "./lookForScroll";
+import { capLookForTravel, oppositeDirection, visibleScrollKeys } from "./lookForScroll";
 import type { AndroidSearchDragState } from "./androidSearchDrag";
 import type {
   ScrollUntilVisibleDependencies,
@@ -78,6 +79,10 @@ interface ScrollSearchOperations {
     containerElement: Element,
     observation: ObserveResult,
   ): Element["bounds"];
+  computeHalfScreenReverseCoords(
+    reverseDir: SwipeDirection,
+    effectiveBounds: { left: number; top: number; right: number; bottom: number },
+  ): { startX: number; startY: number; endX: number; endY: number };
   dispatchSearchSwipe(options: SearchSwipeDispatchOptions): Promise<SwipeResult>;
   matchInterruptedDisplaySearch(
     options: SwipeOnOptions,
@@ -92,6 +97,7 @@ interface ScrollSearchOperations {
   ): Promise<Element | null>;
   shouldGuardSearchStep(options: {
     failedAndroidSwipe: boolean;
+    reverseMode: boolean;
     overlapRecoveryUsed: boolean;
     searchDragState: AndroidSearchDragState;
   }): boolean;
@@ -144,6 +150,10 @@ export class ScrollSearchSession {
   private interruptedDisplay?: StaleDisplayDetails;
   private swipeWarning?: string;
   private lastAndroidSwipeError?: string;
+  /** Forward reached its end; a bounded half-screen slow sweep now searches back (#1449, #9678). */
+  private reverseMode = false;
+  private reverseDirection!: SwipeDirection;
+  private reverseOptions!: SwipeOnResolvedOptions;
   private fallbackLogged = false;
   /** The backend that brought the target into view, when the page scrolled it there (#5162). */
   private webScroll?: IosSdkTapOutcome;
@@ -474,13 +484,16 @@ export class ScrollSearchSession {
   private initializeLoop(): void {
     this.searchDragState = {};
     this.overlapRecoveryUsed = false;
+    this.reverseMode = false;
+    this.reverseDirection = oppositeDirection(this.request.options.direction);
+    this.reverseOptions = { ...this.lookForOptions, speed: "slow" as const };
   }
 
   private createStep(): SearchStep {
     throwIfAborted(this.request.signal);
     this.scrollIteration++;
     logger.info(
-      `[SwipeOn] Iteration ${this.scrollIteration}: elapsed=${this.deps.timer.now() - this.startTime}ms, unchangedScrollCount=${this.unchangedScrollCount}/${this.maxUnchangedScrolls}`,
+      `[SwipeOn] Iteration ${this.scrollIteration}: elapsed=${this.deps.timer.now() - this.startTime}ms, reverseMode=${this.reverseMode}, unchangedScrollCount=${this.unchangedScrollCount}/${this.maxUnchangedScrolls}`,
     );
 
     // The container was resolved from the latest observation (initially above,
@@ -492,23 +505,28 @@ export class ScrollSearchSession {
       this.lastObservation,
     );
     this.swipeWarning = swipeCoordinates.warning ?? this.swipeWarning;
-    // Perform scroll in the requested direction; the overlap guard owns bounded back-scrolls.
+    const reverseBounds = this.host.resolveReverseBounds(
+      this.request.options,
+      this.containerElement,
+      this.lastObservation,
+    );
+    // Forward uses the requested direction (the overlap guard owns bounded back-scrolls);
+    // once forward reaches its end, a half-screen slow reverse sweep searches back.
     const previousKeys = visibleScrollKeys(this.lastObservation, this.containerElement);
-    const activeCoords =
-      this.deps.device.platform === "android" && this.request.strategy
-        ? capLookForTravel(
-            swipeCoordinates,
-            this.host.resolveReverseBounds(
-              this.request.options,
-              this.containerElement,
-              this.lastObservation,
-            ),
-          )
+    const activeCoords = this.reverseMode
+      ? this.host.computeHalfScreenReverseCoords(this.reverseDirection, reverseBounds)
+      : this.deps.device.platform === "android" && this.request.strategy
+        ? capLookForTravel(swipeCoordinates, reverseBounds)
         : swipeCoordinates;
+    const activeDirection = this.reverseMode
+      ? this.reverseDirection
+      : this.request.options.direction;
     const activeDuration = this.deps.getDuration(
-      this.request.strategy && this.deps.device.platform === "android"
-        ? { ...this.lookForOptions, duration: undefined, speed: "slow" }
-        : this.lookForOptions,
+      this.reverseMode
+        ? this.reverseOptions
+        : this.request.strategy && this.deps.device.platform === "android"
+          ? { ...this.lookForOptions, duration: undefined, speed: "slow" }
+          : this.lookForOptions,
     );
     const { startX, startY, endX, endY } = activeCoords;
     const chromeStartWarning = iosSwipeStartWarning({
@@ -518,7 +536,7 @@ export class ScrollSearchSession {
       startY: Math.floor(startY),
     });
     logger.info(
-      `[SwipeOn] Swipe: direction=${this.request.options.direction}, coords=(${Math.floor(startX)},${Math.floor(startY)})→(${Math.floor(endX)},${Math.floor(endY)}), duration=${activeDuration}ms`,
+      `[SwipeOn] Swipe: direction=${activeDirection}, coords=(${Math.floor(startX)},${Math.floor(startY)})→(${Math.floor(endX)},${Math.floor(endY)}), duration=${activeDuration}ms`,
     );
 
     return {
@@ -526,7 +544,7 @@ export class ScrollSearchSession {
       chromeStartWarning,
       dispatch: {
         coordinates: activeCoords,
-        direction: this.request.options.direction,
+        direction: activeDirection,
         duration: activeDuration,
         options: this.request.options,
         containerElement: this.containerElement,
@@ -684,6 +702,7 @@ export class ScrollSearchSession {
     if (
       this.host.shouldGuardSearchStep({
         failedAndroidSwipe,
+        reverseMode: this.reverseMode,
         overlapRecoveryUsed: this.overlapRecoveryUsed,
         searchDragState: this.searchDragState,
       })
@@ -788,7 +807,9 @@ export class ScrollSearchSession {
         `[SwipeOn] Iteration ${this.scrollIteration}: unchanged count now ${this.unchangedScrollCount}/${this.maxUnchangedScrolls}`,
       );
 
-      this.reachedEnd = this.unchangedScrollCount >= this.maxUnchangedScrolls;
+      if (this.unchangedScrollCount >= this.maxUnchangedScrolls) {
+        this.onDirectionExhausted();
+      }
     } else {
       // Stale, failed or guard-restored steps cannot establish consecutive no-change evidence.
       this.unchangedScrollCount = 0;
@@ -796,6 +817,19 @@ export class ScrollSearchSession {
     this.lastFingerprint = currentFingerprint;
 
     logger.info(`[SwipeOn] Iteration ${this.scrollIteration}: ${this.target} not yet found`);
+  }
+
+  /** Forward end switches to the reverse sweep; reachedEnd only once both directions are exhausted. */
+  private onDirectionExhausted(): void {
+    if (this.reverseMode) {
+      this.reachedEnd = true;
+      return;
+    }
+    this.reverseMode = true;
+    this.unchangedScrollCount = 0;
+    logger.info(
+      `[SwipeOn] Reached end in forward direction without finding ${this.target}, switching to reverse half-screen recovery`,
+    );
   }
 
   private async finish(): Promise<SwipeOnResult> {
@@ -808,9 +842,9 @@ export class ScrollSearchSession {
       }
       if (this.reachedEnd) {
         const error =
-          `Scroll reached end of container (no change after ${this.maxUnchangedScrolls} consecutive swipes). ` +
-          `${this.target} not found${this.scopeDescription}. ${this.movedSwipes} swipes moved the screen. ` +
-          "Try the opposite direction.";
+          `Scroll reached end of container in both directions (${this.request.options.direction} and ${this.reverseDirection}; ` +
+          `no change after ${this.maxUnchangedScrolls} consecutive swipes each way). ` +
+          `${this.target} not found${this.scopeDescription}. ${this.movedSwipes} swipes moved the screen.`;
         logger.info(`[SwipeOn] ${error}`);
         await this.deps.captureTerminalObservationScreenshot?.(this.lastObservation, this.perf);
         return {

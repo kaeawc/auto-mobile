@@ -306,6 +306,8 @@ export class ScrollUntilVisible {
             resolveContainerSwipeCoordinates: (...args) =>
               this.resolveContainerSwipeCoordinates(...args),
             resolveReverseBounds: (...args) => this.resolveReverseBounds(...args),
+            computeHalfScreenReverseCoords: (...args) =>
+              this.computeHalfScreenReverseCoords(...args),
             dispatchSearchSwipe: (dispatch) =>
               this.dispatchSearchSwipe(dispatch, (warning) => {
                 xrWarning = warning;
@@ -358,12 +360,14 @@ export class ScrollUntilVisible {
 
   private shouldGuardSearchStep(options: {
     failedAndroidSwipe: boolean;
+    reverseMode: boolean;
     overlapRecoveryUsed: boolean;
     searchDragState: AndroidSearchDragState;
   }): boolean {
     return (
       this.deps.device.platform === "android" &&
       !options.failedAndroidSwipe &&
+      !options.reverseMode &&
       !options.overlapRecoveryUsed &&
       !options.searchDragState.pagingStep
     );

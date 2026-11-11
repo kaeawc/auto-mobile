@@ -15,6 +15,8 @@ import { xrBackStack } from "../../../helpers/xrHeadset";
 
 const VIEWPORT = 1800;
 const PITCH = 300;
+// From the end (offset 24), each half-screen reverse sweep moves three rows: eight swipes reach the top.
+const MOVED_BACK = 8;
 interface Step {
   x1: number;
   y1: number;
@@ -133,21 +135,31 @@ test("lookFor row 11 is found without a fling", async () => {
   });
 });
 
-test("a search already past its target stops after two unchanged swipes with an opposite-direction hint", async () => {
+test("a search already past its target stalls at the end, then finds it in the reverse sweep", async () => {
+  const h = listHarness({ initialOffset: 24 });
+  const result = await h.search("row 12");
+  expect(result).toMatchObject({ success: true, found: true, element: { text: "row 12" } });
+  expect(result.reachedEnd).toBeUndefined();
+  // Two unchanged forward swipes establish the end before the sweep turns back.
+  expect(h.steps.slice(0, 2).every((step) => step.y2 < step.y1)).toBe(true);
+  expect(h.steps.slice(2).every((step) => step.y2 > step.y1)).toBe(true);
+  expect(h.steps.length).toBeGreaterThan(2);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("a target missing in both directions reports reachedEnd after both sweeps", async () => {
   const h = listHarness({ initialOffset: 24 });
   const result = await h.search("Item 12");
   expect(result).toMatchObject({
     success: false,
     found: false,
     reachedEnd: true,
-    movedSwipes: 0,
-    scrollIterations: 2,
-    error:
-      'Scroll reached end of container (no change after 2 consecutive swipes). text "Item 12" not found. 0 swipes moved the screen. Try the opposite direction.',
+    movedSwipes: MOVED_BACK,
+    scrollIterations: 4 + MOVED_BACK,
+    error: `Scroll reached end of container in both directions (up and down; no change after 2 consecutive swipes each way). text "Item 12" not found. ${MOVED_BACK} swipes moved the screen.`,
   });
-  expect(h.steps).toHaveLength(2);
-  expect(h.steps.every((step) => step.y2 < step.y1)).toBe(true);
-  expect(h.timer.now()).toBe(1400);
+  expect(h.steps.slice(0, 2).every((step) => step.y2 < step.y1)).toBe(true);
+  expect(h.steps.slice(2).every((step) => step.y2 > step.y1)).toBe(true);
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
 
@@ -157,16 +169,18 @@ test("end detection counts only swipes that changed the settled screen", async (
   expect(result).toMatchObject({
     success: false,
     reachedEnd: true,
-    movedSwipes: 6,
-    scrollIterations: 8,
+    // Six forward swipes reach the end and two unchanged ones confirm it; the reverse
+    // sweep then moves back to the top and two more unchanged swipes confirm that end.
+    movedSwipes: 6 + MOVED_BACK,
+    scrollIterations: 8 + MOVED_BACK + 2,
   });
-  expect(h.steps).toHaveLength(8);
-  expect(h.timer.now()).toBe(5600);
+  expect(h.steps).toHaveLength(8 + MOVED_BACK + 2);
+  expect(h.timer.now()).toBe(12600);
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
 
 test.each([1, 3])(
-  "a stationary list stops at the configured threshold of %i swipes",
+  "a list at its end turns back after the configured threshold of %i swipes",
   async (maxUnchangedSwipes) => {
     const h = listHarness({ initialOffset: 24 });
     expect(
@@ -174,10 +188,11 @@ test.each([1, 3])(
     ).toMatchObject({
       success: false,
       reachedEnd: true,
-      movedSwipes: 0,
-      scrollIterations: maxUnchangedSwipes,
+      movedSwipes: MOVED_BACK,
+      scrollIterations: 2 * maxUnchangedSwipes + MOVED_BACK,
     });
-    expect(h.steps).toHaveLength(maxUnchangedSwipes);
+    expect(h.steps.slice(0, maxUnchangedSwipes).every((step) => step.y2 < step.y1)).toBe(true);
+    expect(h.steps.slice(maxUnchangedSwipes).every((step) => step.y2 > step.y1)).toBe(true);
     expect(h.timer.getSleepHistory()).toEqual([]);
   },
 );
@@ -261,16 +276,17 @@ test("unrecoverable zero overlap falls back to the normal end-of-list detector",
   const h = listHarness({ overshoot: true, stuckRecovery: true });
   expect(await h.search("row 11")).toMatchObject({ success: false, reachedEnd: true });
   expect(h.steps.filter((step) => step.y2 < step.y1)).toHaveLength(3);
-  expect(h.steps).toHaveLength(6);
+  // The stuck list cannot move back either, so the reverse sweep ends after two unchanged swipes.
+  expect(h.steps).toHaveLength(8);
 });
 
-test("an absent target reports the requested-direction end without reverse swipes", async () => {
+test("an absent target reports reachedEnd only after the reverse sweep", async () => {
   const h = listHarness();
   expect(await h.search("absent")).toMatchObject({ success: false, reachedEnd: true });
-  expect(h.steps.length).toBeLessThan(20);
+  expect(h.steps.length).toBeLessThan(40);
   expect(h.timer.now()).toBeLessThan(15000);
   const last = h.steps.at(-1)!;
-  expect(last.y2).toBeLessThan(last.y1);
+  expect(last.y2).toBeGreaterThan(last.y1);
 });
 
 test("iOS skips the Android overlap guard while preserving its gesture parameters", async () => {

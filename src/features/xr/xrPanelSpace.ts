@@ -121,17 +121,9 @@ export async function withXrPoseWarning<
   return xrWarning ? { ...result, warning: appendWarning(result.warning, xrWarning) } : result;
 }
 
-/** The eye screenshot is square; fullscreen tasks recover display size when screenSize is the IME. */
-export function xrScreenshotSize(observation: {
-  screenSize: Size;
-  screenshotImageSize?: Size;
-  backStack?: BackStackInfo;
-}): Size {
-  if (observation.screenshotImageSize) {
-    return observation.screenshotImageSize;
-  }
+function fullscreenTaskExtent(backStack: BackStackInfo | undefined): Size | undefined {
   let display: Size | undefined;
-  for (const task of observation.backStack?.tasks ?? []) {
+  for (const task of backStack?.tasks ?? []) {
     const bounds = task.bounds;
     if (
       task.windowingMode !== "fullscreen" ||
@@ -146,6 +138,19 @@ export function xrScreenshotSize(observation: {
       display = { width, height };
     }
   }
+  return display;
+}
+
+/** The eye screenshot is square; fullscreen tasks recover display size when screenSize is the IME. */
+export function xrScreenshotSize(observation: {
+  screenSize: Size;
+  screenshotImageSize?: Size;
+  backStack?: BackStackInfo;
+}): Size {
+  if (observation.screenshotImageSize) {
+    return observation.screenshotImageSize;
+  }
+  const display = fullscreenTaskExtent(observation.backStack);
   const side = Math.min(
     Math.max(observation.screenSize.width, display?.width ?? observation.screenSize.width),
     Math.max(observation.screenSize.height, display?.height ?? observation.screenSize.height),

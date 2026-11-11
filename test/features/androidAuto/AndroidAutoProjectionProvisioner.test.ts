@@ -124,7 +124,11 @@ class FakeLauncher implements DesktopHeadUnitLauncher {
   }
 }
 
-function setup(outcomes: DhuLaunchOutcome[] = [], signerCheck?: AndroidAutoSignerCheck) {
+function setup(
+  outcomes: DhuLaunchOutcome[] = [],
+  signerCheck?: AndroidAutoSignerCheck,
+  portHeldElsewhere = false,
+) {
   const ui = new FakeUi();
   const phone = new FakePhone(ui);
   const verified: string[][] = [];
@@ -140,7 +144,7 @@ function setup(outcomes: DhuLaunchOutcome[] = [], signerCheck?: AndroidAutoSigne
       },
     },
     dhu: launcher,
-    hostPorts: { isPortAvailable: () => !phone.redirected },
+    hostPorts: { isPortAvailable: () => !phone.redirected && !portHeldElsewhere },
     timer,
     recoveryBackoff: fixedBackoff(1_000),
   });
@@ -269,5 +273,33 @@ describe("AndroidAutoProjectionProvisioner", () => {
     await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
       "only one emulator per host",
     );
+  });
+
+  test("refuses a host port 5277 it did not redirect to this device", async () => {
+    const { phone, launcher, provisioner } = setup([], undefined, true);
+    await expect(provisioner.provision(request())).rejects.toThrow(
+      "a redirect or process AutoMobile did not create",
+    );
+    expect(phone.changes).not.toContain("redirect");
+    expect(launcher.launches).toBe(0);
+  });
+
+  test("concurrent calls for one device share a single run and DHU launch", async () => {
+    const { launcher, provisioner } = setup();
+    const [first, second] = await Promise.all([
+      provisioner.provision(request()),
+      provisioner.provision(request()),
+    ]);
+    expect(launcher.launches).toBe(1);
+    expect(second).toBe(first);
+  });
+
+  test("refuses another device while a run is in flight", async () => {
+    const { provisioner } = setup();
+    const first = provisioner.provision(request());
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "is in progress",
+    );
+    await first;
   });
 });

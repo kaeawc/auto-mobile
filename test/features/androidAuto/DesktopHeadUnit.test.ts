@@ -98,6 +98,16 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     expect(() => result.session.sendCommand("day")).toThrow("not running");
   });
 
+  test("interleaved stderr output never splices a stdout line", async () => {
+    const { timer, child, launch } = setup();
+    const outcome = launch();
+    child.print("conn");
+    child.stderr.emit("data", "diagnostic\n");
+    child.print("ected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    expect(await outcome).toMatchObject({ status: "connected" });
+  });
+
   test("no connected. line before the timeout is a no-connect and kills the DHU", async () => {
     const { timer, child, launch } = setup();
     const outcome = launch();

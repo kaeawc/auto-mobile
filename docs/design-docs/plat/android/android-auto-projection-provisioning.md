@@ -46,9 +46,11 @@ changes nothing when it already holds, so a rerun on a provisioned phone reports
 - **Developer mode** reads as on when Android Auto's overflow menu lists **Developer settings**.
 - **Head unit server** reads as on when port 5277 is listening on the phone.
 - **Transport** is `adb emu redir add tcp:5277:5277`, not `adb forward`: a forward is dropped with the
-  adb transport and takes the projection with it. A bound host port 5277 counts as already redirected.
-  The DHU dials host port 5277, so one emulator per host projects at a time; the provisioner refuses a
-  second device while a session is running.
+  adb transport and takes the projection with it. A bound host port 5277 counts as redirected only when
+  this provisioner redirected it to the same device; any other holder, such as another emulator's
+  leftover redirect, is refused rather than risk projecting the wrong phone. The DHU dials host port
+  5277, so one emulator per host projects at a time: a concurrent call for the same device joins the
+  run in progress, and the provisioner refuses another device while a run or a session is active.
 - **Welcome screen.** **Continue** accepts Android Auto's terms on the user's behalf, so it is tapped
   only when the request sets `acceptAndroidAutoTerms`; otherwise a pending screen is reported as
   `skipped`.

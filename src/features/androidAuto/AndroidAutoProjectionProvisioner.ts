@@ -76,11 +76,43 @@ type Probe = (signal?: AbortSignal) => Promise<boolean>;
  */
 export class AndroidAutoProjectionProvisioner {
   private readonly sessions = new Map<string, DesktopHeadUnitSession>();
+  /** The device this provisioner redirected host port 5277 to, if any. */
+  private redirectOwner: string | null = null;
+  /** The provisioning run in progress; the host has one port 5277, so at most one runs. */
+  private inFlight: { deviceId: string; run: Promise<AndroidAutoProjectionResult> } | null = null;
 
   constructor(private readonly deps: AndroidAutoProjectionProvisionerDeps) {}
 
-  async provision(request: AndroidAutoProjectionRequest): Promise<AndroidAutoProjectionResult> {
-    this.assertSingleProjection(request.deviceId);
+  /**
+   * Provisions `request.deviceId`. A concurrent call for the same device joins the run in
+   * progress; one for another device is refused, since both would claim host port 5277.
+   */
+  provision(request: AndroidAutoProjectionRequest): Promise<AndroidAutoProjectionResult> {
+    if (this.inFlight) {
+      if (this.inFlight.deviceId === request.deviceId) {
+        return this.inFlight.run;
+      }
+      return Promise.reject(
+        new ActionableError(
+          `Android Auto provisioning for ${this.inFlight.deviceId} is in progress. The DHU dials host port ${HEAD_UNIT_SERVER_PORT}, so only one emulator per host can project; retry after it finishes.`,
+        ),
+      );
+    }
+    try {
+      this.assertSingleProjection(request.deviceId);
+    } catch (error) {
+      return Promise.reject(toActionableError(error, "Android Auto provisioning refused"));
+    }
+    const run = this.runProvisioning(request).finally(() => {
+      this.inFlight = null;
+    });
+    this.inFlight = { deviceId: request.deviceId, run };
+    return run;
+  }
+
+  private async runProvisioning(
+    request: AndroidAutoProjectionRequest,
+  ): Promise<AndroidAutoProjectionResult> {
     const { phone, ui } = this.deps;
     const signal = request.signal;
     const steps: AndroidAutoProvisioningStep[] = [await this.installAndroidAuto(request)];
@@ -126,7 +158,7 @@ export class AndroidAutoProjectionProvisioner {
       ),
     );
     steps.push(await this.ensureHeadUnitServer(signal));
-    steps.push(await this.ensureTransport(signal));
+    steps.push(await this.ensureTransport(request.deviceId, signal));
     const dhu = await this.ensureDesktopHeadUnit(request);
     steps.push(dhu.step, await this.handleOnboarding(request));
     return { steps, session: dhu.session };
@@ -182,16 +214,29 @@ export class AndroidAutoProjectionProvisioner {
     return { step: "head-unit-server", status: "applied" };
   }
 
-  private async ensureTransport(signal?: AbortSignal): Promise<AndroidAutoProvisioningStep> {
-    if (!this.deps.hostPorts.isPortAvailable(HEAD_UNIT_SERVER_PORT)) {
-      return {
-        step: "transport",
-        status: "already-done",
-        detail: `host port ${HEAD_UNIT_SERVER_PORT} is already bound, by this emulator's redirect or another emulator's`,
-      };
+  /**
+   * A bound host port counts as redirected only when this provisioner redirected it to the
+   * same device. Any other holder (another emulator's leftover redirect, an unrelated
+   * process) would make the DHU project the wrong phone, so it is refused.
+   */
+  private async ensureTransport(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<AndroidAutoProvisioningStep> {
+    if (this.deps.hostPorts.isPortAvailable(HEAD_UNIT_SERVER_PORT)) {
+      await this.deps.phone.addHeadUnitRedirect(signal);
+      this.redirectOwner = deviceId;
+      return { step: "transport", status: "applied" };
     }
-    await this.deps.phone.addHeadUnitRedirect(signal);
-    return { step: "transport", status: "applied" };
+    if (this.redirectOwner === deviceId) {
+      return { step: "transport", status: "already-done" };
+    }
+    const holder = this.redirectOwner
+      ? `${this.redirectOwner}'s redirect`
+      : "a redirect or process AutoMobile did not create";
+    throw new ActionableError(
+      `Host port ${HEAD_UNIT_SERVER_PORT} is held by ${holder}, so the DHU would project that instead of ${deviceId}. Remove it (adb -s <serial> emu redir del tcp:${HEAD_UNIT_SERVER_PORT}) or stop the process holding the port, then retry.`,
+    );
   }
 
   private async ensureDesktopHeadUnit(

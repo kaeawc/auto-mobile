@@ -124,7 +124,8 @@ function watchLaunch(
   return new Promise<DhuLaunchOutcome>((resolve) => {
     let phase: Phase = "connecting";
     let pingTimeouts = 0;
-    let pending = "";
+    // One partial-line buffer per stream, so interleaved stdout/stderr chunks never splice a line.
+    const pending = { stdout: "", stderr: "" };
     let timeout: NodeJS.Timeout | null = null;
 
     const arm = (ms: number, onTimeout: () => void) => {
@@ -166,17 +167,18 @@ function watchLaunch(
         }
       }
     };
-    const onData = (chunk: Buffer | string) => {
-      const lines = `${pending}${chunk.toString()}`.split(/\r?\n/);
-      pending = lines.pop() ?? "";
+    const onData = (stream: keyof typeof pending) => (chunk: Buffer | string) => {
+      const lines = `${pending[stream]}${chunk.toString()}`.split(/\r?\n/);
+      pending[stream] = lines.pop() ?? "";
       lines.forEach(onLine);
     };
 
-    child.stdout.on("data", onData);
-    child.stderr.on("data", onData);
+    child.stdout.on("data", onData("stdout"));
+    child.stderr.on("data", onData("stderr"));
     child.once("exit", (code) => {
       const status = phase === "settling" ? "stalled" : "no-connect";
-      const tail = pending.trim() ? `: ${pending.trim()}` : "";
+      const last = `${pending.stdout} ${pending.stderr}`.trim();
+      const tail = last ? `: ${last}` : "";
       finish({ status, detail: `the DHU exited (code ${code ?? "none"})${tail}` });
     });
     child.once("error", (error) => fail("no-connect", error.message));

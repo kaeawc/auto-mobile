@@ -826,24 +826,34 @@ class ImeCommitDriver(
         return it
       }
       var offset = 0
+      var nextUnit = 0
       var confirmed = 0
+      var matchedOffset = 0
+      var swallowed = false
       while (offset < applied.length) {
-        val unit = dispatched.getOrNull(confirmed)
+        val unit = dispatched.getOrNull(nextUnit) ?: return null
         when {
-          unit != null && unit.isNotEmpty() && applied.startsWith(unit, offset) -> {
+          unit.isNotEmpty() && applied.startsWith(unit, offset) -> {
             offset += unit.length
-            confirmed++
+            nextUnit++
+            confirmed = nextUnit
+            matchedOffset = offset
           }
-          (unit == null || !FORMATTING.containsMatchIn(unit)) &&
-            FORMATTING.matchesAt(applied, offset) ->
+          unit.isNotEmpty() && FORMATTING.replace(unit, "").isEmpty() -> {
+            nextUnit++
+            swallowed = true
+          }
+          !FORMATTING.containsMatchIn(unit) && FORMATTING.matchesAt(applied, offset) ->
             offset += Character.charCount(applied.codePointAt(offset))
           else -> return null
         }
       }
+      // A later match must anchor swallowed units; a transformed tail is ambiguous, not a loss.
+      if (swallowed && matchedOffset != offset) return null
       return confirmed.takeIf { it > 0 }
     }
 
-    // Match complete editing units first; only unmatched editor formatting may be skipped.
+    // Match complete editing units first; only formatting may be skipped or swallowed.
     private val FORMATTING = Regex("[^\\p{L}\\p{N}\\p{M}]")
 
     private fun exactConfirmedUnits(applied: String, dispatched: List<String>): Int? {

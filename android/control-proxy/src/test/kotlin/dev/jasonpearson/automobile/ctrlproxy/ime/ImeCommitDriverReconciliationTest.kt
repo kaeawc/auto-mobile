@@ -23,6 +23,105 @@ internal class ImeCommitDriverReconciliationTest : ImeCommitDriverFixtures() {
   }
 
   @Test
+  fun `transformed trailing punctuation during restart continues without resend`() {
+    for ((text, delta) in
+      listOf("ok..." to "ok…", "hello\"" to "hello”", "hi :)" to "hi 🙂", "a--" to "a—")) {
+      val units = Regex("\\X").findAll(text).map { it.value }.toList()
+      assertEquals(
+        text,
+        ImeCommitDriver.Reconciliation.Continue,
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(false, true, "", delta, units),
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `replaced typed formatting confirms captured phone prefixes and complete delta`() {
+    for ((text, delta, count) in
+      listOf(
+        Triple("(512) 555-0142", " 512-5", 7),
+        Triple("(512) 555-0142", " 512-555-0", 11),
+        Triple("(512) 555-0142", " 512-555-0142", 14),
+        Triple("512-5550142", " 512-5", 5),
+        Triple("512-5550142", " 512-555-0", 8),
+        Triple("512-5550142", " 512-555-0142", 11),
+      )) {
+      val units = Regex("\\X").findAll(text).map { it.value }.toList()
+      for (postDispatch in listOf(false, true)) {
+        val expected =
+          when {
+            count < units.size -> ImeCommitDriver.Reconciliation.Resume(count)
+            postDispatch -> ImeCommitDriver.Reconciliation.Succeed(delta)
+            else -> ImeCommitDriver.Reconciliation.Continue
+          }
+        assertEquals(
+          "text=$text delta=$delta postDispatch=$postDispatch",
+          expected,
+          ImeCommitDriver.reconcileDecision(
+            ImeReconciliationState(postDispatch, true, "", delta, units),
+          ),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `later exact match confirms replaced mixed punctuation`() {
+    val units = Regex("\\X").findAll("a:)b").map { it.value }.toList()
+    for (postDispatch in listOf(false, true)) {
+      assertEquals(
+        if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("a🙂b")
+        else ImeCommitDriver.Reconciliation.Continue,
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(postDispatch, true, "", "a🙂b", units),
+        ),
+      )
+      assertEquals(
+        ImeCommitDriver.Reconciliation.Resume(4),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(postDispatch, true, "", "a🙂b", units + "c"),
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `formatting remaining after dispatched units run out is not confirmed`() {
+    // Boundary perturbations, not additional device captures.
+    for ((text, delta) in listOf("a:)b" to "a🙂b-", "ab" to " ab-")) {
+      val units = Regex("\\X").findAll(text).map { it.value }.toList()
+      assertEquals(
+        text,
+        ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", delta),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(false, false, "", delta, units),
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `swallowed formatting requires a match at the end of the entire delta`() {
+    // Boundary perturbations, not additional device captures.
+    for ((text, delta) in
+      listOf("ok...x" to "ok…", "a:)b" to "a🙂", "a:)b" to "a🙂b-", "a:)bc" to "a🙂b-")) {
+      val units = Regex("\\X").findAll(text).map { it.value }.toList()
+      for (postDispatch in listOf(false, true)) {
+        assertEquals(
+          "text=$text delta=$delta postDispatch=$postDispatch",
+          if (postDispatch) ImeCommitDriver.Reconciliation.Succeed(delta)
+          else ImeCommitDriver.Reconciliation.Continue,
+          ImeCommitDriver.reconcileDecision(
+            ImeReconciliationState(postDispatch, true, "", delta, units),
+          ),
+        )
+      }
+    }
+  }
+
+  @Test
   fun `formatting extras confirm captured phone prefixes and complete delta`() {
     val units = "5125550142".map { it.toString() }
     for ((delta, count) in listOf(" 512-5" to 4, " 512-555-0" to 7, " 512-555-0142" to 10)) {

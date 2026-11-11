@@ -59,6 +59,7 @@ import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { InMemoryIosCameraPosterRegistry } from "../../src/features/utility/ios/IosCameraPosterRegistry";
 import { FakeWebSocket } from "../fakes/FakeWebSocket";
 import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -3921,6 +3922,52 @@ describe("killDevice handler", () => {
 
     expect(pool.getDevice(image.deviceId!)).toBeNull();
     expect(registry.getByUuid(deviceSession.deviceSessionUuid)).toBeUndefined();
+  });
+
+  test("clears the simulator's recorded camera poster on kill", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const posters = new InMemoryIosCameraPosterRegistry();
+    const udid = "11111111-2222-3333-4444-555555555555";
+    posters.set(udid, { kind: "image", path: "/tmp/poster.png" });
+    posters.set("other-udid", { kind: "image", path: "/tmp/other.png" });
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      iosCameraPosterRegistry: posters,
+      timer,
+    });
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+    const image: DeviceInfo = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: udid,
+      isRunning: false,
+      source: "local",
+    };
+    successfulManager.setDeviceImages("ios", [image]);
+    const { pool, registry } = createRegistryWiredDevicePool(
+      sessionManager,
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      new FakeDeviceSessionRepository(),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await tool.handler({ device: { name: image.name, platform: "ios", deviceId: udid } });
+
+    expect(posters.get(udid)).toBeUndefined();
+    expect(posters.get("other-udid")).toEqual({ kind: "image", path: "/tmp/other.png" });
   });
 
   test("releases an iOS shutdown reservation after a late CtrlProxy teardown failure", async () => {

@@ -38,8 +38,13 @@ An injected `IosCameraPosterRegistry` stores image paths or QR text plus generat
 by simulator UDID, with an in-memory process-wide default. `startDevice` records after selecting
 or booting the simulator, including already-running simulators. `setDeviceState` validates host
 PNG/JPG/JPEG files and records or clears the poster. Whitespace is allowed; `surface` is echoed
-and ignored. State is write-only and lasts until cleared or daemon restart, independently of app
-and session lifetime.
+and ignored. Both run the dylib provider's `ensure()` before recording, so a missing compiler,
+source or override fails the call that sets the poster and leaves the previous record intact;
+`clear` never builds. A record lasts until cleared, the simulator's `killDevice` completes
+(post-shutdown cleanup clears the UDID), its session is released (`SessionReleaseBroadcaster`
+with a device snapshot; upgrade-only re-announcements are ignored because the device may already
+belong to the next owner), the daemon removes the device, or the daemon restarts. A session that
+reuses the simulator therefore never inherits an earlier session's poster.
 
 `setDeviceState` returns `supported: true`, `method: "ios_simulator_dyld_injection"`, the path
 when set, and `relaunchRequired: true`. It never relaunches an app automatically. Every running
@@ -48,6 +53,9 @@ forces a cold launch and returns `cameraPosterApplied: true`; after clearing, us
 `launchApp coldBoot: true` to remove injection from a running app. Existing DYLD entries and
 `prototype: true` injection compose: both libraries remain in the colon-separated list and the
 prototype port/token environment is preserved. Without a registered poster, launch is unchanged.
+Like `prototype: true`, injection skips `com.apple.*` bundles (SpringBoard and system apps cannot
+be injected): the launch is unchanged and reports `cameraPosterApplied: false` rather than
+failing, so system apps such as Settings stay launchable while a poster is set.
 
 Physical iOS devices return a typed unsupported result from `setDeviceState` and an
 `ActionableError` from `startDevice`; tvOS, watchOS and visionOS poster starts are refused.
@@ -59,25 +67,37 @@ The camera is injected into simulator app processes, not device hardware.
 missing path fails instead of falling back. Otherwise it locates the committed Objective-C source
 relative to the module's package/repository root or daemon launch directory, or uses
 `AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE`. Relative overrides resolve against the daemon launch
-directory. Published npm packages omit `ios/`, so use a repository checkout or either override.
+directory. The npm package ships `ios/CameraPosterInjection/Injection/CameraPosterInjection.m`
+(package.json `files`, required by `scripts/build/packed-runtime-assets.ts`), so an installed
+package finds it from `<package>/dist/src/` by walking ancestors, with no override.
+
+Packaging choice: ship the single self-contained source (about 30 KB) and build on demand,
+rather than a prebuilt release asset. Simulator code signing is ad hoc and not enforced, and
+starting a simulator already requires Xcode, so a local build adds no new requirement. A
+prebuilt, checksummed universal dylib following the `prototype-agent` release asset pattern
+would remove the first-use compile; until then `AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB` serves
+users who supply their own build.
 
 The source bytes' SHA-256 determines
-`<AutoMobile data dir>/ios-camera-poster/<hash12>/libAMCameraPoster.dylib`. An existing file is
+`<AutoMobile data dir>/ios-camera-poster/<hash12>-sim-universal/libAMCameraPoster.dylib`; the
+flavor suffix keeps an older single-slice build from being reused. An existing file is
 reused; otherwise an injected host command runner invokes `xcrun --sdk iphonesimulator clang`
-with arm64, ARC, simulator minimum 17.0 and the frameworks from `build.sh`, then ad-hoc signs
+with `-arch arm64 -arch x86_64` (a universal binary, so Intel hosts and Rosetta-run Node on Apple
+silicon both match the simulator, where `process.arch` alone could name the wrong slice), ARC,
+simulator minimum 17.0 and the frameworks from `build.sh`, then ad-hoc signs
 with `codesign -f -s -`. Each build writes a uniquely named partial and renames it atomically
 only after signing. `SingleFlight` coalesces concurrent builds within the default provider;
 separate processes can build private partials safely. No clock, sleep or device commands are needed.
 
 Missing Xcode/xcrun errors explain installation and the prebuilt override. Missing source errors
-explain the npm limitation and overrides. Compile/sign errors include bounded, trimmed command
+name the expected packaged path and the overrides. Compile/sign errors include bounded, trimmed command
 stderr. Preparation failures stop `launchApp` with an `ActionableError` before app launch;
 a registered poster is never silently dropped. Invalid extensions and missing images are typed
 state failures and leave the prior record intact.
 
 ## Limits
 
-- The built library targets arm64 iOS Simulator 17.0 and later.
+- The built library targets arm64 and x86_64 iOS Simulator 17.0 and later.
 
 - Takes effect only at launch; hardened or system apps that strip `DYLD_INSERT_LIBRARIES` are out.
 - Process-wide swizzles; apps that subclass capture classes or use private camera paths may bypass it.

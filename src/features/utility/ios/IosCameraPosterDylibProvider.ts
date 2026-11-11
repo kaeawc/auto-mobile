@@ -30,9 +30,20 @@ export interface IosCameraPosterDylibDependencies {
   env?: NodeJS.ProcessEnv;
   directory?: () => string;
   sourcePaths?: string[];
+  /** Where this module runs from; its ancestors are searched for the packaged or checkout source. */
+  moduleDirectory?: string;
 }
 
-const SOURCE = "ios/CameraPosterInjection/Injection/CameraPosterInjection.m";
+/** Shipped in the npm package (package.json `files`) and present in a repo checkout. */
+export const IOS_CAMERA_POSTER_SOURCE =
+  "ios/CameraPosterInjection/Injection/CameraPosterInjection.m";
+/**
+ * Both simulator slices: Apple silicon and Intel hosts, and an arm64 host whose Node runs under
+ * Rosetta (where process.arch would name the wrong simulator architecture).
+ */
+export const IOS_CAMERA_POSTER_ARCHS = ["arm64", "x86_64"] as const;
+/** Part of the cache directory name, so a build with other slices is never reused. */
+const BUILD_FLAVOR = "sim-universal";
 const XCODE_HINT =
   "Install Xcode and run xcode-select --install, or set AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB to a prebuilt libAMCameraPoster.dylib";
 
@@ -68,7 +79,7 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
         .slice(0, 12);
       const directory = join(
         (this.deps.directory ?? (() => getTempDir("ios-camera-poster")))(),
-        digest,
+        `${digest}-${BUILD_FLAVOR}`,
       );
       const output = join(directory, "libAMCameraPoster.dylib");
       return await this.flights.run(output, () => this.build(source, directory, output));
@@ -90,8 +101,10 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
       override !== undefined
         ? [override]
         : (this.deps.sourcePaths ?? [
-            ...sourcePathsFromModule(),
-            resolvePathFromDaemonLaunchWorkingDirectory(SOURCE, this.env),
+            ...sourcePathsFromModule(
+              this.deps.moduleDirectory ?? dirname(fileURLToPath(import.meta.url)),
+            ),
+            resolvePathFromDaemonLaunchWorkingDirectory(IOS_CAMERA_POSTER_SOURCE, this.env),
           ]);
     for (const candidate of candidates) {
       const path = resolvePathFromDaemonLaunchWorkingDirectory(candidate, this.env);
@@ -100,7 +113,7 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
       }
     }
     throw new ActionableError(
-      "iOS camera poster source not found. The npm package does not ship ios/. Use a repo checkout, set AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE to CameraPosterInjection.m, or set AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB to a prebuilt libAMCameraPoster.dylib.",
+      `iOS camera poster source not found (${IOS_CAMERA_POSTER_SOURCE} beside the installed package or in a repo checkout). Reinstall the package, set AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE to CameraPosterInjection.m, or set AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB to a prebuilt libAMCameraPoster.dylib.`,
     );
   }
 
@@ -123,8 +136,7 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
         "--sdk",
         "iphonesimulator",
         "clang",
-        "-arch",
-        "arm64",
+        ...IOS_CAMERA_POSTER_ARCHS.flatMap((arch) => ["-arch", arch]),
         "-dynamiclib",
         "-fobjc-arc",
         ...[
@@ -172,12 +184,15 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
 export const iosCameraPosterDylibProvider: IosCameraPosterDylibProvider =
   new DefaultIosCameraPosterDylibProvider();
 
-/** Walk ancestors so source modules and bundled dist/src chunks locate the same checkout. */
-function sourcePathsFromModule(): string[] {
+/**
+ * Walk ancestors so source modules and bundled dist/src chunks find the same file: the package
+ * root of an installed package (`<root>/dist/src/...`) or a repo checkout.
+ */
+export function sourcePathsFromModule(moduleDirectory: string): string[] {
   const paths: string[] = [];
-  let directory = dirname(fileURLToPath(import.meta.url));
+  let directory = moduleDirectory;
   while (true) {
-    paths.push(join(directory, SOURCE));
+    paths.push(join(directory, IOS_CAMERA_POSTER_SOURCE));
     const parent = dirname(directory);
     if (parent === directory) {
       return paths;

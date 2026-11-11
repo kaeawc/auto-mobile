@@ -198,11 +198,17 @@ host's network, so `localhost:<port>` already reaches your machine.
 `startDevice` accepts mutually exclusive `cameraPosterPath` or `cameraPosterQr: { text }`.
 Android requires a stopped emulator; iOS Simulator also accepts posters when already running.
 On iOS, `launchApp` applies a registered poster with a cold launch and reports
-`cameraPosterApplied: true`. Poster settings last until cleared or the daemon restarts.
-Use a PNG/JPG/JPEG file that exists on the host. If the injection library is unavailable,
-launch fails: install Xcode or set `AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB` to a prebuilt library.
-Building automatically requires a repository checkout, or `AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE`
-pointing to the injection source. Other Apple platforms do not support camera posters.
+`cameraPosterApplied: true`. Apple system apps (`com.apple.*`) cannot be injected: they launch
+normally and the result reports `cameraPosterApplied: false` with a note in `message`.
+A poster lasts until it is cleared, the simulator is killed with `killDevice`, the session that
+holds the simulator is released, or the daemon restarts; a later session on the same simulator
+starts without one. Use a PNG/JPG/JPEG file that exists on the host.
+Setting a poster prepares the injection library, so a missing Xcode or library fails
+`startDevice` or `setDeviceState` (nothing is recorded) instead of the later `launchApp`.
+The library is built on first use from the source shipped in the package (Intel and Apple
+silicon simulators); this needs Xcode. To skip the build, set
+`AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB` to a prebuilt library. Other Apple platforms do not support
+camera posters.
 
 For a clean app start, use `launchApp` with `clearAppData: true` where the
 platform supports it. Use `observe` after preparation to confirm the expected

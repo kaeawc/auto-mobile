@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { DeviceState } from "../../../../src/features/utility/DeviceState";
-import { FakeIosCameraPosterRegistry } from "../../../fakes/FakeIosCameraPoster";
+import {
+  FakeIosCameraPosterDylibProvider,
+  FakeIosCameraPosterRegistry,
+} from "../../../fakes/FakeIosCameraPoster";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import type { BootedDevice } from "../../../../src/models";
 
@@ -14,10 +18,12 @@ const image = resolve("/posters/my poster.PNG");
 const qr = resolve("/posters/qr.png");
 function setup(device = simulator) {
   const registry = new FakeIosCameraPosterRegistry();
+  const provider = new FakeIosCameraPosterDylibProvider();
   const adbFactory = new FakeAdbClientFactory();
   const texts: string[] = [];
   const state = new DeviceState(device, {
     iosCameraPosterRegistry: registry,
+    iosCameraPosterDylibProvider: provider,
     adbFactory,
     cameraPosterFileExists: (path) => [image, qr].includes(path),
     cameraPosterQrWriter: {
@@ -27,7 +33,7 @@ function setup(device = simulator) {
       },
     },
   });
-  return { state, registry, texts, adbFactory };
+  return { state, registry, provider, texts, adbFactory };
 }
 
 test("simulator image accepts whitespace and echoes ignored surface without relaunching", async () => {
@@ -84,4 +90,23 @@ test("physical iOS returns typed unsupported before rendering or writing", async
   expect(result.cameraPoster).toMatchObject({ supported: false });
   expect(result.error).toContain("unsupported on physical iOS devices");
   expect(h.texts).toEqual([]);
+});
+
+test("set preflights the dylib once; clear does not build it", async () => {
+  const h = setup();
+  await h.state.setState({ cameraPoster: { mode: "image", path: image } });
+  expect(h.provider.calls).toBe(1);
+  await h.state.setState({ cameraPoster: { mode: "clear" } });
+  expect(h.provider.calls).toBe(1);
+});
+
+test("dylib preflight failure is reported at set time and keeps the previous poster", async () => {
+  const h = setup();
+  h.registry.set(simulator.deviceId, { kind: "qr", text: "old", path: qr });
+  h.provider.error = new ActionableError("iOS camera poster source not found");
+  const result = await h.state.setState({ cameraPoster: { mode: "image", path: image } });
+  expect(result.success).toBe(false);
+  expect(result.cameraPoster?.error).toContain("Camera poster not recorded");
+  expect(result.cameraPoster?.error).toContain("source not found");
+  expect(h.registry.get(simulator.deviceId)).toEqual({ kind: "qr", text: "old", path: qr });
 });

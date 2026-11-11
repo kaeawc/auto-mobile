@@ -9,6 +9,7 @@
  */
 import { writeIosCameraPoster } from "./ios/IosCameraPoster";
 import type { IosCameraPosterRegistry } from "./ios/IosCameraPosterRegistry";
+import type { IosCameraPosterDylibProvider } from "./ios/IosCameraPosterDylibProvider";
 import { existsSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import type { BootedDevice } from "../../models";
@@ -46,6 +47,7 @@ export interface DeviceCameraPosterState {
 export interface CameraPosterDependencies {
   adbFactory: AdbClientFactory;
   iosCameraPosterRegistry?: IosCameraPosterRegistry;
+  iosCameraPosterDylibProvider?: IosCameraPosterDylibProvider;
   qrWriter?: QrPosterWriter;
   fileExists?: (path: string) => boolean;
 }
@@ -107,6 +109,7 @@ export async function writeDeviceCameraPoster(
   if (device.platform === "ios") {
     return writeIosCameraPoster(device, input, {
       registry: deps.iosCameraPosterRegistry,
+      dylibProvider: deps.iosCameraPosterDylibProvider,
       qrWriter: deps.qrWriter,
       fileExists: deps.fileExists,
     });

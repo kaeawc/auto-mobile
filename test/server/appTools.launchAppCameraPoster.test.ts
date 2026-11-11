@@ -22,6 +22,9 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { toolJson } from "../helpers/toolResponse";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
+import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 
 isolateToolRegistry();
 const simulator: BootedDevice = {
@@ -73,8 +76,8 @@ function setup() {
         }),
     },
   });
-  const launch = (device = simulator, prototype = false) =>
-    ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, { appId, prototype });
+  const launch = (device = simulator, prototype = false, id = appId) =>
+    ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, { appId: id, prototype });
   return { registry, provider, calls, launch, ports, prototypeProvider, timer };
 }
 afterEach(() => ToolRegistry.clearTools());
@@ -136,4 +139,47 @@ test.each([
   expect(h.calls[0]?.coldBoot).toBe(false);
   expect(h.calls[0]?.launchEnvironment).toBeUndefined();
   expect(response.cameraPosterApplied).toBeUndefined();
+});
+
+test("session release forgets the poster so a reusing session launches without it", async () => {
+  const h = setup();
+  h.registry.set(simulator.deviceId, { kind: "image", path: "/image.png" });
+  SessionReleaseBroadcaster.emit("session-1", "explicit-release", {
+    deviceId: simulator.deviceId,
+  } as SessionReleaseSnapshot);
+  expect(h.registry.get(simulator.deviceId)).toBeUndefined();
+  const response = toolJson(await h.launch());
+  expect(h.provider.calls).toBe(0);
+  expect(h.calls[0]?.launchEnvironment).toBeUndefined();
+  expect(response.cameraPosterApplied).toBeUndefined();
+});
+
+test("device removal forgets the poster", () => {
+  const h = setup();
+  h.registry.set(simulator.deviceId, { kind: "image", path: "/image.png" });
+  getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(simulator.deviceId);
+  expect(h.registry.get(simulator.deviceId)).toBeUndefined();
+});
+
+test("upgrade-only session release keeps the next owner's poster", () => {
+  const h = setup();
+  h.registry.set(simulator.deviceId, { kind: "image", path: "/image.png" });
+  SessionReleaseBroadcaster.emit(
+    "earlier-session",
+    "explicit-release",
+    { deviceId: simulator.deviceId } as SessionReleaseSnapshot,
+    { upgradeOnly: true },
+  );
+  expect(h.registry.get(simulator.deviceId)).toEqual({ kind: "image", path: "/image.png" });
+});
+
+test("a system app launches unchanged and the response says the poster was skipped", async () => {
+  const h = setup();
+  h.registry.set(simulator.deviceId, { kind: "image", path: "/image.png" });
+  const response = toolJson(await h.launch(simulator, false, "com.apple.Preferences"));
+  expect(h.provider.calls).toBe(0);
+  expect(h.calls[0]?.coldBoot).toBe(false);
+  expect(h.calls[0]?.launchEnvironment).toBeUndefined();
+  expect(response.cameraPosterApplied).toBe(false);
+  expect(response.message).toContain("camera poster not applied");
 });

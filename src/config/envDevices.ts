@@ -109,7 +109,7 @@ export const DEVICES_ENV = {
     name: "AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE",
     kind: "path",
     default: "unset",
-    doc: "CameraPosterInjection.m source used for the iOS Simulator camera poster build.",
+    doc: "CameraPosterInjection.m source for the iOS Simulator camera poster build; overrides the one shipped in the package.",
   },
   IOS_PROTOTYPE_AGENT: {
     name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT",

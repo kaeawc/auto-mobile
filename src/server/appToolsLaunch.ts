@@ -445,12 +445,16 @@ export async function beginPrototypeLaunch(
 export function withCameraPosterApplied<T extends { message: string }>(
   response: T,
   environment: Record<string, string> | undefined,
+  skipped?: string,
 ): T & { cameraPosterApplied?: boolean } {
-  return environment
-    ? {
-        ...response,
-        cameraPosterApplied: true,
-        message: `${response.message}; camera poster applied (cold launch)`,
-      }
+  if (environment) {
+    return {
+      ...response,
+      cameraPosterApplied: true,
+      message: `${response.message}; camera poster applied (cold launch)`,
+    };
+  }
+  return skipped
+    ? { ...response, cameraPosterApplied: false, message: `${response.message}; ${skipped}` }
     : response;
 }

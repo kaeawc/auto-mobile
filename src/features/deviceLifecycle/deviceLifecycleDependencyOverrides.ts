@@ -171,6 +171,8 @@ function cameraPosterDependencyOverrides(
   return {
     cameraPosterQrWriter: deps.cameraPosterQrWriter ?? currentDeps.cameraPosterQrWriter,
     iosCameraPosterRegistry: deps.iosCameraPosterRegistry ?? currentDeps.iosCameraPosterRegistry,
+    iosCameraPosterDylibProvider:
+      deps.iosCameraPosterDylibProvider ?? currentDeps.iosCameraPosterDylibProvider,
     cameraPosterFileExists: deps.cameraPosterFileExists ?? currentDeps.cameraPosterFileExists,
   };
 }

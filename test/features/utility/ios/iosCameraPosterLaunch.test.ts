@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import pngReport from "../../../../ios/CameraPosterInjection/fixtures/report-injected-png-ios18.6.json";
 import qrReport from "../../../../ios/CameraPosterInjection/fixtures/report-injected-qr-ios26.5.json";
-import { prepareCameraPosterLaunch } from "../../../../src/features/utility/ios/iosCameraPosterLaunch";
+import {
+  cameraPosterLaunchSkip,
+  prepareCameraPosterLaunch,
+} from "../../../../src/features/utility/ios/iosCameraPosterLaunch";
 import {
   FakeIosCameraPosterRegistry,
   FakeIosCameraPosterDylibProvider,
@@ -84,4 +87,27 @@ test("each poster mode clears the other mode's variable inherited from the host"
     SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/fresh.png",
     SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "",
   });
+});
+
+test("Apple system apps launch without the poster and never build the dylib", async () => {
+  const registry = new FakeIosCameraPosterRegistry();
+  const provider = new FakeIosCameraPosterDylibProvider();
+  const device = {
+    platform: "ios",
+    deviceId: "11111111-2222-3333-4444-555555555555",
+    name: "Fixture",
+  } as const;
+  registry.set(device.deviceId, { kind: "image", path: "/poster.png" });
+  const deps = { registry, provider, hostEnv: {} };
+  expect(
+    await prepareCameraPosterLaunch(device, deps, undefined, "com.apple.Preferences"),
+  ).toBeUndefined();
+  expect(provider.calls).toBe(0);
+  expect(cameraPosterLaunchSkip(device, registry, "com.apple.Preferences")).toContain(
+    "com.apple.*",
+  );
+  expect(cameraPosterLaunchSkip(device, registry, "com.example.app")).toBeUndefined();
+  expect(await prepareCameraPosterLaunch(device, deps, undefined, "com.example.app")).toBeDefined();
+  registry.clear(device.deviceId);
+  expect(cameraPosterLaunchSkip(device, registry, "com.apple.Preferences")).toBeUndefined();
 });

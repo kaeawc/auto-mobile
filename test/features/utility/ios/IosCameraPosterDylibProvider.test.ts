@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
-import { DefaultIosCameraPosterDylibProvider } from "../../../../src/features/utility/ios/IosCameraPosterDylibProvider";
+import { readFileSync } from "node:fs";
+import {
+  DefaultIosCameraPosterDylibProvider,
+  IOS_CAMERA_POSTER_SOURCE,
+  sourcePathsFromModule,
+} from "../../../../src/features/utility/ios/IosCameraPosterDylibProvider";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { FakeHostCommandExecutor } from "../../../fakes/FakeHostCommandExecutor";
@@ -10,7 +15,11 @@ import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 const source = resolve("/repo/CameraPosterInjection.m");
 const bytes = "captured source bytes for hashing";
 const digest = createHash("sha256").update(bytes).digest("hex").slice(0, 12);
-const output = join(resolve("/data/ios-camera-poster"), digest, "libAMCameraPoster.dylib");
+const output = join(
+  resolve("/data/ios-camera-poster"),
+  `${digest}-sim-universal`,
+  "libAMCameraPoster.dylib",
+);
 
 class BuildRunner extends FakeHostCommandExecutor {
   beforeCommand?: (command: string, args: string[]) => Promise<void>;
@@ -57,7 +66,7 @@ test("missing override fails without falling back to a build", async () => {
   expect(h.runner.getExecutedCalls()).toEqual([]);
 });
 
-test("builds exact arm64 simulator flags, signs the partial, publishes under source hash", async () => {
+test("builds a universal arm64 + x86_64 simulator dylib, signs the partial, publishes under source hash", async () => {
   const h = setup();
   expect(await h.provider.ensure()).toBe(output);
   const partial = `${output}.fake-1.tmp`;
@@ -71,6 +80,8 @@ test("builds exact arm64 simulator flags, signs the partial, publishes under sou
         "clang",
         "-arch",
         "arm64",
+        "-arch",
+        "x86_64",
         "-dynamiclib",
         "-fobjc-arc",
         ...[
@@ -111,7 +122,7 @@ test("missing xcrun returns install and prebuilt guidance", async () => {
 
 test("source override missing is actionable and does not fall back", async () => {
   const h = setup({ AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE: "/missing.m" });
-  await expect(h.provider.ensure()).rejects.toThrow("npm package does not ship ios/");
+  await expect(h.provider.ensure()).rejects.toThrow("Reinstall the package");
   expect(h.runner.getExecutedCalls()).toEqual([]);
 });
 
@@ -182,7 +193,53 @@ test("source content changes choose a new hash directory", async () => {
   h.fs.setFile(source, "changed source");
   const hash = createHash("sha256").update("changed source").digest("hex").slice(0, 12);
   expect(await h.provider.ensure()).toBe(
-    join(resolve("/data/ios-camera-poster"), hash, "libAMCameraPoster.dylib"),
+    join(resolve("/data/ios-camera-poster"), `${hash}-sim-universal`, "libAMCameraPoster.dylib"),
   );
   expect(h.runner.getExecutedCalls()).toHaveLength(6);
+});
+
+test("an arm64-only build cached under the bare source hash is not reused", async () => {
+  const h = setup();
+  h.fs.setFile(
+    join(resolve("/data/ios-camera-poster"), digest, "libAMCameraPoster.dylib"),
+    "arm64 only",
+  );
+  expect(await h.provider.ensure()).toBe(output);
+  expect(h.runner.wasCommandExecuted("codesign")).toBe(true);
+});
+
+test("an installed package finds the shipped source from its bundled dist/src module", async () => {
+  const fs = new FakeFileSystem();
+  const root = resolve("/usr/lib/node_modules/@kaeawc/auto-mobile");
+  const shipped = join(root, IOS_CAMERA_POSTER_SOURCE);
+  fs.setFile(shipped, bytes);
+  const runner = new BuildRunner(fs);
+  const provider = new DefaultIosCameraPosterDylibProvider({
+    fileSystem: fs,
+    runner,
+    env: {},
+    idGenerator: new FakeIdGenerator(),
+    moduleDirectory: join(root, "dist", "src"),
+    directory: () => resolve("/data/ios-camera-poster"),
+  });
+  expect(await provider.ensure()).toBe(output);
+  expect(runner.getExecutedCalls()[1]?.args).toContain(shipped);
+});
+
+test("module ancestors are searched nearest first up to the filesystem root", () => {
+  const root = resolve("/pkg");
+  const paths = sourcePathsFromModule(join(root, "dist", "src"));
+  expect(paths.slice(0, 3)).toEqual([
+    join(root, "dist", "src", IOS_CAMERA_POSTER_SOURCE),
+    join(root, "dist", IOS_CAMERA_POSTER_SOURCE),
+    join(root, IOS_CAMERA_POSTER_SOURCE),
+  ]);
+});
+
+test("the npm package ships the injection source the provider looks for", () => {
+  const manifest = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
+    files: string[];
+  };
+  expect(manifest.files).toContain(IOS_CAMERA_POSTER_SOURCE);
+  expect(readFileSync(resolve(IOS_CAMERA_POSTER_SOURCE), "utf8")).toContain("AM_CAMERA_POSTER");
 });

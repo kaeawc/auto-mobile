@@ -11,7 +11,10 @@ export async function recordStartCameraPoster(
   device: BootedDevice,
   deps: Pick<
     DeviceToolsDependencies,
-    "iosCameraPosterRegistry" | "cameraPosterQrWriter" | "cameraPosterFileExists"
+    | "iosCameraPosterRegistry"
+    | "iosCameraPosterDylibProvider"
+    | "cameraPosterQrWriter"
+    | "cameraPosterFileExists"
   >,
 ): Promise<void> {
   if (
@@ -25,6 +28,7 @@ export async function recordStartCameraPoster(
         : { mode: "image", path: args.cameraPosterPath! },
       {
         registry: deps.iosCameraPosterRegistry,
+        dylibProvider: deps.iosCameraPosterDylibProvider,
         qrWriter: deps.cameraPosterQrWriter,
         fileExists: deps.cameraPosterFileExists,
       },

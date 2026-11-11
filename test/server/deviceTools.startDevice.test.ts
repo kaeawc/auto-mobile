@@ -1,4 +1,7 @@
-import { FakeIosCameraPosterRegistry } from "../fakes/FakeIosCameraPoster";
+import {
+  FakeIosCameraPosterDylibProvider,
+  FakeIosCameraPosterRegistry,
+} from "../fakes/FakeIosCameraPoster";
 import { resolve } from "node:path";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -499,6 +502,7 @@ describe("startDevice handler", () => {
     for (const mode of ["image", "qr"] as const) {
       it(`records iOS ${mode} camera poster on ${running ? "running" : "cold"} simulator`, async () => {
         const registry = new FakeIosCameraPosterRegistry();
+        const provider = new FakeIosCameraPosterDylibProvider();
         const payloads: string[] = [];
         const posterDevice = { ...iosDevice, deviceId: "11111111-2222-3333-4444-555555555555" };
         const image: DeviceInfo = { ...posterDevice, isRunning: running };
@@ -508,6 +512,7 @@ describe("startDevice handler", () => {
         fakeMatcher.setImageResult(image);
         setDeviceToolsDependencies({
           iosCameraPosterRegistry: registry,
+          iosCameraPosterDylibProvider: provider,
           cameraPosterFileExists: () => true,
           cameraPosterQrWriter: {
             writePoster: async (text) => {
@@ -529,9 +534,34 @@ describe("startDevice handler", () => {
             ? { kind: "image", path: resolve("/poster.png") }
             : { kind: "qr", text: "hello", path: resolve("/qr.png") },
         );
+        expect(provider.calls).toBe(1);
       });
     }
   }
+
+  it("fails startDevice when the camera poster dylib cannot be prepared and records nothing", async () => {
+    const registry = new FakeIosCameraPosterRegistry();
+    const provider = new FakeIosCameraPosterDylibProvider();
+    provider.error = new ActionableError("iOS camera poster compiler unavailable. Install Xcode");
+    const posterDevice = { ...iosDevice, deviceId: "11111111-2222-3333-4444-555555555555" };
+    fakeDeviceUtils.setBootedDevices("ios", [posterDevice]);
+    fakeDeviceUtils.setDeviceImages("ios", [{ ...posterDevice, isRunning: true }]);
+    fakeMatcher.setBootedResult(posterDevice);
+    fakeMatcher.setImageResult({ ...posterDevice, isRunning: true });
+    setDeviceToolsDependencies({
+      iosCameraPosterRegistry: registry,
+      iosCameraPosterDylibProvider: provider,
+      cameraPosterFileExists: () => true,
+    });
+    await expect(
+      callStartDevice({
+        platform: "ios",
+        deviceId: posterDevice.deviceId,
+        cameraPosterPath: resolve("/poster.png"),
+      }),
+    ).rejects.toThrow("compiler unavailable");
+    expect(registry.get(posterDevice.deviceId)).toBeUndefined();
+  });
 
   it("rejects camera posters on physical iOS with an actionable error before discovery", async () => {
     for (const poster of [

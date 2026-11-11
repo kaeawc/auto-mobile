@@ -4,6 +4,7 @@ import type { HostChildProcess } from "../utils/HostCommandExecutor";
 import type { CtrlProxyHealthCheckResult } from "./ios/IosCtrlProxyHealthClient";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
+import type { BackoffPolicy } from "../utils/Backoff";
 import type { Timer } from "../utils/SystemTimer";
 import type { AccessibilityHierarchyRequest } from "../utils/interfaces/DeviceService";
 import type { ProxySetupResult } from "../utils/interfaces/ProxyManager";
@@ -138,6 +139,8 @@ export interface AndroidFrameworkReadinessResult {
 
 export interface RunnerReadinessDependencies {
   timer: Timer;
+  androidHealthProbeBackoff?: BackoffPolicy;
+  ctrlProxyUnresponsiveAfterRestartFailMs?: number;
   /** Maximum iOS transient startup attempts, including the initial setup. */
   iosSetupMaxAttempts?: number;
   iosPostSetupRestartMinFailedProbes?: number;

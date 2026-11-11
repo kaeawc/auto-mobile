@@ -341,6 +341,7 @@ export const installAppResultSchema = z
     userId: z.number().int().nonnegative().optional(),
     packageName: z.string().optional(),
     upgrade: z.boolean().optional(),
+    dataPreserved: z.boolean().optional(),
     warning: z.string().optional(),
     signingGuard: z
       .discriminatedUnion("status", [

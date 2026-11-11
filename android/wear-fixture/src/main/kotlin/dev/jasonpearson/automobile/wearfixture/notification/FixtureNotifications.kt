@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
@@ -19,8 +20,8 @@ import dev.jasonpearson.automobile.wearfixture.R
 import dev.jasonpearson.automobile.wearfixture.WearFixtureCatalog
 
 /**
- * Posts the fixture's notification (two actions that reopen the app with the pressed action) and
- * its ongoing activity. Both are local; nothing waits on a network or an account.
+ * Posts the fixture's notification (inline reply and archive actions) and its ongoing activity.
+ * Both are local; nothing waits on a network or an account.
  */
 class FixtureNotifications(private val context: Context) {
   private val manager = NotificationManagerCompat.from(context)
@@ -48,6 +49,15 @@ class FixtureNotifications(private val context: Context) {
             action.label,
             openApp(REQUEST_ALERT_ACTION + index, action.id),
           )
+          .apply {
+            if (action.id == "reply") {
+              addRemoteInput(
+                RemoteInput.Builder(WearFixtureCatalog.REPLY_INPUT_KEY)
+                  .setLabel(action.label)
+                  .build(),
+              )
+            }
+          }
           .build(),
       )
     }
@@ -100,6 +110,8 @@ class FixtureNotifications(private val context: Context) {
   }
 
   private fun openApp(requestCode: Int, actionId: String?): PendingIntent {
+    val mutability =
+      if (actionId == "reply") PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE
     val intent =
       // MainActivity is singleTop, so a running fixture receives this through onNewIntent.
       Intent(context, MainActivity::class.java).apply {
@@ -109,7 +121,7 @@ class FixtureNotifications(private val context: Context) {
       context,
       requestCode,
       intent,
-      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+      mutability or PendingIntent.FLAG_UPDATE_CURRENT,
     )
   }
 

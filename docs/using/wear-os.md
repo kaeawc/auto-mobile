@@ -145,7 +145,11 @@ flagged as below).
 - `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
   card, scrolling the stream when the action sits below the screen edge. If that text is not a
   single clickable target there, it fails rather than guessing and collapses the card; retry with
-  an explicit `tapActionLabel`.
+  an explicit `tapActionLabel`. Set `notification.replyText` to a non-empty string to reply inline:
+  this defaults the action label to **Keyboard input**, types the text, commits it with the
+  keyboard's **Space** key so Gboard appends one trailing space to the reply, and taps **Send**
+  before restoring the stream. An explicit `tapActionLabel` overrides the default.
+  If the keyboard, Space key or Send button is unavailable, re-observe and retry.
 - `dismiss` swipes the card sideways, taps the X button when the swipe only reveals it (Wear OS
   7), and reports `dismissal_unconfirmed` unless the removal is
   confirmed: with `appId`, by one of the app's active notifications showing the card's title
@@ -357,7 +361,7 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 
 - Physical watches: only Wear OS emulators are matched and created.
 - Listing the tiles in the carousel, and listing complication providers.
-- Tapping a notification's expanded content or its reply and action buttons without an explicit
-  clickable label (see [Notifications](#notifications)).
+- Tapping a notification's expanded content or action buttons without a clickable label or
+  `notification.replyText` (see [Notifications](#notifications)).
 - Hardware wake by tilt or touch, and a paired phone and watch.
 - Watch-specific prototype components and round-aware prototype layout.

@@ -192,3 +192,149 @@ describe("chrome-free container intersection", () => {
     ).toThrow("no area outside iOS system chrome");
   });
 });
+
+describe("iOS drag-handle containers", () => {
+  const handleInput = {
+    geometry,
+    overlayDetector: noOverlayAnalyzer,
+    options: options("down"),
+    viewHierarchy: emptyHierarchy,
+    containerElement: containerElement(bounds(164, 617, 237, 641)),
+    observeResult: observe({ width: 402, height: 874 }, { top: 0, right: 0, bottom: 0, left: 0 }),
+    platform: "ios" as const,
+  };
+
+  test("drags the captured sheet grabber 240 points from its integer centre", () => {
+    const result = resolveContainerSwipeCoordinates(handleInput);
+    expect(result).toEqual({
+      startX: 200,
+      startY: 629,
+      endX: 200,
+      endY: 869,
+      warning: expect.stringContaining("Container is only 24 pt along the swipe axis"),
+    });
+    expect(result.warning).toContain("travels 240 pt");
+  });
+
+  test.each([
+    { direction: "up", b: bounds(164, 617, 237, 641), endX: 200, endY: 389 },
+    { direction: "left", b: bounds(300, 617, 324, 641), endX: 72, endY: 629 },
+    { direction: "right", b: bounds(60, 617, 84, 641), endX: 312, endY: 629 },
+  ] as const)(
+    "extends a thin container in the $direction direction",
+    ({ direction, b, endX, endY }) => {
+      const result = resolveContainerSwipeCoordinates({
+        ...handleInput,
+        options: options(direction),
+        containerElement: containerElement(b),
+      });
+      expect(result).toMatchObject({
+        startX: Math.floor((b.left + b.right) / 2),
+        startY: Math.floor((b.top + b.bottom) / 2),
+        endX,
+        endY,
+      });
+    },
+  );
+
+  test.each([
+    { direction: "down", b: bounds(164, 800, 237, 824), endX: 200, endY: 874 },
+    { direction: "up", b: bounds(164, 50, 237, 74), endX: 200, endY: 0 },
+    { direction: "right", b: bounds(328, 617, 352, 641), endX: 402, endY: 629 },
+    { direction: "left", b: bounds(50, 617, 74, 641), endX: 0, endY: 629 },
+  ] as const)(
+    "clamps $direction travel and warns when fewer than 120 points remain",
+    ({ direction, b, endX, endY }) => {
+      const result = resolveContainerSwipeCoordinates({
+        ...handleInput,
+        options: options(direction),
+        containerElement: containerElement(b),
+      });
+      expect(result).toMatchObject({ endX, endY });
+      expect(result.warning).toContain("travels 62 pt");
+      expect(result.warning).toContain("less than 120 pt");
+    },
+  );
+
+  test("does not warn about short travel when clamping leaves exactly 120 points", () => {
+    const result = resolveContainerSwipeCoordinates({
+      ...handleInput,
+      containerElement: containerElement(bounds(164, 742, 237, 766)),
+    });
+    expect(result.endY).toBe(874);
+    expect(result.warning).toContain("travels 120 pt");
+    expect(result.warning).not.toContain("less than 120 pt");
+  });
+
+  test("starts on the handle without consulting overlay candidates", () => {
+    const result = resolveContainerSwipeCoordinates({
+      ...handleInput,
+      overlayDetector: {
+        collectOverlayCandidates: () => {
+          throw new Error("handle must bypass overlays");
+        },
+        computeSafeSwipeCoordinates: () => {
+          throw new Error("handle must bypass overlays");
+        },
+      },
+    });
+    expect(result.endY).toBe(869);
+  });
+
+  test.each([48, 300])("preserves a %i point tall iOS container", (height) => {
+    const b = bounds(164, 100, 237, 100 + height);
+    expect(
+      resolveContainerSwipeCoordinates({
+        ...handleInput,
+        containerElement: containerElement(b),
+      }),
+    ).toEqual(geometry.getSwipeWithinBounds("down", b));
+  });
+
+  test("uses extent along the swipe axis rather than the shortest side", () => {
+    expect(
+      resolveContainerSwipeCoordinates({
+        ...handleInput,
+        options: options("right"),
+      }),
+    ).toEqual(geometry.getSwipeWithinBounds("right", handleInput.containerElement.bounds));
+  });
+
+  test("preserves the captured 19 point swipe on Android", () => {
+    expect(
+      resolveContainerSwipeCoordinates({
+        ...handleInput,
+        platform: "android",
+      }),
+    ).toEqual({ startX: 200, startY: 619, endX: 200, endY: 638 });
+  });
+
+  test("measures the chrome-inset extent and starts at the exposed centre", () => {
+    const result = resolveContainerSwipeCoordinates({
+      ...handleInput,
+      containerElement: containerElement(bounds(164, 30, 237, 100)),
+      observeResult: observe(
+        { width: 402, height: 874 },
+        { top: 60, right: 0, bottom: 0, left: 0 },
+      ),
+    });
+    expect(result).toMatchObject({ startX: 200, startY: 80, endX: 200, endY: 320 });
+    expect(result.warning).toContain("Container is only 40 pt");
+  });
+
+  test("infers iOS from the observation and retains the chrome-start warning", () => {
+    const observation = loadIosRemindersNoiseObservePair().after;
+    identifyObservedHierarchy("ios", observation.viewHierarchy!, "fresh");
+    const result = resolveContainerSwipeCoordinates({
+      ...handleInput,
+      platform: undefined,
+      options: { ...options("down"), includeSystemInsets: true },
+      viewHierarchy: observation.viewHierarchy!,
+      observeResult: observation,
+      containerElement: containerElement(bounds(164, 60, 237, 84)),
+    });
+    expect(result).toMatchObject({ startX: 200, startY: 72, endX: 200, endY: 312 });
+    expect(result.warning).toContain("Container is only 24 pt");
+    expect(result.warning).toContain("swipe started in the navigation bar");
+  });
+});

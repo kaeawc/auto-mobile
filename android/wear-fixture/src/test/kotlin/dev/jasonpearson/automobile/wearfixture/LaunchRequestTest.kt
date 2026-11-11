@@ -24,5 +24,31 @@ class LaunchRequestTest {
       LaunchRequest(notificationActionId = "archive").status(),
     )
     assertNull(LaunchRequest().status())
+    assertEquals(
+      "Notification action: Reply",
+      LaunchRequest(notificationActionId = "reply").status(),
+    )
+    assertNull(LaunchRequest(notificationActionId = "snooze").status())
+  }
+
+  @Test
+  fun `reply text takes precedence over the notification action status`() {
+    assertEquals(
+      "Notification reply: On my way",
+      LaunchRequest(notificationActionId = "reply", replyText = "On my way").status(),
+    )
+    assertEquals("Notification reply: Hello", LaunchRequest(replyText = "Hello").status())
+  }
+
+  @Test
+  fun `a non-null reply is preserved even when empty or surrounded by whitespace`() {
+    assertEquals(
+      "Notification reply: ",
+      LaunchRequest(notificationActionId = "reply", replyText = "").status(),
+    )
+    assertEquals(
+      "Notification reply:  Thanks! ",
+      LaunchRequest(replyText = " Thanks! ").status(),
+    )
   }
 }

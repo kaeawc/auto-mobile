@@ -1,0 +1,113 @@
+Attributes: Application, 0x1068b52c0, pid: 37751, label: 'ClockFace'
+Element subtree:
+ →Application, 0x1068b52c0, pid: 37751, label: 'ClockFace'
+    Window, 0x1068b4780, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x1068b4a00, {{0.0, 0.0}, {187.0, 223.0}}
+        Other, 0x1068b43c0, {{0.0, 0.0}, {187.0, 223.0}}
+          Other, 0x1068b4280, {{0.0, 0.0}, {187.0, 223.0}}
+            Other, 0x1068b4000, {{0.0, 0.0}, {187.0, 223.0}}
+              Other, 0x1068b4140, {{0.0, 0.0}, {187.0, 223.0}}
+                Other, 0x1068b5400, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x1068b4b40, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x1068b4c80, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x1068b5040, {{0.0, 0.0}, {187.0, 223.0}}
+                    CollectionView, 0x1068b4dc0, {{0.0, 0.0}, {187.0, 223.0}}
+                      Other, 0x1068b4f00, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x1068b5180, {{0.0, 0.0}, {187.0, 223.0}}
+                          Other, 0x1068b4640, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x1068b4500, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b5540, {{0.0, 0.0}, {187.0, 223.0}}
+                                Other, 0x1068b5680, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x1068b57c0, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b5900, {{0.0, 0.0}, {176.0, 72.5}}
+                            Other, 0x1068b5a40, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b5b80, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x1068b5cc0, {{0.0, 0.0}, {187.0, 223.0}}
+                          Other, 0x1068b5e00, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x1068b6300, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b6440, {{0.0, 0.0}, {187.0, 223.0}}
+                                Other, 0x1068b61c0, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x1068b7c00, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b7d40, {{0.0, 0.0}, {176.0, 72.5}}
+                            Other, 0x1068b7e80, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b70c0, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x1068b7200, {{0.0, 0.0}, {187.0, 223.0}}
+                          Other, 0x1068b7980, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x1068b7ac0, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b7700, {{0.0, 0.0}, {187.0, 223.0}}
+                                Other, 0x1068b7840, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x1068b7340, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b7480, {{0.0, 0.0}, {176.0, 72.5}}
+                            Other, 0x1068b75c0, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x1068b6580, {{0.0, 0.0}, {187.0, 223.0}}
+                      Other, 0x1068b66c0, {{5.5, 15.5}, {176.0, 87.0}}, identifier: 'Smart Stack Header'
+                        Button, 0x1068b6e40, {{5.5, 15.5}, {83.0, 87.0}}, label: 'Wednesday, November 11'
+                          StaticText, 0x1068b6f80, {{12.5, 20.5}, {46.5, 28.5}}, label: 'WED'
+                          StaticText, 0x1068b6bc0, {{12.5, 44.5}, {44.0, 28.5}}, label: 'NOV'
+                          StaticText, 0x1068b6d00, {{12.5, 68.5}, {18.5, 28.5}}, label: '11'
+                        Button, 0x1068b6800, {{94.5, 15.5}, {87.0, 87.0}}, label: '9:25 AM and 35 seconds'
+                          StaticText, 0x1068b6940, {{114.8, 44.5}, {46.5, 29.0}}, label: '9:25'
+                          StaticText, 0x1068b6a80, {{114.8, 44.5}, {46.5, 29.0}}, label: '9:25'
+                          StaticText, 0x1068b6080, {{114.8, 44.5}, {46.5, 29.0}}, label: '9:25'
+                          StaticText, 0x1068b5f40, {{114.8, 44.5}, {46.5, 29.0}}, label: '9:25'
+                      Cell, 0x106819cc0, {{5.5, 110.0}, {176.0, 72.5}}, identifier: 'StackCollectionViewComplicationCell -- DDD37D39-18A1-434F-A6A2-52CBF6252C51 -- Now Playing -- Suggested -- com.apple.NanoNowPlaying -- com.apple.NanoNowPlaying-com.apple.NanoNowPlaying.widgets-com.apple.NanoNowPlaying.widgets.media-suggestions-0'
+                        Other, 0x1068d6580, {{5.5, 110.0}, {176.0, 72.5}}
+                          Other, 0x1068c4500, {{5.5, 110.0}, {176.0, 72.5}}
+                            Other, 0x1068ce1c0, {{5.5, 110.0}, {176.0, 72.5}}
+                              Other, 0x1068cfd40, {{5.5, 110.0}, {176.0, 72.5}}
+                                Other, 0x1068cf840, {{5.5, 110.0}, {176.0, 72.5}}, label: 'Now Playing'
+                                  Other, 0x1068cdb80, {{5.5, 110.0}, {176.0, 72.5}}
+                                    Other, 0x1068cf200, {{5.5, 110.0}, {176.0, 72.5}}
+                                      Other, 0x1068ce800, {{5.5, 110.0}, {176.0, 72.5}}
+                                        Other, 0x1068ce440, {{0.0, 0.0}, {176.0, 72.5}}
+                                          Other, 0x1068cc3c0, {{0.0, 0.0}, {176.0, 72.5}}, label: 'Now Playing'
+                                            Other, 0x1068cda40, {{0.0, 0.0}, {176.0, 72.5}}
+                                              Other, 0x1068cf700, {{0.0, 0.0}, {176.0, 72.5}}
+                                                Other, 0x1068ce080, {{0.0, 0.0}, {176.0, 72.5}}
+                                                  StaticText, 0x1068cfac0, {{0.0, 0.0}, {176.0, 72.5}}, label: 'Suggested media will appear here.'
+                                                    Other, 0x1068cf5c0, {{0.0, 0.0}, {176.0, 72.5}}
+                                                      StaticText, 0x1068ced00, {{25.0, 21.5}, {126.0, 31.0}}, label: 'Suggested media will appear here.'
+                                            Other, 0x1068cc500, {{0.0, 0.0}, {176.0, 72.5}}, label: 'Now Playing'
+                      Cell, 0x1068cee40, {{16.9, 137.4}, {153.1, 63.1}}, identifier: 'StackCollectionViewComplicationCell -- 6EDC7CA6-3499-441F-BD18-F2F3A8565659 -- Now Playing -- Suggested -- com.apple.NanoNowPlaying -- com.apple.NanoNowPlaying-com.apple.NanoNowPlaying.widgets-com.apple.NanoNowPlaying.widgets.media-suggestions-0'
+                        Other, 0x1068cc280, {{16.9, 137.4}, {153.1, 63.1}}
+                          Other, 0x1068cf340, {{16.9, 137.4}, {153.1, 63.1}}
+                            Other, 0x1068cc8c0, {{16.9, 137.4}, {153.1, 63.1}}
+                              Other, 0x1068ce580, {{16.9, 137.4}, {153.1, 63.1}}
+                                Other, 0x1068cde00, {{16.9, 137.4}, {153.1, 63.1}}, label: 'Now Playing'
+                                  Other, 0x1068cc140, {{16.9, 137.4}, {153.1, 63.1}}
+                                    Other, 0x1068cf0c0, {{16.9, 137.4}, {153.1, 63.1}}
+                                      Other, 0x1068cc780, {{16.9, 137.4}, {153.1, 63.1}}
+                                        Other, 0x1068ce940, {{0.0, 0.0}, {176.0, 72.5}}
+                                          Other, 0x1068cea80, {{0.0, 0.0}, {176.0, 72.5}}, label: 'Now Playing'
+                                            Other, 0x1068ce6c0, {{0.0, 0.0}, {176.0, 72.5}}
+                                              Other, 0x1068cdf40, {{0.0, 0.0}, {176.0, 72.5}}
+                                                Other, 0x1068cfc00, {{0.0, 0.0}, {176.0, 72.5}}
+                                                  StaticText, 0x1068ccdc0, {{0.0, 0.0}, {176.0, 72.5}}, label: 'Suggested media will appear here.'
+                                                    Other, 0x1068cdcc0, {{0.0, 0.0}, {176.0, 72.5}}
+                                                      StaticText, 0x1068cf980, {{25.0, 21.5}, {126.0, 31.0}}, label: 'Suggested media will appear here.'
+                                            Other, 0x1068ce300, {{0.0, 0.0}, {176.0, 72.5}}, label: 'Now Playing'
+                            Other, 0x1068cf480, {{16.9, 137.4}, {153.1, 63.1}}
+                      Cell, 0x1068cef80, {{30.1, 163.8}, {126.7, 52.2}}, identifier: 'StackCollectionViewTriPlatterCell'
+                        Other, 0x1068c8280, {{30.1, 163.8}, {126.7, 52.2}}
+                          Other, 0x1068c8140, {{30.1, 163.8}, {126.7, 52.2}}
+                            Other, 0x1068c8780, {{30.1, 163.8}, {126.7, 52.2}}
+                              Other, 0x1068c8000, {{77.3, 163.8}, {32.4, 52.2}}
+                                Other, 0x1068c8500, {{77.3, 173.9}, {32.4, 32.4}}, identifier: 'TrailingPlatter'
+                                  Other, 0x1068c9540, {{77.3, 173.9}, {32.4, 32.4}}
+                                  Other, 0x1068c83c0, {{78.7, 175.3}, {29.5, 29.5}}
+                                    Other, 0x1068caa80, {{78.7, 175.3}, {29.5, 29.5}}, label: 'No unread messages'
+                                      Other, 0x1068d8000, {{78.7, 175.3}, {29.5, 29.5}}, label: 'No unread messages'
+                            Other, 0x1068d8140, {{30.1, 163.8}, {126.7, 52.2}}
+                  Other, 0x1068d8280, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x1068d83c0, {{0.0, 0.0}, {187.0, 223.0}}
+    Window, 0x1068d8500, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x1068d8640, {{0.0, 0.0}, {187.0, 223.0}}
+    Window (Main), 0x1068d8780, {{179.0, 37.5}, {6.0, 46.5}}
+    Window, 0x1068d88c0, {{0.0, 0.0}, {187.0, 223.0}}
+Path to element:
+ →Application, 0x1068b52c0, pid: 37751, label: 'ClockFace'
+Query chain:
+ →Find: Application 'com.apple.clockface'
+  Output: {
+    Application, 0x1068d8c80, pid: 37751, label: 'ClockFace'
+  }

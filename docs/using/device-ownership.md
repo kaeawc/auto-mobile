@@ -31,6 +31,13 @@ omits `cleanup`.
   session that untargeted calls run on. An explicit `sessionUuid` targets that
   one call only. A call passing only `platform` runs on the default session when
   the platform matches.
+- **Device id:** `observe` and the app-management tools (`installApp`,
+  `launchApp`, `terminateApp`, `crashApp`, `appLifecycle`, `uninstallApp`,
+  `listApps`, `setAppPermissions`, `getAppPermissions`, `inspectPackageSigning`,
+  `resetKeychain`) take `deviceId` (an Android serial such as `emulator-5554`, or
+  an iOS UDID) to pick one of several booted devices. `device` is not a device
+  id: it is an `executePlan` device label, and passing a serial there is refused
+  with a message that names `deviceId`.
 
 If you hold two sessions and the default one ends, a control call that passes the
 surviving session's `sessionUuid` or `deviceId` runs on that session. A control

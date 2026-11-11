@@ -142,6 +142,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🔊 <code>captureAudio</code>                | Emulator or simulator: record audio output and report its level. Off by default         |
 | 📞 <code>phoneCall</code>                   | Simulate an incoming phone call (iOS Simulator: accept/hold are partial)                |
 | 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                                |
+| 🌱 <code>seedContent</code>                 | [Seed Android contacts, calendars, calls and SMS](using/seed-content.md)                |
 | 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                                  |
 | 📣 <code>postNotification</code>            | Post notification via Android SDK hooks or iOS Simulator simctl push                    |
 | 🔕 <code>getNotificationPolicy</code>       | Read app notification/DND policy state                                                  |

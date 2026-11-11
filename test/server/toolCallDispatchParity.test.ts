@@ -50,13 +50,13 @@ type CallEntryPoint = (name: string, args: Record<string, unknown>) => Promise<O
 // Strip the transport framing each door adds: the SDK's `MCP error <code>: `
 // prefix on a JSON-RPC error, and the proxy's `Error: ` on a forwarded failure.
 // The proxy client also re-words an unknown tool as `Unknown tool "<name>".`
-// (`DaemonMcpProxy.toolUnavailableError`, which can append a removed-tool
-// hint); that happens before dispatch, so map it to the servers' wording.
+// (`DaemonMcpProxy.toolUnavailableError`, which appends a removed-tool hint or
+// does-not-exist guidance); that happens before dispatch, so map it to the servers' wording.
 function normalizeMessage(message: string): string {
   return message
     .replace(/^Error: /, "")
     .replace(/^MCP error -?\d+: /, "")
-    .replace(/^Unknown tool "([^"]+)"\.$/, "Unknown tool: $1");
+    .replace(/^Unknown tool "([^"]+)"\.(?: .*)?$/, "Unknown tool: $1");
 }
 
 function firstText(content: unknown): string {

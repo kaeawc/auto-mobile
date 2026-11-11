@@ -143,7 +143,7 @@ export function createGetLogsHandler(
 export const getLogsTool = defineDeviceTool({
   name: "getLogs",
   description:
-    "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS, Apple Watch and Apple TV Simulator unified log by app subsystem and process. Bounded output.",
+    "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS, Apple Watch, Apple TV and Apple Vision Pro Simulator unified log by app subsystem and process. Bounded output.",
   input: getLogsInput,
   options: {
     // A plan step that captures what the app logged around the preceding steps.

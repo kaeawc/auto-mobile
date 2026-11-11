@@ -3,6 +3,7 @@ import {
   isAndroidOrIosPlatform,
   NON_IOS_APPLE_PLATFORM_LABELS,
   type NonIosApplePlatform,
+  type Platform,
 } from "../models/Platform";
 
 /**
@@ -65,6 +66,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
   visionos: new Set<string>([
     "executePlan",
+    // simctl spawn <udid> log show, as on an iOS simulator (#18011).
+    "getLogs",
     "installApp",
     "uninstallApp",
     "launchApp",
@@ -130,6 +133,26 @@ export function assertToolSupportsDevicePlatform(
     return;
   }
   throw new ActionableError(unsupportedPlatformToolMessage(toolName, platform));
+}
+
+/**
+ * The tool names, from `names`, a session on `platform` can call: device-aware tools the platform
+ * gate ({@link assertToolSupportsDevicePlatform}) would refuse are dropped, so an acquisition never
+ * advertises a tool that then refuses the session's device (#18013). Plain tools look up their own
+ * target and are kept.
+ */
+export function platformCallableToolNames(
+  names: readonly string[],
+  platform: Platform,
+  isDeviceAware: (toolName: string) => boolean,
+  supportedTools: Readonly<
+    Record<NonIosApplePlatform, ReadonlySet<string>>
+  > = APPLE_PLATFORM_SUPPORTED_TOOLS,
+): string[] {
+  if (isAndroidOrIosPlatform(platform)) {
+    return [...names];
+  }
+  return names.filter((name) => !isDeviceAware(name) || supportedTools[platform].has(name));
 }
 
 /** A non-iOS Apple platform a request names, or undefined for Android, iOS or none. */

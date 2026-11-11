@@ -3,6 +3,7 @@ import { SearchableHierarchy } from "../../../src/features/utility/SearchableNod
 import { SafeAreaAuditor } from "../../../src/features/observe/audits/SafeAreaAuditor";
 import { expect, test } from "bun:test";
 import { SingleDisplayEnrichStage } from "../../../src/features/observe/SingleDisplayEnrichStage";
+import { CachedAndroidXrDisplaySize } from "../../../src/features/observe/android/AndroidXrDisplaySize";
 import type { SingleDisplayRun } from "../../../src/features/observe/singleDisplayRun";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
@@ -19,9 +20,22 @@ function unused(): never {
 async function enrich(result: ObserveResult, xr: boolean, platform: "android" | "ios" = "android") {
   const timer = new FakeTimer();
   const detector = new FakeAndroidXrDetector(xr);
-  const stage = new SingleDisplayEnrichStage({
-    device: () => ({ name: "fake", deviceId: "fixture-xr-output", platform, formFactor: "phone" }),
+  const device = {
+    name: "fake",
+    deviceId: "fixture-xr-output",
+    platform,
+    formFactor: "phone",
+  } as const;
+  const xrDisplaySize = new CachedAndroidXrDisplaySize({
+    device: () => device,
     xrDetector: detector,
+    hierarchyCollector: unused,
+    readDisplaySize: async () => result.screenSize,
+  });
+  await xrDisplaySize.prime(result, result.viewHierarchy!);
+  const stage = new SingleDisplayEnrichStage({
+    device: () => device,
+    isAndroidXr: () => xrDisplaySize.isXrCached(),
     timer: () => timer,
     platformTraits: unused,
     screenshotRecorder: unused,
@@ -62,7 +76,9 @@ async function enrich(result: ObserveResult, xr: boolean, platform: "android" | 
     routedAggregateSecondary: false,
     cacheGeneration: 0,
   };
-  await stage.enrichSingleDisplay(run);
+  const enriched = stage.enrichSingleDisplay(run);
+  expect(result.elements).toBeDefined();
+  await enriched;
   return detector;
 }
 const hidden = [

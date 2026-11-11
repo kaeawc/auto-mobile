@@ -47,8 +47,15 @@ function mayBeXrFormFactor(formFactor: BootedDevice["formFactor"]): boolean {
 /** Default-display XR geometry shared by initial collection and synchronous recapture application. */
 export class CachedAndroidXrDisplaySize implements AndroidXrDisplaySize {
   private readonly displaySizes = new Map<string, { width: number; height: number }>();
+  private readonly xrDevices = new Map<string, boolean>();
 
   constructor(private readonly deps: AndroidXrDisplaySizeDeps) {}
+
+  /** The identity resolved by prime; element enrichment must not probe or yield again. */
+  isXrCached(): boolean {
+    const device = this.deps.device();
+    return device.platform === "android" && this.xrDevices.get(device.deviceId) === true;
+  }
 
   private key(hierarchy: ViewHierarchyResult): string {
     return `${this.deps.device().deviceId}:${Number(hierarchy.rotation === 1 || hierarchy.rotation === 3)}`;
@@ -69,7 +76,9 @@ export class CachedAndroidXrDisplaySize implements AndroidXrDisplaySize {
     if (this.displaySizes.has(key)) {
       return;
     }
-    if (!(await this.isXr(result, signal))) {
+    const xr = await this.isXr(result, signal);
+    this.xrDevices.set(device.deviceId, xr);
+    if (!xr) {
       return;
     }
     try {

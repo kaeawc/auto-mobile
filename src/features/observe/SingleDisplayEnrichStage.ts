@@ -1,8 +1,3 @@
-import {
-  isAndroidXr,
-  type AndroidXrDetector,
-} from "../../utils/android-cmdline-tools/androidXrDevice";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { recordObservationRead } from "./observationReadScope";
 import { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { logger } from "../../utils/logger";
@@ -28,8 +23,7 @@ import type { ScreenRoundReader } from "../wear/screenRound";
 /** Stages 3 and 5 of one single-display observation: derive elements, start screenshots, run audits and predictions, then attach timings and protect the screenshot. */
 export interface SingleDisplayEnrichStageDependencies {
   device: () => BootedDevice;
-  adb?: () => AdbExecutor | null;
-  xrDetector?: AndroidXrDetector;
+  isAndroidXr?: () => boolean;
   timer: () => Timer;
   platformTraits: () => PlatformObservationTraits;
   screenshotRecorder: () => ObserveScreenshotRecorder;
@@ -52,10 +46,7 @@ export interface SingleDisplayEnrichStageDependencies {
 export class SingleDisplayEnrichStage {
   constructor(private readonly d: SingleDisplayEnrichStageDependencies) {}
 
-  private async enrichSingleDisplayElements(
-    context: SingleDisplayStageContext,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  private enrichSingleDisplayElements(context: SingleDisplayStageContext): void {
     const { result } = context;
 
     // Hierarchy collection and accepted recaptures each replace `screenSize`.
@@ -71,12 +62,7 @@ export class SingleDisplayEnrichStage {
 
     if (result.viewHierarchy) {
       const device = this.d.device();
-      const androidXr =
-        device.platform === "android" &&
-        (await isAndroidXr(
-          { device, adb: this.d.adb?.(), backStack: result.backStack, signal },
-          this.d.xrDetector,
-        ));
+      const androidXr = device.platform === "android" && (this.d.isAndroidXr?.() ?? false);
       result.elements = this.d
         .elementsBuilder()
         .build(
@@ -89,7 +75,7 @@ export class SingleDisplayEnrichStage {
   }
   /** Stage 3: derive elements, start screenshots, and run audits and predictions. */
   async enrichSingleDisplay(run: SingleDisplayRun): Promise<void> {
-    await this.enrichSingleDisplayElements({ result: run.result }, run.signal);
+    this.enrichSingleDisplayElements({ result: run.result });
     if (this.d.device().formFactor === "watch") {
       const surface = wearSurfaceKind(run.result);
       if (surface !== undefined) {

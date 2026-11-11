@@ -1,4 +1,9 @@
-import { resolveAndroidExactProfile, resolveIosModelReference, validateContext } from "./catalog";
+import {
+  iosModelTypeArchetype,
+  resolveAndroidExactProfile,
+  resolveIosModelReference,
+  validateContext,
+} from "./catalog";
 import { parseSessionDeviceRequirement } from "./parsing";
 import { failure, success } from "./result";
 import type {
@@ -7,7 +12,6 @@ import type {
   IosArchetype,
   IosArchetypeOsDefault,
   IosCatalogModel,
-  IosModelType,
   IosSessionDeviceCatalog,
   IosSessionDeviceRequirement,
   IosSessionRequirementDefaults,
@@ -49,12 +53,6 @@ function normalizeDefaultOs(
   return success(selector.value);
 }
 
-const IOS_FAMILY_ARCHETYPE: Record<IosModelType["family"], IosArchetype> = {
-  iphone: "phone",
-  ipad: "tablet",
-  duo: "duo",
-};
-
 /** The archetype an iOS hardware selector targets, when known before resolution. */
 function iosHardwareArchetype(
   hardware: EffectiveIosHardwareSelector,
@@ -64,7 +62,7 @@ function iosHardwareArchetype(
     return hardware.archetype;
   }
   return hardware.kind === "model-type"
-    ? IOS_FAMILY_ARCHETYPE[hardware.modelType.family]
+    ? iosModelTypeArchetype(hardware.modelType)
     : exactModel?.archetype;
 }
 

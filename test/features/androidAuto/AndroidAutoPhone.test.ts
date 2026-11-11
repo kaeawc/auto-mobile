@@ -56,6 +56,30 @@ describe("AdbAndroidAutoPhone queries", () => {
   });
 });
 
+describe("AdbAndroidAutoPhone adbState", () => {
+  test("reports adb get-state's state", async () => {
+    const adb = new RecordingAdb(() => result("device\n"));
+    expect(await new AdbAndroidAutoPhone(adb).adbState()).toBe("device");
+    expect(adb.calls).toEqual([["get-state"]]);
+  });
+
+  test("reports the error adb exits with while the emulator is offline", async () => {
+    const adb = new RecordingAdb(() => new Error("error: device offline"));
+    expect(await new AdbAndroidAutoPhone(adb).adbState()).toContain("device offline");
+  });
+
+  test("rejects on abort instead of reporting a state", async () => {
+    const controller = new AbortController();
+    const adb = new RecordingAdb(() => {
+      controller.abort(new Error("deadline"));
+      return new Error("aborted");
+    });
+    await expect(new AdbAndroidAutoPhone(adb).adbState(controller.signal)).rejects.toThrow(
+      "deadline",
+    );
+  });
+});
+
 describe("AdbAndroidAutoPhone mutations", () => {
   test("installs the split APKs as one replacing install-multiple", async () => {
     const adb = new RecordingAdb(() => result("Success\n"));

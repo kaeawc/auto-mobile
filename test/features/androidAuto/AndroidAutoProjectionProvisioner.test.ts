@@ -98,6 +98,56 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(second.session).toBe(first.session);
   });
 
+  test("waits for a just-booted phone that adb still reports offline before the APK steps", async () => {
+    const statesAtVerify: number[] = [];
+    const { phone, timer, provisioner } = setup([], {
+      verify: async () => {
+        statesAtVerify.push(phone.adbStateChecks);
+      },
+    });
+    phone.adbStates = ["error: device offline", "offline", "device"];
+    const result = await provisioner.provision(request());
+    expect(result.steps[0]).toEqual({
+      step: "android-auto-apk",
+      status: "applied",
+      detail: "installed 2 APKs",
+    });
+    expect(statesAtVerify).toEqual([3]);
+    expect(timer.getSleepHistory()).toEqual([500, 1_000]);
+  });
+
+  test("a phone that stays offline fails with an actionable error having changed nothing", async () => {
+    const { phone, ui, verified, timer, provisioner } = setup();
+    phone.adbStates = ["error: device offline"];
+    const failure = provisioner.provision(request());
+    await expect(failure).rejects.toBeInstanceOf(ActionableError);
+    await expect(failure).rejects.toThrow(
+      "adb still reports emulator-5554 as not ready (error: device offline) after 60 s",
+    );
+    expect(timer.getSleepHistory().reduce((sum, ms) => sum + ms, 0)).toBe(60_000);
+    expect(verified).toEqual([]);
+    expect(phone.changes).toEqual([]);
+    expect(ui.changes).toEqual([]);
+  });
+
+  test("the provision deadline's abort ends the offline wait", async () => {
+    const { phone, provisioner } = setup();
+    const controller = new AbortController();
+    phone.adbStates = ["offline"];
+    const adbState = phone.adbState.bind(phone);
+    phone.adbState = async () => {
+      if (phone.adbStateChecks === 2) {
+        controller.abort(new Error("provision deadline"));
+      }
+      return adbState();
+    };
+    await expect(provisioner.provision(request({ signal: controller.signal }))).rejects.toThrow(
+      "provision deadline",
+    );
+    expect(phone.adbStateChecks).toBe(3);
+    expect(phone.changes).toEqual([]);
+  });
+
   test("a phone still on the stub with no APKs supplied fails without touching it", async () => {
     const { phone, provisioner } = setup();
     await expect(provisioner.provision(request({ androidAutoApks: [] }))).rejects.toThrow(
@@ -584,5 +634,19 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(stops).toBe(2);
     expect(again.session).not.toBe(stuck);
     expect(launcher.launches).toBe(2);
+  });
+
+  test("hands out the running DHU's console for head-unit input, never a stopped one", async () => {
+    const { provisioner } = setup();
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")).toBeUndefined();
+    const { session } = await provisioner.provision(request());
+
+    const dhuConsole = provisioner.desktopHeadUnitConsole("emulator-5554");
+    dhuConsole?.sendCommand("dpad back");
+    expect((session as FakeSession).commands).toEqual(["dpad back"]);
+    expect(provisioner.desktopHeadUnitConsole("emulator-5556")).toBeUndefined();
+
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")).toBeUndefined();
   });
 });

@@ -31,7 +31,11 @@ import {
   type ProvisionAndroidAutoOptions,
   type StartDeviceAndroidAutoOptions,
 } from "./androidAutoProvisionInputs";
-import { createDefaultDhuSpawner, SpawningDesktopHeadUnitLauncher } from "./DesktopHeadUnit";
+import {
+  createDefaultDhuSpawner,
+  SpawningDesktopHeadUnitLauncher,
+  type DesktopHeadUnitConsole,
+} from "./DesktopHeadUnit";
 
 /** What `provisionDevice` and `startDevice` report under `androidAuto`. */
 export interface AndroidAutoProvisionReport {
@@ -211,6 +215,16 @@ export type AndroidAutoHostPortHolder = Pick<
 /** The process-wide provisioner only when something already projected, like the applier below. */
 export function existingDefaultAndroidAutoHostPortHolder(): AndroidAutoHostPortHolder | undefined {
   return defaultProvisioner;
+}
+
+/**
+ * The console of the DHU this daemon runs for `deviceId` (#17842), or undefined when the daemon
+ * started none. Never creates the provisioner, and never starts or stops a DHU.
+ */
+export function existingDesktopHeadUnitConsole(
+  deviceId: string,
+): DesktopHeadUnitConsole | undefined {
+  return defaultProvisioner?.desktopHeadUnitConsole(deviceId);
 }
 
 /**

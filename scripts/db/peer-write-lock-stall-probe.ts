@@ -57,6 +57,7 @@ try {
     const { raceWithDeadline } = await import("../../src/utils/raceWithDeadline");
     const { defaultTimer } = await import("../../src/utils/SystemTimer");
     const { sql } = await import("kysely");
+    const dialect = await import("../../src/db/bunSqliteDialect");
     console.log(
       JSON.stringify({
         budgets: {
@@ -65,6 +66,8 @@ try {
           noHeartbeatReleaseBudgetMs: windows.NO_HEARTBEAT_RELEASE_BUDGET_MS,
           idleTimeoutMs: windows.DEFAULT_SESSION_IDLE_TIMEOUT_MS,
           maxStallMs,
+          appBusyTimeoutMs: database.SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS,
+          appRetryTotalWaitMs: dialect.DEFAULT_RETRY_TOTAL_WAIT_MS,
         },
         bunVersion: Bun.version,
         platform: process.platform,

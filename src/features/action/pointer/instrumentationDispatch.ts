@@ -1,5 +1,6 @@
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import { runWithAbortSignal } from "../../../utils/AbortContext";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { ActionableError } from "../../../models/ActionableError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -160,7 +161,7 @@ async function sendPointerCancel(
 /**
  * Runs one instrumentation and, when it ends without a report (killed, crashed, timed out or
  * aborted by the caller), closes any pointer it left down before rethrowing. The CANCEL runs
- * without the caller's signal: an aborted gesture is exactly the one whose pointer is still open,
+ * without the caller's signal, explicit or ambient: an aborted gesture is exactly the one whose pointer is still open,
  * and the lock is still held so a queued run cannot start on top of it.
  */
 async function runClosingOnAbandon(
@@ -172,7 +173,10 @@ async function runClosingOnAbandon(
     return await run();
   } catch (error) {
     if (!(error instanceof PointerNotSentError)) {
-      await sendPointerCancel(adb, request, "an abandoned pointer run");
+      // Clear the ambient request signal too: AdbClient falls back to it, and it is already aborted.
+      await runWithAbortSignal(undefined, () =>
+        sendPointerCancel(adb, request, "an abandoned pointer run"),
+      );
     }
     throw error;
   }

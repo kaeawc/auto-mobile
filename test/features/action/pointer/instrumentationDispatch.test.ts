@@ -10,6 +10,7 @@ import {
 } from "../../../../src/features/action/pointer/instrumentationDispatch";
 import type { PointerRequest } from "../../../../src/features/action/pointer/PointerInjector";
 import { createExecResult } from "../../../../src/utils/execResult";
+import { getAbortSignal, runWithAbortSignal } from "../../../../src/utils/AbortContext";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { flushMicrotasks } from "../../../helpers/shutdownStageHarness";
 
@@ -476,5 +477,29 @@ describe("createInstrumentationDispatch", () => {
       "shell input stylus motionevent CANCEL 10 20",
     ]);
     expect(order).toEqual(["first:Command timed out", "second"]);
+  });
+
+  test("the abandon CANCEL ignores an aborted ambient request signal", async () => {
+    // AdbClient resolves an omitted signal from the ambient request context.
+    const ambient: Array<AbortSignal | undefined> = [];
+    class AmbientRecordingAdb extends GatedAdbExecutor {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
+        if (command.includes("motionevent CANCEL")) {
+          ambient.push(getAbortSignal());
+        }
+        return super.executeCommand(command, options);
+      }
+    }
+    const adb = new AmbientRecordingAdb();
+    adb.setCommandError("am instrument", new Error("Operation cancelled"));
+    const controller = new AbortController();
+    const dispatch = runWithAbortSignal(controller.signal, () =>
+      createInstrumentationDispatch(adb, DEVICE)(hover, controller.signal),
+    );
+    await adb.started.promise;
+    controller.abort();
+    adb.release.resolve();
+    await expect(dispatch).rejects.toThrow("Operation cancelled");
+    expect(ambient).toEqual([undefined]);
   });
 });

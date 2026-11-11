@@ -270,8 +270,13 @@ reasoned skip list for content-sized floating captures and host chrome. The stan
 recorder, `bash scripts/ios/prototype-record-goldens.sh <simulator-udid>`, requires an already
 booted iPhone 16 and the app built by `scripts/ios/prototype-viewer-build.sh`. It installs a fresh
 viewer per case, loads the emitted spec through `Documents/prototype/`, and sets light or dark
-appearance before launch. It refuses the CI iPhone, clears its status override and restores light
-appearance on exit. Optional `--viewer`, `--out` and golden names select the app, destination and cases.
+appearance before launch. It launches the viewer with `--automobile-prototype-recording`, which
+turns all motion off as `motion: "none"` does (indeterminate progress draws one fixed frame, and
+dialogs appear without an entrance animation) and pins date-dependent content to the `en_US_POSIX`
+locale, UTC and a fixed clock (2026-01-15T12:00Z) for value formats and the date picker's calendar.
+The system date picker still marks the device's current day, which no launch argument can move.
+Without the flag the viewer is unchanged. It refuses the CI iPhone, clears its status override and
+restores light appearance on exit. Optional `--viewer`, `--out` and golden names select the app, destination and cases.
 
 - **Geometry.** Goldens in `ios/prototype-agent/Goldens/iphone-16/` are the full 1179×2556 pixel
   screenshot of the 393×852 pt screen at 3×, with the status bar pinned to 9:41. The viewer draws

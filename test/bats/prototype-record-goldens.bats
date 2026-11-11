@@ -124,7 +124,7 @@ record() {
   grep -q 'simctl uninstall test-udid dev.jasonpearson.automobile.prototype-viewer' "${CALLS}"
   grep -q 'simctl install test-udid' "${CALLS}"
   grep -q 'simctl ui test-udid appearance dark' "${CALLS}"
-  grep -q 'simctl launch test-udid' "${CALLS}"
+  grep -q 'simctl launch test-udid dev.jasonpearson.automobile.prototype-viewer --automobile-prototype-recording' "${CALLS}"
   grep -q 'sips --cropOffset 0 0 --cropToHeightWidth 2556 1179' "${CALLS}"
   grep -q 'simctl terminate test-udid' "${CALLS}"
   grep -q 'simctl status_bar test-udid clear' "${CALLS}"

@@ -42,12 +42,15 @@ struct PrototypeFormatEnvironment {
     let timeZone: TimeZone
     let now: Date
 
-    static func device(clock: PrototypeClock = SystemPrototypeClock()) -> Self {
-        Self(
+    static func device(
+        clock: PrototypeClock = SystemPrototypeClock(),
+        recording: PrototypeRecordingMode = .current
+    ) -> Self {
+        recording.formatEnvironment(device: Self(
             locale: .autoupdatingCurrent,
             timeZone: .current,
             now: Date(timeIntervalSince1970: Double(clock.nowMilliseconds) / 1000)
-        )
+        ))
     }
 }
 

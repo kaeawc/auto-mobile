@@ -110,7 +110,8 @@ while IFS=$'\t' read -r golden mode; do
   printf '%s\n' '{"formatVersion":1,"specFile":"spec.json","assets":[],"fonts":[]}' > "${container}/Documents/prototype/manifest.json"
   cp "${tmp_dir}/${golden}.json" "${container}/Documents/prototype/spec.json"
   running=1
-  xcrun simctl launch "${udid}" "${bundle}"
+  # Recording mode: fixed spinner frames, a pinned calendar locale and clock, no dialog entrance.
+  xcrun simctl launch "${udid}" "${bundle}" --automobile-prototype-recording
   capture_until_stable "${golden}"
   check_size "${tmp_dir}/screen.png" 1179 2556
   # man sips: --cropOffset offsetY offsetH; --cropToHeightWidth pixelsH pixelsW.

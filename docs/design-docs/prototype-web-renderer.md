@@ -273,8 +273,10 @@ viewer per case, loads the emitted spec through `Documents/prototype/`, and sets
 appearance before launch. It launches the viewer with `--automobile-prototype-recording`, which
 turns all motion off as `motion: "none"` does (indeterminate progress draws one fixed frame, and
 dialogs appear without an entrance animation) and pins date-dependent content to the `en_US_POSIX`
-locale, UTC and a fixed clock (2026-01-15T12:00Z) for value formats and the date picker's calendar.
-The system date picker still marks the device's current day, which no launch argument can move.
+locale, UTC and a fixed clock (2026-01-15T12:00Z) for value formats. A `datePicker` draws a static
+six-week month grid instead of the system graphical picker, whose UIKit calendar keeps laying out
+its month after captures match; it opens on the bound date's month (the fixed day when unbound) and
+marks no device "today".
 Without the flag the viewer is unchanged. It refuses the CI iPhone, clears its status override and
 restores light appearance on exit. Optional `--viewer`, `--out` and golden names select the app, destination and cases.
 

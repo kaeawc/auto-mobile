@@ -42,6 +42,7 @@ function resolutionIntent(
 ): ResolutionIntent {
   return {
     viewport,
+    readingOrder: options.readingOrder,
     action:
       options.intentAction ?? (options.selectionIntent === "focus-input" ? "focus-input" : "tap"),
     allowHintFallback: options.allowHintFallback,

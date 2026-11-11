@@ -15,6 +15,7 @@ import {
 import { SIGNING_SHA256_PATTERN } from "../utils/signingIdentity";
 import { installAppResultSchema, listAppsResultSchema } from "./appToolOutputSchemas";
 import { defineDeviceTool } from "./defineTool";
+import { ADVERTISES_DEVICE_ID } from "./toolRegistryTypes";
 
 // Schema definitions
 // #6613: these app schemas advertised `additionalProperties: false` but were
@@ -236,6 +237,7 @@ export const installAppTool = defineDeviceTool({
   description: "Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)",
   input: installAppInput,
   options: {
+    ...ADVERTISES_DEVICE_ID,
     defaultEnabled: true,
     // Installation is a platform package-manager operation. Requiring
     // accessibility automation here creates a dependency cycle on iOS:
@@ -489,6 +491,7 @@ export const listAppsTool = defineDeviceTool({
     "preinstalled ones included), search (package name or label), and profile.",
   input: listAppsInput,
   options: {
+    ...ADVERTISES_DEVICE_ID,
     defaultEnabled: true,
     // Listing installed apps only needs adb/simctl/devicectl — never CtrlProxy
     // automation — so it should not pay for (or trigger) automation-readiness

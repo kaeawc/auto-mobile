@@ -8,6 +8,57 @@ import XCTest
 
 @MainActor
 final class WatchCommandHandlerTests: XCTestCase {
+    func testTapPointMapsToNormalizedOffset() throws {
+        let offset = try watchTapNormalizedOffset(
+            x: 93, y: 140, frame: CGRect(x: 0, y: 0, width: 186, height: 224)
+        )
+        XCTAssertEqual(offset.dx, 0.5)
+        XCTAssertEqual(offset.dy, 0.625)
+    }
+
+    func testTapPointAcceptsScreenBoundaries() throws {
+        let frame = CGRect(x: 0, y: 0, width: 200, height: 250)
+        for (x, y) in [(0.0, 0.0), (200.0, 0.0), (0.0, 250.0), (200.0, 250.0)] {
+            let offset = try watchTapNormalizedOffset(x: x, y: y, frame: frame)
+            XCTAssertEqual(offset.dx, x / 200)
+            XCTAssertEqual(offset.dy, y / 250)
+        }
+    }
+
+    func testTapPointRejectsInvalidCoordinates() {
+        let frame = CGRect(x: 0, y: 0, width: 200, height: 250)
+        let points: [(Double, Double)] = [
+            (-1, 100), (100, -1), (.nan, 100), (100, .nan),
+            (.infinity, 100), (100, -.infinity), (201, 100), (100, 251),
+        ]
+        for (x, y) in points {
+            XCTAssertThrowsError(try watchTapNormalizedOffset(x: x, y: y, frame: frame)) { error in
+                guard case WatchCommandError.invalidRequest("tap is outside the watch screen") = error else {
+                    return XCTFail("Expected invalidRequest, got \(error)")
+                }
+            }
+        }
+    }
+
+    func testTapPointRejectsInvalidScreenDimensions() {
+        let sizes: [CGSize] = [
+            .zero, CGSize(width: 0, height: 250), CGSize(width: 200, height: 0),
+            CGSize(width: -200, height: 250), CGSize(width: 200, height: -250),
+            CGSize(width: CGFloat.nan, height: 250), CGSize(width: 200, height: CGFloat.infinity),
+        ]
+        for size in sizes {
+            XCTAssertThrowsError(try watchTapNormalizedOffset(
+                x: 0,
+                y: 0,
+                frame: CGRect(origin: .zero, size: size)
+            )) { error in
+                guard case WatchCommandError.invalidRequest("tap is outside the watch screen") = error else {
+                    return XCTFail("Expected invalidRequest, got \(error)")
+                }
+            }
+        }
+    }
+
     func testSystemAlertsIgnoreEmptyAlerts() {
         let tree = WatchAlertTree(element: "root", children: [
             WatchAlertTree(element: "empty", elementType: 7),

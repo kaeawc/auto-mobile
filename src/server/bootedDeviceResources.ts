@@ -1640,7 +1640,7 @@ async function computeBootedDevicesForPlatforms(
       ["serviceStatus", () => enrichDeviceServiceStatuses(devices, timer)],
       ["lock", () => enrichDeviceLockStates(devices, { timer, signal: controller.signal })],
       ["orientation", () => enrichDeviceOrientations(devices, timer, deps)],
-      ["traits", () => traitsProbe.enrich(devices, { target, timer, deps, serviceStatusEnabled })],
+      ["traits", () => traitsProbe.attach(devices, { target, timer, deps, serviceStatusEnabled })],
     ] as const;
     for (const [name] of probes) {
       pending.add(name);

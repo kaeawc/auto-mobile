@@ -1,3 +1,4 @@
+import type { AndroidXrDisplaySize } from "../observe/android/AndroidXrDisplaySize";
 import { withoutHiddenXrChrome, selectWithoutHiddenXrChrome } from "./xrHiddenChrome";
 import type { TapOnCall } from "./ActionCall";
 import {
@@ -102,6 +103,7 @@ interface TapSearchResult {
 
 /** Capabilities used by this phase; dependency readers observe replacements made by tests. */
 export interface TapTargetResolverHost {
+  readonly xrDisplaySize?: () => AndroidXrDisplaySize | undefined;
   readonly accessibilityService: () => TapOnCtrlProxy;
   readonly adb: () => AdbExecutor;
   buildSelectedElementMetadata: TapTargetResolver["buildSelectedElementMetadata"];
@@ -392,6 +394,7 @@ export class TapTargetResolver {
       logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
       return null;
     }
+    await this.correctXrHierarchySize(captured, signal);
     if (isUsableScreenSize(screenSize) && this.host.strategy().verifiesRefreshedDisplay) {
       await this.checkRefreshedDisplay(captured, screenSize, observedGeneration, signal);
     }
@@ -407,6 +410,20 @@ export class TapTargetResolver {
       context.refresh ??
       ((timeoutMs) => this.host.refreshViewHierarchy(timeoutMs, context.screenSize, context.signal))
     );
+  }
+
+  private async correctXrHierarchySize(
+    hierarchy: ViewHierarchyResult,
+    signal?: AbortSignal,
+    observation?: ObserveResult,
+  ): Promise<void> {
+    const size = this.host.xrDisplaySize?.();
+    if (!size || this.host.device().platform !== "android") {
+      return;
+    }
+    await size.prime(observation ?? {}, hierarchy, signal);
+    const result = observation ?? { screenSize: { width: 0, height: 0 } };
+    size.applyCached(result, hierarchy);
   }
 
   private async checkRefreshedDisplay(
@@ -625,6 +642,7 @@ export class TapTargetResolver {
       throw new ActionableError("Unable to get view hierarchy, cannot tap on element");
     }
 
+    await this.correctXrHierarchySize(viewHierarchy, signal, observeResult);
     const xr = this.xrChromeSearch(signal);
     await xr.detect(viewHierarchy);
     const searchDurationMs = this.host.getSearchUntilDuration(options);

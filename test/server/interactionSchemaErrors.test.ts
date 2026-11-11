@@ -4,6 +4,37 @@ import { observeSchema } from "../../src/server/observeTools";
 import { formatToolParamError } from "../../src/server/toolParamError";
 
 describe("actionable interaction schema errors", () => {
+  test.each(["open", "close", "find", "list", "dismiss", "clearAll"])(
+    "systemTray rejects replyText for %s",
+    (action) => {
+      const result = systemTraySchema.safeParse({
+        action,
+        notification: { appId: "com.example", replyText: "hi" },
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(
+          result.error.issues.some(
+            (issue) => issue.message === "notification.replyText is only valid for tap action",
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+
+  test("systemTray replyText must be non-empty", () => {
+    expect(
+      systemTraySchema.safeParse({ action: "tap", notification: { title: "Alert", replyText: "" } })
+        .success,
+    ).toBe(false);
+    expect(
+      systemTraySchema.safeParse({
+        action: "tap",
+        notification: { title: "Alert", replyText: "hi" },
+      }).success,
+    ).toBe(true);
+  });
+
   test("observe rejects an unknown root argument", () => {
     const input = { bogusKey: 123 };
     const result = observeSchema.safeParse(input);

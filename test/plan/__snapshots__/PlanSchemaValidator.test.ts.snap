@@ -41,7 +41,7 @@ exports[`PlanSchemaValidator preserves the complete validation result for enum 1
       "column": 1,
       "field": "platform",
       "line": 2,
-      "message": "Must be one of: android, ios, tvos",
+      "message": "Must be one of: android, ios, tvos, visionos, watchos",
     },
   ],
   "valid": false,

@@ -73,6 +73,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     selector: AccessibilityNodeSelector | undefined;
     expectedBounds?: { left: number; top: number; right: number; bottom: number };
     identityHints?: AndroidActionRequestOptions["identityHints"];
+    allowInvisible?: boolean;
     timeoutMs: number;
     perf?: PerformanceTracker;
     signal?: AbortSignal;
@@ -1207,6 +1208,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       signal,
       expectedBounds,
       identityHints,
+      allowInvisible,
     }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestNodeAction");
@@ -1219,6 +1221,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       signal,
       ...(expectedBounds ? { expectedBounds } : {}),
       ...(identityHints ? { identityHints: { ...identityHints } } : {}),
+      ...(allowInvisible ? { allowInvisible: true } : {}),
     });
     return (
       this.actionResult ?? {

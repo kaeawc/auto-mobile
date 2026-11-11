@@ -40,7 +40,7 @@ class FakeCrashCommandRunner implements SimulatorCrashCommandRunner {
 }
 
 describe("IosCrashBackend", () => {
-  test.each(["ios", "tvos"] as const)(
+  test.each(["ios", "tvos", "watchos"] as const)(
     "%s resolver dispatches SIGABRT in the platform's launchctl domain",
     async (platform) => {
       const runner = new FakeCrashCommandRunner();
@@ -54,9 +54,9 @@ describe("IosCrashBackend", () => {
         "launchctl",
         "kill",
         "SIGABRT",
-        `${platform === "tvos" ? "system" : "user/501"}/${serviceLabel}`,
+        `${platform === "ios" ? "user/501" : "system"}/${serviceLabel}`,
       ]);
-      if (platform === "tvos") {
+      if (platform !== "ios") {
         expect(runner.calls[0].args.some((arg) => arg.startsWith("user/"))).toBe(false);
       }
     },

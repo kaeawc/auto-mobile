@@ -1,5 +1,5 @@
 /**
- * Shared runner for the advisory emulator smoke lanes (AAOS #16746, Wear OS #16829).
+ * Shared runner for the advisory emulator smoke lanes (AAOS #16746, Android TV #16732, Wear OS #16829).
  *
  * A lane supplies a fixed plan of tool calls, each with an assertion over its payload. The runner
  * drives the plan over one persistent MCP session, writes each payload as JSON, copies observe

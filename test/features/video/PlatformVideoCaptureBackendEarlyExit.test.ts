@@ -20,7 +20,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 const RECORDING_ID = "early-exit";
 const DEVICE_FILE = `/sdcard/auto-mobile-${RECORDING_ID}.mp4`;
 const LAUNCH = "exec screenrecord";
-const SETTLE_MS = 300;
+const SETTLE_MS = 1000;
 const OUR_CMDLINE = `screenrecord\u0000--bit-rate\u0000100\u0000${DEVICE_FILE}\u0000`;
 const PROBE = "shell 'cat /proc/4321/cmdline 2>/dev/null; true'";
 const STAT = `shell stat -c %s ${DEVICE_FILE}`;
@@ -108,12 +108,12 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
       // path it echoes are never part of the message.
       expect(message).not.toContain("5000x5000");
       expect(message).not.toContain(DEVICE_FILE);
-      // One launch (no retry); the other spawn is the failed start's temp-file cleanup.
+      // Both abnormal launches fail; each also runs failed-start temp-file cleanup.
       const launches = factory
         .getFakeClient()
         .getSpawnCalls()
         .filter((argv) => argv.join(" ").includes(LAUNCH));
-      expect(launches).toHaveLength(1);
+      expect(launches).toHaveLength(2);
     });
 
     test("a start that fails after the device pid is known stops that recorder and removes its temp file (#10217)", async () => {
@@ -253,7 +253,7 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
           .some((argv) => argv[0] === "pull"),
       ).toBe(true);
       expect(result.sizeBytes).toBe(2048);
-      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings).toHaveLength(2);
       expect(result.warnings?.[0]).toContain("code 1");
       expect(result.warnings?.[0]).toContain("adb: device offline");
     });
@@ -287,7 +287,9 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
       const second = await backend.stop(handle);
 
       expect(second.sizeBytes).toBe(640);
-      expect(second.warnings).toBeUndefined();
+      expect(second.warnings).toEqual([
+        "The Android video is much shorter than the recording window and should not be used as evidence.",
+      ]);
     });
 
     test("a recorder that finished by its own time limit (exit 0) still goes through the pull path", async () => {

@@ -147,13 +147,24 @@ preserved. Writes use a temporary file and atomic rename.
 | `catalog-cpu` | minimal plus healthServices, photoAnalysis, assistantSuggestions, appleIntelligence, searchIndexing | 23     |
 
 Explicit disabled resources add their catalog labels; explicit enabled resources remove their labels
-from the selected profile. An empty label set performs no host I/O. The write is best effort: errors
+from the selected profile. An empty label set performs no label-database I/O. The write is best effort: errors
 warn and provisioning continues. Explicit resource requests still run through the existing post-boot
 verification, which remains `current_boot`.
 
 The database survives reboot and erase and is specific to the UDID; clones do not inherit it.
 After successful simulator deletion, AutoMobile removes that UDID's host directory on a best-effort
 basis. Orphan directories belonging to simulators already deleted are not swept.
+
+Independently of the lean profile, `AUTOMOBILE_IOS_SUPPRESS_APSD_LOG=1` (or `true`, trimmed and
+case-insensitive) opts in to suppressing `com.apple.apsd` logs for newly created simulators before
+first boot. It defaults to `false` and writes nothing when off. AutoMobile writes a dictionary plist
+at `~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Library/Preferences/Logging/Subsystems/com.apple.apsd.plist`
+with `DEFAULT-OPTIONS.Level.Enable` and `DEFAULT-OPTIONS.Level.Persist` both set to the string `off`.
+The setting persists across reboots; write failures warn and provisioning continues independently of
+label application. This hides apsd debug logs needed for push-flow debugging; remote push itself is
+unaffected because only logging changes, with no launchd job disabled. Measure any CPU effect by
+sampling `ps` cputime deltas over 60 seconds for simulator `diagnosticd`, `apsd`, and `logd`, and host
+`diagnosticd`. The flood was not reproduced on iOS 26.5 here, so no CPU benefit is claimed.
 
 ## Settled template creation
 

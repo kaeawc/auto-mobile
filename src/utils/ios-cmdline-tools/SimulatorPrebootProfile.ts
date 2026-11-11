@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   findUnsafeResourceCombinations,
   iosDeviceResourceHazards,
@@ -83,6 +85,11 @@ export function resolveDefaultPrebootProfile(env: NodeJS.ProcessEnv): PrebootLea
   return PREBOOT_LEAN_PROFILE_DEFAULT;
 }
 
+export function resolveApsdLogSuppressionEnabled(env: NodeJS.ProcessEnv): boolean {
+  const value = readEnvTrimmed(ENV.IOS_SUPPRESS_APSD_LOG, env)?.toLowerCase();
+  return value === "1" || value === "true";
+}
+
 export const simulatorHostStateDir = (udid: string): string =>
   `/private/var/tmp/com.apple.CoreSimulator.SimDevice.${udid.toUpperCase()}`;
 export const simulatorDisabledDbPath = (udid: string): string =>
@@ -95,6 +102,7 @@ export interface PrebootApplyResult {
   path?: string;
   reason?: string;
   unsafe?: readonly IosDeviceResourceHazard[];
+  apsdLogSuppression?: { applied: boolean; path?: string; reason?: string };
 }
 
 export class SimulatorPrebootProfile {
@@ -103,6 +111,10 @@ export class SimulatorPrebootProfile {
     private readonly defaultProfile: () => PrebootLeanProfileName = () =>
       resolveDefaultPrebootProfile(process.env),
     private readonly hazards: readonly IosDeviceResourceHazard[] = iosDeviceResourceHazards,
+    private readonly apsdLog: { enabled: () => boolean; devicesDir: () => string } = {
+      enabled: () => resolveApsdLogSuppressionEnabled(process.env),
+      devicesDir: () => join(homedir(), "Library/Developer/CoreSimulator/Devices"),
+    },
   ) {}
   async apply(
     udid: string,
@@ -113,6 +125,7 @@ export class SimulatorPrebootProfile {
       return { applied: false, resources: [], labels: [], reason: "Invalid simulator UDID" };
     }
     let labels: string[] = [];
+    let suppression: Pick<PrebootApplyResult, "apsdLogSuppression"> = {};
     try {
       signal?.throwIfAborted();
       const options = { profile: this.defaultProfile(), resources };
@@ -127,10 +140,11 @@ export class SimulatorPrebootProfile {
         return { applied: false, resources: [], labels: [], reason: refusal.message, unsafe };
       }
       labels = resolvePrebootLabels(options);
-      if (!labels.length) {
-        return { applied: false, resources: [], labels: [] };
-      }
+      suppression = await this.suppressApsdLogs(udid, signal);
       signal?.throwIfAborted();
+      if (!labels.length) {
+        return { applied: false, resources: [], labels: [], ...suppression };
+      }
       const path = simulatorDisabledDbPath(udid);
       await this.host.mkdirPrivate(simulatorHostStateDir(udid));
       const existing = await this.host.readExisting(path, signal);
@@ -140,15 +154,51 @@ export class SimulatorPrebootProfile {
         { ...existing, ...Object.fromEntries(labels.map((label) => [label, true])) },
         signal,
       );
-      return { applied: true, resources: resolvePrebootResources(options), labels, path };
+      return {
+        applied: true,
+        resources: resolvePrebootResources(options),
+        labels,
+        path,
+        ...suppression,
+      };
     } catch (error) {
       if (signal?.aborted) {
         // Cancellation is expected when the provisioning request ends.
         logger.debug("Simulator preboot profile apply aborted", error);
-        return { applied: false, resources: [], labels, reason: "aborted" };
+        return { applied: false, resources: [], labels, reason: "aborted", ...suppression };
       }
       logger.warn(`Failed to apply simulator preboot profile: ${errorMessage(error)}`, error);
-      return { applied: false, resources: [], labels, reason: errorMessage(error) };
+      return { applied: false, resources: [], labels, reason: errorMessage(error), ...suppression };
+    }
+  }
+  private async suppressApsdLogs(
+    udid: string,
+    signal?: AbortSignal,
+  ): Promise<Pick<PrebootApplyResult, "apsdLogSuppression">> {
+    try {
+      if (!this.apsdLog.enabled()) {
+        return {};
+      }
+      signal?.throwIfAborted();
+      const path = join(
+        this.apsdLog.devicesDir(),
+        udid.toUpperCase(),
+        "data/Library/Preferences/Logging/Subsystems/com.apple.apsd.plist",
+      );
+      await this.host.mkdirPrivate(dirname(path));
+      signal?.throwIfAborted();
+      await this.host.writeBinaryPlist(
+        path,
+        { "DEFAULT-OPTIONS": { Level: { Enable: "off", Persist: "off" } } },
+        signal,
+      );
+      return { apsdLogSuppression: { applied: true, path } };
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(`Failed to suppress simulator apsd logs: ${errorMessage(error)}`, error);
+      return { apsdLogSuppression: { applied: false, reason: errorMessage(error) } };
     }
   }
   async removeHostState(udid: string): Promise<void> {

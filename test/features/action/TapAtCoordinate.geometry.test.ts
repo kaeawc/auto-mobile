@@ -9,6 +9,48 @@ import { createTapAt, observation } from "../../helpers/tapAtCoordinate";
 import { ToolCallRecorder } from "../../../src/features/record/ToolCallRecorder";
 import { YamlPlanSerializer } from "../../../src/utils/plan/PlanSerializer";
 import * as yaml from "js-yaml";
+import { readFileSync } from "node:fs";
+import type { ObserveResult } from "../../../src/models";
+import { parseBounds } from "../../../src/utils/bounds";
+
+// Restore the public compact bounds encoding to the internal observation shape.
+const gboardCapture: { observation: ObserveResult; x: number; y: number } = JSON.parse(
+  readFileSync(
+    new URL("../../fixtures/android-xr/tapat-gboard-ime-screensize-17825.json", import.meta.url),
+    "utf8",
+  ),
+  (key, value: unknown) => (key === "bounds" ? (parseBounds(value) ?? value) : value),
+);
+
+test("XR tapAt resolves the Gboard IME-sized observation using the fullscreen display", () => {
+  const { observation, x, y } = gboardCapture;
+  expect(observation.screenSize).toMatchObject({ width: 1080, height: 608 });
+  expect(observation.screenshotImageSize).toBeUndefined();
+  const options = { x, y, androidXr: true };
+  const resolved = resolveTapAtCoordinates(options, observation, "android");
+  expect(resolved).toMatchObject({
+    x: 836,
+    y: 110,
+    screenshotPoint: { x: 1100, y: 861 },
+    xrPanel: { packageName: "com.android.settings", taskId: 6, displayX: 836, displayY: 110 },
+  });
+  expect(resolved).toEqual(
+    resolveTapAtCoordinates(
+      options,
+      { ...observation, screenSize: { width: 2560, height: 2558 } },
+      "android",
+    ),
+  );
+});
+
+test("phone tapAt retains the small observation screen bounds despite fullscreen tasks", () => {
+  const { observation, x, y } = gboardCapture;
+  expect(resolveTapAtCoordinates({ x, y, androidXr: false }, observation, "android")).toEqual({
+    x,
+    y,
+    error: "tapAt coordinates (1100, 861) are outside screen bounds [0, 1080) x [0, 608)",
+  });
+});
 
 for (const platform of ["android", "ios"] as const) {
   test(`${platform} native recording/serialization/replay round trip`, async () => {

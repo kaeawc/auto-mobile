@@ -123,13 +123,41 @@ export async function withXrPoseWarning<
   return xrWarning ? { ...result, warning: appendWarning(result.warning, xrWarning) } : result;
 }
 
-/** The measured eye screenshot is square even though wm size reports 2560x2558. */
+function fullscreenTaskExtent(backStack: BackStackInfo | undefined): Size | undefined {
+  let display: Size | undefined;
+  for (const task of backStack?.tasks ?? []) {
+    const bounds = task.bounds;
+    if (
+      task.windowingMode !== "fullscreen" ||
+      !bounds ||
+      !Object.values(bounds).every(Number.isFinite)
+    ) {
+      continue;
+    }
+    const width = bounds.right - bounds.left;
+    const height = bounds.bottom - bounds.top;
+    if (width > 0 && height > 0 && (!display || width * height > display.width * display.height)) {
+      display = { width, height };
+    }
+  }
+  return display;
+}
+
+/** The eye screenshot is square; fullscreen tasks recover display size when screenSize is the IME. */
 export function xrScreenshotSize(observation: {
   screenSize: Size;
   screenshotImageSize?: Size;
+  backStack?: BackStackInfo;
 }): Size {
-  const side = Math.min(observation.screenSize.width, observation.screenSize.height);
-  return observation.screenshotImageSize ?? { width: side, height: side };
+  if (observation.screenshotImageSize) {
+    return observation.screenshotImageSize;
+  }
+  const display = fullscreenTaskExtent(observation.backStack);
+  const side = Math.min(
+    Math.max(observation.screenSize.width, display?.width ?? observation.screenSize.width),
+    Math.max(observation.screenSize.height, display?.height ?? observation.screenSize.height),
+  );
+  return { width: side, height: side };
 }
 
 export function panelRectInScreenshot(panel: XrPanel, screenshot: Size): ElementBounds {

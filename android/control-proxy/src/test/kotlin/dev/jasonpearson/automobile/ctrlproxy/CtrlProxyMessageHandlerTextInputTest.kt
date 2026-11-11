@@ -349,13 +349,43 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
   }
 
   @Test
+  fun `dispatches allowInvisible alongside selector bounds`() = runTest {
+    dispatch(
+      """{"type":"request_action","requestId":"hidden","action":"click","selector":{"resourceId":"com.app:id/x"},"boundsLeft":10,"boundsTop":20,"boundsRight":110,"boundsBottom":120,"allowInvisible":true}""",
+    )
+    assertEquals(
+      "requestAction" to
+        listOf<Any?>(
+          "hidden",
+          "click",
+          null,
+          dev.jasonpearson.automobile.protocol.NodeSelector(resourceId = "com.app:id/x"),
+          NodeActionArguments(),
+          NodeExpectedBounds(10, 20, 110, 120),
+          null,
+          true,
+        ),
+      lastCall,
+    )
+  }
+
+  @Test
   fun `dispatches request_action`() = runTest {
     dispatch(
       """{"type":"request_action","requestId":"a1","action":"long_click","resourceId":"com.app:id/x"}""",
     )
     assertEquals(
       "requestAction" to
-        listOf<Any?>("a1", "long_click", "com.app:id/x", null, NodeActionArguments(), null, null),
+        listOf<Any?>(
+          "a1",
+          "long_click",
+          "com.app:id/x",
+          null,
+          NodeActionArguments(),
+          null,
+          null,
+          false,
+        ),
       lastCall,
     )
   }
@@ -375,6 +405,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
           NodeActionArguments(),
           NodeExpectedBounds(10, 20, 110, 120),
           NodeIdentityHints("Row", "", "", "Connected devices", "Connections"),
+          false,
         ),
       lastCall,
     )
@@ -397,6 +428,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
             NodeActionArguments(),
             NodeExpectedBounds(10, 20, 110, bottom),
             null,
+            false,
           ),
         lastCall,
       )
@@ -418,6 +450,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
           NodeActionArguments(customAction = "Archive"),
           null,
           null,
+          false,
         ),
       lastCall,
     )
@@ -434,6 +467,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
           NodeActionArguments(progress = 0.75f),
           null,
           null,
+          false,
         ),
       lastCall,
     )
@@ -458,6 +492,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
           NodeActionArguments(),
           null,
           null,
+          false,
         ),
       lastCall,
     )

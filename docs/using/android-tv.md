@@ -143,7 +143,13 @@ the match and presses `enter`, so one flow can tap on both Android TV and tvOS. 
 the same element a touch tap would, including a text field found by its placeholder and the first
 of several matches, even when focus is on another one. The result then has
 `inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`. Focus takes the shortest
-route: a match on another row is reached by changing rows first. With `action: "longPress"` the
+route: a match on another row is reached by changing rows first. A card that is not on screen yet,
+further along a row that only shows its first cards, is searched for in the row whose cards are
+labelled like it (`Trending card 1` to `5` for `Trending card 8`): focus moves into that row, presses
+right to its end, then left, and does not leave it. This applies to `focusNavigate` too. If neither
+end holds the card, `status` is `stuck` and the message says the target was not on screen, names the
+row and the element focus ended on; check the label. When no row on screen is labelled like the
+target, the walk presses down instead, and the message says so. With `action: "longPress"` the
 call holds D-pad center for `duration` ms (default 1000) instead of pressing `enter`; the hold
 needs Android 15 (API 35) or newer.
 If focus cannot reach the match, the call fails without pressing `enter`; observe and retry, or

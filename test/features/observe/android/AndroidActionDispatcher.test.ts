@@ -132,6 +132,26 @@ describe("AndroidActionDispatcher", () => {
     }
   });
 
+  test("serializes allowInvisible only for an explicit true opt in", async () => {
+    const sent: string[] = [];
+    const { dispatcher } = harness({ connected: true, sent });
+    for (const allowInvisible of [true, false, undefined]) {
+      await dispatcher.requestNodeAction(
+        "click",
+        { resourceId: "id/button" },
+        {
+          expectedBounds: { left: 10, top: 20, right: 110, bottom: 120 },
+          allowInvisible,
+        },
+      );
+    }
+    expect(sent).toHaveLength(3);
+    const [optedIn, optedOut, legacy] = sent.map((data) => JSON.parse(data));
+    expect(optedIn).toMatchObject({ allowInvisible: true, boundsLeft: 10, boundsBottom: 120 });
+    expect(optedOut).not.toHaveProperty("allowInvisible");
+    expect(legacy).not.toHaveProperty("allowInvisible");
+  });
+
   test("serializes a bounds-only click without selector or resource id", async () => {
     const sent: string[] = [];
     const { dispatcher } = harness({ connected: true, sent });

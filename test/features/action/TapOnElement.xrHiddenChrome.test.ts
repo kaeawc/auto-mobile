@@ -57,7 +57,15 @@ function setup(xr = true, platform: "android" | "ios" = "android") {
 }
 
 describe("XR hidden system chrome target resolution", () => {
-  for (const text of ["Environment", "Recents"]) {
+  test("permits captured hidden Environment with a unique native click selector", async () => {
+    const result = await setup().search(tree());
+    expect(result.selection.element?.["resource-id"]).toBe(
+      "com.android.systemui:id/home_screen_env_button",
+    );
+    expect(result.visibilityError).toBeUndefined();
+  });
+
+  for (const text of ["Recents"]) {
     test(`refuses captured hidden ${text} with actionable guidance before dispatch`, async () => {
       const hierarchy = tree();
       expect(target(hierarchy, text).properties["visible-to-user"]).toBe(false);
@@ -98,12 +106,12 @@ describe("XR hidden system chrome target resolution", () => {
     tap.refreshViewHierarchy = async () => hierarchy;
     const result = await tap.execute({
       action: "tap",
-      text: "Environment",
+      text: "Recents",
       searchUntil: { duration: 100 },
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("hidden XR system chrome");
-    expect(result.error).toContain("Environment");
+    expect(result.error).toContain("Recents");
     expect(service.getNodeActionHistory()).toEqual([]);
     expect(service.getTapHistory()).toEqual([]);
     expect(adb.getAllCommands()).toEqual([
@@ -117,7 +125,7 @@ describe("XR hidden system chrome target resolution", () => {
     const result = await tap.searchForElement(
       {
         action: "tap",
-        text: "Environment",
+        text: "Recents",
         selectionStrategy: "unique",
         searchUntil: { duration: 100 },
         verification: { refresh: async () => hierarchy },
@@ -194,6 +202,8 @@ describe("XR hidden system chrome target resolution", () => {
 
   test("resource-id ownership works without window metadata", async () => {
     const node = target(tree(), "Environment").source;
+    // Test resource-id ownership on a non-clickable variant of the captured node.
+    Object.assign(node, { actions: [] });
     const result = await setup().search({ hierarchy: { node } });
     expect(result.selection.element).toBeNull();
     expect(result.visibilityError?.message).toContain("hidden XR system chrome");
@@ -231,7 +241,7 @@ describe("XR hidden system chrome target resolution", () => {
       expect(found.visibilityError).toBeUndefined();
       expect(detector.queries).toEqual(["fake"]);
       // Hidden chrome stays excluded from the raw universe too.
-      const hidden = await setup().search(output, "Environment");
+      const hidden = await setup().search(output, "Recents");
       expect(hidden.selection.element).toBeNull();
       expect(hidden.visibilityError?.message).toContain("hidden XR system chrome");
     } finally {
@@ -255,10 +265,10 @@ describe("XR hidden system chrome target resolution", () => {
 
   test("polling can replace a hidden match with a visible control", async () => {
     const refreshed = tree();
-    Object.assign(target(refreshed, "Environment").source, { "visible-to-user": true });
+    Object.assign(target(refreshed, "Recents").source, { "visible-to-user": true });
     const { search, detector } = setup();
-    const result = await search(tree(), "Environment", refreshed);
-    expect(result.selection.element?.["content-desc"]).toBe("Environment");
+    const result = await search(tree(), "Recents", refreshed);
+    expect(result.selection.element?.["content-desc"]).toBe("Recents");
     expect(result.visibilityError).toBeUndefined();
     expect(result.stats.requestCount).toBe(1);
     expect(detector.queries).toEqual(["fake"]);

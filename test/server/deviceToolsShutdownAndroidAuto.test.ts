@@ -148,6 +148,18 @@ for (const stopped of [true, false]) {
   });
 }
 
+test("pre-kill shutdown marks the confirmed AVD rather than an unknown entry name", async () => {
+  const { context, applier, timer } = setup();
+  applier.stopDesktopHeadUnit = async () => true;
+  const markers = new FakeAvdColdBootMarkerStore();
+  await stopAndroidAutoBeforeShutdown(
+    { ...context, device: { ...context.device, name: "Unknown (emulator-5554)" } },
+    { timer, androidAutoProjection: applier, avdColdBootMarkers: markers },
+    "Pixel",
+  );
+  expect(markers.calls).toEqual(["write:Pixel"]);
+});
+
 test("marker write failure does not fail pre-kill shutdown", async () => {
   const { context, applier, timer } = setup();
   applier.stopDesktopHeadUnit = async () => true;

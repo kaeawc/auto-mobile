@@ -38,7 +38,8 @@ describe("FileAvdColdBootMarkerStore", () => {
       const first = new FileAvdColdBootMarkerStore(resolver, markerFiles);
       expect(await first.isMarked("Pixel")).toBe(false);
       await first.mark("Pixel");
-      expect(files.getWrittenFiles().has(join(directory, AVD_COLD_BOOT_MARKER))).toBe(true);
+      // existsSync normalizes separators; getWrittenFiles() keys are "/"-joined even on Windows.
+      expect(files.existsSync(join(directory, AVD_COLD_BOOT_MARKER))).toBe(true);
       // A new instance models a restarted daemon; no process-local state is shared.
       const restarted = new FileAvdColdBootMarkerStore(resolver, markerFiles);
       expect(await restarted.isMarked("Pixel")).toBe(true);

@@ -12,7 +12,9 @@ import { stopProvisionedAndroidAuto } from "./provisioning/provisioningAndroidAu
  * Only a DHU this daemon spawned for this emulator; it would otherwise outlive it (#17839).
  * Its host port redirect is forgotten only once the kill succeeds, since a failed kill leaves
  * the emulator, and its redirect, in place. Other platforms have no DHU, so their deadline
- * errors keep naming their own step (#17877).
+ * errors keep naming their own step (#17877). `avdName` is the AVD the kill confirmed, which can
+ * differ from the entry device's name (an `Unknown (emulator-NNNN)` placeholder); the cold boot
+ * marker is written for it.
  */
 export async function stopAndroidAutoBeforeShutdown(
   shutdownContext: ShutdownDeadlineContext,
@@ -20,6 +22,7 @@ export async function stopAndroidAutoBeforeShutdown(
     DeviceToolsDependencies,
     "timer" | "androidAutoProjection" | "avdColdBootMarkers"
   >,
+  avdName: string = shutdownContext.device.name,
 ): Promise<void> {
   const { device } = shutdownContext;
   if (device.platform !== "android") {
@@ -32,12 +35,10 @@ export async function stopAndroidAutoBeforeShutdown(
       const stopped = await stopProvisionedAndroidAuto(dependencies, device);
       if (stopped) {
         try {
-          await (dependencies.avdColdBootMarkers ?? new FileAvdColdBootMarkerStore()).mark(
-            device.name,
-          );
+          await (dependencies.avdColdBootMarkers ?? new FileAvdColdBootMarkerStore()).mark(avdName);
         } catch (error) {
           logger.warn(
-            `[AndroidAuto] Failed to mark AVD '${device.name}' for a cold boot: ${errorMessage(error)}`,
+            `[AndroidAuto] Failed to mark AVD '${avdName}' for a cold boot: ${errorMessage(error)}`,
             error,
           );
         }

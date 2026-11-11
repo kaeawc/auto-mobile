@@ -28,7 +28,7 @@ auto-mobile --cli provisionDevice --readiness none --device '{
 }'
 ```
 
-The result includes the simulator's UDID (`identity.stableId`) and a `sessionId`. Pass that `sessionId` as `--sessionUuid` to the calls below. `readiness` must be `none` for visionOS. Provisioning boots the simulator and creates it if no exact match exists.
+The result includes the simulator's UDID (`identity.stableId`), a `sessionId`, and `enabledTools`: the tools this session can use on visionOS. Tools that refuse visionOS, such as `tapAt`, `swipeOn`, `pressButton` and `homeScreen`, are left out. Pass that `sessionId` as `--sessionUuid` to the calls below. `readiness` must be `none` for visionOS. Provisioning boots the simulator and creates it if no exact match exists.
 
 ## Install and launch an app
 

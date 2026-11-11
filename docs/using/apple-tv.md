@@ -134,7 +134,9 @@ listing.
 ## Observe
 
 With a connected runner, `observe` returns a screenshot, the hierarchy and `focusedElement`;
-`project: "full"` includes the full hierarchy. The hierarchy describes the app in front: the app
+`project: "full"` includes the full hierarchy. `focusedElement.checked` reports a toggle's on/off
+state when available, including when focus belongs to the row containing the toggle. An absent
+`checked` means its state is unknown. The hierarchy describes the app in front: the app
 you last started with `launchApp`, Settings or another Apple app, or the home screen.
 
 Without a runner it returns a screenshot with `hierarchyUnavailable`; call `startDevice` again to
@@ -182,7 +184,8 @@ Touch-surface swipes are unavailable because XCUITest does not expose them on tv
 directional presses and focus navigation instead.
 
 `tapOn` replaces tapping: it moves focus to a matched element with directional presses and then
-presses `select`.
+presses `select`. A matched checkable control inside the focused row's bounds activates that row with one
+`select`; the result's `element` remains the matched child.
 
 - Match with an exact `text` or `elementId`, and an optional zero-based `index`. Only the `tap`
   action is supported; other options are refused.

@@ -261,3 +261,16 @@ enum TVTargetResolver {
         return trimmed.isEmpty ? rest : [trimmed] + rest
     }
 }
+
+/// XCTest-independent state projection for radio buttons, checkboxes and switches.
+enum TVCheckableState {
+    static func attributes(elementType: Int, value: String?) -> (checkable: String?, checked: String?) {
+        // XCUIElement.ElementType raw values, from XCUIElementTypes.h.
+        guard [10, 12, 40].contains(elementType) else { return (nil, nil) }
+        switch value?.lowercased() {
+        case "1", "true", "on": return ("true", "true")
+        case "0", "false", "off": return ("true", "false")
+        default: return ("true", nil)
+        }
+    }
+}

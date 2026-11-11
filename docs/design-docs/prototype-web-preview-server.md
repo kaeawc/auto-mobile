@@ -58,6 +58,7 @@ binds the server to Bun's API where the daemon's other HTTP servers use node:htt
 
 ## Headless mode
 
-Headless mode (#17974) plugs in through `PrototypePreviewPageSource`: if it records its shown specs
-into the daemon's spec revisions, the default source serves them unchanged; otherwise it supplies
-its own source through `PrototypeToolDependencies.preview`.
+Headless mode (#17974) needs no source of its own. A show or patch on the virtual device runs the
+same Android path as a device, so the status store records it into the daemon's spec revisions and
+the default `PrototypePreviewPageSource` serves it and signals the reload. `serve` and `stop` are
+host-only, so the registry's headless `nonDeviceHandler` reaches them with no device resolved.

@@ -1,0 +1,273 @@
+import { describe, expect, test } from "bun:test";
+import type { AndroidAutoPhone } from "../../../src/features/androidAuto/AndroidAutoPhone";
+import {
+  AndroidAutoProjectionProvisioner,
+  type AndroidAutoProjectionRequest,
+} from "../../../src/features/androidAuto/AndroidAutoProjectionProvisioner";
+import type { AndroidAutoSignerCheck } from "../../../src/features/androidAuto/AndroidAutoSignerCheck";
+import { ActionableError } from "../../../src/models/ActionableError";
+import type { AndroidAutoSettingsUi } from "../../../src/features/androidAuto/AndroidAutoSettingsUi";
+import type {
+  DesktopHeadUnitLauncher,
+  DesktopHeadUnitSession,
+  DhuLaunchOutcome,
+} from "../../../src/features/androidAuto/DesktopHeadUnit";
+import { fixedBackoff } from "../../../src/utils/Backoff";
+import { FakeTimer } from "../../fakes/FakeTimer";
+
+/** A phone whose provisioning state lives in plain fields; every mutation is recorded. */
+class FakePhone implements AndroidAutoPhone {
+  readonly changes: string[] = [];
+  sideloaded = false;
+  keyguardDisabled = false;
+  stayOn = false;
+  listenerAllowed = false;
+  serverListening = false;
+  redirected = false;
+
+  constructor(private readonly ui: FakeUi) {}
+
+  async isAndroidAutoSideloaded() {
+    return this.sideloaded;
+  }
+  async installSplitApks(paths: readonly string[]) {
+    this.changes.push(`install:${paths.join(",")}`);
+    this.sideloaded = true;
+  }
+  async isKeyguardDisabled() {
+    return this.keyguardDisabled;
+  }
+  async disableKeyguard() {
+    this.changes.push("keyguard");
+    this.keyguardDisabled = true;
+  }
+  async isStayOnEnabled() {
+    return this.stayOn;
+  }
+  async enableStayOn() {
+    this.changes.push("stay-on");
+    this.stayOn = true;
+  }
+  async isNotificationListenerAllowed() {
+    return this.listenerAllowed;
+  }
+  async allowNotificationListener() {
+    this.changes.push("listener");
+    this.listenerAllowed = true;
+  }
+  async isHeadUnitServerListening() {
+    return this.serverListening || this.ui.serverStarted;
+  }
+  async openAndroidAutoSettings() {}
+  async forceStopAndroidAuto() {
+    this.changes.push("force-stop");
+    this.ui.serverStarted = false;
+    this.serverListening = false;
+  }
+  async addHeadUnitRedirect() {
+    this.changes.push("redirect");
+    this.redirected = true;
+  }
+}
+
+class FakeUi implements AndroidAutoSettingsUi {
+  readonly changes: string[] = [];
+  developerMode = false;
+  unknownSources = false;
+  serverStarted = false;
+  onboardingPending = false;
+
+  async isDeveloperModeEnabled() {
+    return this.developerMode;
+  }
+  async enableDeveloperMode() {
+    this.changes.push("developer-mode");
+    this.developerMode = true;
+  }
+  async isUnknownSourcesEnabled() {
+    return this.unknownSources;
+  }
+  async enableUnknownSources() {
+    this.changes.push("unknown-sources");
+    this.unknownSources = true;
+  }
+  async startHeadUnitServer() {
+    this.changes.push("start-server");
+    this.serverStarted = true;
+  }
+  async isOnboardingPending() {
+    return this.onboardingPending;
+  }
+  async acceptOnboarding() {
+    this.changes.push("onboarding");
+    this.onboardingPending = false;
+  }
+}
+
+class FakeSession implements DesktopHeadUnitSession {
+  running = true;
+  sendCommand() {}
+  isRunning() {
+    return this.running;
+  }
+  stop() {
+    this.running = false;
+  }
+}
+
+class FakeLauncher implements DesktopHeadUnitLauncher {
+  launches = 0;
+  constructor(private readonly outcomes: DhuLaunchOutcome[] = []) {}
+  async launch(): Promise<DhuLaunchOutcome> {
+    this.launches++;
+    return this.outcomes.shift() ?? { status: "connected", session: new FakeSession() };
+  }
+}
+
+function setup(outcomes: DhuLaunchOutcome[] = [], signerCheck?: AndroidAutoSignerCheck) {
+  const ui = new FakeUi();
+  const phone = new FakePhone(ui);
+  const verified: string[][] = [];
+  const launcher = new FakeLauncher(outcomes);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const provisioner = new AndroidAutoProjectionProvisioner({
+    phone,
+    ui,
+    signerCheck: signerCheck ?? {
+      verify: async (paths) => {
+        verified.push([...paths]);
+      },
+    },
+    dhu: launcher,
+    hostPorts: { isPortAvailable: () => !phone.redirected },
+    timer,
+    recoveryBackoff: fixedBackoff(1_000),
+  });
+  return { ui, phone, verified, launcher, timer, provisioner };
+}
+
+const APKS = ["/apks/base.apk", "/apks/split_config.arm64_v8a.apk"];
+
+function request(
+  overrides: Partial<AndroidAutoProjectionRequest> = {},
+): AndroidAutoProjectionRequest {
+  return {
+    deviceId: "emulator-5554",
+    androidAutoApks: APKS,
+    dhu: { binaryPath: "desktop-head-unit", configPath: "config/default_720p.ini" },
+    ...overrides,
+  };
+}
+
+describe("AndroidAutoProjectionProvisioner", () => {
+  test("provisions a fresh Play emulator in the order verified on device", async () => {
+    const { ui, phone, verified, launcher, provisioner } = setup();
+    const result = await provisioner.provision(request());
+    expect(result.steps.map((step) => `${step.step}:${step.status}`)).toEqual([
+      "android-auto-apk:applied",
+      "keyguard:applied",
+      "stay-awake:applied",
+      "notification-access:applied",
+      "developer-mode:applied",
+      "unknown-sources:applied",
+      "head-unit-server:applied",
+      "transport:applied",
+      "desktop-head-unit:applied",
+      "onboarding:already-done",
+    ]);
+    expect(verified).toEqual([APKS]);
+    expect(phone.changes).toEqual([
+      `install:${APKS.join(",")}`,
+      "keyguard",
+      "stay-on",
+      "listener",
+      "redirect",
+    ]);
+    expect(ui.changes).toEqual(["developer-mode", "unknown-sources", "start-server"]);
+    expect(launcher.launches).toBe(1);
+    expect(result.session.isRunning()).toBe(true);
+  });
+
+  test("a rerun on a provisioned phone changes nothing and reuses the running DHU", async () => {
+    const { ui, phone, launcher, provisioner } = setup();
+    const first = await provisioner.provision(request());
+    const phoneChanges = phone.changes.length;
+    const uiChanges = ui.changes.length;
+
+    const second = await provisioner.provision(request());
+    expect(second.steps.every((step) => step.status === "already-done")).toBe(true);
+    expect(phone.changes).toHaveLength(phoneChanges);
+    expect(ui.changes).toHaveLength(uiChanges);
+    expect(launcher.launches).toBe(1);
+    expect(second.session).toBe(first.session);
+  });
+
+  test("a phone still on the stub with no APKs supplied fails without touching it", async () => {
+    const { phone, provisioner } = setup();
+    await expect(provisioner.provision(request({ androidAutoApks: [] }))).rejects.toThrow(
+      "never downloads them",
+    );
+    expect(phone.changes).toEqual([]);
+  });
+
+  test("a signer mismatch stops before the install", async () => {
+    const { phone, provisioner } = setup([], {
+      verify: async () => {
+        throw new ActionableError("base.apk is signed by another key");
+      },
+    });
+    await expect(provisioner.provision(request())).rejects.toThrow("signed by another key");
+    expect(phone.changes).toEqual([]);
+  });
+
+  test("relaunches after a stall by force-stopping Android Auto and restarting its server", async () => {
+    const { ui, phone, launcher, provisioner } = setup([
+      { status: "stalled", detail: "2 Ping timeout lines" },
+    ]);
+    const result = await provisioner.provision(request());
+    expect(launcher.launches).toBe(2);
+    expect(phone.changes).toContain("force-stop");
+    expect(ui.changes.filter((change) => change === "start-server")).toHaveLength(2);
+    expect(result.steps.find((step) => step.step === "desktop-head-unit")?.detail).toBe(
+      "connected after 1 relaunches",
+    );
+  });
+
+  test("gives up after the recovery budget with every attempt's reason", async () => {
+    const stall: DhuLaunchOutcome = { status: "no-connect", detail: "no connected." };
+    const { launcher, provisioner } = setup([stall, stall, stall]);
+    await expect(provisioner.provision(request())).rejects.toThrow("after 3 attempts");
+    expect(launcher.launches).toBe(3);
+  });
+
+  test("reports a pending welcome screen without accepting Android Auto's terms", async () => {
+    const { ui, provisioner } = setup();
+    ui.onboardingPending = true;
+    const result = await provisioner.provision(request());
+    expect(result.steps.at(-1)).toMatchObject({ step: "onboarding", status: "skipped" });
+    expect(ui.changes).not.toContain("onboarding");
+  });
+
+  test("accepts the welcome screen only on explicit instruction", async () => {
+    const { ui, provisioner } = setup();
+    ui.onboardingPending = true;
+    const result = await provisioner.provision(request({ acceptAndroidAutoTerms: true }));
+    expect(result.steps.at(-1)).toMatchObject({ step: "onboarding", status: "applied" });
+    expect(ui.changes).toContain("onboarding");
+  });
+
+  test("a head unit server that never listens is an actionable error", async () => {
+    const { ui, provisioner } = setup();
+    ui.startHeadUnitServer = async () => {};
+    await expect(provisioner.provision(request())).rejects.toThrow("not listening on port 5277");
+  });
+
+  test("refuses a second projecting emulator on the same host", async () => {
+    const { provisioner } = setup();
+    await provisioner.provision(request());
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "only one emulator per host",
+    );
+  });
+});

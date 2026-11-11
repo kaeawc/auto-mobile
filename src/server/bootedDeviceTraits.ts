@@ -1,4 +1,5 @@
 import type { BootedDevice, Platform } from "../models";
+import { withLiveVehicleCapabilities, type DeviceDescription } from "../daemon/deviceDescription";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -138,6 +139,23 @@ export async function enrich<T extends { platform: Platform } & WithTraits>(
     const value = traits[i];
     if (value) {
       devices[i] = { ...devices[i], traits: value };
+    }
+  }
+}
+
+/**
+ * {@link enrich} for device descriptions: once traits are attached, an automotive entry's live
+ * build-prop `traits.vehicle` replaces its image-tag-derived `vehicle` (#16775).
+ */
+export async function attach<T extends DeviceDescription & WithTraits>(
+  devices: T[],
+  options: DeviceTraitsEnrichment<T>,
+): Promise<void> {
+  await enrich(devices, options);
+  for (let i = 0; i < devices.length; i++) {
+    const vehicle = devices[i].traits?.vehicle;
+    if (vehicle) {
+      devices[i] = { ...devices[i], ...withLiveVehicleCapabilities(devices[i], vehicle) };
     }
   }
 }

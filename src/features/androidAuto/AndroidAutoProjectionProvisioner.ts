@@ -54,10 +54,19 @@ export interface AndroidAutoProjectionResult {
   session: DesktopHeadUnitSession;
 }
 
-export interface AndroidAutoProjectionProvisionerDeps {
+/** The adapters that act on one phone emulator. */
+export interface AndroidAutoDeviceAdapters {
   phone: AndroidAutoPhone;
   ui: AndroidAutoSettingsUi;
   signerCheck: AndroidAutoSignerCheck;
+}
+
+export interface AndroidAutoProjectionProvisionerDeps {
+  /**
+   * The adapters for `deviceId`. The provisioner itself is host-wide (one host port 5277), so
+   * it resolves its phone-side adapters per request rather than holding one device's.
+   */
+  forDevice(deviceId: string): AndroidAutoDeviceAdapters;
   dhu: DesktopHeadUnitLauncher;
   hostPorts: PortAvailabilityChecker;
   timer: Timer;
@@ -124,9 +133,10 @@ export class AndroidAutoProjectionProvisioner {
   private async runProvisioning(
     request: AndroidAutoProjectionRequest,
   ): Promise<AndroidAutoProjectionResult> {
-    const { phone, ui } = this.deps;
+    const device = this.deps.forDevice(request.deviceId);
+    const { phone, ui } = device;
     const signal = request.signal;
-    const steps: AndroidAutoProvisioningStep[] = [await this.installAndroidAuto(request)];
+    const steps: AndroidAutoProvisioningStep[] = [await this.installAndroidAuto(device, request)];
     steps.push(
       await ensure(
         "keyguard",
@@ -168,10 +178,10 @@ export class AndroidAutoProjectionProvisioner {
         signal,
       ),
     );
-    steps.push(await this.ensureHeadUnitServer(signal));
-    steps.push(await this.ensureTransport(request.deviceId, signal));
-    const dhu = await this.ensureDesktopHeadUnit(request);
-    steps.push(dhu.step, await this.handleOnboarding(request));
+    steps.push(await this.ensureHeadUnitServer(device, signal));
+    steps.push(await this.ensureTransport(phone, request.deviceId, signal));
+    const dhu = await this.ensureDesktopHeadUnit(device, request);
+    steps.push(dhu.step, await this.handleOnboarding(ui, request));
     return { steps, session: dhu.session };
   }
 
@@ -196,9 +206,9 @@ export class AndroidAutoProjectionProvisioner {
   }
 
   private async installAndroidAuto(
+    { phone, signerCheck }: AndroidAutoDeviceAdapters,
     request: AndroidAutoProjectionRequest,
   ): Promise<AndroidAutoProvisioningStep> {
-    const { phone, signerCheck } = this.deps;
     if (await phone.isAndroidAutoSideloaded(request.signal)) {
       return { step: "android-auto-apk", status: "already-done" };
     }
@@ -220,13 +230,15 @@ export class AndroidAutoProjectionProvisioner {
     };
   }
 
-  private async ensureHeadUnitServer(signal?: AbortSignal): Promise<AndroidAutoProvisioningStep> {
-    const { phone, ui } = this.deps;
+  private async ensureHeadUnitServer(
+    { phone, ui }: AndroidAutoDeviceAdapters,
+    signal?: AbortSignal,
+  ): Promise<AndroidAutoProvisioningStep> {
     if (await phone.isHeadUnitServerListening(signal)) {
       return { step: "head-unit-server", status: "already-done" };
     }
     await ui.startHeadUnitServer(signal);
-    if (!(await this.waitForHeadUnitServer(signal))) {
+    if (!(await this.waitForHeadUnitServer(phone, signal))) {
       throw new ActionableError(
         `Android Auto's head unit server is not listening on port ${HEAD_UNIT_SERVER_PORT} after Start head unit server. Check that developer mode is on and start it from Android Auto's overflow menu.`,
       );
@@ -235,8 +247,11 @@ export class AndroidAutoProjectionProvisioner {
   }
 
   /** The server binds tcp:5277 some time after the menu tap, so poll on a bounded backoff. */
-  private async waitForHeadUnitServer(signal?: AbortSignal): Promise<boolean> {
-    const { phone, timer } = this.deps;
+  private async waitForHeadUnitServer(
+    phone: AndroidAutoPhone,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const { timer } = this.deps;
     const backoff = this.deps.serverBindBackoff ?? DEFAULT_SERVER_BIND_BACKOFF;
     const attempts = this.deps.serverBindAttempts ?? DEFAULT_SERVER_BIND_ATTEMPTS;
     for (let attempt = 0; attempt <= attempts; attempt++) {
@@ -257,11 +272,12 @@ export class AndroidAutoProjectionProvisioner {
    * process) would make the DHU project the wrong phone, so it is refused.
    */
   private async ensureTransport(
+    phone: AndroidAutoPhone,
     deviceId: string,
     signal?: AbortSignal,
   ): Promise<AndroidAutoProvisioningStep> {
     if (this.deps.hostPorts.isPortAvailable(HEAD_UNIT_SERVER_PORT)) {
-      await this.deps.phone.addHeadUnitRedirect(signal);
+      await phone.addHeadUnitRedirect(signal);
       this.redirectOwner = deviceId;
       return { step: "transport", status: "applied" };
     }
@@ -277,6 +293,7 @@ export class AndroidAutoProjectionProvisioner {
   }
 
   private async ensureDesktopHeadUnit(
+    device: AndroidAutoDeviceAdapters,
     request: AndroidAutoProjectionRequest,
   ): Promise<{ step: AndroidAutoProvisioningStep; session: DesktopHeadUnitSession }> {
     const existing = this.sessions.get(request.deviceId);
@@ -290,7 +307,7 @@ export class AndroidAutoProjectionProvisioner {
     const maxRecoveries = this.deps.maxDhuRecoveries ?? 2;
     const failures: string[] = [];
     for (let attempt = 0; attempt <= maxRecoveries; attempt++) {
-      if (attempt > 0 && !(await this.recoverHeadUnitServer(attempt, request.signal))) {
+      if (attempt > 0 && !(await this.recoverHeadUnitServer(device, attempt, request.signal))) {
         failures.push(
           `head-unit-server: not listening on port ${HEAD_UNIT_SERVER_PORT} after the restart`,
         );
@@ -310,6 +327,14 @@ export class AndroidAutoProjectionProvisioner {
           session: outcome.session,
         };
       }
+      if (outcome.status === "unkillable") {
+        // Tracked, not dropped: the live DHU still dials host port 5277, so the single
+        // projection check must see it, and the next provision of this device retries its stop.
+        this.sessions.set(request.deviceId, outcome.session);
+        throw new ActionableError(
+          `The Desktop Head Unit for ${request.deviceId} failed and did not exit after SIGTERM and SIGKILL (${outcome.detail}). It still holds host port ${HEAD_UNIT_SERVER_PORT}; end the desktop-head-unit process, then provision ${request.deviceId} again.`,
+        );
+      }
       failures.push(`${outcome.status}: ${outcome.detail}`);
     }
     throw new ActionableError(
@@ -322,18 +347,22 @@ export class AndroidAutoProjectionProvisioner {
    * Resolves false when the restarted server does not bind tcp:5277 within the bounded wait,
    * so the caller skips a relaunch that could only dial an unbound port.
    */
-  private async recoverHeadUnitServer(attempt: number, signal?: AbortSignal): Promise<boolean> {
+  private async recoverHeadUnitServer(
+    { phone, ui }: AndroidAutoDeviceAdapters,
+    attempt: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     await this.deps.timer.sleep(this.deps.recoveryBackoff.delayForAttempt(attempt));
     signal?.throwIfAborted();
-    await this.deps.phone.forceStopAndroidAuto(signal);
-    await this.deps.ui.startHeadUnitServer(signal);
-    return this.waitForHeadUnitServer(signal);
+    await phone.forceStopAndroidAuto(signal);
+    await ui.startHeadUnitServer(signal);
+    return this.waitForHeadUnitServer(phone, signal);
   }
 
   private async handleOnboarding(
+    ui: AndroidAutoSettingsUi,
     request: AndroidAutoProjectionRequest,
   ): Promise<AndroidAutoProvisioningStep> {
-    const { ui } = this.deps;
     if (!(await ui.isOnboardingPending(request.signal))) {
       return { step: "onboarding", status: "already-done" };
     }

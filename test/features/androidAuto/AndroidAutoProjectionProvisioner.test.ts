@@ -141,14 +141,13 @@ function setup(
   const launcher = new FakeLauncher(outcomes);
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const provisioner = new AndroidAutoProjectionProvisioner({
-    phone,
-    ui,
-    signerCheck: signerCheck ?? {
-      verify: async (paths) => {
-        verified.push([...paths]);
-      },
+  const signers: AndroidAutoSignerCheck = signerCheck ?? {
+    verify: async (paths) => {
+      verified.push([...paths]);
     },
+  };
+  const provisioner = new AndroidAutoProjectionProvisioner({
+    forDevice: () => ({ phone, ui, signerCheck: signers }),
     dhu: launcher,
     hostPorts: { isPortAvailable: () => !phone.redirected && !portHeldElsewhere },
     timer,
@@ -311,6 +310,48 @@ describe("AndroidAutoProjectionProvisioner", () => {
     stuck.running = false;
     await expect(provisioner.provision(request())).rejects.toThrow("did not exit");
     expect(launcher.launches).toBe(1);
+  });
+
+  test("tracks a failed launch's DHU that survives SIGKILL so another device is refused", async () => {
+    const zombie = new FakeSession();
+    zombie.running = false;
+    let stops = 0;
+    zombie.stop = async () => {
+      stops++;
+      throw new ActionableError("The Desktop Head Unit did not exit");
+    };
+    const { phone, launcher, provisioner } = setup([
+      { status: "unkillable", detail: "no-connect: no connected.; did not exit", session: zombie },
+    ]);
+    const failed = provisioner.provision(request());
+    await expect(failed).rejects.toBeInstanceOf(ActionableError);
+    await expect(failed).rejects.toThrow("did not exit after SIGTERM and SIGKILL");
+    expect(launcher.launches).toBe(1);
+
+    phone.redirected = false;
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "for emulator-5554 is unhealthy but still running",
+    );
+    expect(launcher.launches).toBe(1);
+
+    // Re-provisioning the same device retries the stop and still refuses to relaunch beside it.
+    await expect(provisioner.provision(request())).rejects.toThrow("did not exit");
+    expect(stops).toBe(1);
+    expect(launcher.launches).toBe(1);
+  });
+
+  test("launches again once a tracked unkillable DHU finally exits", async () => {
+    const zombie = new FakeSession();
+    zombie.running = false;
+    const { phone, launcher, provisioner } = setup([
+      { status: "unkillable", detail: "stalled: exited; did not exit", session: zombie },
+    ]);
+    await expect(provisioner.provision(request())).rejects.toThrow("still holds host port 5277");
+    zombie.alive = false;
+    phone.redirected = false;
+    const result = await provisioner.provision(request({ deviceId: "emulator-5556" }));
+    expect(result.session.isRunning()).toBe(true);
+    expect(launcher.launches).toBe(2);
   });
 
   test("gives up after the recovery budget with every attempt's reason", async () => {

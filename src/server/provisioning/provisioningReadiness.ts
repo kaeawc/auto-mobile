@@ -1,3 +1,4 @@
+import type { AndroidAutoProvisionReport } from "../../features/androidAuto/AndroidAutoProjectionService";
 import {
   currentAutolockMcpSessionId,
   currentOneShotCli,
@@ -71,12 +72,14 @@ function postBootResults(
     | {
         resources?: DeviceResourceConfigurationResult;
         manufacturerProfile?: Record<string, unknown>;
+        androidAuto?: AndroidAutoProvisionReport;
       }
     | undefined,
 ): Record<string, unknown> {
   return {
     ...(booted?.resources ? { resources: booted.resources } : {}),
     ...(booted?.manufacturerProfile ? { manufacturerProfile: booted.manufacturerProfile } : {}),
+    ...(booted?.androidAuto ? { androidAuto: booted.androidAuto } : {}),
   };
 }
 
@@ -230,6 +233,7 @@ export function buildProvisionDeviceResult(
       sourceImage?: DeviceInfo;
       resources?: DeviceResourceConfigurationResult;
       manufacturerProfile?: Record<string, unknown>;
+      androidAuto?: AndroidAutoProvisionReport;
     };
   },
 ): Record<string, unknown> {

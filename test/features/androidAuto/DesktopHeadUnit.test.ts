@@ -268,16 +268,31 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
   });
 
-  test("a failed launch whose DHU never exits rejects instead of allowing a relaunch", async () => {
+  test("a failed launch whose DHU never exits hands back the live session instead of dropping it", async () => {
     const { timer, child, launch } = setup();
     child.ignoredSignals = new Set(["SIGTERM", "SIGKILL"]);
-    const outcome = launch();
+    const pending = launch();
     timer.advanceTime(TIMING.connectTimeoutMs);
     await flushStdin();
     timer.advanceTime(TIMING.stopTimeoutMs);
     await flushStdin();
     timer.advanceTime(TIMING.stopTimeoutMs);
-    await expect(outcome).rejects.toThrow("did not exit");
+    const outcome = await pending;
+    expect(outcome).toMatchObject({
+      status: "unkillable",
+      detail: expect.stringContaining("did not exit"),
+    });
+    if (outcome.status !== "unkillable") {
+      throw new Error("expected an unkillable outcome");
+    }
+    expect(outcome.session.isAlive()).toBe(true);
+    expect(outcome.session.isRunning()).toBe(false);
+
+    // A later stop retries the signals and resolves once the process finally exits.
+    child.ignoredSignals = new Set();
+    await outcome.session.stop();
+    expect(outcome.session.isAlive()).toBe(false);
+    expect(child.signals).toEqual(["SIGTERM", "SIGKILL", "SIGTERM"]);
   });
 
   test("a spawn that failed before a process existed is a no-connect without any signal", async () => {

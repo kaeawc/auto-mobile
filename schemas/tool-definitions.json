@@ -33597,6 +33597,33 @@
               "windowMode"
             ]
           }
+        },
+        "androidAuto": {
+          "description": "Android only. After boot, prepare the phone emulator for Android Auto projection (no Google account) and start a headless Desktop Head Unit. Requires boot=true and a Google Play system image; one projecting emulator per host.",
+          "type": "object",
+          "properties": {
+            "apkDirectory": {
+              "description": "Host directory holding the Android Auto split APKs you supplied: base.apk plus its split_*.apk config splits for the emulator's ABI, language and density. AutoMobile never downloads them. Installed only while the phone still runs the image's Android Auto stub.",
+              "type": "string",
+              "minLength": 1
+            },
+            "dhuPath": {
+              "description": "desktop-head-unit binary; defaults to $ANDROID_HOME/extras/google/auto/desktop-head-unit",
+              "type": "string",
+              "minLength": 1
+            },
+            "dhuConfig": {
+              "description": "Head unit config (.ini); defaults to config/default_720p.ini beside the DHU binary",
+              "type": "string",
+              "minLength": 1
+            },
+            "acceptAndroidAutoTerms": {
+              "description": "Tap Continue on Android Auto's welcome screen, which accepts its terms. Set only on the user's explicit instruction; otherwise a pending welcome screen is reported, not tapped.",
+              "type": "boolean"
+            }
+          },
+          "required": ["apkDirectory"],
+          "additionalProperties": false
         }
       },
       "required": ["device"],

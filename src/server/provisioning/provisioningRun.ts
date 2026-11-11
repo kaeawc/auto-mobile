@@ -35,6 +35,7 @@ import {
 import { bootExactProvisionedDevice, provisionExactDevice } from "./provisioningBoot";
 import { buildProvisionDeviceResult } from "./provisioningReadiness";
 import { assertDeviceProfileEmulatable } from "./provisioningDeviceProfile";
+import { assertAndroidAutoInputsPresent } from "./provisioningAndroidAuto";
 import {
   rethrowFailedProvisionDeviceLifecycle,
   undeliveredProvisionRollback,
@@ -61,6 +62,7 @@ export async function executeProvisionDevice(
   const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
   // Before any lease, creation or boot: a stock emulator can never serve this request (#14058).
   assertDeviceProfileEmulatable(args);
+  await assertAndroidAutoInputsPresent(args, deps);
   try {
     return await runProvisionDeviceLifecycle(ctx, args, deps, {
       recordLifecycle,

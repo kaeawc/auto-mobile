@@ -1,4 +1,5 @@
 import type { SimulatorPairService } from "../../../utils/ios-cmdline-tools/SimulatorPairs";
+import type { AndroidAutoProjectionApplier } from "../../androidAuto/AndroidAutoProjectionService";
 import type { AppleVisionSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorProvisioner";
 import type { AppleVisionSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorBoot";
 import type { PendingImeRestoreRegistry } from "../../action/sendkeys/PendingImeRestore";
@@ -164,6 +165,11 @@ export interface DeviceToolsDependencies {
    * defaults to the manufacturerProfile tool's executors.
    */
   manufacturerProfileApplier?: ManufacturerProfileApplier;
+  /**
+   * Runs a provisionDevice `androidAuto` request (#17839); defaults to the process-wide applier,
+   * which drives adb, `uiautomator dump` and the host Desktop Head Unit.
+   */
+  androidAutoProjection?: AndroidAutoProjectionApplier;
   /**
    * Per-platform boot capacity reporters the `listDevices` `capacity` field samples; defaults to
    * the process-wide admission gates, which probe adb/simctl/ps. Injected by the benchmark so the

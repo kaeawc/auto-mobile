@@ -4,11 +4,11 @@ import type { Posture } from "../../models/DisplayPanel";
 export type IosHingePanelRole = "cover" | "inner";
 
 /**
- * At or below this angle the cover layout is plausible: stepping 0 -> 90 keeps the app on the
- * cover panel with UIHinge.status closed. Above it the simulator should show the inner panel;
- * a cover layout there is the path-dependent "stuck" state (0 -> 80 -> 120 stays on cover, #17726).
+ * At or above this angle the simulator should settle on the inner panel. Below it the cover
+ * layout is plausible; at 0 it is expected. A cover read at 90 can be a delayed panel switch,
+ * while a persistent cover layout is the path-dependent "stuck" state (#17726).
  */
-export const IOS_COVER_LAYOUT_MAX_DEGREES = 90;
+export const IOS_INNER_LAYOUT_MIN_DEGREES = 90;
 
 /** Fully open; anything strictly between 0 and this with the inner panel active is half open. */
 export const IOS_FULLY_OPEN_DEGREES = 180;
@@ -55,13 +55,13 @@ export function iosPostureForPanel(role: IosHingePanelRole, requestedAngle?: num
 
 /**
  * The panel a healthy simulator settles on for this angle, or undefined when either panel is
- * plausible (0 < angle <= IOS_COVER_LAYOUT_MAX_DEGREES). Mirrors iosHingeLayoutWarning.
+ * plausible (0 < angle < IOS_INNER_LAYOUT_MIN_DEGREES). Mirrors iosHingeLayoutWarning.
  */
 export function iosHingeExpectedPanelRole(requestedAngle: number): IosHingePanelRole | undefined {
   if (requestedAngle <= 0) {
     return "cover";
   }
-  return requestedAngle > IOS_COVER_LAYOUT_MAX_DEGREES ? "inner" : undefined;
+  return requestedAngle >= IOS_INNER_LAYOUT_MIN_DEGREES ? "inner" : undefined;
 }
 
 /** A warning with a next step when the active panel contradicts the requested hinge angle. */
@@ -69,7 +69,7 @@ export function iosHingeLayoutWarning(
   requestedAngle: number,
   role: IosHingePanelRole,
 ): string | undefined {
-  if (role === "cover" && requestedAngle > IOS_COVER_LAYOUT_MAX_DEGREES) {
+  if (role === "cover" && requestedAngle >= IOS_INNER_LAYOUT_MIN_DEGREES) {
     return (
       `Hinge and layout disagree: requested ${requestedAngle} degrees, but the cover panel is still active, so apps show the closed (cover) layout. ` +
       "The iPhone Duo simulator's panel switch depends on the angles it passed through (for example 0 -> 80 -> 120 stays on the cover panel). " +

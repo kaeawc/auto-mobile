@@ -93,6 +93,25 @@ function selectedElementLabel(
   );
 }
 
+/**
+ * The reported match count. When the selection reports fewer tappable targets than raw
+ * matches (an iOS non-tappable context label, or a row and its own switch), only the tappable
+ * ones count; `index` still addresses the full candidate list, so it names that total (#17939).
+ */
+function matchCountDetail(selectedElement: TapOnSelectedElement): string {
+  const total = selectedElement.totalMatches;
+  const tappable = selectedElement.tappableMatches;
+  const count = tappable !== undefined && tappable > 0 && tappable < total ? tappable : total;
+  const noun = count === 1 ? "match" : "matches";
+  if (count <= 1) {
+    return `${count} ${noun}`;
+  }
+  // For an ambiguous selector, name which occurrence was tapped so index 0 vs 2
+  // (or a random pick) among identical rows is distinguishable.
+  const of = count < total ? ` of ${total} candidates` : "";
+  return `${count} ${noun} (index ${selectedElement.indexInMatches}${of})`;
+}
+
 function buildTapOnResultDetails(
   selectedElement: TapOnSelectedElement | undefined,
   searchSummary: string | undefined,
@@ -116,11 +135,7 @@ function buildTapOnResultDetails(
       identity.push(`text=${JSON.stringify(label)}`);
     }
     details.push(`matched ${identity.length > 0 ? identity.join(" ") : "element"}`);
-    const count = selectedElement.totalMatches;
-    // For an ambiguous selector, name which occurrence was tapped so index 0 vs 2
-    // (or a random pick) among identical rows is distinguishable.
-    const index = count > 1 ? ` (index ${selectedElement.indexInMatches})` : "";
-    details.push(`${count} ${count === 1 ? "match" : "matches"}${index}`);
+    details.push(matchCountDetail(selectedElement));
   }
   // Append the activated semantic link whenever present, additively: an
   // owner-scoped subtext tap resolves BOTH an owner (selectedElement) and the

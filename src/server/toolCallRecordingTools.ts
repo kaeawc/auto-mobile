@@ -74,6 +74,52 @@ const recordToolCallsResultSchema = z.object({
   error: z.string().optional(),
 });
 
+type RecordingConnectionId = ReturnType<typeof currentAutolockMcpSessionId>;
+
+const recordingStatusResponse = (connectionId: RecordingConnectionId) => {
+  const status = getToolCallRecordingStatus({ connectionId });
+  return createStructuredToolResponse({
+    success: true,
+    action: "status",
+    recording: status?.recording ?? false,
+    ...(status && {
+      startedAt: status.startedAt,
+      stepCount: status.stepCount,
+      durationMs: status.durationMs,
+    }),
+  });
+};
+
+const recordingBeginResponse = (connectionId: RecordingConnectionId, planName?: string) => {
+  const result = startToolCallRecording({ connectionId, planName });
+  return createStructuredToolResponse({
+    success: true,
+    action: "begin",
+    recording: result.recording,
+    startedAt: result.startedAt,
+    ...(result.planName && { planName: result.planName }),
+    ...(result.alreadyActive && {
+      alreadyActive: true,
+      currentStepCount: result.currentStepCount,
+    }),
+  });
+};
+
+const recordingEndResponse = (connectionId: RecordingConnectionId, planName?: string) => {
+  const result = stopToolCallRecording({ connectionId, planName });
+  return createStructuredToolResponse({
+    success: true,
+    action: "end",
+    planName: result.planName,
+    planContent: result.planContent,
+    stepCount: result.stepCount,
+    durationMs: result.durationMs,
+    ...(result.warnings.length > 0 && { warnings: result.warnings }),
+    ...(result.platform && { platform: result.platform }),
+    ...(result.platformNote && { platformNote: result.platformNote }),
+  });
+};
+
 const recordToolCallsTool = async (params: {
   action: "begin" | "end" | "status";
   planName?: string;
@@ -81,17 +127,7 @@ const recordToolCallsTool = async (params: {
   const connectionId = currentAutolockMcpSessionId();
   // Status is always allowed — lets agents probe recording state even when the flag is off.
   if (params.action === "status") {
-    const status = getToolCallRecordingStatus({ connectionId });
-    return createStructuredToolResponse({
-      success: true,
-      action: "status",
-      recording: status?.recording ?? false,
-      ...(status && {
-        startedAt: status.startedAt,
-        stepCount: status.stepCount,
-        durationMs: status.durationMs,
-      }),
-    });
+    return recordingStatusResponse(connectionId);
   }
 
   if (!serverConfig.isToolCallRecordingEnabled()) {
@@ -106,32 +142,9 @@ const recordToolCallsTool = async (params: {
 
   try {
     if (params.action === "begin") {
-      const result = startToolCallRecording({ connectionId, planName: params.planName });
-      return createStructuredToolResponse({
-        success: true,
-        action: "begin",
-        recording: result.recording,
-        startedAt: result.startedAt,
-        ...(result.planName && { planName: result.planName }),
-        ...(result.alreadyActive && {
-          alreadyActive: true,
-          currentStepCount: result.currentStepCount,
-        }),
-      });
+      return recordingBeginResponse(connectionId, params.planName);
     }
-
-    const result = stopToolCallRecording({ connectionId, planName: params.planName });
-    return createStructuredToolResponse({
-      success: true,
-      action: "end",
-      planName: result.planName,
-      planContent: result.planContent,
-      stepCount: result.stepCount,
-      durationMs: result.durationMs,
-      ...(result.warnings.length > 0 && { warnings: result.warnings }),
-      ...(result.platform && { platform: result.platform }),
-      ...(result.platformNote && { platformNote: result.platformNote }),
-    });
+    return recordingEndResponse(connectionId, params.planName);
   } catch (error) {
     logger.error(`[recordToolCalls] Failed: ${errorMessage(error)}`);
     return withIsErrorOnFailure(

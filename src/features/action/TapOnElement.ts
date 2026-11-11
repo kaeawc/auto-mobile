@@ -69,6 +69,7 @@ import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture"
 import { type RenderedObservationReader } from "./TargetDisplayAction";
 import type { TapOnCall } from "./ActionCall";
 import { tapPlatformTraits, type TapPlatformTraits } from "./strategies/tapPlatformTraits";
+import { withIosTappableMatches } from "../utility/tappableMatchCount";
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
@@ -740,7 +741,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   buildSelectedElementMetadata(
     ...args: Parameters<TapTargetResolver["buildSelectedElementMetadata"]>
   ): ReturnType<TapTargetResolver["buildSelectedElementMetadata"]> {
-    return this.targets.buildSelectedElementMetadata(...args);
+    const metadata = this.targets.buildSelectedElementMetadata(...args);
+    return withIosTappableMatches(this.device.platform, args[0], metadata);
   }
 
   /**

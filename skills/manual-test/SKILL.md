@@ -268,7 +268,8 @@ JSON uses `permit`; wait JSON uses `waitingFor: permit` (or `load`/`interval`).
 
 ## Default method: multi-device, multi-client
 
-A full iteration runs **2 Android + 2 iOS devices at once** under ONE private
+A full iteration runs **2 Android + 2 iOS devices at once** (the device budget;
+never more) under ONE private
 daemon, driven by **several independent MCP stdio proxies** — one proxy (own
 process, own session) per device, plus one or two **contenders** that try to take
 a held device, call sessionless, or read a device they do not own. Single-device,
@@ -337,6 +338,55 @@ tool's `success`.
 10. **Tool sweep in parallel** on all four devices (observe, tap, swipe,
     setUIState, sendKeys, launch/terminate, install/uninstall, screenshot,
     systemTray, keyboard, pressButton), light/dark, cold boot vs quickboot.
+
+## Form-factor lanes: XR headset, glasses, Android TV
+
+Every round adds these Android lanes on top of the phone lanes. They count
+against the 2 Android budget: run them on one of the two Android slots in turn
+(shut the first down through `killDevice` before booting the next), never as
+extra concurrent emulators. Each lane starts from a freshly created AVD you own,
+pinned to an explicit non-5554 console port. Record per lane the image, the
+`adb -s <id> emu avd name` correlation and the observed fields below; a lane
+whose image is not installed is reported SKIPPED with the `sdkmanager` line, not
+silently dropped. AutoMobile never downloads images.
+
+**XR headset (every round).** Image `system-images;android-34;google-xr;arm64-v8a`
+(x86_64 on Intel hosts), profile `xr_headset_device`, created with
+`startDevice { platform: "android", formFactor: "xr-headset", createIfMissing: true }`.
+
+- Install the CtrlProxy debug APK built at the pinned SHA (see Phase 1), never the
+  released APK: the released APK reports Settings rows as hidden on this image, so a
+  Settings sweep on it is a false FAIL.
+- Do not use `medium_phone` or any phone AVD as an XR stand-in: it gives misleading
+  results for panel size, density and input.
+- Checklist: lifecycle (create, boot to `sys.boot_completed`, `killDevice`, reuse of
+  the created AVD); install and launch the test app; `observe` returns panel
+  elements with sane bounds; tap and swipe on the panel by `tapOn`/`swipeOn` land on
+  the intended element (check the result in the app, not `success`); `sendKeys`
+  and `pressButton` back/home; Settings rows observed visible with the debug APK.
+
+**Glasses (every round where an image is installed).** Image
+`system-images;android-36;ai-glasses;arm64-v8a`, profile `ai_glasses_device`,
+`formFactor: "xr-glasses"`. Boot it next to the headset's slot only after the
+headset is down. The pairing flow with a phone emulator is tracked separately;
+until it lands, exercise the glasses standalone.
+
+- Checklist: lifecycle as above; install and launch; `observe` returns a
+  well-formed (possibly small) tree; touchpad gestures through `sendKeys`
+  (D-pad and enter) and `pressButton` back; confirm the effect in the app.
+
+**Android TV (every round).** Prefer the `android-tv` image, then `google-tv`
+(`sdkmanager --list | grep -E "android-tv|google-tv"`), API 34 or newer, created
+with `startDevice { platform: "android", formFactor: "tv", createIfMissing: true }`
+(profile `tv_1080p`). Run `android-tv` when installed, and `google-tv` as a second
+pass when both are.
+
+- Checklist: lifecycle (create, boot, `killDevice`, AVD reuse); install and
+  launch; `observe` reports the focused element; `focusNavigate` moves focus to a
+  named element and selects only with `select: true`; `sendKeys enter` activates
+  the focused element; `tapOn` by `text` moves focus and presses enter; back and
+  home return to the expected screen. `adb root` is refused on these images: use
+  non-root ground truth (`dumpsys window`, `dumpsys activity`).
 
 ## Device failure modes and repair
 
@@ -470,11 +520,17 @@ subprocesses, fewer round trips and less waiting — not just correctness.
    `android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk`.
 4. **iOS runner — rebuild if any `ios/control-proxy/**` changed:**
    `scripts/ios/ctrl-proxy-build-for-testing.sh` → `/tmp/automobile-ctrl-proxy/Build/Products`.
-5. **Playground SDK app — only if testing SDK features.** Use the **standard**
-   Gradle output `android/playground/app/build/outputs/apk/debug/app-debug.apk`.
-   Do NOT use `android/build/grit/**` or `android/build/gojvm/**` variants — they
-   are incomplete (missing `androidx.startup` resources) and crash on launch with
-   `NoClassDefFoundError: androidx.startup.R$string`.
+
+**Build once per SHA.** Build the CtrlProxy debug APK and the iOS runner a single
+time, before any device lane starts, into one shared read-only scratch directory
+keyed by the pinned SHA (set a private `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`
+under it for the runner). Every lane installs from that directory; a lane never
+rebuilds, and none writes to it after the build. Boots are staggered through
+`boot-gate`, not started together. 5. **Playground SDK app — only if testing SDK features.** Use the **standard**
+Gradle output `android/playground/app/build/outputs/apk/debug/app-debug.apk`.
+Do NOT use `android/build/grit/**` or `android/build/gojvm/**` variants — they
+are incomplete (missing `androidx.startup` resources) and crash on launch with
+`NoClassDefFoundError: androidx.startup.R$string`.
 
 ## Phase 2 — Restart the daemon with the right flags
 

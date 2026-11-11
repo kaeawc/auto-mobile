@@ -448,25 +448,42 @@ describe("DefaultGitMetadataClient", () => {
     test("returns the latest write time among every tracked path", async () => {
       const { client, calls } = fixture(
         timedRepo({ [`${ROOT}/src/a.ts`]: 100, [`${ROOT}/src/b.ts`]: 300 }),
-        { "ls-files": "src/a.ts\0src/b.ts\0" },
+        { "ls-files": "src/a.ts\0src/b.ts\0", diff: "" },
       );
       expect(await client.readTrackedModifiedAt(ROOT)).toBe(300);
-      expect(calls.filter(({ args }) => args[0] === "ls-files")).toEqual([
+      const listing = { cwd: ROOT, timeoutMs: 2_000, maxBufferBytes: 64 * 1024 * 1024 };
+      expect(calls.filter(({ args }) => args[0] === "ls-files" || args[0] === "diff")).toEqual([
+        { command: "git", args: ["ls-files", "-z", "--full-name", "--", ":/"], ...listing },
         {
           command: "git",
-          args: ["ls-files", "-z", "--full-name", "--", ":/"],
-          cwd: ROOT,
-          timeoutMs: 2_000,
-          maxBufferBytes: 64 * 1024 * 1024,
+          args: ["diff", "HEAD", "--name-only", "--no-renames", "-z", "--", ":/"],
+          ...listing,
         },
       ]);
+    });
+
+    test("counts a staged deletion that ls-files no longer lists", async () => {
+      // After `git rm src/gone.ts` only the diff names it; its directory's time shows the delete.
+      const { client } = fixture(timedRepo({ [`${ROOT}/src`]: 800, [`${ROOT}/src/a.ts`]: 100 }), {
+        "ls-files": "src/a.ts\0",
+        diff: "src/gone.ts\0",
+      });
+      expect(await client.readTrackedModifiedAt(ROOT)).toBe(800);
+    });
+
+    test("is unknown when the changed-path listing fails", async () => {
+      const { client } = fixture(timedRepo({ [`${ROOT}/src/a.ts`]: 100 }), {
+        "ls-files": "src/a.ts\0",
+        diff: null,
+      });
+      expect(await client.readTrackedModifiedAt(ROOT)).toBeNull();
     });
 
     test("counts a clean file written later, such as an edit reverted to HEAD", async () => {
       // `src/b.ts` is no longer dirty, but its newer write time must still show.
       const { client } = fixture(
         timedRepo({ [`${ROOT}/src/dirty.ts`]: 100, [`${ROOT}/src/b.ts`]: 900 }),
-        { "ls-files": "src/dirty.ts\0src/b.ts\0" },
+        { "ls-files": "src/dirty.ts\0src/b.ts\0", diff: "src/dirty.ts\0" },
       );
       expect(await client.readTrackedModifiedAt(ROOT)).toBe(900);
     });
@@ -474,6 +491,7 @@ describe("DefaultGitMetadataClient", () => {
     test("uses the parent directory's time for a deleted path", async () => {
       const { client } = fixture(timedRepo({ [`${ROOT}/src`]: 700, [`${ROOT}/src/a.ts`]: 100 }), {
         "ls-files": "src/a.ts\0src/gone.ts\0",
+        diff: "src/gone.ts\0",
       });
       expect(await client.readTrackedModifiedAt(ROOT)).toBe(700);
     });
@@ -481,14 +499,15 @@ describe("DefaultGitMetadataClient", () => {
     test("is unknown when a path and its directory are unreadable", async () => {
       const { client } = fixture(timedRepo({ [`${ROOT}/src/a.ts`]: 100 }), {
         "ls-files": "src/a.ts\0missing/b.ts\0",
+        diff: "",
       });
       expect(await client.readTrackedModifiedAt(ROOT)).toBeNull();
     });
 
     test("is unknown when the listing fails or is empty", async () => {
-      const failed = fixture(timedRepo({}), { "ls-files": null });
+      const failed = fixture(timedRepo({}), { "ls-files": null, diff: "" });
       expect(await failed.client.readTrackedModifiedAt(ROOT)).toBeNull();
-      const empty = fixture(timedRepo({}), { "ls-files": "" });
+      const empty = fixture(timedRepo({}), { "ls-files": "", diff: "" });
       expect(await empty.client.readTrackedModifiedAt(ROOT)).toBeNull();
     });
 

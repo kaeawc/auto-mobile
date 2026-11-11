@@ -200,23 +200,29 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
    * started after this instant loaded the working tree as it is now, whatever
    * its own best-effort dirty stamp says (#17991). Every tracked path counts,
    * not only the dirty ones, so an edit reverted to HEAD after the daemon
-   * started still shows. A deleted path uses its parent directory's time; any
-   * unreadable path or a failed listing makes the answer unknown.
+   * started still shows. Paths changed against HEAD are added, so a staged
+   * deletion (`git rm`), which `ls-files` no longer lists, still counts. A
+   * deleted path uses its parent directory's time; any unreadable path or a
+   * failed listing makes the answer unknown.
    */
   async readTrackedModifiedAt(cwd: string): Promise<number | null> {
     const toplevel = this.locate(cwd)?.toplevel;
     if (!toplevel || !this.fs.modifiedAtMs) {
       return null;
     }
-    const names = await this.runAsync("git", ["ls-files", "-z", "--full-name", "--", ":/"], {
-      cwd,
-      timeoutMs: GIT_TIMEOUT_MS,
-      maxBufferBytes: TRACKED_LISTING_MAX_BYTES,
-    });
-    if (names === null) {
+    const options = { cwd, timeoutMs: GIT_TIMEOUT_MS, maxBufferBytes: TRACKED_LISTING_MAX_BYTES };
+    const [tracked, changed] = await Promise.all([
+      this.runAsync("git", ["ls-files", "-z", "--full-name", "--", ":/"], options),
+      this.runAsync(
+        "git",
+        ["diff", "HEAD", "--name-only", "--no-renames", "-z", "--", ":/"],
+        options,
+      ),
+    ]);
+    if (tracked === null || changed === null) {
       return null;
     }
-    const paths = names.split("\0").filter((name) => name.length > 0);
+    const paths = new Set(`${tracked}\0${changed}`.split("\0").filter((name) => name.length > 0));
     let latest: number | null = null;
     for (const name of paths) {
       const absolute = join(toplevel, name);

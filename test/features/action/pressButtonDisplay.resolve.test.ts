@@ -6,6 +6,8 @@ import {
 } from "../../../src/features/action/pressButtonDisplay";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import type { BootedDevice } from "../../../src/models";
+import { displayInventoryOutcome } from "../../../src/models/DeviceInfo";
+import { DisplayInventoryUnavailableError } from "../../../src/models/DisplayInventoryUnavailableError";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
@@ -39,6 +41,21 @@ function fakeState({ focused, live }: { focused?: string; live: string }) {
 }
 
 describe("resolvePressButtonDisplay (#17649)", () => {
+  test("unreadable inventory rejects an explicit role before resolving a logical display", async () => {
+    const adb = new FakeAdbExecutor();
+    const { state, liveReads } = fakeState({ live: "main" });
+    const target: BootedDevice = {
+      ...multiDisplay,
+      displays: undefined,
+      [displayInventoryOutcome]: { kind: "unreadable", reason: "dumpsys display timed out" },
+    };
+    const read = resolvePressButtonDisplay(target, "inner", { adb, state });
+    await expect(read).rejects.toBeInstanceOf(DisplayInventoryUnavailableError);
+    await expect(read).rejects.toMatchObject({ details: { retryable: true } });
+    expect(liveReads).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
   test("active is the unscoped observation's focused panel, not the last explicitly observed one", async () => {
     // The passenger panel was observed explicitly; that never moves the focused (main) panel.
     const { state, liveReads } = fakeState({ focused: "main", live: "passenger" });

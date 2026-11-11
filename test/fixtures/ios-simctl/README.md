@@ -49,3 +49,8 @@ Captured verbatim from real `xcrun simctl` runs. Nothing here is hand-written.
 - `launchctl-list-crashtv-tvos26-5.txt` (#16723): the verbatim app-service line
   from `simctl spawn <udid> launchctl list` supplied by the tvOS 26.5 device run.
   The service is in the `system` domain; this simulator has no `user/501` domain.
+- `log-show-compact-dogfoodvision-visionos26-5.txt` (#18011): verbatim stdout of
+  `log show --style compact` with the app's subsystem predicate on a visionOS 26.5 Apple
+  Vision Pro 4K simulator, quoted in the issue from the #16854 dogfood run (2026-11-11).
+  The app logs with `Logger(subsystem: "dev.dogfood.vision", category: "ui")`; the output
+  starts with the same `getpwuid_r` preamble as watchOS and tvOS.

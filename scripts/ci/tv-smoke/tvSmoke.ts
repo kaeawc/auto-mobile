@@ -18,6 +18,8 @@ export const TV_FIXTURE = {
   appTitle: "AutoMobile TV",
   statusReady: "Ready",
   focusNone: "Focused: none",
+  /** BrowseScreen focuses Featured 01 on launch, so D-pad right must land on Featured 02. */
+  dpadRightFocusStatus: "Focused: Featured 02",
   navSearch: "Search",
   navPlayer: "Player",
   featuredRow: "Featured",
@@ -56,10 +58,9 @@ export function expectText(appId: string, text: string) {
 }
 
 export function assertFocusChanged(payload: Payload): string | undefined {
-  const text = JSON.stringify(payload);
-  return text.includes("Focused: ") && !text.includes(TV_FIXTURE.focusNone)
+  return payloadMentions(payload, TV_FIXTURE.dpadRightFocusStatus)
     ? undefined
-    : "D-pad right did not move focus from the initial state";
+    : `D-pad right did not move focus to ${TV_FIXTURE.dpadRightFocusStatus}`;
 }
 
 export function assertFocusedTarget(payload: Payload): string | undefined {

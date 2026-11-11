@@ -81,11 +81,13 @@ describe("TV smoke assertions", () => {
     expect(assertTvDevice({ formFactor: "phone" })).toContain("reported phone");
   });
 
-  test("requires D-pad movement away from the initial focus state", () => {
-    expect(assertFocusChanged(screen(TV_FIXTURE.appId, "Focused: Movies 01"))).toBeUndefined();
-    expect(assertFocusChanged(screen(TV_FIXTURE.appId, TV_FIXTURE.focusNone))).toContain(
-      "did not move focus",
-    );
+  test("requires D-pad right to move focus to the next card", () => {
+    expect(assertFocusChanged(screen(TV_FIXTURE.appId, "Focused: Featured 02"))).toBeUndefined();
+    for (const unchanged of ["Focused: Featured 01", TV_FIXTURE.focusNone]) {
+      expect(assertFocusChanged(screen(TV_FIXTURE.appId, unchanged))).toContain(
+        "did not move focus",
+      );
+    }
   });
 
   test("checks focusNavigate and selected results", () => {

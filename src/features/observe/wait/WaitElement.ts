@@ -80,7 +80,9 @@ function displayedTextMatcher(
     const pattern = new RegExp(normalizeQuotes(text), "i");
     return (shown) => shown !== undefined && pattern.test(normalizeQuotes(shown));
   }
-  const matches = new DefaultTextMatcher().createTextMatcher(text, textMatch !== "exact");
+  // Exact compares case-sensitively, like `for: "textEquals"`; contains ignores case (#17944).
+  const exact = textMatch === "exact";
+  const matches = new DefaultTextMatcher().createTextMatcher(text, !exact, exact);
   const trimShown = text === text.trim();
   return (shown) => matches(shown !== undefined && trimShown ? shown.trim() : shown);
 }

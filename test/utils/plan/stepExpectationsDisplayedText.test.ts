@@ -148,3 +148,25 @@ describe("textEquals / textContains expectations compare the displayed text (#16
     ).toBe(false);
   });
 });
+
+// Displayed exact matching is case-sensitive, like `for: "textEquals"` (#17944).
+describe("displayed-text exact matching is case-sensitive (#17944)", () => {
+  test.each(selectors)("textEquals by %s fails on a case-only difference", (_, selector) => {
+    expect(holds({ type: "textEquals", selector, text: "Ready" }, counter("ready"))).toBe(false);
+    expect(holds({ type: "textEquals", selector, text: "READY" }, counter("Ready"))).toBe(false);
+    expect(holds({ type: "textEquals", selector, text: "Ready" }, counter("Ready"))).toBe(true);
+  });
+
+  test("textEquals without a selector fails on a case-only difference", () => {
+    expect(holds({ type: "textEquals", text: "Ready" }, counter("ready"))).toBe(false);
+  });
+
+  test("textEquals still folds smart quotes", () => {
+    expect(holds({ type: "textEquals", text: "It's on" }, counter("It’s on"))).toBe(true);
+    expect(holds({ type: "textEquals", text: "it's on" }, counter("It’s on"))).toBe(false);
+  });
+
+  test("textContains still ignores case", () => {
+    expect(holds({ type: "textContains", text: "rea" }, counter("Ready now"))).toBe(true);
+  });
+});

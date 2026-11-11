@@ -20,7 +20,7 @@ import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import type { DisplayFenceOption } from "./BaseVisualChange";
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { findTapTargetNode } from "./tapTargetSupport";
-import { isApprovedHiddenSystemUiClick } from "./xrHiddenChrome";
+import { isApprovedHiddenSystemUiClick, labeledHiddenSystemUiAlternatives } from "./xrHiddenChrome";
 import type { AndroidActionRequestOptions } from "../observe/android/AndroidActionDispatcher";
 import type { A11yActionResult } from "../observe/android/types";
 
@@ -29,7 +29,17 @@ type VerifiedNodeTarget = {
   expectedBounds: Element["bounds"];
   identityHints?: AndroidActionRequestOptions["identityHints"];
   allowInvisible?: boolean;
+  /** Set for a hidden System UI node click, whose success must be confirmed by a screen change. */
+  hiddenChrome?: HiddenXrChromeClick;
 };
+
+/** A click on a hidden System UI node: CtrlProxy's success does not prove the control activated. */
+export interface HiddenXrChromeClick {
+  /** The selector label the caller can recognise the target by. */
+  label: string;
+  /** Labels of other hidden System UI controls that tapOn can activate by text. */
+  alternatives: string[];
+}
 
 type XrNodeClickOptions = DisplayFenceOption & {
   resolvedHierarchy?: ViewHierarchyResult;
@@ -42,6 +52,8 @@ type XrNodeClickOptions = DisplayFenceOption & {
    * observation via {@link settleUnconfirmedXrClick}. Without it the click fails as unconfirmed.
    */
   onUnconfirmedClick?: (reason: string) => void;
+  /** Receives a confirmed hidden System UI node click; the caller checks its effect (#17798). */
+  onHiddenChromeClick?: (click: HiddenXrChromeClick) => void;
 };
 
 /** Resolves the requested container in the click's hierarchy. */
@@ -86,6 +98,69 @@ export function settleUnconfirmedXrClick(
   }
   result.success = false;
   result.error = xrUnconfirmedClickError(reason).message;
+  delete result.warnings;
+}
+
+/** What an XR node click left for the caller to decide from its post-tap effect. */
+export interface XrClickRecord {
+  /** Why CtrlProxy left the click unconfirmed (#17983). */
+  unconfirmed?: string;
+  /** A confirmed hidden System UI node click (#17798). */
+  hiddenChrome?: HiddenXrChromeClick;
+}
+
+/** Callbacks that record an XR node click's outcome on `state` for {@link settleXrNodeClick}. */
+export function recordXrNodeClick(state: {
+  xrClick?: XrClickRecord;
+}): Pick<XrNodeClickOptions, "onUnconfirmedClick" | "onHiddenChromeClick"> {
+  return {
+    onUnconfirmedClick: (reason) => {
+      state.xrClick = { ...state.xrClick, unconfirmed: reason };
+    },
+    onHiddenChromeClick: (click) => {
+      state.xrClick = { ...state.xrClick, hiddenChrome: click };
+    },
+  };
+}
+
+/** Settle a recorded XR node click against the post-tap effect. */
+export function settleXrNodeClick(
+  result: Pick<TapOnElementResult, "success" | "error" | "effect" | "warnings">,
+  record: XrClickRecord | undefined,
+): void {
+  settleUnconfirmedXrClick(result, record?.unconfirmed);
+  settleHiddenXrChromeClick(result, record?.hiddenChrome);
+}
+
+/** The refusal for a hidden System UI node click CtrlProxy accepted but that changed nothing. */
+export function hiddenXrChromeNoEffectError(click: HiddenXrChromeClick): ActionableError {
+  const instead = click.alternatives.length
+    ? `Select the labeled control instead: ${click.alternatives
+        .map((label) => `tapOn {text: "${label}"}`)
+        .join(" or ")}, or observe and use tapAt with screen coordinates from the screenshot.`
+    : "Observe the screen and use tapAt with screen coordinates from the screenshot.";
+  return new ActionableError(
+    `Target '${click.label}' is hidden XR system chrome (visible-to-user false, systemui): its ` +
+      `accessibility node accepted the click but the screen did not change, so the control was ` +
+      `not activated. ${instead}`,
+  );
+}
+
+/**
+ * Decide a confirmed hidden System UI node click from the post-click effect: CtrlProxy reports
+ * ACTION_CLICK accepted even when the node is not the drawn control (`launcher_button`), so an
+ * unchanged screen fails the tap instead of reporting a success that had no effect.
+ */
+export function settleHiddenXrChromeClick(
+  result: Pick<TapOnElementResult, "success" | "error" | "effect" | "warnings">,
+  click: HiddenXrChromeClick | undefined,
+): void {
+  if (!click || !result.success || result.effect?.screenChanged !== false) {
+    return;
+  }
+  result.success = false;
+  result.error = hiddenXrChromeNoEffectError(click).message;
+  // The TalkBack no-change warning is superseded by the failure.
   delete result.warnings;
 }
 
@@ -179,7 +254,7 @@ function xrNodeClickSelector(
         ...(selector.selector &&
         element["visible-to-user"] === false &&
         isApprovedHiddenSystemUiTarget(entries, element, hierarchy)
-          ? { allowInvisible: true }
+          ? { allowInvisible: true, hiddenChrome: hiddenChromeClick(entries, element, hierarchy) }
           : {}),
       };
     }
@@ -197,6 +272,19 @@ function isApprovedHiddenSystemUiTarget(
 ): boolean {
   const target = findTapTargetNode(entries, element);
   return target !== undefined && isApprovedHiddenSystemUiClick(hierarchy, target.source);
+}
+
+function hiddenChromeClick(
+  entries: readonly SearchableEntry[],
+  element: Element,
+  hierarchy: ViewHierarchyResult,
+): HiddenXrChromeClick {
+  const id = element["resource-id"] ?? "";
+  const target = findTapTargetNode(entries, element);
+  return {
+    label: id || element["content-desc"] || element.text || "",
+    alternatives: target ? labeledHiddenSystemUiAlternatives(hierarchy, target.source, id) : [],
+  };
 }
 
 /** A label container may identify its owning row, while unrelated targets stay scoped. */
@@ -335,7 +423,7 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
   },
 ): Promise<void> {
   throwIfAborted(signal);
-  const { selector, ...verification } = xrNodeClickSelector(
+  const { selector, hiddenChrome, ...verification } = xrNodeClickSelector(
     action,
     element,
     options ?? {},
@@ -347,6 +435,9 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
     displayFence: options?.displayFence,
   });
   settleXrNodeClickReply(result, options);
+  if (result.success && hiddenChrome) {
+    options?.onHiddenChromeClick?.(hiddenChrome);
+  }
 }
 
 /** Send the verified click; any failure before CtrlProxy replies is the coordinate refusal. */

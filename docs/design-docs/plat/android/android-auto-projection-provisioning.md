@@ -70,6 +70,11 @@ Unknown sources, head unit server, transport, DHU, welcome screen. Each step rea
 changes nothing when it already holds, so a rerun on a provisioned phone reports every step
 `already-done` and reuses the running DHU session.
 
+Before the first step the provisioner polls `adb get-state` on a bounded backoff (up to 60 s, and
+never past the provision deadline) until the phone reads `device`: right after boot adb can still
+report the emulator `offline`, and every step needs a working transport. A phone that stays offline
+fails the run before any step, so nothing on it changed.
+
 - **Install.** An updated system app lives under `/data/app`; the stub lives on a read-only partition.
   APKs are needed only while the stub is still in use, and AutoMobile never downloads them.
 - **Shell reads** wrap each device condition so the reply is the module's own `yes`/`no` token, not
@@ -117,3 +122,26 @@ the detached daemon runs from the home directory.
 After a failure the provisioner waits the injected backoff,
 force-stops Android Auto, starts the head unit server again and relaunches, up to two relaunches by
 default.
+
+## Head-unit actions
+
+`tapAt` and `pressButton` with `display: "headUnit"` act on the projected head unit instead of the
+phone. During projection the phone's signals stay still: the accessibility tree does not track the
+car virtual displays, `activeWindow` stays on Android Auto's `GhostActivity`, and the car app's own
+`gfxinfo` frame stats do not move, because Android Auto's presentation draws the projected UI. So
+this path never enters `BaseVisualChange` or `AwaitIdle`:
+
+- **Input** is written to the console of the DHU the daemon's provisioner already runs for that
+  serial (`desktopHeadUnitConsole`). The action only writes commands; it never starts or stops a DHU,
+  and a serial with no healthy tracked DHU, or one still provisioning, is refused. `tapAt` becomes
+  `tap <x> <y>` in head-unit pixels; D-pad, select, back and rotary buttons become `dpad …`; home and
+  media buttons become `keycode …`. Fields with no console equivalent (long press, double tap,
+  coordinate spaces, image points, `durationMs`) are refused, not approximated.
+- **Change detection** compares the projected apps' template stacks before and after the input
+  (`CarAppTemplateReader.readProjected`, the same reads as observe's projected block, which leaves
+  observe's services snapshot alone). Each projected session contributes its top screen class,
+  template type and title, and stack depth. With no template data on either side the effect is
+  reported as unknown rather than unchanged.
+- **Idle** polls those reads until two consecutive ones agree with no template `loading`. A read that
+  still matches the screen before the input is accepted only after the unchanged settle window, so a
+  slow push is not read as a no-op; the wait ends at its timeout either way.

@@ -5,6 +5,7 @@ import {
   CAR_APP_TEMPLATES_NOTE,
   carAppTemplateDocumentSchema,
   type CarAppForegroundTemplates,
+  type CarAppProjectedTemplates,
   type CarAppTemplateDocument,
   type CarAppTemplates,
 } from "../../../models/CarAppTemplates";
@@ -160,6 +161,33 @@ export class CarAppTemplateReader {
     observationId: string,
   ): Promise<CarAppTemplates | undefined> {
     this.projectionSnapshots.delete(device.deviceId);
+    const { services, apps, blocks } = await this.readBoundApps(device);
+    if (services) {
+      const answered = new Set(
+        apps.flatMap((app, index) => (blocks[index] ? [appUserKey(app)] : [])),
+      );
+      this.projectionSnapshots.set(device.deviceId, { observationId, services, answered });
+    }
+    return projectedTemplates(blocks);
+  }
+
+  /**
+   * The projected apps' template stacks outside an observation, for head-unit actions (#17842):
+   * the same reads as observe's projected block, without replacing the services snapshot an
+   * observation in progress keeps for its `androidAuto` block.
+   */
+  async readProjected(device: BootedDevice): Promise<CarAppProjectedTemplates | undefined> {
+    if (device.platform !== "android") {
+      return undefined;
+    }
+    return projectedTemplates((await this.readBoundApps(device)).blocks);
+  }
+
+  private async readBoundApps(device: BootedDevice): Promise<{
+    services: AndroidAutoProjectionServices | undefined;
+    apps: AndroidAutoProjectionServices["apps"];
+    blocks: (CarAppForegroundTemplates | undefined)[];
+  }> {
     const services = await this.projectionServices(device);
     const apps = services?.apps ?? [];
     const blocks = await Promise.all(
@@ -169,33 +197,7 @@ export class CarAppTemplateReader {
         ),
       ),
     );
-    if (services) {
-      const answered = new Set(
-        apps.flatMap((app, index) => (blocks[index] ? [appUserKey(app)] : [])),
-      );
-      this.projectionSnapshots.set(device.deviceId, { observationId, services, answered });
-    }
-    const projected = blocks.flatMap((block) =>
-      block
-        ? [
-            {
-              packageName: block.packageName,
-              sessions: block.sessions,
-              ...(block.error ? { error: block.error } : {}),
-            },
-          ]
-        : [],
-    );
-    if (projected.length === 0) {
-      return undefined;
-    }
-    return {
-      source: "sdk",
-      note: CAR_APP_TEMPLATES_NOTE,
-      projectedBy: ANDROID_AUTO_PACKAGE,
-      projectedNote: CAR_APP_PROJECTED_NOTE,
-      projected,
-    };
+    return { services, apps, blocks };
   }
 
   /**
@@ -434,6 +436,33 @@ export class CarAppTemplateReader {
     }
     return parseRouteOutput(packageName, output);
   }
+}
+
+/** The projected block from each bound app's read, or undefined when none answered enabled. */
+function projectedTemplates(
+  blocks: readonly (CarAppForegroundTemplates | undefined)[],
+): CarAppProjectedTemplates | undefined {
+  const projected = blocks.flatMap((block) =>
+    block
+      ? [
+          {
+            packageName: block.packageName,
+            sessions: block.sessions,
+            ...(block.error ? { error: block.error } : {}),
+          },
+        ]
+      : [],
+  );
+  if (projected.length === 0) {
+    return undefined;
+  }
+  return {
+    source: "sdk",
+    note: CAR_APP_TEMPLATES_NOTE,
+    projectedBy: ANDROID_AUTO_PACKAGE,
+    projectedNote: CAR_APP_PROJECTED_NOTE,
+    projected,
+  };
 }
 
 /** A bound app's package and Android user, as one key. */

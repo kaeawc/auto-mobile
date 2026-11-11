@@ -113,7 +113,7 @@ export async function withDeviceDiagnostics(
 let defaultCarAppTemplateReader: CarAppTemplateReader | undefined;
 
 /** The shared reader, so the projection block reuses the services dump the templates read took. */
-function carAppTemplateReader(): CarAppTemplateReader {
+export function carAppTemplateReader(): CarAppTemplateReader {
   defaultCarAppTemplateReader ??= new CarAppTemplateReader((target) =>
     defaultAdbClientFactory.create(target),
   );

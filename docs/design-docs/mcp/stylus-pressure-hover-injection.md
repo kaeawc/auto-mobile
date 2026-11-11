@@ -131,7 +131,9 @@ Rationale:
 
 ## Recording representation
 
-- `recordToolCalls` records AutoMobile tool calls to YAML. Injected gestures are not
+- `recordToolCalls` records AutoMobile tool calls to YAML. `begin` rejects a
+  top-level one-shot CLI call before creating a recorder; recording requires a
+  persistent MCP connection (the proxy / daemon MCP session). Injected gestures are not
   seen by the `getevent` recorder by design
   (`DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE` in
   `src/daemon/deviceGestureRecordingManager.ts`), so the new params and `hoverAt`

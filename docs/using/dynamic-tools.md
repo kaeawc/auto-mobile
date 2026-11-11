@@ -92,7 +92,10 @@ which take precedence over environment values and built-in defaults.
 
 Some tools also require a process option such as `--debug` or `--embedded-sdk`.
 `recordToolCalls` needs no process option: `setToolEnabled` lists it, and its
-`tool-call-recording` feature flag is on by default.
+`tool-call-recording` feature flag is on by default. Its `begin` action requires
+a persistent MCP connection (the proxy / daemon MCP session). A one-shot
+`auto-mobile --cli` call returns `success: false` with an actionable `error`
+because its connection closes after the call and cannot hold a recording.
 
 A call refused because a feature flag is off names the tool, the flag and both
 ways to turn it on, for example:

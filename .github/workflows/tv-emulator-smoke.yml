@@ -1,0 +1,76 @@
+name: "Android TV Emulator Smoke (Advisory)"
+
+# Advisory Android TV smoke (#16732). Not in the green-main ruleset. Runs nightly, on dispatch,
+# and on same-repository pull requests labelled run-tv.
+on:
+  schedule:
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+    inputs:
+      break-assertion:
+        description: "Swap in an impossible assertion to check the failure summary"
+        type: boolean
+        default: false
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'run-tv') && github.run_id || 'run' }}
+  cancel-in-progress: true
+
+jobs:
+  tv-emulator-smoke:
+    name: "Android TV Emulator Smoke (Advisory)"
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-tv') && (github.event.action != 'labeled' || github.event.label.name == 'run-tv'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Free disk space for emulator"
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          df -h
+
+      - name: "Enable KVM group perms"
+        uses: ./.github/actions/enable-kvm
+
+      - name: "Set up JDK"
+        uses: actions/setup-java@v5
+        with:
+          distribution: "zulu"
+          java-version: "21"
+
+      - name: "Ensure Android emulator SDK"
+        run: bash scripts/android/ensure-emulator-sdk.sh
+
+      - name: "Install emulator runtime libraries"
+        run: scripts/ci/install-apt-packages.sh libpulse0 libasound2t64 libgl1 libnss3 libxkbfile1 libx11-xcb1
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+        with:
+          install-global: "false"
+
+      - name: "Run Android TV smoke"
+        env:
+          TV_SMOKE_OUT_DIR: "${{ github.workspace }}/scratch/tv-smoke"
+          TV_SMOKE_BREAK_ASSERTION: "${{ inputs.break-assertion && '1' || '0' }}"
+        run: bash scripts/ci/tv-smoke/run-tv-smoke.sh
+
+      - name: "Upload Android TV smoke artifacts"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tv-emulator-smoke
+          path: |
+            scratch/tv-smoke/
+            !scratch/tv-smoke/db/
+          if-no-files-found: warn
+          retention-days: 14

@@ -13,6 +13,7 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createObserveResultForTest } from "../flatHierarchyBuilders";
 import type { BootedDevice } from "../../../../src/models";
 import { fixtureHierarchy, readCarAppHostFixture } from "../automotive/carAppHostFixtures";
+import { readSettingsWhileDrivingObservation } from "../automotive/drivingRestrictionBlockFixture";
 
 const capture = (name: string): string =>
   readFileSync(
@@ -178,4 +179,23 @@ test("a captured Car App Library template screen carries the host-rendered marke
   await collector.refreshAutomotiveForegroundActivity(result);
   expect(Object.hasOwn(result.automotive ?? {}, "hostRenderedUi")).toBe(false);
   expect(adb.getExecutedCommands()).toHaveLength(reads + 1);
+});
+
+test("the car's blocking activity in front reports blocked with the covered activity", async () => {
+  const { collector, result, adb } = setup();
+  const captured = readSettingsWhileDrivingObservation();
+  result.activeWindow = captured.activeWindow;
+  result.backStack = captured.backStack;
+  await collector.collectAutomotive(result);
+  expect(result.automotive).toEqual({
+    drivingState: "moving",
+    uxRestrictions: { requiresDistractionOptimization: true, activeRestrictions: 255 },
+    blocked: true,
+    blockedBy: "com.android.systemui.car.activity.ActivityBlockingActivity",
+    blockedActivity: "dev.dogfood.garage.SettingsActivity",
+  });
+  expect(observeResultSchema.parse(result).automotive).toEqual(result.automotive);
+  expect(adb.getExecutedCommands().some((command) => command.includes("get-do-activities"))).toBe(
+    false,
+  );
 });

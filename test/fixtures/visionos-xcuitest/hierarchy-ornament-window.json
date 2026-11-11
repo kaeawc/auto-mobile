@@ -1,0 +1,1963 @@
+{
+ "timestamp": 1794426638740,
+ "requestId": "r1",
+ "data": {
+  "screenHeight": 2036,
+  "packageName": "",
+  "hierarchy": {
+   "bounds": {
+    "bottom": 720,
+    "right": 1280,
+    "top": 0,
+    "left": 0
+   },
+   "className": "2",
+   "text": "DogfoodVision",
+   "focused": "false",
+   "enabled": "true",
+   "node": [
+    {
+     "className": "1",
+     "text": "",
+     "bounds": {
+      "bottom": 720,
+      "left": 0,
+      "top": 0,
+      "right": 1280
+     },
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": "dev.dogfood.vision:SFBSystemService-8C8F077D-5681-4900-8DA3-53332466D5D0"
+    },
+    {
+     "className": "4",
+     "text": "",
+     "bounds": {
+      "bottom": 1328,
+      "right": 1680,
+      "left": 0,
+      "top": 0
+     },
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "text": "",
+     "bounds": {
+      "bottom": 1328,
+      "left": 0,
+      "top": 0,
+      "right": 1680
+     },
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "text": "",
+     "bounds": {
+      "right": 1680,
+      "bottom": 1328,
+      "left": 0,
+      "top": 0
+     },
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "className": "4",
+     "text": "",
+     "bounds": {
+      "bottom": 720,
+      "left": 0,
+      "top": 0,
+      "right": 1280
+     },
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "text": "",
+     "bounds": {
+      "bottom": 720,
+      "right": 1280,
+      "top": 0,
+      "left": 0
+     },
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "text": "",
+     "bounds": {
+      "left": 0,
+      "top": 0,
+      "right": 1280,
+      "bottom": 720
+     },
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "right": 1280,
+      "left": 0,
+      "top": 0,
+      "bottom": 720
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "bottom": 720,
+      "left": 0,
+      "top": 0,
+      "right": 1280
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "bottom": 720,
+      "left": 0,
+      "top": 0,
+      "right": 1280
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "21",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "bottom": 92,
+      "left": 0,
+      "top": 0,
+      "right": 1280
+     },
+     "focused": "false",
+     "resource-id": "Dogfood Items"
+    },
+    {
+     "className": "48",
+     "enabled": "true",
+     "text": "Dogfood Items",
+     "bounds": {
+      "left": 24,
+      "bottom": 63,
+      "top": 28,
+      "right": 222
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "Settings",
+     "bounds": {
+      "right": 1256,
+      "top": 24,
+      "bottom": 68,
+      "left": 1151
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "left": 1151,
+      "top": 24,
+      "bottom": 68,
+      "right": 1256
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "text": "Settings",
+     "className": "9",
+     "clickable": "true",
+     "resource-id": "",
+     "bounds": {
+      "top": 24,
+      "bottom": 68,
+      "right": 1256,
+      "left": 1151
+     },
+     "focused": "false"
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "top": 0,
+      "bottom": 720,
+      "right": 1280,
+      "left": 0
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "bottom": 720,
+      "left": 0,
+      "top": 0,
+      "right": 1280
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "top": 0,
+      "bottom": 720,
+      "right": 1280,
+      "left": 0
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "top": 0,
+      "right": 1280,
+      "left": 0,
+      "bottom": 720
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "32",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "right": 1280,
+      "top": 0,
+      "bottom": 720,
+      "left": 0
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "top": -1348,
+      "left": -24,
+      "bottom": 2036,
+      "right": 1304
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "text": "",
+     "className": "75",
+     "clickable": "true",
+     "resource-id": "",
+     "bounds": {
+      "left": 24,
+      "bottom": 152,
+      "top": 92,
+      "right": 1256
+     },
+     "focused": "false"
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "left": 24,
+      "bottom": 152,
+      "top": 92,
+      "right": 1256
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "left": 24,
+      "bottom": 152,
+      "top": 92,
+      "right": 1256
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "left": 24,
+      "top": 92,
+      "right": 1256,
+      "bottom": 152
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "className": "1",
+     "enabled": "true",
+     "text": "",
+     "bounds": {
+      "left": 24,
+      "top": 92,
+      "right": 1256,
+      "bottom": 152
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "bottom": 152,
+      "right": 1256,
+      "top": 92,
+      "left": 24
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "left": 24,
+      "top": 92,
+      "right": 1256,
+      "bottom": 152
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "right": 1256,
+      "left": 24,
+      "top": 92,
+      "bottom": 152
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "text": "Item 1",
+     "clickable": "true",
+     "className": "9",
+     "resource-id": "",
+     "bounds": {
+      "top": 92,
+      "bottom": 152,
+      "left": 24,
+      "right": 1256
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "top": 112,
+      "bottom": 132,
+      "left": 44,
+      "right": 91
+     },
+     "resource-id": "",
+     "className": "48",
+     "text": "Item 1"
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "left": 1224,
+      "bottom": 130,
+      "top": 115,
+      "right": 1232
+     },
+     "resource-id": "chevron.forward",
+     "className": "43",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "top": 92,
+      "bottom": 152,
+      "left": 24,
+      "right": 1256
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "bottom": 152,
+      "top": 152,
+      "right": 1256,
+      "left": 24
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "bottom": 152,
+      "top": 152,
+      "left": 24,
+      "right": 1256
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "text": "",
+     "clickable": "true",
+     "className": "75",
+     "resource-id": "",
+     "bounds": {
+      "left": 24,
+      "top": 152,
+      "right": 1256,
+      "bottom": 213
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "left": 24,
+      "top": 152,
+      "right": 1256,
+      "bottom": 213
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "top": 152,
+      "right": 1256,
+      "bottom": 213,
+      "left": 24
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "top": 152,
+      "bottom": 213,
+      "left": 24,
+      "right": 1256
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "top": 152,
+      "bottom": 213,
+      "right": 1256,
+      "left": 24
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "bottom": 213,
+      "left": 24,
+      "top": 152,
+      "right": 1256
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "top": 152,
+      "left": 24,
+      "right": 1256,
+      "bottom": 213
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "bounds": {
+      "top": 152,
+      "right": 1256,
+      "left": 24,
+      "bottom": 213
+     },
+     "resource-id": "",
+     "className": "1",
+     "text": ""
+    },
+    {
+     "enabled": "true",
+     "text": "Item 2",
+     "clickable": "true",
+     "className": "9",
+     "resource-id": "",
+     "bounds": {
+      "right": 1256,
+      "bottom": 213,
+      "top": 152,
+      "left": 24
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "focused": "false",
+     "className": "48",
+     "bounds": {
+      "left": 44,
+      "top": 172,
+      "right": 93,
+      "bottom": 193
+     },
+     "text": "Item 2"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "chevron.forward",
+     "focused": "false",
+     "className": "43",
+     "bounds": {
+      "bottom": 190,
+      "right": 1232,
+      "left": 1224,
+      "top": 175
+     },
+     "text": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "right": 1256,
+      "left": 24,
+      "top": 152,
+      "bottom": 213
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "left": 24,
+      "right": 1256,
+      "top": 212,
+      "bottom": 213
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "right": 1256,
+      "top": 212,
+      "bottom": 213,
+      "left": 24
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "text": "",
+     "clickable": "true",
+     "className": "75",
+     "resource-id": "",
+     "bounds": {
+      "top": 213,
+      "left": 24,
+      "right": 1256,
+      "bottom": 273
+     },
+     "focused": "false"
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "top": 213,
+      "left": 24,
+      "right": 1256,
+      "bottom": 273
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "right": 1256,
+      "bottom": 273,
+      "top": 213,
+      "left": 24
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "left": 24,
+      "top": 213,
+      "right": 1256,
+      "bottom": 273
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "right": 1256,
+      "bottom": 273,
+      "left": 24,
+      "top": 213
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "left": 24,
+      "right": 1256,
+      "bottom": 273,
+      "top": 213
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "top": 213,
+      "right": 1256,
+      "bottom": 273,
+      "left": 24
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "left": 24,
+      "bottom": 273,
+      "top": 213,
+      "right": 1256
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "text": "Item 3",
+     "clickable": "true",
+     "className": "9",
+     "resource-id": "",
+     "bounds": {
+      "top": 213,
+      "bottom": 273,
+      "right": 1256,
+      "left": 24
+     },
+     "focused": "false"
+    },
+    {
+     "text": "Item 3",
+     "focused": "false",
+     "bounds": {
+      "top": 233,
+      "bottom": 253,
+      "right": 93,
+      "left": 44
+     },
+     "enabled": "true",
+     "className": "48",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "bottom": 251,
+      "top": 236,
+      "left": 1224,
+      "right": 1232
+     },
+     "enabled": "true",
+     "className": "43",
+     "resource-id": "chevron.forward"
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "right": 1256,
+      "bottom": 273,
+      "top": 213,
+      "left": 24
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "bottom": 273,
+      "left": 24,
+      "right": 1256,
+      "top": 273
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "right": 1256,
+      "bottom": 273,
+      "top": 273,
+      "left": 24
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "text": "",
+     "clickable": "true",
+     "className": "75",
+     "resource-id": "",
+     "bounds": {
+      "top": 273,
+      "bottom": 334,
+      "right": 1256,
+      "left": 24
+     },
+     "focused": "false"
+    },
+    {
+     "text": "",
+     "focused": "false",
+     "bounds": {
+      "top": 273,
+      "bottom": 334,
+      "right": 1256,
+      "left": 24
+     },
+     "enabled": "true",
+     "className": "1",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "bottom": 334,
+      "right": 1256,
+      "left": 24,
+      "top": 273
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "bottom": 334,
+      "top": 273,
+      "right": 1256,
+      "left": 24
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "left": 24,
+      "top": 273,
+      "bottom": 334,
+      "right": 1256
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "top": 273,
+      "right": 1256,
+      "bottom": 334,
+      "left": 24
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "left": 24,
+      "right": 1256,
+      "bottom": 334,
+      "top": 273
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "left": 24,
+      "bottom": 334,
+      "top": 273,
+      "right": 1256
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "text": "Item 4",
+     "className": "9",
+     "clickable": "true",
+     "resource-id": "",
+     "bounds": {
+      "top": 273,
+      "left": 24,
+      "right": 1256,
+      "bottom": 334
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "Item 4",
+     "className": "48",
+     "bounds": {
+      "top": 293,
+      "left": 44,
+      "right": 94,
+      "bottom": 314
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "43",
+     "bounds": {
+      "left": 1224,
+      "right": 1232,
+      "bottom": 311,
+      "top": 296
+     },
+     "resource-id": "chevron.forward"
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "bottom": 334,
+      "top": 273,
+      "right": 1256,
+      "left": 24
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "left": 24,
+      "top": 333,
+      "bottom": 334,
+      "right": 1256
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "left": 24,
+      "bottom": 334,
+      "top": 333,
+      "right": 1256
+     },
+     "resource-id": ""
+    },
+    {
+     "bounds": {
+      "top": 334,
+      "left": 24,
+      "right": 1256,
+      "bottom": 394
+     },
+     "clickable": "true",
+     "text": "",
+     "className": "75",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "top": 334,
+      "left": 24,
+      "right": 1256,
+      "bottom": 394
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "top": 334,
+      "right": 1256,
+      "bottom": 394,
+      "left": 24
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "left": 24,
+      "bottom": 394,
+      "right": 1256,
+      "top": 334
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "left": 24,
+      "top": 334,
+      "right": 1256,
+      "bottom": 394
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "bottom": 394,
+      "top": 334,
+      "left": 24,
+      "right": 1256
+     },
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "focused": "false",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "bottom": 394,
+      "top": 334,
+      "left": 24,
+      "right": 1256
+     },
+     "resource-id": ""
+    },
+    {
+     "bounds": {
+      "bottom": 394,
+      "right": 1256,
+      "top": 334,
+      "left": 24
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "top": 334,
+      "left": 24,
+      "right": 1256,
+      "bottom": 394
+     },
+     "clickable": "true",
+     "className": "9",
+     "text": "Item 5",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "bounds": {
+      "top": 354,
+      "left": 44,
+      "right": 93,
+      "bottom": 374
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "48",
+     "text": "Item 5",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "left": 1224,
+      "top": 357,
+      "right": 1232,
+      "bottom": 372
+     },
+     "resource-id": "chevron.forward",
+     "focused": "false",
+     "className": "43",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "top": 334,
+      "bottom": 394,
+      "left": 24,
+      "right": 1256
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "bottom": 394,
+      "left": 24,
+      "top": 394,
+      "right": 1256
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "left": 24,
+      "bottom": 394,
+      "top": 394,
+      "right": 1256
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "right": 1256,
+      "top": 394,
+      "bottom": 455,
+      "left": 24
+     },
+     "clickable": "true",
+     "className": "75",
+     "text": "",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "bounds": {
+      "right": 1256,
+      "top": 394,
+      "bottom": 455,
+      "left": 24
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "top": 394,
+      "right": 1256,
+      "bottom": 455,
+      "left": 24
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "right": 1256,
+      "top": 394,
+      "bottom": 455,
+      "left": 24
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "top": 394,
+      "bottom": 455,
+      "right": 1256,
+      "left": 24
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "right": 1256,
+      "left": 24,
+      "top": 394,
+      "bottom": 455
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "top": 394,
+      "right": 1256,
+      "left": 24,
+      "bottom": 455
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "left": 24,
+      "top": 394,
+      "right": 1256,
+      "bottom": 455
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "right": 1256,
+      "left": 24,
+      "top": 394,
+      "bottom": 455
+     },
+     "clickable": "true",
+     "className": "9",
+     "text": "Item 6",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "bounds": {
+      "right": 93,
+      "left": 44,
+      "top": 414,
+      "bottom": 435
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "48",
+     "text": "Item 6",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "left": 1224,
+      "right": 1232,
+      "top": 417,
+      "bottom": 432
+     },
+     "resource-id": "chevron.forward",
+     "focused": "false",
+     "className": "43",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "right": 1256,
+      "left": 24,
+      "top": 394,
+      "bottom": 455
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "bounds": {
+      "bottom": 455,
+      "left": 24,
+      "right": 1256,
+      "top": 454
+     },
+     "resource-id": "",
+     "focused": "false",
+     "className": "1",
+     "text": "",
+     "enabled": "true"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "bottom": 455,
+      "top": 454,
+      "right": 1256,
+      "left": 24
+     },
+     "focused": "false"
+    },
+    {
+     "bounds": {
+      "left": 24,
+      "right": 1256,
+      "top": 455,
+      "bottom": 515
+     },
+     "clickable": "true",
+     "text": "",
+     "className": "75",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "left": 24,
+      "right": 1256,
+      "top": 455,
+      "bottom": 515
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "top": 455,
+      "right": 1256,
+      "bottom": 515,
+      "left": 24
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "right": 1256,
+      "left": 24,
+      "bottom": 515,
+      "top": 455
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "right": 1256,
+      "top": 455,
+      "left": 24,
+      "bottom": 515
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "right": 1256,
+      "bottom": 515,
+      "left": 24,
+      "top": 455
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "top": 455,
+      "right": 1256,
+      "left": 24,
+      "bottom": 515
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "bottom": 515,
+      "right": 1256,
+      "top": 455,
+      "left": 24
+     },
+     "focused": "false"
+    },
+    {
+     "bounds": {
+      "top": 455,
+      "left": 24,
+      "right": 1256,
+      "bottom": 515
+     },
+     "clickable": "true",
+     "text": "Item 7",
+     "className": "9",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "Item 7",
+     "className": "48",
+     "bounds": {
+      "top": 475,
+      "left": 44,
+      "right": 92,
+      "bottom": 495
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "chevron.forward",
+     "text": "",
+     "className": "43",
+     "bounds": {
+      "top": 478,
+      "left": 1224,
+      "bottom": 493,
+      "right": 1232
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "right": 1256,
+      "top": 455,
+      "left": 24,
+      "bottom": 515
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "bottom": 515,
+      "top": 515,
+      "right": 1256,
+      "left": 24
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "right": 1256,
+      "top": 515,
+      "left": 24,
+      "bottom": 515
+     },
+     "focused": "false"
+    },
+    {
+     "bounds": {
+      "top": 515,
+      "left": 24,
+      "right": 1256,
+      "bottom": 576
+     },
+     "clickable": "true",
+     "text": "",
+     "className": "75",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "top": 515,
+      "left": 24,
+      "right": 1256,
+      "bottom": 576
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "top": 515,
+      "right": 1256,
+      "bottom": 576,
+      "left": 24
+     },
+     "focused": "false"
+    },
+    {
+     "enabled": "true",
+     "resource-id": "",
+     "text": "",
+     "className": "1",
+     "bounds": {
+      "right": 1256,
+      "left": 24,
+      "bottom": 576,
+      "top": 515
+     },
+     "focused": "false"
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "right": 1256,
+      "left": 24,
+      "top": 515,
+      "bottom": 576
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "left": 24,
+      "top": 515,
+      "right": 1256,
+      "bottom": 576
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "bottom": 576,
+      "top": 515,
+      "left": 24,
+      "right": 1256
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "bottom": 576,
+      "top": 515,
+      "left": 24,
+      "right": 1256
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "bounds": {
+      "top": 515,
+      "right": 1256,
+      "left": 24,
+      "bottom": 576
+     },
+     "clickable": "true",
+     "className": "9",
+     "text": "Item 8",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "top": 535,
+      "right": 94,
+      "left": 44,
+      "bottom": 556
+     },
+     "focused": "false",
+     "className": "48",
+     "enabled": "true",
+     "text": "Item 8"
+    },
+    {
+     "resource-id": "chevron.forward",
+     "bounds": {
+      "bottom": 553,
+      "top": 538,
+      "left": 1224,
+      "right": 1232
+     },
+     "focused": "false",
+     "className": "43",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "left": 24,
+      "bottom": 576,
+      "top": 515,
+      "right": 1256
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "WolfScrollIndicatorVertical",
+     "bounds": {
+      "right": 1277,
+      "bottom": 720,
+      "left": 1265,
+      "top": 0
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "top": 0,
+      "left": 1265,
+      "bottom": 720,
+      "right": 1277
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "left": 1265,
+      "right": 1277,
+      "bottom": 408,
+      "top": 309
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "top": 312,
+      "left": 1268,
+      "right": 1274,
+      "bottom": 405
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "left": 1255,
+      "right": 1287,
+      "top": 302,
+      "bottom": 418
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "left": 0,
+      "bottom": 76,
+      "top": 0,
+      "right": 143
+     },
+     "focused": "false",
+     "className": "4",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "top": 0,
+      "left": 0,
+      "right": 143,
+      "bottom": 76
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "top": 0,
+      "bottom": 76,
+      "right": 143,
+      "left": 0
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "bottom": 76,
+      "top": 0,
+      "right": 143,
+      "left": 0
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "left": 0,
+      "right": 143,
+      "bottom": 76,
+      "top": 0
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "resource-id": "",
+     "bounds": {
+      "right": 143,
+      "left": 0,
+      "bottom": 76,
+      "top": 0
+     },
+     "focused": "false",
+     "className": "1",
+     "enabled": "true",
+     "text": ""
+    },
+    {
+     "bounds": {
+      "top": 16,
+      "right": 127,
+      "left": 16,
+      "bottom": 60
+     },
+     "clickable": "true",
+     "text": "Add item",
+     "className": "9",
+     "focused": "false",
+     "enabled": "true",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "enabled": "true",
+     "className": "4",
+     "bounds": {
+      "top": 0,
+      "right": 1680,
+      "left": 0,
+      "bottom": 1328
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "enabled": "true",
+     "className": "1",
+     "bounds": {
+      "left": 0,
+      "right": 1680,
+      "top": 0,
+      "bottom": 1328
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "enabled": "true",
+     "className": "1",
+     "bounds": {
+      "right": 1680,
+      "bottom": 1328,
+      "left": 0,
+      "top": 0
+     },
+     "focused": "false",
+     "resource-id": ""
+    },
+    {
+     "text": "",
+     "enabled": "true",
+     "className": "1",
+     "bounds": {
+      "left": 0,
+      "top": 0,
+      "bottom": 50,
+      "right": 50
+     },
+     "focused": "false",
+     "resource-id": ""
+    }
+   ],
+   "resource-id": ""
+  },
+  "updatedAt": 1794426638740,
+  "insets": {
+   "source": "unavailable",
+   "available": false,
+   "displayCutoutInfo": {
+    "classification": "unknown"
+   },
+   "units": "unknown"
+  },
+  "screenWidth": 1680
+ },
+ "type": "hierarchy_update"
+}

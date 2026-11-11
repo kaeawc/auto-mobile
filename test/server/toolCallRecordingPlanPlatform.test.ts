@@ -33,11 +33,11 @@ const RECORDED_AT_MS = Date.parse("2026-11-11T14:37:55.459Z");
 
 /** The parsed plan without the fields that depend on the build or the session length. */
 function comparable(planContent: string): Record<string, unknown> {
-  const plan = yaml.load(planContent) as Record<string, unknown>;
+  const plan = { ...(yaml.load(planContent) as Record<string, unknown>) };
   const metadata = { ...(plan.metadata as Record<string, unknown>) };
   delete metadata.recording;
-  const { mcpVersion: _mcpVersion, ...rest } = plan;
-  return { ...rest, metadata };
+  delete plan.mcpVersion;
+  return { ...plan, metadata };
 }
 
 function recordIssueCalls(platforms: [string | undefined, string | undefined]) {

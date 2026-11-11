@@ -214,6 +214,10 @@ export function withResolvedPlatform(
   return { ...args, platform: device.platform };
 }
 
+function platformOf(args: Record<string, unknown>): string | undefined {
+  return typeof args.platform === "string" ? args.platform : undefined;
+}
+
 /**
  * Records successful MCP tool calls as PlanStep entries.
  * Designed to be wired into ToolRegistry's wrappedHandler success path.
@@ -322,7 +326,7 @@ export class ToolCallRecorder {
       this.steps.push({ tool: toolName, params: recordedParams });
     }
     // `platform` is a routing param, stripped from the step; the plan declares it once (#17938).
-    this.stepPlatforms.push(typeof args.platform === "string" ? args.platform : undefined);
+    this.stepPlatforms.push(platformOf(args));
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
   }
 

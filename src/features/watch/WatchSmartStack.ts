@@ -1,4 +1,6 @@
 import type { ViewHierarchyResult } from "../../models";
+import { errorMessage } from "../../models/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { normalizeWatchHierarchy, type WatchHierarchyNode } from "./WatchHierarchy";
 import { parseXcuiDebugDescription } from "./WatchXcuiDebugDescription";
 
@@ -6,6 +8,31 @@ import { parseXcuiDebugDescription } from "./WatchXcuiDebugDescription";
 export const WATCH_CLOCK_FACE_BUNDLE_ID = "com.apple.clockface";
 /** Element role given to a Smart Stack widget cell. */
 export const SMART_STACK_WIDGET_ROLE = "widget";
+
+/** Normalized center of the Smart Stack Edit button, when its frame and window are present. */
+export function readSmartStackEditTap(dump: string): { x: number; y: number } | undefined {
+  try {
+    const tree = parseXcuiDebugDescription(dump, {
+      bundleId: WATCH_CLOCK_FACE_BUNDLE_ID,
+      timestamp: 0,
+    });
+    const all = [tree.root, ...descendants(tree.root)];
+    const button = all.find(
+      (node) => node.className === "Button" && node.accessibilityLabel === "Edit",
+    );
+    if (!button || tree.screenWidth <= 0 || tree.screenHeight <= 0) {
+      return undefined;
+    }
+    return {
+      x: (button.bounds.left + button.bounds.right) / 2 / tree.screenWidth,
+      y: (button.bounds.top + button.bounds.bottom) / 2 / tree.screenHeight,
+    };
+  } catch (error) {
+    // A dump without a window frame mid-transition has no Edit button.
+    logger.debug(`Smart Stack Edit button read skipped: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
 
 const HEADER_ID = "Smart Stack Header";
 const CELL_PREFIX = "StackCollectionView";

@@ -260,6 +260,14 @@ class FakeAutoMobileClient private constructor(private val state: FakeAutoMobile
   /** deviceId passed to the most recent [listPerformanceAuditResults] call (null if unscoped). */
   var lastListPerformanceAuditResultsDeviceId by state::lastListPerformanceAuditResultsDeviceId
 
+  /** deviceSessionUuid passed to the most recent [listPerformanceAuditResults] call. */
+  var lastListPerformanceAuditResultsDeviceSessionUuid by
+    state::lastListPerformanceAuditResultsDeviceSessionUuid
+
+  /** False makes [listPerformanceAuditResults] reject `deviceSessionUuid` like an older daemon. */
+  var performanceResultsSupportsDeviceSessionUuid by
+    state::performanceResultsSupportsDeviceSessionUuid
+
   override fun openGestureStream(platform: String, deviceId: String?): GestureInputStream? {
     calls.add("openGestureStream")
     if (!gestureStreamSupported) return null

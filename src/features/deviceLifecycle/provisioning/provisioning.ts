@@ -145,9 +145,13 @@ export class ProvisionDeviceRollbackError extends ProvisionDeviceError {
     readonly cleanup: ProvisionDeviceCleanup,
     options?: { retainedDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]> },
   ) {
+    // A failure that changed nothing keeps its own actionable code and message; the failed
+    // cleanup still reaches the caller through `cleanup` and the lifecycle outcome.
+    const reportCleanupFailure =
+      cleanup.status === "failed" && !provisionFailure.diagnostics.failedStepChangedNothing;
     super(
-      cleanup.status === "failed" ? "cleanup_failed" : provisionFailure.code,
-      cleanup.status === "failed"
+      reportCleanupFailure ? "cleanup_failed" : provisionFailure.code,
+      reportCleanupFailure
         ? `${provisionFailure.message} Cleanup of the newly created device also failed: ${
             cleanup.failure?.message ?? "unknown cleanup failure"
           }`

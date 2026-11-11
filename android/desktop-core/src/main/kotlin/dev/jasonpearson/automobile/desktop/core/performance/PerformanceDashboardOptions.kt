@@ -14,8 +14,9 @@ data class PerformanceDashboardOptions(
   val observationStreamClient: ObservationStream? = null,
   val deviceId: String? = null,
   /**
-   * The pane's device epoch. A new epoch of the same [deviceId] drops the shown run and reloads the
-   * device's audit history, so a rebooted device does not show the previous epoch's live metrics.
+   * The pane's device epoch. A new epoch of the same [deviceId] drops the shown run and reloads
+   * audit history scoped to this epoch, so a rebooted device shows neither the previous epoch's
+   * live metrics nor its audits.
    */
   val deviceSessionUuid: String? = null,
   val connectionGeneration: Int = 0,

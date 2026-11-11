@@ -31,6 +31,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "getLogs",
   ]),
   tvos: new Set<string>([
+    "getLogs",
+    "crashApp",
     "explore",
     "executePlan",
     "sendKeys",

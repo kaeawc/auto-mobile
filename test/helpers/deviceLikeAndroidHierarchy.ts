@@ -29,6 +29,7 @@ export async function deviceLikeAndroidHierarchy(
     deviceId: "fake-settle-cache",
     name: "Fake Android",
     platform: "android",
+    formFactor: "phone",
   } as const;
   const adb = new FakeAdbExecutor();
   adb.setCommandResponse(

@@ -95,6 +95,7 @@ describe("performance poll query and cursor characterization", () => {
       passed: true,
       diagnostics: null,
       nodeId: null,
+      deviceSessionUuid: null,
       metrics: {
         p50Ms: null,
         p90Ms: null,

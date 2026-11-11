@@ -58,10 +58,12 @@ afterAll(() => {
 });
 
 /**
- * Template parameters that name an MCP connection, not a device session, so a read naming one is
- * never fenced: the prototype resources' `mcpSessionId` revision filter (#17358).
+ * Template parameters that do not name a held session, so a read naming one is never fenced: the
+ * prototype resources' `mcpSessionId` connection filter (#17358), and `performance-results`'
+ * `deviceSessionUuid` history filter (#17030), which names a device epoch whose audits stay
+ * readable after it is retired.
  */
-const EXEMPT_CONNECTION_PARAMS = /\bmcpSessionId\b/g;
+const EXEMPT_CONNECTION_PARAMS = /\b(?:mcpSessionId|deviceSessionUuid)\b/g;
 
 function sessionScopedTemplates(): string[] {
   return templates.filter((template) =>

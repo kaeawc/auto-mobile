@@ -53,6 +53,10 @@ internal object DaemonStatePaths {
     return "/tmp/auto-mobile-daemon-${userId()}${isolationSuffix(envProvider, userDir)}.${file.extension}"
   }
 
+  /** Whether [file]'s path comes from its explicit override env var rather than the default. */
+  fun hasOverride(file: DaemonStateFile, envProvider: (String) -> String?): Boolean =
+    !(envProvider(file.overrideEnv) ?: envProvider(file.legacyOverrideEnv)).isNullOrBlank()
+
   /** `-<first 10 hex chars of sha256(resolved aux dir)>`, or "" without an aux dir. */
   fun isolationSuffix(
     envProvider: (String) -> String?,

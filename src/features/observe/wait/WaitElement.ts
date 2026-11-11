@@ -16,6 +16,7 @@ import {
 } from "../../utility/ElementGeometry";
 import type { ScreenSize } from "../../../models/ScreenSize";
 import { normalizeQuotes } from "../../utility/TextMatcher";
+import { normalize } from "../../utility/ElementResolverMatching";
 import type { ResolverSelector } from "../../../models/elementSelectorSchemas";
 import type { ConditionResolver } from "../ConditionPredicates";
 import type { ObserveWaitForOptions } from "./WaitForSchemas";
@@ -48,6 +49,55 @@ function retryCompoundText<T>(
   }
   const textIndex = predicates.findIndex((selector) => selector.text !== undefined);
   sets[textIndex] = resolve({ text: waitFor.text!, match: "contains" });
+}
+
+/**
+ * `textSource: "displayed"` (#16875): the text predicate's matches must show `waitFor.text` in
+ * their displayed text (`shownText`: an editable value, else the text), so a node that carries
+ * the text only as a content description or accessibility label does not satisfy it. Without an
+ * explicit `textMatch`, an exact match the filter removes (a content description equal to the
+ * text) must not hide a node whose displayed text contains it, so the substring pass is retried.
+ */
+function keepDisplayedTextMatches(
+  waitFor: ObserveWaitForOptions,
+  negative: boolean,
+  predicates: readonly ResolverSelector[],
+  {
+    sets,
+    resolve,
+  }: { sets: SearchableEntry[][]; resolve: (selector: ResolverSelector) => SearchableEntry[] },
+): void {
+  if (waitFor.textSource !== "displayed" || waitFor.text === undefined) {
+    return;
+  }
+  const textIndex = predicates.findIndex((selector) => selector.text !== undefined);
+  if (textIndex < 0) {
+    return;
+  }
+  const shows = displayedTextMatcher(waitFor.text, waitFor.textMatch);
+  let kept = sets[textIndex].filter((node) => shows(node.shownText));
+  if (kept.length === 0 && waitFor.textMatch === undefined && !negative) {
+    kept = resolve({ text: waitFor.text, match: "contains" }).filter((node) =>
+      shows(node.shownText),
+    );
+  }
+  sets[textIndex] = kept;
+}
+
+function displayedTextMatcher(
+  text: string,
+  textMatch: ObserveWaitForOptions["textMatch"],
+): (shown: string | undefined) => boolean {
+  if (textMatch === "regex") {
+    // Same flags and quote normalization as the resolver's regex text match.
+    const pattern = new RegExp(normalizeQuotes(text), "i");
+    return (shown) => shown !== undefined && pattern.test(normalizeQuotes(shown));
+  }
+  // Same quote folding, trimming, whitespace collapsing and case folding as the resolver.
+  const expected = normalize(text);
+  return textMatch === "exact"
+    ? (shown) => shown !== undefined && normalize(shown) === expected
+    : (shown) => shown !== undefined && normalize(shown).includes(expected);
 }
 
 function isWaitSourceVisible(
@@ -311,6 +361,7 @@ export const findWaitForElement = (
     return candidates;
   });
   retryCompoundText(waitFor, negative, predicates, { sets, resolve });
+  keepDisplayedTextMatches(waitFor, negative, predicates, { sets, resolve });
   const candidates = [...new Set(sets.flat())].sort(
     (a, b) => a.windowRank - b.windowRank || a.index - b.index,
   );

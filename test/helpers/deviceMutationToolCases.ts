@@ -99,6 +99,11 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
   { name: "clearMockNetwork", args: {}, kind: "opaque" },
   { name: "phoneCall", args: { action: "call", phoneNumber: "123" }, kind: "opaque" },
   { name: "sendSms", args: { phoneNumber: "123", message: "Hello" }, kind: "opaque" },
+  {
+    name: "seedContent",
+    args: { namespace: "test", contacts: [{ name: "Test Contact" }] },
+    kind: "opaque",
+  },
   { name: "resetAppLogs", args: { appId: "com.example", paths: ["app.log"] }, kind: "opaque" },
   { name: "deviceSnapshot", args: { action: "restore", snapshotName: "baseline" }, kind: "opaque" },
   { name: "statusBar", args: { action: "override", time: "9:41" }, kind: "status-bar" },

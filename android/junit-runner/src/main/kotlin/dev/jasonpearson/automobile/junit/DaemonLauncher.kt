@@ -294,7 +294,9 @@ internal object DaemonLauncher {
       )
     }
 
-    if (daemonAvailable && (env.userManagedSocket || (skew && !forceRestartRequested))) {
+    // Only a requested forced restart may replace a skewed shared daemon; never a user-managed one.
+    val mustNotReplace = env.userManagedSocket || (skew && !forceRestartRequested)
+    if (daemonAvailable && mustNotReplace) {
       reuseLiveDaemon(env, record, skew, forcedRestart)
       return
     }

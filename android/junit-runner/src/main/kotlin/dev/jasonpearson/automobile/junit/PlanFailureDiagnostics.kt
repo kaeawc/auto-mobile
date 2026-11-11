@@ -26,6 +26,39 @@ internal class PlanFailureDiagnostics(private val collaborators: PlanExecutorCol
     return result.copy(output = output)
   }
 
+  /** A failed result with exit code -1 for a failure before the daemon ran the plan. */
+  fun failed(
+    errorMessage: String,
+    startTimeMs: Long,
+    parameters: Map<String, Any>,
+    options: AutoMobilePlanExecutionOptions,
+  ): AutoMobilePlanExecutionResult =
+    annotate(
+      AutoMobilePlanExecutionResult(
+        success = false,
+        exitCode = -1,
+        errorMessage = errorMessage,
+        executionTimeMs = System.currentTimeMillis() - startTimeMs,
+        parametersUsed = parameters,
+      ),
+      options,
+    )
+
+  /** The failure for "adb lists no usable device", with the probe's last error when it had one. */
+  fun noDevices(
+    startTimeMs: Long,
+    parameters: Map<String, Any>,
+    options: AutoMobilePlanExecutionOptions,
+  ): AutoMobilePlanExecutionResult {
+    val probeError = collaborators.deviceChecker.getLastError()?.let { ": $it" } ?: ""
+    return failed(
+      "No Android devices available for plan execution$probeError",
+      startTimeMs,
+      parameters,
+      options,
+    )
+  }
+
   private fun describeDeviceSelector(options: AutoMobilePlanExecutionOptions): String {
     val configured = options.device.trim()
     val serial = PlanDeviceSelection.androidSerial(collaborators.environment)

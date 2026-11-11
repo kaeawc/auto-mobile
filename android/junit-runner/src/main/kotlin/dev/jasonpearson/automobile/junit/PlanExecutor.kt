@@ -44,19 +44,7 @@ internal class PlanExecutor(
 
       // Check device availability after plan file validation
       if (!collaborators.deviceChecker.areDevicesAvailable()) {
-        val executionTime = System.currentTimeMillis() - startTime
-        return failureDiagnostics.annotate(
-          AutoMobilePlanExecutionResult(
-            success = false,
-            exitCode = -1,
-            errorMessage =
-              "No Android devices available for plan execution" +
-                (collaborators.deviceChecker.getLastError()?.let { ": $it" } ?: ""),
-            executionTimeMs = executionTime,
-            parametersUsed = parameters,
-          ),
-          options,
-        )
+        return failureDiagnostics.noDevices(startTime, parameters, options)
       }
 
       // Read the RAW plan once. Derive the effective secret keys and the concrete strings to scrub
@@ -109,15 +97,10 @@ internal class PlanExecutor(
         options,
       )
     } catch (e: Exception) {
-      val executionTime = System.currentTimeMillis() - startTime
-      return failureDiagnostics.annotate(
-        AutoMobilePlanExecutionResult(
-          success = false,
-          exitCode = -1,
-          errorMessage = "Plan execution failed: ${e.message}",
-          executionTimeMs = executionTime,
-          parametersUsed = parameters,
-        ),
+      return failureDiagnostics.failed(
+        "Plan execution failed: ${e.message}",
+        startTime,
+        parameters,
         options,
       )
     }

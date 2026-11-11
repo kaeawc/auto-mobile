@@ -28,7 +28,11 @@ while [[ $# -gt 0 ]]; do
 done
 [[ "$(uname -s)" == Darwin ]] || fail 'macOS is required'
 [[ -d "${viewer}" ]] || fail "viewer app not found: ${viewer}; run scripts/ios/prototype-viewer-build.sh"
-for command in bun jq xcrun sips; do
+stable_max_captures="${PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES:-8}"
+stable_budget_secs="${PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS:-15}"
+[[ "${stable_max_captures}" =~ ^[1-9][0-9]*$ ]] || fail 'PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES must be a positive integer'
+[[ "${stable_budget_secs}" =~ ^(0|[1-9][0-9]*)$ ]] || fail 'PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS must be a nonnegative integer'
+for command in bun jq xcrun sips cmp date; do
   command -v "${command}" >/dev/null || fail "required command not found: ${command}"
 done
 
@@ -73,6 +77,26 @@ check_size() {
   size="$(sips -g pixelWidth -g pixelHeight "${image}")"
   [[ "$(awk '/pixelWidth:/ {print $2}' <<< "${size}")" == "${expected_width}" && "$(awk '/pixelHeight:/ {print $2}' <<< "${size}")" == "${expected_height}" ]] || fail "wrong screenshot size (expected ${expected_width}x${expected_height}): ${size}"
 }
+# Compare complete PNGs, including system chrome, before cropping the chosen capture.
+capture_until_stable() {
+  local golden="$1" captures=0 started
+  started="$(date +%s)"
+  sleep 0.5
+  while (( captures < stable_max_captures && $(date +%s) - started < stable_budget_secs )); do
+    xcrun simctl io "${udid}" screenshot --type=png "${tmp_dir}/screen.png"
+    captures=$((captures + 1))
+    if (( captures > 1 )) && cmp -s "${tmp_dir}/screen.png" "${tmp_dir}/screen.prev.png"; then
+      printf 'prototype-record-goldens: %s: capture=stable (%s captures)\n' "${golden}" "${captures}" >&2
+      return
+    fi
+    cp "${tmp_dir}/screen.png" "${tmp_dir}/screen.prev.png"
+    if (( captures < stable_max_captures )); then sleep 0.5; fi
+  done
+  # Preserve the original settle-and-capture behavior when the bounded polling fails.
+  sleep 2
+  xcrun simctl io "${udid}" screenshot --type=png "${tmp_dir}/screen.png"
+  printf 'prototype-record-goldens: %s: capture=fallback (not stable after %s captures)\n' "${golden}" "${captures}" >&2
+}
 mkdir -p "${out}"
 restore=1
 xcrun simctl status_bar "${udid}" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4 --operatorName ''
@@ -87,8 +111,7 @@ while IFS=$'\t' read -r golden mode; do
   cp "${tmp_dir}/${golden}.json" "${container}/Documents/prototype/spec.json"
   running=1
   xcrun simctl launch "${udid}" "${bundle}"
-  sleep 2
-  xcrun simctl io "${udid}" screenshot --type=png "${tmp_dir}/screen.png"
+  capture_until_stable "${golden}"
   check_size "${tmp_dir}/screen.png" 1179 2556
   # man sips: --cropOffset offsetY offsetH; --cropToHeightWidth pixelsH pixelsW.
   sips --cropOffset "${crop_top}" 0 --cropToHeightWidth "${height}" "${width}" "${tmp_dir}/screen.png" --out "${tmp_dir}/cropped.png" >/dev/null

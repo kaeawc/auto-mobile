@@ -14,6 +14,7 @@ import {
 import { listAppsResultSchema } from "../../src/server/appToolOutputSchemas";
 import { createPlatformInstallApp, createPlatformLaunchApp } from "../../src/server/appToolsWatch";
 import { LaunchApp } from "../../src/features/action/LaunchApp";
+import { VISIONOS_RUNNER_HOST_BUNDLE_ID } from "../../src/features/visionos/VisionosRunnerLifecycle";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SELECTS_ACTIVE_DEVICE } from "../../src/server/toolRegistryTypes";
@@ -282,6 +283,52 @@ describe("app tools on an Apple Vision Pro simulator", () => {
     expect(createPlatformInstallApp(iphone, factory)).toBeInstanceOf(InstallApp);
     expect(createPlatformLaunchApp(iphone, factory)).toBeInstanceOf(LaunchApp);
   });
+  test("launchApp of a missing runner host app restarts the runner and launches again (#17382)", async () => {
+    const plist = new FakeWatchBundleIds();
+    const simctl = new FakeWatchAppsSimctl(plist);
+    const factory = (device: BootedDevice) => new WatchAppManager(device, { simctl, plist });
+    const recoveries: string[] = [];
+    const recover = async (deviceId: string) => {
+      recoveries.push(deviceId);
+      // The restarted runner reinstalls its host app.
+      simctl.seed(deviceId, { CFBundleIdentifier: VISIONOS_RUNNER_HOST_BUNDLE_ID });
+      return true;
+    };
+    const launch = createPlatformLaunchApp(visionPro, factory, undefined, recover);
+
+    expect(
+      await launch.execute(VISIONOS_RUNNER_HOST_BUNDLE_ID, {
+        clearAppData: false,
+        coldBoot: false,
+      }),
+    ).toMatchObject({ success: true, packageName: VISIONOS_RUNNER_HOST_BUNDLE_ID });
+    expect(recoveries).toEqual([visionPro.deviceId]);
+  });
+
+  test("launchApp reports a missing app unchanged when no runner restart helps", async () => {
+    const plist = new FakeWatchBundleIds();
+    const simctl = new FakeWatchAppsSimctl(plist);
+    const factory = (device: BootedDevice) => new WatchAppManager(device, { simctl, plist });
+    const recoveries: string[] = [];
+    const recover = async (deviceId: string) => {
+      recoveries.push(deviceId);
+      return false;
+    };
+    const launch = createPlatformLaunchApp(visionPro, factory, undefined, recover);
+    const call = { clearAppData: false, coldBoot: false };
+
+    expect(await launch.execute(VISIONOS_RUNNER_HOST_BUNDLE_ID, call)).toMatchObject({
+      success: false,
+      error: "App is not installed",
+    });
+    // Another missing app never restarts the runner.
+    expect(await launch.execute(BUNDLE, call)).toMatchObject({
+      success: false,
+      error: "App is not installed",
+    });
+    expect(recoveries).toEqual([visionPro.deviceId]);
+  });
+
   test.each([
     ["all", ["com.apple.Settings", BUNDLE]],
     ["user", [BUNDLE]],

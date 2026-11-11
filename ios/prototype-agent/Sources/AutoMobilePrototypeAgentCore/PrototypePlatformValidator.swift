@@ -612,7 +612,9 @@ enum PrototypePlatformValidator {
     /// the runtime once it resolves.
     private static func requestedPermissions(
         _ args: [String: JSONValue], path: String, declared: Set<String>
-    ) throws {
+    )
+        throws
+    {
         guard case let .object(form)? = args["names"], case let .array(names)? = form["value"] else { return }
         for (index, entry) in names.enumerated() {
             if case let .string(name) = entry, !declared.contains(name) {

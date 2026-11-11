@@ -50,6 +50,14 @@ export function isSkippedWindowReadReason(
   return reason === "window_read_skipped" || reason === "window_list_skipped";
 }
 
+/** Whether an incomplete capture is worth a retry and a uiautomator dump. */
+export function needsIncompleteRecovery(hierarchy: ViewHierarchyResult): boolean {
+  return (
+    hierarchy.ctrlProxyIncomplete === true &&
+    !isSkippedWindowReadReason(hierarchy.ctrlProxyIncompleteReason)
+  );
+}
+
 /**
  * Represents the ViewHierarchy dump result from a device.
  */

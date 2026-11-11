@@ -11,7 +11,7 @@ import { watchRunners } from "../watch/WatchRunnerRegistry";
 import { holderOf } from "../../daemon/deviceBinding";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
-import { isSkippedWindowReadReason } from "../../models/ViewHierarchyResult";
+import { needsIncompleteRecovery } from "../../models/ViewHierarchyResult";
 import { requireAndroidOrIosPlatform } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -407,14 +407,6 @@ async function normalizeSyncedHierarchy(options: {
   );
   recordAcquisitionTimestamp(supplemented, hierarchy.updatedAt);
   return supplemented;
-}
-
-/** Whether an incomplete capture is worth a retry and a uiautomator dump. */
-function needsIncompleteRecovery(hierarchy: ViewHierarchyResult): boolean {
-  return (
-    hierarchy.ctrlProxyIncomplete === true &&
-    !isSkippedWindowReadReason(hierarchy.ctrlProxyIncompleteReason)
-  );
 }
 
 /** The display a refused selected-display read may dump with `uiautomator dump --display`. */

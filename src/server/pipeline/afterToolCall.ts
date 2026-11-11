@@ -14,6 +14,7 @@ import { type Timer } from "../../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/wire/constants";
 import { getToolCallRecorder } from "../../daemon/toolCallRecordingManager";
+import { withResolvedPlatform } from "../../features/record/ToolCallRecorder";
 import { formatToolResultLog } from "../toolResultLog";
 import { formatStructuredToolError } from "../../utils/formatStructuredToolError";
 import {
@@ -420,7 +421,7 @@ function recordCompletedToolCall(
   if (toolSuccess) {
     getToolCallRecorder({ connectionId: currentAutolockMcpSessionId() })?.record(
       name,
-      args,
+      withResolvedPlatform(args, input.device),
       traits,
       getToolSelectionContext()?.toolCallRecording,
     );

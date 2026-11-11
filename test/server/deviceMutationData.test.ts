@@ -206,11 +206,14 @@ describe("data mutation identities", () => {
     ).toEqual([{ kind: "opaque", key: opaqueIntentKey("sql", "com.example", "db") }]);
   });
 
-  test.each(["sendSms", "phoneCall"])("%s records a persistent fallback intent", (name) => {
-    expect(deviceToolMutations(name, {}, "android")).toEqual([
-      { kind: "opaque", key: opaqueIntentKey(name) },
-    ]);
-  });
+  test.each(["seedContent", "sendSms", "phoneCall"])(
+    "%s records a persistent fallback intent",
+    (name) => {
+      expect(deviceToolMutations(name, {}, "android")).toEqual([
+        { kind: "opaque", key: opaqueIntentKey(name) },
+      ]);
+    },
+  );
 
   test("SQL with no classifiable query records a fallback", () => {
     expect(

@@ -219,6 +219,45 @@ describe("SingleDisplayEnrichStage", () => {
     expect(unreadable.result.isScreenRound).toBeUndefined();
   });
 
+  test("a watch read reports surface; a phone read never computes it", async () => {
+    const captured: Pick<ObserveResult, "activeWindow" | "viewHierarchy"> = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../fixtures/wear/surface/observe-project-full-tile-favorites.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const onWatch = fakeRun({ observerMode: true });
+    Object.assign(onWatch.result, captured);
+    await stage(
+      new WeakMap(),
+      { count: 0 },
+      {
+        device: { ...android, formFactor: "watch" },
+      },
+    ).enrichSingleDisplay(onWatch);
+    expect(onWatch.result.surface).toBe("tile");
+
+    const onPhone = fakeRun({ observerMode: true });
+    Object.defineProperty(onPhone.result, "activeWindow", {
+      get: () => unused("phone surface identity"),
+    });
+    await stage(new WeakMap(), { count: 0 }).enrichSingleDisplay(onPhone);
+    expect(onPhone.result).not.toHaveProperty("surface");
+
+    const unreadable = fakeRun({ observerMode: true });
+    await stage(
+      new WeakMap(),
+      { count: 0 },
+      {
+        device: { ...android, formFactor: "watch" },
+      },
+    ).enrichSingleDisplay(unreadable);
+    expect(unreadable.result).not.toHaveProperty("surface");
+  });
+
   test("a watch reports captured roundness through the served response", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(

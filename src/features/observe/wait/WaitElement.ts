@@ -15,7 +15,8 @@ import {
   type ScreenSizeForOffscreenCheckOptions,
 } from "../../utility/ElementGeometry";
 import type { ScreenSize } from "../../../models/ScreenSize";
-import { DefaultTextMatcher, normalizeQuotes } from "../../utility/TextMatcher";
+import { normalizeQuotes } from "../../utility/TextMatcher";
+import { normalize } from "../../utility/ElementResolverMatching";
 import type { ResolverSelector } from "../../../models/elementSelectorSchemas";
 import type { ConditionResolver } from "../ConditionPredicates";
 import type { ObserveWaitForOptions } from "./WaitForSchemas";
@@ -53,7 +54,9 @@ function retryCompoundText<T>(
 /**
  * `textSource: "displayed"` (#16875): the text predicate's matches must show `waitFor.text` in
  * their displayed text (`shownText`: an editable value, else the text), so a node that carries
- * the text only as a content description or accessibility label does not satisfy it.
+ * the text only as a content description or accessibility label does not satisfy it. Without an
+ * explicit `textMatch`, an exact match the filter removes (a content description equal to the
+ * text) must not hide a node whose displayed text contains it, so the substring pass is retried.
  */
 function keepDisplayedTextMatches(
   waitFor: ObserveWaitForOptions,
@@ -72,14 +75,13 @@ function keepDisplayedTextMatches(
     return;
   }
   const shows = displayedTextMatcher(waitFor.text, waitFor.textMatch);
-  sets[textIndex] = sets[textIndex].filter((node) => shows(node.shownText));
-  // The implicit exact tier may come only from a content description; retry contains on
-  // displayed text so unrelated accessibility metadata cannot hide a real match.
-  if (sets[textIndex].length === 0 && waitFor.textMatch === undefined && !negative) {
-    sets[textIndex] = resolve({ text: waitFor.text, match: "contains" }).filter((node) =>
+  let kept = sets[textIndex].filter((node) => shows(node.shownText));
+  if (kept.length === 0 && waitFor.textMatch === undefined && !negative) {
+    kept = resolve({ text: waitFor.text, match: "contains" }).filter((node) =>
       shows(node.shownText),
     );
   }
+  sets[textIndex] = kept;
 }
 
 function displayedTextMatcher(
@@ -91,11 +93,14 @@ function displayedTextMatcher(
     const pattern = new RegExp(normalizeQuotes(text), "i");
     return (shown) => shown !== undefined && pattern.test(normalizeQuotes(shown));
   }
-  // Exact compares case-sensitively, like `for: "textEquals"`; contains ignores case (#17944).
-  const exact = textMatch === "exact";
-  const matches = new DefaultTextMatcher().createTextMatcher(text, !exact, exact);
-  const trimShown = text === text.trim();
-  return (shown) => matches(shown !== undefined && trimShown ? shown.trim() : shown);
+  // Same quote folding, trimming and whitespace collapsing as the resolver. Exact compares
+  // case-sensitively, like `for: "textEquals"`; contains ignores case (#17944).
+  if (textMatch === "exact") {
+    const expected = normalize(text, true);
+    return (shown) => shown !== undefined && normalize(shown, true) === expected;
+  }
+  const expected = normalize(text);
+  return (shown) => shown !== undefined && normalize(shown).includes(expected);
 }
 
 function isWaitSourceVisible(

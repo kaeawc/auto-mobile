@@ -1,5 +1,6 @@
 import * as yaml from "js-yaml";
 import { Plan } from "../models";
+import type { PlanTopLevelPlatform } from "../models/Plan";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
@@ -11,6 +12,8 @@ export interface ToolCallRecordingStartResult {
   startedAt: string;
   alreadyActive?: boolean;
   currentStepCount?: number;
+  /** The name the plan will be exported under, when begin was given one. */
+  planName?: string;
 }
 
 export interface ToolCallRecordingStopResult {
@@ -22,6 +25,10 @@ export interface ToolCallRecordingStopResult {
   stoppedAt: string;
   /** One entry per call that was skipped or recorded in a weakened form; empty when none. */
   warnings: string[];
+  /** The platform written at the top of the plan, when every recorded call targeted it. */
+  platform?: PlanTopLevelPlatform;
+  /** Why the plan has no top-level platform; absent when `platform` is set. */
+  platformNote?: string;
 }
 
 export interface ToolCallRecordingStatus {
@@ -34,6 +41,8 @@ export interface ToolCallRecordingStatus {
 interface ToolCallRecordingSession {
   recorder: ToolCallRecorder;
   startedAt: number;
+  /** The planName given to begin; the exported plan's name when end names none (#17950). */
+  planName?: string;
 }
 
 export interface ToolCallRecordingOptions {
@@ -74,8 +83,9 @@ export function getToolCallRecordingStatus({
 
 export function startToolCallRecording({
   connectionId,
+  planName,
   timer = defaultTimer,
-}: ToolCallRecordingOptions = {}): ToolCallRecordingStartResult {
+}: ToolCallRecordingOptions & { planName?: string } = {}): ToolCallRecordingStartResult {
   const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
   const activeSession = activeSessions.get(connectionKey);
   if (activeSession) {
@@ -85,13 +95,18 @@ export function startToolCallRecording({
       startedAt: new Date(activeSession.startedAt).toISOString(),
       alreadyActive: true,
       currentStepCount: activeSession.recorder.stepCount,
+      ...(activeSession.planName && { planName: activeSession.planName }),
     };
   }
 
   const recorder = new ToolCallRecorder();
   recorder.start();
 
-  const session = { recorder, startedAt: timer.now() };
+  const session: ToolCallRecordingSession = {
+    recorder,
+    startedAt: timer.now(),
+    ...(planName?.trim() && { planName: planName.trim() }),
+  };
   activeSessions.set(connectionKey, session);
 
   logger.info("[ToolCallRecording] Started tool call recording");
@@ -99,6 +114,7 @@ export function startToolCallRecording({
   return {
     recording: true,
     startedAt: new Date(session.startedAt).toISOString(),
+    ...(session.planName && { planName: session.planName }),
   };
 }
 
@@ -109,6 +125,42 @@ const formatPlanName = (planName?: string, timer: Timer = defaultTimer): string 
   const timestamp = new Date(timer.now()).toISOString().replace(/[:.]/g, "-");
   return `mcp-recorded-plan-${timestamp}`;
 };
+
+const PLAN_TOP_LEVEL_PLATFORMS: ReadonlySet<string> = new Set(["android", "ios", "tvos"]);
+
+function isPlanTopLevelPlatform(value: string): value is PlanTopLevelPlatform {
+  return PLAN_TOP_LEVEL_PLATFORMS.has(value);
+}
+
+/**
+ * The platform a recorded plan declares: the one every recorded call targeted, so the plan
+ * runs as exported (#17938). Mixed or unknown platforms leave it out, with the reason.
+ */
+export function resolveRecordedPlanPlatform(
+  stepPlatforms: readonly (string | undefined)[],
+): { platform: PlanTopLevelPlatform } | { platformNote: string } {
+  const unknownCount = stepPlatforms.filter((platform) => platform === undefined).length;
+  const distinct = [...new Set(stepPlatforms.filter((p): p is string => p !== undefined))];
+  const omitted = "The plan has no top-level platform";
+  const remedy = "add platform to the plan, or pass platform to executePlan";
+  if (unknownCount > 0) {
+    return {
+      platformNote: `${omitted}: ${unknownCount} of ${stepPlatforms.length} recorded call(s) had no known platform; ${remedy}.`,
+    };
+  }
+  if (distinct.length > 1) {
+    return {
+      platformNote: `${omitted}: the recorded calls targeted more than one platform (${distinct.join(", ")}); ${remedy}.`,
+    };
+  }
+  const [only] = distinct;
+  if (only === undefined || !isPlanTopLevelPlatform(only)) {
+    return {
+      platformNote: `${omitted}: ${only ?? "no platform"} is not a plan platform (android, ios or tvos); ${remedy}.`,
+    };
+  }
+  return { platform: only };
+}
 
 export function stopToolCallRecording({
   connectionId,
@@ -125,9 +177,11 @@ export function stopToolCallRecording({
         "connection (such as a one-shot CLI call) cannot end another connection's recording.",
     );
   }
+  // A planName given to end wins; otherwise the one given to begin names the plan (#17950).
+  planName = planName?.trim() ? planName : session.planName;
 
   try {
-    const { steps, warnings } = session.recorder.stopWithWarnings();
+    const { steps, warnings, stepPlatforms } = session.recorder.stopWithWarnings();
     const stoppedAt = timer.now();
     const resolvedName = formatPlanName(planName, timer);
 
@@ -142,8 +196,10 @@ export function stopToolCallRecording({
       );
     }
 
+    const platformResolution = resolveRecordedPlanPlatform(stepPlatforms);
     const plan: Plan = {
       name: resolvedName,
+      ...("platform" in platformResolution && { platform: platformResolution.platform }),
       steps,
       // Release portion only — recorded plans are schema-validated (`^\d+\.\d+\.\d+$`)
       // before migration, so a dev build's `+g<sha>` stamp would make them unusable.
@@ -179,6 +235,7 @@ export function stopToolCallRecording({
       startedAt: new Date(session.startedAt).toISOString(),
       stoppedAt: new Date(stoppedAt).toISOString(),
       warnings,
+      ...platformResolution,
     };
   } finally {
     activeSessions.delete(connectionKey);

@@ -36,6 +36,44 @@ function counter(text: string, contentDescription?: string): ViewHierarchyResult
   };
 }
 
+function rows(...nodes: { text: string; contentDescription?: string }[]): ViewHierarchyResult {
+  return {
+    hierarchy: {
+      node: {
+        $: { bounds: { left: 0, top: 0, right: 400, bottom: 800 } },
+        node: nodes.map(({ text, contentDescription }, index) => ({
+          $: {
+            class: "android.widget.TextView",
+            text,
+            ...(contentDescription === undefined ? {} : { "content-desc": contentDescription }),
+            bounds: { left: 20, top: 100 + index * 80, right: 220, bottom: 160 + index * 80 },
+          },
+        })),
+      },
+    },
+    screenWidth: 400,
+    screenHeight: 800,
+  };
+}
+
+function waits(waitFor: Record<string, unknown>, hierarchy: ViewHierarchyResult): boolean {
+  return evaluateWaitForObservation(
+    new ElementResolver(),
+    waitForSchema.parse(waitFor),
+    createObserveResultForTest({
+      screenSize,
+      viewHierarchy: hierarchy,
+      elements: new ObserveElementsBuilder().build(hierarchy, "android"),
+    }),
+    {
+      devicePlatform: "android",
+      displayInventory: "single",
+      modes: new Map<string, MatchMode>(),
+      iosMultiPanel: false,
+    },
+  ).matched;
+}
+
 function holds(expectation: Record<string, unknown>, hierarchy: ViewHierarchyResult): boolean {
   const query = expectationQuery(expectation);
   if (query.kind !== "evaluate") {
@@ -138,6 +176,35 @@ describe("textEquals / textContains expectations compare the displayed text (#16
     expect(matches("^ready$", counter("Ready"))).toBe(true);
     expect(matches("^it's on$", counter("It\u2019s on"))).toBe(true);
     expect(matches("^ready$", counter("Wrong", "Ready"))).toBe(false);
+  });
+
+  test("a displayed substring match collapses whitespace like the resolver does", () => {
+    expect(
+      holds(
+        { type: "textContains", selector: { testTag: "counter_value" }, text: "Ready now" },
+        counter("Ready\nnow"),
+      ),
+    ).toBe(true);
+    expect(
+      holds(
+        { type: "textContains", selector: { testTag: "counter_value" }, text: "ready  now" },
+        counter("Ready\tnow!"),
+      ),
+    ).toBe(true);
+  });
+
+  test("an implicit displayed wait is not pinned to exact by a content-description match", () => {
+    const hierarchy = rows({ text: "Wrong", contentDescription: "Ready" }, { text: "Ready now" });
+    expect(waits({ text: "Ready", textSource: "displayed" }, hierarchy)).toBe(true);
+    expect(waits({ text: "Ready", textSource: "displayed", textMatch: "exact" }, hierarchy)).toBe(
+      false,
+    );
+    expect(
+      waits(
+        { text: "Ready", textSource: "displayed" },
+        rows({ text: "Wrong", contentDescription: "Ready" }),
+      ),
+    ).toBe(false);
   });
 
   test("the observe schema refuses textSource without text", () => {

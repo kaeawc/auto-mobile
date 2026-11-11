@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { toolJson } from "../helpers/toolResponse";
 import { withWireConnection } from "../helpers/mcpConnection";
@@ -78,6 +79,7 @@ describe("startDevice with a deviceId and a name", () => {
     await pool.initializeWithDevices(booted);
     DaemonState.getInstance().initialize(sessionManager, pool);
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       deviceManagerFactory: () => deviceUtils,

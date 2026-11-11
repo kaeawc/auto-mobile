@@ -128,6 +128,25 @@ Run it with:
 ./gradlew :app:testDebugUnitTest --tests ClockAppTest
 ```
 
+**Device.** Pass `AutoMobilePlanExecutionOptions(device = "<serial>")` to
+`execute()` to pick the device. With the default `device = "auto"`, a set
+`ANDROID_SERIAL` pins every single-device plan to that serial and runs the
+class's tests one at a time; without either, the daemon picks a free device.
+Multi-device plans (section 4) choose their own devices and ignore
+`ANDROID_SERIAL`.
+
+**Daemon.** The runner uses the daemon on `AUTOMOBILE_DAEMON_SOCKET_PATH` when
+it is set, or the default per-user daemon otherwise, and starts one only if
+none is running. It never stops or replaces a running daemon of a different
+version: the test fails and names both versions. Restart the daemon with the
+runner's version, or set `-Dautomobile.daemon.force.restart=true` (the default
+in CI) to let the runner replace the default per-user daemon. A daemon on an
+explicit `AUTOMOBILE_DAEMON_SOCKET_PATH` is never restarted.
+
+**Failures.** When a plan fails, `result.output` holds the error, the daemon
+socket, and the device selector, so `assertTrue(result.success, result.output)`
+puts all three in the test report.
+
 ### iOS
 
 Add the plan to the iOS test bundle and create an `AutoMobileTestCase`:

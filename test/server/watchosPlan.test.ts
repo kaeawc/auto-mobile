@@ -9,6 +9,7 @@ import {
 } from "../../src/server/planExecutionOrchestrator";
 import * as planUtils from "../../src/server/planExecutorFactory";
 import { registerPlanTools } from "../../src/server/planTools";
+import { resolveRecordedPlanPlatform } from "../../src/daemon/toolCallRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   registerDirectSessionDevice,
@@ -57,6 +58,17 @@ describe("executePlan accepts a watch (#18051)", () => {
     expect(
       schema.safeParse({ planContent: recordedPlanContent, platform: "watchos" }).success,
     ).toBe(true);
+  });
+
+  test("a recording that ends on a watch or Vision Pro matches the recordToolCalls output schema", () => {
+    registerPlanTools();
+    const outputSchema = ToolRegistry.getTool("recordToolCalls")!.outputSchema!;
+    for (const platform of ["watchos", "visionos"] as const) {
+      const resolved = resolveRecordedPlanPlatform([platform]);
+      expect(resolved).toEqual({ platform });
+      const ended = { success: true, action: "end", planContent: recordedPlanContent, ...resolved };
+      expect(outputSchema.safeParse(ended).success).toBe(true);
+    }
   });
 
   test("the platform gate no longer refuses executePlan on a watch", () => {

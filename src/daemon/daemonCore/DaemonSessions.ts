@@ -242,8 +242,11 @@ export class DaemonSessions {
       }),
       ambientExecutionIdReader,
       cancelDeviceSessionExecutions: Object.assign(
-        (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
-          this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
+        (
+          sessionId: string,
+          reason: string,
+          options?: { excludeExecutionId?: string; sessionPreserving?: boolean },
+        ) => this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
         {
           cancelDeviceExecutions: (
             deviceId: string,
@@ -550,7 +553,7 @@ export class DaemonSessions {
   private async cancelAndDrainDeviceSessionExecutions(
     sessionId: string,
     reason: string,
-    options?: { excludeExecutionId?: string },
+    options?: { excludeExecutionId?: string; sessionPreserving?: boolean },
   ): Promise<number> {
     const cancelled = await executionTracker.cancelDeviceSessionExecutions(
       sessionId,

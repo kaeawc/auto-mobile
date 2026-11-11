@@ -2,8 +2,10 @@ import type { ExecutionTracker } from "./executionTracker";
 
 /**
  * A {@link holdAcquiringSession} hold. `signal` aborts when the daemon cancels the held session's
- * work (its device was lost, the session was released), so the held steps stop at once instead
- * of running out their own deadline. `release` ends the hold; calling it again is a no-op.
+ * work because the session or its device is really gone (the device was retired, the session was
+ * released), so the held steps stop at once instead of running out their own deadline. A recovery
+ * that keeps the session (a short adb or device drop) does not abort it (#17896). `release` ends
+ * the hold; calling it again is a no-op.
  */
 export interface AcquiringSessionHold {
   readonly signal: AbortSignal;
@@ -40,6 +42,8 @@ export function holdAcquiringSession(
   }: { toolName: string; sessionUuid: string; deadlineMs: number },
 ): AcquiringSessionHold {
   const execution = tracker.startExecution(toolName, undefined, sessionUuid);
+  // Session-preserving recovery keeps the session, so it must not fail the steps it holds.
+  execution.survivesSessionPreservingRecovery = true;
   tracker.setExecutionDeadline(execution.id, () => deadlineMs);
   let released = false;
   return {

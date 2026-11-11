@@ -76,8 +76,9 @@ function displayedTextMatcher(
   textMatch: ObserveWaitForOptions["textMatch"],
 ): (shown: string | undefined) => boolean {
   if (textMatch === "regex") {
-    const pattern = new RegExp(text);
-    return (shown) => shown !== undefined && pattern.test(shown);
+    // Same flags and quote normalization as the resolver's regex text match.
+    const pattern = new RegExp(normalizeQuotes(text), "i");
+    return (shown) => shown !== undefined && pattern.test(normalizeQuotes(shown));
   }
   const matches = new DefaultTextMatcher().createTextMatcher(text, textMatch !== "exact");
   const trimShown = text === text.trim();

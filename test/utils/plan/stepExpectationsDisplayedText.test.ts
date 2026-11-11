@@ -113,6 +113,33 @@ describe("textEquals / textContains expectations compare the displayed text (#16
     ).toBe(true);
   });
 
+  test("a displayed regex wait keeps the resolver's case and quote folding", () => {
+    const matches = (text: string, hierarchy: ViewHierarchyResult) =>
+      evaluateWaitForObservation(
+        new ElementResolver(),
+        waitForSchema.parse({
+          testTag: "counter_value",
+          text,
+          textMatch: "regex",
+          textSource: "displayed",
+        }),
+        createObserveResultForTest({
+          screenSize,
+          viewHierarchy: hierarchy,
+          elements: new ObserveElementsBuilder().build(hierarchy, "android"),
+        }),
+        {
+          devicePlatform: "android",
+          displayInventory: "single",
+          modes: new Map(),
+          iosMultiPanel: false,
+        },
+      ).matched;
+    expect(matches("^ready$", counter("Ready"))).toBe(true);
+    expect(matches("^it's on$", counter("It\u2019s on"))).toBe(true);
+    expect(matches("^ready$", counter("Wrong", "Ready"))).toBe(false);
+  });
+
   test("the observe schema refuses textSource without text", () => {
     expect(waitForSchema.safeParse({ testTag: "a", textSource: "displayed" }).success).toBe(false);
     expect(waitForSchema.safeParse({ text: "a", textSource: "displayed" }).success).toBe(true);

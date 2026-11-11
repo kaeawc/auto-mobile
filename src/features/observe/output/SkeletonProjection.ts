@@ -134,8 +134,14 @@ function deriveSublabel(el: Element, label: string | undefined): string | undefi
   return getToggleContentDescription(el) && el.text !== label ? nonEmptyString(el.text) : undefined;
 }
 
-/** Apply the shared disabled-only state marker to a row or its accumulator. */
-function copyDisabledState(element: Element, row: Pick<SkeletonElement, "enabled">): void {
+/** Preserve coordinate space and explicit disabled state on a row or its accumulator. */
+function copyElementState(
+  element: Pick<Element, "enabled" | "space">,
+  row: Pick<SkeletonElement, "enabled" | "space">,
+): void {
+  if (element.space === "ornament") {
+    row.space = element.space;
+  }
   if (isFalsy(element.enabled)) {
     row.enabled = false;
   }
@@ -165,7 +171,7 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
   if (affordances.includes("toggle")) {
     entry.checked = isTruthy(element.checked);
   }
-  copyDisabledState(element, entry);
+  copyElementState(element, entry);
   return entry;
 }
 
@@ -252,7 +258,7 @@ function accumulateByIdentity(
     }
     const searchable = toSkeletonSearchable(el);
     const { elementId, label, affordances } = searchable;
-    const key = identityKey(elementId, label, bounds);
+    const key = JSON.stringify([el.space, identityKey(elementId, label, bounds)]);
 
     let acc = byIdentity.get(key);
     if (!acc) {
@@ -269,7 +275,7 @@ function accumulateByIdentity(
     if (affordances.includes("toggle")) {
       acc.checked = isTruthy(el.checked);
     }
-    copyDisabledState(el, acc);
+    copyElementState(el, acc);
     copyPrototypeState(el, acc, prototypeSources);
     if (acc.testTag === undefined) {
       acc.testTag = nonEmptyString(el["test-tag"]);
@@ -293,6 +299,9 @@ function containerEnclosesText(
   container: SkeletonAccumulator,
   inner: SkeletonAccumulator,
 ): boolean {
+  if (container.space !== inner.space) {
+    return false;
+  }
   if (container.provenance && inner.provenance) {
     return isStrictAncestor(container.provenance, inner.provenance);
   }
@@ -541,9 +550,7 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   if (acc.stateDescription !== undefined) {
     entry.state = acc.stateDescription;
   }
-  if (acc.enabled !== undefined) {
-    entry.enabled = acc.enabled;
-  }
+  copyElementState(acc, entry);
   if (acc.index !== undefined) {
     entry.index = acc.index;
   }
@@ -677,7 +684,8 @@ function markAppRowsCoveredByApplicationWindow(
     return;
   }
   let coverIndex: ApplicationWindowCoverIndex | undefined;
-  for (const acc of kept) {
+  // Ornament-local bounds cannot participate in window-space visibility checks.
+  for (const acc of kept.filter((row) => row.space !== "ornament")) {
     if (acc.occluded || !acc.target || acc.affordances.size === 0) {
       continue;
     }
@@ -713,7 +721,8 @@ function markIosRowsRefusedByTap(
   }
   const context = createIosVisibleTapContext(nodes, viewport, hierarchy);
   const bySource = new Map(uniqueBySource(nodes).map((node) => [node.source, node]));
-  for (const acc of kept) {
+  // Ornament-local bounds cannot participate in window-space visibility checks.
+  for (const acc of kept.filter((row) => row.space !== "ornament")) {
     if (acc.occluded || !acc.target || acc.affordances.size === 0) {
       continue;
     }
@@ -773,6 +782,7 @@ function iosRowRefusedByTap(
 /** Whether two rows sit at identical bounds in the same window and state. */
 function sameTarget(a: SkeletonAccumulator, b: SkeletonAccumulator): boolean {
   return (
+    a.space === b.space &&
     a.bounds.every((edge, index) => edge === b.bounds[index]) &&
     a.provenance?.group === b.provenance?.group &&
     a.enabled === b.enabled &&

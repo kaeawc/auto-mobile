@@ -10,6 +10,13 @@ import {
 // This schema accepts both for compatibility
 const booleanOrString = z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional();
 
+const elementSpaceSchema = z
+  .literal("ornament")
+  .optional()
+  .describe(
+    "visionOS: bounds are ornament-local, not window or screenshot coordinates. Tap by label or identifier, never coordinates. Omitted means window space.",
+  );
+
 const semanticLinkSchema = z.object({
   text: z.string().min(1),
   occurrence: z.number().int().nonnegative(),
@@ -20,6 +27,8 @@ const semanticLinkSchema = z.object({
 export const elementSchema = z
   .object({
     bounds: elementBoundsSchema,
+    space: elementSpaceSchema,
+    value: z.string().optional(),
     text: z.string().optional(),
     "resource-id": z.string().optional(),
     "view-id": z
@@ -87,6 +96,8 @@ export const viewHierarchyNodeSchema: z.ZodType = z.lazy(() =>
   z
     .object({
       bounds: elementBoundsSchema.optional(),
+      space: elementSpaceSchema,
+      value: z.string().optional(),
       occlusionState: z.string().optional(),
       occludedBy: z.string().optional(),
       occludedByViewId: z.string().optional(),
@@ -251,13 +262,14 @@ export const skeletonElementSchema = z
       .describe(
         "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
       ),
+    space: elementSpaceSchema,
     label: z.string().optional(),
     sublabel: z.string().optional(),
     testTag: z.string().optional(),
     semanticLinks: z.array(semanticLinkSchema).optional(),
     bounds: compactBoundsTupleSchema.describe(
       "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
-        "for skeleton entries, in the same current-orientation native space as screenSize and tapAt.",
+        "for skeleton entries, in the same current-orientation native space as screenSize and tapAt unless space is ornament.",
     ),
     affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
     occluded: z

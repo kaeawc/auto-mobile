@@ -15,8 +15,17 @@ export class FakePhone implements AndroidAutoPhone {
   listenerAllowed = false;
   serverListening = false;
   redirected = false;
+  /** Replies to successive `adbState` calls; the last one repeats. */
+  adbStates: string[] = ["device"];
+  adbStateChecks = 0;
 
   constructor(private readonly ui: FakeUi) {}
+
+  async adbState() {
+    const state = this.adbStates[Math.min(this.adbStateChecks, this.adbStates.length - 1)];
+    this.adbStateChecks++;
+    return state ?? "device";
+  }
 
   async isAndroidAutoSideloaded() {
     return this.sideloaded;

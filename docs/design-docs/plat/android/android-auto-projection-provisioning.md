@@ -70,6 +70,11 @@ Unknown sources, head unit server, transport, DHU, welcome screen. Each step rea
 changes nothing when it already holds, so a rerun on a provisioned phone reports every step
 `already-done` and reuses the running DHU session.
 
+Before the first step the provisioner polls `adb get-state` on a bounded backoff (up to 60 s, and
+never past the provision deadline) until the phone reads `device`: right after boot adb can still
+report the emulator `offline`, and every step needs a working transport. A phone that stays offline
+fails the run before any step, so nothing on it changed.
+
 - **Install.** An updated system app lives under `/data/app`; the stub lives on a read-only partition.
   APKs are needed only while the stub is still in use, and AutoMobile never downloads them.
 - **Shell reads** wrap each device condition so the reply is the module's own `yes`/`no` token, not

@@ -15,21 +15,23 @@
 # and ultimately loud failure. The workflow step also carries `timeout-minutes`
 # as a hard backstop.
 #
-# The default Azure Ubuntu mirror can answer `apt-get update` yet stall on the
-# xmlstarlet .deb fetch (exit 124 twice in a row). When the install on the
-# default mirror is exhausted, one more bounded operation re-runs update+install
-# against an alternate mirror (FAST_VALIDATION_DEPS_FALLBACK_MIRROR) using a
-# throwaway sources list, leaving the system sources untouched. When xmlstarlet
-# is already on PATH, both apt operations are skipped.
+# The XML check (scripts/xml/validate_xml.sh) is well-formedness only and runs
+# on python3's bundled parser when xmlstarlet is absent, so apt is skipped
+# whenever xmlstarlet or python3 is on PATH, as python3 always is on
+# ubuntu-latest. An Ubuntu apt mirror outage, in which the default and
+# archive.ubuntu.com mirrors both stalled, then cannot fail this step (#17930).
+# Only a host with neither installs xmlstarlet, through
+# scripts/ci/install-apt-packages.sh, the shared bounded installer with its
+# alternate-mirror fallback (FAST_VALIDATION_DEPS_FALLBACK_MIRROR; #17131).
 set -euo pipefail
 
 # Tunables (overridable for tuning and for the BATS tests).
 #
 # Defaults are sized so the WORST CASE fits the workflow step's
-# `timeout-minutes: 15` backstop: 5 retried operations (apt-get update, apt-get
-# install, the alternate-mirror install fallback, bats clone, bats install) x
-# (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + retry delays) = 5 x (2 x (60 + 10)
-# + 5) = 725s, plus one lychee install bounded by LYCHEE_TIMEOUT + KILL_GRACE =
+# `timeout-minutes: 15` backstop: 5 retried operations (the apt helper's
+# update, install and alternate-mirror fallback, each given CMD_TIMEOUT, plus
+# bats clone and bats install) x (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) +
+# retry delays) = 5 x (2 x (60 + 10) + 5) = 725s, plus one lychee install bounded by LYCHEE_TIMEOUT + KILL_GRACE =
 # 150 + 10 = 160s, for 885s < 900s. Healthy runs finish in seconds; a stalled
 # mirror that cannot answer in 60s will not answer in 180s either. Keep this
 # arithmetic aligned when changing any of these values or the step timeout.
@@ -52,8 +54,9 @@ BATS_INSTALL_PREFIX="${FAST_VALIDATION_DEPS_BATS_INSTALL_PREFIX:-/usr/local}"
 BATS_CORE_TAG="v1.14.0"
 BATS_CORE_COMMIT="eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
 XMLSTARLET_COMMAND="${FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND:-xmlstarlet}"
+PYTHON_COMMAND="${FAST_VALIDATION_DEPS_PYTHON_COMMAND:-python3}"
 FALLBACK_MIRROR="${FAST_VALIDATION_DEPS_FALLBACK_MIRROR:-http://archive.ubuntu.com/ubuntu}"
-SELF="${BASH_SOURCE[0]}"
+APT_INSTALLER="$(dirname "${BASH_SOURCE[0]}")/install-apt-packages.sh"
 
 log() {
   echo "[install-fast-validation-deps] $*"
@@ -130,27 +133,6 @@ run_with_retry() {
   fi
 }
 
-# Re-run update+install of xmlstarlet against FALLBACK_MIRROR with a throwaway
-# sources list (invoked as a subprocess under sudo + timeout; see main). sudo
-# resets the environment, so main passes the mirror and codename via `env`.
-install_xmlstarlet_from_fallback_mirror() {
-  local codename="${FAST_VALIDATION_DEPS_UBUNTU_CODENAME:-}"
-  if [[ -z "$codename" && -r /etc/os-release ]]; then
-    # Host OS metadata is unavailable on non-Linux analysis hosts.
-    # shellcheck source=/dev/null
-    codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
-  fi
-  codename="${codename:-noble}"
-  local list
-  list="$(mktemp)"
-  echo "deb ${FALLBACK_MIRROR} ${codename} main universe" > "$list"
-  local opts=(-o "Dir::Etc::sourcelist=${list}" -o "Dir::Etc::sourceparts=/dev/null")
-  local status=0
-  apt-get update "${opts[@]}" && apt-get install -y "${opts[@]}" xmlstarlet || status=$?
-  rm -f "$list"
-  return "$status"
-}
-
 main() {
   local var
   for var in CMD_TIMEOUT_SECONDS KILL_GRACE_SECONDS MAX_ATTEMPTS RETRY_BASE_DELAY_SECONDS LYCHEE_TIMEOUT_SECONDS; do
@@ -162,16 +144,23 @@ main() {
 
   if command -v "$XMLSTARLET_COMMAND" > /dev/null 2>&1; then
     log "xmlstarlet already on PATH; skipping apt-get"
+  elif command -v "$PYTHON_COMMAND" > /dev/null 2>&1; then
+    log "python3 on PATH validates XML; skipping the xmlstarlet apt install"
   else
-    run_with_retry "apt-get update" sudo apt-get update
-    run_capture_status try_with_retry "apt-get install xmlstarlet" sudo apt-get install -y xmlstarlet
-    if [[ "$RUN_STATUS" -ne 0 ]]; then
-      log "Default mirror failed; falling back to ${FALLBACK_MIRROR}"
-      run_with_retry "apt-get install xmlstarlet from fallback mirror" \
-        sudo env \
-        "FAST_VALIDATION_DEPS_FALLBACK_MIRROR=${FALLBACK_MIRROR}" \
-        "FAST_VALIDATION_DEPS_UBUNTU_CODENAME=${FAST_VALIDATION_DEPS_UBUNTU_CODENAME:-}" \
-        bash "$SELF" --install-xmlstarlet-from-fallback-mirror
+    # The helper owns its retries and mirror fallback; hand it this script's
+    # tunables so the step budget above covers its three bounded operations.
+    local apt_status=0
+    APT_INSTALL_UPDATE_TIMEOUT_SECONDS="$CMD_TIMEOUT_SECONDS" \
+      APT_INSTALL_TIMEOUT_SECONDS="$CMD_TIMEOUT_SECONDS" \
+      APT_INSTALL_FALLBACK_TIMEOUT_SECONDS="$CMD_TIMEOUT_SECONDS" \
+      APT_INSTALL_KILL_GRACE_SECONDS="$KILL_GRACE_SECONDS" \
+      APT_INSTALL_MAX_ATTEMPTS="$MAX_ATTEMPTS" \
+      APT_INSTALL_RETRY_BASE_DELAY_SECONDS="$RETRY_BASE_DELAY_SECONDS" \
+      APT_INSTALL_FALLBACK_MIRROR="$FALLBACK_MIRROR" \
+      APT_INSTALL_UBUNTU_CODENAME="${FAST_VALIDATION_DEPS_UBUNTU_CODENAME:-}" \
+      bash "$APT_INSTALLER" xmlstarlet || apt_status=$?
+    if [[ "$apt_status" -ne 0 ]]; then
+      die "install xmlstarlet failed with exit ${apt_status}"
     fi
   fi
 
@@ -205,8 +194,4 @@ main() {
   log "Fast Validation dependencies ready"
 }
 
-if [[ "${1:-}" == "--install-xmlstarlet-from-fallback-mirror" ]]; then
-  install_xmlstarlet_from_fallback_mirror
-else
-  main "$@"
-fi
+main "$@"

@@ -226,18 +226,15 @@ export class DevicePoolPresence {
       });
     let released: boolean | void = undefined;
     if (isDeviceRestartReleaseReason(releaseReason)) {
-      // Quarantine normally drains the holder, but shutdown reservations defer it.
-      // Fresh settlement must drain that deferred work before publishing B too.
-      if (
-        !device.identityUnresolved ||
-        this.state.runtimeIdentity.hasDeferredQuarantineCancellation(device)
-      ) {
-        await this.state.cancelDeviceSessionExecutions(
-          sessionId,
-          deviceLossCancellationReason(device.id, incidentId),
-          { excludeExecutionId: this.state.ambientExecutionIdReader?.getExecutionId() },
-        );
-      }
+      // Always cancel and drain the holder before publishing B. Quarantine (or its
+      // shutdown-deferred cancel) drained it session-preservingly, which spared the
+      // provisioning hold (#17896); the replacement ends the session, so that hold must
+      // drain now, not be aborted undrained by the release (#17901).
+      await this.state.cancelDeviceSessionExecutions(
+        sessionId,
+        deviceLossCancellationReason(device.id, incidentId),
+        { excludeExecutionId: this.state.ambientExecutionIdReader?.getExecutionId() },
+      );
       if (isSupersededByNewerIdentity()) {
         return false;
       }

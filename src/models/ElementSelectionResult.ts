@@ -17,5 +17,10 @@ export interface ElementSelectionResult {
   onlyKeyboardKeyMatch?: boolean;
   indexInMatches: number;
   totalMatches: number;
+  /**
+   * Distinct tappable targets among the matches: non-actionable labels are left out and a
+   * control nested in a same-label tappable row counts with the row (#17939).
+   */
+  tappableMatches?: number;
   strategy: ElementSelectionStrategy;
 }

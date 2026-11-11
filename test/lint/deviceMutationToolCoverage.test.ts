@@ -85,6 +85,7 @@ describe("device mutation tool coverage", () => {
   test.each([
     "pressButton",
     "manufacturerProfile",
+    "seedContent",
     "sendSms",
     "phoneCall",
     "sqlQuery",

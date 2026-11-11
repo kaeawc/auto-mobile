@@ -188,7 +188,7 @@ not match rows; its `textMatch: "exact"` comparison is case-sensitive. The top-l
 
 ### Step expectations
 
-A step can check its own result. After the step's tool succeeds, each entry in
+A step can check the screen after its tool succeeds. Each entry in
 its `expectations` is checked in order against a fresh observation of the same
 device. Elements are matched the same way `tapOn` matches them. The first
 expectation that does not hold fails the step, and therefore the plan. If the
@@ -229,6 +229,33 @@ satisfied after 5000ms; 1 near match(es); observed texts: "0"`. The step's
 `failureObservation` holds the full observation. An expectation with a missing
 or contradictory field fails the step without observing. An expectation `type`
 not in the table is not checked: the plan result carries a warning naming it.
+
+For a check against the tool's returned result, use optional `expect` beside
+`params`. `contains` and `notContains` are non-empty, case-sensitive literal
+strings; when both are supplied, both must hold. `getLogs` checks the returned
+log messages joined with newlines; other tools, including `observe`, check the
+serialized JSON payload. These checks use the original result, before response
+trimming, and do not poll or make another observation. A violation fails the
+plan, or skips an `optional` step. A negative log check also fails if the output
+was truncated, because absence cannot be verified from incomplete logs.
+
+```yaml
+- tool: getLogs
+  params:
+    since: run-start
+    tags: [AcceptApp]
+  expect:
+    contains: "reply received: [hello ] action=reply"
+    notContains: "reply received: [null]"
+```
+
+`getLogs` accepts `since: run-start` only during plan execution. Its window
+starts at the current execution, including when resuming at a later step, and
+is shared across device tracks. It uses the log reader's whole-second look-back
+(rounded up, minimum one second), so boundary lines just before the start can
+appear. The existing one-hour cap and output limits still apply. Outside a plan,
+`run-start` fails instead of falling back to an older window. Other `since`
+options keep their usual behavior.
 
 ### Plan parameters and special characters
 

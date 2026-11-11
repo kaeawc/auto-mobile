@@ -49,7 +49,6 @@ export function stripSessionScopedParams(
 const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   keyboard: new Set(["detect", "listProfiles", "listImes"]),
   clipboard: new Set(["get"]),
-  systemTray: new Set(["list", "find"]),
   systemAlerts: new Set(["get"]),
 };
 
@@ -88,7 +87,7 @@ const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
   accessibility: ["talkback", "voiceover"],
 };
 
-/** True when a recorded call only queried state, so replaying it adds nothing. */
+/** Filter incidental probes; explicit systemTray list/find, observe and getLogs verify replay state. */
 export function isReadOnlyCall(toolName: string, params: Record<string, unknown>): boolean {
   const setFields = READ_UNLESS_SET_FIELDS[toolName];
   if (setFields) {

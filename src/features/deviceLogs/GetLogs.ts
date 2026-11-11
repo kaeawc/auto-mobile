@@ -23,7 +23,7 @@ export const GET_LOGS_MAX_BYTES = 256 * 1024;
 /** The unified-log levels `log show` accepts (same as the session log resource). */
 export type UnifiedLogLevel = "default" | "info" | "debug";
 
-export type GetLogsSince = "lastAction" | "sessionStart" | { seconds: number };
+export type GetLogsSince = "lastAction" | "sessionStart" | "run-start" | { seconds: number };
 
 export interface GetLogsRequest {
   appId?: string;
@@ -57,6 +57,8 @@ export interface GetLogsResult {
 /** Clock sources `since` resolves against, injected so tests need no daemon. */
 export interface GetLogsClock {
   now(): number;
+  /** Current plan execution start; absent outside executePlan. */
+  planStartMs?(): number | undefined;
   /** Host-clock start of the device's latest control call, if any. */
   lastActionStartMs(deviceId: string): number | undefined;
   /** Host-clock creation of the caller's session, if it has one. */
@@ -89,7 +91,7 @@ function secondsSince(startMs: number, nowMs: number): number {
   return Math.max(1, Math.ceil((nowMs - startMs) / 1000));
 }
 
-/** Resolve `since` into a device-relative window; an unknown anchor falls back with a warning. */
+/** Resolve `since` into a device-relative window; run-start requires an executing plan. */
 export function resolveSinceSeconds(
   since: GetLogsSince | undefined,
   deviceId: string,
@@ -97,7 +99,13 @@ export function resolveSinceSeconds(
   warnings: string[],
 ): number {
   let seconds = GET_LOGS_DEFAULT_SECONDS;
-  if (typeof since === "object") {
+  if (since === "run-start") {
+    const anchor = clock.planStartMs?.();
+    if (anchor === undefined) {
+      throw new ActionableError('getLogs since: "run-start" requires an executing plan.');
+    }
+    seconds = secondsSince(anchor, clock.now());
+  } else if (typeof since === "object") {
     seconds = since.seconds;
   } else if (since === "lastAction" || since === "sessionStart") {
     const anchor =

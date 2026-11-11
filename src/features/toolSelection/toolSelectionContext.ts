@@ -103,6 +103,8 @@ export type ToolSelectionContext = {
    * inherits it and a direct call outside a plan stays unscoped.
    */
   planLockNamespace?: string;
+  /** Host-clock start of the current plan execution, inherited by nested tool calls. */
+  planStartMs?: number;
   /** This device-aware call's recording context, set by its wrapper (#15663); never inherited. */
   toolCallRecording?: ToolCallRecordingContext;
 };

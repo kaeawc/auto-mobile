@@ -222,6 +222,16 @@
           "type": "string",
           "description": "DEPRECATED: Use 'label' instead (legacy field)"
         },
+        "expect": {
+          "type": "object",
+          "description": "Case-sensitive literal assertions on returned getLogs message text, or the serialized JSON payload of other tools. Both checks must hold. No extra observation or polling.",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "contains": { "type": "string", "minLength": 1 },
+            "notContains": { "type": "string", "minLength": 1 }
+          }
+        },
         "expectations": {
           "type": "array",
           "description": "Assertions to validate after step execution",

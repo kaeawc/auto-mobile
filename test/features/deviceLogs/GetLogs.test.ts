@@ -44,6 +44,20 @@ class RecordingAndroid implements AndroidLogSource {
 }
 
 describe("resolveSinceSeconds (#14082)", () => {
+  test("run-start uses this execution's start, including zero, and rejects a missing plan", () => {
+    const warnings: string[] = [];
+    expect(
+      resolveSinceSeconds("run-start", "d", clock({ planStartMs: () => 92_500 }), warnings),
+    ).toBe(8);
+    expect(resolveSinceSeconds("run-start", "d", clock({ planStartMs: () => 0 }), warnings)).toBe(
+      100,
+    );
+    expect(warnings).toEqual([]);
+    expect(() => resolveSinceSeconds("run-start", "d", clock(), [])).toThrow(
+      "requires an executing plan",
+    );
+  });
+
   test("lastAction is measured from the latest control call's start", () => {
     const warnings: string[] = [];
     expect(

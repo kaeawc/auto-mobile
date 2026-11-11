@@ -700,6 +700,7 @@ jobs:
               # The shared bodies of the WebRTC jobs (#11872).
               - '.github/actions/ci-android-device-whep/**'
               - '.github/actions/ci-webrtc-publisher-integration/**'
+              - 'scripts/ci/ensure-ffmpeg.sh'
 
       # Run the WebRTC integration jobs when the streaming surface is touched, OR
       # when a human explicitly opts in by labelling the PR `webrtc` or mentioning
@@ -1061,8 +1062,9 @@ jobs:
       # Pure network/disk and independent of everything below, so background it
       # here and let the JDK download and the npm-package setup (Bun + ripgrep +
       # `bun install` + build, ~60-120s) overlap it. The `wait` barrier re-syncs
-      # before the first consumer: the aggregator's `xml` check shells out to
-      # xmlstarlet, and the BATS step needs bats. No dpkg-lock contention — this
+      # before the first consumer: the aggregator's `xml` check needs xmlstarlet
+      # or python3 (always present here, so apt is skipped; #17930), and the
+      # BATS step needs bats. No dpkg-lock contention — this
       # is the only apt user in the job (setup-java unpacks a tarball and
       # setup-ripgrep installs a pre-built binary). Mechanism per #3779.
       #
@@ -1184,9 +1186,9 @@ jobs:
           key: tool-download-lychee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/lychee/lychee_version.sh') }}
 
       # prepush-shell.sh selects the same fast-validate checks Fast Validation
-      # runs (xml needs xmlstarlet, lychee-offline needs lychee), so install
-      # their tools with the same helper: pinned bats-core, xmlstarlet with a
-      # fallback mirror, and lychee, each bounded and retried.
+      # runs (xml needs xmlstarlet or python3, lychee-offline needs lychee), so
+      # install their tools with the same helper: pinned bats-core, lychee, and
+      # xmlstarlet only when python3 is missing, each bounded and retried.
       - name: "Install BATS"
         shell: bash
         background: true

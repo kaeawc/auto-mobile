@@ -62,6 +62,7 @@ import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
 import { adoptDirectSessionDevice } from "./directSessionTarget";
 import { assertReadCallerHoldsSessionBinding } from "./readSessionBinding";
+import { deviceLabelHint } from "./deviceLabelHint";
 
 export interface ExecutionTargetInput {
   name: string;
@@ -181,7 +182,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
     if (!baseSessionUuid) {
       throw new ActionableError(
-        `Device label '${deviceLabel}' requires sessionUuid to be provided.`,
+        `Device label '${deviceLabel}' requires sessionUuid to be provided. ${deviceLabelHint(deviceLabel)}`,
       );
     }
     state.sessionUuid = this.labelSession(state, baseSessionUuid, deviceLabel);
@@ -218,7 +219,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     // idle deadline, fails with the base's terminal release, not as an unallocated label.
     refuseEndedPlanBase(baseSessionUuid, state.execution?.executionId);
     throw new ActionableError(
-      `Device label '${deviceLabel}' is not allocated. Provide a devices list to executePlan before using device labels.`,
+      `Device label '${deviceLabel}' is not allocated. ${deviceLabelHint(deviceLabel)}`,
     );
   }
 

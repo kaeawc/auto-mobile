@@ -9,20 +9,30 @@ runs:
   steps:
     # FFmpeg generates the synthetic H.264 the publisher ingests. Chrome
     # (google-chrome) is preinstalled on ubuntu-latest and resolved by the test;
-    # fail early with a clear message if the image ever drops it. The install is
-    # bounded and falls back to another mirror: a trickling Azure mirror once
-    # consumed the whole job timeout here (#17131).
-    - name: "Install FFmpeg and verify a browser is present"
+    # fail early with a clear message if the image ever drops it. No apt: the
+    # runner's ffmpeg is used when present, else a pinned, checksummed static
+    # build, cached like MediaMTX, so an Ubuntu mirror outage cannot fail this
+    # job (#17964).
+    - name: "Cache static FFmpeg"
+      uses: actions/cache@v5
+      with:
+        path: scratch/ffmpeg
+        key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci/ensure-ffmpeg.sh') }}
+
+    - name: "Ensure FFmpeg and verify a browser is present"
       shell: bash
       run: |
-        scripts/ci/install-apt-packages.sh ffmpeg
-        ffmpeg -version | head -1
+        scripts/ci/ensure-ffmpeg.sh
         if ! command -v google-chrome >/dev/null 2>&1 \
           && ! command -v chromium >/dev/null 2>&1 \
           && ! command -v chromium-browser >/dev/null 2>&1; then
           echo "::error::No Chrome/Chromium found on the runner; the WHEP decode step needs one"
           exit 1
         fi
+
+    - name: "Show FFmpeg version"
+      shell: bash
+      run: ffmpeg -version | head -1
 
     - name: "Setup Bun"
       uses: oven-sh/setup-bun@v2

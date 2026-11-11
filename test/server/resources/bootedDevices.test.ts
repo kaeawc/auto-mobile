@@ -974,6 +974,40 @@ describe("MCP Booted Device Resources", () => {
       expect(traits.reads.map((read) => read.deviceId)).toEqual([mockAndroidDevice1.deviceId]);
     });
 
+    test("an automotive entry's vehicle comes from live build-prop traits (#16775)", async function () {
+      const car: BootedDevice = {
+        name: "Car_No_Image",
+        platform: "android",
+        deviceId: "emulator-5558",
+        source: "local",
+        formFactor: "automotive",
+      };
+      fakeDeviceUtils.setBootedDevices("android", [car, mockAndroidDevice1]);
+      const traits = new FakeDeviceTraits(androidDeviceTraits());
+      traits.setTraitsFor(
+        car.deviceId,
+        androidDeviceTraits({
+          formFactor: "automotive",
+          vehicle: { motion: "supported", nightMode: "supported" },
+        }),
+      );
+      useDeviceTraits(traits);
+
+      const { client } = fixture.getContext();
+      const result = await client.request(
+        { method: "resources/read", params: { uri: "automobile:devices/booted/android" } },
+        z.object({ contents: z.array(z.object({ text: z.string() })) }),
+      );
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
+      const byId = new Map(data.devices.map((device) => [device.runtime.deviceId, device]));
+
+      expect(byId.get(car.deviceId)?.vehicle).toEqual({
+        motion: "supported",
+        nightMode: "supported",
+      });
+      expect(byId.get(mockAndroidDevice1.deviceId)).not.toHaveProperty("vehicle");
+    });
+
     test("omits lock state for a device the probe cannot read", async function () {
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
       // iOS (and any unreadable device) yields undefined — the field is then omitted entirely.

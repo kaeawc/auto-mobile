@@ -1,5 +1,4 @@
 import type { BootedDevice, ObserveResult } from "../../models";
-import { displayInventoryOutcome } from "../../models/DeviceInfo";
 import { ActionableError } from "../../models/ActionableError";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -11,7 +10,11 @@ import { serverConfig } from "../../utils/ServerConfig";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
 import { StaleDisplayError, staleDisplayError } from "../observe/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
-import { DisplaySelectionError, resolveDeviceTargetDisplay } from "../observe/DisplaySelection";
+import {
+  DisplaySelectionError,
+  followUpDisplaySelector,
+  resolveDeviceTargetDisplay,
+} from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type {
   ObserveScreen,
@@ -315,22 +318,6 @@ export async function prepareTargetDisplayAction(
     followUpDisplay: followUpDisplaySelector(device, display, panel.key),
     assertCurrent,
   };
-}
-
-/**
- * The selector an action's follow-up reads pass to observe. They pin the prepared panel's key so
- * `active` is not re-resolved, except when `active` fell back on an unreadable inventory: that
- * fallback key is not a selector the caller chose, so re-checking it as explicit would reject the
- * read (#16741). `active` re-resolves to the same sole fallback panel.
- */
-export function followUpDisplaySelector(
-  device: Pick<BootedDevice, typeof displayInventoryOutcome>,
-  display: string,
-  panelKey: string,
-): string {
-  return display === "active" && device[displayInventoryOutcome]?.kind === "unreadable"
-    ? "active"
-    : panelKey;
 }
 
 /** Search and retry captures must stay on the prepared Android panel. */

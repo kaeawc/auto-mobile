@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DragPath } from "../../../src/features/action/DragPath";
+import { SwipeAtCoordinate } from "../../../src/features/action/SwipeAtCoordinate";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
-import { followUpDisplaySelector } from "../../../src/features/action/TargetDisplayAction";
+import { followUpDisplaySelector } from "../../../src/features/observe/DisplaySelection";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { assertDisplayInventoryAvailable } from "../../../src/features/observe/DisplaySelection";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
@@ -143,5 +144,25 @@ describe("display-targeted gestures on an unreadable inventory (#16741)", () => 
     });
     expect(result).toMatchObject({ success: true });
     expect(observe.displays.every((display) => display === "active")).toBe(true);
+  });
+
+  test("swipeAt on an explicit display keeps the retryable inventory details", async () => {
+    const observe = new GuardedObserveScreen();
+    observe.setObserveResult(screen());
+    const action = new SwipeAtCoordinate(device, adb(), {
+      timer: autoTimer(),
+      lastRenderedObservation: rendered,
+    });
+    action.observeScreen = observe;
+    const result = await action.execute({
+      from: { x: 10, y: 10 },
+      to: { x: 100, y: 100 },
+      display: "0",
+    });
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("display inventory could not be read"),
+      displayInventory: { retryable: true },
+    });
   });
 });

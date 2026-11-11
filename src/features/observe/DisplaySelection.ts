@@ -141,6 +141,22 @@ export function assertDisplayInventoryAvailable(
   }
 }
 
+/**
+ * The selector an action's follow-up reads pass to observe. They pin the prepared panel's key so
+ * `active` is not re-resolved, except when `active` fell back on an unreadable inventory: that
+ * fallback key is not a selector the caller chose, so re-checking it as explicit would reject the
+ * read (#16741). `active` re-resolves to the same sole fallback panel.
+ */
+export function followUpDisplaySelector(
+  device: Pick<BootedDevice, typeof displayInventoryOutcome>,
+  display: string,
+  panelKey: string,
+): string {
+  return display === "active" && device[displayInventoryOutcome]?.kind === "unreadable"
+    ? "active"
+    : panelKey;
+}
+
 /** Device-aware selection preserves unreadable inventory evidence before resolving a selector. */
 export function resolveDeviceTargetDisplay(
   device: Pick<BootedDevice, "displays" | typeof displayInventoryOutcome>,

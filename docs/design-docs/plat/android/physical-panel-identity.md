@@ -49,7 +49,8 @@ the panel id, and pushed display transitions have never carried a panel key.
   whose `active` falls back to logical display 0 sends `input -d 0` and keeps its observations
   unscoped, since the fallback key is not a selector the caller chose. Display-targeted gestures
   (tapAt, dragPath, swipes, drags, hover, element taps) likewise pass `active`, not the fallback
-  key, to their follow-up reads; it re-resolves to the same sole fallback panel.
+  key, to their follow-up reads and to the shared navigation settle polls; it re-resolves to the
+  same sole fallback panel.
 - Overlay displays (`overlay_display_devices`, `type OVERLAY`, `uniqueId="overlay:N"`) have no
   SurfaceFlinger physical id, so they join the inventory after the physical panels under role
   `overlay` with the whole `overlay:N` as key: a bare `N` could be mistaken for a logical display

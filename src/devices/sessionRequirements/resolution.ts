@@ -6,6 +6,7 @@ import {
   iosModelTypesEqual,
   resolveIosModelReference,
 } from "./catalog";
+import { iosArchetypeOsDefault } from "./normalization";
 import { failure, success } from "./result";
 import type {
   AndroidArchetype,
@@ -590,9 +591,39 @@ function resolutionProvenance(
     resolvedHardwareBy: hardwareBy,
     resolvedOsBy: osBy,
     hardwareDefaultPath: hardwarePath,
+    ...(requirement.provenance.osDefaultArchetype === undefined
+      ? {}
+      : { osDefaultArchetype: requirement.provenance.osDefaultArchetype }),
     policyVersion: requirement.provenance.policyVersion,
     catalogSource: requirement.provenance.catalogSource,
     catalogRevision: requirement.provenance.catalogRevision,
+  };
+}
+
+/**
+ * A platform OS default the model cannot run (an exact 26.5 for a Duo that needs 27) is fixed
+ * per archetype, without moving phones and tablets off their pin (#18003).
+ */
+function withArchetypeOsDefaultHint(
+  error: RequirementResult<never>,
+  requirement: NormalizedIosSessionDeviceRequirement,
+  model: IosCatalogModel,
+): RequirementResult<never> {
+  if (
+    error.ok ||
+    error.error.code !== "runtime_incompatible" ||
+    requirement.original.os.kind !== "omitted" ||
+    requirement.provenance.osDefaultArchetype !== undefined ||
+    model.archetype === undefined
+  ) {
+    return error;
+  }
+  return {
+    ok: false,
+    error: {
+      ...error.error,
+      message: `${error.error.message} The request omitted the OS, so the host's platform default applied; add a defaults.ios.os.archetypes entry for "${model.archetype}" to give that hardware its own OS default, or pass an os selector in the request.`,
+    },
   };
 }
 
@@ -605,9 +636,11 @@ function resolveIos(
   if (!hardware.ok) {
     return hardware;
   }
+  const osDefaultArchetype = requirement.provenance.osDefaultArchetype;
   const os = chooseIosRelease(
     requirement.effective.os,
-    defaults.os.preferredVersion,
+    iosArchetypeOsDefault(defaults, osDefaultArchetype)?.policy.preferredVersion ??
+      defaults.os.preferredVersion,
     catalog.releases,
     hardware.value.model,
   );
@@ -616,7 +649,7 @@ function resolveIos(
   }
   const compatibility = evaluateIosCompatibility(hardware.value.model, os.value.release.osVersion);
   if (!compatibility.ok) {
-    return compatibility;
+    return withArchetypeOsDefaultHint(compatibility, requirement, hardware.value.model);
   }
   const model = hardware.value.model;
   if (!model.archetype || !model.modelType) {

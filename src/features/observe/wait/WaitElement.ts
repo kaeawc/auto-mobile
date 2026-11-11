@@ -93,11 +93,14 @@ function displayedTextMatcher(
     const pattern = new RegExp(normalizeQuotes(text), "i");
     return (shown) => shown !== undefined && pattern.test(normalizeQuotes(shown));
   }
-  // Same quote folding, trimming, whitespace collapsing and case folding as the resolver.
+  // Same quote folding, trimming and whitespace collapsing as the resolver. Exact compares
+  // case-sensitively, like `for: "textEquals"`; contains ignores case (#17944).
+  if (textMatch === "exact") {
+    const expected = normalize(text, true);
+    return (shown) => shown !== undefined && normalize(shown, true) === expected;
+  }
   const expected = normalize(text);
-  return textMatch === "exact"
-    ? (shown) => shown !== undefined && normalize(shown) === expected
-    : (shown) => shown !== undefined && normalize(shown).includes(expected);
+  return (shown) => shown !== undefined && normalize(shown).includes(expected);
 }
 
 function isWaitSourceVisible(

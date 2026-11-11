@@ -89,7 +89,10 @@ first-record order, so it can change after `disable()` and `enable()`.
   apply unchanged. The block then has `projectedBy`, `projectedNote` and `projected[]` (package,
   sessions, error) instead of a top-level `packageName`. Android Auto does not say which bound app is
   on the head unit (#17827), so every enabled app is listed by package name and none is marked
-  visible. A failed dump, or no bound app answering enabled, leaves the payload unchanged.
+  visible. A failed dump, or no bound app answering enabled, leaves the payload unchanged. A bound
+  app whose route last answered enabled but whose read fails (or is inside its five-second retry
+  interval) stays listed with no sessions and `error: "template_read_failed"`, so a head-unit action
+  reads its screen as unknown rather than gone; an app with no such answer is still dropped.
 - The `androidAuto` block (#17841) is resolved after `carAppTemplates` from the services snapshot that
   read took for the same observation (kept past the dump's TTL), so it costs no extra device read. It is added only while gearhead is the foreground package
   and one of gearhead's `.apphost.Template*Service` hosts (one per car app category; the captured

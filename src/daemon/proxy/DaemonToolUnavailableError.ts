@@ -6,6 +6,8 @@ export class DaemonToolUnavailableError extends Error {
   /** Set when the daemon's availability gate rejected the call, so callers can tell it from skew. */
   readonly code?: typeof DAEMON_TOOL_UNAVAILABLE_CODE;
   readonly toolName: string;
+  /** True when the client and daemon builds differ, so a daemon restart can fix it. */
+  readonly buildMismatch: boolean;
   readonly clientBuildId: string;
   readonly daemonBuildId: string;
 
@@ -46,6 +48,7 @@ export class DaemonToolUnavailableError extends Error {
       this.code = DAEMON_TOOL_UNAVAILABLE_CODE;
     }
     this.toolName = params.toolName;
+    this.buildMismatch = params.buildMismatch !== false;
     this.clientBuildId = params.client.buildId;
     this.daemonBuildId = params.daemon.buildId;
   }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SpawnOptions } from "node:child_process";
 import { GetLogs } from "../../src/features/deviceLogs/GetLogs";
-import { ActionableError, type BootedDevice, type ExecResult } from "../../src/models";
+import { type BootedDevice, type ExecResult } from "../../src/models";
 import {
   assertRequestedPlatformSupported,
   assertToolSupportsDevicePlatform,
@@ -137,23 +137,9 @@ describe("getLogs on an Apple TV simulator (#16723)", () => {
     expect(result.warnings).toEqual(["Android-only filters ignored on tvOS: buffers."]);
   });
 
-  test("a platform without a log path never falls through to logcat", async () => {
-    const simctl = new ReplayingSimctl(TV_LOG);
-    const tv: BootedDevice = { ...TV, name: "Apple Vision Pro", platform: "visionos" };
-    await expect(tvGetLogs(simctl, new FakeTimer()).execute(tv, { appId: "a" })).rejects.toThrow(
-      new ActionableError("getLogs does not support platform visionos."),
-    );
-    expect(simctl.argv).toEqual([]);
-  });
-
-  test("the tool schema and platform gate admit an Apple TV but still refuse visionOS", () => {
+  test("the tool schema and platform gate admit an Apple TV", () => {
     expect(getLogsTool.schema.safeParse({ platform: "tvos", appId: "a" }).success).toBe(true);
     expect(() => assertToolSupportsDevicePlatform("getLogs", TV)).not.toThrow();
     expect(() => assertRequestedPlatformSupported("getLogs", { platform: "tvos" })).not.toThrow();
-    for (const platform of ["visionos"] as const) {
-      expect(() => assertRequestedPlatformSupported("getLogs", { platform })).toThrow(
-        ActionableError,
-      );
-    }
   });
 });

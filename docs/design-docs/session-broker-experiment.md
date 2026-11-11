@@ -330,7 +330,11 @@ device type and a compatible runtime are installed, without an opt-in or separat
 capability advertisement. Creating a Duo for a
 `duo` archetype request needs both a Duo `archetypes` entry and a Duo
 `modelTypes` entry; a Duo model-type request needs only the `modelTypes` entry;
-an exact Duo model needs neither. Android `os` selectors use the release version (`16`),
+an exact Duo model needs neither. `defaults.ios.os.archetypes` (optional, at most one
+entry per archetype, each `{ archetype, selector, preferredVersion }`) replaces `os` for
+that hardware archetype only when the request omits the OS, so a host can pin phones and
+tablets to exact 26.5 while `duo` defaults to 27.1; explicit request selectors stay as
+requested, and provenance records the entry used as `osDefaultArchetype`. Android `os` selectors use the release version (`16`),
 not the API level (`36`); at equal versions the resolver prefers `google_apis`
 over `google_apis_playstore`. Android hardware defaults map archetypes to installed
 profile IDs through `defaults.android.hardware.profiles`, for example

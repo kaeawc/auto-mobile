@@ -127,6 +127,32 @@ describe("registerAndroidAutoSessionCleanup", () => {
     expect(h.phone.changes).not.toContain("redirect-removed");
   });
 
+  test("a session that moves to another phone without ending frees port 5277 (#17911)", async () => {
+    const dhu = new FakeSession();
+    const h = setup([{ status: "connected", session: dhu }]);
+    await h.provisioner.provision(request());
+
+    h.manager.unbound("s-1", PHONE);
+    expect(h.manager.pendingCleanups.map(({ deviceId }) => deviceId)).toEqual([PHONE]);
+    await h.manager.settle();
+
+    expect(dhu.isAlive()).toBe(false);
+    await expectHostPortFree(h);
+  });
+
+  test("a move off a phone whose serial was replaced stops the old DHU without blocking", async () => {
+    const dhu = new FakeSession();
+    const h = setup([{ status: "connected", session: dhu }]);
+    await h.provisioner.provision(request());
+
+    h.manager.unbound("s-1", PHONE, true);
+    await Promise.resolve();
+
+    expect(h.manager.pendingCleanups).toEqual([]);
+    expect(dhu.isAlive()).toBe(false);
+    expect(h.phone.changes).not.toContain("redirect-removed");
+  });
+
   test("a terminal upgrade of a finished release does nothing", async () => {
     const dhu = new FakeSession();
     const h = setup([{ status: "connected", session: dhu }]);

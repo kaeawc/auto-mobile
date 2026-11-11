@@ -5,6 +5,7 @@ import {
   resolveSessionDeviceProfile,
   type AndroidSessionDeviceRequirement,
   type IosSessionDeviceRequirement,
+  type IosSessionRequirementDefaults,
 } from "../../../src/devices/sessionRequirements";
 import {
   IOS_DUO,
@@ -333,6 +334,119 @@ describe("Duo normalization", () => {
       ).toEqual({ kind: "mismatch", reason: "hardware" });
     },
   );
+});
+
+describe("per-archetype iOS OS defaults (#18003)", () => {
+  const release = (osVersion: string) => ({
+    runtimeId: `com.apple.CoreSimulator.SimRuntime.iOS-${osVersion.replace(".", "-")}`,
+    osVersion,
+    installed: true,
+    metadataState: "current" as const,
+  });
+  const catalog = () => iosCatalog({ releases: [release("26.5"), release("27.1")] });
+  const pinned = (archetypes?: IosSessionRequirementDefaults["os"]["archetypes"]) =>
+    iosDefaults({
+      hardware: {
+        ...iosDefaults().hardware,
+        archetypes: [
+          ...iosDefaults().hardware.archetypes,
+          { archetype: "duo", modelType: { family: "duo", variant: "duo" } },
+        ],
+        modelTypes: [
+          ...iosDefaults().hardware.modelTypes,
+          {
+            modelType: { family: "duo", variant: "duo" },
+            model: { namespace: "alias", value: "duo-preview" },
+          },
+        ],
+      },
+      os: {
+        selector: { kind: "exact", version: "26.5" },
+        preferredVersion: "26.5",
+        ...(archetypes === undefined ? {} : { archetypes }),
+      },
+    });
+  const duoOverride = [
+    {
+      archetype: "duo" as const,
+      selector: { kind: "minimum" as const, version: "27" },
+      preferredVersion: "27.1",
+    },
+  ];
+  const request = (
+    hardware: IosSessionDeviceRequirement["hardware"],
+    os: IosSessionDeviceRequirement["os"] = { kind: "omitted" },
+  ): IosSessionDeviceRequirement => ({ schemaVersion: 1, platform: "ios", hardware, os });
+  const resolveWith = (
+    defaults: IosSessionRequirementDefaults,
+    req: IosSessionDeviceRequirement,
+  ) => {
+    const normalized = normalizeIos(req, defaults, catalog());
+    return resolveSessionDeviceProfile(normalized, defaults, catalog());
+  };
+
+  test.each([
+    { kind: "archetype" as const, archetype: "duo" as const },
+    { kind: "model-type" as const, modelType: { family: "duo" as const, variant: "duo" as const } },
+    { kind: "exact-model" as const, model: { namespace: "alias" as const, value: "duo-preview" } },
+  ])("an omitted OS on Duo selector %# uses the Duo entry", (hardware) => {
+    const defaults = pinned(duoOverride);
+    const normalized = normalizeIos(request(hardware), defaults, catalog());
+    expect(normalized.effective.os).toEqual({ kind: "minimum", version: "27" });
+    expect(normalized.provenance.osDefaultArchetype).toBe("duo");
+    const resolved = resolveIos(normalized, defaults, catalog());
+    expect(resolved.profile).toMatchObject({ archetype: "duo", osVersion: "27.1" });
+    expect(resolved.provenance).toMatchObject({
+      osDefaultArchetype: "duo",
+      resolvedOsBy: "preferred-default",
+    });
+  });
+
+  test.each(["phone", "tablet"] as const)(
+    "%s keeps the exact platform default when only Duo has an entry",
+    (archetype) => {
+      const defaults = pinned(duoOverride);
+      const normalized = normalizeIos(
+        request({ kind: "archetype", archetype }),
+        defaults,
+        catalog(),
+      );
+      expect(normalized.effective.os).toEqual({ kind: "exact", version: "26.5" });
+      expect(normalized.provenance.osDefaultArchetype).toBeUndefined();
+      expect(resolveIos(normalized, defaults, catalog()).profile.osVersion).toBe("26.5");
+    },
+  );
+
+  test("an explicit exact OS on Duo stays exact and ignores the Duo entry", () => {
+    const defaults = pinned(duoOverride);
+    const result = resolveWith(
+      defaults,
+      request({ kind: "archetype", archetype: "duo" }, { kind: "exact", version: "26.5" }),
+    );
+    const error = unwrapError(result);
+    expect(error.code).toBe("runtime_incompatible");
+    expect(error.message).not.toContain("defaults.ios.os.archetypes");
+  });
+
+  test("Duo without an entry keeps runtime_incompatible and names the new field", () => {
+    const error = unwrapError(
+      resolveWith(pinned(), request({ kind: "archetype", archetype: "duo" })),
+    );
+    expect(error.code).toBe("runtime_incompatible");
+    expect(error.message).toContain('defaults.ios.os.archetypes entry for "duo"');
+  });
+
+  test("an entry whose preferred version misses its selector is invalid config", () => {
+    const result = normalizeSessionDeviceRequirement(
+      request({ kind: "archetype", archetype: "duo" }),
+      pinned([{ ...duoOverride[0], preferredVersion: "26.5" }]),
+      catalog(),
+    );
+    expect(unwrapError(result)).toMatchObject({
+      code: "invalid_config",
+      field: "defaults.os.archetypes[0].preferredVersion",
+    });
+  });
 });
 
 describe("installed Duo resolution", () => {

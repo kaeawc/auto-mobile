@@ -213,6 +213,16 @@ export interface OsDefaultPolicy {
   preferredVersion: string;
 }
 
+/** OS default for one iOS archetype; applied only when the request omits the OS (#18003). */
+export interface IosArchetypeOsDefault extends OsDefaultPolicy {
+  archetype: IosArchetype;
+}
+
+export interface IosOsDefaultPolicy extends OsDefaultPolicy {
+  /** Overrides the platform-level default for the listed archetypes, at most one entry each. */
+  archetypes?: readonly IosArchetypeOsDefault[];
+}
+
 export interface IosArchetypeDefault {
   archetype: IosArchetype;
   modelType: IosModelType;
@@ -244,7 +254,7 @@ export interface IosSessionRequirementDefaults {
   platform: "ios";
   policyVersion: string;
   hardware: IosHardwareDefaults;
-  os: OsDefaultPolicy;
+  os: IosOsDefaultPolicy;
 }
 
 export interface AndroidSessionRequirementDefaults {
@@ -263,6 +273,8 @@ export interface RequirementProvenance {
   catalogSource: string;
   catalogRevision: string;
   defaultsApplied: readonly ("hardware-archetype" | "os-predicate")[];
+  /** Set when an omitted iOS OS took the `defaults.os.archetypes` entry for this archetype. */
+  osDefaultArchetype?: IosArchetype;
 }
 
 export interface NormalizedIosSessionDeviceRequirement {
@@ -366,6 +378,8 @@ export interface ResolutionProvenance {
   resolvedHardwareBy: "explicit-model" | "model-type-default" | "archetype-default";
   resolvedOsBy: "exact" | "preferred-default" | "highest-satisfying";
   hardwareDefaultPath: readonly string[];
+  /** Set when an omitted iOS OS took the `defaults.os.archetypes` entry for this archetype. */
+  osDefaultArchetype?: IosArchetype;
   policyVersion: string;
   catalogSource: string;
   catalogRevision: string;

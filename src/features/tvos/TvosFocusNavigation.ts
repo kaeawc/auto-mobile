@@ -118,6 +118,14 @@ function focusOwner(target: Element, matches: Element[]): Element {
   }, target);
 }
 
+/** tvOS rows own focus for nested checkable controls reported by the runner. */
+function canSelectAtFocus(focus: Element, target: Element): boolean {
+  return (
+    sameBounds(focus, target) ||
+    (target.checkable === "true" && focusOwner(target, [focus]) === focus)
+  );
+}
+
 interface TargetIdentity {
   key: string;
   ordinal: number;
@@ -374,9 +382,14 @@ export async function tvosTapOn(
     const state = await locate(lookup, identity, maxSearchMoves);
     const { focus, target } = state;
     identity = state.identity;
-    if (sameBounds(focus, target)) {
+    if (canSelectAtFocus(focus, target)) {
       await client.request({ type: "request_press_button", action: "select" }, signal);
-      return { success: true, action: "tap", element: target };
+      return {
+        success: true,
+        action: "tap",
+        element: target,
+        ...(sameBounds(focus, target) ? {} : { debug: { activatedAncestor: focus } }),
+      };
     }
     // A press that leaves the focus signature unchanged was refused at this focus position.
     const refused = blocked.get(state.signature) ?? new Set<Direction>();

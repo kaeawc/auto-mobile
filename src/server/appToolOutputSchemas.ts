@@ -237,7 +237,7 @@ export const crashAppResultSchema = z.object({
   message: z.string(),
   success: z.boolean(),
   supported: z.boolean(),
-  platform: z.enum(["android", "ios", "tvos"]),
+  platform: z.enum(["android", "ios", "watchos", "tvos"]),
   appId: z.string(),
   processId: z.number().int().positive().optional(),
   mechanism: z.enum([

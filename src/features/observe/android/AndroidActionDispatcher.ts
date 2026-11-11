@@ -36,6 +36,7 @@ export interface AndroidActivateAccessibilityLinkRequest {
 export interface AndroidActionRequestOptions {
   selector?: AccessibilityNodeSelector;
   expectedBounds?: { left: number; top: number; right: number; bottom: number };
+  allowInvisible?: boolean;
   identityHints?: {
     className?: string;
     text?: string;
@@ -90,7 +91,7 @@ export class AndroidActionDispatcher {
       ...options
     }: AndroidActionRequestOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
-    const { selector, signal, expectedBounds, identityHints } = options;
+    const { selector, signal, expectedBounds, identityHints, allowInvisible } = options;
     return this.dispatchActionRequest(
       action,
       (requestId) =>
@@ -105,6 +106,7 @@ export class AndroidActionDispatcher {
             identityContentDesc: identityHints?.contentDesc,
             identityLabelText: identityHints?.labelText,
             identityLabelContentDesc: identityHints?.labelContentDesc,
+            ...(allowInvisible ? { allowInvisible: true } : {}),
             ...(expectedBounds
               ? {
                   boundsLeft: expectedBounds.left,
@@ -349,6 +351,7 @@ export class AndroidActionDispatcher {
       signal,
       expectedBounds,
       identityHints,
+      allowInvisible,
     }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
     if (!selector && (action !== "click" || !expectedBounds)) {
@@ -362,6 +365,7 @@ export class AndroidActionDispatcher {
       signal,
       expectedBounds,
       identityHints,
+      allowInvisible,
     });
   }
 

@@ -1,0 +1,5 @@
+<resources>
+  <item name="focus_status" type="id" />
+  <item name="click_status" type="id" />
+  <item name="input_status" type="id" />
+</resources>

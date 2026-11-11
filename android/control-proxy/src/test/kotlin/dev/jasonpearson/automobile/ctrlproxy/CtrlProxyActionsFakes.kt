@@ -88,6 +88,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     arguments: NodeActionArguments,
     expectedBounds: NodeExpectedBounds?,
     identityHints: NodeIdentityHints?,
+    allowInvisible: Boolean,
   ) = Unit
 
   override suspend fun requestActivateAccessibilityLink(
@@ -392,6 +393,7 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     arguments: NodeActionArguments,
     expectedBounds: NodeExpectedBounds?,
     identityHints: NodeIdentityHints?,
+    allowInvisible: Boolean,
   ) =
     record(
       "requestAction",
@@ -402,6 +404,7 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       arguments,
       expectedBounds,
       identityHints,
+      allowInvisible,
     )
 
   override suspend fun requestActivateAccessibilityLink(

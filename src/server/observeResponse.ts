@@ -62,14 +62,15 @@ import {
   defaultAudioInputDiagnostic,
   type AudioInputDiagnosticResolver,
 } from "../utils/audio/audioInputDiagnostic";
-import {
-  CarAppTemplateReader,
-  type AndroidAutoProjectionResolver,
-  type CarAppTemplatesResolver,
+import type {
+  AndroidAutoProjectionResolver,
+  CarAppTemplatesResolver,
 } from "../features/observe/android/CarAppTemplateReader";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { carAppTemplateReader } from "./carAppTemplateReader";
 import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 import { assertActiveWindowWaitForSupportedOnPlatform } from "../features/observe/wait/WaitForSchemas";
+
+export { carAppTemplateReader } from "./carAppTemplateReader";
 
 export interface ObserveToolDependencies {
   snapshotReferences?: Pick<SnapshotReferenceStore, "capture">;
@@ -108,16 +109,6 @@ export async function withDeviceDiagnostics(
 ): Promise<ObserveResult> {
   const diagnostic = await resolve(device);
   return diagnostic ? { ...result, diagnostics: [diagnostic] } : result;
-}
-
-let defaultCarAppTemplateReader: CarAppTemplateReader | undefined;
-
-/** The shared reader, so the projection block reuses the services dump the templates read took. */
-export function carAppTemplateReader(): CarAppTemplateReader {
-  defaultCarAppTemplateReader ??= new CarAppTemplateReader((target) =>
-    defaultAdbClientFactory.create(target),
-  );
-  return defaultCarAppTemplateReader;
 }
 
 /** Under `bun test` (NODE_ENV=test) the default never runs adb; tests inject a resolver. */

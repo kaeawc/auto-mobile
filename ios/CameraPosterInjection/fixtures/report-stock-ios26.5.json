@@ -1,0 +1,29 @@
+{
+  "authorizationStatus" : "authorized",
+  "complete" : true,
+  "dataScannerAvailable" : true,
+  "dataScannerSupported" : false,
+  "defaultVideoDevicePresent" : false,
+  "deviceInputCreated" : false,
+  "discoverySessionDeviceCount" : 0,
+  "imagePickerCameraAvailable" : true,
+  "iosVersion" : "26.5",
+  "metadataQrStrings" : [
+
+  ],
+  "photo" : {
+    "byteCount" : 0,
+    "error" : "No video capture device",
+    "height" : 0,
+    "received" : false,
+    "sha256" : null,
+    "width" : 0
+  },
+  "photoDecodedQr" : [
+
+  ],
+  "previewLayerHasContent" : false,
+  "sessionCanAddMetadataOutput" : true,
+  "sessionCanAddPhotoOutput" : true,
+  "timestamp" : "2026-11-11T17:04:07Z"
+}

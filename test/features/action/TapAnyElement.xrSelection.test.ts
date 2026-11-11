@@ -270,3 +270,32 @@ test("XR leaf fallback stays inside a nested selector's outer container", () => 
   expect(select(true, { text: "Header" }, tree)?.text).toBe("fragment_root");
   expect(select(true, { text: "Header", container: { text: "Section" } }, tree)).toBeNull();
 });
+
+test("a higher-layer dialog from another package wins over the Settings search bar", () => {
+  const searchBar = { left: 48, top: 60, right: 568, bottom: 164 };
+  const app = capture.viewHierarchy.windows!.find((window) => window.id === 38)!;
+  const allow = {
+    ...settingsControl("Allow", 600),
+    "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+  };
+  const dialog = {
+    ...app,
+    id: 91,
+    windowLayer: 1,
+    packageName: "com.android.permissioncontroller",
+    hierarchy: allow,
+  };
+  // Every captured window stays, so the search bar and the SystemUI chrome remain candidates.
+  const tree = {
+    ...capture.viewHierarchy,
+    hierarchy: {},
+    windows: [dialog, ...capture.viewHierarchy.windows!],
+  };
+  const selected = select(true, undefined, tree);
+  expect(selected?.bounds).not.toEqual(searchBar);
+  expect(selected?.["resource-id"]).toBe(allow["resource-id"]);
+  // The dialog's absence restores the search bar, so the test exercises the ranking.
+  expect(
+    select(true, undefined, { ...tree, windows: capture.viewHierarchy.windows! })?.bounds,
+  ).toEqual(searchBar);
+});

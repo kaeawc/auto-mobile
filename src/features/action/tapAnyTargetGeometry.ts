@@ -23,6 +23,9 @@ import {
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import { ownPrototypeSafeGesturePoint, uniqueBySource } from "../observe/ApplicationWindowCover";
+import { ownPrototypeWindows } from "../observe/ownWindowFocus";
+
+const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
 
 export function findTapAnyClickableElement(
   context: {
@@ -118,18 +121,29 @@ export function resolveTapAnyPoint(
   return safe;
 }
 
-/** Prefer the foreground app's controls to its separate, window-local caption buttons. */
+/**
+ * Prefer application windows to SystemUI's separate, window-local caption buttons. Every
+ * application window stays, whatever its package, so window ranking puts a higher-layer dialog
+ * from another package (a permission prompt) ahead of the pane behind it.
+ */
 function xrTapAnyHierarchy(
   viewHierarchy: ViewHierarchyResult,
   options: TapAnyElementOptions,
 ): ViewHierarchyResult {
   viewHierarchy = withoutHiddenXrChrome(viewHierarchy).hierarchy;
-  const appWindows = viewHierarchy.windows?.filter(
-    (window) =>
-      window.hierarchy &&
-      window.packageName === viewHierarchy.packageName &&
-      !window.packageName?.startsWith("com.android.systemui"),
-  );
+  const prototypes = new Set(ownPrototypeWindows(viewHierarchy));
+  const appWindows = viewHierarchy.windows?.filter((window) => {
+    // An unnamed window falls back to the capture's package, as the window contract documents.
+    const packageName = window.packageName ?? viewHierarchy.packageName;
+    return (
+      window.hierarchy !== undefined &&
+      !prototypes.has(window) &&
+      !packageName?.startsWith("com.android.systemui") &&
+      (packageName === viewHierarchy.packageName ||
+        window.type === undefined ||
+        window.type === ACCESSIBILITY_WINDOW_TYPE_APPLICATION)
+    );
+  });
   if (!options.container && appWindows?.length) {
     viewHierarchy = {
       ...viewHierarchy,

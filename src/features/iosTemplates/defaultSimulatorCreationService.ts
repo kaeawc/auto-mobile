@@ -6,6 +6,8 @@ import { TemplateSimCtlClient } from "./TemplateSimCtlClient";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import {
   SimulatorPrebootProfile,
+  apsdLogSuppressionConfig,
+  resolveApsdLogSuppressionEnabled,
   resolveDefaultPrebootProfile,
 } from "../../utils/ios-cmdline-tools/SimulatorPrebootProfile";
 import { resolveTemplateCloneEnabled } from "../../utils/ios-cmdline-tools/SimulatorTemplateKey";
@@ -67,7 +69,13 @@ export function getDefaultTemplateDependencies(
     hasSpareCapacity: async () =>
       !gates.ios || (await gates.ios.evaluateBoot()).outcome === "allow",
     settle: new FleetSettleDetector(source, timer),
-    profile: (key) => new SimulatorPrebootProfile(undefined, () => key.profile),
+    profile: (key) =>
+      new SimulatorPrebootProfile(
+        undefined,
+        () => key.profile,
+        undefined,
+        apsdLogSuppressionConfig(() => key.apsdLogSuppressed === true),
+      ),
   });
   const deps: TemplateCreationDependencies = {
     client,
@@ -76,6 +84,7 @@ export function getDefaultTemplateDependencies(
     xcode,
     timer,
     profile: () => resolveDefaultPrebootProfile(process.env),
+    apsdLogSuppressed: () => resolveApsdLogSuppressionEnabled(process.env),
     builder: {
       build: (key, signal) => runWithAbortSignal(signal, () => builder.build(key, signal)),
     },

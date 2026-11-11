@@ -15,6 +15,22 @@ test("manifest round-trips and removes through fake filesystem", async () => {
   expect(await store.read(fake.manifest!.key)).toBeUndefined();
 });
 
+test("the apsd suppression key field round-trips through the manifest store", async () => {
+  const fake = new SimulatorTemplatesHarness();
+  fake.ready();
+  const manifest = {
+    ...fake.manifest!,
+    key: { ...fake.manifest!.key, apsdLogSuppressed: true as const },
+  };
+  const store = new FileSimulatorTemplateManifestStore(
+    new FakeTemplateManifestFiles(),
+    () => "/fake/templates",
+  );
+  await store.write(manifest);
+  expect(await store.read(manifest.key)).toEqual(manifest);
+  expect(await store.read(fake.manifest!.key)).toBeUndefined();
+});
+
 test("corrupt manifests are absent, skipped and removable by cleanup", async () => {
   const fake = new SimulatorTemplatesHarness();
   fake.ready();

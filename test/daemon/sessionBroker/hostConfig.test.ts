@@ -272,6 +272,47 @@ describe("session broker host configuration", () => {
     },
   );
 
+  test("iOS os.archetypes overrides parse, and duplicate archetypes are rejected (#18003)", () => {
+    const duo = { archetype: "duo", selector: { kind: "exact", version: "27.1" } };
+    const ios = (archetypes: unknown[]) => ({
+      ...iosDefaults(),
+      os: { ...iosDefaults().os, archetypes },
+    });
+    expect(
+      parseSessionBrokerHostConfig(
+        config({ defaults: { ios: ios([{ ...duo, preferredVersion: "27.1" }]) } }),
+      ).defaults.ios?.os.archetypes,
+    ).toEqual([
+      { archetype: "duo", selector: { kind: "exact", version: "27.1" }, preferredVersion: "27.1" },
+    ]);
+    expect(parseSessionBrokerHostConfig(config()).defaults.ios?.os.archetypes).toBeUndefined();
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({
+          defaults: {
+            ios: ios([
+              { ...duo, preferredVersion: "27.1" },
+              { ...duo, preferredVersion: "27.1" },
+            ]),
+          },
+        }),
+      ),
+    ).toThrow("defaults.ios.os.archetypes must list each archetype at most once");
+    expect(() => parseSessionBrokerHostConfig(config({ defaults: { ios: ios([duo]) } }))).toThrow();
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({
+          defaults: {
+            android: {
+              ...androidDefaults(),
+              os: { ...androidDefaults().os, archetypes: [] },
+            },
+          },
+        }),
+      ),
+    ).toThrow();
+  });
+
   test("rejects unrelated capabilities and does not warn for an empty capability object", () => {
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {

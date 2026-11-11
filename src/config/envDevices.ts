@@ -203,6 +203,12 @@ export const DEVICES_ENV = {
     default: "minimal",
     doc: "Pre-boot iOS simulator lean profile: minimal by default, none opts out, or catalog-cpu; unknown values use the default.",
   },
+  IOS_SUPPRESS_APSD_LOG: {
+    name: "AUTOMOBILE_IOS_SUPPRESS_APSD_LOG",
+    kind: "string",
+    default: "false",
+    doc: "Suppress com.apple.apsd logs before newly created iOS simulators boot; exact 1/true opts in (trimmed, case-insensitive). Hides push-debugging logs; remote push is unaffected.",
+  },
   IOS_SIM_CAPACITY_GATE: {
     name: "AUTOMOBILE_IOS_SIM_CAPACITY_GATE",
     kind: "string",

@@ -81,6 +81,8 @@ class ScreenshotControllerTest {
 
     override fun frameworkDimenPx(name: String) = 0
 
+    override fun isXrSpatialDevice() = false
+
     override fun densityDpi() = 420
   }
 

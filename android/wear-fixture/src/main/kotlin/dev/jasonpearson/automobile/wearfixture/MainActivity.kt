@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.app.RemoteInput
 import dev.jasonpearson.automobile.wearfixture.notification.FixtureNotifications
 import dev.jasonpearson.automobile.wearfixture.ui.FixtureApp
 
@@ -32,6 +33,10 @@ class MainActivity : ComponentActivity() {
     LaunchRequest(
       itemId = getStringExtra(LaunchRequest.EXTRA_ITEM_ID),
       notificationActionId = getStringExtra(LaunchRequest.EXTRA_NOTIFICATION_ACTION),
+      replyText =
+        RemoteInput.getResultsFromIntent(this)
+          ?.getCharSequence(WearFixtureCatalog.REPLY_INPUT_KEY)
+          ?.toString(),
     )
 }
 

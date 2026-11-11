@@ -30,7 +30,12 @@ export interface DesktopHeadUnitSession {
   /** Writes one console command (for example `screenshot /tmp/hu.png`). */
   sendCommand(command: string): void;
   isRunning(): boolean;
-  stop(): void;
+  /**
+   * Ends the DHU and resolves once its process exited: SIGTERM, then SIGKILL after
+   * `stopTimeoutMs`. Rejects when the process still has not exited, so a caller never
+   * launches a replacement next to a live DHU.
+   */
+  stop(): Promise<void>;
 }
 
 export interface DhuLaunchOptions {
@@ -57,12 +62,15 @@ export interface DhuLaunchTiming {
   settleMs: number;
   /** Ping timeouts within the settle window that mark the projection as stalled. */
   pingTimeoutLimit: number;
+  /** How long `stop()` waits for the process to exit after each signal. */
+  stopTimeoutMs: number;
 }
 
 export const DEFAULT_DHU_LAUNCH_TIMING: DhuLaunchTiming = {
   connectTimeoutMs: 30_000,
   settleMs: 5_000,
   pingTimeoutLimit: 2,
+  stopTimeoutMs: 5_000,
 };
 
 const hostProcessExecutor = new DefaultHostCommandExecutor();
@@ -103,13 +111,38 @@ interface ChildSession {
  * does not end the process, so `stop()` kills whenever the child has not exited. Otherwise
  * a DHU that is still running would be orphaned and hold the head unit connection.
  */
-function childSession(child: DhuChildProcess): ChildSession {
+function childSession(child: DhuChildProcess, timer: Timer, stopTimeoutMs: number): ChildSession {
   let healthy = true;
   let exited = false;
+  const exitWaiters = new Set<() => void>();
   child.once("exit", () => {
     exited = true;
     healthy = false;
+    exitWaiters.forEach((notify) => notify());
+    exitWaiters.clear();
   });
+  const waitForExit = (ms: number) =>
+    new Promise<boolean>((resolve) => {
+      if (exited) {
+        resolve(true);
+        return;
+      }
+      const onExit = () => {
+        timer.clearTimeout(timeout);
+        resolve(true);
+      };
+      const timeout = timer.setTimeout(() => {
+        exitWaiters.delete(onExit);
+        resolve(false);
+      }, ms);
+      exitWaiters.add(onExit);
+    });
+  const terminate = (signal: NodeJS.Signals): Promise<boolean> => {
+    if (!exited) {
+      child.kill(signal);
+    }
+    return waitForExit(stopTimeoutMs);
+  };
   child.on("error", (error) => {
     logger.warn(`[DHU] process error: ${error.message}`);
     healthy = false;
@@ -131,11 +164,14 @@ function childSession(child: DhuChildProcess): ChildSession {
         child.stdin.write(`${command}\n`);
       },
       isRunning,
-      stop() {
+      async stop() {
         healthy = false;
-        if (!exited) {
-          child.kill("SIGTERM");
+        if ((await terminate("SIGTERM")) || (await terminate("SIGKILL"))) {
+          return;
         }
+        throw new ActionableError(
+          `The Desktop Head Unit did not exit within ${stopTimeoutMs} ms of SIGTERM and again of SIGKILL. End the desktop-head-unit process before retrying, or a relaunch would compete with it for the head unit connection.`,
+        );
       },
     },
     write(command) {
@@ -160,7 +196,7 @@ function watchLaunch(
   signal?: AbortSignal,
 ): Promise<DhuLaunchOutcome> {
   return new Promise<DhuLaunchOutcome>((resolve) => {
-    const dhuConsole = childSession(child);
+    const dhuConsole = childSession(child, timer, timing.stopTimeoutMs);
     let phase: Phase = "connecting";
     let pingTimeouts = 0;
     // One partial-line buffer per stream, so interleaved stdout/stderr chunks never splice a line.

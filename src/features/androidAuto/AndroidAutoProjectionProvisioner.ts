@@ -274,8 +274,9 @@ export class AndroidAutoProjectionProvisioner {
     if (existing?.isRunning()) {
       return { step: { step: "desktop-head-unit", status: "already-done" }, session: existing };
     }
-    // An unhealthy session can still own a live DHU; end it so a relaunch cannot clash on 5277.
-    existing?.stop();
+    // An unhealthy session can still own a live DHU; wait for it to exit (stop() rejects if it
+    // never does) so a relaunch cannot compete with it for the head unit connection.
+    await existing?.stop();
     this.sessions.delete(request.deviceId);
     const maxRecoveries = this.deps.maxDhuRecoveries ?? 2;
     const failures: string[] = [];

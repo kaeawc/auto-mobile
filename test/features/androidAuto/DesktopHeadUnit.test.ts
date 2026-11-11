@@ -25,6 +25,9 @@ class FakeDhuChild extends EventEmitter implements DhuChildProcess {
   readonly stderr = new PassThrough();
   readonly written: string[] = [];
   killed: NodeJS.Signals | undefined;
+  readonly signals: NodeJS.Signals[] = [];
+  /** Signals the process survives, as a DHU stuck in teardown does. */
+  ignoredSignals = new Set<NodeJS.Signals>();
 
   constructor(readonly stdin: Writable = new PassThrough()) {
     super();
@@ -33,7 +36,10 @@ class FakeDhuChild extends EventEmitter implements DhuChildProcess {
 
   kill(signal: NodeJS.Signals = "SIGTERM"): boolean {
     this.killed = signal;
-    this.emit("exit", null, signal);
+    this.signals.push(signal);
+    if (!this.ignoredSignals.has(signal)) {
+      this.emit("exit", null, signal);
+    }
     return true;
   }
 
@@ -42,7 +48,7 @@ class FakeDhuChild extends EventEmitter implements DhuChildProcess {
   }
 }
 
-const TIMING = { connectTimeoutMs: 1_000, settleMs: 500, pingTimeoutLimit: 2 };
+const TIMING = { connectTimeoutMs: 1_000, settleMs: 500, pingTimeoutLimit: 2, stopTimeoutMs: 200 };
 
 function setup(stdin?: Writable) {
   const timer = new FakeTimer();
@@ -100,7 +106,7 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     result.session.sendCommand("screenshot /tmp/hu.png");
     await flushStdin();
     expect(child.written).toEqual(["focus video\n", "screenshot /tmp/hu.png\n"]);
-    result.session.stop();
+    await result.session.stop();
     expect(child.killed).toBe("SIGTERM");
     expect(result.session.isRunning()).toBe(false);
     expect(() => result.session.sendCommand("day")).toThrow("not running");
@@ -178,8 +184,48 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     }
     child.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
     expect(child.killed).toBeUndefined();
-    result.session.stop();
+    await result.session.stop();
     expect(child.killed).toBe("SIGTERM");
+  });
+
+  test("stop() escalates to SIGKILL and resolves only once a DHU that ignores SIGTERM exits", async () => {
+    const { timer, child, launch } = setup();
+    const outcome = launch();
+    child.print("connected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    const result = await outcome;
+    if (result.status !== "connected") {
+      throw new Error(`expected connected, got ${result.status}`);
+    }
+    child.ignoredSignals.add("SIGTERM");
+    let stopped = false;
+    const stopping = result.session.stop().then(() => {
+      stopped = true;
+    });
+    await flushStdin();
+    expect(child.signals).toEqual(["SIGTERM"]);
+    expect(stopped).toBe(false);
+    timer.advanceTime(TIMING.stopTimeoutMs);
+    await stopping;
+    expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  test("stop() rejects when the DHU never exits, so no replacement is launched beside it", async () => {
+    const { timer, child, launch } = setup();
+    const outcome = launch();
+    child.print("connected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    const result = await outcome;
+    if (result.status !== "connected") {
+      throw new Error(`expected connected, got ${result.status}`);
+    }
+    child.ignoredSignals = new Set(["SIGTERM", "SIGKILL"]);
+    const stopping = result.session.stop();
+    await flushStdin();
+    timer.advanceTime(TIMING.stopTimeoutMs);
+    await flushStdin();
+    timer.advanceTime(TIMING.stopTimeoutMs);
+    await expect(stopping).rejects.toThrow("did not exit");
   });
 
   test("stop() does not signal a DHU that already exited", async () => {
@@ -192,7 +238,7 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
       throw new Error(`expected connected, got ${result.status}`);
     }
     child.emit("exit", 0, null);
-    result.session.stop();
+    await result.session.stop();
     expect(child.killed).toBeUndefined();
     expect(result.session.isRunning()).toBe(false);
   });

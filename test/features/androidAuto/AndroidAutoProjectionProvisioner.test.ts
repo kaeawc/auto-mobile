@@ -110,7 +110,7 @@ class FakeSession implements DesktopHeadUnitSession {
   isRunning() {
     return this.running;
   }
-  stop() {
+  async stop() {
     this.running = false;
   }
 }
@@ -283,7 +283,7 @@ describe("AndroidAutoProjectionProvisioner", () => {
   test("stops an unhealthy session before relaunching so it cannot orphan a DHU", async () => {
     const unhealthy = new FakeSession();
     let stops = 0;
-    unhealthy.stop = () => {
+    unhealthy.stop = async () => {
       stops++;
     };
     const { launcher, provisioner } = setup([{ status: "connected", session: unhealthy }]);
@@ -293,6 +293,18 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(stops).toBe(1);
     expect(launcher.launches).toBe(2);
     expect(second.session).not.toBe(unhealthy);
+  });
+
+  test("does not relaunch next to an unhealthy DHU that never exits", async () => {
+    const stuck = new FakeSession();
+    stuck.stop = async () => {
+      throw new ActionableError("The Desktop Head Unit did not exit");
+    };
+    const { launcher, provisioner } = setup([{ status: "connected", session: stuck }]);
+    await provisioner.provision(request());
+    stuck.running = false;
+    await expect(provisioner.provision(request())).rejects.toThrow("did not exit");
+    expect(launcher.launches).toBe(1);
   });
 
   test("gives up after the recovery budget with every attempt's reason", async () => {

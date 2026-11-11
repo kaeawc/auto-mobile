@@ -834,12 +834,13 @@ class ImeCommitDriver(
             offset += unit.length
             confirmed++
           }
-          FORMATTING.matchesAt(applied, offset) ->
+          (unit == null || !FORMATTING.containsMatchIn(unit)) &&
+            FORMATTING.matchesAt(applied, offset) ->
             offset += Character.charCount(applied.codePointAt(offset))
           else -> return null
         }
       }
-      return confirmed
+      return confirmed.takeIf { it > 0 }
     }
 
     // Match complete editing units first; only unmatched editor formatting may be skipped.

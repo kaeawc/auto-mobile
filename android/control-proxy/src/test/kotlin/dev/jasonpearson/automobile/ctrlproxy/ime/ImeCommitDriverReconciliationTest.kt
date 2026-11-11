@@ -9,6 +9,20 @@ import org.junit.Test
 
 internal class ImeCommitDriverReconciliationTest : ImeCommitDriverFixtures() {
   @Test
+  fun `transformed trailing punctuation after restart succeeds without resend`() {
+    for ((text, delta) in
+      listOf("ok..." to "ok…", "hello\"" to "hello”", "hi :)" to "hi 🙂", "a--" to "a—")) {
+      assertEquals(
+        text,
+        ImeCommitDriver.Reconciliation.Succeed(delta),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(true, true, "", delta, text.map { it.toString() }),
+        ),
+      )
+    }
+  }
+
+  @Test
   fun `formatting extras confirm captured phone prefixes and complete delta`() {
     val units = "5125550142".map { it.toString() }
     for ((delta, count) in listOf(" 512-5" to 4, " 512-555-0" to 7, " 512-555-0142" to 10)) {

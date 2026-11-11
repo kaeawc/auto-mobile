@@ -9,6 +9,29 @@ import org.junit.Test
 
 internal class ImeCommitDriverRecoveryTest : ImeCommitDriverFixtures() {
   @Test
+  fun `formatter output without dispatched digits is not editor consumption`() {
+    val units = "5125550142".map { it.toString() }
+    for ((baseline, delta) in listOf("+1" to " ", "" to " ", "" to "• ", "" to "+1 ")) {
+      for (postDispatch in listOf(false, true)) {
+        for (restart in listOf(false, true)) {
+          assertEquals(
+            "baseline=$baseline delta=$delta postDispatch=$postDispatch restart=$restart",
+            when {
+              postDispatch -> ImeCommitDriver.Reconciliation.Succeed(delta)
+              restart -> ImeCommitDriver.Reconciliation.Continue
+              else ->
+                ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", delta)
+            },
+            ImeCommitDriver.reconcileDecision(
+              ImeReconciliationState(postDispatch, restart, baseline, baseline + delta, units),
+            ),
+          )
+        }
+      }
+    }
+  }
+
+  @Test
   fun `captured phone restart resumes only missing digits once`() {
     for ((kept, delta) in listOf(4 to " 512-5", 7 to " 512-555-0")) {
       val sink = phoneRestartingSink(kept)

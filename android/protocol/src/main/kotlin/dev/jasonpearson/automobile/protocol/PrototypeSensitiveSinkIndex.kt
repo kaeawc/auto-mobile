@@ -69,3 +69,37 @@ internal class PrototypeSensitiveSinkIndex(
   fun isTaintedPointer(pointer: String?): Boolean =
     pointer != null && PrototypeDataPointer.isValid(pointer) && overlaps(pointer, false)
 }
+
+/** State templates may name any runtime key sharing the literal prefix before their first brace. */
+internal class PrototypeStateTaintIndex(
+  private val taints: List<String>,
+  private val visit: () -> Boolean,
+) {
+  companion object {
+    private fun prefix(key: String): String? = key.indexOf('{').takeIf { it >= 0 }?.let(key::take)
+
+    fun overlaps(left: String, right: String): Boolean {
+      val leftPrefix = prefix(left)
+      val rightPrefix = prefix(right)
+      return when {
+        leftPrefix == null && rightPrefix == null -> left == right
+        leftPrefix == null -> left.startsWith(checkNotNull(rightPrefix))
+        rightPrefix == null -> right.startsWith(leftPrefix)
+        else -> leftPrefix.startsWith(rightPrefix) || rightPrefix.startsWith(leftPrefix)
+      }
+    }
+  }
+
+  private val literal = taints.filter { prefix(it) == null }.toSet()
+  private val templated = taints.filter { prefix(it) != null }
+
+  fun key(key: String): Boolean {
+    if (!visit()) return false
+    if (prefix(key) == null && key in literal) return true
+    val candidates = if (prefix(key) == null) templated else taints
+    return candidates.any { visit() && overlaps(it, key) }
+  }
+
+  fun text(text: String): Boolean =
+    '{' in text && taints.any { visit() && text.contains("{${prefix(it) ?: "$it}"}") }
+}

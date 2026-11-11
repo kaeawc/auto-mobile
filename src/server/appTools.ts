@@ -103,7 +103,7 @@ import {
 import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
-import { PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
+import { ADVERTISES_DEVICE_ID, PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
 export {
   buildLaunchAppResponse,
   type LaunchAppExecutor,
@@ -895,6 +895,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     launchAppSchema,
     {
       handler: launchAppHandler,
+      ...ADVERTISES_DEVICE_ID,
       defaultEnabled: true,
       transportRecovery: "connect",
       outputSchema: launchAppResultSchema,
@@ -908,6 +909,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     terminateAppSchema,
     {
       handler: terminateAppHandler,
+      ...ADVERTISES_DEVICE_ID,
       defaultEnabled: true,
       outputSchema: terminateAppResultSchema,
       stopsApp: true,
@@ -921,6 +923,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     crashAppSchema,
     {
       handler: crashAppHandler,
+      ...ADVERTISES_DEVICE_ID,
       ...PLAN_RELEVANT,
       defaultEnabled: true,
       outputSchema: crashAppResultSchema,
@@ -934,6 +937,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     appLifecycleSchema,
     {
       handler: appLifecycleHandler,
+      ...ADVERTISES_DEVICE_ID,
       ...PLAN_RELEVANT,
       defaultEnabled: true,
       outputSchema: appLifecycleResultSchema,
@@ -948,6 +952,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     uninstallAppSchema,
     {
       handler: uninstallAppHandler,
+      ...ADVERTISES_DEVICE_ID,
       defaultEnabled: true,
       outputSchema: uninstallAppResultSchema,
       stopsApp: true,
@@ -960,6 +965,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     setAppPermissionsSchema,
     {
       handler: setAppPermissionsHandler,
+      ...ADVERTISES_DEVICE_ID,
       ...PLAN_RELEVANT,
       defaultEnabled: false,
       outputSchema: setAppPermissionsResultSchema,
@@ -972,6 +978,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     getAppPermissionsSchema,
     {
       handler: getAppPermissionsHandler,
+      ...ADVERTISES_DEVICE_ID,
       // Reads only; read-only access never requires a session (#10965).
       defaultEnabled: false,
       deviceReadOnly: true,
@@ -987,6 +994,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     inspectPackageSigningSchema,
     {
       handler: inspectPackageSigningHandler,
+      ...ADVERTISES_DEVICE_ID,
       defaultEnabled: false,
       deviceReadiness: "booted",
       deviceReadOnly: true,
@@ -1000,6 +1008,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     resetKeychainSchema,
     {
       handler: resetKeychainHandler,
+      ...ADVERTISES_DEVICE_ID,
       ...PLAN_RELEVANT,
       defaultEnabled: false,
       outputSchema: resetKeychainResultSchema,

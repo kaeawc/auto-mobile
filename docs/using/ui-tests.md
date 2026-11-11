@@ -179,7 +179,9 @@ hierarchy node carries that text (`textEquals` requires the exact, case-sensitiv
 value). `for: "clickable"`, `"disappear"` and `"countStable"` check hierarchy nodes
 only. Add `elementId`, `container` or `selectionStrategy` to match a single
 hierarchy node instead; `className` and `contentDescription` do the same for waits
-without `for`. The top-level `layer` argument limits the wait to the `app` or
+without `for`. With `textSource: "displayed"`, a wait without `for` matches `text`
+only against the text an element displays, not its content description, and does
+not match rows. The top-level `layer` argument limits the wait to the `app` or
 `prototype` layer of the hierarchy and also turns off the row match.
 
 </div>
@@ -214,7 +216,9 @@ step is `optional`, the step is skipped instead and the plan continues.
 `selector` accepts `testTag` (matched like the `tapOn` `testTag` selector),
 one id (`resourceId` or `elementId`), `text`, `contentDescription` and
 `className`; every field given must match the same element. For `textEquals` and
-`textContains`, put the expected value in `text`, not in `selector.text`. Each
+`textContains`, put the expected value in `text`, not in `selector.text`; it is
+compared with the text the element displays (an editable field's value, else its
+text), never its content description or accessibility label. Each
 expectation waits up to `timeoutMs` for the condition (the `observe.waitFor`
 default when you omit it), so it tolerates a screen that is still settling.
 

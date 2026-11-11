@@ -21349,6 +21349,11 @@
               "enum": ["exact", "contains", "regex"],
               "description": "How to match waitFor.text; does not affect contentDescription"
             },
+            "textSource": {
+              "type": "string",
+              "enum": ["displayed"],
+              "description": "displayed: match text only against the element's shown text or value"
+            },
             "activeWindow": {
               "type": "object",
               "additionalProperties": false,
@@ -25509,6 +25514,11 @@
               "type": "string",
               "enum": ["exact", "contains", "regex"],
               "description": "How to match waitFor.text; does not affect contentDescription"
+            },
+            "textSource": {
+              "type": "string",
+              "enum": ["displayed"],
+              "description": "displayed: match text only against the element's shown text or value"
             },
             "activeWindow": {
               "type": "object",

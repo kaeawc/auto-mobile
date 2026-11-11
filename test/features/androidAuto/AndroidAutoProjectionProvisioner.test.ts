@@ -238,6 +238,63 @@ describe("AndroidAutoProjectionProvisioner", () => {
     );
   });
 
+  test("a relaunch waits for the restarted head unit server to bind", async () => {
+    const { ui, phone, launcher, timer, provisioner } = setup([
+      { status: "stalled", detail: "2 Ping timeout lines" },
+    ]);
+    let checksAfterRestart = 0;
+    const listening = phone.isHeadUnitServerListening.bind(phone);
+    phone.isHeadUnitServerListening = async () => {
+      if (!phone.changes.includes("force-stop")) {
+        return listening();
+      }
+      checksAfterRestart++;
+      return ui.serverStarted && checksAfterRestart >= 3;
+    };
+    const checksAtLaunch: number[] = [];
+    const launch = launcher.launch.bind(launcher);
+    launcher.launch = async () => {
+      checksAtLaunch.push(checksAfterRestart);
+      return launch();
+    };
+    await provisioner.provision(request());
+    expect(checksAtLaunch).toEqual([0, 3]);
+    expect(timer.getSleepHistory()).toEqual([1_000, 250, 500]);
+  });
+
+  test("a restarted server that never binds fails that attempt without a relaunch", async () => {
+    const stall: DhuLaunchOutcome = { status: "stalled", detail: "2 Ping timeout lines" };
+    const { ui, launcher, provisioner } = setup([stall]);
+    const start = ui.startHeadUnitServer.bind(ui);
+    let starts = 0;
+    ui.startHeadUnitServer = async () => {
+      starts++;
+      // Only the initial start binds; every recovery restart leaves the port unbound.
+      if (starts === 1) {
+        await start();
+      }
+    };
+    await expect(provisioner.provision(request())).rejects.toThrow(
+      "head-unit-server: not listening on port 5277 after the restart",
+    );
+    expect(launcher.launches).toBe(1);
+  });
+
+  test("stops an unhealthy session before relaunching so it cannot orphan a DHU", async () => {
+    const unhealthy = new FakeSession();
+    let stops = 0;
+    unhealthy.stop = () => {
+      stops++;
+    };
+    const { launcher, provisioner } = setup([{ status: "connected", session: unhealthy }]);
+    await provisioner.provision(request());
+    unhealthy.running = false;
+    const second = await provisioner.provision(request());
+    expect(stops).toBe(1);
+    expect(launcher.launches).toBe(2);
+    expect(second.session).not.toBe(unhealthy);
+  });
+
   test("gives up after the recovery budget with every attempt's reason", async () => {
     const stall: DhuLaunchOutcome = { status: "no-connect", detail: "no connected." };
     const { launcher, provisioner } = setup([stall, stall, stall]);

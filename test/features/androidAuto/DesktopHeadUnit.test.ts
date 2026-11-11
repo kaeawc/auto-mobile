@@ -167,6 +167,36 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     expect(() => result.session.sendCommand("day")).toThrow("not running");
   });
 
+  test("stop() still kills a live DHU after a later EPIPE marked the session unhealthy", async () => {
+    const { timer, child, launch } = setup();
+    const outcome = launch();
+    child.print("connected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    const result = await outcome;
+    if (result.status !== "connected") {
+      throw new Error(`expected connected, got ${result.status}`);
+    }
+    child.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+    expect(child.killed).toBeUndefined();
+    result.session.stop();
+    expect(child.killed).toBe("SIGTERM");
+  });
+
+  test("stop() does not signal a DHU that already exited", async () => {
+    const { timer, child, launch } = setup();
+    const outcome = launch();
+    child.print("connected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    const result = await outcome;
+    if (result.status !== "connected") {
+      throw new Error(`expected connected, got ${result.status}`);
+    }
+    child.emit("exit", 0, null);
+    result.session.stop();
+    expect(child.killed).toBeUndefined();
+    expect(result.session.isRunning()).toBe(false);
+  });
+
   test("a child error event before connecting is a no-connect", async () => {
     const { child, launch } = setup();
     const outcome = launch();

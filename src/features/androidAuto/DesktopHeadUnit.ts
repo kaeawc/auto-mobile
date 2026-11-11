@@ -98,22 +98,29 @@ interface ChildSession {
  * Owns the child's lifetime state. Its `error` listeners on the process and on stdin are
  * attached before the first write, so an EPIPE from a DHU that closed its console is
  * handled (it marks the session not running) instead of crashing the host process.
+ *
+ * Health and process lifetime are tracked apart: an error makes the session unusable but
+ * does not end the process, so `stop()` kills whenever the child has not exited. Otherwise
+ * a DHU that is still running would be orphaned and hold the head unit connection.
  */
 function childSession(child: DhuChildProcess): ChildSession {
-  let running = true;
+  let healthy = true;
+  let exited = false;
   child.once("exit", () => {
-    running = false;
+    exited = true;
+    healthy = false;
   });
   child.on("error", (error) => {
     logger.warn(`[DHU] process error: ${error.message}`);
-    running = false;
+    healthy = false;
   });
   child.stdin.on("error", (error) => {
     logger.warn(`[DHU] console write failed: ${error.message}`);
-    running = false;
+    healthy = false;
   });
+  const isRunning = () => healthy && !exited;
   const assertRunning = (command: string) => {
-    if (!running) {
+    if (!isRunning()) {
       throw new ActionableError(`The Desktop Head Unit is not running; cannot send "${command}".`);
     }
   };
@@ -123,9 +130,10 @@ function childSession(child: DhuChildProcess): ChildSession {
         assertRunning(command);
         child.stdin.write(`${command}\n`);
       },
-      isRunning: () => running,
+      isRunning,
       stop() {
-        if (running) {
+        healthy = false;
+        if (!exited) {
           child.kill("SIGTERM");
         }
       },

@@ -29,6 +29,12 @@ export const elementSchema = z
         "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
       ),
     "content-desc": z.string().optional(),
+    descendantLabel: z
+      .string()
+      .optional()
+      .describe(
+        "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+      ),
     occlusionState: z.string().optional(),
     occludedBy: z.string().optional(),
     occludedByViewId: z.string().optional(),

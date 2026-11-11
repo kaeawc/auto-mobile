@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
-ACT_VERSION="0.2.68" # Change this to the desired version
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/act/act_version.sh
+source "$script_dir/act_version.sh"
+# shellcheck source=scripts/lib/release-download.sh
+source "$script_dir/../lib/release-download.sh"
 
 # Check if act is not installed
 if ! command -v act &>/dev/null; then
@@ -42,9 +46,17 @@ if ! command -v act &>/dev/null; then
 
     # Download act binary with progress and error handling
     echo "Downloading act binary for $ARCH..."
-    DOWNLOAD_URL="https://github.com/nektos/act/releases/download/v$ACT_VERSION/act_Linux_$ARCH.tar.gz"
-    
-    if ! curl -L --fail --show-error -o "$TMP_DIR/act.tar.gz" "$DOWNLOAD_URL"; then
+    ASSET="act_Linux_$ARCH.tar.gz"
+    DOWNLOAD_URL="https://github.com/nektos/act/releases/download/v$ACT_VERSION/$ASSET"
+    if ! EXPECTED_SHA="$(act_release_sha256 "$ASSET")"; then
+      echo "Error: no pinned checksum for act $ACT_VERSION asset $ASSET; add it to act_version.sh"
+      rm -rf "$TMP_DIR"
+      exit 1
+    fi
+
+    # Reuses a cached archive whose SHA-256 matches the pin, else downloads with
+    # a bounded backoff and verifies the checksum before extracting or caching.
+    if ! release_fetch_pinned "$DOWNLOAD_URL" "$EXPECTED_SHA" "$TMP_DIR/act.tar.gz" "act/$ACT_VERSION"; then
       echo "Error: Failed to download act binary"
       rm -rf "$TMP_DIR"
       exit 1

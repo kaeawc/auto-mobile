@@ -98,6 +98,7 @@ import {
   createPlatformUninstallApp,
   type WatchAppManagerFactory,
   type WatchRunnerRetarget,
+  type VisionosHostAppRecovery,
 } from "./appToolsWatch";
 import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
@@ -744,6 +745,7 @@ export interface AppToolsDependencies {
   /** The Apple Watch app manager the app tools use for a watch (install through terminate). */
   watchApps?: WatchAppManagerFactory;
   retargetWatchRunner?: WatchRunnerRetarget;
+  recoverVisionosHostApp?: VisionosHostAppRecovery;
 }
 
 /** Builds every injectable handler from real defaults overlaid with `dependencies`. */
@@ -761,6 +763,7 @@ function createAppToolHandlers(dependencies: AppToolsDependencies) {
         dependencies.retargetWatchRunner ??
           ((deviceId, bundleId, signal) =>
             getWatchRunnerLifecycle().retarget({ deviceId, bundleId, signal })),
+        dependencies.recoverVisionosHostApp,
       ),
     ...dependencies.launchApp,
   };

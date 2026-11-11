@@ -1,3 +1,4 @@
+import type { AndroidXrDisplaySize } from "../android/AndroidXrDisplaySize";
 import type { HierarchyCaptureRequest } from "../HierarchyCapture";
 import type { ObserveResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
@@ -70,6 +71,9 @@ export interface ObserveScreenExecuteOptions {
  * Interface for observing device screen state.
  */
 export interface ObserveScreen {
+  /** Shared default-display XR geometry for action hierarchy refreshes. */
+  readonly xrDisplaySize?: AndroidXrDisplaySize;
+
   /**
    * Execute the observe command to capture screen state.
    * Collects view hierarchy, screen size, system insets, and other device state.

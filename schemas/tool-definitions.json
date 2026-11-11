@@ -11257,7 +11257,7 @@
           }
         },
         "minPriority": {
-          "description": "Lowest priority shown (default V)",
+          "description": "Lowest priority shown (default V). Apple unified log: V/D debug and up, I info and up, W default and up (no warning level), E error and fault, F fault",
           "type": "string",
           "enum": ["V", "D", "I", "W", "E", "F"]
         },
@@ -51806,6 +51806,11 @@
             "tapActionLabel": {
               "description": "Action button label to tap (for 'tap' action)",
               "type": "string"
+            },
+            "replyText": {
+              "description": "Inline reply text on watches (tap only; defaults tapActionLabel to Keyboard input)",
+              "type": "string",
+              "minLength": 1
             },
             "packageId": {
               "type": "string"

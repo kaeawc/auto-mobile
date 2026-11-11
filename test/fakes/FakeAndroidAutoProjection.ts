@@ -68,6 +68,10 @@ export class FakePhone implements AndroidAutoPhone {
     this.changes.push("redirect");
     this.redirected = true;
   }
+  async removeHeadUnitRedirect() {
+    this.changes.push("redirect-removed");
+    this.redirected = false;
+  }
 }
 
 export class FakeUi implements AndroidAutoSettingsUi {

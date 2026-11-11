@@ -17,8 +17,12 @@ It reports what the app built, not what the head unit rendered. For template uni
 
 ## Setting up projection by hand
 
-1. Use a phone emulator with a Google Play system image, such as `google_apis_playstore`, and sign in
-   to Google on it yourself.
+1. Use a phone emulator with a Google Play system image, such as `google_apis_playstore`. No Google
+   account is needed: projection works on an emulator with no accounts, because Android Auto is
+   sideloaded (step 2) rather than updated from Play. AutoMobile takes no Google credentials and does
+   not sign in for you: Google does not allow scripted sign-in, and new emulators get "Verify it's you"
+   and CAPTCHA challenges that automation must not get past. For an app only available from Play, use
+   an AVD snapshot that you signed in to yourself.
 2. Replace the Android Auto stub. The image ships Android Auto as a stub
    (`versionName=1.2.551000-stub`) with no head-unit server, and on the API 36 emulator image Google
    Play reports Android Auto as not compatible, so it cannot be updated from Play. Install a current

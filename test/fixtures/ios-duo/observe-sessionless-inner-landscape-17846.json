@@ -1,0 +1,66 @@
+{
+  "observationId": "94591408-9160-4b1d-a48e-d6a2bf181287",
+  "deviceId": "D9CE3691-D0DA-44F9-A280-7B03858985BA",
+  "display": {
+    "key": "primary-1",
+    "role": "inner",
+    "posture": "opened",
+    "generation": 0
+  },
+  "updatedAt": "2026-11-11T03:13:14.455Z",
+  "screenSize": {
+    "width": 669,
+    "height": 951,
+    "units": "points"
+  },
+  "systemInsets": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "insets": {
+    "available": false,
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "rotation": 0,
+  "otherDisplays": [
+    {
+      "key": "primary",
+      "role": "cover",
+      "size": {
+        "width": 466,
+        "height": 678
+      },
+      "units": "points"
+    }
+  ],
+  "freshness": {
+    "verified": false,
+    "isFresh": false,
+    "warning": "View hierarchy could not be retrieved (connection_lost), so its freshness cannot be established. Device D9CE3691-D0DA-44F9-A280-7B03858985BA is session-owned and has no connected hierarchy service: the owning session's hierarchy client is disconnected. Run a session observe as the owner to reconnect it; a deviceId read only connects to an already-running service.",
+    "category": "unavailable",
+    "unavailableReason": "connection_lost",
+    "unavailableDetail": "Device D9CE3691-D0DA-44F9-A280-7B03858985BA is session-owned and has no connected hierarchy service: the owning session's hierarchy client is disconnected. Run a session observe as the owner to reconnect it; a deviceId read only connects to an already-running service."
+  },
+  "deviceLock": {
+    "locked": false,
+    "keyguardShowing": false
+  },
+  "screenshotOrientation": "native",
+  "screenshotPath": "<screenshots>/screenshot_1794366794908_D9CE3691-D0DA-44F9-A280-7B03858985BA-0aa514f55909_7c65820e-fd97-41eb-bbe1-0a64f9d77a97.png",
+  "screenshotExpiresAt": 1794367396779,
+  "screenshotSource": "fresh",
+  "screenshotCaptureSource": "device",
+  "screenshotCapturedAt": "2026-11-11T03:13:16.767Z",
+  "screenshotAgeMs": 0.111328125,
+  "screenshotFormat": "png",
+  "screenshotMimeType": "image/png",
+  "screenshotImageSize": {
+    "width": 2853,
+    "height": 2007
+  },
+  "screenshotSettled": true,
+  "observationScreenshotResourceUri": "automobile:observation/D9CE3691-D0DA-44F9-A280-7B03858985BA/94591408-9160-4b1d-a48e-d6a2bf181287/screenshot"
+}

@@ -30,6 +30,16 @@ describe("parseProjectedCarApps (#17826)", () => {
     expect(parseProjectedCarApps(dump)).toEqual([]);
   });
 
+  test("a c: caller header without a live Android Auto binding is not projected", () => {
+    const dump = [
+      "  * ServiceRecord{1 u0 com.example.car/.CarSvc c:com.google.android.projection.gearhead}",
+      "    intent={act=androidx.car.app.CarAppService cmp=com.example.car/.CarSvc}",
+      "    * IntentBindRecord{2 CREATE}:",
+      "      * Client AppBindRecord{3 ProcessRecord{4 7400:com.example.tester/u0a240}}",
+    ].join("\n");
+    expect(parseProjectedCarApps(dump)).toEqual([]);
+  });
+
   test("empty or unrelated output yields no apps", () => {
     expect(parseProjectedCarApps("")).toEqual([]);
     expect(parseProjectedCarApps("Permission Denial: can't dump ActivityManager")).toEqual([]);

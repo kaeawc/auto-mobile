@@ -15,9 +15,12 @@ const SERVICE_RECORD_HEADER =
   /^(\s*)\* ServiceRecord\{[0-9a-f]+ u(\d+) ([A-Za-z0-9_.]+)\/[^\s}]+(?: [^}]*)?\}/;
 
 const escapedHost = ANDROID_AUTO_PACKAGE.replace(/\./g, "\\.");
-/** A binding client in Android Auto's process (`gearhead` or one of its `:suffix` processes). */
+/**
+ * A live binding client in Android Auto's process (`gearhead` or one of its `:suffix` processes).
+ * The header's `c:<package>` is only the last start/bind caller, so it never counts on its own.
+ */
 const ANDROID_AUTO_CLIENT = new RegExp(
-  `AppBindRecord\\{[0-9a-f]+ ProcessRecord\\{[0-9a-f]+ \\d+:${escapedHost}(?::[\\w.]+)?/|\\bc:${escapedHost}\\}`,
+  `AppBindRecord\\{[0-9a-f]+ ProcessRecord\\{[0-9a-f]+ \\d+:${escapedHost}(?::[\\w.]+)?/`,
 );
 
 interface ServiceBlock {

@@ -14,7 +14,10 @@ function fakeHold() {
     deps: {
       holdAcquiringSession: (sessionUuid: string, deadlineMs: number) => {
         events.push(`hold:${sessionUuid}@${deadlineMs}`);
-        return () => events.push(`release:${sessionUuid}`);
+        return {
+          signal: new AbortController().signal,
+          release: () => events.push(`release:${sessionUuid}`),
+        };
       },
     },
   };

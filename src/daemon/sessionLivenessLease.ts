@@ -77,6 +77,21 @@ export class SessionLivenessController {
   constructor(private readonly port: SessionLivenessPort) {}
 
   /**
+   * Restart a minted session's pre-first-heartbeat grace from now (#17885). An acquiring call
+   * that held the session while it finished (`holdAcquiringSession`) has kept the client from
+   * learning the session id, so the grace must not have run meanwhile. Only `lastHeartbeat`
+   * moves: this is not a heartbeat, so `hasReceivedHeartbeat`, the owner lease and
+   * `activityGeneration` are untouched, and a session that already heartbeated is left alone.
+   */
+  restartPreFirstHeartbeatGrace(sessionId: string): void {
+    const session = this.port.unlessBaseEnded(this.port.getSession(sessionId));
+    if (!session || session.hasReceivedHeartbeat) {
+      return;
+    }
+    session.lastHeartbeat = Math.max(session.lastHeartbeat, this.port.sessionNow());
+  }
+
+  /**
    * Record a liveness heartbeat for a session.
    *
    * A heartbeat proves the owner process is alive; it is not device use (#10656). It renews the

@@ -298,6 +298,59 @@ internal class WindowListBudgetTest : WindowReadBudgetFixtures() {
   }
 
   @Test
+  fun `a skipped listing keeps the active root display and root`() {
+    useGuard()
+    val root = fakeNode("example.app", text = "App")
+    val window = fakeWindow(3, 0, root, WindowState(focused = true, active = true))
+    org.robolectric.Shadows.shadowOf(window).setDisplayId(2)
+    org.robolectric.Shadows.shadowOf(root).setAccessibilityWindowInfo(window)
+    val service = service()
+    org.robolectric.Shadows.shadowOf(service).setRootInActiveWindow(root)
+    worker.durations += Long.MAX_VALUE
+
+    val selected = extractor.selectDisplayWindows(service)
+
+    assertEquals(2, selected.displayId)
+    assertTrue(selected.windows.isEmpty())
+    assertTrue(selected.listingSkipped)
+    val captureRoot = fakeNode("example.app", text = "App")
+    // The lookup recycles its own window and root, so the capture gets its own pair.
+    val captureWindow = fakeWindow(3, 0, captureRoot, WindowState(focused = true, active = true))
+    org.robolectric.Shadows.shadowOf(captureWindow).setDisplayId(2)
+    org.robolectric.Shadows.shadowOf(captureRoot).setAccessibilityWindowInfo(captureWindow)
+    assertEquals(
+      captureRoot,
+      extractor.rootForDisplay(captureRoot, selected.windows, selected.displayId),
+    )
+    assertEquals(WINDOW_READ_BUDGET_MS, worker.nowMs)
+  }
+
+  @Test
+  fun `a skipped listing keeps an explicitly requested display`() {
+    useGuard()
+    worker.durations += Long.MAX_VALUE
+
+    val selected = extractor.selectDisplayWindows(service(), 7)
+
+    assertEquals(7, selected.displayId)
+    assertTrue(selected.windows.isEmpty())
+    assertTrue(selected.listingSkipped)
+    assertEquals(1, worker.budgets.size)
+  }
+
+  @Test
+  fun `a skipped active display lookup defaults to display zero`() {
+    useGuard()
+    worker.durations.addAll(listOf(Long.MAX_VALUE, Long.MAX_VALUE))
+
+    val selected = extractor.selectDisplayWindows(service())
+
+    assertEquals(0, selected.displayId)
+    assertTrue(selected.listingSkipped)
+    assertEquals(2 * WINDOW_READ_BUDGET_MS, worker.nowMs)
+  }
+
+  @Test
   fun `a responsive window listing is returned unchanged`() {
     useGuard()
     val selected = extractor.selectDisplayWindows(service())

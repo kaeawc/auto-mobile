@@ -88,9 +88,26 @@ describe("XR panel-space tap routing", () => {
         expectedBounds: element.bounds,
       },
     ]);
+    expect(service.getNodeActionHistory()[0]).toHaveProperty("allowInvisible", true);
     expect(service.getTapHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(0);
     expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a visible node click omits the invisible opt in", async () => {
+    const visibleHierarchy = structuredClone(hierarchy);
+    const visibleLauncher = new SearchableHierarchy()
+      .project(visibleHierarchy)
+      .find((entry) => entry.label === "Open Launcher Panel")!;
+    Object.assign(visibleLauncher.source, { "visible-to-user": true });
+    const { tap, service } = setup();
+    await tap.executeAndroidTap("tap", point, 0, {
+      element: { ...element, "visible-to-user": true },
+      isTalkBackEnabled: false,
+      options: { action: "tap", resolvedHierarchy: visibleHierarchy },
+    });
+    expect(service.getNodeActionHistory()).toHaveLength(1);
+    expect(service.getNodeActionHistory()[0]).not.toHaveProperty("allowInvisible");
   });
 
   for (const mode of [
@@ -265,6 +282,7 @@ describe("XR panel-space tap routing", () => {
         ].includes(mode)
       ) {
         await result;
+        expect(service.getNodeActionHistory()[0]).not.toHaveProperty("allowInvisible");
         expect(service.getNodeActionHistory()).toMatchObject([
           {
             action: "click",

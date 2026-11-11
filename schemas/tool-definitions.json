@@ -37284,6 +37284,15 @@
             "type": "string"
           }
         },
+        "platform": {
+          "description": "action=end only: the platform written at the top of the plan",
+          "type": "string",
+          "enum": ["android", "ios", "tvos"]
+        },
+        "platformNote": {
+          "description": "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",
+          "type": "string"
+        },
         "error": {
           "type": "string"
         },

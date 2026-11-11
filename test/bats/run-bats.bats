@@ -397,6 +397,30 @@ STUB
   [ "$status" -eq 7 ]
 }
 
+@test "ensure_gnu_parallel installs parallel through the bounded apt helper (#17930)" {
+  local bin="$FIXTURES/apt-bin" chmod_bin
+  chmod_bin="$(command -v chmod)"
+  mkdir -p "$bin"
+  for tool in sed grep bash; do ln -s "$(command -v "$tool")" "$bin/$tool"; done
+  # A raw apt-get call would bypass the helper's bounds and mirror fallback.
+  printf '#!/usr/bin/env bash\necho "raw apt-get $*" >> "%s"\n' "$ARGS_FILE" > "$bin/apt-get"
+  "$chmod_bin" +x "$bin/apt-get"
+  cat > "$FIXTURES/install-apt.sh" <<STUB
+#!/usr/bin/env bash
+printf 'helper:%s\n' "\$*" >> "$ARGS_FILE"
+printf '#!/bin/sh\necho "GNU parallel 20240122"\n' > "$bin/parallel"
+"$chmod_bin" +x "$bin/parallel"
+STUB
+  "$chmod_bin" +x "$FIXTURES/install-apt.sh"
+  source "$SCRIPT"
+  [[ "$RUN_BATS_APT_INSTALLER" == "$REPO_ROOT/scripts/ci/install-apt-packages.sh" ]]
+  [ -x "$RUN_BATS_APT_INSTALLER" ]
+  RUN_BATS_APT_INSTALLER="$FIXTURES/install-apt.sh" PATH="$bin" run ensure_gnu_parallel
+  [ "$status" -eq 0 ]
+  grep -Fxq 'helper:parallel' "$ARGS_FILE"
+  ! grep -q 'raw apt-get' "$ARGS_FILE"
+}
+
 # --- per-file duration recording and slowest-file report (#11474) -----------
 # The job log fixture is a trimmed real capture of the ubuntu `bats-unit-joblog`
 # artifact (merge.yml run 38085793737): sequences 1-12 of the parallel pass.

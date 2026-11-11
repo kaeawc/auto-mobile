@@ -105,7 +105,9 @@ export interface TapAnyAndroidTapperDependencies {
     options: TapAnyElementOptions,
     viewHierarchy: ViewHierarchyResult,
     sizeOptions?: ScreenSizeForOffscreenCheckOptions,
-  ): { element: Element | null; containerFound: boolean };
+  ):
+    | { element: Element | null; containerFound: boolean }
+    | Promise<{ element: Element | null; containerFound: boolean }>;
   resolveTapPoint(
     target: CapturedTapTarget,
     sizeOptions?: ScreenSizeForOffscreenCheckOptions,
@@ -439,7 +441,7 @@ export class TapAnyAndroidTapper {
         "cached-ok",
         { timer: this.deps.timer },
       );
-      const refound = this.deps.findClickableElement(options, capture.hierarchy, {
+      const refound = await this.deps.findClickableElement(options, capture.hierarchy, {
         observationScreenSize: screenSize,
       });
       if (!refound.element) {
@@ -499,7 +501,7 @@ export class TapAnyAndroidTapper {
       "fresh",
       { timer: this.deps.timer },
     );
-    const found = this.deps.findClickableElement(options, capture.hierarchy, {
+    const found = await this.deps.findClickableElement(options, capture.hierarchy, {
       observationScreenSize: screenSize,
     });
     if (!found.element) {

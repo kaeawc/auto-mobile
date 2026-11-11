@@ -47,6 +47,8 @@
 
 log() { printf '%s\n' "$*" >&2; }
 
+RUN_BATS_APT_INSTALLER="${RUN_BATS_APT_INSTALLER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-apt-packages.sh}"
+
 # `bats --jobs` requires *GNU* parallel specifically. A bare `command -v
 # parallel` is not enough: the unrelated moreutils `parallel` is also named
 # `parallel` and would satisfy it while breaking bats. Only GNU parallel prints
@@ -63,9 +65,9 @@ ensure_gnu_parallel() {
   if command -v brew > /dev/null 2>&1; then
     brew install parallel
   elif command -v apt-get > /dev/null 2>&1; then
-    sudo apt-get update -qq
-    # The Debian/Ubuntu 'parallel' package IS GNU parallel.
-    sudo apt-get install -y -qq parallel
+    # The Debian/Ubuntu 'parallel' package IS GNU parallel. The shared helper
+    # bounds each apt call and falls back to an alternate mirror (#17930).
+    "$RUN_BATS_APT_INSTALLER" parallel
   else
     log "ERROR: cannot install GNU parallel (no brew or apt-get)"
     return 1

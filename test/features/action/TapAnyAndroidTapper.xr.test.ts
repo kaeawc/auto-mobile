@@ -262,3 +262,58 @@ describe("tapAny bounds-only XR node click on Settings rows (#17845)", () => {
     });
   }
 });
+
+describe("XR tapAny with a leaf text container", () => {
+  const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/android-xr/observe-settings-home-hidden-systemui.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+
+  for (const outside of [false, true]) {
+    test(`Apps label permits its owner row and refuses unrelated targets: ${outside}`, async () => {
+      const snapshot = identifyObservedHierarchy(
+        "android",
+        { ...structuredClone(capture.viewHierarchy), hierarchy: {} },
+        "cached-ok",
+        { timer: new FakeTimer() },
+      );
+      const nodes = new SearchableHierarchy().project(snapshot.hierarchy);
+      const label = nodes.find((node) => node.properties.text === "Apps")!;
+      const row = nodes.find(
+        (node) =>
+          node.bounds?.top === (outside ? 196 : 548) &&
+          node.bounds.bottom === (outside ? 372 : 724) &&
+          node.categories.clickable,
+      )!;
+      const { tapper, service, adb } = setup(true, () => ({
+        ...label.properties,
+        bounds: label.bounds!,
+      }));
+      const result = tapper.executeAndroidTap("tap", point, 0, {
+        target: {
+          element: { ...row.properties, bounds: row.bounds! },
+          talkBackState: false,
+          scoped: true,
+          container: { text: "Apps" },
+          capture: snapshot,
+        },
+      });
+      if (outside) {
+        await expect(result).rejects.toThrow(/XR panel coordinate space/);
+        expect(service.getNodeActionHistory()).toHaveLength(0);
+      } else {
+        await result;
+        expect(service.getNodeActionHistory()).toMatchObject([
+          { action: "click", expectedBounds: { left: 48, top: 548, right: 696, bottom: 724 } },
+        ]);
+      }
+      expect(service.getTapHistory()).toHaveLength(0);
+      expect(adb.getAllCommands()).toHaveLength(0);
+    });
+  }
+});

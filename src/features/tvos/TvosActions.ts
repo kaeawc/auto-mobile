@@ -7,7 +7,11 @@ import type {
   SendKeysResult,
 } from "../action/SendKeys";
 import type { Platform, PressButtonResult } from "../../models";
-import { TV_REMOTE_BUTTONS, type TVRemoteButton } from "./TvosRunnerClient";
+import {
+  TV_REMOTE_BUTTONS,
+  TVOS_RUNNER_COMMAND_TIMEOUT_MS,
+  type TVRemoteButton,
+} from "./TvosRunnerClient";
 import { requireTvosRunner } from "./TvosRunnerRecovery";
 
 export function unsupportedTvosAction(action: string): never {
@@ -24,6 +28,7 @@ export async function tvosPress(
   deviceId: string,
   button: string,
   signal?: AbortSignal,
+  durationMs?: number,
 ): Promise<PressButtonResult> {
   const action = TV_REMOTE_BUTTONS.find((value): value is TVRemoteButton => value === button);
   if (!action) {
@@ -32,7 +37,13 @@ export async function tvosPress(
   signal?.throwIfAborted();
   await (
     await requireTvosRunner(deviceId, signal)
-  ).request({ type: "request_press_button", action }, signal);
+  ).request(
+    { type: "request_press_button", action, ...(durationMs === undefined ? {} : { durationMs }) },
+    signal,
+    durationMs === undefined
+      ? undefined
+      : { timeoutMs: durationMs + TVOS_RUNNER_COMMAND_TIMEOUT_MS },
+  );
   return { success: true, button, keyCode: 0 };
 }
 

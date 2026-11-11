@@ -261,11 +261,29 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "keyboard", { action: "detect" });
     recordPlanCall(recorder, "keyboard", { action: "listImes" });
     recordPlanCall(recorder, "clipboard", { action: "get" });
-    recordPlanCall(recorder, "systemTray", { action: "list", appId: "com.example" });
-    recordPlanCall(recorder, "systemTray", { action: "find", notification: { title: "Hi" } });
     recordPlanCall(recorder, "displayConfig", {});
     recordPlanCall(recorder, "systemAlerts", { action: "get" });
     expect(recorder.stop()).toEqual([]);
+  });
+
+  test("explicit verification reads keep their order beside the captured reply action", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recordPlanCall(recorder, "systemTray", { action: "list" });
+    recordPlanCall(recorder, "systemTray", {
+      action: "tap",
+      notification: { title: "Reminder", appId: "dev.jasonpearson.accept", replyText: "hello" },
+    });
+    recordPlanCall(recorder, "getLogs", { since: { seconds: 120 }, tags: ["AcceptApp"] });
+    recordPlanCall(recorder, "observe", {});
+    recordPlanCall(recorder, "systemTray", { action: "find", notification: { title: "Reminder" } });
+    expect(recorder.stop().map((step) => step.tool)).toEqual([
+      "systemTray",
+      "systemTray",
+      "getLogs",
+      "observe",
+      "systemTray",
+    ]);
   });
 
   test("mutating actions of the same tools are recorded", () => {

@@ -172,6 +172,7 @@ function launchHost(launcher: DaemonLauncher, h: ReturnType<typeof harness>): Da
       },
       launchLogFileSystem: { openSync: () => 1, closeSync: () => {} },
       launchWorkingDirectory: () => "/fake",
+      probeLaunchCheckoutVersion: async () => "test",
     },
     throwIfRecoveryCancelled: () => {},
     waitForReady: (...args) => h.readiness.waitForReady(...args),

@@ -23,8 +23,11 @@ export type TVRemoteButton = (typeof TV_REMOTE_BUTTONS)[number];
 export type TvosCommand =
   | { type: "request_hierarchy"; bundleId?: string }
   | { type: "request_screenshot" }
-  | { type: "request_press_button"; action: TVRemoteButton; bundleId?: string }
+  | { type: "request_press_button"; action: TVRemoteButton; durationMs?: number; bundleId?: string }
   | { type: "request_append_text"; text: string; bundleId?: string };
+
+/** Advertised in `supportedFeatures` by runners that honour `durationMs` on request_press_button. */
+export const TVOS_PRESS_BUTTON_HOLD_FEATURE = "press_button_hold";
 
 /** Each runner command's deadline; a runner that misses one is treated as stuck. */
 export const TVOS_RUNNER_COMMAND_TIMEOUT_MS = 5000;
@@ -85,11 +88,14 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
   private readonly pending = new Map<string, Pending>();
   private sequence = 0;
   private supported = new Set<string>();
+  private features = new Set<string>();
   private readonly ready: Promise<void>;
   private resolveReady!: () => void;
   private rejectReady!: (error: unknown) => void;
   private failure?: ActionableError;
   private connectionLost = false;
+  /** When the latest dispatched remote hold ends; the runner's serial queue is busy until then. */
+  private holdEndsAt = 0;
 
   constructor(
     url: string,
@@ -166,6 +172,11 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
         ? response.supportedCommands.filter((item): item is string => typeof item === "string")
         : [],
     );
+    this.features = new Set(
+      Array.isArray(response.supportedFeatures)
+        ? response.supportedFeatures.filter((item): item is string => typeof item === "string")
+        : [],
+    );
     this.resolveReady();
     return;
   }
@@ -198,8 +209,11 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
     options?: { timeoutMs?: number },
   ): Promise<unknown> {
     const timer = this.options.timer ?? defaultTimer;
+    // The runner executes commands serially, so a command issued during a hold also waits out
+    // the rest of that hold before its own budget starts to matter.
     const timeoutMs =
-      options?.timeoutMs ?? this.options.timeoutMs ?? TVOS_RUNNER_COMMAND_TIMEOUT_MS;
+      (options?.timeoutMs ?? this.options.timeoutMs ?? TVOS_RUNNER_COMMAND_TIMEOUT_MS) +
+      Math.max(0, this.holdEndsAt - timer.now());
     // One budget covers both handshake and command; correlation entries are removed even on abort.
     const requestId = String(++this.sequence);
     const cancellation = new AbortController();
@@ -230,9 +244,23 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
               "unsupported_on_tvos",
             );
           }
+          // An older runner decodes request_press_button without durationMs and would short-press.
+          if (
+            command.type === "request_press_button" &&
+            command.durationMs !== undefined &&
+            !this.features.has(TVOS_PRESS_BUTTON_HOLD_FEATURE)
+          ) {
+            throw new TvosRunnerError(
+              "The tvos runner predates remote long presses (durationMs); rebuild or update the tvOS runner.",
+              "unsupported_on_tvos",
+            );
+          }
           return new Promise<unknown>((resolve, reject) => {
             this.pending.set(requestId, { type: command.type, resolve, reject });
             dispatched = true;
+            if (command.type === "request_press_button" && command.durationMs !== undefined) {
+              this.holdEndsAt = Math.max(this.holdEndsAt, timer.now() + command.durationMs);
+            }
             this.socket.send(message);
           });
         },

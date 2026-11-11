@@ -113,6 +113,12 @@ ways to turn it on, for example:
 recordToolCalls is behind the 'tool-call-recording' feature flag, which is disabled. Enable it with `auto-mobile --daemon set-feature-flag tool-call-recording true` or in the IDE plugin under Settings > AutoMobile > Feature Flags, then retry the call.
 ```
 
+A `recordToolCalls` recording retains successful explicit verification calls:
+`systemTray` `list`/`find`, `getLogs`, and `observe`, in their original order.
+Incidental probes such as keyboard detection and clipboard reads are omitted.
+Recording does not infer assertions from the result; add step `expect` checks
+to the exported plan as described in [UI tests](ui-tests.md#step-expectations).
+
 Debug-only tools (`debug`), `recordToolCalls` `begin`/`end`
 (`tool-call-recording`) and `setDeviceState` `deviceCondition`
 (`device-condition`) refuse this way. MCP clients cannot change a flag: it applies

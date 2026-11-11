@@ -44,6 +44,20 @@ class RecordingAndroid implements AndroidLogSource {
 }
 
 describe("resolveSinceSeconds (#14082)", () => {
+  test("run-start uses this execution's start, including zero, and rejects a missing plan", () => {
+    const warnings: string[] = [];
+    expect(
+      resolveSinceSeconds("run-start", "d", clock({ planStartMs: () => 92_500 }), warnings),
+    ).toBe(8);
+    expect(resolveSinceSeconds("run-start", "d", clock({ planStartMs: () => 0 }), warnings)).toBe(
+      100,
+    );
+    expect(warnings).toEqual([]);
+    expect(() => resolveSinceSeconds("run-start", "d", clock(), [])).toThrow(
+      "requires an executing plan",
+    );
+  });
+
   test("lastAction is measured from the latest control call's start", () => {
     const warnings: string[] = [];
     expect(
@@ -128,6 +142,46 @@ describe("GetLogs", () => {
       pids: [4211],
       truncated: false,
     });
+  });
+
+  test("Android: an anchored since is re-derived at read time, not frozen at request time", async () => {
+    let now = 100_000;
+    const android = new RecordingAndroid();
+    await new GetLogs({
+      clock: clock({ now: () => now, planStartMs: () => 90_000 }),
+      android: () => android,
+      ios: () => {
+        throw new Error("unused");
+      },
+    }).execute(ANDROID, { appId: "com.example", since: "run-start" });
+    expect(android.requests[0]?.sinceSeconds).toBe(10);
+    now = 103_000;
+    expect(android.requests[0]?.refreshSinceSeconds?.()).toBe(13);
+  });
+
+  test("iOS: an anchored since is re-derived after the process-name probe", async () => {
+    let now = 100_000;
+    const seconds: number[] = [];
+    const ios: IosUnifiedLogSource = {
+      resolveProcessName: async () => {
+        // A slow `simctl listapps` takes 3 fake seconds.
+        now += 3_000;
+        return "Playground";
+      },
+      collect: async (_appId, sinceSeconds) => {
+        seconds.push(sinceSeconds);
+        return { text: "", truncated: false };
+      },
+    };
+    await new GetLogs({
+      clock: clock({ now: () => now, planStartMs: () => 90_000 }),
+      android: () => {
+        throw new Error("unused");
+      },
+      ios: () => ios,
+    }).execute(SIMULATOR, { appId: "com.example", since: "run-start" });
+    // 10s at request time plus the 3s probe: the window must cover the whole 13s.
+    expect(seconds).toEqual([13]);
   });
 
   test("iOS: reads the app's unified log, applies grep and reports ignored filters", async () => {

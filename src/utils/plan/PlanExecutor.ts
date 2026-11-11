@@ -85,6 +85,7 @@ export interface PlanExecutor {
 }
 
 interface SequentialPlanExecutionOptions {
+  planStartMs: number;
   plan: Plan;
   startStep: number;
   platform?: string;
@@ -95,6 +96,7 @@ interface SequentialPlanExecutionOptions {
 }
 
 interface ParallelPlanExecutionOptions {
+  planStartMs: number;
   plan: Plan;
   partitionedPlan: ReturnType<typeof PlanPartitioner.partition> & { devices: string[] };
   startStep: number;
@@ -199,6 +201,7 @@ export class DefaultPlanExecutor<
       executionOptions,
     ]: Parameters<PlanExecutor["executePlan"]>
   ): Promise<PlanExecutionResult> {
+    const planStartMs = this.timer.now();
     // Check if this is a multi-device plan
     const partitionedPlan = PlanPartitioner.partition(plan);
 
@@ -210,6 +213,7 @@ export class DefaultPlanExecutor<
       }
       // Multi-device parallel execution
       return this.executeParallel({
+        planStartMs,
         plan,
         partitionedPlan,
         startStep,
@@ -223,6 +227,7 @@ export class DefaultPlanExecutor<
     } else {
       // Single-device sequential execution
       return this.executeSequential({
+        planStartMs,
         plan,
         startStep,
         platform,
@@ -274,6 +279,7 @@ export class DefaultPlanExecutor<
           deviceId,
           sessionUuid,
           signal,
+          planStartMs: options.planStartMs,
           captureObserveSteps: executionOptions?.captureObserveSteps,
           logPrefix: `[PLAN_STEP_${i + 1}]`,
         });
@@ -391,7 +397,6 @@ export class DefaultPlanExecutor<
       sessionUuid,
       signal,
       abortStrategy = DEFAULT_ABORT_STRATEGY,
-      executionOptions,
     } = options;
     const outOfBounds = this.validateParallelStartStep(plan, startStep);
     if (outOfBounds) {
@@ -437,9 +442,10 @@ export class DefaultPlanExecutor<
           deviceId: deviceId,
           sessionUuid: sessionUuid,
           signal: combinedSignal,
-          executionOptions: executionOptions,
+          executionOptions: options.executionOptions,
           participants: participants,
           toolResultsBudget: toolResultsBudget,
+          planStartMs: options.planStartMs,
         });
         recordParallelTrackResult({
           result,

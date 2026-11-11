@@ -67,6 +67,7 @@ export interface InternalToolCallOptions {
   tapAtPlanContext?: TapAtPlanContext;
   /** A plan step's lock namespace, for this one call (#15663). */
   planLockNamespace?: string;
+  planStartMs?: number;
   sessionUuid?: string;
   targetDevice?: BootedDevice;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
@@ -89,6 +90,7 @@ export interface InternalToolInvocationContext {
   tapAtPlanContext: TapAtPlanContext | undefined;
   /** Always present, so a nested call never inherits a step's lock namespace. */
   planLockNamespace: string | undefined;
+  planStartMs?: number;
   routingSessionUuid?: string;
   toolSelectionProfileUuid?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;

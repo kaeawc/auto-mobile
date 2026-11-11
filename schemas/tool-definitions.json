@@ -11261,11 +11261,11 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "since": {
-          "description": "Window start: \"lastAction\", \"sessionStart\", or {seconds} (default 300s)",
+          "description": "Window start: \"lastAction\", \"sessionStart\", \"run-start\" (executePlan only), or {seconds} (default 300s)",
           "anyOf": [
             {
               "type": "string",
-              "enum": ["lastAction", "sessionStart"]
+              "enum": ["lastAction", "sessionStart", "run-start"]
             },
             {
               "type": "object",

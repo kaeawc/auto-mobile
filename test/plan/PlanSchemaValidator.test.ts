@@ -28,6 +28,23 @@ describe("PlanSchemaValidator", () => {
     validator.validateYaml("name: warmup\nsteps:\n  - tool: observe\n");
   });
 
+  it("accepts result assertions and rejects empty, mistyped or unknown checks", () => {
+    const plan = (assertion: string) =>
+      `name: logs\nsteps:\n  - tool: getLogs\n    params: { since: run-start }\n    expect: ${assertion}\n`;
+    expect(validator.validateYaml(plan('{ contains: "hello", notContains: "null" }')).valid).toBe(
+      true,
+    );
+    for (const invalid of [
+      "{}",
+      '{ contains: "" }',
+      "{ contains: 42 }",
+      '{ pattern: "hello" }',
+      "null",
+    ]) {
+      expect(validator.validateYaml(plan(invalid)).valid).toBe(false);
+    }
+  });
+
   it("accepts an Apple TV plan platform and device platform", () => {
     const result = validator.validateYaml(`
 name: tv-plan

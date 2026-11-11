@@ -143,6 +143,8 @@ by default; see [Device condition fixtures](device-condition.md). The `vehicle` 
 - `vehicle.motion`: `parked` or `driving` (gear, speed and parking brake are set together), or `unset`.
 - `vehicle.nightMode`: `on`, `off`, or `unset`.
 
+A test plan step takes the same object: `tool: setDeviceState` with `params.deviceCondition.vehicle`.
+
 `vehicle.motion` needs a non-user image (userdebug or eng, such as `android-automotive` API 34 ext9); on a `user` build such as the Play Store AAOS image it returns `unsupported`; `vehicle.nightMode` works on both.
 
 To check before calling, read `vehicle` in a device's `listDevices` or `getAndroid` description, or

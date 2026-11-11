@@ -656,6 +656,17 @@ export class FakeSimctl implements SimCtl {
     return !this.simulatorAppHeadless;
   }
 
+  notificationDeliveryLogs: string[] = [];
+  notificationDeliveryLogError?: Error;
+
+  async readNotificationDeliveryLog(deviceId: string): Promise<string> {
+    this.recordCall("readNotificationDeliveryLog", { deviceId });
+    if (this.notificationDeliveryLogError) {
+      throw this.notificationDeliveryLogError;
+    }
+    return this.notificationDeliveryLogs.shift() ?? "";
+  }
+
   async pushNotification(
     deviceId: string,
     bundleId: string,

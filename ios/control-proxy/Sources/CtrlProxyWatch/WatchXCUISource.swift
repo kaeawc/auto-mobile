@@ -156,28 +156,43 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
 
     func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws {
         try performGesture {
+            let hasAlerts = !systemAlerts().isEmpty
+            let appForeground = app.state == .runningForeground
+            let route = watchSwipeRoute(
+                hasAlerts: hasAlerts, appForeground: appForeground,
+                clockfaceForeground: !hasAlerts && !appForeground && clockface.state == .runningForeground
+            )
+            let target: XCUIApplication = switch route {
+            case .app, .systemAlert: app
+            case .clockface: clockface
+            case .system: system
+            }
             if let distance {
                 // The default swipe scrolls about two screens on a watch. A partial drag moves the
                 // content by a fraction of the screen so consecutive lookFor reads overlap.
-                let half = distance / 2
-                let (from, to): (CGVector, CGVector) = switch direction {
-                case .up: (CGVector(dx: 0.5, dy: 0.5 + half), CGVector(dx: 0.5, dy: 0.5 - half))
-                case .down: (CGVector(dx: 0.5, dy: 0.5 - half), CGVector(dx: 0.5, dy: 0.5 + half))
-                case .left: (CGVector(dx: 0.5 + half, dy: 0.5), CGVector(dx: 0.5 - half, dy: 0.5))
-                case .right: (CGVector(dx: 0.5 - half, dy: 0.5), CGVector(dx: 0.5 + half, dy: 0.5))
-                }
+                let (from, to) = watchSwipeVectors(direction: direction, distance: distance)
                 // A slow drag that holds before release ends without fling momentum.
-                app.coordinate(withNormalizedOffset: from).press(
-                    forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: to),
+                target.coordinate(withNormalizedOffset: from).press(
+                    forDuration: 0.05, thenDragTo: target.coordinate(withNormalizedOffset: to),
                     withVelocity: .slow, thenHoldForDuration: 0.3
                 )
                 return
             }
-            switch direction {
-            case .up: app.swipeUp()
-            case .down: app.swipeDown()
-            case .left: app.swipeLeft()
-            case .right: app.swipeRight()
+            switch route {
+            case .app, .systemAlert:
+                switch direction {
+                case .up: app.swipeUp()
+                case .down: app.swipeDown()
+                case .left: app.swipeLeft()
+                case .right: app.swipeRight()
+                }
+            case .clockface, .system:
+                // Element swipes can block while resolving the clockface or system snapshot.
+                let (from, to) = watchSwipeVectors(direction: direction, distance: nil)
+                target.coordinate(withNormalizedOffset: from).press(
+                    forDuration: 0.05, thenDragTo: target.coordinate(withNormalizedOffset: to),
+                    withVelocity: .default, thenHoldForDuration: 0
+                )
             }
         }
     }
@@ -211,6 +226,8 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         try watchVerifiedCrownRotation(snapshots: self, focusedValue: {
             try self.focusedCrownValue()
         }, wake: { point in
+            // A background-app coordinate tap can block every subsequent runner command.
+            guard self.app.state == .runningForeground else { return }
             try self.performGesture {
                 self.app.coordinate(withNormalizedOffset: point).tap()
             }

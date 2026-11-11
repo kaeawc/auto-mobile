@@ -145,7 +145,8 @@ Every other tool refuses a watch before doing anything, with:
   opens a complication has not been checked on a device, so `observe` afterwards to confirm the
   result. A point outside the watch screen fails with `tap is outside the watch screen`; take the
   coordinates from `observe`, within `screenSize`.
-- `swipeOn` swipes in a direction. With `lookFor` it swipes until an exact `text` or `elementId`
+- `swipeOn` swipes in a direction, including on the watch face after `pressButton` with `home`.
+  With `lookFor` it swipes until an exact `text` or `elementId`
   is on screen, up to `maxSwipes` (default 10, maximum 100). Each `lookFor` step is a short, slow drag (about
   one row on a list) so consecutive reads overlap and nearby targets are not skipped. Coordinates
   and duration cannot be set.
@@ -194,8 +195,15 @@ Every other tool refuses a watch before doing anything, with:
 - `installApp` takes a watch simulator `.app` bundle. `uninstallApp` refuses `keepData: true`.
 - `postNotification` sends a simulated push to the watch app named by `appId`. The simulator
   cannot pre-grant notification authorization (`simctl privacy` refuses it on watchOS): the app
-  must request permission, and you answer the prompt with `tapOn`, scrolling with `rotateCrown`
-  first if needed. A notification banner disappears after a few seconds, so call `observe`
+  must request permission, and you answer Allow with `tapOn`, scrolling with `rotateCrown` or
+  `swipeOn` first if needed. A permission prompt for "CtrlProxyWatch" may appear first. If the
+  watch reports that it dropped the push because notifications are denied for the app (the
+  permission prompt was answered Don't Allow, or Allow was never reached), `postNotification`
+  returns `success: false`. A denied app is not asked again, so uninstall and reinstall it
+  (`installApp` resets its permissions), launch it, answer Allow, then post again. Use `observe`
+  to find Allow / Don't Allow and `rotateCrown` or `swipeOn` to scroll the sheet; a "CtrlProxyWatch"
+  runner prompt can appear first. When no delivery verdict
+  is available, success means the simulator accepted the push. A notification banner disappears after a few seconds, so call `observe`
   immediately after the push to inspect its short look; the long look exposes its action buttons.
 - `launchApp` reports an app that is not installed without launching anything. `prototype: true`
   is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch. It does not

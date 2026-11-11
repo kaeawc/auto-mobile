@@ -8,6 +8,68 @@ import XCTest
 
 @MainActor
 final class WatchCommandHandlerTests: XCTestCase {
+    func testSwipeVectorsDefaultDistance() {
+        let cases: [(WatchSwipeDirection, CGVector, CGVector)] = [
+            (.up, CGVector(dx: 0.5, dy: 0.8), CGVector(dx: 0.5, dy: 0.2)),
+            (.down, CGVector(dx: 0.5, dy: 0.2), CGVector(dx: 0.5, dy: 0.8)),
+            (.left, CGVector(dx: 0.8, dy: 0.5), CGVector(dx: 0.2, dy: 0.5)),
+            (.right, CGVector(dx: 0.2, dy: 0.5), CGVector(dx: 0.8, dy: 0.5)),
+        ]
+        for (direction, from, to) in cases {
+            let vectors = watchSwipeVectors(direction: direction, distance: nil)
+            XCTAssertEqual(vectors.from.dx, from.dx, accuracy: 0.000001, direction.rawValue)
+            XCTAssertEqual(vectors.from.dy, from.dy, accuracy: 0.000001, direction.rawValue)
+            XCTAssertEqual(vectors.to.dx, to.dx, accuracy: 0.000001, direction.rawValue)
+            XCTAssertEqual(vectors.to.dy, to.dy, accuracy: 0.000001, direction.rawValue)
+        }
+    }
+
+    func testSwipeVectorsPartialDistance() {
+        let cases: [(WatchSwipeDirection, CGVector, CGVector)] = [
+            (.up, CGVector(dx: 0.5, dy: 0.7), CGVector(dx: 0.5, dy: 0.3)),
+            (.down, CGVector(dx: 0.5, dy: 0.3), CGVector(dx: 0.5, dy: 0.7)),
+            (.left, CGVector(dx: 0.7, dy: 0.5), CGVector(dx: 0.3, dy: 0.5)),
+            (.right, CGVector(dx: 0.3, dy: 0.5), CGVector(dx: 0.7, dy: 0.5)),
+        ]
+        for (direction, from, to) in cases {
+            let vectors = watchSwipeVectors(direction: direction, distance: 0.4)
+            XCTAssertEqual(vectors.from.dx, from.dx, accuracy: 0.000001, direction.rawValue)
+            XCTAssertEqual(vectors.from.dy, from.dy, accuracy: 0.000001, direction.rawValue)
+            XCTAssertEqual(vectors.to.dx, to.dx, accuracy: 0.000001, direction.rawValue)
+            XCTAssertEqual(vectors.to.dy, to.dy, accuracy: 0.000001, direction.rawValue)
+        }
+    }
+
+    func testSwipeRouteUsesAppWhenForeground() {
+        for clockfaceForeground in [false, true] {
+            XCTAssertEqual(watchSwipeRoute(
+                hasAlerts: false, appForeground: true, clockfaceForeground: clockfaceForeground
+            ), .app)
+        }
+    }
+
+    func testSwipeRouteKeepsAlertPath() {
+        for appForeground in [false, true] {
+            for clockfaceForeground in [false, true] {
+                XCTAssertEqual(watchSwipeRoute(
+                    hasAlerts: true, appForeground: appForeground, clockfaceForeground: clockfaceForeground
+                ), .systemAlert)
+            }
+        }
+    }
+
+    func testSwipeRouteUsesClockfaceWhenAppIsNotForegroundAndNoAlert() {
+        XCTAssertEqual(watchSwipeRoute(
+            hasAlerts: false, appForeground: false, clockfaceForeground: true
+        ), .clockface)
+    }
+
+    func testSwipeRouteUsesSystemWhenNeitherAppNorClockfaceIsForegroundAndNoAlert() {
+        XCTAssertEqual(watchSwipeRoute(
+            hasAlerts: false, appForeground: false, clockfaceForeground: false
+        ), .system)
+    }
+
     func testTapPointMapsToNormalizedOffset() throws {
         let offset = try watchTapNormalizedOffset(
             x: 93, y: 140, frame: CGRect(x: 0, y: 0, width: 186, height: 224)

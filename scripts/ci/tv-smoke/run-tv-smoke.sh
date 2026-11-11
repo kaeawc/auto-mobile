@@ -102,19 +102,23 @@ fi
 phase="creating ${out_dir}"
 mkdir -p "${out_dir}"
 
-if [[ "${TV_SMOKE_SKIP_IMAGE_INSTALL:-0}" != "1" ]]; then
+skip_image_install="${TV_SMOKE_SKIP_IMAGE_INSTALL:-0}"
+if [[ "${skip_image_install}" != "1" || "${create_via}" == "avdmanager" ]]; then
   phase="locating sdkmanager"
   sdkmanager="$(locate_sdkmanager)"
+fi
+if [[ "${skip_image_install}" != "1" ]]; then
   phase="installing ${system_image}"
   install_system_image "TV smoke" "${sdkmanager}" "${sdkmanager_timeout_seconds}" \
     "${system_image}" "${out_dir}"
-  if [[ "${create_via}" == "avdmanager" ]]; then
-    phase="creating the ${avd_name} AVD"
-    avdmanager="$(dirname "${sdkmanager}")/avdmanager"
-    echo no | "${avdmanager}" create avd --force --name "${avd_name}" \
-      --package "${system_image}" --device "${device_profile}" \
-      > "${out_dir}/avdmanager-create.log" 2>&1
-  fi
+fi
+# The named AVD is created even when the image install is skipped: startDevice boots it by name.
+if [[ "${create_via}" == "avdmanager" ]]; then
+  phase="creating the ${avd_name} AVD"
+  avdmanager="$(dirname "${sdkmanager}")/avdmanager"
+  echo no | "${avdmanager}" create avd --force --name "${avd_name}" \
+    --package "${system_image}" --device "${device_profile}" \
+    > "${out_dir}/avdmanager-create.log" 2>&1
 fi
 
 if [[ -z "${fixture_apk}" ]]; then

@@ -116,6 +116,14 @@ STUB
   grep -qx "tvSmoke.ts avd=automobile-tv-smoke apk=$ROOT/android/tv-fixture/build/outputs/apk/debug/tv-fixture-debug.apk" "$BUN_LOG"
 }
 
+@test "avdmanager still creates the named AVD when image installation is skipped" {
+  TV_SMOKE_CREATE_VIA=avdmanager TV_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$SDK_LOG" ]
+  grep -q -- "--name automobile-tv-smoke --package system-images;android-36;android-tv;x86_64 --device tv_1080p" "$AVD_LOG"
+  grep -qx "tvSmoke.ts avd=automobile-tv-smoke apk=$ROOT/android/tv-fixture/build/outputs/apk/debug/tv-fixture-debug.apk" "$BUN_LOG"
+}
+
 @test "a supplied fixture APK skips the build and is passed to the smoke" {
   FIXTURE_APK="$BATS_TEST_TMPDIR/tv.apk"
   : > "$FIXTURE_APK"

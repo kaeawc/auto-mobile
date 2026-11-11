@@ -73,7 +73,8 @@ export async function applyProvisionAndroidAuto(
   }
   signal.throwIfAborted();
   return await runOwnedProjection(androidAutoApplier(deps), device, {
-    run: async (applier, operationSignal) => await applier.apply(device, options, operationSignal),
+    run: async (applier, operationSignal) =>
+      await applier.apply(device, options, operationSignal, totalDeadlineMs),
     within: async (operation, onPendingSettlement) =>
       await runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, signal, {
         phase: "setting up Android Auto projection",
@@ -101,7 +102,7 @@ export async function startDeviceAndroidAutoHeadUnit(
 ): Promise<AndroidAutoProvisionReport> {
   return await runOwnedProjection(androidAutoApplier(deps), device, {
     run: async (applier, operationSignal) =>
-      await applier.startHeadUnit(device, options, operationSignal),
+      await applier.startHeadUnit(device, options, operationSignal, totalDeadlineMs),
     within: async (operation, onOrphan) =>
       await runOperationWithinDeadline(deps.timer, totalDeadlineMs, signal, {
         operation,

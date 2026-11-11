@@ -77,10 +77,14 @@ Unknown sources, head unit server, transport, DHU, welcome screen. Each step rea
 changes nothing when it already holds, so a rerun on a provisioned phone reports every step
 `already-done` and reuses the running DHU session.
 
-Before the first step the provisioner polls `adb get-state` on a bounded backoff (up to 60 s, and
-never past the provision deadline) until the phone reads `device`: right after boot adb can still
-report the emulator `offline`, and every step needs a working transport. A phone that stays offline
-fails the run before any step, so nothing on it changed.
+Before the first step the provisioner polls `adb get-state` on a bounded backoff (up to 60 s)
+until the phone reads `device`: right after boot adb can still report the emulator `offline`, and
+every step needs a working transport. The wait also stops one state check (plus a margin) before
+the caller's deadline, and the deadline's abort cuts a re-check delay short, so a short deadline
+still ends in the offline error rather than a generic timeout. A phone that stays offline fails
+the run before any step, so nothing on it changed: provisionDevice reports that error as
+`device_offline` even when the rollback of a device it created then fails, which `cleanup` still
+reports.
 
 - **Install.** An updated system app lives under `/data/app`; the stub lives on a read-only partition.
   APKs are needed only while the stub is still in use, and AutoMobile never downloads them.

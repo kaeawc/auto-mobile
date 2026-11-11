@@ -54,6 +54,9 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 | `postNotification`  | Sends a simulated push to an app; `appId` is required.                                                  |
 | `setAppPermissions` | Grants, revokes or resets privacy permissions; the result is not read back.                             |
 
+| `getLogs` | Reads app logs; `appId` is required. Android-only filters are ignored with a warning. |
+| `crashApp` | Crashes a running app and checks for fresh crash evidence; returns a crash report summary when available. |
+
 <!-- apple-tv-supported-tools:end -->
 
 Every other device tool refuses an Apple TV with an error naming the tool. `tapAt`, `swipeOn`,

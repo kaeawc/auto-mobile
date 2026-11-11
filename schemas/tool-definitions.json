@@ -9139,13 +9139,13 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Stop active recording and export a YAML plan.",
+    "description": "Stop the active recordDeviceGestures or recordToolCalls recording and export a YAML plan.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "recordingId": {
-          "description": "recordDeviceGestures recordingId; defaults to the active recording. For recordToolCalls plans use recordToolCalls action=end",
+          "description": "recordDeviceGestures recordingId; defaults to the active recording. Omit it to end this connection's recordToolCalls recording",
           "type": "string"
         },
         "planName": {
@@ -9191,6 +9191,13 @@
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
+        },
+        "warnings": {
+          "description": "recordToolCalls recordings only, present when non-empty: calls skipped or recorded in a weakened form",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "error": {
           "type": "string"
@@ -37210,7 +37217,7 @@
       "destructiveHint": false,
       "openWorldHint": false
     },
-    "description": "Record MCP tool calls to a YAML plan: action begin, end (returns the plan), or status.",
+    "description": "Record MCP tool calls to a YAML plan: action begin, end (returns the plan; exportPlan also ends it), or status.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -37221,7 +37228,7 @@
           "enum": ["begin", "end", "status"]
         },
         "planName": {
-          "description": "Plan name for action=end",
+          "description": "Plan name: on begin, the exported plan's name; on end, overrides the begin name",
           "type": "string"
         },
         "sessionUuid": {

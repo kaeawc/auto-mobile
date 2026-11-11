@@ -11,6 +11,8 @@ export interface ToolCallRecordingStartResult {
   startedAt: string;
   alreadyActive?: boolean;
   currentStepCount?: number;
+  /** The name the plan will be exported under, when begin was given one. */
+  planName?: string;
 }
 
 export interface ToolCallRecordingStopResult {
@@ -34,6 +36,8 @@ export interface ToolCallRecordingStatus {
 interface ToolCallRecordingSession {
   recorder: ToolCallRecorder;
   startedAt: number;
+  /** The planName given to begin; the exported plan's name when end names none (#17950). */
+  planName?: string;
 }
 
 export interface ToolCallRecordingOptions {
@@ -74,8 +78,9 @@ export function getToolCallRecordingStatus({
 
 export function startToolCallRecording({
   connectionId,
+  planName,
   timer = defaultTimer,
-}: ToolCallRecordingOptions = {}): ToolCallRecordingStartResult {
+}: ToolCallRecordingOptions & { planName?: string } = {}): ToolCallRecordingStartResult {
   const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
   const activeSession = activeSessions.get(connectionKey);
   if (activeSession) {
@@ -85,13 +90,18 @@ export function startToolCallRecording({
       startedAt: new Date(activeSession.startedAt).toISOString(),
       alreadyActive: true,
       currentStepCount: activeSession.recorder.stepCount,
+      ...(activeSession.planName && { planName: activeSession.planName }),
     };
   }
 
   const recorder = new ToolCallRecorder();
   recorder.start();
 
-  const session = { recorder, startedAt: timer.now() };
+  const session: ToolCallRecordingSession = {
+    recorder,
+    startedAt: timer.now(),
+    ...(planName?.trim() && { planName: planName.trim() }),
+  };
   activeSessions.set(connectionKey, session);
 
   logger.info("[ToolCallRecording] Started tool call recording");
@@ -99,6 +109,7 @@ export function startToolCallRecording({
   return {
     recording: true,
     startedAt: new Date(session.startedAt).toISOString(),
+    ...(session.planName && { planName: session.planName }),
   };
 }
 
@@ -125,6 +136,8 @@ export function stopToolCallRecording({
         "connection (such as a one-shot CLI call) cannot end another connection's recording.",
     );
   }
+  // A planName given to end wins; otherwise the one given to begin names the plan (#17950).
+  planName = planName?.trim() ? planName : session.planName;
 
   try {
     const { steps, warnings } = session.recorder.stopWithWarnings();

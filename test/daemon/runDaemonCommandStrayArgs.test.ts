@@ -79,6 +79,8 @@ describe("daemon lifecycle commands refuse stray arguments and unknown options",
   test.each([
     ["stop", ["--port", "3920", "--strict-port"]],
     ["start", ["--network-mockable"]],
+    ["start", ["--headless"]],
+    ["restart", ["--headless", "--debug"]],
     ["start", ["--no-ui-perf-mode", "--skip-ctrl-proxy-download"]],
     ["restart", ["--debug", "--debug-perf"]],
     ["restart", ["--port=3001", "--video-fps", "30", "--event-all-markers", "@,#"]],

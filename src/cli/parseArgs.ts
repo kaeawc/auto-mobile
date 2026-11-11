@@ -76,6 +76,7 @@ const booleanOptions = Object.fromEntries(
     "no-retrieve-interactive-windows",
     "no-occlusion",
     "strict-port",
+    "headless",
   ].map((name) => [name, { type: "boolean" as const }]),
 );
 
@@ -96,6 +97,11 @@ const externalValueFlags = [
   TOOL_OUTPUTS_DIR_FLAG,
   TOOL_OUTPUT_DIR_FLAG_ALIAS,
 ];
+
+/** Headless prototype mode (#17974): the flag or AUTOMOBILE_HEADLESS. */
+function headlessRequested(flag: boolean, environment: NodeJS.ProcessEnv): boolean {
+  return flag || readEnvBool(ENV.HEADLESS, environment);
+}
 
 /** Parses daemon options from explicit argument tokens, rather than process.argv. */
 // The existing option surface is intentionally preserved during this extraction.
@@ -135,6 +141,7 @@ export function parseArgs(
     hasFlag("debug-perf") || hasFlag("ui-perf-debug") || readEnvBool(ENV.DEBUG_PERF, environment);
   const debug = hasFlag("debug") || readEnvBool(ENV.DEBUG, environment);
   const strictPort = hasFlag("strict-port");
+  const headless = headlessRequested(hasFlag("headless"), environment);
   const uiPerfMode = !hasFlag("no-ui-perf-mode");
   const memPerfAuditMode = hasFlag("mem-perf-audit");
   const a11yAuditMode = hasFlag("accessibility-audit");
@@ -187,6 +194,7 @@ export function parseArgs(
     debugPerf,
     debug,
     strictPort,
+    headless,
     uiPerfMode,
     memPerfAuditMode,
     a11yAuditMode,

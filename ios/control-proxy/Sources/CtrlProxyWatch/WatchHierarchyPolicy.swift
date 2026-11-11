@@ -3,14 +3,37 @@ import CoreGraphics
 import Foundation
 import os
 
+/// Where a `tapAt` lands. The host-app and alert paths offset from the target's origin; the
+/// clockface path uses a normalized offset because the clockface is a separate XCUIApplication.
+enum WatchTapRoute: Equatable {
+    case app
+    case systemAlert
+    case clockface(CGVector)
+}
+
+/// Route a point tap without querying XCTest. `clockfaceFrame` is read only on the clockface path.
+func watchTapRoute(
+    x: Double, y: Double, hasAlerts: Bool, appForeground: Bool, clockfaceFrame: () -> CGRect
+) throws -> WatchTapRoute {
+    if hasAlerts { return .systemAlert }
+    if appForeground { return .app }
+    return .clockface(try watchTapNormalizedOffset(x: x, y: y, frame: clockfaceFrame()))
+}
+
 /// Convert screen points to the clockface coordinate space without querying XCTest.
 func watchTapNormalizedOffset(x: Double, y: Double, frame: CGRect) throws -> CGVector {
+    let originX = Double(frame.origin.x)
+    let originY = Double(frame.origin.y)
     let width = Double(frame.size.width)
     let height = Double(frame.size.height)
-    guard width.isFinite, height.isFinite, width > 0, height > 0,
-          x.isFinite, y.isFinite, x >= 0, y >= 0, x <= width, y <= height
+    guard originX.isFinite, originY.isFinite, width.isFinite, height.isFinite, width > 0, height > 0,
+          x.isFinite, y.isFinite
     else { throw WatchCommandError.invalidRequest("tap is outside the watch screen") }
-    return CGVector(dx: x / width, dy: y / height)
+    let localX = x - originX
+    let localY = y - originY
+    guard localX >= 0, localY >= 0, localX <= width, localY <= height
+    else { throw WatchCommandError.invalidRequest("tap is outside the watch screen") }
+    return CGVector(dx: localX / width, dy: localY / height)
 }
 
 /// XCTest may record gesture failures without throwing. Deflect only while a gesture runs.

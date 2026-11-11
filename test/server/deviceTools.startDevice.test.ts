@@ -520,7 +520,7 @@ describe("startDevice handler", () => {
           platform: "ios",
           deviceId: posterDevice.deviceId,
           ...(mode === "image"
-            ? { cameraPosterPath: "/poster.png" }
+            ? { cameraPosterPath: resolve("/poster.png") }
             : { cameraPosterQr: { text: "hello" } }),
         });
         expect(payloads).toEqual(mode === "qr" ? ["hello"] : []);

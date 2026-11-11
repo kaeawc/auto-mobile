@@ -44,7 +44,7 @@ function setup(env: NodeJS.ProcessEnv = {}) {
 }
 
 test("explicit prebuilt override skips source discovery and commands", async () => {
-  const h = setup({ AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB: "/prebuilt.dylib" });
+  const h = setup({ AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB: resolve("/prebuilt.dylib") });
   h.fs.setFile(resolve("/prebuilt.dylib"), "prebuilt");
   expect(await h.provider.ensure()).toBe(resolve("/prebuilt.dylib"));
   expect(h.runner.getExecutedCalls()).toEqual([]);
@@ -116,7 +116,7 @@ test("source override missing is actionable and does not fall back", async () =>
 });
 
 test("source override is compiled instead of local candidates", async () => {
-  const h = setup({ AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE: "/override.m" });
+  const h = setup({ AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE: resolve("/override.m") });
   h.fs.setFile(resolve("/override.m"), bytes);
   await h.provider.ensure();
   expect(h.runner.getExecutedCalls()[1]?.args).toContain(resolve("/override.m"));

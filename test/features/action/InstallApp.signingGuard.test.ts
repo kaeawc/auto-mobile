@@ -13,6 +13,7 @@ import {
 } from "../../fakes/FakePackageSigningInspector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { SIGNER_A, SIGNER_B } from "../../helpers/signedApkFixtures";
+import { AndroidInstallDowngradeRefusedError } from "../../../src/features/action/AndroidInstallDowngradeRefusedError";
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const APK = "/tmp/app-debug.apk";
@@ -142,22 +143,55 @@ describe("InstallApp signing guard", () => {
     expect(inspector.calls).toEqual([]);
   });
 
-  test("disabled destructive recovery fails a downgrade without uninstalling", async () => {
+  test.each([undefined, false])(
+    "a downgrade with allowDestructiveRecovery=%s is refused without uninstalling",
+    async (allowDestructiveRecovery) => {
+      adb.setCommandResponse(
+        `install --user 0 -r "${APK}"`,
+        exec("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
+      );
+      const { install } = build([]);
+      const failure = await install
+        .execute(APK, { userId: 0, guard: { allowDestructiveRecovery } })
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(AndroidInstallDowngradeRefusedError);
+      const refused = failure as AndroidInstallDowngradeRefusedError;
+      expect(refused.code).toBe("install_downgrade_refused");
+      expect(refused.message).toStartWith("[install_downgrade_refused] ");
+      expect(refused.message).toContain("left untouched");
+      expect(refused.message).toContain("allowDowngrade: true");
+      expect(refused.message).toContain("allowDestructiveRecovery: true");
+      expect(adb.getExecutedCommands().some((command) => command.includes("uninstall"))).toBe(
+        false,
+      );
+      expect(
+        adb.getExecutedCommands().filter((command) => command.startsWith("install ")),
+      ).toHaveLength(1);
+    },
+  );
+
+  test("a plain call without any guard refuses a downgrade", async () => {
     adb.setCommandResponse(
       `install --user 0 -r "${APK}"`,
       exec("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
     );
     const { install } = build([]);
-    const result = await install.execute(APK, {
-      userId: 0,
-      guard: { allowDestructiveRecovery: false },
-    });
-    expect(result.success).toBe(false);
-    expect(result.warning).toContain("existing package was left installed");
+    await expect(install.execute(APK, { userId: 0 })).rejects.toThrow("install_downgrade_refused");
     expect(adb.getExecutedCommands().some((command) => command.includes("uninstall"))).toBe(false);
   });
 
-  test("destructive recovery stays on by default", async () => {
+  test("a rejected allowDowngrade is refused and says -d needs a debuggable app", async () => {
+    adb.setCommandResponse(
+      `install --user 0 -r -d "${APK}"`,
+      exec("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
+    );
+    const { install } = build([]);
+    const execution = install.execute(APK, { userId: 0, android: { allowDowngrade: true } });
+    await expect(execution).rejects.toThrow("only for debuggable apps");
+    expect(adb.getExecutedCommands().some((command) => command.includes("uninstall"))).toBe(false);
+  });
+
+  test("opt-in destructive recovery reinstalls and reports dataPreserved: false", async () => {
     adb.setCommandResponseSequence(`install --user 0 -r "${APK}"`, [
       exec("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
       exec("Success"),
@@ -168,6 +202,8 @@ describe("InstallApp signing guard", () => {
       guard: { allowDestructiveRecovery: true },
     });
     expect(result.success).toBe(true);
+    expect(result.dataPreserved).toBe(false);
+    expect(result.upgrade).toBe(false);
     expect(adb.wasCommandExecuted("uninstall com.example.app")).toBe(true);
   });
 

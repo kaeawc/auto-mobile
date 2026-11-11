@@ -16,6 +16,8 @@ import type {
 
 import {
   EARLY_EXIT_DRAIN_TIMEOUT_MS,
+  applyColdBootMarker,
+  createEmulatorLaunchState,
   appendCameraPosterArguments,
   architecturePanicMessage,
   boundedEmulatorOutputTail,
@@ -55,26 +57,6 @@ export interface EmulatorLauncher {
 
 export class DefaultEmulatorLauncher implements EmulatorLauncher {
   constructor(private readonly host: EmulatorLauncherHost) {}
-
-  private createLaunchState(): EmulatorLaunchState {
-    return {
-      launchOutput: "",
-      duplicateAvdDetected: false,
-      startupValidationComplete: false,
-      stdoutGraceTimeout: undefined,
-      serialPollInterval: undefined,
-      serialProbeInFlight: false,
-      startupAccelerationFailureDetected: false,
-      childTerminationObserved: false,
-      earlyExitCategory: undefined,
-      exitCode: undefined,
-      exitSignal: undefined,
-      provisionalPostValidationExitError: undefined,
-      resolvePostValidationExit: undefined,
-      exitDrainTimeout: undefined,
-      earlyExitFinalization: undefined,
-    };
-  }
 
   async startEmulatorProcess(
     avdName: string,
@@ -160,13 +142,14 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       args.push(...requestedExtraArgs);
     }
     appendCameraPosterArguments(args, options.cameraPosterPath);
+    const launchOptions = await applyColdBootMarker(this.host, avdName, args, options);
     let grpcLease: EmulatorGrpcPortLease | undefined;
     try {
       grpcLease = await leaseEmulatorGrpcPort(args, this.host.reservations());
       this.host.throwIfLaunchCancelled(avdName, isCancelled);
       // Queue for capacity only now that this launch will spawn: every adoption
       // path above returned first, and an invalid AVD has already failed fast.
-      const launch = await this.spawnWithBootAdmission(avdName, perf, args, options);
+      const launch = await this.spawnWithBootAdmission(avdName, perf, args, launchOptions);
       handOffEmulatorGrpcLease(grpcLease, launch.process, this.host.reservations());
       return launch;
     } catch (error) {
@@ -331,7 +314,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       const stderrRedactor = new AndroidCommandOutputStreamRedactor();
       const redactors = [stdoutRedactor, stderrRedactor];
 
-      const state = this.createLaunchState();
+      const state = createEmulatorLaunchState();
       perf.startOperation("panicDetection");
 
       const {

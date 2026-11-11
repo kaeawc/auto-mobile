@@ -62,7 +62,9 @@ and reported in `skipped`. `getAndroid` and `getApple` report both `gatedTools`
 (the complement) in their response; `provisionDevice` reports `enabledTools`
 and requires `boot: true`, since a no-boot provision mints no session to
 declare capabilities against.
-Every tool they list is one the next `tools/list` will advertise. A direct
+Every tool they list is one the next `tools/list` will advertise. On an Apple
+Watch, Apple TV or Apple Vision Pro, both lists leave out tools that refuse that
+platform, so every listed tool can run on the acquired device. A direct
 `tools/call` can still invoke an omitted tool.
 
 If the device is acquired but the capability declaration itself cannot be

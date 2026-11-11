@@ -128,6 +128,25 @@ Run it with:
 ./gradlew :app:testDebugUnitTest --tests ClockAppTest
 ```
 
+**Device.** Pass `AutoMobilePlanExecutionOptions(device = "<serial>")` to
+`execute()` to pick the device. With the default `device = "auto"`, a set
+`ANDROID_SERIAL` pins every single-device plan to that serial and runs the
+class's tests one at a time; without either, the daemon picks a free device.
+Multi-device plans (section 4) choose their own devices and ignore
+`ANDROID_SERIAL`.
+
+**Daemon.** The runner uses the daemon on `AUTOMOBILE_DAEMON_SOCKET_PATH` when
+it is set, or the default per-user daemon otherwise, and starts one only if
+none is running. It never stops or replaces a running daemon of a different
+version: the test fails and names both versions. Restart the daemon with the
+runner's version, or set `-Dautomobile.daemon.force.restart=true` (the default
+in CI) to let the runner replace the default per-user daemon. A daemon on an
+explicit `AUTOMOBILE_DAEMON_SOCKET_PATH` is never restarted.
+
+**Failures.** When a plan fails, `result.output` holds the error, the daemon
+socket, and the device selector, so `assertTrue(result.success, result.output)`
+puts all three in the test report.
+
 ### iOS
 
 Add the plan to the iOS test bundle and create an `AutoMobileTestCase`:
@@ -160,7 +179,9 @@ hierarchy node carries that text (`textEquals` requires the exact, case-sensitiv
 value). `for: "clickable"`, `"disappear"` and `"countStable"` check hierarchy nodes
 only. Add `elementId`, `container` or `selectionStrategy` to match a single
 hierarchy node instead; `className` and `contentDescription` do the same for waits
-without `for`. The top-level `layer` argument limits the wait to the `app` or
+without `for`. With `textSource: "displayed"`, a wait without `for` matches `text`
+only against the text an element displays, not its content description, and does
+not match rows; its `textMatch: "exact"` comparison is case-sensitive. The top-level `layer` argument limits the wait to the `app` or
 `prototype` layer of the hierarchy and also turns off the row match.
 
 </div>
@@ -195,7 +216,10 @@ step is `optional`, the step is skipped instead and the plan continues.
 `selector` accepts `testTag` (matched like the `tapOn` `testTag` selector),
 one id (`resourceId` or `elementId`), `text`, `contentDescription` and
 `className`; every field given must match the same element. For `textEquals` and
-`textContains`, put the expected value in `text`, not in `selector.text`. Each
+`textContains`, put the expected value in `text`, not in `selector.text`; it is
+compared with the text the element displays (an editable field's value, else its
+text), never its content description or accessibility label. `textEquals` is
+case-sensitive; `textContains` ignores case. Each
 expectation waits up to `timeoutMs` for the condition (the `observe.waitFor`
 default when you omit it), so it tolerates a screen that is still settling.
 

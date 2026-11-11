@@ -1,11 +1,13 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { sleepUnlessAborted } from "../deviceLifecycle/core/deadlines";
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { PortAvailabilityChecker } from "../../utils/PortManager";
 import type { Timer } from "../../utils/SystemTimer";
 import { HEAD_UNIT_SERVER_PORT } from "./androidAutoProjection";
-import type { AndroidAutoPhone } from "./AndroidAutoPhone";
+import { ADB_STATE_TIMEOUT_MS, type AndroidAutoPhone } from "./AndroidAutoPhone";
+import { AndroidAutoPhoneOfflineError } from "./AndroidAutoPhoneOfflineError";
 import type { AndroidAutoSettingsUi } from "./AndroidAutoSettingsUi";
 import type { AndroidAutoSignerCheck } from "./AndroidAutoSignerCheck";
 import type {
@@ -50,6 +52,11 @@ export interface AndroidAutoProjectionRequest {
    */
   acceptAndroidAutoTerms?: boolean;
   signal?: AbortSignal;
+  /**
+   * When the caller's deadline expires, on `deps.timer.now()`'s clock. The adb-online wait ends
+   * early enough before it to report a phone that stays offline instead of a generic timeout.
+   */
+  deadlineMs?: number;
 }
 
 export interface AndroidAutoProjectionResult {
@@ -102,6 +109,11 @@ export const DEFAULT_ADB_ONLINE_BACKOFF = exponentialBackoff({
   maxDelayMs: 4_000,
 });
 export const DEFAULT_ADB_ONLINE_BUDGET_MS = 60_000;
+/**
+ * Time the adb-online wait leaves before the caller's deadline: one more `adb get-state` check
+ * plus a margin, so the offline error is raised before the deadline's generic timeout.
+ */
+export const ADB_ONLINE_DEADLINE_RESERVE_MS = ADB_STATE_TIMEOUT_MS + 1_000;
 const ADB_ONLINE_STATE = "device";
 
 type Probe = (signal?: AbortSignal) => Promise<boolean>;
@@ -120,10 +132,16 @@ export class AndroidAutoProjectionProvisioner {
   private readonly retired = new WeakSet<DesktopHeadUnitSession>();
   /** The config each tracked DHU was launched with. */
   private readonly launchConfigs = new WeakMap<DesktopHeadUnitSession, string>();
-  /** The device this provisioner redirected host port 5277 to, if any. */
-  private redirectOwner: string | null = null;
-  /** Session-end releases in progress, by device; every provisioning run waits for them. */
-  private readonly releasingRedirects = new Map<string, Promise<void>>();
+  /**
+   * The host port 5277 redirect this provisioner added, if any: one object per `redir add`, so a
+   * late removal clears only the redirect it was removing, never one added after it.
+   */
+  private redirect: { readonly deviceId: string } | null = null;
+  /**
+   * Session-end releases in progress, by device; every provisioning run waits for them. A second
+   * release of the same device chains onto the first, so this entry always covers both.
+   */
+  private readonly releasingRedirects = new Map<string, Promise<boolean>>();
   /** The provisioning run in progress; the host has one port 5277, so at most one runs. */
   private inFlight: { deviceId: string; run: Promise<AndroidAutoProjectionResult> } | null = null;
 
@@ -185,7 +203,7 @@ export class AndroidAutoProjectionProvisioner {
     const { phone, ui } = device;
     const signal = request.signal;
     // A just-booted emulator can still read `offline` to adb; every step below needs `device`.
-    await this.waitForAdbOnline(phone, request.deviceId, signal);
+    await this.waitForAdbOnline(phone, request);
     const steps: AndroidAutoProvisioningStep[] = [await this.installAndroidAuto(device, request)];
     steps.push(
       await ensure(
@@ -263,6 +281,7 @@ export class AndroidAutoProjectionProvisioner {
    * SIGTERM-then-SIGKILL stop, and forgets it so a later emulator that reuses the serial starts
    * its own. Does nothing when this provisioner never spawned one for `deviceId`. Never rejects:
    * a DHU that will not exit stays tracked (it still holds host port 5277) but is never reused.
+   * Returns true only after an owned DHU stopped successfully.
    * `deviceStopped` also forgets the host port redirect, which ended with that emulator.
    * `releaseRedirect` is for a phone that keeps running after its session ended: once its DHU is
    * gone, the redirect this provisioner added to it is removed, so host port 5277 is free for
@@ -274,21 +293,30 @@ export class AndroidAutoProjectionProvisioner {
       deviceStopped = false,
       releaseRedirect = false,
     }: { deviceStopped?: boolean; releaseRedirect?: boolean } = {},
-  ): Promise<void> {
-    if (deviceStopped && this.redirectOwner === deviceId) {
-      this.redirectOwner = null;
+  ): Promise<boolean> {
+    if (deviceStopped && this.redirect?.deviceId === deviceId) {
+      this.redirect = null;
     }
     if (!releaseRedirect || deviceStopped) {
-      await this.stopSession(deviceId, deviceStopped ? "stopped device" : "failed provisioning");
-      return;
+      return await this.stopSession(
+        deviceId,
+        deviceStopped ? "stopped device" : "failed provisioning",
+      );
     }
-    // Registered before the first await, so a run that starts during the DHU stop waits too.
-    const release = this.stopSession(deviceId, "released session").then(
-      async () => await this.removeOwnedRedirect(deviceId),
-    );
+    // Registered before the first await, so a run that starts during the DHU stop waits too. It
+    // first waits for a release of this device still in progress (its `redir del` may be stalled
+    // past the cleanup cap) and for a run still provisioning it, which may yet start a DHU or add
+    // a redirect; neither rejects (#17911).
+    const settled = [this.releasingRedirects.get(deviceId), this.inFlightRunFor(deviceId)];
+    const release = Promise.all(settled)
+      .then(async () => await this.stopSession(deviceId, "released session"))
+      .then(async (stopped) => {
+        await this.removeOwnedRedirect(deviceId);
+        return stopped;
+      });
     this.releasingRedirects.set(deviceId, release);
     try {
-      await release;
+      return await release;
     } finally {
       if (this.releasingRedirects.get(deviceId) === release) {
         this.releasingRedirects.delete(deviceId);
@@ -296,28 +324,50 @@ export class AndroidAutoProjectionProvisioner {
     }
   }
 
-  private async stopSession(deviceId: string, context: string): Promise<void> {
+  private async stopSession(deviceId: string, context: string): Promise<boolean> {
     const session = this.sessions.get(deviceId);
-    if (session) {
-      await this.stopTrackedSession(deviceId, session, context);
+    if (!session) {
+      return false;
     }
+    return await this.stopTrackedSession(deviceId, session, context);
   }
 
-  /** Whether a DHU this provisioner spawned, or a redirect it added, is on `deviceId`. */
+  /**
+   * Whether a DHU this provisioner spawned, or a redirect it added, is on `deviceId`, or a run
+   * provisioning `deviceId` is in progress and may yet add them.
+   */
   holdsHostPortFor(deviceId: string): boolean {
-    return this.sessions.has(deviceId) || this.redirectOwner === deviceId;
+    return (
+      this.sessions.has(deviceId) ||
+      this.redirect?.deviceId === deviceId ||
+      this.inFlight?.deviceId === deviceId
+    );
+  }
+
+  /** The run provisioning `deviceId` now, settled whichever way it ends; undefined when none. */
+  private inFlightRunFor(deviceId: string): Promise<unknown> | undefined {
+    if (this.inFlight?.deviceId !== deviceId) {
+      return undefined;
+    }
+    return this.inFlight.run.catch((error: unknown) => {
+      // The run's own caller gets its failure; the release only needs it to have ended.
+      logger.debug(
+        `[AndroidAuto] the release of ${deviceId} waited for a provisioning run that failed: ${errorMessage(error)}`,
+      );
+    });
   }
 
   /** Removes this provisioner's redirect on `deviceId` once no DHU it spawned there is left. */
   private async removeOwnedRedirect(deviceId: string): Promise<void> {
-    if (this.redirectOwner !== deviceId || this.sessions.has(deviceId)) {
+    const redirect = this.redirect;
+    if (redirect?.deviceId !== deviceId || this.sessions.has(deviceId)) {
       // Not ours, or a DHU that would not exit still dials it: the redirect stays.
       return;
     }
     try {
       await this.deps.forDevice(deviceId).phone.removeHeadUnitRedirect();
-      if (this.redirectOwner === deviceId) {
-        this.redirectOwner = null;
+      if (this.redirect === redirect) {
+        this.redirect = null;
       }
     } catch (error) {
       // Kept as the owner, so the next projection's refusal still names this phone's redirect.
@@ -332,18 +382,20 @@ export class AndroidAutoProjectionProvisioner {
     deviceId: string,
     session: DesktopHeadUnitSession,
     context: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await session.stop();
       if (this.sessions.get(deviceId) === session) {
         this.sessions.delete(deviceId);
       }
+      return true;
     } catch (stopError) {
       this.retired.add(session);
       logger.warn(
         `[AndroidAuto] ${context} ${deviceId} could not stop its Desktop Head Unit; it stays tracked: ${errorMessage(stopError)}`,
         stopError,
       );
+      return false;
     }
   }
 
@@ -410,13 +462,12 @@ export class AndroidAutoProjectionProvisioner {
 
   /**
    * Polls `adb get-state` on a bounded backoff until the phone is `device`. Runs before any
-   * step, so a phone that stays offline fails having changed nothing. The request's signal (the
-   * provision deadline) still cuts the wait short.
+   * step, so a phone that stays offline fails having changed nothing. The wait is capped by the
+   * request's deadline (less one more check), and its signal cuts each sleep short.
    */
   private async waitForAdbOnline(
     phone: AndroidAutoPhone,
-    deviceId: string,
-    signal?: AbortSignal,
+    { deviceId, signal, deadlineMs }: AndroidAutoProjectionRequest,
   ): Promise<void> {
     const backoff = this.deps.adbOnlineBackoff ?? DEFAULT_ADB_ONLINE_BACKOFF;
     const budgetMs = this.deps.adbOnlineBudgetMs ?? DEFAULT_ADB_ONLINE_BUDGET_MS;
@@ -427,14 +478,22 @@ export class AndroidAutoProjectionProvisioner {
       if (state === ADB_ONLINE_STATE) {
         return;
       }
-      const delayMs = Math.min(backoff.delayForAttempt(attempt), budgetMs - waitedMs);
+      const deadlineLeftMs =
+        deadlineMs === undefined
+          ? Number.POSITIVE_INFINITY
+          : deadlineMs - this.deps.timer.now() - ADB_ONLINE_DEADLINE_RESERVE_MS;
+      const delayMs = Math.min(
+        backoff.delayForAttempt(attempt),
+        budgetMs - waitedMs,
+        Math.floor(deadlineLeftMs),
+      );
       if (delayMs <= 0) {
-        throw new ActionableError(
-          `adb still reports ${deviceId} as not ready (${state}) after ${Math.round(waitedMs / 1000)} s, so Android Auto provisioning changed nothing on it. Wait until \`adb -s ${deviceId} get-state\` prints device (restart adb with \`adb kill-server\` if it stays offline), then retry.`,
-        );
+        throw adbOfflineError(deviceId, state, waitedMs, deadlineLeftMs < budgetMs - waitedMs);
       }
       logger.debug(`[AndroidAuto] ${deviceId} adb state is ${state}; re-checking in ${delayMs} ms`);
-      await this.deps.timer.sleep(delayMs);
+      if (await sleepUnlessAborted(this.deps.timer, delayMs, signal)) {
+        signal?.throwIfAborted();
+      }
       waitedMs += delayMs;
     }
   }
@@ -471,14 +530,14 @@ export class AndroidAutoProjectionProvisioner {
   ): Promise<AndroidAutoProvisioningStep> {
     if (this.deps.hostPorts.isPortAvailable(HEAD_UNIT_SERVER_PORT)) {
       await phone.addHeadUnitRedirect(signal);
-      this.redirectOwner = deviceId;
+      this.redirect = { deviceId };
       return { step: "transport", status: "applied" };
     }
-    if (this.redirectOwner === deviceId) {
+    if (this.redirect?.deviceId === deviceId) {
       return { step: "transport", status: "already-done" };
     }
-    const holder = this.redirectOwner
-      ? `${this.redirectOwner}'s redirect`
+    const holder = this.redirect
+      ? `${this.redirect.deviceId}'s redirect`
       : "a redirect or process AutoMobile did not create";
     throw new ActionableError(
       `Host port ${HEAD_UNIT_SERVER_PORT} is held by ${holder}, so the DHU would project that instead of ${deviceId}. Remove it (adb -s <serial> emu redir del tcp:${HEAD_UNIT_SERVER_PORT}) or stop the process holding the port, then retry.`,
@@ -623,4 +682,20 @@ async function ensure(
   }
   await apply(signal);
   return { step, status: "applied" };
+}
+
+function adbOfflineError(
+  deviceId: string,
+  state: string,
+  waitedMs: number,
+  deadlineReached: boolean,
+): AndroidAutoPhoneOfflineError {
+  const waited = `after ${Math.round(waitedMs / 1000)} s${deadlineReached ? ", when the provision deadline left no more time" : ""}`;
+  const retry = deadlineReached
+    ? "then retry, with a larger timeoutMs if the phone needs longer"
+    : "then retry";
+  return new AndroidAutoPhoneOfflineError(
+    deviceId,
+    `adb still reports ${deviceId} as not ready (${state}) ${waited}, so Android Auto provisioning changed nothing on it. Wait until \`adb -s ${deviceId} get-state\` prints device (restart adb with \`adb kill-server\` if it stays offline), ${retry}.`,
+  );
 }

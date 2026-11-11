@@ -1855,6 +1855,31 @@ describe("finalizeToolResponse", () => {
       );
     });
 
+    test("a diffed observation carries the post-action Wear surface (#17497)", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(
+        createStructuredToolResponse({ ...sameScreenObserve(), surface: "watchface" }),
+        { name: "observe", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const next: ObserveResult = { ...sameScreenObserve(), surface: "tile" };
+      flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        {
+          name: "swipeOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
+      );
+
+      const obsSc = observeDiffSchema.parse(structuredPayload(finalized).observation);
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.surface).toBe("tile");
+      expect(JSON.parse(finalized.content[0].text).observation.surface).toBe("tile");
+    });
+
     test("a diffed observation carries every whitelisted passthrough metadata field", () => {
       const { store } = makeStore();
       const freshness = { actualTimestamp: 1000, ageMs: 5, isFresh: true };
@@ -1891,6 +1916,7 @@ describe("finalizeToolResponse", () => {
         settleMs: 550,
         settlePolls: 2,
         accessibilityAuditSkipped: "settled_capture_adopted",
+        surface: "tile",
       });
 
       finalizeToolResponse(createStructuredToolResponse(withPassthroughMetadata()), {

@@ -57,14 +57,18 @@ rollback; a run that outlives the deadline is stopped once it resolves that way.
 or that reused a DHU an earlier provision started, leaves the existing DHU running: the provisioner
 already stops a DHU it applied and then failed on. `killDevice` of that emulator stops its DHU within
 the shutdown deadline and forgets its host port redirect only once the kill succeeds, since a failed
-kill leaves the emulator and its redirect in place. A post-kill stop that outlives the deadline keeps
+kill leaves the emulator and its redirect in place. Stopping an owned DHU before the kill writes a
+marker in the resolved AVD directory: the next launch skips the unusable quickboot snapshot with
+`-no-snapshot-load` and consumes the marker only after the process spawns, even across a daemon
+restart (#17903). A post-kill stop that outlives the deadline keeps
 the serial's shutdown reservation until it settles, whether the rest of the shutdown succeeds or
 fails, so a replacement never boots under it. When the session holding the phone ends without a kill
-(release, heartbeat reap, idle expiry, a cancelled session), a session-release listener stops its DHU
+(release, heartbeat reap, idle expiry, a cancelled session) or moves to another device, a
+session-release and device-unbound listener stops its DHU
 and removes the redirect this provisioner added, as pending device cleanup, so the emulator keeps
 running with host port 5277 free; a phone another live session already holds is skipped, and a
 replaced serial only stops the old DHU and forgets its redirect, without blocking the new device.
-The redirect stays while a DHU that would not exit still dials it. The stop runs outside the releasing request's context, so a cancelled request cannot cut the removal short, and every provisioning run waits for a removal in progress, so a new projection never reuses a redirect about to be deleted, even after the cleanup's acquisition cap lapses. Only DHUs in this daemon's session map are stopped. A stopped session
+The redirect stays while a DHU that would not exit still dials it. The stop runs outside the releasing request's context, so a cancelled request cannot cut the removal short, and every provisioning run waits for a removal in progress, so a new projection never reuses a redirect about to be deleted, even after the cleanup's acquisition cap lapses. A second release of the same phone chains onto the first, so a stalled `redir del` stays awaited, and a removal clears only the redirect object it was removing, never one a later run added. A release while that phone is still provisioning waits for the run (and counts the phone as held), then stops whatever DHU and redirect it left. Only DHUs in this daemon's session map are stopped. A stopped session
 is forgotten, so a later emulator that reuses the serial launches its own DHU; one whose stop fails
 stays tracked for the single-projection check but is never reused as `already-done`.
 The applier is a process-wide singleton: the provisioner it wraps is what tracks which DHU holds host
@@ -77,10 +81,14 @@ Unknown sources, head unit server, transport, DHU, welcome screen. Each step rea
 changes nothing when it already holds, so a rerun on a provisioned phone reports every step
 `already-done` and reuses the running DHU session.
 
-Before the first step the provisioner polls `adb get-state` on a bounded backoff (up to 60 s, and
-never past the provision deadline) until the phone reads `device`: right after boot adb can still
-report the emulator `offline`, and every step needs a working transport. A phone that stays offline
-fails the run before any step, so nothing on it changed.
+Before the first step the provisioner polls `adb get-state` on a bounded backoff (up to 60 s)
+until the phone reads `device`: right after boot adb can still report the emulator `offline`, and
+every step needs a working transport. The wait also stops one state check (plus a margin) before
+the caller's deadline, and the deadline's abort cuts a re-check delay short, so a short deadline
+still ends in the offline error rather than a generic timeout. A phone that stays offline fails
+the run before any step, so nothing on it changed: provisionDevice reports that error as
+`device_offline` even when the rollback of a device it created then fails, which `cleanup` still
+reports.
 
 - **Install.** An updated system app lives under `/data/app`; the stub lives on a read-only partition.
   APKs are needed only while the stub is still in use, and AutoMobile never downloads them.

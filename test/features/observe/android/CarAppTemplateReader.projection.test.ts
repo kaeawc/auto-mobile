@@ -4,6 +4,8 @@ import type { ForegroundApp } from "../../../../src/utils/android-cmdline-tools/
 import {
   CAR_APP_PROJECTED_SERVICES_TTL_MS,
   CAR_APP_ROUTE_ABSENT_TTL_MS,
+  CAR_APP_ROUTE_FAILED_RETRY_MS,
+  CAR_APP_ROUTE_READ_FAILED,
   CarAppTemplateReader,
   type CarAppAdb,
 } from "../../../../src/features/observe/android/CarAppTemplateReader";
@@ -226,5 +228,52 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
       apps: [{ packageName: FIXTURE_APP }],
     });
     expect(await reader.readProjected({ ...phone, platform: "ios" })).toBeUndefined();
+  });
+
+  test("a known app whose read fails stays listed with an error, not dropped (#17911)", async () => {
+    const { adb, timer, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
+    adb.routes.set(MAPS_APP, contentCallBundle(fixtureDocument));
+    expect((await reader.readProjected(phone))?.projected).toHaveLength(2);
+
+    adb.routes.set(MAPS_APP, "Result: Bundle[{result={not json}]");
+    timer.advanceTime(CAR_APP_PROJECTED_SERVICES_TTL_MS);
+    const failed = { packageName: MAPS_APP, sessions: [], error: CAR_APP_ROUTE_READ_FAILED };
+    expect((await reader.readProjected(phone))?.projected).toEqual([
+      failed,
+      { packageName: FIXTURE_APP, sessions: fixtureDocument.sessions },
+    ]);
+    // Inside the retry interval no call is made, and the app is still reported as failed.
+    const mapsCalls = () => adb.contentCalls().filter((call) => call.includes(MAPS_APP)).length;
+    const calls = mapsCalls();
+    expect((await reader.readProjected(phone))?.projected[0]).toEqual(failed);
+    expect(mapsCalls()).toBe(calls);
+
+    adb.routes.set(MAPS_APP, contentCallBundle(fixtureDocument));
+    timer.advanceTime(CAR_APP_ROUTE_FAILED_RETRY_MS);
+    expect((await reader.readProjected(phone))?.projected[0]).toEqual({
+      packageName: MAPS_APP,
+      sessions: fixtureDocument.sessions,
+    });
+  });
+
+  test("a failed read of an app that never answered is dropped, as before", async () => {
+    const { adb, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
+    adb.routes.set(MAPS_APP, "Result: Bundle[{result={not json}]");
+
+    expect((await reader.readProjected(phone))?.projected).toEqual([
+      { packageName: FIXTURE_APP, sessions: fixtureDocument.sessions },
+    ]);
+  });
+
+  test("a known foreground app whose read fails omits the block, as before", async () => {
+    const { adb, timer, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
+    expect(await reader.resolve(phone, observation(FIXTURE_APP))).toBeDefined();
+    adb.routes.set(FIXTURE_APP, "Result: Bundle[{result={not json}]");
+    timer.advanceTime(1);
+
+    expect(await reader.resolve(phone, observation(FIXTURE_APP))).toBeUndefined();
   });
 });

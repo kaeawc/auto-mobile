@@ -64,21 +64,22 @@ phone, or provision again with `acceptAndroidAutoTerms: true`.
 
 ### Errors
 
-| Error                                                                                                  | What to do                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unsupported`: Android Auto projection is missing the APK directory, `base.apk`, the DHU or the config | Nothing was created or booted. The message names every missing path. Install the DHU with `sdkmanager "extras;google;auto"`, or pass `dhuPath`.                                                                              |
-| adb still reports the emulator as not ready (`offline`) after 60 s                                     | Nothing on the phone changed. Wait until `adb -s <serial> get-state` prints `device` (run `adb kill-server` if it stays offline), then retry.                                                                                |
-| The phone still runs the Android Auto stub and the APK signer check fails                              | Supply the APKs of an official Android Auto release. Android rejects an update signed by a different key.                                                                                                                    |
-| A Desktop Head Unit is already projecting another emulator, or one is unhealthy but still running      | One emulator per host can project, because the DHU dials host port 5277. Release that emulator's session or call `killDevice` on it, which stops its DHU, or provision that emulator again, which restarts an unhealthy DHU. |
-| The DHU did not exit after SIGTERM and SIGKILL                                                         | End the `desktop-head-unit` process yourself, then provision again. Until it exits, other emulators are refused.                                                                                                             |
-| Host port 5277 is held by a redirect or process AutoMobile did not create                              | Remove it (`adb -s <serial> emu redir del tcp:5277`) or stop the process, then retry.                                                                                                                                        |
-| The head unit server is not listening, or the DHU did not hold a connection                            | Check developer mode in Android Auto and start the head unit server from its overflow menu, then retry.                                                                                                                      |
+| Error                                                                                                                | What to do                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unsupported`: Android Auto projection is missing the APK directory, `base.apk`, the DHU or the config               | Nothing was created or booted. The message names every missing path. Install the DHU with `sdkmanager "extras;google;auto"`, or pass `dhuPath`.                                                                                      |
+| adb still reports the emulator as not ready (`offline`) after 60 s, or when the provision deadline left no more time | Error code `device_offline`; nothing on the phone changed. Wait until `adb -s <serial> get-state` prints `device` (run `adb kill-server` if it stays offline), then retry, with a larger `timeoutMs` if the deadline ended the wait. |
+| The phone still runs the Android Auto stub and the APK signer check fails                                            | Supply the APKs of an official Android Auto release. Android rejects an update signed by a different key.                                                                                                                            |
+| A Desktop Head Unit is already projecting another emulator, or one is unhealthy but still running                    | One emulator per host can project, because the DHU dials host port 5277. Release that emulator's session or call `killDevice` on it, which stops its DHU, or provision that emulator again, which restarts an unhealthy DHU.         |
+| The DHU did not exit after SIGTERM and SIGKILL                                                                       | End the `desktop-head-unit` process yourself, then provision again. Until it exits, other emulators are refused.                                                                                                                     |
+| Host port 5277 is held by a redirect or process AutoMobile did not create                                            | Remove it (`adb -s <serial> emu redir del tcp:5277`) or stop the process, then retry.                                                                                                                                                |
+| The head unit server is not listening, or the DHU did not hold a connection                                          | Check developer mode in Android Auto and start the head unit server from its overflow menu, then retry.                                                                                                                              |
 
 A failure after boot fails the whole request: an emulator the request created is rolled back, and a DHU
 that request started is stopped. A DHU an earlier provision started keeps running. `killDevice` on an emulator also stops its DHU.
 When the session holding the phone ends (you release it, its heartbeat lapses, it idles out or is
-cancelled), AutoMobile stops the DHU it started for that phone and removes its port 5277 redirect, so
-another emulator can project. The phone keeps running.
+cancelled) or moves to another device, AutoMobile stops the DHU it started for that phone and removes
+its port 5277 redirect, so another emulator can project. A provision of that phone still running
+finishes first. The phone keeps running.
 
 ## Starting the head unit with `startDevice`
 
@@ -115,7 +116,8 @@ or release the device. The errors are the ones in the `provisionDevice` table ab
 | The Android Auto head unit is missing a DHU   | The message names the missing path. Install the DHU with `sdkmanager "extras;google;auto"`, or pass `androidAuto.headUnit.dhuPath`. |
 | Timed out starting the Android Auto head unit | Raise `timeoutMs` and call `startDevice` again. A DHU that connects after the timeout is stopped.                                   |
 
-`killDevice` on the phone, or the end of the session holding it, stops its DHU. AutoMobile only ever
+`killDevice` on the phone, or the end of the session holding it, stops its DHU. The first
+`startDevice` after killing a projected phone is a cold boot (about 60 seconds). AutoMobile only ever
 stops a DHU it started itself.
 
 ## Acting on the head unit
@@ -137,8 +139,9 @@ The result gains a `headUnit` block:
 
 - `commands`: the console commands sent.
 - `effect`: `screenChanged` and its `basis`. The change is read from the projected apps' template
-  stacks (`carAppTemplates.projected[]`): each app's top screen class, template type and title, and
-  stack depth. Without the AutoMobile template route in any projected app, `basis` is
+  stacks (`carAppTemplates.projected[]`): each app's top screen class and stack depth, and the top
+  template's content, so a tab switch or a changed item on the same screen counts as a change. A
+  list scroll counts only when the app's template reports different items. Without the AutoMobile template route in any projected app, `basis` is
   `no template data` and `screenChanged` is absent: the input was sent, but whether it changed the
   screen is unknown.
 - `idle`: whether two template reads in a row agreed (`stable`) and how long the wait took
@@ -253,6 +256,8 @@ default values, the same as `default.ini`: 800x480 at 160 dpi and 30 fps.
 - While projecting, the phone's foreground app is Android Auto, not your app. If your app enabled the
   AutoMobile template route, `observe` reads it from every app Android Auto has bound and returns
   `carAppTemplates.projected[]`, one entry per app (`packageName`, `sessions`, `error`), with
+  `error: "template_read_failed"` and no sessions when an app that answered before could not be
+  read this time, and
   `projectedBy` naming Android Auto. Android Auto does not report which bound app the head unit shows,
   so with several apps bound, check each entry's top screen rather than assuming the first is visible.
   The entries are what the app built, not what the head unit rendered.

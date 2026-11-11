@@ -38,6 +38,9 @@ import path from "path";
 import { readFileSync } from "node:fs";
 
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
+
+/** Downgrade recovery uninstalls the app and deletes its data, so it is opt-in (#17978). */
+const RECOVER_DOWNGRADE = { allowDestructiveRecovery: true };
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { logger } from "../../../src/utils/logger";
@@ -1367,7 +1370,7 @@ describe("InstallApp", () => {
       performanceTrackerFactory: () => perf,
       installedAppsRepository: repo,
     });
-    const result = await installApp.execute(apkPath);
+    const result = await installApp.execute(apkPath, { guard: RECOVER_DOWNGRADE });
 
     expect(result.success).toBe(true);
     expect(result.upgrade).toBe(false);
@@ -1417,7 +1420,7 @@ describe("InstallApp", () => {
       installedAppsRepository: repo,
     });
 
-    const result = await installApp.execute(apkPath);
+    const result = await installApp.execute(apkPath, { guard: RECOVER_DOWNGRADE });
 
     expect(result.success).toBe(false);
     expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
@@ -1478,7 +1481,10 @@ describe("InstallApp", () => {
           { userId: 0, name: "Owner", flags: 0x13, running: !stopped },
           { userId: 10, name: "Work", flags: 0x30, running: true },
         ]);
-        const result = await androidAction().execute(apkPath, { userId: 10 });
+        const result = await androidAction().execute(apkPath, {
+          userId: 10,
+          guard: RECOVER_DOWNGRADE,
+        });
         expect(result).toMatchObject({ success: true, userId: 10, packageName, upgrade: false });
         const commands = fakeAdb.getExecutedCommands();
         const uninstallIndex = commands.indexOf(`uninstall ${packageName}`);
@@ -1517,7 +1523,10 @@ describe("InstallApp", () => {
         ]);
         const warn = spyOn(logger, "warn").mockImplementation(() => {});
         try {
-          const result = await androidAction().execute(apkPath, { userId: 10 });
+          const result = await androidAction().execute(apkPath, {
+            userId: 10,
+            guard: RECOVER_DOWNGRADE,
+          });
           expect(result.success).toBe(true);
           expect(result.error).toBeUndefined();
           expect(result.warning).toContain("App data was lost for users: 0, 10, 11");
@@ -1544,7 +1553,10 @@ describe("InstallApp", () => {
           "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]",
         ),
       ]);
-      const result = await androidAction().execute(apkPath, { userId: 10 });
+      const result = await androidAction().execute(apkPath, {
+        userId: 10,
+        guard: RECOVER_DOWNGRADE,
+      });
       expect(result.success).toBe(false);
       expect(result.error).toContain(
         `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE)`,
@@ -1569,7 +1581,7 @@ describe("InstallApp", () => {
         stderr: "Failure [INSTALL_FAILED_INVALID_APK]",
       });
       fakeAdb.reinstallError = error;
-      const execution = androidAction().execute(apkPath, { userId: 10 });
+      const execution = androidAction().execute(apkPath, { userId: 10, guard: RECOVER_DOWNGRADE });
       await expect(execution).rejects.toThrow(
         `The previous version of ${packageName} was uninstalled`,
       );
@@ -1599,7 +1611,7 @@ describe("InstallApp", () => {
             ? controller.signal
             : new AbortController().signal;
       return runWithAbortSignal(source === "explicit" ? undefined : controller.signal, () =>
-        androidAction().execute(apkPath, { userId: 10, signal }),
+        androidAction().execute(apkPath, { userId: 10, guard: RECOVER_DOWNGRADE, signal }),
       );
     }
 
@@ -1786,13 +1798,18 @@ describe("InstallApp", () => {
       configureDowngrade();
       const error = new Error("uninstall denied");
       fakeAdb.setCommandError(`uninstall ${packageName}`, error);
-      await expect(androidAction().execute(apkPath, { userId: 10 })).rejects.toBe(error);
+      await expect(
+        androidAction().execute(apkPath, { userId: 10, guard: RECOVER_DOWNGRADE }),
+      ).rejects.toBe(error);
     });
 
     test("unavailable user enumeration falls back to the target user", async () => {
       const installCommand = configureDowngrade();
       fakeAdb.setUsers([]);
-      const result = await androidAction().execute(apkPath, { userId: 10 });
+      const result = await androidAction().execute(apkPath, {
+        userId: 10,
+        guard: RECOVER_DOWNGRADE,
+      });
       expect(result.success).toBe(true);
       expect(result.warning).toContain(
         "Other users could not be checked and may have lost the app",
@@ -1808,7 +1825,10 @@ describe("InstallApp", () => {
     test("failed other-user listing proceeds and names the unchecked user", async () => {
       configureDowngrade();
       fakeAdb.setCommandError("shell pm list packages --user 0", new Error("listing failed"));
-      const result = await androidAction().execute(apkPath, { userId: 10 });
+      const result = await androidAction().execute(apkPath, {
+        userId: 10,
+        guard: RECOVER_DOWNGRADE,
+      });
       expect(result.success).toBe(true);
       expect(result.warning).toContain("User 0 could not be checked and may have lost the app");
       expect(result.warning).toContain("listing failed");
@@ -1820,7 +1840,9 @@ describe("InstallApp", () => {
       configureDowngrade();
       const cancellation = new DOMException("Listing aborted", "AbortError");
       fakeAdb.setCommandError("shell pm list packages --user 0", cancellation);
-      await expect(androidAction().execute(apkPath, { userId: 10 })).rejects.toBe(cancellation);
+      await expect(
+        androidAction().execute(apkPath, { userId: 10, guard: RECOVER_DOWNGRADE }),
+      ).rejects.toBe(cancellation);
       expect(fakeAdb.wasCommandExecuted("uninstall ")).toBe(false);
     });
 
@@ -1836,7 +1858,11 @@ describe("InstallApp", () => {
       const restoreCommand = `shell pm install-existing --user 0 '${packageName}'`;
       // Deliberately lenient fake: the action must stop even if ADB ignores the signal.
       fakeAdb.abortAfterCommand(restoreCommand, controller);
-      const execution = androidAction().execute(apkPath, { userId: 10, signal: controller.signal });
+      const execution = androidAction().execute(apkPath, {
+        userId: 10,
+        guard: RECOVER_DOWNGRADE,
+        signal: controller.signal,
+      });
       await expect(execution).rejects.toBeInstanceOf(ActionableError);
       await expect(execution).rejects.toHaveProperty("cause", controller.signal.reason);
       await expect(execution).rejects.toThrow("was uninstalled");
@@ -1852,7 +1878,7 @@ describe("InstallApp", () => {
       const cancellation = new DOMException("Restore aborted", "AbortError");
       const restoreCommand = `shell pm install-existing --user 0 '${packageName}'`;
       fakeAdb.setCommandError(restoreCommand, cancellation);
-      const execution = androidAction().execute(apkPath, { userId: 10 });
+      const execution = androidAction().execute(apkPath, { userId: 10, guard: RECOVER_DOWNGRADE });
       await expect(execution).rejects.toBeInstanceOf(ActionableError);
       await expect(execution).rejects.toHaveProperty("cause", cancellation);
       await expect(execution).rejects.toThrow("NOT restored for users: 0");
@@ -1866,7 +1892,11 @@ describe("InstallApp", () => {
       // The first listing is discovery; only the second listing confirms the restore.
       fakeAdb.setCommandResponseSequence("shell pm list packages --user 0", [present(), present()]);
       fakeAdb.postRestoreAbortController = controller;
-      const execution = androidAction().execute(apkPath, { userId: 10, signal: controller.signal });
+      const execution = androidAction().execute(apkPath, {
+        userId: 10,
+        guard: RECOVER_DOWNGRADE,
+        signal: controller.signal,
+      });
       await expect(execution).rejects.toBeInstanceOf(ActionableError);
       await expect(execution).rejects.toHaveProperty("cause", controller.signal.reason);
       await expect(execution).rejects.toThrow("reinstalled for target user 10");
@@ -1898,7 +1928,10 @@ describe("InstallApp", () => {
             createExecResult("Failure [INSTALL_FAILED_INVALID_APK]"),
           ]);
         }
-        const result = await androidAction().execute(apkPath, { userId: 10 });
+        const result = await androidAction().execute(apkPath, {
+          userId: 10,
+          guard: RECOVER_DOWNGRADE,
+        });
         expect(result.success).toBe(!fails);
         expect(result.warning ?? result.error).not.toContain("users: none");
         if (!fails) {
@@ -1915,7 +1948,10 @@ describe("InstallApp", () => {
         present(),
         createExecResult("package:other"),
       ]);
-      const result = await androidAction().execute(apkPath, { userId: 10 });
+      const result = await androidAction().execute(apkPath, {
+        userId: 10,
+        guard: RECOVER_DOWNGRADE,
+      });
       expect(result.success).toBe(true);
       expect(result.warning).toContain("NOT restored for users: 0");
       expect(result.warning).toContain("Package restored for users: 10");
@@ -1928,7 +1964,10 @@ describe("InstallApp", () => {
     test("failed restore confirmation warns without failing the target install", async () => {
       configureDowngrade();
       fakeAdb.postRestoreListingError = new Error("confirmation offline");
-      const result = await androidAction().execute(apkPath, { userId: 10 });
+      const result = await androidAction().execute(apkPath, {
+        userId: 10,
+        guard: RECOVER_DOWNGRADE,
+      });
       expect(result.success).toBe(true);
       expect(result.warning).toContain("could not confirm");
       expect(result.warning).toContain("user 0");
@@ -1942,7 +1981,10 @@ describe("InstallApp", () => {
         "shell pm list packages --user 0",
         createExecResult("package:com.example.other"),
       );
-      const result = await androidAction().execute(apkPath, { userId: 10 });
+      const result = await androidAction().execute(apkPath, {
+        userId: 10,
+        guard: RECOVER_DOWNGRADE,
+      });
       expect(result.warning).toBe(
         `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`,
       );
@@ -1955,7 +1997,10 @@ describe("InstallApp", () => {
       fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        const result = await androidAction().execute(apkPath, { userId: 0 });
+        const result = await androidAction().execute(apkPath, {
+          userId: 0,
+          guard: RECOVER_DOWNGRADE,
+        });
         expect(result.success).toBe(true);
         expect(result.packageName).toBe(packageName);
         expect(result.error).toBeUndefined();
@@ -1974,7 +2019,11 @@ describe("InstallApp", () => {
       fakeAdb.abortAfterCommand("install --user 0", controller);
       fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
       await expect(
-        androidAction().execute(apkPath, { userId: 0, signal: controller.signal }),
+        androidAction().execute(apkPath, {
+          userId: 0,
+          guard: RECOVER_DOWNGRADE,
+          signal: controller.signal,
+        }),
       ).rejects.toThrow("Operation cancelled");
     });
 
@@ -1982,7 +2031,9 @@ describe("InstallApp", () => {
       const error = new DOMException("Listing aborted", "AbortError");
       fakeAdb.postInstallListingError = error;
       fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
-      await expect(androidAction().execute(apkPath, { userId: 0 })).rejects.toBe(error);
+      await expect(
+        androidAction().execute(apkPath, { userId: 0, guard: RECOVER_DOWNGRADE }),
+      ).rejects.toBe(error);
     });
 
     test.each(["", "package:com.example.other"])(
@@ -1996,7 +2047,10 @@ describe("InstallApp", () => {
           createExecResult(listing),
         ]);
         await expect(
-          androidAction({ create: () => adb }).execute(apkPath, { userId: 0 }),
+          androidAction({ create: () => adb }).execute(apkPath, {
+            userId: 0,
+            guard: RECOVER_DOWNGRADE,
+          }),
         ).rejects.toThrow(
           `APK package name mismatch: aapt reported "${packageName}", but the device reported "${listing ? "com.example.other" : "no installed package"}" after installation. Verify the APK manifest application ID and install the matching APK.`,
         );
@@ -2025,6 +2079,7 @@ describe("InstallApp", () => {
           packageName,
           upgrade,
           warning: undefined,
+          ...(upgrade ? { dataPreserved: true } : {}),
         });
         expect(fakeAdb.getExecutedCommands()).toEqual([
           "shell pm list packages --user 0",
@@ -2054,7 +2109,9 @@ describe("InstallApp", () => {
       performanceTrackerFactory: () => perf,
     });
 
-    await expect(installApp.execute(apkPath)).rejects.toThrow("INSTALL_FAILED_VERSION_DOWNGRADE");
+    await expect(installApp.execute(apkPath, { guard: RECOVER_DOWNGRADE })).rejects.toThrow(
+      "INSTALL_FAILED_VERSION_DOWNGRADE",
+    );
     expect(fakeAdb.wasCommandExecuted("uninstall")).toBe(false);
   });
 
@@ -2541,7 +2598,7 @@ describe("InstallApp", () => {
         return execute(...args);
       });
 
-      const result = await installApp.execute(apkPath, { userId: 0 });
+      const result = await installApp.execute(apkPath, { userId: 0, guard: RECOVER_DOWNGRADE });
 
       expect(result.success).toBe(true);
       expect(result.warning).toContain("timed out but the device finished installing");
@@ -2566,7 +2623,7 @@ describe("InstallApp", () => {
         return execute(...args);
       });
 
-      const rejection = installApp.execute(apkPath, { userId: 0 });
+      const rejection = installApp.execute(apkPath, { userId: 0, guard: RECOVER_DOWNGRADE });
       await expect(rejection).rejects.toThrow("was uninstalled during downgrade recovery");
       await expect(rejection).rejects.toThrow("Install outcome is indeterminate");
       await expect(rejection).rejects.toThrow("do not retry automatically");
@@ -2604,7 +2661,7 @@ describe("InstallApp", () => {
         return execute(...args);
       });
 
-      const result = await installApp.execute(apkPath, { userId: 0 });
+      const result = await installApp.execute(apkPath, { userId: 0, guard: RECOVER_DOWNGRADE });
 
       expect(result.success).toBe(true);
       expect(result.warning).toContain("was newer than the artifact");

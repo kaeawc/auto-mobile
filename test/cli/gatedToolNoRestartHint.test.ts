@@ -5,10 +5,11 @@ import {
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
 import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../../src/daemon/types";
+import { DaemonToolUnavailableError } from "../../src/daemon/proxy/DaemonToolUnavailableError";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 /**
- * #10179: the CLI appended "Try: auto-mobile --daemon restart" to every `Unknown tool` text,
+ * #10179/#18024: the CLI appended "Try: auto-mobile --daemon restart" to every `Unknown tool` text,
  * which is wrong for a tool the daemon registers but gates (debug-only, embedded-SDK-only,
  * plan-only): a restart cannot lift a gate. The proxy marks that error with the gate code.
  */
@@ -72,10 +73,24 @@ describe("CLI daemon tool errors (#10179)", () => {
     expect(message).not.toContain("--daemon restart");
   });
 
-  test("an unmarked unknown tool keeps the restart hint", async () => {
+  test("an unknown tool name gets no restart hint (#18024)", async () => {
     const message = await failWith(new Error("MCP error -32603: Unknown tool: listDevices"));
 
     expect(message).toContain("Unknown tool: listDevices");
+    expect(message).not.toContain("--daemon restart");
+  });
+
+  test("detected client/daemon build skew keeps the restart hint", async () => {
+    const message = await failWith(
+      new DaemonToolUnavailableError({
+        toolName: "listDevices",
+        client: { entryScript: "/client/dist/index.js", buildId: "client-build" },
+        daemon: { entryScript: "/daemon/dist/index.js", buildId: "daemon-build" },
+        buildMismatch: true,
+      }),
+    );
+
+    expect(message).toContain("wrong-build daemon");
     expect(message).toContain("Try: auto-mobile --daemon restart");
   });
 });

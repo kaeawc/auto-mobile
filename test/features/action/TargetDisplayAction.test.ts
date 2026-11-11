@@ -76,6 +76,7 @@ const android = {
   deviceId: "target-display-android",
   platform: "android",
   name: "Android",
+  formFactor: "phone",
   displays: {
     panels: [
       { key: "internal", role: "inner", sizePx: { width: 100, height: 100 } },

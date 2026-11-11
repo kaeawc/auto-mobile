@@ -63,6 +63,12 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "AUX_SOCKET_DIR isolates the socket; remove this competing override.",
   },
   { name: "AUTOMOBILE_CTRL_PROXY_APK_PATH", kind: "input", reason: "Read-only APK artifact." },
+  { name: "AUTOMOBILE_CONTENT_SEEDER_APK_PATH", kind: "input", reason: "Read-only APK artifact." },
+  {
+    name: "AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH",
+    kind: "input",
+    reason: "Read-only simulator probe executable.",
+  },
   {
     name: "AUTOMOBILE_CARPLAY_POWER_HELPER_PATH",
     kind: "input",
@@ -260,6 +266,7 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_IOS_SIM_CAPACITY_GATE",
   "AUTOMOBILE_IOS_SIM_MAX_BOOTED",
   "AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH",
+  "AUTOMOBILE_IOS_SUPPRESS_APSD_LOG",
   "AUTOMOBILE_IOS_TAP_STRATEGY",
   "AUTOMOBILE_IOS_TEAM_ID",
   "AUTOMOBILE_IOS_TEAM_IDS",

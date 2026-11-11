@@ -2,6 +2,12 @@ import type { EnvVarSpec } from "./envSpec";
 
 /** Device, emulator, simulator and CtrlProxy variables. */
 export const DEVICES_ENV = {
+  CONTENT_SEEDER_APK_PATH: {
+    name: "AUTOMOBILE_CONTENT_SEEDER_APK_PATH",
+    kind: "string",
+    default: "checkout content-seeder debug APK",
+    doc: "Path to the Android content seeder debug/test-only APK used for contacts, calendar and SMS fixtures.",
+  },
   CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS: {
     name: "AUTOMOBILE_CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS",
     kind: "int",
@@ -196,6 +202,12 @@ export const DEVICES_ENV = {
     kind: "string",
     default: "minimal",
     doc: "Pre-boot iOS simulator lean profile: minimal by default, none opts out, or catalog-cpu; unknown values use the default.",
+  },
+  IOS_SUPPRESS_APSD_LOG: {
+    name: "AUTOMOBILE_IOS_SUPPRESS_APSD_LOG",
+    kind: "string",
+    default: "false",
+    doc: "Suppress com.apple.apsd logs before newly created iOS simulators boot; exact 1/true opts in (trimmed, case-insensitive). Hides push-debugging logs; remote push is unaffected.",
   },
   IOS_SIM_CAPACITY_GATE: {
     name: "AUTOMOBILE_IOS_SIM_CAPACITY_GATE",

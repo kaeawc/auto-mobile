@@ -34,7 +34,12 @@ const recordToolCallsSchema = addSessionUuidToSchema(
         .describe(
           "begin starts recording this connection's tool calls; end stops and returns the YAML plan; status reports state",
         ),
-      planName: z.string().optional().describe("Plan name for action=end"),
+      planName: z
+        .string()
+        .optional()
+        .describe(
+          "Plan name: on begin, the exported plan's name; on end, overrides the begin name",
+        ),
     })
     .strict(),
 );
@@ -56,8 +61,64 @@ const recordToolCallsResultSchema = z.object({
     .describe(
       "action=end only, present when non-empty: calls that were skipped (host-file sourcePath, oversized param) or recorded in a weakened form (resetKeychain with confirm:false), each with the reason",
     ),
+  platform: z
+    .enum(["android", "ios", "tvos"])
+    .optional()
+    .describe("action=end only: the platform written at the top of the plan"),
+  platformNote: z
+    .string()
+    .optional()
+    .describe(
+      "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",
+    ),
   error: z.string().optional(),
 });
+
+type RecordingConnectionId = ReturnType<typeof currentAutolockMcpSessionId>;
+
+const recordingStatusResponse = (connectionId: RecordingConnectionId) => {
+  const status = getToolCallRecordingStatus({ connectionId });
+  return createStructuredToolResponse({
+    success: true,
+    action: "status",
+    recording: status?.recording ?? false,
+    ...(status && {
+      startedAt: status.startedAt,
+      stepCount: status.stepCount,
+      durationMs: status.durationMs,
+    }),
+  });
+};
+
+const recordingBeginResponse = (connectionId: RecordingConnectionId, planName?: string) => {
+  const result = startToolCallRecording({ connectionId, planName });
+  return createStructuredToolResponse({
+    success: true,
+    action: "begin",
+    recording: result.recording,
+    startedAt: result.startedAt,
+    ...(result.planName && { planName: result.planName }),
+    ...(result.alreadyActive && {
+      alreadyActive: true,
+      currentStepCount: result.currentStepCount,
+    }),
+  });
+};
+
+const recordingEndResponse = (connectionId: RecordingConnectionId, planName?: string) => {
+  const result = stopToolCallRecording({ connectionId, planName });
+  return createStructuredToolResponse({
+    success: true,
+    action: "end",
+    planName: result.planName,
+    planContent: result.planContent,
+    stepCount: result.stepCount,
+    durationMs: result.durationMs,
+    ...(result.warnings.length > 0 && { warnings: result.warnings }),
+    ...(result.platform && { platform: result.platform }),
+    ...(result.platformNote && { platformNote: result.platformNote }),
+  });
+};
 
 const recordToolCallsTool = async (params: {
   action: "begin" | "end" | "status";
@@ -66,17 +127,7 @@ const recordToolCallsTool = async (params: {
   const connectionId = currentAutolockMcpSessionId();
   // Status is always allowed — lets agents probe recording state even when the flag is off.
   if (params.action === "status") {
-    const status = getToolCallRecordingStatus({ connectionId });
-    return createStructuredToolResponse({
-      success: true,
-      action: "status",
-      recording: status?.recording ?? false,
-      ...(status && {
-        startedAt: status.startedAt,
-        stepCount: status.stepCount,
-        durationMs: status.durationMs,
-      }),
-    });
+    return recordingStatusResponse(connectionId);
   }
 
   if (!serverConfig.isToolCallRecordingEnabled()) {
@@ -91,29 +142,9 @@ const recordToolCallsTool = async (params: {
 
   try {
     if (params.action === "begin") {
-      const result = startToolCallRecording({ connectionId });
-      return createStructuredToolResponse({
-        success: true,
-        action: "begin",
-        recording: result.recording,
-        startedAt: result.startedAt,
-        ...(result.alreadyActive && {
-          alreadyActive: true,
-          currentStepCount: result.currentStepCount,
-        }),
-      });
+      return recordingBeginResponse(connectionId, params.planName);
     }
-
-    const result = stopToolCallRecording({ connectionId, planName: params.planName });
-    return createStructuredToolResponse({
-      success: true,
-      action: "end",
-      planName: result.planName,
-      planContent: result.planContent,
-      stepCount: result.stepCount,
-      durationMs: result.durationMs,
-      ...(result.warnings.length > 0 && { warnings: result.warnings }),
-    });
+    return recordingEndResponse(connectionId, params.planName);
   } catch (error) {
     logger.error(`[recordToolCalls] Failed: ${errorMessage(error)}`);
     return withIsErrorOnFailure(
@@ -131,7 +162,7 @@ export const registerToolCallRecordingTools = () => {
   // tool call recording — begin/end gated by "tool-call-recording" feature flag; status always available.
   ToolRegistry.register(
     "recordToolCalls",
-    "Record MCP tool calls to a YAML plan: action begin, end (returns the plan), or status.",
+    "Record MCP tool calls to a YAML plan: action begin, end (returns the plan; exportPlan also ends it), or status.",
     recordToolCallsSchema,
     {
       handler: recordToolCallsTool,

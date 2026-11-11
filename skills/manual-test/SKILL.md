@@ -268,7 +268,8 @@ JSON uses `permit`; wait JSON uses `waitingFor: permit` (or `load`/`interval`).
 
 ## Default method: multi-device, multi-client
 
-A full iteration runs **2 Android + 2 iOS devices at once** under ONE private
+A full iteration runs **2 Android + 2 iOS devices at once** (the device budget;
+never more) under ONE private
 daemon, driven by **several independent MCP stdio proxies** — one proxy (own
 process, own session) per device, plus one or two **contenders** that try to take
 a held device, call sessionless, or read a device they do not own. Single-device,
@@ -337,6 +338,83 @@ tool's `success`.
 10. **Tool sweep in parallel** on all four devices (observe, tap, swipe,
     setUIState, sendKeys, launch/terminate, install/uninstall, screenshot,
     systemTray, keyboard, pressButton), light/dark, cold boot vs quickboot.
+
+## Form-factor lanes: XR headset, glasses, Android TV
+
+Every round adds these Android lanes on top of the phone lanes. Broker clients
+refuse `startDevice` and `killDevice`, so run the lanes in a separate plain
+batch (`private-daemon.ts init --batch-dir B2` without `--broker-batch`, its own
+`--base-port`), not through the broker batch. They count against the 2 Android
+budget: run them one at a time, never as extra
+concurrent emulators. Each lane starts from a freshly created AVD you own, named
+explicitly (`avdName`) and pinned to an explicit non-5554 console port; release it
+with `killDevice` on the plain batch before booting the next lane, and stop
+leftovers with `shutdown-devices --device <serial>`. Record per lane the image, the
+`adb -s <id> emu avd name` correlation and the observed fields below; a lane
+whose image is not installed is reported SKIPPED with the `sdkmanager` line, not
+silently dropped. AutoMobile never downloads images.
+
+**XR headset (every round).** Image `system-images;android-34;google-xr;arm64-v8a`
+(x86_64 on Intel hosts), profile `xr_headset_device`, created with
+`startDevice { platform: "android", formFactor: "xr-headset", createIfMissing: true }`.
+
+- Install the CtrlProxy debug APK built at the pinned SHA (see Phase 1) by setting
+  `AUTOMOBILE_CTRL_PROXY_APK_PATH` to it on the private daemon, never the
+  released APK (the daemon reinstalls the released one otherwise): the released APK reports Settings rows as hidden on this image, so a
+  Settings sweep on it is a false FAIL.
+- Do not use `medium_phone` or any phone AVD as an XR stand-in: it gives misleading
+  results for panel size, density and input.
+- Checklist: lifecycle (create, boot to `sys.boot_completed`, `killDevice`, reuse of
+  the created AVD); install and launch the test app; `observe` returns panel
+  elements with sane bounds; tap and swipe on the panel by `tapOn`/`swipeOn` land on
+  the intended element (check the result in the app, not `success`); `sendKeys`
+  and `pressButton` back/home; Settings rows observed visible with the debug APK.
+
+**Glasses (every round where an image is installed).** Image
+`system-images;android-36;ai-glasses;arm64-v8a`, profile `ai_glasses_device`,
+`formFactor: "xr-glasses"`. Boot it in the same Android slot, after the headset
+is down. The pairing flow with a phone emulator is tracked separately;
+until it lands, exercise the glasses standalone.
+
+- Checklist: lifecycle as above; install and launch; `observe` returns a
+  well-formed (possibly small) tree; touchpad gestures through `sendKeys`
+  (D-pad and enter) and `pressButton` back; confirm the effect in the app.
+
+**Android TV (every round).** Prefer the `android-tv` image, then `google-tv`
+(`sdkmanager --list | grep -E "android-tv|google-tv"`), API 34 or newer, created
+with `startDevice { platform: "android", formFactor: "tv", createIfMissing: true }`
+(profile `tv_1080p`). Run `android-tv` when installed, and `google-tv` as a second
+pass when both are.
+
+- Checklist: lifecycle (create, boot, `killDevice`, AVD reuse); install and
+  launch; `observe` reports the focused element; `focusNavigate` moves focus to a
+  named element and selects only with `select: true`; `sendKeys enter` activates
+  the focused element; `tapOn` by `text` moves focus and presses enter; back and
+  home return to the expected screen. `adb root` is refused on these images: use
+  non-root ground truth (`dumpsys window`, `dumpsys activity`).
+
+**Apple Vision Pro simulator (every round, macOS only).** Takes an iOS slot
+(`device-slot.sh acquire ios`). Create your own simulator through the private
+daemon: `provisionDevice --readiness none` with `platform: "visionos"`, runtime
+`com.apple.CoreSimulator.SimRuntime.xrOS-26-5` and device type
+`com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K` (the plain
+`Apple-Vision-Pro` type is rejected). Never `simctl delete` anything but your own UDID.
+
+- Init the private daemon with `--env AUTOMOBILE_PROJECT_ROOT=<checkout>`,
+  `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true` and a private
+  `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`. Pre-build the runner through
+  `heavy-build-slot.sh xcodebuild build-for-testing -scheme AutoMobileVisionTest
+  -destination "generic/platform=visionOS Simulator"` into that derived data, so the
+  daemon finds the xctestrun instead of building outside the slot. Set
+  `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` for `--cli` calls, since a build outlasts the
+  2-minute default and ends the session.
+- Checklist: provision (record cold-boot seconds); `installApp` an `xrsimulator` `.app`;
+  `launchApp`; `observe` reports the window's elements; `tapOn` by identifier moves
+  list to detail and back (`BackButton`), opens a sheet and flips a toggle, and taps an
+  ornament button; confirm each effect in the screenshot, since the hierarchy carries
+  no toggle value; `terminateApp`, `uninstallApp`; delete the simulator and verify absence.
+- Record the visionOS gaps that remain (getLogs, executePlan, pressButton, homeScreen,
+  swipeOn, tapAt are refused) as SKIPPED with their issue, not as PASS.
 
 ## Device failure modes and repair
 
@@ -475,6 +553,14 @@ subprocesses, fewer round trips and less waiting — not just correctness.
    Do NOT use `android/build/grit/**` or `android/build/gojvm/**` variants — they
    are incomplete (missing `androidx.startup` resources) and crash on launch with
    `NoClassDefFoundError: androidx.startup.R$string`.
+
+**Build once per SHA.** Build the CtrlProxy debug APK and the iOS runner a single
+time, before any device lane starts, into one shared scratch directory
+keyed by the pinned SHA (set a private `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`
+under it for the runner). Every lane installs from that directory; a lane never
+rebuilds, and none writes build products to it after the build (by convention;
+nothing enforces it). Keep it writable: each iOS runner launch writes a
+per-device `automobile-runner-<deviceId>.xctestrun` beside the built xctestrun. Boots are staggered through `boot-gate`, not started together.
 
 ## Phase 2 — Restart the daemon with the right flags
 

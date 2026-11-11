@@ -62,6 +62,7 @@ class FakeApplier implements AndroidAutoProjectionApplier {
   constructor(private readonly missing?: string) {}
   async stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }) {
     this.stopped.push({ deviceId, ...options });
+    return true;
   }
   async resolveInputs() {
     if (this.missing) {
@@ -77,13 +78,27 @@ class FakeApplier implements AndroidAutoProjectionApplier {
     return { dhu: { binaryPath: "/dhu", configPath: "/dhu.ini" }, acceptAndroidAutoTerms: false };
   }
   /** The startDevice run: recorded apart from `apply`, with the same waits and failures. */
-  async startHeadUnit(device: { deviceId: string }, _options: unknown, signal?: AbortSignal) {
+  /** The deadline each run was given, which caps the provisioner's adb-online wait. */
+  readonly deadlines: Array<number | undefined> = [];
+  async startHeadUnit(
+    device: { deviceId: string },
+    _options: unknown,
+    signal?: AbortSignal,
+    deadlineMs?: number,
+  ) {
     this.startedHeadUnits.push(device.deviceId);
+    this.deadlines.push(deadlineMs);
     return await this.run(signal);
   }
   readonly startedHeadUnits: string[] = [];
-  async apply(device: { deviceId: string }, _options: unknown, signal?: AbortSignal) {
+  async apply(
+    device: { deviceId: string },
+    _options: unknown,
+    signal?: AbortSignal,
+    deadlineMs?: number,
+  ) {
     this.applied.push(device.deviceId);
+    this.deadlines.push(deadlineMs);
     return await this.run(signal);
   }
   private async run(signal?: AbortSignal) {
@@ -157,6 +172,8 @@ describe("provisionDevice androidAuto", () => {
     );
     expect(report).toEqual(REPORT);
     expect(applier.applied).toEqual(["emulator-5554"]);
+    // The provision deadline reaches the projection, so its adb-online wait ends before it.
+    expect(applier.deadlines).toEqual([timer.now() + 60_000]);
   });
 
   test("does nothing without the option", async () => {
@@ -362,6 +379,7 @@ describe("startDevice androidAuto.headUnit (#17840)", () => {
     expect(report).toEqual(REPORT);
     expect(applier.startedHeadUnits).toEqual(["emulator-5554"]);
     expect(applier.applied).toEqual([]);
+    expect(applier.deadlines).toEqual([timer.now() + 60_000]);
   });
 
   test("a failed start stops no DHU it did not connect", async () => {

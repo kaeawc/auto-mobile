@@ -19,6 +19,7 @@ import { isTouchLatencySamplingEnabled } from "./performanceAuditConfig";
 import { serverConfig } from "../../utils/ServerConfig";
 import { PerformanceAuditRepository } from "../../db/performanceAuditRepository";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { currentDeviceSessionUuid } from "../../utils/deviceIncarnation";
 import { selectTopContributors } from "../../utils/topContributors";
 import { shellQuote } from "../../utils/shellQuote";
 import {
@@ -903,6 +904,10 @@ export class PerformanceAudit {
     } = options;
     logger.info(`[PerformanceAudit] Running audit for ${packageName}`);
 
+    // The epoch the metrics are collected on, read before collection so a
+    // reincarnation mid-audit cannot re-attribute this run (#17030).
+    const deviceSessionUuid = currentDeviceSessionUuid(this.device.deviceId);
+
     // Get device capabilities
     const deviceCapabilities = await this.capabilitiesDetector.getCapabilities();
 
@@ -942,6 +947,7 @@ export class PerformanceAudit {
         touchLatencyMs: metrics.touchLatencyMs,
       },
       diagnostics,
+      deviceSessionUuid,
     });
 
     return {

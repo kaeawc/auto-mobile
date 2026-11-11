@@ -237,7 +237,7 @@ export const crashAppResultSchema = z.object({
   message: z.string(),
   success: z.boolean(),
   supported: z.boolean(),
-  platform: z.enum(["android", "ios"]),
+  platform: z.enum(["android", "ios", "tvos"]),
   appId: z.string(),
   processId: z.number().int().positive().optional(),
   mechanism: z.enum([
@@ -341,6 +341,7 @@ export const installAppResultSchema = z
     userId: z.number().int().nonnegative().optional(),
     packageName: z.string().optional(),
     upgrade: z.boolean().optional(),
+    dataPreserved: z.boolean().optional(),
     warning: z.string().optional(),
     signingGuard: z
       .discriminatedUnion("status", [

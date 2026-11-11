@@ -13,6 +13,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 export class SimulatorTemplatesHarness {
   events: string[] = [];
   builds = 0;
+  apsdLogSuppressed = false;
   xcode = "X1";
   cloneFails = false;
   relocateFails = false;
@@ -125,6 +126,7 @@ export class SimulatorTemplatesHarness {
         },
         timer: this.timer,
         profile: () => "none",
+        apsdLogSuppressed: () => this.apsdLogSuppressed,
         xcode: { readBuild: async () => this.xcode },
         relocator: this.relocator,
         builder: {

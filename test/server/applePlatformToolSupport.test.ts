@@ -97,7 +97,7 @@ describe("assertToolSupportsDevicePlatform", () => {
     );
   });
 
-  test("visionOS allows lifecycle, app tools, observe and window-app input", () => {
+  test("visionOS allows lifecycle, app tools, logs, observe and window-app input", () => {
     expect([...APPLE_PLATFORM_SUPPORTED_TOOLS.visionos].sort()).toEqual(
       [
         ...DEVICE_LIFECYCLE_TOOLS,
@@ -109,6 +109,7 @@ describe("assertToolSupportsDevicePlatform", () => {
         "observe",
         "tapOn",
         "sendKeys",
+        "getLogs",
       ].sort(),
     );
     for (const tool of [
@@ -121,6 +122,7 @@ describe("assertToolSupportsDevicePlatform", () => {
       "observe",
       "tapOn",
       "sendKeys",
+      "getLogs",
     ]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).not.toThrow();
       expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).not.toThrow();
@@ -150,6 +152,22 @@ describe("assertToolSupportsDevicePlatform", () => {
         assertRequestedPlatformSupported("postNotification", { platform }),
       ).not.toThrow();
     }
+  });
+
+  test("admits tvOS diagnostics; visionOS admits getLogs but still refuses crashApp", () => {
+    expect(() => assertToolSupportsDevicePlatform("getLogs", visionPro)).not.toThrow();
+    for (const tool of ["getLogs", "crashApp"]) {
+      for (const device of [appleTv, iphone, { ...iphone, platform: "android" as const }]) {
+        expect(() => assertToolSupportsDevicePlatform(tool, device)).not.toThrow();
+        expect(() =>
+          assertRequestedPlatformSupported(tool, { platform: device.platform }),
+        ).not.toThrow();
+      }
+    }
+    expect(() => assertToolSupportsDevicePlatform("crashApp", visionPro)).toThrow(ActionableError);
+    expect(() => assertRequestedPlatformSupported("crashApp", { platform: "visionos" })).toThrow(
+      ActionableError,
+    );
   });
 
   test("never rejects an Android or iOS device", () => {

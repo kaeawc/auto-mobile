@@ -1,0 +1,2 @@
+Broadcasting: Intent { act=dev.jasonpearson.automobile.contentseeder.SEED flg=0x400000 cmp=dev.jasonpearson.automobile.contentseeder/.SeedReceiver (has extras) }
+Broadcast completed: result=-1, data="{"inserted":1}"

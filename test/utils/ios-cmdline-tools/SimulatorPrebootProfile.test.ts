@@ -6,6 +6,8 @@ import {
   PREBOOT_LEAN_PROFILES,
   resolvePrebootLabels,
   resolveDefaultPrebootProfile,
+  resolveApsdLogSuppressionEnabled,
+  apsdLogSuppressionConfig,
   simulatorHostStateDir,
   simulatorDisabledDbPath,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorPrebootProfile";
@@ -14,10 +16,180 @@ import { iosDeviceResourceCatalog as catalog } from "../../../src/utils/iosDevic
 import { logger } from "../../../src/utils/logger";
 
 const UDID = "12345678-1234-ABCD-9876-123456789ABC";
-function harness(profile: "none" | "minimal" | "catalog-cpu" = "none") {
+const DEVICES_DIR = "/fake/CoreSimulator/Devices";
+const APSD_LOG_DIR = `${DEVICES_DIR}/${UDID}/data/Library/Preferences/Logging/Subsystems`;
+const APSD_LOG_PATH = `${APSD_LOG_DIR}/com.apple.apsd.plist`;
+const APSD_LOG_PLIST = { "DEFAULT-OPTIONS": { Level: { Enable: "off", Persist: "off" } } };
+const APSD_LOG_OFF = { enabled: () => false, devicesDir: () => DEVICES_DIR };
+function harness(profile: "none" | "minimal" | "catalog-cpu" = "none", suppressApsdLog = false) {
   const host = new FakeSimulatorHostState();
-  return { host, service: new SimulatorPrebootProfile(host, () => profile) };
+  return {
+    host,
+    service: new SimulatorPrebootProfile(host, () => profile, undefined, {
+      enabled: () => suppressApsdLog,
+      devicesDir: () => DEVICES_DIR,
+    }),
+  };
 }
+
+test("apsd suppression is default-off and accepts only 1/true, trimmed and case-insensitive", () => {
+  expect(resolveApsdLogSuppressionEnabled({})).toBe(false);
+  for (const value of ["1", "true", " TRUE "]) {
+    expect(resolveApsdLogSuppressionEnabled({ AUTOMOBILE_IOS_SUPPRESS_APSD_LOG: value })).toBe(
+      true,
+    );
+  }
+  for (const value of ["", "0", "false", "yes", "on", "unknown"]) {
+    expect(resolveApsdLogSuppressionEnabled({ AUTOMOBILE_IOS_SUPPRESS_APSD_LOG: value })).toBe(
+      false,
+    );
+  }
+});
+
+test.each(["none", "minimal"] as const)("flag off adds no host I/O for %s", async (profile) => {
+  const host = new FakeSimulatorHostState();
+  const service = new SimulatorPrebootProfile(host, () => profile, undefined, {
+    enabled: () => false,
+    devicesDir: () => {
+      throw new Error("flag off must not resolve the data container");
+    },
+  });
+  const result = await service.apply(UDID, {});
+  expect(result.apsdLogSuppression).toBeUndefined();
+  expect(host.calls).toEqual(
+    profile === "none"
+      ? []
+      : [
+          ["mkdir", simulatorHostStateDir(UDID)],
+          ["read", simulatorDisabledDbPath(UDID)],
+          ["write", simulatorDisabledDbPath(UDID)],
+        ],
+  );
+});
+
+test.each(["none", "minimal"] as const)(
+  "opt-in writes the apsd dictionary before boot with %s",
+  async (profile) => {
+    const { host, service } = harness(profile, true);
+    const result = await service.apply(UDID.toLowerCase(), {});
+    expect(result.apsdLogSuppression).toEqual({ applied: true, path: APSD_LOG_PATH });
+    expect(host.calls.slice(0, 2)).toEqual([
+      ["mkdir", APSD_LOG_DIR],
+      ["write", APSD_LOG_PATH],
+    ]);
+    expect(host.writtenPlists.get(APSD_LOG_PATH)).toEqual(APSD_LOG_PLIST);
+    expect(result.applied).toBe(profile !== "none");
+  },
+);
+
+test.each(["../x", `${UDID}/x`, `${UDID}\n`])(
+  "opt-in refuses invalid UDID %s before host I/O",
+  async (udid) => {
+    const { host, service } = harness("minimal", true);
+    expect(await service.apply(udid, {})).toEqual({
+      applied: false,
+      labels: [],
+      resources: [],
+      reason: "Invalid simulator UDID",
+    });
+    expect(host.calls).toEqual([]);
+  },
+);
+
+test.each(["none", "minimal"] as const)(
+  "apsd write failure warns without failing %s labels",
+  async (profile) => {
+    const { host, service } = harness(profile, true);
+    const error = new Error("apsd write denied");
+    host.writeError = error;
+    host.writeErrorPath = APSD_LOG_PATH;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await service.apply(UDID, {});
+      expect(result.apsdLogSuppression).toEqual({ applied: false, reason: error.message });
+      expect(result.reason).toBeUndefined();
+      expect(result.applied).toBe(profile !== "none");
+      expect(result.labels).toEqual(resolvePrebootLabels({ profile }));
+      if (profile === "minimal") {
+        expect(host.writtenPlists.has(simulatorDisabledDbPath(UDID))).toBe(true);
+      }
+      expect(warn).toHaveBeenCalledWith(
+        "Failed to suppress simulator apsd logs: apsd write denied",
+        error,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
+
+test("opt-in honors cancellation before host I/O", async () => {
+  const { host, service } = harness("minimal", true);
+  const controller = new AbortController();
+  controller.abort();
+  expect(await service.apply(UDID, {}, controller.signal)).toMatchObject({
+    applied: false,
+    reason: "aborted",
+  });
+  expect(host.calls).toEqual([]);
+});
+
+test("opt-in honors cancellation after mkdir without writing or failing labels as an unexpected error", async () => {
+  const { host, service } = harness("minimal", true);
+  const controller = new AbortController();
+  const mkdir = spyOn(host, "mkdirPrivate").mockImplementation(async () => {
+    controller.abort();
+  });
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(await service.apply(UDID, {}, controller.signal)).toMatchObject({
+      applied: false,
+      reason: "aborted",
+    });
+    expect(host.calls).toEqual([]);
+    expect(mkdir).toHaveBeenCalledWith(APSD_LOG_DIR);
+    expect(warn).not.toHaveBeenCalled();
+  } finally {
+    mkdir.mockRestore();
+    warn.mockRestore();
+  }
+});
+
+test("apsd directory failure warns and still applies labels", async () => {
+  const { host, service } = harness("minimal", true);
+  const error = new Error("cannot create apsd directory");
+  const mkdir = spyOn(host, "mkdirPrivate");
+  mkdir.mockRejectedValueOnce(error);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(await service.apply(UDID, {})).toMatchObject({
+      applied: true,
+      apsdLogSuppression: { applied: false, reason: error.message },
+    });
+    expect(host.writtenPlists.has(APSD_LOG_PATH)).toBe(false);
+    expect(host.writtenPlists.has(simulatorDisabledDbPath(UDID))).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      "Failed to suppress simulator apsd logs: cannot create apsd directory",
+      error,
+    );
+  } finally {
+    mkdir.mockRestore();
+    warn.mockRestore();
+  }
+});
+
+test("apsd opt-in is read lazily on each apply", async () => {
+  const host = new FakeSimulatorHostState();
+  const env: NodeJS.ProcessEnv = {};
+  const service = new SimulatorPrebootProfile(host, () => "none", undefined, {
+    enabled: () => resolveApsdLogSuppressionEnabled(env),
+    devicesDir: () => DEVICES_DIR,
+  });
+  expect(await service.apply(UDID, {})).toEqual({ applied: false, resources: [], labels: [] });
+  expect(host.calls).toEqual([]);
+  env.AUTOMOBILE_IOS_SUPPRESS_APSD_LOG = "true";
+  expect((await service.apply(UDID, {})).apsdLogSuppression?.applied).toBe(true);
+});
 test("resolves only catalog labels, with explicit overrides and sorted union", () => {
   expect(resolvePrebootLabels({ profile: "none" })).toEqual([]);
   expect(resolvePrebootLabels({ profile: "catalog-cpu" })).toHaveLength(23);
@@ -187,7 +359,12 @@ test("Node adapter uses private mkdir, PlistClient reads and an atomic binary wr
 test("evaluates the default lazily on each apply without reading ambient env in tests", async () => {
   const host = new FakeSimulatorHostState();
   const env: NodeJS.ProcessEnv = {};
-  const service = new SimulatorPrebootProfile(host, () => resolveDefaultPrebootProfile(env));
+  const service = new SimulatorPrebootProfile(
+    host,
+    () => resolveDefaultPrebootProfile(env),
+    undefined,
+    APSD_LOG_OFF,
+  );
   env.AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE = "minimal";
   expect((await service.apply(UDID, {})).labels).toHaveLength(3);
   host.calls.length = 0;
@@ -302,7 +479,7 @@ test.each(["symlink", "foreign owner", "file", "ok"])(
       { next: () => "unique" },
       () => 501,
     );
-    const service = new SimulatorPrebootProfile(host, () => "minimal");
+    const service = new SimulatorPrebootProfile(host, () => "minimal", undefined, APSD_LOG_OFF);
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       expect((await service.apply(UDID, {})).applied).toBe(mode === "ok");
@@ -315,7 +492,7 @@ test.each(["symlink", "foreign owner", "file", "ok"])(
 
 test("unsafe preboot overrides warn without host access", async () => {
   const host = new FakeSimulatorHostState();
-  const service = new SimulatorPrebootProfile(host, () => "minimal", hazards);
+  const service = new SimulatorPrebootProfile(host, () => "minimal", hazards, APSD_LOG_OFF);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
     expect(
@@ -332,7 +509,7 @@ test("unsafe preboot overrides warn without host access", async () => {
 test("preboot hazards include profile keys and honor enabled overrides", async () => {
   const host = new FakeSimulatorHostState();
   const profileHazards = [{ ...hazards[0]!, resources: ["widgets", "calendarServices"] as const }];
-  const service = new SimulatorPrebootProfile(host, () => "minimal", profileHazards);
+  const service = new SimulatorPrebootProfile(host, () => "minimal", profileHazards, APSD_LOG_OFF);
   expect(
     (await service.apply(UDID, { resources: { calendarServices: "disabled" } })).unsafe,
   ).toEqual(profileHazards);
@@ -345,7 +522,7 @@ test("preboot hazards include profile keys and honor enabled overrides", async (
 
 test("real post-boot calendar hazard allows preboot disable", async () => {
   const host = new FakeSimulatorHostState();
-  const service = new SimulatorPrebootProfile(host, () => "minimal");
+  const service = new SimulatorPrebootProfile(host, () => "minimal", undefined, APSD_LOG_OFF);
   const result = await service.apply(UDID, { resources: { calendarServices: "disabled" } });
   expect(result.applied).toBe(true);
   expect(result.labels).toContain("com.apple.calaccessd");
@@ -376,4 +553,20 @@ test("default and all profiles exclude calendar; default is safe in both phases"
     resources: { widgets: "enabled", healthServices: "disabled" },
   });
   expect(result.resources).toEqual(["wallpaperRendering", "liveActivities", "healthServices"]);
+});
+
+test("apsd suppression writes into the configured custom device set", async () => {
+  const config = apsdLogSuppressionConfig(() => true, {
+    CORESIMULATOR_DEVICE_SET_PATH: "/custom/device-set",
+  });
+  expect(config.devicesDir()).toBe("/custom/device-set");
+  const host = new FakeSimulatorHostState();
+  const result = await new SimulatorPrebootProfile(host, () => "none", undefined, config).apply(
+    UDID,
+    {},
+  );
+  expect(result.apsdLogSuppression).toEqual({
+    applied: true,
+    path: `/custom/device-set/${UDID}/data/Library/Preferences/Logging/Subsystems/com.apple.apsd.plist`,
+  });
 });

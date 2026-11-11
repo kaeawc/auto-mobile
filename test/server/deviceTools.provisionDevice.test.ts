@@ -807,6 +807,37 @@ describe("provisionDevice handler", () => {
       expect(events).toEqual(["dhu-stop"]);
     });
 
+    test("a provision that applied its DHU and then fails at a later step stops it before rollback", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      createdAndroid(applier);
+      setDeviceToolsDependencies({
+        // The step after the bound session and its projection: it fails the whole provision.
+        notifyResourcesChanged: () => {
+          applier.events.push("notify");
+          throw new ActionableError("resource notification failed");
+        },
+        // The rollback's own shutdown detaches observers before it stops the DHU again.
+        stopAndroidObservers: async () => {
+          applier.events.push("rollback");
+        },
+      });
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.success).toBe(false);
+      expect(JSON.stringify(payload)).toContain("resource notification failed");
+      // The projection resolved `applied`, so the provision itself stops its DHU, before the
+      // rollback's shutdown starts.
+      const rollbackStarts = applier.events.indexOf("rollback");
+      expect(applier.events.slice(0, rollbackStarts + 1)).toEqual([
+        "apply:emulator-5554",
+        "notify",
+        "stop:emulator-5554",
+        "rollback",
+      ]);
+      expect(applier.events).toContain("destroy");
+    });
+
     test("a failed rerun on a reused emulator leaves the DHU an earlier provision started", async () => {
       const events: string[] = [];
       const { ui, applier, sessions } = realProjectionStack(events);

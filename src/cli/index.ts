@@ -12,6 +12,7 @@ import {
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonUnavailableError } from "../daemon/client/client";
+import { DaemonToolUnavailableError } from "../daemon/proxy/DaemonToolUnavailableError";
 import {
   DaemonMcpProxy,
   DaemonVersionMismatchError,
@@ -19,7 +20,7 @@ import {
   DaemonAssetVersionMismatchError,
 } from "../daemon/daemonMcpProxy";
 import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
-import { isGatedToolErrorCode, type DaemonOptions } from "../daemon/types";
+import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
@@ -401,7 +402,9 @@ async function runToolViaDaemon(
     }
     const message = errorMessage(error);
     throw new ActionableError(
-      formatDaemonToolError(toolName, message, { gated: isGatedToolErrorCode(error) }),
+      formatDaemonToolError(toolName, message, {
+        buildSkew: error instanceof DaemonToolUnavailableError && error.buildMismatch,
+      }),
     );
   } finally {
     // Declare the session this one-shot process owns BEFORE closing (#6870).

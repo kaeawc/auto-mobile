@@ -95,7 +95,8 @@ export function resolveIosCrashBackend(
     ? new SimulatorIosCrashBackend(
         deviceId,
         deps.simctl,
-        deps.platform === "tvos" ? "system" : "user",
+        // tvOS and watchOS simulators run apps in the system domain; neither has user/<uid>.
+        deps.platform === "tvos" || deps.platform === "watchos" ? "system" : "user",
       )
     : new PhysicalIosCrashBackend();
 }

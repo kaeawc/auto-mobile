@@ -150,6 +150,26 @@ function watchDisplay(device: BootedDevice): { ref: DisplayRef; captureKey: stri
   };
 }
 
+/** What to pass instead of each refused option, or nothing when the option has no alternative here. */
+function refusedOptionAlternatives(
+  refused: readonly string[],
+  displayKey: string,
+  hasRunnerHierarchy: boolean,
+): string[] {
+  return refused.flatMap((name) => {
+    if (name === 'screenshot: "none"') {
+      return ['use screenshot: "settled" or "async" (every observe here returns a screenshot)'];
+    }
+    if (name === "raw" && hasRunnerHierarchy) {
+      return ['omit raw and use project: "full" for every element'];
+    }
+    if (name.startsWith("display: ")) {
+      return [`use display: "active" or "${displayKey}"`];
+    }
+    return [];
+  });
+}
+
 /** Throws an ActionableError naming every observe option this Apple simulator path cannot honour. */
 export function assertWatchObserveOptions(
   args: ObserveArgs,
@@ -165,11 +185,15 @@ export function assertWatchObserveOptions(
     refused.push(`display: "${args.display}"`);
   }
   if (refused.length > 0) {
+    const label = NON_IOS_APPLE_PLATFORM_LABELS[platform];
+    const alternatives = refusedOptionAlternatives(refused, displayKey, hasRunnerHierarchy);
     throw new ActionableError(
       (hasRunnerHierarchy
-        ? `observe with the ${NON_IOS_APPLE_PLATFORM_LABELS[platform]} runner `
-        : `observe on ${NON_IOS_APPLE_PLATFORM_LABELS[platform]} returns only a screenshot (the view hierarchy is not available yet) `) +
-        `and does not support: ${refused.join(", ")}. Remove these options and observe again.`,
+        ? `observe with the ${label} runner does not support: `
+        : `observe on ${label} returns only a screenshot (the view hierarchy is not available yet) and does not support: `) +
+        `${refused.join(", ")}.` +
+        (alternatives.length > 0 ? ` Instead, ${alternatives.join("; ")}.` : "") +
+        " Remove the unsupported options and observe again.",
     );
   }
 }

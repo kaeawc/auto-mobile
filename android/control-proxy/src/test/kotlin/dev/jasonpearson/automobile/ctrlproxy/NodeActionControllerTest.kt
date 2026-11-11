@@ -162,9 +162,8 @@ class NodeActionControllerTest {
       controller.performNodeAction(
         "bounds",
         "click",
-        null,
-        selector,
-        expectedBounds = expectedBounds,
+        NodeActionTarget(selector = selector),
+        boundsConstraint = NodeBoundsConstraint(expectedBounds),
       )
 
       assertTrue(host.results.single().success)
@@ -180,7 +179,12 @@ class NodeActionControllerTest {
     val target = boundsNode(visible = false)
     host.windowRoots = listOf(tree(target))
 
-    controller.performNodeAction("hidden", "click", null, selector, expectedBounds = expectedBounds)
+    controller.performNodeAction(
+      "hidden",
+      "click",
+      NodeActionTarget(selector = selector),
+      boundsConstraint = NodeBoundsConstraint(expectedBounds),
+    )
 
     assertFalse(host.results.single().success)
     assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
@@ -197,13 +201,85 @@ class NodeActionControllerTest {
     controller.performNodeAction(
       "bounds-only",
       "click",
-      null,
-      null,
-      expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+      NodeActionTarget(),
+      boundsConstraint = NodeBoundsConstraint(NodeExpectedBounds(48, 372, 696, 548)),
     )
 
     assertTrue(host.results.single().success)
     verify(exactly = 1) { target.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+    verify(exactly = 1) { target.recycle() }
+  }
+
+  @Test
+  fun `selector click opts into an invisible node only at exact nonempty bounds`() = runTest {
+    for (left in listOf(10, 11, 110)) {
+      val (controller, host) = setup()
+      val target = boundsNode(visible = false, left = left)
+      host.windowRoots = listOf(tree(target))
+
+      controller.performNodeAction(
+        "hidden-click",
+        "click",
+        NodeActionTarget(selector = selector),
+        boundsConstraint =
+          NodeBoundsConstraint(
+            expectedBounds =
+              if (left == 110) NodeExpectedBounds(110, 20, 110, 120) else expectedBounds,
+            allowInvisible = true,
+          ),
+      )
+
+      assertEquals(left == 10, host.results.single().success)
+      if (left != 10) {
+        assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
+      }
+      verify(exactly = if (left == 10) 1 else 0) {
+        target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+      }
+      verify(exactly = 1) { target.recycle() }
+    }
+  }
+
+  @Test
+  fun `invisible selector click refuses multiple exact bounds matches`() = runTest {
+    val (controller, host) = setup()
+    val first = boundsNode(visible = false)
+    val second = boundsNode(visible = false)
+    host.windowRoots = listOf(tree(first), tree(second))
+
+    controller.performNodeAction(
+      "hidden-ambiguous",
+      "click",
+      NodeActionTarget(selector = selector),
+      boundsConstraint = NodeBoundsConstraint(expectedBounds, allowInvisible = true),
+    )
+
+    assertFalse(host.results.single().success)
+    assertTrue(host.results.single().error?.startsWith("node_bounds_ambiguous:") == true)
+    for (target in listOf(first, second)) {
+      verify(exactly = 0) { target.performAction(any()) }
+      verify(exactly = 1) { target.recycle() }
+    }
+  }
+
+  @Test
+  fun `non-click actions ignore allowInvisible and refuse an invisible node`() = runTest {
+    val (controller, host) = setup()
+    val target = boundsNode(visible = false)
+    every { target.actionList } returns
+      listOf(AccessibilityNodeInfo.AccessibilityAction.ACTION_LONG_CLICK)
+    host.windowRoots = listOf(tree(target))
+
+    controller.performNodeAction(
+      "hidden-long-click",
+      "long_click",
+      NodeActionTarget(selector = selector),
+      boundsConstraint = NodeBoundsConstraint(expectedBounds, allowInvisible = true),
+    )
+
+    assertFalse(host.results.single().success)
+    assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
+    verify(exactly = 0) { target.performAction(any()) }
     verify(exactly = 1) { target.recycle() }
   }
 
@@ -234,14 +310,16 @@ class NodeActionControllerTest {
       controller.performNodeAction(
         "identity",
         "click",
-        null,
-        null,
-        expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
-        identityHints =
-          NodeIdentityHints(
-            className = "android.widget.LinearLayout",
-            text = "Connected devices",
-            contentDesc = "Settings",
+        NodeActionTarget(),
+        boundsConstraint =
+          NodeBoundsConstraint(
+            expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+            identityHints =
+              NodeIdentityHints(
+                className = "android.widget.LinearLayout",
+                text = "Connected devices",
+                contentDesc = "Settings",
+              ),
           ),
       )
 
@@ -275,14 +353,16 @@ class NodeActionControllerTest {
       controller.performNodeAction(
         "label",
         "click",
-        null,
-        null,
-        expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
-        identityHints =
-          NodeIdentityHints(
-            className = "android.widget.LinearLayout",
-            labelText = "Connected devices",
-            labelContentDesc = "Connections",
+        NodeActionTarget(),
+        boundsConstraint =
+          NodeBoundsConstraint(
+            expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+            identityHints =
+              NodeIdentityHints(
+                className = "android.widget.LinearLayout",
+                labelText = "Connected devices",
+                labelContentDesc = "Connections",
+              ),
           ),
       )
 
@@ -309,14 +389,16 @@ class NodeActionControllerTest {
       controller.performNodeAction(
         "stale-row",
         "click",
-        null,
-        null,
-        expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
-        identityHints =
-          NodeIdentityHints(
-            className = "android.widget.LinearLayout",
-            labelText = if (mode == "description") null else "Connected devices",
-            labelContentDesc = if (mode == "description") "Connections" else null,
+        NodeActionTarget(),
+        boundsConstraint =
+          NodeBoundsConstraint(
+            expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+            identityHints =
+              NodeIdentityHints(
+                className = "android.widget.LinearLayout",
+                labelText = if (mode == "description") null else "Connected devices",
+                labelContentDesc = if (mode == "description") "Connections" else null,
+              ),
           ),
       )
 
@@ -338,9 +420,8 @@ class NodeActionControllerTest {
     controller.performNodeAction(
       "duplicate",
       "click",
-      null,
-      null,
-      expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+      NodeActionTarget(),
+      boundsConstraint = NodeBoundsConstraint(NodeExpectedBounds(48, 372, 696, 548)),
     )
 
     assertTrue(host.results.single().error?.startsWith("node_bounds_ambiguous:") == true)
@@ -364,7 +445,12 @@ class NodeActionControllerTest {
           else -> NodeExpectedBounds(48, 372, 696, 548)
         }
 
-      controller.performNodeAction("refuse", "click", null, null, expectedBounds = bounds)
+      controller.performNodeAction(
+        "refuse",
+        "click",
+        NodeActionTarget(),
+        boundsConstraint = NodeBoundsConstraint(bounds),
+      )
 
       assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
       verify(exactly = 0) { target.performAction(any()) }
@@ -378,9 +464,8 @@ class NodeActionControllerTest {
     controller.performNodeAction(
       "refuse",
       "long_click",
-      null,
-      null,
-      expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+      NodeActionTarget(),
+      boundsConstraint = NodeBoundsConstraint(NodeExpectedBounds(48, 372, 696, 548)),
     )
     advanceUntilIdle()
     assertEquals(
@@ -395,7 +480,12 @@ class NodeActionControllerTest {
     val target = boundsNode(left = 99)
     host.windowRoots = listOf(tree(target))
 
-    controller.performNodeAction("bounds", "click", null, selector, expectedBounds = expectedBounds)
+    controller.performNodeAction(
+      "bounds",
+      "click",
+      NodeActionTarget(selector = selector),
+      boundsConstraint = NodeBoundsConstraint(expectedBounds),
+    )
 
     assertFalse(host.results.single().success)
     assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
@@ -411,7 +501,12 @@ class NodeActionControllerTest {
     val second = boundsNode()
     host.windowRoots = listOf(tree(first), tree(second))
 
-    controller.performNodeAction("bounds", "click", null, selector, expectedBounds = expectedBounds)
+    controller.performNodeAction(
+      "bounds",
+      "click",
+      NodeActionTarget(selector = selector),
+      boundsConstraint = NodeBoundsConstraint(expectedBounds),
+    )
 
     assertFalse(host.results.single().success)
     assertTrue(host.results.single().error?.startsWith("node_bounds_ambiguous:") == true)
@@ -430,9 +525,8 @@ class NodeActionControllerTest {
     controller.performNodeAction(
       "partial",
       "click",
-      null,
-      selector,
-      expectedBounds = NodeExpectedBounds(10, null, 110, 120),
+      NodeActionTarget(selector = selector),
+      boundsConstraint = NodeBoundsConstraint(NodeExpectedBounds(10, null, 110, 120)),
     )
 
     assertFalse(host.results.single().success)
@@ -447,7 +541,7 @@ class NodeActionControllerTest {
     val visible = boundsNode()
     host.windowRoots = listOf(tree(hidden, visible))
 
-    controller.performNodeAction("legacy", "click", null, selector)
+    controller.performNodeAction("legacy", "click", NodeActionTarget(selector = selector))
 
     assertTrue(host.results.single().success)
     verify(exactly = 1) { hidden.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
@@ -458,7 +552,7 @@ class NodeActionControllerTest {
   fun `the action result is one timestamped envelope with no perf timing in tests`() = runTest {
     val (controller, host) = setup()
 
-    controller.performNodeAction("r0", "click", null, null)
+    controller.performNodeAction("r0", "click", NodeActionTarget())
     advanceUntilIdle()
 
     val envelope = host.envelopes.single()
@@ -475,7 +569,7 @@ class NodeActionControllerTest {
     val (controller, host) = setup()
     host.failSend = IllegalStateException("socket closed")
 
-    controller.performNodeAction("r-x", "click", null, null)
+    controller.performNodeAction("r-x", "click", NodeActionTarget())
     advanceUntilIdle()
 
     assertEquals(listOf("forget", "error:r-x"), host.events)
@@ -485,7 +579,7 @@ class NodeActionControllerTest {
   fun `an action without a resource id or selector is refused`() = runTest {
     val (controller, host) = setup()
 
-    controller.performNodeAction("r1", "click", null, null)
+    controller.performNodeAction("r1", "click", NodeActionTarget())
     advanceUntilIdle()
 
     val result = host.results.single()
@@ -501,7 +595,7 @@ class NodeActionControllerTest {
   fun `an action on a missing element reports it not found`() = runTest {
     val (controller, host) = setup()
 
-    controller.performNodeAction("r1", "click", "app:id/missing", null)
+    controller.performNodeAction("r1", "click", NodeActionTarget(resourceId = "app:id/missing"))
     advanceUntilIdle()
 
     assertEquals("Element not found with resource-id: app:id/missing", host.results.single().error)
@@ -514,7 +608,7 @@ class NodeActionControllerTest {
       val target = node(actions = listOf(AccessibilityNodeInfo.ACTION_CLICK))
       host.node = target
 
-      controller.performNodeAction("r1", "click", "app:id/ok", null)
+      controller.performNodeAction("r1", "click", NodeActionTarget(resourceId = "app:id/ok"))
 
       assertEquals(listOf("forget", "publish", "result"), host.events)
       assertTrue(host.results.single().success)
@@ -529,7 +623,7 @@ class NodeActionControllerTest {
     val target = node(focused = true)
     host.node = target
 
-    controller.performNodeAction("r1", "focus", "app:id/ok", null)
+    controller.performNodeAction("r1", "focus", NodeActionTarget(resourceId = "app:id/ok"))
 
     val result = host.results.single()
     assertTrue(result.success)
@@ -543,7 +637,7 @@ class NodeActionControllerTest {
     val (controller, host) = setup()
     host.node = node(actions = listOf(AccessibilityNodeInfo.ACTION_LONG_CLICK))
 
-    controller.performNodeAction("r1", "click", "app:id/ok", null)
+    controller.performNodeAction("r1", "click", NodeActionTarget(resourceId = "app:id/ok"))
 
     val result = host.results.single()
     assertFalse(result.success)

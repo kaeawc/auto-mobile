@@ -110,6 +110,7 @@ interface CtrlProxyActions {
     arguments: NodeActionArguments = NodeActionArguments(),
     expectedBounds: NodeExpectedBounds? = null,
     identityHints: NodeIdentityHints? = null,
+    allowInvisible: Boolean = false,
   )
 
   suspend fun requestActivateAccessibilityLink(

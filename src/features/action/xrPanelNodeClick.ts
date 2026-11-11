@@ -20,6 +20,7 @@ import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import type { DisplayFenceOption } from "./BaseVisualChange";
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { findTapTargetNode } from "./tapTargetSupport";
+import { isApprovedHiddenSystemUiClick } from "./xrHiddenChrome";
 import type { AndroidActionRequestOptions } from "../observe/android/AndroidActionDispatcher";
 import type { A11yActionResult } from "../observe/android/types";
 
@@ -27,6 +28,7 @@ type VerifiedNodeTarget = {
   selector?: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
   expectedBounds: Element["bounds"];
   identityHints?: AndroidActionRequestOptions["identityHints"];
+  allowInvisible?: boolean;
 };
 
 type XrNodeClickOptions = DisplayFenceOption & {
@@ -170,12 +172,31 @@ function xrNodeClickSelector(
   if (hasAccessibilityAction(element.actions, "click")) {
     const selector = uniqueSelector(element);
     if (selector) {
-      return selector;
+      return {
+        ...selector,
+        // Only the hidden-chrome gate's approved System UI targets may bypass CtrlProxy's
+        // visibility check; a hidden or covered app node keeps the refusal.
+        ...(selector.selector &&
+        element["visible-to-user"] === false &&
+        isApprovedHiddenSystemUiTarget(entries, element, hierarchy)
+          ? { allowInvisible: true }
+          : {}),
+      };
     }
     throw xrCoordinateError();
   }
 
   return xrAncestorClickSelector(element, entries, uniqueSelector, scope);
+}
+
+/** The hidden-chrome gate's approval, asked about the click-time node in the click's own capture. */
+function isApprovedHiddenSystemUiTarget(
+  entries: readonly SearchableEntry[],
+  element: Element,
+  hierarchy: ViewHierarchyResult,
+): boolean {
+  const target = findTapTargetNode(entries, element);
+  return target !== undefined && isApprovedHiddenSystemUiClick(hierarchy, target.source);
 }
 
 /** A label container may identify its owning row, while unrelated targets stay scoped. */
@@ -314,14 +335,14 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
   },
 ): Promise<void> {
   throwIfAborted(signal);
-  const { selector, expectedBounds, identityHints } = xrNodeClickSelector(
+  const { selector, ...verification } = xrNodeClickSelector(
     action,
     element,
     options ?? {},
     options && resolveContainer && ((hierarchy) => resolveContainer(hierarchy, options)),
   );
   const result = await dispatchXrNodeClick(accessibilityService, {
-    target: { selector, expectedBounds, identityHints },
+    target: { selector, ...verification },
     signal,
     displayFence: options?.displayFence,
   });
@@ -335,7 +356,7 @@ async function dispatchXrNodeClick(
     "supportsNodeActionSelectors" | "requestNodeAction"
   >,
   {
-    target: { selector, expectedBounds, identityHints },
+    target: { selector, ...verification },
     signal,
     displayFence,
   }: {
@@ -352,8 +373,7 @@ async function dispatchXrNodeClick(
     displayFence?.assertCurrent();
     const result = await accessibilityService().requestNodeAction("click", selector, {
       signal,
-      expectedBounds,
-      identityHints,
+      ...verification,
     });
     throwIfAborted(signal);
     return result;

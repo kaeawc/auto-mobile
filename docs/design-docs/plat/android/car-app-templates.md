@@ -90,6 +90,20 @@ first-record order, so it can change after `disable()` and `enable()`.
   sessions, error) instead of a top-level `packageName`. Android Auto does not say which bound app is
   on the head unit (#17827), so every enabled app is listed by package name and none is marked
   visible. A failed dump, or no bound app answering enabled, leaves the payload unchanged.
+- The `androidAuto` block (#17841) is resolved after `carAppTemplates` from the services snapshot that
+  read took for the same observation (kept past the dump's TTL), so it costs no extra device read. It is added only while gearhead is the foreground package
+  and one of gearhead's `.apphost.Template*Service` hosts (one per car app category; the captured
+  dump shows `TemplateNavigationService` bound by `gearhead:car`) has a live gearhead binding, which
+  is positive evidence that a head unit session hosts car app templates. `apps[]` keeps only bound
+  apps (package and user) whose route answered: Android Auto binds Maps, media, Play and Assistant services the same
+  way, and without a captured `cmd package query-services -a androidx.car.app.CarAppService` read,
+  an answering route is the only proof an app is a Car App Library app. Each entry carries the bound
+  components from the dump. The block never names a visible app: the bound set and the route's
+  answer stay the same while another app is on the head unit (#17827). The host's own state
+  (`dumpsys activity service <host>`, `activity state:RESUMED`/`isShowing:true`) does tell visibility
+  for a category with a single bound app, but it is not read until a capture of it is committed.
+  Head unit config, resolution and screenshot are not reported. No projection seen leaves the
+  payload unchanged, byte for byte.
 
 ## Host-rendered marker
 

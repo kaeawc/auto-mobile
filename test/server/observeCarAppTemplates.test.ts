@@ -8,7 +8,14 @@ import {
   CAR_APP_PROJECTED_NOTE,
   CAR_APP_TEMPLATES_NOTE,
 } from "../../src/models/CarAppTemplates";
-import type { CarAppTemplatesResolver } from "../../src/features/observe/android/CarAppTemplateReader";
+import type {
+  AndroidAutoProjectionResolver,
+  CarAppTemplatesResolver,
+} from "../../src/features/observe/android/CarAppTemplateReader";
+import {
+  ANDROID_AUTO_PROJECTION_NOTE,
+  type AndroidAutoProjection,
+} from "../../src/models/AndroidAutoProjection";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { observeResultSchema } from "../../src/server/toolOutputSchemas";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -73,7 +80,11 @@ const block: CarAppForegroundTemplates = {
   ],
 };
 
-async function observe(resolver: CarAppTemplatesResolver, result: ObserveResult) {
+async function observe(
+  resolver: CarAppTemplatesResolver,
+  result: ObserveResult,
+  androidAuto: AndroidAutoProjectionResolver = async () => undefined,
+) {
   const screen = new FakeObserveScreen();
   screen.setObserveResult(result);
   const seen: string[] = [];
@@ -86,6 +97,7 @@ async function observe(resolver: CarAppTemplatesResolver, result: ObserveResult)
         seen.push(target.deviceId);
         return await resolver(target, observed);
       },
+      androidAuto,
     });
     const tool = ToolRegistry.getTool("observe")!;
     const response = await tool.deviceAwareHandler!(
@@ -141,6 +153,64 @@ describe("observe carAppTemplates (#16751)", () => {
     expect(advertised).toContain('"screens"');
     expect(advertised).toContain('"tabContent"');
     expect(advertised).toContain('"projected"');
+    expect(advertised).not.toContain("$ref");
+  });
+});
+
+describe("observe androidAuto (#17841)", () => {
+  const projection: AndroidAutoProjection = {
+    projecting: true,
+    projectedBy: ANDROID_AUTO_PACKAGE,
+    templateHosts: [`${ANDROID_AUTO_PACKAGE}/.apphost.TemplateNavigationService`],
+    apps: [{ packageName: block.packageName, userId: 0, services: [`${block.packageName}/.Svc`] }],
+    note: ANDROID_AUTO_PROJECTION_NOTE,
+  };
+
+  test("the projection block is resolved after carAppTemplates and passes the output schema", async () => {
+    const projected: CarAppTemplates = {
+      source: "sdk",
+      note: CAR_APP_TEMPLATES_NOTE,
+      projectedBy: ANDROID_AUTO_PACKAGE,
+      projectedNote: CAR_APP_PROJECTED_NOTE,
+      projected: [{ packageName: block.packageName, sessions: block.sessions }],
+    };
+    const seenTemplates: unknown[] = [];
+    const result = observationOf(capturedTwoWindowHierarchy());
+    const { payload } = await observe(
+      async () => projected,
+      result,
+      async (_target, observed) => {
+        seenTemplates.push(observed.carAppTemplates);
+        return projection;
+      },
+    );
+    expect(seenTemplates).toEqual([projected]);
+    expect(payload.androidAuto).toEqual(projection);
+    expect(result.androidAuto).toBeUndefined();
+  });
+
+  test("with no projection the payload is byte-identical to one served without the resolver", async () => {
+    const baseline = await observe(
+      async () => undefined,
+      observationOf(capturedTwoWindowHierarchy()),
+    );
+    const withResolver = await observe(
+      async () => undefined,
+      observationOf(capturedTwoWindowHierarchy()),
+      async () => undefined,
+    );
+    expect(JSON.stringify(withResolver.raw)).toBe(JSON.stringify(baseline.raw));
+    expect(JSON.stringify(withResolver.raw)).not.toContain("androidAuto");
+  });
+
+  test("the advertised observe schema carries androidAuto with no dangling $ref", () => {
+    const observeTool = toolDefinitions.find((tool) => tool.name === "observe");
+    const advertised = JSON.stringify(
+      (observeTool?.outputSchema as { properties?: Record<string, unknown> } | undefined)
+        ?.properties?.androidAuto,
+    );
+    expect(advertised).toContain('"templateHosts"');
+    expect(advertised).toContain('"projecting"');
     expect(advertised).not.toContain("$ref");
   });
 });

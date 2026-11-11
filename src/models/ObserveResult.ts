@@ -338,6 +338,13 @@ export type ObserveResult = {
   carAppTemplates?: import("./CarAppTemplates").CarAppTemplates;
 
   /**
+   * Present only on the `observe` tool's own result while Android Auto projects to a head unit
+   * (#17841): its bound template hosts and the bound apps whose template route answered. The
+   * visible app is not reported.
+   */
+  androidAuto?: import("./AndroidAutoProjection").AndroidAutoProjection;
+
+  /**
    * Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise,
    * iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right
    * (iOS landscapeRight / Android ROTATION_270).

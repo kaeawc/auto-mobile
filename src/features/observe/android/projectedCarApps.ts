@@ -7,11 +7,31 @@ export interface ProjectedCarApp {
   userId: number;
 }
 
+/** A bound app with the components Android Auto holds a live binding to, as the dump names them. */
+export interface ProjectedCarAppServices extends ProjectedCarApp {
+  /** `<package>/<class>`, sorted; the class keeps the dump's short `.`-prefixed form. */
+  services: string[];
+}
+
+/** What one `dumpsys activity services` read says about an Android Auto projection (#17841). */
+export interface AndroidAutoProjectionServices {
+  /**
+   * Android Auto's own Car App Library template hosts (`.apphost.Template*Service`, one per app
+   * category) that one of its processes holds bound, sorted. A bound host means a head unit session
+   * is hosting car app templates; it says nothing about which app the head unit shows.
+   */
+  templateHosts: string[];
+  /** Every app outside Android Auto with a live Android Auto binding, as {@link parseProjectedCarApps}. */
+  apps: ProjectedCarAppServices[];
+}
+
 /** `* ServiceRecord{<hash> u<user> <package>/<class>[ c:<client>]}` */
 const SERVICE_RECORD_HEADER =
-  /^\s*\* ServiceRecord\{[0-9a-f]+ u(\d+) ([A-Za-z0-9_.]+)\/[^\s}]+(?: [^}]*)?\}/;
+  /^\s*\* ServiceRecord\{[0-9a-f]+ u(\d+) ([A-Za-z0-9_.]+)\/([^\s}]+)(?: [^}]*)?\}/;
 
 const escapedHost = ANDROID_AUTO_PACKAGE.replace(/\./g, "\\.");
+/** Android Auto's template host classes, short (`.apphost.X`) or fully qualified. */
+const TEMPLATE_HOST_CLASS = new RegExp(`^(?:${escapedHost})?\\.apphost\\.Template\\w*Service$`);
 /**
  * A live binding client in Android Auto's process (`gearhead` or one of its `:suffix` processes).
  * The header's `c:<package>` is only the last start/bind caller, so it never counts on its own.
@@ -22,6 +42,7 @@ const ANDROID_AUTO_CLIENT = new RegExp(
 
 interface ServiceBlock {
   packageName: string;
+  className: string;
   userId: number;
   lines: string[];
 }
@@ -47,7 +68,12 @@ function serviceBlocks(dump: string): ServiceBlock[] {
   for (const line of dump.split(/\r?\n/)) {
     const header = SERVICE_RECORD_HEADER.exec(line);
     if (header) {
-      current = { userId: Number(header[1]), packageName: header[2], lines: [line] };
+      current = {
+        userId: Number(header[1]),
+        packageName: header[2],
+        className: header[3],
+        lines: [line],
+      };
       blocks.push(current);
     } else if (isSectionHeader(line)) {
       current = undefined;
@@ -68,22 +94,43 @@ function serviceBlocks(dump: string): ServiceBlock[] {
  * dump's order says nothing about which app is shown.
  */
 export function parseProjectedCarApps(dump: string): ProjectedCarApp[] {
-  const found = new Map<string, ProjectedCarApp>();
+  return parseAndroidAutoProjectionServices(dump).apps.map(({ packageName, userId }) => ({
+    packageName,
+    userId,
+  }));
+}
+
+/** The bound apps (with their bound components) and Android Auto's bound template hosts. */
+export function parseAndroidAutoProjectionServices(dump: string): AndroidAutoProjectionServices {
+  const found = new Map<string, ProjectedCarAppServices>();
+  const templateHosts = new Set<string>();
   for (const block of serviceBlocks(dump)) {
-    const body = block.lines.join("\n");
-    if (
-      block.packageName === ANDROID_AUTO_PACKAGE ||
-      !ANDROID_PACKAGE_NAME_PATTERN.test(block.packageName) ||
-      !ANDROID_AUTO_CLIENT.test(body)
-    ) {
+    if (!ANDROID_AUTO_CLIENT.test(block.lines.join("\n"))) {
       continue;
     }
-    found.set(`${block.packageName}\u0000${block.userId}`, {
+    const component = `${block.packageName}/${block.className}`;
+    if (block.packageName === ANDROID_AUTO_PACKAGE) {
+      if (TEMPLATE_HOST_CLASS.test(block.className)) {
+        templateHosts.add(component);
+      }
+      continue;
+    }
+    if (!ANDROID_PACKAGE_NAME_PATTERN.test(block.packageName)) {
+      continue;
+    }
+    const key = `${block.packageName}\u0000${block.userId}`;
+    const app = found.get(key) ?? {
       packageName: block.packageName,
       userId: block.userId,
-    });
+      services: [],
+    };
+    if (!app.services.includes(component)) {
+      app.services.push(component);
+    }
+    found.set(key, app);
   }
-  return [...found.values()].sort(
-    (a, b) => a.packageName.localeCompare(b.packageName) || a.userId - b.userId,
-  );
+  const apps = [...found.values()]
+    .map((app) => ({ ...app, services: [...app.services].sort() }))
+    .sort((a, b) => a.packageName.localeCompare(b.packageName) || a.userId - b.userId);
+  return { templateHosts: [...templateHosts].sort(), apps };
 }

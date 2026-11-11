@@ -64,6 +64,7 @@ import {
 } from "../utils/audio/audioInputDiagnostic";
 import {
   CarAppTemplateReader,
+  type AndroidAutoProjectionResolver,
   type CarAppTemplatesResolver,
 } from "../features/observe/android/CarAppTemplateReader";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -90,6 +91,8 @@ export interface ObserveToolDependencies {
   audioInputDiagnostic?: AudioInputDiagnosticResolver;
   /** Car App Library template stacks from the foreground app's SDK route (#16751). */
   carAppTemplates?: CarAppTemplatesResolver;
+  /** The Android Auto projection block (#17841), resolved after `carAppTemplates`. */
+  androidAuto?: AndroidAutoProjectionResolver;
   /** Screenshot-only observe on an Apple Watch simulator (#14910); tests pass a fake capture. */
   watch?: WatchObserveDependencies;
 }
@@ -109,15 +112,28 @@ export async function withDeviceDiagnostics(
 
 let defaultCarAppTemplateReader: CarAppTemplateReader | undefined;
 
+/** The shared reader, so the projection block reuses the services dump the templates read took. */
+function carAppTemplateReader(): CarAppTemplateReader {
+  defaultCarAppTemplateReader ??= new CarAppTemplateReader((target) =>
+    defaultAdbClientFactory.create(target),
+  );
+  return defaultCarAppTemplateReader;
+}
+
 /** Under `bun test` (NODE_ENV=test) the default never runs adb; tests inject a resolver. */
 const defaultCarAppTemplates: CarAppTemplatesResolver = async (device, result) => {
   if (readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test") {
     return undefined;
   }
-  defaultCarAppTemplateReader ??= new CarAppTemplateReader((target) =>
-    defaultAdbClientFactory.create(target),
-  );
-  return defaultCarAppTemplateReader.resolve(device, result);
+  return carAppTemplateReader().resolve(device, result);
+};
+
+/** Under `bun test` (NODE_ENV=test) the default never runs adb; tests inject a resolver. */
+const defaultAndroidAuto: AndroidAutoProjectionResolver = async (device, result) => {
+  if (readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test") {
+    return undefined;
+  }
+  return carAppTemplateReader().resolveAndroidAuto(device, result);
 };
 
 /**
@@ -134,19 +150,38 @@ export async function withCarAppTemplates(
 }
 
 /**
+ * The served observe result with the Android Auto projection block (#17841). A copy, like
+ * {@link withCarAppTemplates}; unchanged, byte for byte, when nothing is projecting.
+ */
+export async function withAndroidAutoProjection(
+  result: ObserveResult,
+  device: BootedDevice,
+  resolve: AndroidAutoProjectionResolver = defaultAndroidAuto,
+): Promise<ObserveResult> {
+  const androidAuto = await resolve(device, result);
+  return androidAuto ? { ...result, androidAuto } : result;
+}
+
+/**
  * The extras only the `observe` tool's own result carries: device diagnostics, then the foreground
- * app's Car App Library templates. A non-owner read of a held device makes no app provider calls.
+ * app's Car App Library templates, then the Android Auto projection. A non-owner read of a held
+ * device makes no app provider calls.
  */
 export async function withServedObservationExtras(
   result: ObserveResult,
   device: BootedDevice,
   deviceRead: boolean,
-  dependencies: Pick<ObserveToolDependencies, "audioInputDiagnostic" | "carAppTemplates">,
+  dependencies: Pick<
+    ObserveToolDependencies,
+    "audioInputDiagnostic" | "carAppTemplates" | "androidAuto"
+  >,
 ): Promise<ObserveResult> {
   const diagnosed = await withDeviceDiagnostics(result, device, dependencies.audioInputDiagnostic);
-  return deviceRead
-    ? diagnosed
-    : await withCarAppTemplates(diagnosed, device, dependencies.carAppTemplates);
+  if (deviceRead) {
+    return diagnosed;
+  }
+  const templated = await withCarAppTemplates(diagnosed, device, dependencies.carAppTemplates);
+  return await withAndroidAutoProjection(templated, device, dependencies.androidAuto);
 }
 
 /**

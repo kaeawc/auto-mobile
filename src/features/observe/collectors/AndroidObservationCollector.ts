@@ -1,5 +1,10 @@
-import { logger } from "../../../utils/logger";
 import { errorMessage as describeError } from "../../../utils/describeUnknownError";
+import {
+  CachedAndroidXrDisplaySize,
+  type AndroidXrDisplaySize,
+  type AndroidXrDisplaySizeDeps,
+} from "../android/AndroidXrDisplaySize";
+import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type {
   BootedDevice,
@@ -44,7 +49,8 @@ export interface AndroidObservationCollector {
   collect(context: AndroidCollectionContext): Promise<void>;
 }
 
-export interface AndroidObservationCollectorDeps {
+export interface AndroidObservationCollectorDeps extends AndroidXrDisplaySizeDeps {
+  xrDisplaySize?: AndroidXrDisplaySize;
   hierarchyCollector: () => HierarchyCollectorPort;
   deviceStateCollector: () => DeviceStateCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
@@ -84,7 +90,11 @@ function replaceDisplayReadAppId(result: ObserveResult): boolean {
 }
 
 export class DefaultAndroidObservationCollector implements AndroidObservationCollector {
-  constructor(private readonly deps: AndroidObservationCollectorDeps) {}
+  private readonly xrDisplaySize: AndroidXrDisplaySize;
+
+  constructor(private readonly deps: AndroidObservationCollectorDeps) {
+    this.xrDisplaySize = deps.xrDisplaySize ?? new CachedAndroidXrDisplaySize(deps);
+  }
 
   async collect(context: AndroidCollectionContext): Promise<void> {
     const {
@@ -115,6 +125,8 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     const hierarchy = result.viewHierarchy;
     if (hierarchy?.screenWidth && hierarchy?.screenHeight) {
       result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
+      await this.xrDisplaySize.prime(result, hierarchy, signal, context.displayId);
+      this.xrDisplaySize.applyCached(result, hierarchy, context.displayId);
       this.applyHierarchyDeviceMetadata(result, hierarchy);
       const parallelTasks = this.startDeviceStateTasks(context, !hierarchy.wakefulness);
       if (parallelTasks.length > 0) {

@@ -11276,7 +11276,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS, Apple Watch and Apple TV Simulator unified log by app subsystem and process. Bounded output.",
+    "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS, Apple Watch, Apple TV and Apple Vision Pro Simulator unified log by app subsystem and process. Bounded output.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -15407,7 +15407,7 @@
           }
         },
         "allowDestructiveRecovery": {
-          "description": "Android: false refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
+          "description": "Android: true uninstalls the installed copy, deleting its app data, and reinstalls after INSTALL_FAILED_VERSION_DOWNGRADE (result dataPreserved: false). Default false: a downgrade fails with install_downgrade_refused and leaves the app untouched",
           "type": "boolean"
         },
         "sessionUuid": {
@@ -15452,6 +15452,9 @@
           "type": "string"
         },
         "upgrade": {
+          "type": "boolean"
+        },
+        "dataPreserved": {
           "type": "boolean"
         },
         "warning": {

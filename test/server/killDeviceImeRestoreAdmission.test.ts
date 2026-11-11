@@ -56,3 +56,18 @@ describe("killDevice flushes the target's pending IME restore only after admissi
     expect(injected.flushes).toEqual([f.device.deviceId]);
   });
 });
+
+// A device about to stop does not need its keyboard back, so a failed restore must not stop the kill (#17879).
+describe("killDevice continues when the pending IME restore fails", () => {
+  const { test, fixture } = restartStopHarness();
+
+  test("the admitted caller's kill proceeds after the registry's flush rejects", async () => {
+    const f = await fixture("android", false, false, "owner-conn", false);
+    const injected = new FakePendingImeRestoreRegistry();
+    injected.error = new Error("ime list timed out");
+    setDeviceToolsDependencies({ pendingImeRestores: injected });
+    await f.call("killDevice", BASE, false, "owner-conn");
+    expect(injected.flushes).toEqual([f.device.deviceId]);
+    expect(f.manager.killed).toEqual([f.device.deviceId]);
+  });
+});

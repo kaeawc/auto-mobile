@@ -13,7 +13,7 @@ import {
   type ConnectedPlatformScan,
 } from "../../daemon/readiness/DeviceReadiness";
 import { BootedDevice, type Platform, SomePlatform } from "../../models";
-import { logger } from "../../utils/logger";
+import { logger, type Logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
@@ -584,8 +584,9 @@ function schemaAcceptsSessionDisplay(schema: unknown): boolean {
 }
 
 /**
- * Restores the keyboard sendKeys replaced, for a tool that acts on the installed keyboard or ends
- * the device. Every other tool leaves the AutoMobile IME selected until session release (#16428).
+ * Restores the keyboard sendKeys replaced, for a tool that acts on the installed keyboard. A failed
+ * restore throws, since that tool would otherwise act on the wrong keyboard. Every other tool
+ * leaves the AutoMobile IME selected until session release (#16428).
  */
 export async function flushPendingImeRestoreBeforeTool(
   deviceId: string,
@@ -597,6 +598,26 @@ export async function flushPendingImeRestoreBeforeTool(
     throw toActionableError(
       error,
       `Failed to restore the keyboard before tool dispatch on ${deviceId}`,
+    );
+  }
+}
+
+/**
+ * Best-effort keyboard restore for a tool that ends the device (killDevice). A device about to
+ * stop does not need its keyboard back, so a failed or slow restore is logged and the tool
+ * continues instead of leaving the device running (#17879).
+ */
+export async function flushPendingImeRestoreBeforeDeviceEnd(
+  deviceId: string,
+  registry: Pick<PendingImeRestoreRegistry, "flush"> = pendingImeRestores,
+  log: Pick<Logger, "warn"> = logger,
+): Promise<void> {
+  try {
+    await registry.flush(deviceId);
+  } catch (error) {
+    log.warn(
+      `[DeviceDispatch] Keyboard restore failed before ending ${deviceId}; continuing: ${errorMessage(error)}`,
+      error,
     );
   }
 }

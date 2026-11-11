@@ -50,6 +50,7 @@ test/fixtures/android-startup/*.txt text eol=lf
 test/fixtures/android-profiling/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
+test/fixtures/ios-carplay/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf
 test/fixtures/tvos-xcuitest/*.json text eol=lf
 test/fixtures/visionos-xcuitest/*.json text eol=lf

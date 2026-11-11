@@ -1,0 +1,9 @@
+# CarPlay template snapshots
+
+The debug SDK serves read-only `GET /carplay/templates`. Identity authorization still applies, but phone foreground state does not: CarPlay can remain active while the phone app is backgrounded. The walk and registration run on the main thread using public CarPlay APIs only.
+
+Apps opt in with `AutoMobileSDK.shared.registerCarPlay(interfaceController:)` and disconnect with `unregisterCarPlay()`. The controller is weakly held. Before registration the route returns schemaVersion 1, enabled false, connected false, empty templates and truncated false, without initializing CarPlay. After registration, enabled remains true; connected reflects whether the controller is still alive, including after unregister.
+
+Templates follow the controller stack bottom to top, with an optional presented node. Slash paths identify stack indices, sections/items, buttons, tabs and nested tab templates. IDs describe positions in each snapshot, not identities across stack changes. Lists expose text, detail text, enabled and image presence; grids expose title variants and enabled; tabs expose selection and nested templates. Information items, alert titles and action-sheet titles, messages and actions use public properties. Other known template families report their type; unknown templates include className. Images are never serialized, and these objects describe app templates rather than host-rendered pixels.
+
+The mapper caps each collection at 50, all nodes at 500, and depth at 6 (root depth zero). Sections, rows, tab wrappers and actions count toward the node budget. Any omitted nodes set truncated true. Optional values are omitted from JSON. The Codable model and disabled path compile without CarPlay; mapper tests require an iOS simulator destination through xcodebuild. CarPlayFixture provides fixed templates independently of Playground.

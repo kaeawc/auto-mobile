@@ -265,6 +265,16 @@ fi
 if [[ -n "${STUB_BUN_SLEEP_SECONDS:-}" ]]; then
   sleep "$STUB_BUN_SLEEP_SECONDS"
 fi
+# Block until the marker exists so only the watchdog can end this invocation:
+# watchdog cases then assert on what it guarantees, not on wall-clock margins
+# (#17858). Tests never create the marker; the 20s cap turns a missing watchdog
+# into a bounded, visible failure (status 0, every chunk started), not a hang.
+if [[ "$1" == test && -n "${STUB_BUN_BLOCK_UNTIL_FILE:-}" ]]; then
+  block_cap=$((SECONDS + 20))
+  while [[ ! -e "$STUB_BUN_BLOCK_UNTIL_FILE" && "$SECONDS" -lt "$block_cap" ]]; do
+    sleep 0.05
+  done
+fi
 if [[ "$1" == test && -n "${STUB_SLOW_SHARD_LABEL:-}" && "${AUTOMOBILE_WATCHDOG_LABEL:-}" == "$STUB_SLOW_SHARD_LABEL" ]]; then
   if [[ -n "${STUB_FAKE_CLOCK_DIR:-}" ]]; then
     # Advance only this shard's fake clock; no real waiting.
@@ -2876,23 +2886,23 @@ EOF
   stub_chunk_discovery
   record="$BATS_TEST_TMPDIR/chunks"
   # The watchdog fires at 0.4s (AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS fakes the 1s
-  # budget so the case does not wait it out, #16140). Each invocation fits that
-  # (0.25s); their sequence cannot. A per-invocation watchdog would let all three
-  # finish and exit 0, so the 124 below proves the one deadline spans the whole
-  # sequence. A loaded runner only makes the sequence slower, so it never
-  # finishes inside the deadline either way.
+  # budget so the case does not wait it out, #16140). Every chunk blocks on a
+  # marker that never appears, so only a watchdog ends one and no timing margin
+  # is involved (#17858). One shard-wide watchdog kills the whole chunk loop with
+  # the chunk it interrupts, so at most one chunk ever starts; a per-invocation
+  # watchdog would kill each chunk and start the next, recording all three.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
-    STUB_BUN_SLEEP_SECONDS=0.25 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    STUB_BUN_BLOCK_UNTIL_FILE="$BATS_TEST_TMPDIR/never" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS=0.4 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   # The fake chunk only creates the record once it starts. On a loaded runner
-  # the deadline can expire before the first chunk begins, and zero chunks
-  # still satisfies "the sequence was cut short", so a missing file counts as 0.
+  # the deadline can expire before the first chunk begins, so a missing file
+  # counts as 0.
   started=0
   if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
-  [ "$started" -lt 3 ]
+  [ "$started" -le 1 ]
   [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
 }
 
@@ -3036,16 +3046,17 @@ fixture_list() {
 @test "one watchdog bounds the shared and isolated groups of a shard together" {
   stub_chunk_discovery
   write_shared_allowlist
-  # Each group fits the faked 0.4s deadline (0.25s); the pair cannot. See the
-  # chunk watchdog test above.
+  # The shared group runs first and blocks until the watchdog fires; see the
+  # chunk watchdog test above. One shard-wide watchdog ends the shard with it, so
+  # the isolated group never starts; a per-group watchdog would start it.
   # Retries are off so the shard's single attempt is what the isolated count sees.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
-    STUB_BUN_SLEEP_SECONDS=0.25 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    STUB_BUN_BLOCK_UNTIL_FILE="$BATS_TEST_TMPDIR/never" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS=0.4 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
-  [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -le 1 ]
+  [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -eq 0 ]
   [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
 }
 
@@ -3133,16 +3144,16 @@ fixture_list() {
 @test "one watchdog bounds all isolated chunks of a shard" {
   stub_chunk_discovery
   record="$BATS_TEST_TMPDIR/chunks"
-  # See the chunk watchdog test above for the margins.
+  # Chunks block until the watchdog fires; see the chunk watchdog test above.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 AUTOMOBILE_UNIT_SHARD_RETRIES=0 STUB_CHUNK_RECORD="$record" \
-    STUB_BUN_SLEEP_SECONDS=0.25 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    STUB_BUN_BLOCK_UNTIL_FILE="$BATS_TEST_TMPDIR/never" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS=0.4 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   started=0
   if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
-  [ "$started" -lt 3 ]
+  [ "$started" -le 1 ]
 }
 
 @test "a retried shard re-runs both its shared and isolated groups (#10583)" {

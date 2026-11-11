@@ -52,6 +52,7 @@ data class DemoIndexNavigation(
   val onNavigateToDesignSystem: () -> Unit = {},
   val onNavigateToPointerProbe: () -> Unit = {},
   val onNavigateToCollapsingComposer: () -> Unit = {},
+  val onNavigateToSharedRowIdList: () -> Unit = {},
   val onNavigateBack: () -> Unit = {},
 )
 
@@ -81,6 +82,7 @@ fun DemoIndexScreen(navigation: DemoIndexNavigation) {
           navigation.onNavigateToDesignSystem,
           navigation.onNavigateToPointerProbe,
           navigation.onNavigateToCollapsingComposer,
+          navigation.onNavigateToSharedRowIdList,
         )
 
     Scaffold(
@@ -261,6 +263,7 @@ private fun toolingDemos(
   onNavigateToDesignSystem: () -> Unit,
   onNavigateToPointerProbe: () -> Unit,
   onNavigateToCollapsingComposer: () -> Unit,
+  onNavigateToSharedRowIdList: () -> Unit,
 ): List<DemoEntry> =
   listOf(
     DemoEntry(
@@ -284,5 +287,12 @@ private fun toolingDemos(
         "A message composer that collapses when the keyboard hides and preserves its draft.",
       buttonLabel = "Open Collapsing Composer",
       onClick = onNavigateToCollapsingComposer,
+    ),
+    DemoEntry(
+      id = "demo_shared_row_id_list",
+      title = "Shared Row Id List",
+      description = "XML RecyclerView of 60 rows that all share one resource id.",
+      buttonLabel = "Open Shared Row Id List",
+      onClick = onNavigateToSharedRowIdList,
     ),
   )

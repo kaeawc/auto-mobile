@@ -15,6 +15,7 @@ import dev.jasonpearson.automobile.demos.HandledExceptionDemoScreen
 import dev.jasonpearson.automobile.demos.NestedSelectionDemoScreen
 import dev.jasonpearson.automobile.demos.NetworkTestScreen
 import dev.jasonpearson.automobile.demos.PointerProbeScreen
+import dev.jasonpearson.automobile.demos.SharedRowIdListScreen
 import dev.jasonpearson.automobile.demos.TapTargetsDemoScreen
 import dev.jasonpearson.automobile.demos.XmlSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.sdk.adapters.Navigation3Adapter
@@ -41,6 +42,9 @@ internal fun EntryProviderScope<NavKey>.demoScenarioNavigationEntries(state: Nav
   entry<DemoPointerProbeDestination> { destination -> DemoPointerProbeEntry(destination, state) }
   entry<DemoCollapsingComposerDestination> { destination ->
     DemoCollapsingComposerEntry(destination, state)
+  }
+  entry<DemoSharedRowIdListDestination> { destination ->
+    DemoSharedRowIdListEntry(destination, state)
   }
 }
 
@@ -195,5 +199,21 @@ private fun DemoCollapsingComposerEntry(
   }
   Box(modifier = Modifier.destinationSemanticModifier<DemoCollapsingComposerDestination>()) {
     CollapsingComposerScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
+  }
+}
+
+@Composable
+private fun DemoSharedRowIdListEntry(
+  destination: DemoSharedRowIdListDestination,
+  state: NavigationState,
+) {
+  val (backStack, _, analyticsTracker) = state
+  Navigation3Adapter.TrackNavigation(destination)
+  LaunchedEffect(Unit) {
+    Log.d(TAG, "Navigated to SharedRowIdListScreen")
+    analyticsTracker.trackScreenView("SharedRowIdListScreen")
+  }
+  Box(modifier = Modifier.destinationSemanticModifier<DemoSharedRowIdListDestination>()) {
+    SharedRowIdListScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
   }
 }

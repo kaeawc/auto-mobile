@@ -147,6 +147,14 @@ class DeepLinkManagerTest {
   }
 
   @Test
+  fun testParseDemoSharedRowIdListDeepLink() {
+    val uri = Uri.parse("automobile://playground/demos/lists/shared_row_id")
+    assertTrue(DeepLinkManager.isValidDeepLink(uri))
+    assertEquals(DemoSharedRowIdListDestination, DeepLinkManager.parseDeepLink(uri))
+    assertEquals("Demo Shared Row Id List", DeepLinkManager.getDestinationName(uri))
+  }
+
+  @Test
   fun testParseInvalidScheme() {
     val uri = Uri.parse("https://playground/onboarding")
     val destination = DeepLinkManager.parseDeepLink(uri)
@@ -225,7 +233,7 @@ class DeepLinkManagerTest {
   @Test
   fun testGetAllDeepLinks() {
     val allLinks = DeepLinkManager.getAllDeepLinks()
-    assertEquals(26, allLinks.size)
+    assertEquals(27, allLinks.size)
 
     val linkUrls = allLinks.map { it.second }
     assertTrue(linkUrls.all { it.startsWith("automobile://playground/") })
@@ -244,5 +252,6 @@ class DeepLinkManagerTest {
     assertTrue(linkUrls.contains("automobile://playground/demos/bugs/repro"))
     assertTrue(linkUrls.contains("automobile://playground/demos/input/pointer_probe"))
     assertTrue(linkUrls.contains("automobile://playground/demos/input/collapsing_composer"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/lists/shared_row_id"))
   }
 }

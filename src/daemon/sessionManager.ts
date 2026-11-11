@@ -1039,6 +1039,10 @@ export class SessionManager extends SessionManagerForwarders {
     this.liveness.recordHeartbeat(sessionId);
   }
 
+  restartPreFirstHeartbeatGrace(sessionId: string): void {
+    this.liveness.restartPreFirstHeartbeatGrace(sessionId);
+  }
+
   claimLivenessOwnership(
     sessionId: string,
     ownerToken: string,

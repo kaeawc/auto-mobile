@@ -333,14 +333,15 @@ async function applyProvisionPostBindSteps(
   return await whileHoldingProvisionedSession(
     deps,
     { sessionUuid: boundSessionId, deadlineMs: totalDeadlineMs },
-    async () => {
+    async (holdSignal) => {
       // Applied to the bound session's ready device, so its release restores it (#14058).
       const manufacturerProfile = await applyProvisionDeviceProfile(args, deps, device, {
         boundSessionId,
         signal,
       });
       const androidAuto = await applyProvisionAndroidAuto(args, deps, device, {
-        signal,
+        // A device lost mid-projection aborts the hold: stop now, not at the deadline.
+        signal: combineAbortSignals(signal, holdSignal)!,
         totalDeadlineMs,
         settlementState,
       });

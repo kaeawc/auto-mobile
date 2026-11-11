@@ -13,6 +13,7 @@ import { applyPrototypePatch } from "../prototypePatch";
 import { prototypeDataPointerTokens } from "../prototypeData";
 import type { PrototypePatchReply, PrototypePatchRequest } from "../prototypePatchWire";
 import { collectPrototypeAssetReferences } from "../prototypeAssetReferences";
+import { walkPrototypeNodes } from "../prototypeNodeChildren";
 import type { PrototypeAssetUpload } from "../prototypeAssets";
 import type { PrototypeData, PrototypeJson, PrototypeSpec } from "../prototypeSpec";
 import type { PrototypeShowOverrides } from "../PrototypeTransport";
@@ -109,6 +110,28 @@ function stateGuardReply(
   };
 }
 
+/**
+ * Each root pager's position, as `PrototypeRuntime.boundPages` derives it on a show: a numeric
+ * value of its `stateKey` first, else the retained position, else 0, clamped to its pages.
+ */
+function boundPages(
+  spec: Record<string, unknown>,
+  state: PrototypeState,
+  previous: Record<string, number>,
+): Record<string, number> {
+  const pages: Record<string, number> = {};
+  walkPrototypeNodes({ root: spec.root }, (node) => {
+    if (node.type !== "pager" || typeof node.id !== "string") {
+      return;
+    }
+    const last = Math.max(0, (Array.isArray(node.children) ? node.children.length : 0) - 1);
+    const bound = typeof node.stateKey === "string" ? state[node.stateKey] : undefined;
+    const position = typeof bound === "number" ? Math.trunc(bound) : (previous[node.id] ?? 0);
+    pages[node.id] = Math.min(Math.max(position, 0), last);
+  });
+  return pages;
+}
+
 const asState = (value: unknown): PrototypeState =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (structuredClone(value) as PrototypeState)
@@ -153,7 +176,7 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
     this.shown.set(spec.id, {
       spec: copy,
       state,
-      pages: inPlace ? { ...previous.pages } : {},
+      pages: boundPages(copy, state, inPlace ? previous.pages : {}),
       // Sequences never rewind for an id, as on hardware.
       lastSequence: previous?.lastSequence ?? 0,
       revision,

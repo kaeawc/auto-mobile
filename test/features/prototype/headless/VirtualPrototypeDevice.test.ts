@@ -48,6 +48,36 @@ describe("VirtualPrototypeDevice (#17974)", () => {
     ]);
   });
 
+  const pager = (pageCount: number, extra: Record<string, unknown> = {}) => ({
+    root: {
+      type: "pager",
+      id: "tabs",
+      children: Array.from({ length: pageCount }, (_, index) => ({
+        type: "text",
+        text: `Page ${index}`,
+      })),
+      ...extra,
+    },
+  });
+
+  test("show derives a state-bound pager's position from the spec", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(
+      spec("one", { state: { page: 1 }, ...pager(2, { stateKey: "page" }) }),
+    );
+    const inspected = await virtual.requestInspectPrototypes();
+    expect(inspected.prototypes?.[0]?.pages).toEqual({ tabs: 1 });
+  });
+
+  test("a same-id show clamps a retained pager position to the new page count", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(spec("one", pager(2)));
+    virtual.dispatch({ id: "one", kind: "page_changed", name: "tabs", pages: { tabs: 1 } });
+    await virtual.requestShowPrototype(spec("one", pager(1)));
+    const inspected = await virtual.requestInspectPrototypes();
+    expect(inspected.prototypes?.[0]?.pages).toEqual({ tabs: 0 });
+  });
+
   test("a show replaces other prototypes unless replaceOthers is false", async () => {
     const virtual = device();
     await virtual.requestShowPrototype(spec("one"));

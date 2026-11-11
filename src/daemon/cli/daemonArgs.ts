@@ -332,6 +332,8 @@ const SHARED_LAUNCH_VALUE_FLAGS = [EVENT_ALL_MARKERS_FLAG, "--daemon-socket-path
 const SHARED_LAUNCH_BOOLEAN_FLAGS = [
   SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
   LEGACY_SKIP_ACCESSIBILITY_DOWNLOAD_FLAG,
+  // Headless prototype mode (#17974), which parseArgs resolves from the same argv.
+  "--headless",
   ...OUTPUT_REDUCTION_FLAG_SPECS.flatMap((spec) =>
     spec.disableCli ? [spec.cli, spec.disableCli] : [spec.cli],
   ),

@@ -7,6 +7,28 @@ uses the panel matching the highlighted element's source dimensions. If those di
 identify a panel, it uses the focused panel when both panel displays can be identified. Duplicate
 windows with the same display proportions remain ambiguous; close duplicate windows and retry.
 
+## OS version in session-broker requests
+
+The iPhone Duo simulator needs a newer iOS runtime than the phones and tablets a host
+usually pins. When a session-broker request omits `os`, the host's `defaults.ios.os` applies
+to every device type, so an exact 26.5 default fails a Duo request with
+`runtime_incompatible`; the error names `defaults.ios.os.archetypes`. Give Duo its own
+default in the host configuration without changing the others:
+
+```json
+"os": {
+  "selector": { "kind": "exact", "version": "26.5" },
+  "preferredVersion": "26.5",
+  "archetypes": [
+    { "archetype": "duo", "selector": { "kind": "exact", "version": "27.1" }, "preferredVersion": "27.1" }
+  ]
+}
+```
+
+Each archetype (`phone`, `tablet`, `duo`) may appear at most once; a duplicate fails config
+loading. An entry applies only when the request omits `os`; a request that passes an `os`
+selector gets exactly that selector. Alternatively, pass `os` in the Duo request.
+
 ## Reading the posture with getDeviceState
 
 `getDeviceState` is not listed in `tools/list` by default. A client that picks tools from

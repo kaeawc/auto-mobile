@@ -45,6 +45,20 @@ class WebSocketRequestInteractionTest : WebSocketRequestTestSupport() {
     assertEquals(20, request.boundsTop)
     assertEquals(100, request.boundsRight)
     assertEquals(80, request.boundsBottom)
+    assertEquals(false, request.allowInvisible)
+  }
+
+  @Test
+  fun `deserialize request_action with explicit invisible click opt in`() {
+    val message =
+      """{"type":"request_action","action":"click","selector":{"resourceId":"com.app:id/name"},"boundsLeft":10,"boundsTop":20,"boundsRight":100,"boundsBottom":80,"allowInvisible":true}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestAction>(request)
+    assertEquals(true, request.allowInvisible)
+    assertEquals("com.app:id/name", request.selector?.resourceId)
+    assertEquals(10, request.boundsLeft)
+    assertEquals(80, request.boundsBottom)
   }
 
   @Test

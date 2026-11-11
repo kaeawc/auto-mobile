@@ -1,0 +1,35 @@
+# Captured 2026-11-11 on an android-36 ai-glasses emulator (ai_glasses_device AVD) with the glasses-fixture app focused.
+# getprop ro.build.characteristics: nosdcard,watch ; wm size: Physical size: 450x450
+# input devices: virtio_input_multi_touch_touchpad_0 Sources: KEYBOARD | TOUCHPAD | TOUCH_NAVIGATION (X max 1542, Y max 297); gpio-keys
+# Each block: the adb shell command, then the fixture status read back by uiautomator (focus_status | click_status | input_status | focused Button).
+
+## (launch)
+focus_status=focus: Item 1 | click_status=clicks: 0 last: none | input_status=input: none | FOCUSED=ITEM 1
+## input touchnavigation swipe 225 112 225 337 200
+focus_status=focus: Item 1 | click_status=clicks: 0 last: none | input_status=motion 0x200000 ACTION_UP | FOCUSED=ITEM 1
+## input touchnavigation swipe 225 112 225 337 200
+focus_status=focus: Item 2 | click_status=clicks: 0 last: none | input_status=key KEYCODE_DPAD_DOWN ACTION_UP | FOCUSED=ITEM 2
+## input touchnavigation swipe 225 337 225 112 200
+focus_status=focus: Item 1 | click_status=clicks: 0 last: none | input_status=key KEYCODE_DPAD_UP ACTION_UP | FOCUSED=ITEM 1
+## input touchnavigation tap 225 225
+focus_status=focus: Item 1 | click_status=clicks: 1 last: Item 1 | input_status=key KEYCODE_DPAD_CENTER ACTION_UP | FOCUSED=ITEM 1
+## input touchnavigation swipe 112 225 337 225 200
+focus_status=focus: Item 1 | click_status=clicks: 1 last: Item 1 | input_status=key KEYCODE_DPAD_RIGHT ACTION_UP | FOCUSED=ITEM 1
+## input touchnavigation swipe 337 225 112 225 200
+focus_status=focus: Item 1 | click_status=clicks: 1 last: Item 1 | input_status=key KEYCODE_DPAD_LEFT ACTION_UP | FOCUSED=ITEM 1
+## input touchpad tap 225 225
+focus_status=focus: Item 1 | click_status=clicks: 1 last: Item 1 | input_status=motion 0x100008 ACTION_UP | FOCUSED=ITEM 1
+## input touchpad swipe 225 112 225 337 200
+focus_status=focus: Item 1 | click_status=clicks: 1 last: Item 1 | input_status=motion 0x100008 ACTION_UP | FOCUSED=ITEM 1
+## input touchnavigation swipe 225 225 225 225 900
+focus_status=focus: Item 1 | click_status=clicks: 1 last: Item 1 | input_status=motion 0x200000 ACTION_UP | FOCUSED=ITEM 1
+
+# Direct key events (same session, focus started on Item 1... counts below continue from the earlier launch)
+## input keyevent DPAD_DOWN
+focus_status=focus: Item 2 | click_status=clicks: 0 last: none | input_status=key KEYCODE_DPAD_DOWN ACTION_UP | FOCUSED=ITEM 2
+## input keyevent DPAD_DOWN
+focus_status=focus: Item 3 | click_status=clicks: 0 last: none | input_status=key KEYCODE_DPAD_DOWN ACTION_UP | FOCUSED=ITEM 3
+## input keyevent DPAD_UP
+focus_status=focus: Item 2 | click_status=clicks: 0 last: none | input_status=key KEYCODE_DPAD_UP ACTION_UP | FOCUSED=ITEM 2
+## input keyevent DPAD_CENTER
+focus_status=focus: Item 2 | click_status=clicks: 1 last: Item 2 | input_status=key KEYCODE_DPAD_CENTER ACTION_UP | FOCUSED=ITEM 2

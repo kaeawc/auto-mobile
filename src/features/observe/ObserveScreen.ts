@@ -919,6 +919,12 @@ export class RealObserveScreen implements ObserveScreen {
       needsBackStackActivityReconciliation(observation, activeWindow, attribution),
     );
     scopeActiveWindowToBackStack(observation);
+    // The polls skipped the stack, so the blocker was not detectable when automotive state was
+    // sampled; re-derive it now that the stack is attached.
+    await this.deviceStateCollector.refreshAutomotiveForegroundActivity(
+      observation,
+      options.signal,
+    );
     return disagrees;
   }
 

@@ -484,7 +484,19 @@ export const observeResultSchema = z
         blocked: z
           .boolean()
           .describe(
-            "True when DO is required and the known foreground activity is not distraction optimized.",
+            "True when DO is required and the known foreground activity is not distraction optimized, or when the car's driving-restriction blocking activity is in front.",
+          ),
+        blockedBy: z
+          .string()
+          .optional()
+          .describe(
+            "The car's blocking activity in front (com.android.systemui.car.activity.ActivityBlockingActivity); absent when no blocking activity is in front.",
+          ),
+        blockedActivity: z
+          .string()
+          .optional()
+          .describe(
+            "The activity the blocking activity covers; absent when the back stack does not list it.",
           ),
         hostRenderedUi: z
           .object({

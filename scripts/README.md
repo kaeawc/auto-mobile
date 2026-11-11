@@ -730,5 +730,18 @@ enters and exits `ambient`. Without the fixture only the device-level steps run,
 a summary note. The fixture texts the plan expects live in `WEAR_FIXTURE` in `wearSmoke.ts` and
 mirror `WearFixtureCatalog` in the fixture. Step JSON, screenshots, `summary.md`, the fixture build log and emulator diagnostics land in
 `WEAR_SMOKE_OUT_DIR` (default `scratch/wear-smoke`); `WEAR_SMOKE_BREAK_ASSERTION=1` (the
-`break-assertion` dispatch input) swaps in an impossible assertion. Both smoke lanes share
+`break-assertion` dispatch input) swaps in an impossible assertion. All three smoke lanes share
 `scripts/ci/emulator-smoke/` (the step runner and the bounded `sdkmanager` install).
+
+### Android TV Emulator Smoke (advisory)
+
+`.github/workflows/tv-emulator-smoke.yml` runs nightly, on dispatch, and on a pull request
+labelled `run-tv`; it is not a required check. `scripts/ci/tv-smoke/run-tv-smoke.sh` installs an
+Android TV or Google TV system image (default API 36), lets `startDevice` create a TV AVD or can
+create a named `tv_1080p` AVD with avdmanager, builds the `:tv-fixture` app, and runs
+`scripts/ci/tv-smoke/tvSmoke.ts`. The plan checks the TV form factor and hierarchy, launches the
+fixture, verifies its catalog, moves D-pad focus, navigates to and selects a later card, then sends
+back and home. Fixture text expectations mirror `TvFixtureCatalog` in `TV_FIXTURE`. Step JSON,
+screenshots, `summary.md`, the fixture build log and emulator diagnostics land in
+`TV_SMOKE_OUT_DIR` (default `scratch/tv-smoke`); `TV_SMOKE_BREAK_ASSERTION=1` (the
+`break-assertion` dispatch input) swaps in an impossible foreground assertion.

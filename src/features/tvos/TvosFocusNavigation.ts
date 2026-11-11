@@ -1,6 +1,8 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { Element, TapOnElementOptions, TapOnElementResult } from "../../models";
 import { boundsArea } from "../../utils/bounds";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { compareSelectionRank, selectableCandidates } from "../utility/selectionRank";
 import { normalizeTvosHierarchy } from "./TvosHierarchy";
@@ -8,6 +10,9 @@ import type { TvosRunnerClient } from "./TvosRunnerClient";
 import { tvosRunners } from "./TvosRunnerRegistry";
 
 type Direction = "up" | "down" | "left" | "right";
+
+const NOTHING_FOCUSED_MESSAGE =
+  "Nothing is focused on tvOS; use pressButton to establish focus and observe before retrying tapOn.";
 
 function focusKey(element: Element): string {
   const { left, top, right, bottom } = element.bounds;
@@ -42,19 +47,27 @@ export interface TvosTapBudgets {
   maxMoves?: number;
   /** Presses spent sweeping rows for a target that is not in the hierarchy yet. */
   maxSearchMoves?: number;
+  /** Time allowed for missing focus to settle after a screen transition or press. */
+  focusTimeoutMs?: number;
+  /** Interval between hierarchy reads while focus is missing. */
+  focusPollIntervalMs?: number;
 }
 
 function validateBudgets({
   maxMoves = 30,
   maxSearchMoves = 60,
+  focusTimeoutMs = 3000,
+  focusPollIntervalMs = 200,
 }: TvosTapBudgets): Required<TvosTapBudgets> {
-  if (!Number.isInteger(maxMoves) || maxMoves < 0) {
-    throw new ActionableError("tvOS maxMoves must be a non-negative integer.");
+  for (const [name, value] of Object.entries({ maxMoves, maxSearchMoves, focusTimeoutMs })) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new ActionableError(`tvOS ${name} must be a non-negative integer.`);
+    }
   }
-  if (!Number.isInteger(maxSearchMoves) || maxSearchMoves < 0) {
-    throw new ActionableError("tvOS maxSearchMoves must be a non-negative integer.");
+  if (!Number.isInteger(focusPollIntervalMs) || focusPollIntervalMs <= 0) {
+    throw new ActionableError("tvOS focusPollIntervalMs must be a positive integer.");
   }
-  return { maxMoves, maxSearchMoves };
+  return { maxMoves, maxSearchMoves, focusTimeoutMs, focusPollIntervalMs };
 }
 
 function validateOptions(
@@ -170,7 +183,8 @@ async function readScreen(
   const focus = all.find((element) => element.focused === "true");
   const signature = focusSignature(all, focus);
   const peers = identity ? all.filter((element) => identityKey(element) === identity.key) : [];
-  if (identity && peers.length !== identity.count) {
+  // A focusless transition can temporarily omit the pinned target too; validate once focus returns.
+  if (focus && identity && peers.length !== identity.count) {
     throw new ActionableError(
       "The tvOS tapOn target disappeared or became ambiguous; observe and retry with its current identifier or exact text.",
     );
@@ -210,9 +224,7 @@ async function readScreen(
 
 function requireFocus(read: ScreenRead): Element {
   if (!read.focus) {
-    throw new ActionableError(
-      "Nothing is focused on tvOS; use pressButton to establish focus and observe before retrying tapOn.",
-    );
+    throw new ActionableError(NOTHING_FOCUSED_MESSAGE);
   }
   return read.focus;
 }
@@ -227,13 +239,48 @@ interface Lookup {
   client: TvosRunnerClient;
   options: TapOnElementOptions;
   signal?: AbortSignal;
+  timer: Timer;
+  focusTimeoutMs: number;
+  focusPollIntervalMs: number;
+}
+
+/** Missing focus is transient during tvOS transitions; never navigate from that frame. */
+async function readFocusedScreen(
+  { client, options, signal, timer, focusTimeoutMs, focusPollIntervalMs }: Lookup,
+  identity?: TargetIdentity,
+): Promise<ScreenRead> {
+  signal?.throwIfAborted();
+  let read = await readScreen(client, options, signal, identity);
+  const deadline = timer.now() + focusTimeoutMs;
+  while (!read.focus && timer.now() < deadline) {
+    await raceWithDeadline(
+      () => timer.sleep(Math.min(focusPollIntervalMs, deadline - timer.now())),
+      {
+        timer,
+        signal,
+        label: "tvOS focus settling",
+      },
+    );
+    signal?.throwIfAborted();
+    // A slow hierarchy reply must not extend the focus-settle budget.
+    read = await raceWithDeadline(() => readScreen(client, options, signal, identity), {
+      timer,
+      signal,
+      timeoutMs: Math.max(0, deadline - timer.now()),
+      timeoutError: () => new ActionableError(NOTHING_FOCUSED_MESSAGE),
+      label: "tvOS focus settling",
+    });
+  }
+  requireFocus(read);
+  return read;
 }
 
 async function searchForTarget(
-  { client, options, signal }: Lookup,
+  lookup: Lookup,
   first: ScreenRead,
   maxSearchMoves: number,
 ): Promise<ScreenRead> {
+  const { client, signal } = lookup;
   let read = first;
   let moves = 0;
   const press = async (direction: Direction): Promise<boolean> => {
@@ -245,7 +292,7 @@ async function searchForTarget(
     moves++;
     await client.request({ type: "request_press_button", action: direction }, signal);
     signal?.throwIfAborted();
-    const next = await readScreen(client, options, signal);
+    const next = await readFocusedScreen(lookup);
     const moved = next.signature !== read.signature;
     read = next;
     return moved;
@@ -281,15 +328,14 @@ async function locate(
   identity: TargetIdentity | undefined,
   maxSearchMoves: number,
 ): Promise<{ focus: Element; target: Element; identity?: TargetIdentity; signature: string }> {
-  const { client, options, signal } = lookup;
-  let state = await readScreen(client, options, signal, identity);
+  const { options } = lookup;
+  let state = await readFocusedScreen(lookup, identity);
   if (!state.target && !identity) {
     if (options.elementId === undefined && options.text === undefined) {
       throw new ActionableError(
         "No tvOS element matched; observe and check the identifier, exact text or index.",
       );
     }
-    requireFocus(state);
     state = await searchForTarget(lookup, state, maxSearchMoves);
   }
   return {
@@ -304,11 +350,21 @@ export async function tvosTapOn(
   deviceId: string,
   options: TapOnElementOptions,
   signal?: AbortSignal,
-  budgets: TvosTapBudgets = {},
+  budgets: TvosTapBudgets & { timer?: Timer } = {},
 ): Promise<TapOnElementResult> {
-  const { maxMoves, maxSearchMoves } = validateOptions(options, budgets);
+  const { maxMoves, maxSearchMoves, focusTimeoutMs, focusPollIntervalMs } = validateOptions(
+    options,
+    budgets,
+  );
   signal?.throwIfAborted();
-  const lookup: Lookup = { client: tvosRunners.require(deviceId), options, signal };
+  const lookup: Lookup = {
+    client: tvosRunners.require(deviceId),
+    options,
+    signal,
+    timer: budgets.timer ?? defaultTimer,
+    focusTimeoutMs,
+    focusPollIntervalMs,
+  };
   const { client } = lookup;
   const blocked = new Map<string, Set<Direction>>();
   let previous: { signature: string; direction: Direction } | undefined;

@@ -179,8 +179,8 @@ presses `select`.
 
 - Match with an exact `text` or `elementId`, and an optional zero-based `index`. Only the `tap`
   action is supported; other options are refused.
-- Focus must already be somewhere on screen. With nothing focused, press a direction with
-  `pressButton` and observe.
+- If focus is missing during a screen transition, `tapOn` waits up to three seconds for it to
+  return. If nothing gains focus, press a direction with `pressButton` and observe before retrying.
 - A match outside the visible area, such as an item further along a row, is still reached: focus
   moves toward it and the row scrolls. On-screen matches count first for `index`.
 - When nothing on screen matches yet, focus sweeps each row right and left, moving down a row at a

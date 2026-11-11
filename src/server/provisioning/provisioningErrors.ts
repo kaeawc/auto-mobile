@@ -29,6 +29,7 @@ import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlC
 import { DeviceBootTimeoutError } from "../../devices/deviceBootService";
 import { AdbDeviceOfflineError } from "../../utils/android-cmdline-tools/AdbDeviceHealth";
 import { RunnerReadinessError } from "../../ctrlProxy/RunnerReadinessError";
+import { AndroidAutoPhoneOfflineError } from "../../features/androidAuto/AndroidAutoPhoneOfflineError";
 import {
   bindingProvisionError,
   type ProvisionDeviceFailureCode,
@@ -222,6 +223,14 @@ export function toProvisionDeviceError(
       `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
       true,
       { deviceId: error.deviceId, retryAfterMs: error.retryAfterMs },
+    );
+  }
+  if (error instanceof AndroidAutoPhoneOfflineError) {
+    return new ProvisionDeviceError(
+      "device_offline",
+      `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+      true,
+      { deviceId: error.deviceId, failedStepChangedNothing: true },
     );
   }
   const acquisitionFailure = retryableAcquisitionProvisionError(args, error);

@@ -9,7 +9,8 @@ import android.util.Log
 
 /**
  * Send an ordered explicit broadcast with action dev.jasonpearson.automobile.contentseeder.SEED.
- * Success returns the inserted URI as result data; failures return RESULT_CANCELED and a reason.
+ * Success returns inserted/removed JSON counts as result data; failures return RESULT_CANCELED and
+ * a reason.
  */
 class SeedReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
@@ -22,8 +23,8 @@ class SeedReceiver : BroadcastReceiver() {
       when (val parsed = parseSeedRequest(parameters)) {
         is SeedParseResult.Invalid -> setResult(Activity.RESULT_CANCELED, parsed.message, null)
         is SeedParseResult.Valid -> {
-          val uri = ContentSeeder(context).seed(parsed.request)
-          setResult(Activity.RESULT_OK, uri.toString(), null)
+          val counts = ContentSeeder(context).seed(parsed.request)
+          setResult(Activity.RESULT_OK, counts.toString(), null)
         }
       }
     } catch (error: SecurityException) {
@@ -48,7 +49,6 @@ class SeedReceiver : BroadcastReceiver() {
 
   companion object {
     private const val ACTION_SEED = "dev.jasonpearson.automobile.contentseeder.SEED"
-    private val PARAMETER_NAMES =
-      listOf("kind", "title", "startMillis", "endMillis", "address", "body", "dateMillis")
+    private val PARAMETER_NAMES = listOf("kind", "namespace", "items", "kinds", "dropAccount")
   }
 }

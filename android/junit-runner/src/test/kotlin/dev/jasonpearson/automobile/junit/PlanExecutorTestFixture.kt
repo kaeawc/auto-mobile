@@ -18,6 +18,8 @@ internal abstract class PlanExecutorTestFixture {
   protected val json = Json { ignoreUnknownKeys = true }
   protected lateinit var fakeDaemonClient: FakeDaemonToolClient
   protected lateinit var fakeDeviceChecker: FakeDeviceChecker
+  /** The process environment the executor sees; empty so the host's ANDROID_SERIAL never leaks. */
+  protected val fakeEnv = mutableMapOf<String, String>()
 
   @Before
   fun setup() {
@@ -31,7 +33,13 @@ internal abstract class PlanExecutorTestFixture {
         deviceChecker = fakeDeviceChecker,
         daemon = fakeDaemonClient,
         heartbeat = FakeDaemonHeartbeat(),
+        environment = { fakeEnv[it] },
+        daemonEndpoint = { FAKE_DAEMON_SOCKET },
       )
+  }
+
+  protected companion object {
+    const val FAKE_DAEMON_SOCKET = "/fake/private/d.sock"
   }
 
   protected fun recoveryFixtureDir(): File {

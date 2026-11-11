@@ -73,6 +73,38 @@ describe("iOS Simulator .ips finder (#14103)", () => {
     });
   });
 
+  test("attributes the captured tvOS report only to its simulator and reads it verbatim", async () => {
+    const captured = readFileSync(
+      join(import.meta.dir, "../../fixtures/ios-simctl/crash-report-crashtv-tvos26-5.ips"),
+      "utf8",
+    );
+    const crashedAt = Date.parse("2026-11-11T07:50:28-06:00");
+    const reports = new MemoryReports();
+    reports.add("CrashTv-2026-11-11-075034.ips", captured, crashedAt + 6000);
+    const finder = new IosSimulatorCrashReportFinder(
+      "F7ACFDD0-2EF2-4A3B-B7DA-B3BA02F86BD6",
+      reports,
+      REPORTS,
+    );
+    const tvQuery = {
+      appId: "dev.jasonpearson.automobile.crashtv",
+      processId: 80815,
+      notBeforeTimestampMs: crashedAt,
+    };
+    const lookup = await finder.find(tvQuery);
+    expect(lookup).toMatchObject({
+      status: "found",
+      report: { processId: 80815, exceptionType: "EXC_BREAKPOINT (SIGTRAP)" },
+    });
+    if (lookup.status !== "found") {
+      throw new Error("expected captured tvOS report");
+    }
+    expect((await finder.read(lookup.report.id))?.text).toBe(captured);
+    const other = new IosSimulatorCrashReportFinder(OTHER_SIMULATOR, reports, REPORTS);
+    expect(await other.find(tvQuery)).toEqual({ status: "notFound" });
+    expect(await other.read(lookup.report.id)).toBeUndefined();
+  });
+
   test("never attributes reports from another Simulator, another app, another pid, or before the crash", async () => {
     const reports = new MemoryReports();
     reports.add("other-sim.ips", IPS.replaceAll(SIMULATOR, OTHER_SIMULATOR));
@@ -314,19 +346,25 @@ describe("crash report lookup wiring (#14103)", () => {
     });
   });
 
-  test("gives up on a missing Simulator .ips after about 20 s", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const finder = createNativeCrashReportFinder(SIMULATOR_DEVICE, {
-      adb: new FakeAdbClient(),
-      fileSystem: new MemoryReports(),
-      timer,
-    });
+  test.each(["ios", "tvos"] as const)(
+    "gives up on a missing %s Simulator .ips after about 20 s",
+    async (platform) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const finder = createNativeCrashReportFinder(
+        { ...SIMULATOR_DEVICE, platform },
+        {
+          adb: new FakeAdbClient(),
+          fileSystem: new MemoryReports(),
+          timer,
+        },
+      );
 
-    expect(await finder.find(query)).toEqual({ status: "notFound" });
-    expect(timer.getSleepHistory()).toEqual([...IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS]);
-    expect(elapsed(timer)).toBe(20_000);
-  });
+      expect(await finder.find(query)).toEqual({ status: "notFound" });
+      expect(timer.getSleepHistory()).toEqual([...IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS]);
+      expect(elapsed(timer)).toBe(20_000);
+    },
+  );
 
   test("gates physical iOS with a typed unsupported reason", async () => {
     const finder = createNativeCrashReportFinder(

@@ -54,6 +54,7 @@ import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { AppearanceSocketServerHarness } from "./appearanceSocketServerHarness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
@@ -568,6 +569,7 @@ export class LivenessScenario {
       }
       setDeviceToolsDependencies({
         timer: this.timer,
+        androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
         idGenerator: new FakeIdGenerator(["scenario-acquired-session"]),
         deviceManagerFactory: () => this.discovery,
         ensureCtrlProxyReady: async () => {},

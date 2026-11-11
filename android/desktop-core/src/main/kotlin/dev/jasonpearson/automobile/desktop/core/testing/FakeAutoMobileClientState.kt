@@ -101,4 +101,7 @@ internal class FakeAutoMobileClientState {
     InputActionResult(action = "input/gestureStart", success = true)
   val openedGestureStreams = mutableListOf<RecordingGestureStream>()
   var lastListPerformanceAuditResultsDeviceId: String? = null
+  var lastListPerformanceAuditResultsDeviceSessionUuid: String? = null
+  /** False models a daemon that predates the performance-results `deviceSessionUuid` filter. */
+  var performanceResultsSupportsDeviceSessionUuid: Boolean = true
 }

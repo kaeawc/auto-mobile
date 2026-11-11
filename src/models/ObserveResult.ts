@@ -292,6 +292,9 @@ export type ObserveResult = {
    */
   isScreenRound?: boolean;
 
+  /** Wear OS watch devices only: captured foreground surface; omitted when it cannot be identified. */
+  surface?: "tile" | "watchface" | "launcher" | "app";
+
   /** CarService state, present only on automotive devices. Unavailable reads omit their fields. */
   automotive?: {
     drivingState?: "parked" | "idling" | "moving";

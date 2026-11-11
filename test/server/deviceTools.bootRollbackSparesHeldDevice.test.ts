@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
@@ -112,6 +113,7 @@ describe("a failed start does not stop the device it booted once another session
     const idGenerator = new CountingIdGenerator("booter");
     const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       deviceManagerFactory: () => devices,
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),

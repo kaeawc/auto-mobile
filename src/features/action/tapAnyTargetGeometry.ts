@@ -150,29 +150,53 @@ function xrContainerOwner(
   options: TapAnyElementOptions,
   viewport: { width: number; height: number } | undefined,
 ): Element | null {
-  const container = selector.resolveContainer?.(viewHierarchy, options.container!);
-  const source = container && getHierarchyNodeSource(container);
   const nodes = new SearchableHierarchy().project(viewHierarchy);
-  // Live captures share nodes between the merged roots and each window; resolve the owning
-  // window's copy so the scope below is bounded by that window's root, not the merged wrapper.
-  const node = uniqueBySource(nodes).find((entry) => entry.source === source);
-  if (!node?.bounds || nodes.some((entry) => entry.parentIndex === node.index)) {
+  const node = leafContainerEntry(
+    nodes,
+    resolvedSource(selector, viewHierarchy, options.container),
+  );
+  if (!node) {
     return null;
   }
-  const area = boundsArea(node.bounds);
-  if (area <= 0) {
-    return null;
-  }
+  // A nested selector's outer container bounds the promotion too: the owner stays inside it.
+  const boundary = resolvedSource(selector, viewHierarchy, options.container!.container);
   const owner = promoteClickableAncestor(
     node,
     nodes,
     { action: options.action === "longPress" ? "long-press" : "tap", viewport },
-    xrContainerScope(node, nodes, viewport),
+    xrContainerScope(node, nodes, viewport, boundary),
   );
   if (!owner || (options.scrollableContainer && !withinScrollingRoot(owner, nodes))) {
     return null;
   }
   return new DefaultElementParser().parseNodeBounds(owner.source);
+}
+
+function resolvedSource(
+  selector: ElementSelector,
+  viewHierarchy: ViewHierarchyResult,
+  container: ElementContainerSelector | undefined,
+): SearchableEntry["source"] | undefined {
+  const element = container && selector.resolveContainer?.(viewHierarchy, container);
+  return element ? getHierarchyNodeSource(element) : undefined;
+}
+
+/** The container's entry when it is a leaf with a positive area, otherwise undefined. */
+function leafContainerEntry(
+  nodes: readonly SearchableEntry[],
+  source: SearchableEntry["source"] | undefined,
+): SearchableEntry | undefined {
+  // Live captures share nodes between the merged roots and each window; resolve the owning
+  // window's copy so the scope is bounded by that window's root, not the merged wrapper.
+  const node = source && uniqueBySource(nodes).find((entry) => entry.source === source);
+  if (
+    !node?.bounds ||
+    boundsArea(node.bounds) <= 0 ||
+    nodes.some((entry) => entry.parentIndex === node.index)
+  ) {
+    return undefined;
+  }
+  return node;
 }
 
 /** `scrollableContainer` admits only owners inside a scrolling root, as the selector does. */
@@ -186,11 +210,15 @@ function withinScrollingRoot(node: SearchableEntry, nodes: readonly SearchableEn
   return false;
 }
 
-/** Bound leaf ownership to three ancestors, a quarter window, and no unrelated controls. */
+/**
+ * Bound leaf ownership to three ancestors, a quarter window, the enclosing container (when the
+ * selector nests one), and no unrelated controls.
+ */
 function xrContainerScope(
   node: SearchableEntry,
   nodes: readonly SearchableEntry[],
   viewport: { width: number; height: number } | undefined,
+  boundary?: SearchableEntry["source"],
 ): SearchableEntry {
   const root = nodes.findLast(
     (entry) =>
@@ -211,7 +239,12 @@ function xrContainerScope(
   let scope = node;
   for (let level = 0; level < 3 && scope.parentIndex !== undefined; level++) {
     const parent = nodes[scope.parentIndex];
-    if (parent === root || !parent.bounds || boundsArea(parent.bounds) > windowArea / 4) {
+    if (
+      parent === root ||
+      parent.source === boundary ||
+      !parent.bounds ||
+      boundsArea(parent.bounds) > windowArea / 4
+    ) {
       break;
     }
     if (

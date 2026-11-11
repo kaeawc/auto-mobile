@@ -204,13 +204,13 @@ test.each([
 // A live capture shares each window's root between the merged roots and `windows[i]`, and the
 // hidden SystemUI chrome makes XR selection wrap the merged roots in a boundless root.
 // JSON breaks that sharing, so relink it while keeping every SystemUI window.
-function linkedCapture(ownerHeight?: number, ownerTop = 48): ViewHierarchyResult {
+function linkedCapture(ownerHeight?: number, ownerTop = 48, sectionText = ""): ViewHierarchyResult {
   const raw = structuredClone(capture.viewHierarchy);
   if (ownerHeight !== undefined) {
     const app = raw.windows!.find((window) => window.id === 38)!;
     const label = { ...settingsControl("Header", 300), clickable: false };
     label.bounds = { left: 96, top: 320, right: 187, bottom: 374 };
-    const section = { ...settingsControl("", 300), clickable: false, node: [label] };
+    const section = { ...settingsControl(sectionText, 300), clickable: false, node: [label] };
     section.bounds = { left: 0, top: 300, right: 744, bottom: 400 };
     const owner = { ...settingsControl("fragment_root", ownerTop), node: [section] };
     owner.bounds = { left: 0, top: ownerTop, right: 744, bottom: ownerTop + ownerHeight };
@@ -263,4 +263,10 @@ test("XR leaf fallback honours scrollableContainer", () => {
     right: 696,
     bottom: 724,
   });
+});
+
+test("XR leaf fallback stays inside a nested selector's outer container", () => {
+  const tree = linkedCapture(100, 300, "Section");
+  expect(select(true, { text: "Header" }, tree)?.text).toBe("fragment_root");
+  expect(select(true, { text: "Header", container: { text: "Section" } }, tree)).toBeNull();
 });

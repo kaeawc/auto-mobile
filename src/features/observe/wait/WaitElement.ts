@@ -15,7 +15,7 @@ import {
   type ScreenSizeForOffscreenCheckOptions,
 } from "../../utility/ElementGeometry";
 import type { ScreenSize } from "../../../models/ScreenSize";
-import { normalizeQuotes } from "../../utility/TextMatcher";
+import { DefaultTextMatcher, normalizeQuotes } from "../../utility/TextMatcher";
 import type { ResolverSelector } from "../../../models/elementSelectorSchemas";
 import type { ConditionResolver } from "../ConditionPredicates";
 import type { ObserveWaitForOptions } from "./WaitForSchemas";
@@ -48,6 +48,40 @@ function retryCompoundText<T>(
   }
   const textIndex = predicates.findIndex((selector) => selector.text !== undefined);
   sets[textIndex] = resolve({ text: waitFor.text!, match: "contains" });
+}
+
+/**
+ * `textSource: "displayed"` (#16875): the text predicate's matches must show `waitFor.text` in
+ * their displayed text (`shownText`: an editable value, else the text), so a node that carries
+ * the text only as a content description or accessibility label does not satisfy it.
+ */
+function keepDisplayedTextMatches(
+  waitFor: ObserveWaitForOptions,
+  predicates: readonly ResolverSelector[],
+  sets: SearchableEntry[][],
+): void {
+  if (waitFor.textSource !== "displayed" || waitFor.text === undefined) {
+    return;
+  }
+  const textIndex = predicates.findIndex((selector) => selector.text !== undefined);
+  if (textIndex < 0) {
+    return;
+  }
+  const shows = displayedTextMatcher(waitFor.text, waitFor.textMatch);
+  sets[textIndex] = sets[textIndex].filter((node) => shows(node.shownText));
+}
+
+function displayedTextMatcher(
+  text: string,
+  textMatch: ObserveWaitForOptions["textMatch"],
+): (shown: string | undefined) => boolean {
+  if (textMatch === "regex") {
+    const pattern = new RegExp(text);
+    return (shown) => shown !== undefined && pattern.test(shown);
+  }
+  const matches = new DefaultTextMatcher().createTextMatcher(text, textMatch !== "exact");
+  const trimShown = text === text.trim();
+  return (shown) => matches(shown !== undefined && trimShown ? shown.trim() : shown);
 }
 
 function isWaitSourceVisible(
@@ -311,6 +345,7 @@ export const findWaitForElement = (
     return candidates;
   });
   retryCompoundText(waitFor, negative, predicates, { sets, resolve });
+  keepDisplayedTextMatches(waitFor, predicates, sets);
   const candidates = [...new Set(sets.flat())].sort(
     (a, b) => a.windowRank - b.windowRank || a.index - b.index,
   );

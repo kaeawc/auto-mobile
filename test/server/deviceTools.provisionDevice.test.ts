@@ -119,10 +119,14 @@ import {
   setVideoRecordingManagerDependencies,
 } from "../../src/daemon/videoRecordingManager";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
-import type {
-  AndroidAutoProjectionApplier,
-  AndroidAutoProvisionReport,
+import {
+  DefaultAndroidAutoProjectionApplier,
+  type AndroidAutoProjectionApplier,
+  type AndroidAutoProvisionReport,
 } from "../../src/features/androidAuto/AndroidAutoProjectionService";
+import { AndroidAutoProjectionProvisioner } from "../../src/features/androidAuto/AndroidAutoProjectionProvisioner";
+import { fixedBackoff } from "../../src/utils/Backoff";
+import { FakeLauncher, FakePhone, FakeSession, FakeUi } from "../fakes/FakeAndroidAutoProjection";
 
 /** Exact provision response body from the registered production handler, with deterministic dependencies. */
 function assertProvisionSurface(name: string, payload: unknown): void {
@@ -742,7 +746,103 @@ describe("provisionDevice handler", () => {
       expect(applier.events).toEqual(["apply:emulator-5554"]);
     });
 
-    test("a failed projection stops its DHU, then rolls back the created emulator", async () => {
+    /** The real applier and provisioner, with fakes only for the phone, its UI and the DHU. */
+    function realProjectionStack(events: string[]) {
+      const ui = new FakeUi();
+      const phone = new FakePhone(ui);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const sessions: FakeSession[] = [];
+      const launcher = new FakeLauncher();
+      launcher.launch = async () => {
+        const session = new FakeSession();
+        const stop = session.stop.bind(session);
+        session.stop = async () => {
+          events.push("dhu-stop");
+          await stop();
+        };
+        sessions.push(session);
+        return { status: "connected", session };
+      };
+      const provisioner = new AndroidAutoProjectionProvisioner({
+        forDevice: () => ({ phone, ui, signerCheck: { verify: async () => {} } }),
+        dhu: launcher,
+        hostPorts: { isPortAvailable: () => !phone.redirected },
+        timer,
+        recoveryBackoff: fixedBackoff(1_000),
+      });
+      const applier = new DefaultAndroidAutoProjectionApplier(
+        {
+          env: { ANDROID_HOME: "/sdk" },
+          platform: "linux",
+          files: {
+            isDirectory: async () => true,
+            isFile: async () => true,
+            list: async () => ["base.apk"],
+          },
+        },
+        provisioner,
+      );
+      return { ui, applier, sessions };
+    }
+
+    test("a run that started its DHU and then fails stops that DHU before rolling back", async () => {
+      const events: string[] = [];
+      const { ui, applier, sessions } = realProjectionStack(events);
+      ui.isOnboardingPending = async () => {
+        throw new ActionableError("Android Auto onboarding read failed");
+      };
+      const recording = new RecordingAndroidAutoApplier();
+      createdAndroid(recording);
+      setDeviceToolsDependencies({ androidAutoProjection: applier });
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.success).toBe(false);
+      expect(JSON.stringify(payload)).toContain("Android Auto onboarding read failed");
+      expect(payload.cleanup).toMatchObject({ status: "succeeded" });
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.isAlive()).toBe(false);
+      expect(recording.events).toContain("destroy");
+      // The DHU stops inside the run, so before the created emulator is rolled back.
+      expect(events).toEqual(["dhu-stop"]);
+    });
+
+    test("a failed rerun on a reused emulator leaves the DHU an earlier provision started", async () => {
+      const events: string[] = [];
+      const { ui, applier, sessions } = realProjectionStack(events);
+      const args = provisionTestArgs("android");
+      const device: BootedDevice = {
+        name: args.device.name,
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      // The earlier provision: it connected a DHU that is still projecting this emulator.
+      await applier.apply(device, { apkDirectory: "/apks" });
+      expect(sessions).toHaveLength(1);
+      ui.isOnboardingPending = async () => {
+        throw new ActionableError("uiautomator dump failed");
+      };
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      deviceManager.setBootedDevices("android", [device]);
+      setDeviceToolsDependencies({
+        timer: new FakeTimer(),
+        ensureCtrlProxyReady: async () => {},
+        androidAutoProjection: applier,
+      });
+
+      const payload = JSON.parse(
+        await provisionResponseText({ ...args, androidAuto: { apkDirectory: "/apks" } }),
+      );
+
+      expect(payload.success).toBe(false);
+      expect(JSON.stringify(payload)).toContain("uiautomator dump failed");
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.isRunning()).toBe(true);
+      expect(events).toEqual([]);
+    });
+
+    test("a projection that rejects is not stopped again by the failed provision", async () => {
       const applier = new RecordingAndroidAutoApplier();
       applier.failure = new ActionableError("Android Auto onboarding read failed");
       createdAndroid(applier);
@@ -750,13 +850,8 @@ describe("provisionDevice handler", () => {
       const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
 
       expect(payload.success).toBe(false);
-      expect(JSON.stringify(payload)).toContain("Android Auto onboarding read failed");
-      expect(payload.cleanup).toMatchObject({ status: "succeeded" });
-      expect(applier.events.slice(0, 2)).toEqual(["apply:emulator-5554", "stop:emulator-5554"]);
       expect(applier.events).toContain("destroy");
-      expect(applier.events.indexOf("stop:emulator-5554")).toBeLessThan(
-        applier.events.indexOf("destroy"),
-      );
+      expect(applier.events).not.toContain("stop:emulator-5554");
     });
 
     test("a plain provision whose lifecycle abort lands after the session is bound still succeeds", async () => {

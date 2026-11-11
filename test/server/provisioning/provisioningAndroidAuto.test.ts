@@ -46,6 +46,11 @@ const REPORT: AndroidAutoProvisionReport = {
 
 class FakeApplier implements AndroidAutoProjectionApplier {
   readonly applied: string[] = [];
+  report: AndroidAutoProvisionReport = REPORT;
+  /** When set, apply rejects with it after any pending wait. */
+  failure?: Error;
+  /** False models a run past its last abort check, which resolves even after the deadline. */
+  honorsAbort = true;
   readonly stopped: Array<{ deviceId: string; deviceStopped?: boolean }> = [];
   /** When set, apply waits on it (and on its signal) instead of returning at once. */
   pending?: Promise<void>;
@@ -67,9 +72,14 @@ class FakeApplier implements AndroidAutoProjectionApplier {
     this.applied.push(device.deviceId);
     if (this.pending) {
       await this.pending;
-      signal?.throwIfAborted();
+      if (this.honorsAbort) {
+        signal?.throwIfAborted();
+      }
     }
-    return REPORT;
+    if (this.failure) {
+      throw this.failure;
+    }
+    return this.report;
   }
 }
 
@@ -183,6 +193,7 @@ describe("provisionDevice androidAuto", () => {
 
   test("the provision's total deadline bounds the projection and stops a DHU it connects late", async () => {
     const applier = new FakeApplier();
+    applier.honorsAbort = false;
     let release!: () => void;
     applier.pending = new Promise<void>((resolve) => {
       release = resolve;
@@ -202,11 +213,89 @@ describe("provisionDevice androidAuto", () => {
     expect(await settled).toMatchObject({ code: "timeout" });
     expect(applier.stopped).toEqual([]);
     release();
-    for (let tick = 0; tick < 5 && applier.stopped.length === 0; tick++) {
+    for (let tick = 0; tick < 20 && applier.stopped.length === 0; tick++) {
       await Promise.resolve();
     }
     expect(applier.stopped).toEqual([{ deviceId: "emulator-5554" }]);
   });
+
+  test("marks the device for a failure stop only when this run started its own DHU", async () => {
+    const timer = new FakeTimer();
+    const applier = new FakeApplier();
+    const applied: { androidAutoDevice?: unknown } = {};
+    await applyProvisionAndroidAuto(
+      args(),
+      { androidAutoProjection: applier, timer },
+      androidDevice,
+      {
+        ...bounds(timer),
+        settlementState: applied,
+      },
+    );
+    expect(applied.androidAutoDevice).toEqual(androidDevice);
+
+    applier.report = {
+      steps: [{ step: "desktop-head-unit", status: "already-done" }],
+      desktopHeadUnit: { running: true },
+    };
+    const reused: { androidAutoDevice?: unknown } = {};
+    await applyProvisionAndroidAuto(
+      args(),
+      { androidAutoProjection: applier, timer },
+      androidDevice,
+      {
+        ...bounds(timer),
+        settlementState: reused,
+      },
+    );
+    expect(reused.androidAutoDevice).toBeUndefined();
+
+    applier.failure = new Error("onboarding failed");
+    const rejected: { androidAutoDevice?: unknown } = {};
+    await expect(
+      applyProvisionAndroidAuto(args(), { androidAutoProjection: applier, timer }, androidDevice, {
+        ...bounds(timer),
+        settlementState: rejected,
+      }),
+    ).rejects.toThrow("onboarding failed");
+    expect(rejected.androidAutoDevice).toBeUndefined();
+  });
+
+  for (const late of [
+    { name: "rejects", failure: new Error("late failure"), status: "applied" as const },
+    { name: "reused an earlier DHU", failure: undefined, status: "already-done" as const },
+  ]) {
+    test(`a run that outlives the deadline and ${late.name} stops no DHU`, async () => {
+      const applier = new FakeApplier();
+      applier.honorsAbort = false;
+      applier.failure = late.failure;
+      applier.report = {
+        steps: [{ step: "desktop-head-unit", status: late.status }],
+        desktopHeadUnit: { running: true },
+      };
+      let release!: () => void;
+      applier.pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const timer = new FakeTimer();
+      const settled = applyProvisionAndroidAuto(
+        args(),
+        { androidAutoProjection: applier, timer },
+        androidDevice,
+        bounds(timer, new AbortController().signal, 1_000),
+      ).then(
+        () => "resolved",
+        (error: unknown) => error,
+      );
+      timer.advanceTime(1_000);
+      expect(await settled).toMatchObject({ code: "timeout" });
+      release();
+      for (let tick = 0; tick < 10; tick++) {
+        await Promise.resolve();
+      }
+      expect(applier.stopped).toEqual([]);
+    });
+  }
 
   test("stopProvisionedAndroidAuto stops only the Android device's DHU and never rejects", async () => {
     const applier = new FakeApplier();

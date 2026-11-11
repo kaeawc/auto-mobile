@@ -815,7 +815,19 @@ async function preparePlatformShutdown(
     );
     stopWatchRunnerBeforeShutdown(context.device, dependencies);
     // Only a DHU this daemon spawned for this emulator; it would otherwise outlive it (#17839).
-    await stopProvisionedAndroidAuto(dependencies, context.device, { deviceStopped: true });
+    // Its host port redirect is forgotten only once the kill succeeds, since a failed kill
+    // leaves the emulator, and its redirect, in place.
+    await runWithinShutdownDeadline(
+      context.device,
+      dependencies.timer,
+      shutdownContext.deadlineMs,
+      {
+        detail: "Desktop Head Unit stop did not complete",
+        requestAbortSignal: shutdownContext.requestAbortSignal,
+        operation: async () => await stopProvisionedAndroidAuto(dependencies, context.device),
+        timeoutMs: shutdownContext.timeoutMs,
+      },
+    );
     return { ...target, androidObserverState };
   } catch (error) {
     clearFence();
@@ -974,6 +986,8 @@ export async function shutdownDevice(
             timeoutMs,
             retiredIncarnation,
           });
+          // The kill succeeded, so the emulator's host port 5277 redirect went with it.
+          await stopProvisionedAndroidAuto(dependencies, device, { deviceStopped: true });
 
           perf.end();
           return {

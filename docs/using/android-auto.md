@@ -72,7 +72,7 @@ phone, or provision again with `acceptAndroidAutoTerms: true`.
 | The head unit server is not listening, or the DHU did not hold a connection                            | Check developer mode in Android Auto and start the head unit server from its overflow menu, then retry.                                                                                              |
 
 A failure after boot fails the whole request: an emulator the request created is rolled back, and a DHU
-AutoMobile started for that emulator is stopped. `killDevice` on an emulator also stops its DHU.
+that request started is stopped. A DHU an earlier provision started keeps running. `killDevice` on an emulator also stops its DHU.
 
 ## Setting up projection by hand
 

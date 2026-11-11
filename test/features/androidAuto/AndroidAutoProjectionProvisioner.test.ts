@@ -1,134 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import type { AndroidAutoPhone } from "../../../src/features/androidAuto/AndroidAutoPhone";
 import {
   AndroidAutoProjectionProvisioner,
   type AndroidAutoProjectionRequest,
 } from "../../../src/features/androidAuto/AndroidAutoProjectionProvisioner";
 import type { AndroidAutoSignerCheck } from "../../../src/features/androidAuto/AndroidAutoSignerCheck";
 import { ActionableError } from "../../../src/models/ActionableError";
-import type { AndroidAutoSettingsUi } from "../../../src/features/androidAuto/AndroidAutoSettingsUi";
-import type {
-  DesktopHeadUnitLauncher,
-  DesktopHeadUnitSession,
-  DhuLaunchOutcome,
-} from "../../../src/features/androidAuto/DesktopHeadUnit";
+import type { DhuLaunchOutcome } from "../../../src/features/androidAuto/DesktopHeadUnit";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
-
-/** A phone whose provisioning state lives in plain fields; every mutation is recorded. */
-class FakePhone implements AndroidAutoPhone {
-  readonly changes: string[] = [];
-  sideloaded = false;
-  keyguardDisabled = false;
-  stayOn = false;
-  listenerAllowed = false;
-  serverListening = false;
-  redirected = false;
-
-  constructor(private readonly ui: FakeUi) {}
-
-  async isAndroidAutoSideloaded() {
-    return this.sideloaded;
-  }
-  async installSplitApks(paths: readonly string[]) {
-    this.changes.push(`install:${paths.join(",")}`);
-    this.sideloaded = true;
-  }
-  async isKeyguardDisabled() {
-    return this.keyguardDisabled;
-  }
-  async disableKeyguard() {
-    this.changes.push("keyguard");
-    this.keyguardDisabled = true;
-  }
-  async isStayOnEnabled() {
-    return this.stayOn;
-  }
-  async enableStayOn() {
-    this.changes.push("stay-on");
-    this.stayOn = true;
-  }
-  async isNotificationListenerAllowed() {
-    return this.listenerAllowed;
-  }
-  async allowNotificationListener() {
-    this.changes.push("listener");
-    this.listenerAllowed = true;
-  }
-  async isHeadUnitServerListening() {
-    return this.serverListening || this.ui.serverStarted;
-  }
-  async openAndroidAutoSettings() {}
-  async forceStopAndroidAuto() {
-    this.changes.push("force-stop");
-    this.ui.serverStarted = false;
-    this.serverListening = false;
-  }
-  async addHeadUnitRedirect() {
-    this.changes.push("redirect");
-    this.redirected = true;
-  }
-}
-
-class FakeUi implements AndroidAutoSettingsUi {
-  readonly changes: string[] = [];
-  developerMode = false;
-  unknownSources = false;
-  serverStarted = false;
-  onboardingPending = false;
-
-  async isDeveloperModeEnabled() {
-    return this.developerMode;
-  }
-  async enableDeveloperMode() {
-    this.changes.push("developer-mode");
-    this.developerMode = true;
-  }
-  async isUnknownSourcesEnabled() {
-    return this.unknownSources;
-  }
-  async enableUnknownSources() {
-    this.changes.push("unknown-sources");
-    this.unknownSources = true;
-  }
-  async startHeadUnitServer() {
-    this.changes.push("start-server");
-    this.serverStarted = true;
-  }
-  async isOnboardingPending() {
-    return this.onboardingPending;
-  }
-  async acceptOnboarding() {
-    this.changes.push("onboarding");
-    this.onboardingPending = false;
-  }
-}
-
-class FakeSession implements DesktopHeadUnitSession {
-  running = true;
-  /** The DHU process has not exited; an unhealthy session can still be alive. */
-  alive = true;
-  sendCommand() {}
-  isRunning() {
-    return this.running && this.alive;
-  }
-  isAlive() {
-    return this.alive;
-  }
-  async stop() {
-    this.running = false;
-    this.alive = false;
-  }
-}
-
-class FakeLauncher implements DesktopHeadUnitLauncher {
-  launches = 0;
-  constructor(private readonly outcomes: DhuLaunchOutcome[] = []) {}
-  async launch(): Promise<DhuLaunchOutcome> {
-    this.launches++;
-    return this.outcomes.shift() ?? { status: "connected", session: new FakeSession() };
-  }
-}
+import {
+  FakeLauncher,
+  FakePhone,
+  FakeSession,
+  FakeUi,
+} from "../../fakes/FakeAndroidAutoProjection";
 
 function setup(
   outcomes: DhuLaunchOutcome[] = [],
@@ -558,6 +443,27 @@ describe("AndroidAutoProjectionProvisioner", () => {
     phone.redirected = false;
     const other = await provisioner.provision(request({ deviceId: "emulator-5556" }));
     expect(other.session.isRunning()).toBe(true);
+  });
+
+  test("stopDesktopHeadUnit without deviceStopped keeps the redirect, so the same emulator re-provisions", async () => {
+    const { launcher, provisioner } = setup();
+    await provisioner.provision(request());
+    // A kill that failed after the DHU stopped: the emulator and its redirect are still there.
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    const again = await provisioner.provision(request());
+    const status = (name: string) => again.steps.find((step) => step.step === name)?.status;
+    expect(status("transport")).toBe("already-done");
+    expect(status("desktop-head-unit")).toBe("applied");
+    expect(launcher.launches).toBe(2);
+  });
+
+  test("refusing another device names killDevice or re-provisioning as the recovery", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    phone.redirected = false;
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "Call killDevice on emulator-5554 (which stops its DHU), or re-provision emulator-5554",
+    );
   });
 
   test("stopDesktopHeadUnit never touches a DHU it did not spawn for that device", async () => {

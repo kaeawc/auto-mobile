@@ -60,7 +60,7 @@ export async function applyProvisionAndroidAuto(
   }: {
     signal: AbortSignal;
     totalDeadlineMs: number;
-    /** Records the device once the run starts, so a failed provision stops its DHU. */
+    /** Records the device once this run's own DHU connected, so a failed provision stops it. */
     settlementState?: Pick<ProvisionSettlementState, "androidAutoDevice">;
   },
 ): Promise<AndroidAutoProvisionReport | undefined> {
@@ -69,19 +69,47 @@ export async function applyProvisionAndroidAuto(
     return undefined;
   }
   signal.throwIfAborted();
-  if (settlementState) {
-    settlementState.androidAutoDevice = device;
-  }
   const applier = androidAutoApplier(deps);
+  // Set only once this run's own DHU connected: a failed rerun must not stop a DHU an earlier
+  // provision started and this run merely reused (the provisioner already stops one it applied
+  // and then failed on).
+  let ownsDesktopHeadUnit = false;
   return await runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, signal, {
     phase: "setting up Android Auto projection",
-    operation: (operationSignal) => applier.apply(device, options, operationSignal),
-    // A run that outlives the deadline may still connect a DHU; stop it once the run settles.
+    operation: async (operationSignal) => {
+      const report = await applier.apply(device, options, operationSignal);
+      if (startedDesktopHeadUnit(report)) {
+        ownsDesktopHeadUnit = true;
+        if (settlementState) {
+          settlementState.androidAutoDevice = device;
+        }
+      }
+      return report;
+    },
+    // A run that outlives the deadline may still connect its own DHU; stop it once the run
+    // settles. A run that rejects already stopped any DHU it applied, and a reused one stays.
     onPendingSettlement: (settlement) => {
-      const stop = () => applier.stopDesktopHeadUnit(device.deviceId);
-      void settlement.then(stop, stop);
+      void settlement.then(
+        async () => {
+          if (ownsDesktopHeadUnit) {
+            await applier.stopDesktopHeadUnit(device.deviceId);
+          }
+        },
+        (error: unknown) => {
+          // The provision already failed on the deadline; this late rejection has no caller.
+          logger.debug(
+            `[AndroidAuto] late projection run for ${device.deviceId} failed: ${errorMessage(error)}`,
+          );
+        },
+      );
     },
   });
+}
+
+function startedDesktopHeadUnit(report: AndroidAutoProvisionReport): boolean {
+  return report.steps.some(
+    (step) => step.step === "desktop-head-unit" && step.status === "applied",
+  );
 }
 
 /**

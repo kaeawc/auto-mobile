@@ -4,6 +4,9 @@ import {
   readOptions,
 } from "../../helpers/selectedDisplayRead";
 import { readFileSync } from "node:fs";
+import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
+import { UntrackedAndroidDisplayError } from "../../../src/features/observe/UntrackedAndroidDisplayError";
+import { aaosDumpsysDisplay } from "../../helpers/aaosMultidisplay";
 import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
 import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
 import { findFocusedElement } from "../../../src/features/observe/HierarchyFocus";
@@ -702,5 +705,47 @@ test("display without a readable size never starts a dump", async () => {
   await expect(read()).rejects.toThrow(overlayRefusal);
   expect(adb.getCommandCalls().some((call) => call.command.includes("uiautomator dump"))).toBe(
     false,
+  );
+});
+
+const display4Refusal =
+  "Display 4 exposes no accessibility windows on this device: the accessibility service does not track this display. Use the default display or a display tracked by accessibility.";
+
+test.each([false, true])(
+  "a private virtual display names the platform limit and never dumps (observer=%s)",
+  async (observer) => {
+    const { read, adb } = overlayCapture(observer, 4, display4Refusal);
+    // Captured AAOS dump: display 4 is `type VIRTUAL` with FLAG_PRIVATE, so accessibility
+    // never tracks it and `uiautomator dump --display 4` returns display 0's content.
+    adb.setCommandResult("shell dumpsys display", aaosDumpsysDisplay);
+    const error = await read().then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(UntrackedAndroidDisplayError);
+    expect(error).toBeInstanceOf(AndroidDisplayReadError);
+    expect(String(error)).toContain(
+      "Display 4 (virtual:com.android.emulator.multidisplay:1234562) is a private virtual display owned by com.android.emulator.multidisplay",
+    );
+    expect(String(error)).toContain('"input -d 4"');
+    expect(adb.getCommandCalls().some((call) => call.command.includes("uiautomator"))).toBe(false);
+  },
+);
+
+test("a public virtual display is sized from the dumpsys Logical Displays section", async () => {
+  const { read, adb } = overlayCapture(false, 4, display4Refusal);
+  // Derived from the captured AAOS dump with display 4 made public (`-multidisplay ...,1`). Real
+  // `dumpsys display` prints no `Display id <n>:` rows, only `mBaseDisplayInfo` records.
+  adb.setCommandResult(
+    "shell dumpsys display",
+    aaosDumpsysDisplay.replace(/(displayId 4, displayGroupId 0, )FLAG_PRIVATE, /g, "$1"),
+  );
+  const result = await read();
+  expect(result.hierarchy.displayId).toBe(4);
+  expect(result.hierarchy.sources).toEqual(["uiautomator"]);
+  expect(result.hierarchy.screenWidth).toBe(1280);
+  expect(result.hierarchy.screenHeight).toBe(720);
+  expect(adb.getCommandCalls()[1]?.command).toBe(
+    "shell uiautomator dump --display 4 /data/local/tmp/automobile-hierarchy-overlay.xml",
   );
 });

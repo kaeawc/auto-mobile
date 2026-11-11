@@ -10,7 +10,13 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
 import { rawNodeValue } from "../utility/elementProperties";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { parseAndroidDisplayInfos } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import {
+  isAccessibilityUntrackedDisplay,
+  parseAndroidDisplayInfos,
+  parseDumpsysLogicalDisplays,
+  type AndroidDisplayInfo,
+} from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import { UntrackedAndroidDisplayError } from "../observe/UntrackedAndroidDisplayError";
 import { uiautomatorDumpLock } from "./uiautomatorDumpLock";
 
 const DUMP_CLEANUP_TIMEOUT_MS = 1500;
@@ -321,14 +327,39 @@ function fitsDisplay(
   });
 }
 
+/**
+ * The display-service record of one logical display. `dumpsys display` prints its records in the
+ * Logical Displays section (`mBaseDisplayInfo=DisplayInfo{...}`); the `Display id <n>:` form that
+ * `cmd display get-displays` prints is read too.
+ */
+function findAndroidDisplayInfo(
+  dumpsysDisplay: string,
+  displayId: number,
+): AndroidDisplayInfo | undefined {
+  const matches = (info: AndroidDisplayInfo) => info.logicalId === String(displayId);
+  return (
+    parseDumpsysLogicalDisplays(dumpsysDisplay).find(matches) ??
+    parseAndroidDisplayInfos(dumpsysDisplay).find(matches)
+  );
+}
+
 async function readDisplaySize(
   displayId: number,
   execute: ReturnType<typeof boundedDumpExecutor>,
 ): Promise<{ width: number; height: number }> {
-  const displays = parseAndroidDisplayInfos(
+  const info = findAndroidDisplayInfo(
     (await execute(["shell", "dumpsys", "display"])).stdout,
+    displayId,
   );
-  const size = displays.find((info) => info.logicalId === String(displayId))?.sizePx;
+  if (info && isAccessibilityUntrackedDisplay(info)) {
+    // UIAutomator reads through accessibility too: on a private virtual display it dumps the
+    // default display's content, so do not run it.
+    throw new UntrackedAndroidDisplayError(displayId, {
+      uniqueId: info.uniqueId,
+      ownerPackage: info.ownerPackage,
+    });
+  }
+  const size = info?.sizePx;
   if (!size || size.width <= 0 || size.height <= 0) {
     throw new ActionableError(`Display ${displayId} has no readable size in dumpsys display`);
   }
@@ -377,6 +408,9 @@ export async function readAndroidDisplayHierarchy(
     };
   } catch (error) {
     throwIfAborted(signal);
+    if (error instanceof UntrackedAndroidDisplayError) {
+      throw error;
+    }
     throw toActionableError(error, `Failed to read display ${displayId} with UIAutomator`);
   } finally {
     await removeDump(deps, path, deadline, signal);

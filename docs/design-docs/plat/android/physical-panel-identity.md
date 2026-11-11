@@ -63,6 +63,16 @@ the panel id, and pushed display transitions have never carried a panel key.
   Only missing secondary inventory panels and unreported nonzero logical ids are added; the shell
   list wins conflicts, and disabled fold panels remain disconnected. Physical-only inventories
   need no additional read.
+- Addressing a display and reading its hierarchy are separate. The key resolves to a logical id
+  from the display service alone (`cmd display get-displays`, then `dumpsys display`), never from
+  accessibility windows, so a display accessibility cannot see still resolves and still takes
+  `input -d <logicalId>`. Accessibility does not track private virtual displays (`type VIRTUAL`
+  with `FLAG_PRIVATE`, such as Android Auto's car displays or a private emulator
+  `-multidisplay` display). When CtrlProxy refuses a selected display, the UIAutomator fallback
+  first reads that display's `dumpsys display` record: for a private virtual display it raises
+  `UntrackedAndroidDisplayError` (non-retryable) without dumping, because `uiautomator dump
+  --display` there returns the default display's content. Otherwise the record's `real W x H`
+  bounds the dump.
 - A pushed `display_transition` without a panel key clears that cache; the next observation
   re-reads it, but callers that may not probe (`tapOn` refresh) get no panel, and the transition
   tracker cannot tell a panel swap from a same-panel change except by width and height.

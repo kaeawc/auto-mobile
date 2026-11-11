@@ -11,26 +11,13 @@
 import type { Element } from "../../../models/Element";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import { isEditableElementProperties } from "../../utility/elementProperties";
+import { allElements, boundsTuple } from "./skeletonProjection/rowModel";
 
 function ownLabel(element: Element): string | undefined {
   const label = [element.text, element["content-desc"]].find(
     (value) => typeof value === "string" && value.trim().length > 0,
   );
   return typeof label === "string" ? label : undefined;
-}
-
-function boundsTuple(bounds: unknown): readonly number[] | undefined {
-  if (Array.isArray(bounds)) {
-    return bounds.length === 4 && bounds.every((value) => typeof value === "number")
-      ? bounds
-      : undefined;
-  }
-  if (typeof bounds !== "object" || bounds === null) {
-    return undefined;
-  }
-  const { left, top, right, bottom } = bounds as Record<string, unknown>;
-  const tuple = [left, top, right, bottom];
-  return tuple.every((value) => typeof value === "number") ? (tuple as number[]) : undefined;
 }
 
 function sameBounds(a: readonly number[], b: readonly number[]): boolean {
@@ -51,7 +38,7 @@ function shownInside(
 ): boolean {
   const wanted = label.trim();
   return elements.some((element) => {
-    const own = boundsTuple(element.bounds);
+    const own = boundsTuple(element);
     return (
       element !== focused &&
       own !== undefined &&
@@ -82,7 +69,7 @@ export function focusedDescendantLabel(
   rows: readonly SkeletonElement[],
   elements: readonly Element[],
 ): string | undefined {
-  const bounds = boundsTuple(focused.bounds);
+  const bounds = boundsTuple(focused);
   if (!needsDescendantLabel(focused) || !bounds) {
     return undefined;
   }
@@ -100,8 +87,7 @@ export function focusedDescendantLabel(
 
 /** The flat element list of an observation's categorized `elements`. */
 export function observedElements(source: ObserveResult): Element[] {
-  const elements = source.elements;
-  return elements ? [...elements.clickable, ...elements.scrollable, ...elements.text] : [];
+  return source.elements ? allElements(source.elements) : [];
 }
 
 /**

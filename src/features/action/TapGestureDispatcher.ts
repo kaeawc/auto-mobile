@@ -1,4 +1,8 @@
-import { executeXrNodeClick, xrCoordinateError } from "./xrPanelNodeClick";
+import {
+  executeXrNodeClick,
+  xrCoordinateError,
+  type HiddenXrChromeClick,
+} from "./xrPanelNodeClick";
 import { pointInTapBounds } from "./tapTargetSupport";
 import { TapElementFinder } from "./tapElementFinder";
 import { tapViaVoiceOver, withVoiceOverTimeoutContext } from "./tapIosVoiceOver";
@@ -86,6 +90,8 @@ export type ResolvedAndroidTapOptions = DisplayFenceOption & {
   onTalkBackActivation?: () => void;
   /** An XR node click CtrlProxy received but never answered; the caller checks its effect (#17983). */
   onUnconfirmedClick?: (reason: string) => void;
+  /** A hidden System UI XR node click CtrlProxy accepted; the caller checks its effect (#17798). */
+  onHiddenChromeClick?: (click: HiddenXrChromeClick) => void;
   onResolvedElement?: (
     element: Element,
     selection?: ElementSelectionResult,

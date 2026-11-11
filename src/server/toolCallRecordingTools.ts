@@ -67,7 +67,7 @@ const recordToolCallsResultSchema = z.object({
       "action=end only, present when non-empty: calls that were skipped (host-file sourcePath, oversized param) or recorded in a weakened form (resetKeychain with confirm:false), each with the reason",
     ),
   platform: z
-    .enum(["android", "ios", "tvos"])
+    .enum(["android", "ios", "tvos", "visionos", "watchos"])
     .optional()
     .describe("action=end only: the platform written at the top of the plan"),
   platformNote: z

@@ -105,7 +105,9 @@ Besides the device management above, these tools accept a watch:
 - `listApps`
 - `launchApp`
 - `terminateApp`
+- `crashApp`
 - `getLogs`
+- `executePlan`
 
 <!-- watchos-supported-tools:end -->
 
@@ -202,12 +204,20 @@ Every other tool refuses a watch before doing anything, with:
   is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch. It does not
   observe the launched app: `verified` stays unset with `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
+- `crashApp` sends SIGABRT to the running watch app named by `appId`, as on an iOS simulator, and
+  checks the watch's unified log and the host crash reports for fresh crash evidence. The result
+  has `confirmed`, `evidence` and, when the report is found, a `crashReport` summary. An app
+  that is not running fails with `wasRunning: false` without signalling anything.
 - `getLogs` reads the watch simulator's unified log as on an iOS simulator: `appId` is required,
   and lines from the app's subsystem or its process are returned. `minPriority` ranks the
   unified-log levels as `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log
   has no warning level), `E` error and fault, and `F` fault only. `tags`, `buffers` and
   `includeSystem` are Android-only and are ignored with a warning. It is not listed by default;
   enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
+- `executePlan` replays a plan on a watch with `platform: "watchos"`, including a plan
+  `recordToolCalls` recorded on a watch. Each step runs as the same tool called directly, so a
+  step whose tool is not in the list above fails with the refusal below. Plans on a watch record
+  no video.
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with
 `tapOn` first, or provide a selector with an exact `elementId` or `text` to focus it before typing.

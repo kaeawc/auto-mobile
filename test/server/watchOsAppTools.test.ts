@@ -308,10 +308,14 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     await arrange();
     await bindWatchSession();
 
-    const error = await failure(call("crashApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }));
+    const error = await failure(
+      call("appLifecycle", { sessionUuid: WATCH_SESSION, appId: BUNDLE, action: "background" }),
+    );
 
     expect(error).toBeInstanceOf(ActionableError);
-    expect(error).toMatchObject({ message: unsupportedPlatformToolMessage("crashApp", "watchos") });
+    expect(error).toMatchObject({
+      message: unsupportedPlatformToolMessage("appLifecycle", "watchos"),
+    });
   });
 
   test("launch, relaunch with clearAppData, and terminate an app on the session-bound watch", async () => {

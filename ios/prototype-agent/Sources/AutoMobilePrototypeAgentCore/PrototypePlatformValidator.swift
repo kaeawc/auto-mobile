@@ -585,7 +585,8 @@ enum PrototypePlatformValidator {
            case let .string(page)? = form["value"], !iosSettingsPages.contains(page)
         {
             // The iOS agent only opens these pages (#16616); the host refuses the others at the same path.
-            throw fail(path, "settings.open page \"\(page)\" is Android only; on iOS use \"app\" or \"notifications\"")
+            let message = "settings.open page \"\(page)\" is Android only; "
+            throw fail(path, message + "on iOS use \"app\" or \"notifications\"")
         }
         if call == "permissions.request" {
             try requestedPermissions(args, path: path, declared: declared.permissions)

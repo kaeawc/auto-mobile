@@ -708,11 +708,17 @@ describe("provisionDevice handler", () => {
         }
         return {
           steps: [{ step: "desktop-head-unit", status: "applied" }],
-          desktopHeadUnit: { running: true },
+          desktopHeadUnit: { running: true, configPath: "/dhu.ini" },
         };
       }
       async stopDesktopHeadUnit(deviceId: string) {
         this.events.push(`stop:${deviceId}`);
+      }
+      async resolveHeadUnitInputs(): Promise<never> {
+        throw new Error("not used by provisionDevice");
+      }
+      async startHeadUnit(): Promise<never> {
+        throw new Error("not used by provisionDevice");
       }
     }
 
@@ -747,7 +753,7 @@ describe("provisionDevice handler", () => {
       expect(payload.error).toBeUndefined();
       expect(payload.androidAuto).toEqual({
         steps: [{ step: "desktop-head-unit", status: "applied" }],
-        desktopHeadUnit: { running: true },
+        desktopHeadUnit: { running: true, configPath: "/dhu.ini" },
       });
       expect(applier.events).toEqual(["apply:emulator-5554"]);
     });

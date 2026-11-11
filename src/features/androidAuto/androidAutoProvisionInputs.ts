@@ -5,9 +5,12 @@ import {
   type AndroidSdkEnvironment,
 } from "../../utils/android-cmdline-tools/androidSdkRoot";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
-import type { ProvisionAndroidAutoOptions } from "../deviceLifecycle/core/schemas";
+import type {
+  ProvisionAndroidAutoOptions,
+  StartDeviceAndroidAutoOptions,
+} from "../deviceLifecycle/core/schemas";
 
-export type { ProvisionAndroidAutoOptions };
+export type { ProvisionAndroidAutoOptions, StartDeviceAndroidAutoOptions };
 
 /** The host files a projection run uses, resolved and checked to exist. */
 export interface AndroidAutoProvisionInputs {
@@ -73,9 +76,11 @@ async function resolveApks(
 }
 
 async function resolveDhu(
-  options: ProvisionAndroidAutoOptions,
+  options: Pick<ProvisionAndroidAutoOptions, "dhuPath" | "dhuConfig">,
   { env, platform, files }: AndroidAutoInputEnvironment,
   missing: string[],
+  /** Where the caller passed `dhuPath` and `dhuConfig`, for the messages. */
+  field = "androidAuto",
 ): Promise<{ binaryPath: string; configPath: string }> {
   let binaryPath: string;
   if (options.dhuPath) {
@@ -84,7 +89,7 @@ async function resolveDhu(
     const sdkRoot = resolveAndroidSdkRoot(env);
     if (!sdkRoot) {
       missing.push(
-        `the Desktop Head Unit: ANDROID_HOME is not set, so ${dhuBinaryName(platform)} cannot be found; set ANDROID_HOME or pass androidAuto.dhuPath`,
+        `the Desktop Head Unit: ANDROID_HOME is not set, so ${dhuBinaryName(platform)} cannot be found; set ANDROID_HOME or pass ${field}.dhuPath`,
       );
       return { binaryPath: "", configPath: "" };
     }
@@ -93,7 +98,7 @@ async function resolveDhu(
   const binaryFound = await files.isFile(binaryPath);
   if (!binaryFound) {
     missing.push(
-      `the Desktop Head Unit at ${binaryPath}; install it with sdkmanager "${DHU_SDK_PACKAGE}" (Android Auto Desktop Head Unit Emulator) or pass androidAuto.dhuPath`,
+      `the Desktop Head Unit at ${binaryPath}; install it with sdkmanager "${DHU_SDK_PACKAGE}" (Android Auto Desktop Head Unit Emulator) or pass ${field}.dhuPath`,
     );
   }
   const configPath = options.dhuConfig
@@ -101,7 +106,7 @@ async function resolveDhu(
     : path.join(path.dirname(binaryPath), DEFAULT_DHU_CONFIG);
   // A default config beside a missing binary is the same missing install; report it once.
   if ((binaryFound || options.dhuConfig) && !(await files.isFile(configPath))) {
-    missing.push(`the head unit config ${configPath}; pass androidAuto.dhuConfig with a DHU .ini`);
+    missing.push(`the head unit config ${configPath}; pass ${field}.dhuConfig with a DHU .ini`);
   }
   return { binaryPath, configPath };
 }
@@ -125,4 +130,26 @@ export async function resolveAndroidAutoProvisionInputs(
     dhu,
     acceptAndroidAutoTerms: options.acceptAndroidAutoTerms === true,
   };
+}
+
+/** The host files startDevice's head unit needs: the DHU and its config, no APKs. */
+export interface DesktopHeadUnitInputs {
+  dhu: { binaryPath: string; configPath: string };
+  acceptAndroidAutoTerms: boolean;
+}
+
+/**
+ * Resolves and checks the DHU binary and config for a phone that is already provisioned for
+ * projection. Throws one actionable error that names every missing piece.
+ */
+export async function resolveDesktopHeadUnitInputs(
+  options: StartDeviceAndroidAutoOptions,
+  host: AndroidAutoInputEnvironment,
+): Promise<DesktopHeadUnitInputs> {
+  const missing: string[] = [];
+  const dhu = await resolveDhu(options.headUnit, host, missing, "androidAuto.headUnit");
+  if (missing.length > 0) {
+    throw new ActionableError(`The Android Auto head unit is missing ${missing.join("; and ")}.`);
+  }
+  return { dhu, acceptAndroidAutoTerms: options.acceptAndroidAutoTerms === true };
 }

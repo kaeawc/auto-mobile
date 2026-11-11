@@ -14,6 +14,7 @@ import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTr
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceShuttingDownError } from "../models/deviceAcquisitionRefusals";
 import { ActionableError, BootedDevice, DeviceInfo, type Platform } from "../models";
+import { withRequestedHeadUnit } from "./startDeviceHeadUnit";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DaemonStateLike } from "../daemon/daemonState";
@@ -980,7 +981,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
             ...resolvedArgs,
             ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
           };
-          return prepareDevice(
+          const ready = await prepareDevice(
             target,
             {
               bootTimeoutMs: totalTimeoutMs,
@@ -1007,6 +1008,10 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
             progress,
             requestSignal,
           );
+          return await withRequestedHeadUnit(args.androidAuto, ready, {
+            signal: requestSignal,
+            totalDeadlineMs: deadlineMs,
+          });
         },
       },
     );

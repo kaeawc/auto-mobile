@@ -947,6 +947,12 @@ describe("killDevice handler", () => {
         apply: async () => {
           throw new Error("not used by killDevice");
         },
+        resolveHeadUnitInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        startHeadUnit: async () => {
+          throw new Error("not used by killDevice");
+        },
         stopDesktopHeadUnit: async (deviceId, options) => {
           stops.push({ deviceId, ...options });
         },
@@ -975,6 +981,12 @@ describe("killDevice handler", () => {
           throw new Error("not used by killDevice");
         },
         apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        resolveHeadUnitInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        startHeadUnit: async () => {
           throw new Error("not used by killDevice");
         },
         stopDesktopHeadUnit: async (deviceId, options) => {
@@ -1059,6 +1071,12 @@ describe("killDevice handler", () => {
         apply: async () => {
           throw new Error("not used by killDevice");
         },
+        resolveHeadUnitInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        startHeadUnit: async () => {
+          throw new Error("not used by killDevice");
+        },
         stopDesktopHeadUnit: async (deviceId, options) => {
           if (options?.deviceStopped && redirectOwner?.deviceId === deviceId) {
             redirectOwner = null;
@@ -1110,6 +1128,12 @@ describe("killDevice handler", () => {
           throw new Error("not used by killDevice");
         },
         apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        resolveHeadUnitInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        startHeadUnit: async () => {
           throw new Error("not used by killDevice");
         },
         stopDesktopHeadUnit: async (_deviceId, options) => {
@@ -1184,6 +1208,12 @@ describe("killDevice handler", () => {
         apply: async () => {
           throw new Error("not used by killDevice");
         },
+        resolveHeadUnitInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        startHeadUnit: async () => {
+          throw new Error("not used by killDevice");
+        },
         stopDesktopHeadUnit: async (deviceId, options) => {
           stoppedDeviceIds.push(deviceId);
           if (!options?.deviceStopped) {
@@ -1246,6 +1276,12 @@ describe("killDevice handler", () => {
           throw new Error("not used by killDevice");
         },
         apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        resolveHeadUnitInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        startHeadUnit: async () => {
           throw new Error("not used by killDevice");
         },
         stopDesktopHeadUnit: async (deviceId) => {

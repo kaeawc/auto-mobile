@@ -507,7 +507,7 @@ const provisionDeviceResourcesField = deviceResourceConfigurationSchema
   );
 
 /** Android Auto projection set up on the booted phone emulator, with a headless DHU (#17839). */
-export const provisionAndroidAutoSchema = z
+const provisionAndroidAutoSchema = z
   .object({
     apkDirectory: z
       .string()

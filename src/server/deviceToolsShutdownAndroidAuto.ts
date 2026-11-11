@@ -66,32 +66,51 @@ async function stopAndroidAutoAfterKill(
   }
 }
 
+type RetainReservation = (operation: Promise<void>, releaseAfterFailure: boolean) => void;
+
 /**
  * The post-kill DHU stop for one shutdown: `onShutdownConfirmed` runs it once the platform stop
  * is confirmed, and `releaseReservation` releases the shutdown reservation now or, while that
  * stop is still running, keeps it until the stop settles so no replacement claims the serial.
+ * A shutdown that fails after the stop outlived its wait (ownership retirement throws) calls
+ * `retainAfterFailure` instead, so the failure path never frees the serial under a running stop
+ * nor waits on it past the deadline (#17889). The reservation is retained at most once.
  */
 export function trackAndroidAutoStopAfterKill(
   shutdownContext: ShutdownDeadlineContext,
   dependencies: DeviceToolsDependencies,
 ): {
   onShutdownConfirmed: () => Promise<void>;
-  releaseReservation: (
-    release: () => Promise<void>,
-    retain: (operation: Promise<void>, releaseAfterFailure: boolean) => void,
-  ) => Promise<void>;
+  releaseReservation: (release: () => Promise<void>, retain: RetainReservation) => Promise<void>;
+  retainAfterFailure: () => void;
 } {
   let lateStop: Promise<void> | undefined;
+  let retained = false;
+  const retainLateStop = (retain: RetainReservation): boolean => {
+    if (!lateStop) {
+      return false;
+    }
+    if (!retained) {
+      retained = true;
+      retain(lateStop, true);
+    }
+    return true;
+  };
   return {
     onShutdownConfirmed: async () => {
       lateStop = (await stopAndroidAutoAfterKill(shutdownContext, dependencies))?.pending;
     },
     releaseReservation: async (release, retain) => {
-      if (lateStop) {
-        retain(lateStop, true);
+      if (retainLateStop(retain)) {
         return;
       }
       await release();
+    },
+    retainAfterFailure: () => {
+      const retain = shutdownContext.retainReservationUntil;
+      if (retain) {
+        retainLateStop(retain);
+      }
     },
   };
 }

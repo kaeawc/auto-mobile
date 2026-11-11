@@ -142,7 +142,13 @@ const glassesInputTool = defineDeviceTool({
     "Android XR glasses: tap clicks the focused item; swipeForward/swipeBack move focus using DPAD keys (vertical down/up by default, horizontal right/left). count repeats any gesture 1..20 times. Success means adb commands exited cleanly; no read-back is performed, so observe afterwards. Voice input uses the existing injectAudioInput tool. Long press and two-finger gestures are not injectable yet: key holds produce no long click and raw touchpad holds/gestures are swallowed by the unpaired glasses system UI (raw input also requires adb root). Direct DPAD avoids unreliable touchnavigation swipes and touchpad motion that does not change focus. Unconfirmed glasses receive a warning but input is still sent.",
   input: glassesInput,
   handler: createGlassesInputHandler(),
-  options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: glassesInputResultSchema },
+  options: {
+    ...PLAN_RELEVANT,
+    // `tap` can open another screen, so record the call like tapOn and sendKeys for navigateTo to replay.
+    recordsNavigation: true,
+    defaultEnabled: false,
+    outputSchema: glassesInputResultSchema,
+  },
 });
 export const glassesInputSchema = glassesInputTool.schema;
 export function registerGlassesInputTools() {

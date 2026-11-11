@@ -8,4 +8,4 @@ The result contains `success`, `message`, `gesture`, `axis`, `count`, `keyCodes`
 
 A `not_glasses` or `traits_unavailable` warning means glasses identity is unconfirmed; input is still sent. Check `listDevices` and observe the effect. Command error output returns `success: false`; transport failures raise an actionable error. Check the Android connection before retrying, since earlier repetitions may already have taken effect. iOS is unsupported.
 
-For voice input, use `injectAudioInput`. Long press and two-finger gestures are not injectable yet: key holds do not produce a long click, and the unpaired glasses system UI swallows raw touchpad gestures, which also require adb root. Direct DPAD input avoids unreliable touch-navigation swipes and touchpad motion that does not move focus.
+For voice input, use `injectAudioInput`. Long press and two-finger gestures are not supported.

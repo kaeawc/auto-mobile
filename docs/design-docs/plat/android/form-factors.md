@@ -55,20 +55,7 @@ TV navigation is a focus problem: D-pad keys can be sent and the focused element
 
 The TV image is `system-images;android-36;android-tv;arm64-v8a` with profile `tv_1080p` (1920×1080 at 320 dpi), a user build that refuses `adb root`. The SDK tags `android-tv`, `google-tv`, `google-tv-ps16k` and the profiles `tv_1080p`, `tv_4k`, `tv_720p` match `src/models/formFactor.ts`. CtrlProxy installs and its accessibility service enables from the host with no TV-specific setup, and `observe` returns the hierarchy for the launcher and Settings.
 
-The following pass/fail matrix was verified on the Android 36 `android-tv` and `google-tv` arm64-v8a emulators (`tv_1080p`). Both report touchscreen and leanback features, emulator characteristics, and no touch input device.
-
-| Tool or behaviour                               | `android-tv` | `google-tv` |
-| ----------------------------------------------- | ------------ | ----------- |
-| `observe` (launcher hierarchy and focus)        | Pass         | Pass        |
-| `pressButton` right / down / select             | Pass         | Pass        |
-| `sendKeys` arrow_up / arrow_down / enter        | Pass         | Pass        |
-| `focusNavigate` (launcher and fixture targets)  | Pass         | Pass        |
-| `tapOn` text selector (leanback D-pad path)     | Pass         | Pass        |
-| `tapOn` touch-only option (for example sibling) | **Fail**     | **Fail**    |
-| `launchApp` (Leanback-only and fixture apps)    | Pass         | Pass        |
-| `listApps`                                      | Pass         | Pass        |
-| CtrlProxy install and accessibility enable      | Pass         | Pass        |
-| `swipeOn`                                       | Pass         | Not checked |
+The `google-tv` arm64-v8a image (`tv_1080p`) behaves the same: both images report touchscreen and leanback features, emulator characteristics, and no touch input device, and `observe`, `pressButton`, `sendKeys`, `focusNavigate`, the D-pad `tapOn` path, `launchApp`, `listApps` and CtrlProxy setup work on both. `swipeOn` has only been exercised on `android-tv`.
 
 `focusedElement` follows the Leanback focus ring. `sendKeys` arrows move focus and `enter` activates. `focusNavigate` matches the target's own `contentDesc` or `resourceId`, and a static child label counts when it belongs to the focused control. Scrollable containers and ancestors of separately actionable controls cannot borrow those controls' labels. `pressButton` back and home, screenshots and video recording work. `launchApp` and `terminateApp` work for apps that only have a `LEANBACK_LAUNCHER` entry, and `listApps` includes them. The prototype overlay renders and dismisses, but its button is not reachable with D-pad focus. `observe.accessibilityState` reports the service as disabled and unknown while it is bound, which is an unexplained oddity.
 

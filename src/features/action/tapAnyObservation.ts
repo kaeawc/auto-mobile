@@ -29,6 +29,7 @@ export function capturedTapAnyTarget(
     observationDisplay: observeResult.viewHierarchy,
     observationScreenSize: observeResult.screenSize,
     scoped: isStrictlyScoped(options),
+    container: options.container,
     layer: options.layer,
   };
 }

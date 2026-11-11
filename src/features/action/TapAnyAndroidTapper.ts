@@ -20,6 +20,7 @@ import {
   ActionableError,
   BootedDevice,
   Element,
+  type ElementContainerSelector,
   ObserveResult,
   type Point,
   TapAnyElementOptions,
@@ -44,6 +45,7 @@ import {
   TalkBackTapStrategy,
 } from "../talkback/TalkBackTapStrategy";
 import { hasAccessibilityAction } from "../utility/elementProperties";
+import { executeXrNodeClick } from "./xrPanelNodeClick";
 import { checkAndroidTapHierarchyChange, PRE_RETRY_DELAY_MS } from "./androidGhostTapRetry";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { type TalkBackNavigationDriverFactory } from "../talkback/TalkBackNavigationDriver";
@@ -65,6 +67,8 @@ export interface CapturedTapTarget {
   observationScreenSize?: ObserveResult["screenSize"];
   observationDisplay?: ScreenSizeForOffscreenCheckOptions["display"];
   scoped?: boolean;
+  /** The request's `container`; an XR node click never promotes past it. */
+  container?: ElementContainerSelector;
   talkBackState?: boolean | null;
   /** The request's `layer`; with none, the tap point must avoid AutoMobile's prototype windows. */
   layer?: HierarchyLayer;
@@ -88,6 +92,13 @@ export interface TapAnyAndroidTapperDependencies {
     | "executePreciseTap"
   >;
   talkBackDriverFactory: TalkBackNavigationDriverFactory;
+  /** The shared XR predicate; XR panel bounds are not screen coordinates. */
+  isAndroidXr(signal?: AbortSignal): Promise<boolean>;
+  /** Resolves the request's container in a hierarchy, as tapAny's selection does. */
+  resolveContainer(
+    hierarchy: ViewHierarchyResult,
+    container: ElementContainerSelector,
+  ): Element | undefined;
   beforeTap(): void;
   refreshViewHierarchy: RefreshViewHierarchy;
   findClickableElement(
@@ -136,6 +147,22 @@ export class TapAnyAndroidTapper {
     const { element, capture } = target;
     this.deps.beforeTap();
     assertSelectedCapture(capture);
+    if (await this.deps.isAndroidXr(signal)) {
+      // Same route as tapOn: click the accessibility node, or refuse; never panel-space coordinates.
+      await executeXrNodeClick(() => this.deps.accessibilityService, {
+        action,
+        element,
+        signal,
+        options: {
+          displayFence: fence,
+          resolvedHierarchy: capture.hierarchy,
+          container: target.container,
+        },
+        resolveContainer: (tree) =>
+          target.container ? this.deps.resolveContainer(tree, target.container) : undefined,
+      });
+      return;
+    }
     // UiAutomator captures keep their existing coordinate route, but unavailable
     // TalkBack evidence must still be retried and reported to the caller.
     const { talkBack: talkBackState, unconfirmed } =
@@ -380,6 +407,12 @@ export class TapAnyAndroidTapper {
     const { signal, screenSize } = fenceOptions;
     const reportedTarget = target;
     if (action !== "tap" || !preTapHash) {
+      return;
+    }
+    if (await this.deps.isAndroidXr(signal)) {
+      // The XR tap was a node click; an unchanged hierarchy does not prove it missed, and a
+      // second click would toggle a switch back (#17811).
+      logger.info("[TapAnyElement] XR node click; skipping ghost-tap retry");
       return;
     }
     const probe = await checkAndroidTapHierarchyChange(

@@ -12,6 +12,7 @@ import type {
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 
 // Preserve the captured trees, including the panel-space bounds and already-pruned Settings roots.
 const capture: {
@@ -54,7 +55,7 @@ function settingsTarget(tree: ViewHierarchyResult) {
   return { nodes, label, frame, row };
 }
 
-function setup(formFactor: BootedDevice["formFactor"] = "xr-headset") {
+function setup(formFactor: BootedDevice["formFactor"] = "xr-headset", xr = formFactor !== "phone") {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const adb = new FakeAdbClient();
@@ -64,7 +65,7 @@ function setup(formFactor: BootedDevice["formFactor"] = "xr-headset") {
   const tap = new TapOnElement(
     { name: "XR", platform: "android", deviceId: "fake-xr", formFactor },
     adb,
-    { timer },
+    { timer, xrDetector: new FakeAndroidXrDetector(xr) },
   );
   Object.assign(tap, { accessibilityService: service });
   const execute = (target = element, action: "tap" | "doubleTap" = "tap", talkBack = false) =>
@@ -307,6 +308,19 @@ describe("XR panel-space tap routing", () => {
     ).rejects.toThrow(/XR panel coordinate space.*tapAt/);
     expect(service.getTapHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(0);
+  });
+
+  test("routes by the shared XR predicate, not the provisional form factor (#17811)", async () => {
+    // A headset whose ro.build.characteristics lacks "xr" still declares the spatial feature.
+    const headset = setup("phone", true);
+    await headset.execute();
+    expect(headset.service.getNodeActionHistory()).toHaveLength(1);
+    expect(headset.service.getTapHistory()).toHaveLength(0);
+    // An xr-headset form factor without the spatial feature keeps the coordinate tap.
+    const phone = setup("xr-headset", false);
+    await phone.execute();
+    expect(phone.service.getNodeActionHistory()).toHaveLength(0);
+    expect(phone.service.getTapHistory()).toHaveLength(1);
   });
 
   test("keeps coordinate taps for the same captured element on a phone", async () => {

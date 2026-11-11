@@ -176,6 +176,86 @@ describe("CarAppTemplateReader (#16751)", () => {
     expect(adb.commands).toHaveLength(2);
   });
 
+  test("forgetPackage retries every user of only that device's package without waiting", async () => {
+    const { adb, reader } = setup(() => "Unknown authority");
+    const otherDevice = { ...android, deviceId: `${android.deviceId}-other` };
+    const packages = ["com.example.car", "com.example.car.extra", "com.example.other"];
+    for (const device of [android, otherDevice]) {
+      for (const packageName of packages) {
+        for (const userId of [0, 10]) {
+          await reader.resolve(device, observation(packageName, userId));
+        }
+      }
+    }
+    expect(adb.commands).toHaveLength(12);
+    expect(reader.quietEntryCount).toBe(18);
+
+    reader.forgetPackage(android.deviceId, "com.example.car");
+    expect(reader.quietEntryCount).toBe(15);
+    adb.setReply(() => bundle(enabledDocument));
+
+    // With no observed user, both the quiet interval and the last-user hint must be forgotten.
+    expect(await reader.resolve(android, observation("com.example.car"))).toBeDefined();
+    expect(await reader.resolve(android, observation("com.example.car", 10))).toBeDefined();
+    expect(adb.commands).toHaveLength(14);
+    for (const device of [android, otherDevice]) {
+      for (const packageName of packages) {
+        if (device === android && packageName === "com.example.car") {
+          continue;
+        }
+        for (const userId of [0, 10]) {
+          expect(await reader.resolve(device, observation(packageName, userId))).toBeUndefined();
+        }
+      }
+    }
+    expect(adb.commands).toHaveLength(14);
+    expect(adb.foregroundLookups).toBe(1);
+  });
+
+  test("forgetPackage without a package clears only the device, including failed user lookups", async () => {
+    const { adb, reader } = setup(() => "Unknown authority");
+    const otherDevice = { ...android, deviceId: `${android.deviceId}-other` };
+    await reader.resolve(android, observation("com.example.car"));
+    await reader.resolve(android, observation("com.example.other", 10));
+    await reader.resolve(otherDevice, observation("com.example.car", 0));
+    adb.foreground = null;
+    await reader.resolve(android, observation("com.example.lookup"));
+
+    reader.forgetPackage(android.deviceId);
+    expect(reader.quietEntryCount).toBe(2);
+    adb.setReply(() => bundle(enabledDocument));
+    for (const packageName of ["com.example.car", "com.example.other", "com.example.lookup"]) {
+      adb.foreground = { packageName, userId: 10 };
+      expect(await reader.resolve(android, observation(packageName))).toBeDefined();
+    }
+    expect(await reader.resolve(otherDevice, observation("com.example.car", 0))).toBeUndefined();
+    expect(adb.commands).toHaveLength(6);
+    expect(adb.foregroundLookups).toBe(5);
+  });
+
+  test("forgetPackage also clears a disabled route's shorter quiet interval", async () => {
+    const { adb, reader } = setup(() => bundle({ schemaVersion: 1, enabled: false, sessions: [] }));
+    await reader.resolve(android, observation("com.example.car", 10));
+    adb.setReply(() => bundle(enabledDocument));
+    expect(await reader.resolve(android, observation("com.example.car", 10))).toBeUndefined();
+    reader.forgetPackage(android.deviceId, "com.example.car");
+    expect(await reader.resolve(android, observation("com.example.car", 10))).toBeDefined();
+    expect(adb.commands).toHaveLength(2);
+    expect(reader.quietEntryCount).toBe(0);
+  });
+
+  test("an absent route stays quiet without an install even if the route becomes enabled", async () => {
+    const { adb, timer, reader } = setup(() => "Unknown authority");
+    await reader.resolve(android, observation("com.example.car", 0));
+    adb.setReply(() => bundle(enabledDocument));
+    timer.advanceTime(CAR_APP_ROUTE_ABSENT_TTL_MS - 1);
+    expect(await reader.resolve(android, observation("com.example.car", 0))).toBeUndefined();
+    expect(adb.commands).toHaveLength(1);
+    timer.advanceTime(1);
+    expect(await reader.resolve(android, observation("com.example.car", 0))).toBeDefined();
+    expect(adb.commands).toHaveLength(2);
+  });
+
   test("a failed foreground lookup is retried after the failure interval", async () => {
     const { adb, timer, reader } = setup(() => bundle(enabledDocument));
     adb.foreground = new Error("no devices");

@@ -49,9 +49,9 @@ export type CarAppAdb = Pick<AdbExecutor, "executeCommand" | "getForegroundApp">
 
 /** observe awaits the block, so a slow or stuck provider must not hold the captured result. */
 export const CAR_APP_TEMPLATES_TIMEOUT_MS = 1500;
-/** An app without the route is asked again only after this long (it may be reinstalled with it). */
+/** An app without the route is asked again after this long, or after an install invalidates it. */
 export const CAR_APP_ROUTE_ABSENT_TTL_MS = 5 * 60_000;
-/** An app whose route answered disabled is asked again only after this long. */
+/** An app whose route answered disabled is asked again after this long, unless invalidated. */
 export const CAR_APP_ROUTE_DISABLED_TTL_MS = 30_000;
 /** A read that failed (timeout, adb error, bad payload) is retried after this short interval. */
 export const CAR_APP_ROUTE_FAILED_RETRY_MS = 5_000;
@@ -130,6 +130,30 @@ export class CarAppTemplateReader {
   /** Remembered quiet packages and user hints; expired entries are pruned on every write. */
   get quietEntryCount(): number {
     return this.quietUntil.size + this.lastUser.size;
+  }
+
+  /** An install may change the route for every Android user; no package means any app changed. */
+  forgetPackage(deviceId: string, packageName?: string): void {
+    const devicePrefix = `${deviceId}\u0000`;
+    // Quiet keys are device + package + user, so the trailing separator matches every user
+    // without also matching another package that happens to start with this package's name.
+    const prefix = packageName === undefined ? devicePrefix : `${devicePrefix}${packageName}\u0000`;
+    for (const entries of [this.quietUntil, this.failedReads, this.answeredEnabled]) {
+      for (const key of entries.keys()) {
+        if (key.startsWith(prefix)) {
+          entries.delete(key);
+        }
+      }
+    }
+    for (const appKey of this.lastUser.keys()) {
+      if (
+        packageName === undefined
+          ? appKey.startsWith(devicePrefix)
+          : appKey === `${devicePrefix}${packageName}`
+      ) {
+        this.lastUser.delete(appKey);
+      }
+    }
   }
 
   readonly resolve: CarAppTemplatesResolver = async (device, result) => {

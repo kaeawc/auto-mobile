@@ -10,9 +10,17 @@ const appTools = createAppToolsHarness();
 describe("installApp handler", () => {
   const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
   const artifactPath = "/tmp/app.apk";
+  const forgotten: Array<{ deviceId: string; packageName?: string }> = [];
+  const carAppTemplates = {
+    forgetPackage(deviceId: string, packageName?: string): void {
+      forgotten.push({ deviceId, packageName });
+    },
+  };
 
   beforeEach(() => {
+    forgotten.length = 0;
     appTools.reset();
+    appTools.configure("installApp", { carAppTemplates });
   });
 
   afterEach(() => {
@@ -22,6 +30,64 @@ describe("installApp handler", () => {
   const stubInstall = (result: InstallAppResult) => {
     appTools.configure("installApp", { createInstallApp: () => ({ execute: async () => result }) });
   };
+
+  test("a successful upgrade forgets the result package on the installed device for all users", async () => {
+    stubInstall({ success: true, upgrade: true, packageName: "com.example.car", userId: 10 });
+    await ToolRegistry.getTool("installApp")!.deviceAwareHandler!(device, { artifactPath });
+    expect(forgotten).toEqual([{ deviceId: device.deviceId, packageName: "com.example.car" }]);
+  });
+
+  test("a failed result still forgets the result package in finally", async () => {
+    stubInstall({ success: false, error: "install failed", packageName: "com.example.car" });
+    await expect(
+      ToolRegistry.getTool("installApp")!.deviceAwareHandler!(device, { artifactPath }),
+    ).rejects.toThrow("install failed");
+    expect(forgotten).toEqual([{ deviceId: device.deviceId, packageName: "com.example.car" }]);
+  });
+
+  test("a thrown install forgets the device when the package could not be determined", async () => {
+    appTools.configure("installApp", {
+      createInstallApp: () => ({
+        execute: async () => {
+          throw new Error("install threw");
+        },
+      }),
+    });
+    await expect(
+      ToolRegistry.getTool("installApp")!.deviceAwareHandler!(device, { artifactPath }),
+    ).rejects.toThrow("Failed to install app");
+    expect(forgotten).toEqual([{ deviceId: device.deviceId, packageName: undefined }]);
+  });
+
+  test("a successful install without a package name forgets the device", async () => {
+    stubInstall({ success: true });
+    await ToolRegistry.getTool("installApp")!.deviceAwareHandler!(device, { artifactPath });
+    expect(forgotten).toEqual([{ deviceId: device.deviceId, packageName: undefined }]);
+  });
+
+  test("an already cancelled install does not invalidate the reader", async () => {
+    stubInstall({ success: true, packageName: "com.example.car" });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      ToolRegistry.getTool("installApp")!.deviceAwareHandler!(
+        device,
+        { artifactPath },
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toBeInstanceOf(ActionableError);
+    expect(forgotten).toEqual([]);
+  });
+
+  test("an iOS install does not invalidate Android route state", async () => {
+    stubInstall({ success: true, packageName: "com.example.car" });
+    await ToolRegistry.getTool("installApp")!.deviceAwareHandler!(
+      { ...device, platform: "ios" },
+      { artifactPath },
+    );
+    expect(forgotten).toEqual([]);
+  });
 
   test("surfaces a failed install instead of claiming success", async () => {
     stubInstall({ success: false, error: "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]" });

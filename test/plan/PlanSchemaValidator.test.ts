@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from "bun:test
 import { compileAjv } from "../helpers/jsonSchemaCompile";
 import { dump } from "js-yaml";
 import path from "path";
+import { readFileSync } from "node:fs";
 import planSchema from "../../schemas/test-plan.schema.json";
 import toolDefinitions from "../../schemas/tool-definitions.json";
 import { setDeviceStateSchema } from "../../src/server/utilityTools";
@@ -144,6 +145,55 @@ ${condition}
     ]) {
       expect(validator.validateYaml(plan(rejected)).valid).toBe(false);
     }
+  });
+
+  it("accepts every deviceCondition key the live setDeviceState tool accepts", () => {
+    // Property names at every nesting level, through anyOf/oneOf branches. Patterns and refinements
+    // are compared by the accept/reject cases above; JSON Schema cannot carry every zod refine.
+    const propertyPaths = (schema: unknown, prefix = ""): string[] => {
+      if (typeof schema !== "object" || schema === null) {
+        return [];
+      }
+      const node = schema as {
+        properties?: Record<string, unknown>;
+        anyOf?: unknown[];
+        oneOf?: unknown[];
+      };
+      return [
+        ...Object.entries(node.properties ?? {}).flatMap(([key, child]) => [
+          `${prefix}${key}`,
+          ...propertyPaths(child, `${prefix}${key}.`),
+        ]),
+        ...[...(node.anyOf ?? []), ...(node.oneOf ?? [])].flatMap((branch) =>
+          propertyPaths(branch, prefix),
+        ),
+      ];
+    };
+    const live = toolDefinitions.find((tool) => tool.name === "setDeviceState")?.inputSchema
+      ?.properties?.deviceCondition;
+    const livePaths = [...new Set(propertyPaths(live))].sort();
+    expect(livePaths).toContain("vehicle.motion");
+    expect(
+      [
+        ...new Set(propertyPaths(planSchema.$defs.setDeviceStateParams.properties.deviceCondition)),
+      ].sort(),
+    ).toEqual(livePaths);
+  });
+
+  it("accepts the captured vehicle-motion plan and rejects vehicle values the tool does not", () => {
+    const captured = readFileSync(
+      new URL("../fixtures/automotive/plans/garage-flow.yaml", import.meta.url),
+      "utf8",
+    );
+    const result = validator.validateYaml(captured);
+    expect(result.errors ?? []).toEqual([]);
+    expect(result.valid).toBe(true);
+    const vehicle = (value: string) =>
+      `name: vehicle\nsteps:\n  - tool: setDeviceState\n    params:\n      deviceCondition:\n        vehicle:\n${value}\n`;
+    expect(validator.validateYaml(vehicle("          nightMode: on")).valid).toBe(true);
+    expect(validator.validateYaml(vehicle("          motion: unset")).valid).toBe(true);
+    expect(validator.validateYaml(vehicle("          motion: flying")).valid).toBe(false);
+    expect(validator.validateYaml(vehicle("          speed: 30")).valid).toBe(false);
   });
 
   it("reports the window error for an unquoted out-of-window clock instant", () => {

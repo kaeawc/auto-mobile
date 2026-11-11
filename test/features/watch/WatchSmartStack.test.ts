@@ -6,6 +6,7 @@ import {
   WATCH_CLOCK_FACE_BUNDLE_ID,
   parseSmartStackWidgetIdentifier,
   parseWatchClockFaceDump,
+  readSmartStackEditTap,
   type SmartStackWidgetCard,
 } from "../../../src/features/watch/WatchSmartStack";
 import {
@@ -21,6 +22,24 @@ const reloadDump = readFileSync(
   path.join(FIXTURES, "fixture-face-smartstack-after-reload.txt"),
   "utf8",
 );
+const editDump = readFileSync(
+  new URL("../../fixtures/watch/fixture-face-smartstack-with-edit.txt", import.meta.url),
+  "utf8",
+);
+const noEditDump = readFileSync(
+  new URL("../../fixtures/watch/fixture-face-smartstack-no-edit.txt", import.meta.url),
+  "utf8",
+);
+
+describe("readSmartStackEditTap", () => {
+  test("requires an Edit button and normalizes its center to the first window", () => {
+    expect(readSmartStackEditTap(noEditDump)).toBeUndefined();
+    expect(readSmartStackEditTap(editDump)).toMatchObject({ x: 0.5 });
+    expect(readSmartStackEditTap(editDump)?.y).toBeCloseTo(0.923);
+    const withoutWindow = editDump.replace(/^\s*Window(?: \(Main\))?,.*\n/gm, "");
+    expect(readSmartStackEditTap(withoutWindow)).toBeUndefined();
+  });
+});
 const CELL_ID =
   "StackCollectionViewComplicationCell -- 93A18F3B-D642-41DA-B6A4-F312ED9DB584 -- ProbeApp -- " +
   "ProbeWidgetXYZ -- dev.probe.app -- dev.probe.app-dev.probe.app.widget-probe-0";

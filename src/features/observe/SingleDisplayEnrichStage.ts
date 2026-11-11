@@ -1,3 +1,8 @@
+import {
+  isAndroidXr,
+  type AndroidXrDetector,
+} from "../../utils/android-cmdline-tools/androidXrDevice";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { recordObservationRead } from "./observationReadScope";
 import { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { logger } from "../../utils/logger";
@@ -23,6 +28,8 @@ import type { ScreenRoundReader } from "../wear/screenRound";
 /** Stages 3 and 5 of one single-display observation: derive elements, start screenshots, run audits and predictions, then attach timings and protect the screenshot. */
 export interface SingleDisplayEnrichStageDependencies {
   device: () => BootedDevice;
+  adb?: () => AdbExecutor | null;
+  xrDetector?: AndroidXrDetector;
   timer: () => Timer;
   platformTraits: () => PlatformObservationTraits;
   screenshotRecorder: () => ObserveScreenshotRecorder;
@@ -45,7 +52,10 @@ export interface SingleDisplayEnrichStageDependencies {
 export class SingleDisplayEnrichStage {
   constructor(private readonly d: SingleDisplayEnrichStageDependencies) {}
 
-  private enrichSingleDisplayElements(context: SingleDisplayStageContext): void {
+  private async enrichSingleDisplayElements(
+    context: SingleDisplayStageContext,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const { result } = context;
 
     // Hierarchy collection and accepted recaptures each replace `screenSize`.
@@ -60,17 +70,26 @@ export class SingleDisplayEnrichStage {
     result.layoutWarnings = { scope: "full", warnings: this.d.safeAreaAuditor().inspect(result) };
 
     if (result.viewHierarchy) {
+      const device = this.d.device();
+      const androidXr =
+        device.platform === "android" &&
+        (await isAndroidXr(
+          { device, adb: this.d.adb?.(), backStack: result.backStack, signal },
+          this.d.xrDetector,
+        ));
       result.elements = this.d
         .elementsBuilder()
         .build(
           result.viewHierarchy,
-          requireAndroidOrIosPlatform(this.d.device().platform, "Observing the view hierarchy"),
+          requireAndroidOrIosPlatform(device.platform, "Observing the view hierarchy"),
+          androidXr,
+          result,
         );
     }
   }
   /** Stage 3: derive elements, start screenshots, and run audits and predictions. */
   async enrichSingleDisplay(run: SingleDisplayRun): Promise<void> {
-    this.enrichSingleDisplayElements({ result: run.result });
+    await this.enrichSingleDisplayElements({ result: run.result }, run.signal);
     if (this.d.device().formFactor === "watch") {
       const surface = wearSurfaceKind(run.result);
       if (surface !== undefined) {

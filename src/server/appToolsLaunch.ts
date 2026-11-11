@@ -160,7 +160,12 @@ function launchVerificationFailureReason(
   }
   const activeWindowPackage = observation.activeWindow?.appId;
   const hierarchyPackage = observation.viewHierarchy?.packageName;
-  if (activeWindowPackage && hierarchyPackage && activeWindowPackage !== hierarchyPackage) {
+  if (
+    activeWindowPackage &&
+    hierarchyPackage &&
+    activeWindowPackage !== hierarchyPackage &&
+    getLaunchObservationPackageNames(observation).includes(hierarchyPackage)
+  ) {
     return `foreground signals disagree: activeWindow=${activeWindowPackage}, hierarchy=${hierarchyPackage}`;
   }
   if (observedAppId !== appId) {

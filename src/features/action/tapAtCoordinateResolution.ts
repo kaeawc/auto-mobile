@@ -1,3 +1,4 @@
+import { assertXrDisplayInputSupported } from "../xr/xrSpatialPanelInput";
 import type { ImageRelativePoint } from "../../models/ImageRelativePoint";
 import {
   detectXrPanel,
@@ -147,6 +148,9 @@ function tapAtCoordinateFrame(
   platform: BootedDevice["platform"],
   toolName: string,
 ) {
+  if (platform === "android" && toolName === "tapAt") {
+    assertXrDisplayInputSupported(observation, options.androidXr === true);
+  }
   // Only tapAt maps XR screenshot pixels to the panel, so only it carries the default-pose
   // guard; hitTest, hoverAt, dragPath, multiTouch and swipeAt resolve native pixels (#17819).
   const xr =

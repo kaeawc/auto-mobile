@@ -1,6 +1,9 @@
 test/fixtures/visionos-settings/*.json text eol=lf
 test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/xr-headset/*.json text eol=lf
+test/fixtures/android-xr/observe-spatial-panel-full-space-18022.json text eol=lf
+test/fixtures/android-xr/observe-spatial-panel-no-focus-18025.json text eol=lf
+test/fixtures/android-xr/observe-spatial-panel-host-window-missing-18022.json text eol=lf
 test/fixtures/xr/systemui-hidden-chrome.json text eol=lf
 test/fixtures/android-aaos-cluster-screen-size/*.txt text eol=lf
 test/fixtures/android-aaos-cluster-screen-size/*.json text eol=lf

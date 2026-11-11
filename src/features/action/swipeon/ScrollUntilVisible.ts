@@ -1,6 +1,9 @@
+import { isFalsy } from "../../../models/Element";
+import { isVisibleAutoScrollTarget } from "./SwipeOnAutoTargeting";
 import { appendWarning, xrPoseWarning, xrScreenSwipeBounds } from "../../xr/xrPanelSpace";
 import type { IosSdkWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { ScrollSearchSession } from "./ScrollSearchSession";
+import { computeHalfScreenReverseCoords } from "./swipeOnUtils";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 
@@ -306,8 +309,7 @@ export class ScrollUntilVisible {
             resolveContainerSwipeCoordinates: (...args) =>
               this.resolveContainerSwipeCoordinates(...args),
             resolveReverseBounds: (...args) => this.resolveReverseBounds(...args),
-            computeHalfScreenReverseCoords: (...args) =>
-              this.computeHalfScreenReverseCoords(...args),
+            computeHalfScreenReverseCoords,
             dispatchSearchSwipe: (dispatch) =>
               this.dispatchSearchSwipe(dispatch, (warning) => {
                 xrWarning = warning;
@@ -470,7 +472,7 @@ export class ScrollUntilVisible {
     const direction = oppositeDirection(dispatch.direction);
     const result = await this.dispatchSearchSwipe({
       ...dispatch,
-      coordinates: this.computeHalfScreenReverseCoords(
+      coordinates: computeHalfScreenReverseCoords(
         direction,
         this.resolveReverseBounds(options, container, observation),
       ),
@@ -611,6 +613,7 @@ export class ScrollUntilVisible {
               );
             }
             const result = await swipeRunner.executeSwipeGesture({
+              observation: lastObservation,
               x1: Math.floor(startX),
               y1: Math.floor(startY),
               x2: Math.floor(endX),
@@ -762,7 +765,7 @@ export class ScrollUntilVisible {
     observeResult: ObserveResult,
     fallbackElement?: Element,
   ): Promise<Element> {
-    fallbackElement ??= await this.screenBoundsContainer({ observation: observeResult });
+    const xr = await this.deps.androidXr(observeResult);
     let element: Element | null = null;
     const viewHierarchy = scopeHierarchyForSelector(observeResult.viewHierarchy!, options.layer);
 
@@ -780,7 +783,9 @@ export class ScrollUntilVisible {
       const resolution = this.resolver.resolve(
         {
           id: String(viewHierarchy.updatedAt ?? "swipe"),
-          nodes: this.searchable.project(viewHierarchy),
+          nodes: this.searchable
+            .project(viewHierarchy)
+            .filter((node) => !xr || !isFalsy(node.properties["visible-to-user"])),
         },
         {},
         { action: "scroll" },
@@ -799,7 +804,9 @@ export class ScrollUntilVisible {
     // If still no element, keep the last known container before using screen bounds.
     if (!element) {
       logger.info(`[SwipeOn] No scrollable container found, using fallback bounds`);
-      element = fallbackElement;
+      element = isVisibleAutoScrollTarget(fallbackElement, xr)
+        ? fallbackElement
+        : await this.screenBoundsContainer({ observation: observeResult });
     }
 
     return element;
@@ -977,47 +984,6 @@ export class ScrollUntilVisible {
           point.y < imeBounds[3]
         ),
     );
-  }
-
-  private computeHalfScreenReverseCoords(
-    reverseDir: SwipeDirection,
-    effectiveBounds: { left: number; top: number; right: number; bottom: number },
-  ): { startX: number; startY: number; endX: number; endY: number } {
-    const cx = (effectiveBounds.left + effectiveBounds.right) / 2;
-    const cy = (effectiveBounds.top + effectiveBounds.bottom) / 2;
-    const h = effectiveBounds.bottom - effectiveBounds.top;
-    const w = effectiveBounds.right - effectiveBounds.left;
-
-    switch (reverseDir) {
-      case "down":
-        return {
-          startX: cx,
-          startY: effectiveBounds.top + h * 0.25,
-          endX: cx,
-          endY: effectiveBounds.top + h * 0.75,
-        };
-      case "up":
-        return {
-          startX: cx,
-          startY: effectiveBounds.bottom - h * 0.25,
-          endX: cx,
-          endY: effectiveBounds.top + h * 0.25,
-        };
-      case "right":
-        return {
-          startX: effectiveBounds.left + w * 0.25,
-          startY: cy,
-          endX: effectiveBounds.left + w * 0.75,
-          endY: cy,
-        };
-      case "left":
-        return {
-          startX: effectiveBounds.right - w * 0.25,
-          startY: cy,
-          endX: effectiveBounds.left + w * 0.25,
-          endY: cy,
-        };
-    }
   }
 
   private resolveReverseBounds(

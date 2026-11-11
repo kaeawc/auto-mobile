@@ -459,6 +459,8 @@ describe("XR panel-space tap routing", () => {
     const row = genericClassRow(tree);
     delete row.source.text;
     delete row.source["content-desc"];
+    // Descendant labels now supply identity for a promoted Compose owner.
+    delete row.source.node;
     const current = new SearchableHierarchy()
       .project(tree)
       .find((entry) => entry.source === row.source)!;

@@ -1,3 +1,5 @@
+import { isVisibleAutoScrollTarget } from "./SwipeOnAutoTargeting";
+import { assertXrSwipeDisplayInputSupported } from "../../xr/xrSpatialPanelInput";
 import {
   appendWarning,
   type ObservedAndroidXr,
@@ -228,7 +230,9 @@ export class SwipeOnAndroidDisplay {
       target,
       includeSystemInsets: requestedOptions.includeSystemInsets,
     });
+    const androidXr = await this.ctx().androidXr(observation, signal);
     const { options, decision } = this.selectedDisplayAutoTarget({
+      androidXr,
       options: requestedOptions,
       observation,
     });
@@ -236,7 +240,7 @@ export class SwipeOnAndroidDisplay {
       options,
       decision,
       observation,
-      androidXr: await this.ctx().androidXr(observation, signal),
+      androidXr,
     });
     const duration = resolveSwipeDuration({ ...options, geometry: this.ctx().geometry });
     const boomerang = resolveBoomerangConfig(options);
@@ -245,6 +249,7 @@ export class SwipeOnAndroidDisplay {
       const swipe = await this.dispatchTalkBackDisplaySwipe({
         options,
         element: decision.element,
+        observation,
         coordinates: { x1, y1, x2, y2 },
         duration,
         boomerang,
@@ -257,7 +262,17 @@ export class SwipeOnAndroidDisplay {
       });
     }
     const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
-    await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
+    await this.dispatchDisplaySwipeLeg({
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      target,
+      observation,
+      useCtrlProxy,
+      signal,
+    });
     let totalDuration = duration;
     if (boomerang) {
       const returnDuration = getReturnDuration({
@@ -278,6 +293,7 @@ export class SwipeOnAndroidDisplay {
             y2: y1,
             duration: returnDuration,
             target,
+            observation,
             useCtrlProxy,
             signal,
           }),
@@ -345,6 +361,7 @@ export class SwipeOnAndroidDisplay {
   private async dispatchTalkBackDisplaySwipe({
     options,
     element,
+    observation,
     coordinates,
     duration,
     boomerang,
@@ -353,6 +370,7 @@ export class SwipeOnAndroidDisplay {
   }: {
     options: SwipeOnOptions;
     element?: Element | null;
+    observation: ObserveResult;
     coordinates: { x1: number; y1: number; x2: number; y2: number };
     duration: number;
     boomerang?: BoomerangConfig;
@@ -372,6 +390,7 @@ export class SwipeOnAndroidDisplay {
       y2,
       direction: direction.direction,
       containerElement: element ?? null,
+      observation,
       gestureOptions: {
         displayFence: { assertCurrent: target.assertCurrent },
         duration,
@@ -452,9 +471,11 @@ export class SwipeOnAndroidDisplay {
   private selectedDisplayAutoTarget({
     options,
     observation,
+    androidXr,
   }: {
     options: SwipeOnOptions;
     observation: ObserveResult;
+    androidXr: boolean;
   }): { options: SwipeOnOptions; decision: AutoTargetDecision } {
     if (options.autoTarget !== true || options.container) {
       return { options, decision: {} };
@@ -464,7 +485,9 @@ export class SwipeOnAndroidDisplay {
       throw new ActionableError(direction.error ?? "direction is required");
     }
     const scrollables = observation.viewHierarchy
-      ? this.ctx().scrollables.findScrollableElements(observation.viewHierarchy)
+      ? this.ctx()
+          .scrollables.findScrollableElements(observation.viewHierarchy)
+          .filter((element) => isVisibleAutoScrollTarget(element, androidXr))
       : [];
     const decision = this.ctx().autoTargeting.resolveAutoTargetDecision({
       scrollables,
@@ -573,6 +596,7 @@ export class SwipeOnAndroidDisplay {
     direction: SwipeDirection;
     options: SwipeOnOptions;
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    observation: ObserveResult;
     searchDragState?: AndroidSearchDragState;
     signal?: AbortSignal;
     onDispatched?: () => void;
@@ -585,6 +609,7 @@ export class SwipeOnAndroidDisplay {
       y2: input.y2,
       direction: input.direction,
       containerElement: null,
+      observation: input.observation,
       gestureOptions: {
         displayFence: { assertCurrent: input.target.assertCurrent },
         duration: input.duration,
@@ -681,6 +706,7 @@ export class SwipeOnAndroidDisplay {
                 coordinates.onSearchFallback?.();
                 await this.dispatchDisplaySwipeLeg({
                   ...coordinates,
+                  observation: previousObservation,
                   target,
                   useCtrlProxy: false,
                   signal,
@@ -689,9 +715,16 @@ export class SwipeOnAndroidDisplay {
                 dispatched = true;
                 return { ...coordinates, success: true };
               };
+              if (!talkBack.enabled) {
+                assertXrSwipeDisplayInputSupported(
+                  previousObservation,
+                  await this.ctx().androidXr(previousObservation, signal),
+                );
+              }
               const gesture = await (talkBack.enabled
                 ? this.executeDisplayTalkBackSwipe({
                     ...coordinates,
+                    observation: previousObservation,
                     direction: direction.direction as SwipeDirection,
                     options,
                     target,
@@ -787,6 +820,7 @@ export class SwipeOnAndroidDisplay {
     duration: number;
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     useCtrlProxy: boolean;
+    observation: ObserveResult;
     signal?: AbortSignal;
     /** Fires as the gesture is handed to the device, after the pre-send checks. */
     onDispatched?: () => void;
@@ -794,6 +828,10 @@ export class SwipeOnAndroidDisplay {
     const { x1, y1, x2, y2, duration, target, useCtrlProxy, signal, onDispatched } = options;
     target.assertCurrent();
     throwIfAborted(signal);
+    assertXrSwipeDisplayInputSupported(
+      options.observation,
+      await this.ctx().androidXr(options.observation, signal),
+    );
     if (useCtrlProxy) {
       const result = await this.ctx().accessibilityService.requestSwipe({
         x1,

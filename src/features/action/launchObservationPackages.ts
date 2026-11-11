@@ -16,6 +16,26 @@ function foregroundTaskPackage(observation: ObserveResult): string | undefined {
   return observation.backStack?.tasks.find((task) => task.id === currentTaskId)?.packageName;
 }
 
+/** XR can label an unfocused multi-window capture as SystemUI while the app task remains foreground. */
+function launchHierarchyPackage(observation: ObserveResult): string | undefined {
+  const hierarchy = observation.viewHierarchy;
+  const packageName = hierarchy?.packageName;
+  const activePackage = observation.activeWindow?.appId;
+  const windows = hierarchy?.windows;
+  if (
+    packageName?.startsWith("com.android.systemui") &&
+    activePackage &&
+    windows?.some(
+      (window) => window.type === 1 && window.packageName === "com.android.systemui.xrhomeenv",
+    ) &&
+    windows.some((window) => window.type === 1 && window.packageName === activePackage)
+  ) {
+    // The XR environment identifies this window model; a phone's SystemUI remains a competing signal.
+    return activePackage;
+  }
+  return packageName;
+}
+
 /**
  * Reconcile launch identity signals, using foregroundActivity only as fallback.
  *
@@ -31,7 +51,7 @@ export function getLaunchObservationPackageNames(observation: ObserveResult | un
   }
 
   const prototypeFocused = isOwnPrototypeFocused(observation.viewHierarchy);
-  const reported = [observation.activeWindow?.appId, observation.viewHierarchy?.packageName].filter(
+  const reported = [observation.activeWindow?.appId, launchHierarchyPackage(observation)].filter(
     (packageName): packageName is string => !!packageName,
   );
   const primaryPackageNames = prototypeFocused

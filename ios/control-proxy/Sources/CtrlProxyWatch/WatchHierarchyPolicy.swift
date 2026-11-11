@@ -122,6 +122,20 @@ func watchCrownWakePoint(in hierarchy: SdkViewHierarchy) -> CGVector? {
     return nil
 }
 
+/// The runner cannot read a control's range, so a readable focused value that did not move names
+/// both causes (too small a turn, or the limit) and the value itself; the caller can tell from the
+/// value which applies. Without a readable focused value, the cause is no crown focus or a scroll limit.
+func watchCrownUnchangedMessage(focused: WatchCrownValue?) -> String {
+    guard let focused else {
+        return "rotateCrown changed nothing verifiable. No focused control exposes a readable value: "
+            + "no view may hold crown focus, or the scrolled content is already at its limit. "
+            + "Tap the control that should respond to the Digital Crown, then retry rotateCrown."
+    }
+    return "rotateCrown changed nothing verifiable. The focused control's value stayed \"\(focused.value)\": "
+        + "the turn was too small to reach its next step, or the control is already at its limit. "
+        + "If the value is not at an end of the control's range, retry rotateCrown with a larger delta."
+}
+
 /// A stable screen without a focused value can receive a neutral wake before rotation.
 /// An unchanged tree alone cannot justify repeating a delta. Retry only when the same focused
 /// accessible value is unchanged, and the safe wake has not changed the screen or focused control.
@@ -165,12 +179,12 @@ func watchVerifiedCrownRotation(
         return watchCrownChangedHierarchy(before: before.hierarchy, after: after.hierarchy)
             || (before.value != nil && after.value != nil && before.value != after.value)
     }
-    func unchanged() -> WatchCommandError {
-        .commandFailed(
-            "rotateCrown changed nothing verifiable. No view may hold crown focus, or "
-                + "the scrolled content is already at its limit. "
-                + "Tap the control that should respond to the Digital Crown, then retry rotateCrown."
-        )
+    func unchanged(_ focused: WatchCrownValue?) -> WatchCommandError {
+        .commandFailed(watchCrownUnchangedMessage(focused: focused))
+    }
+    /// The focused value shared by both observations, or nil when either is unreadable or they differ.
+    func stuckValue(_ old: WatchCrownValue?, _ new: WatchCrownValue?) -> WatchCrownValue? {
+        old == new ? old : nil
     }
     func rotationObservation(
         after before: (hierarchy: SdkViewHierarchy, value: WatchCrownValue?)
@@ -200,22 +214,24 @@ func watchVerifiedCrownRotation(
         if let lastBaselineObservation, let old = lastBaselineObservation.value,
            let after = rotationObservation(after: lastBaselineObservation), let new = after.value,
            old.elementType == new.elementType, old.identifier == new.identifier, old.value == new.value
-        { throw unchanged() }
+        { throw unchanged(new) }
         return
     }
     guard let after = rotationObservation(after: before), !changed(before, after) else { return }
     // A cold wake already prepared routing; without comparable values, never repeat this delta.
-    if proactivelyWoke, before.value == nil || after.value == nil { throw unchanged() }
-    guard let point = watchCrownWakePoint(in: before.hierarchy) else { throw unchanged() }
+    if proactivelyWoke, before.value == nil || after.value == nil { throw unchanged(nil) }
+    guard let point = watchCrownWakePoint(in: before.hierarchy) else {
+        throw unchanged(stuckValue(before.value, after.value))
+    }
 
     try wake(point)
     guard let value = before.value, after.value == value,
           let retryBefore = baseline(), retryBefore.value == value,
           !watchCrownChangedHierarchy(before: after.hierarchy, after: retryBefore.hierarchy)
-    else { throw unchanged() }
+    else { throw unchanged(nil) }
     try rotate()
     guard let retryAfter = rotationObservation(after: retryBefore), !changed(retryBefore, retryAfter) else { return }
-    throw unchanged()
+    throw unchanged(stuckValue(retryBefore.value, retryAfter.value))
 }
 
 /// A value tree keeps alert selection independent of XCTest queries and simulator state.

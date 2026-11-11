@@ -513,16 +513,26 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertFalse(response.success)
         XCTAssertEqual(response.requestId, "c")
         XCTAssertEqual(response.errorCode, "command_failed")
-        XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
-        XCTAssertTrue(response.error?.hasSuffix(
-            "Tap the control that should respond to the Digital Crown, then retry rotateCrown."
-        ) == true)
+        XCTAssertEqual(response.error, watchCrownUnchangedMessage(focused: crownValue("0")))
+        XCTAssertTrue(response.error?.contains(#"The focused control's value stayed "0""#) == true)
         XCTAssertEqual(source.rotations, 2)
         XCTAssertEqual(source.taps, 1)
         XCTAssertEqual(source.events, [
             "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0", "tap",
             "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0",
         ])
+    }
+
+    func testCrownUnchangedMessageSeparatesStuckValueFromMissingFocus() {
+        let stuck = watchCrownUnchangedMessage(focused: crownValue("10"))
+        XCTAssertTrue(stuck.hasPrefix("rotateCrown changed nothing"))
+        XCTAssertTrue(stuck.contains(#"value stayed "10""#))
+        XCTAssertTrue(stuck.contains("too small to reach its next step"))
+        XCTAssertFalse(stuck.contains("crown focus"))
+        let unfocused = watchCrownUnchangedMessage(focused: nil)
+        XCTAssertTrue(unfocused.hasPrefix("rotateCrown changed nothing"))
+        XCTAssertTrue(unfocused.contains("No focused control exposes a readable value"))
+        XCTAssertFalse(unfocused.contains("value stayed"))
     }
 
     func testWarmCrownValueChangeSucceedsWithoutWake() {
@@ -735,6 +745,7 @@ final class WatchCommandHandlerTests: XCTestCase {
             let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
             XCTAssertFalse(response.success)
             XCTAssertEqual(response.errorCode, "command_failed")
+            XCTAssertEqual(response.error, watchCrownUnchangedMessage(focused: nil))
             XCTAssertEqual(source.rotations, 1)
             XCTAssertEqual(source.appliedDelta, 2)
             XCTAssertEqual(source.taps, 1)

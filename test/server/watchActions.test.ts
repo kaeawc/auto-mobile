@@ -120,19 +120,29 @@ test("long press is refused by the real handler before hierarchy or input", asyn
   expect(client.commands).toEqual([]);
 });
 
+// Runner messages, verbatim from watchCrownUnchangedMessage in WatchHierarchyPolicy.swift.
 const unchangedCrown =
+  "rotateCrown changed nothing verifiable. No focused control exposes a readable value: no view may hold crown focus, or the scrolled content is already at its limit. Tap the control that should respond to the Digital Crown, then retry rotateCrown.";
+const stuckCrown =
+  "rotateCrown changed nothing verifiable. The focused control's value stayed \"0\": the turn was too small to reach its next step, or the control is already at its limit. If the value is not at an end of the control's range, retry rotateCrown with a larger delta.";
+// Runners built before the focused value was reported.
+const legacyUnchangedCrown =
   "rotateCrown changed nothing the accessibility tree shows. Tap the view that should receive the crown, then observe before trying again.";
 
-test.each([0.1, -0.5])(
-  "an unchanged sub-revolution crown turn %s names the turn size as a cause",
-  async (delta) => {
-    client.failure = new WatchRunnerError(unchangedCrown, "command_failed");
+test.each([
+  { delta: 0.1, message: unchangedCrown },
+  { delta: -0.5, message: unchangedCrown },
+  { delta: 0.25, message: legacyUnchangedCrown },
+])(
+  "an unchanged sub-revolution crown turn $delta without a focused value names the turn size",
+  async ({ delta, message }) => {
+    client.failure = new WatchRunnerError(message, "command_failed");
     const error = await rotateCrownHandler(device, rotateCrownSchema.parse({ delta })).catch(
       (caught: unknown) => caught,
     );
     expect(error).toBeInstanceOf(WatchRunnerError);
     expect((error as WatchRunnerError).errorCode).toBe("command_failed");
-    expect((error as Error).message).toStartWith(unchangedCrown);
+    expect((error as Error).message).toStartWith(message);
     expect((error as Error).message).toContain(`A delta of ${delta} is ${Math.abs(delta)} of one`);
     expect((error as Error).message).toContain("smaller than one step of the focused control");
     expect((error as Error).message).toContain("if it is not at its limit, try a larger delta");
@@ -145,6 +155,8 @@ test.each([
   { delta: -2, failure: new WatchRunnerError(unchangedCrown, "command_failed") },
   { delta: 0.1, failure: new WatchRunnerError("Watch command failed", "command_failed") },
   { delta: 0.1, failure: new ActionableError(unchangedCrown) },
+  { delta: 0.1, failure: new WatchRunnerError(stuckCrown, "command_failed") },
+  { delta: -0.5, failure: new WatchRunnerError(stuckCrown, "command_failed") },
 ])("crown failure for delta $delta passes through unchanged", async ({ delta, failure }) => {
   client.failure = failure;
   await expect(rotateCrownHandler(device, rotateCrownSchema.parse({ delta }))).rejects.toBe(

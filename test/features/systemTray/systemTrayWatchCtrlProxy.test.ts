@@ -5,6 +5,14 @@ import { SystemTray } from "../../../src/features/systemTray/SystemTray";
 import { WatchSystemTray } from "../../../src/features/systemTray/WatchSystemTray";
 import { prepareWatchSystemTray } from "../../../src/features/systemTray/helpers/watchOpening";
 import {
+  assertSingleWordReply,
+  watchReply,
+  MAX_REPLY_ATTEMPTS,
+  MAX_SETTLE_READS,
+  POLL_MS,
+  REPLY_INPUT_SETTLE_MS,
+} from "../../../src/features/systemTray/helpers/watchReply";
+import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
 } from "../../../src/features/systemTray/systemTrayHelpers";
@@ -14,6 +22,7 @@ import {
   watchExpandedTarget,
   watchHasExpandedCard,
   watchNotifications,
+  watchReplyText,
   watchStreamScroll,
 } from "../../../src/features/systemTray/helpers/watchHierarchy";
 import {
@@ -88,6 +97,19 @@ const replyCard = capture(replyCardCapture, "reply-card");
 const replyInput = capture(replyInputCapture, "reply-input");
 const replyKeyboard = capture(replyKeyboardCapture, "reply-keyboard");
 const replyTyped = capture(replyTypedCapture, "reply-typed");
+/** Change only the field text in both copies of the captured IME hierarchy. */
+function withReplyText(text: string): ObserveResult {
+  const copy = structuredClone(replyTyped);
+  for (const node of copy.viewHierarchy
+    ? getHierarchyRoots(copy.viewHierarchy).flatMap(watchNodes)
+    : []) {
+    const props = getNodeProperties(node);
+    if (props?.["resource-id"] === "com.google.android.inputmethod.latin:id/extract_edit_text") {
+      props.text = text;
+    }
+  }
+  return copy;
+}
 const TAP_REPLY_CARD = "shell input tap 192 176";
 const TAP_KEYBOARD = "shell input tap 289 332";
 const TAP_SEND = "shell input tap 318 111";
@@ -196,7 +218,95 @@ function setup(read: (commands: string[], reads: number) => ObserveResult) {
   return { adb, timer, tray: new SystemTray(watch) };
 }
 
+describe("Wear OS inline reply validation", () => {
+  const invalidReplies = [
+    "",
+    "hello one",
+    " hi",
+    "hi ",
+    "  ",
+    "hi\tthere",
+    "hi\nthere",
+    "\t",
+    "\n",
+    "hi\r",
+    "hi\u00a0there",
+  ];
+
+  test.each(invalidReplies)("rejects %j with an actionable, quoted explanation", (text) => {
+    expect(() => assertSingleWordReply(text)).toThrow(ActionableError);
+    expect(() => assertSingleWordReply(text)).toThrow(
+      `Wear OS inline reply currently supports a single word because Gboard's remote input corrupts multi-word text; use a single word. Given: ${JSON.stringify(text)}.`,
+    );
+  });
+
+  test.each(["hi", "it's", "50%sale"])("accepts a single word %j", (text) => {
+    expect(() => assertSingleWordReply(text)).not.toThrow();
+  });
+
+  test.each(invalidReplies)("rejects %j before any shell input", async (replyText) => {
+    const { tray, adb } = setup(() => replyCard);
+    await expect(
+      tray.execute({ action: "tap", notification: { title: "Fixture alert", replyText } }),
+    ).rejects.toThrow(ActionableError);
+    expect(
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input")),
+    ).toEqual([]);
+  });
+
+  test.each(invalidReplies)(
+    "rejects direct watchReply %j before any dependency call",
+    async (text) => {
+      const calls: string[] = [];
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      await expect(
+        watchReply(text, {
+          read: async () => {
+            calls.push("read");
+            return replyTyped;
+          },
+          tap: async () => {
+            calls.push("tap");
+          },
+          command: async (command) => {
+            calls.push(command);
+          },
+          sleep: (ms) => timer.sleep(ms),
+        }),
+      ).rejects.toThrow(ActionableError);
+      expect(calls).toEqual([]);
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
+});
+
 describe("Wear OS 7 CtrlProxy card capture", () => {
+  test("reads committed reply text without trimming, and rejects conflicting capture copies", () => {
+    expect(watchReplyText(replyKeyboard.viewHierarchy)).toBe("");
+    expect(watchReplyText(replyTyped.viewHierarchy)).toBe("hi ");
+    expect(watchReplyText(withReplyText(" hi  ").viewHierarchy)).toBe(" hi  ");
+    expect(watchReplyText(withReplyText("  ").viewHierarchy)).toBe("  ");
+    expect(watchReplyText(replyCard.viewHierarchy)).toBeUndefined();
+    expect(watchReplyText()).toBeUndefined();
+    const conflicting = withReplyText("hi ");
+    const field = conflicting.viewHierarchy
+      ? getHierarchyRoots(conflicting.viewHierarchy)
+          .flatMap(watchNodes)
+          .find(
+            (node) =>
+              getNodeProperties(node)?.["resource-id"] ===
+              "com.google.android.inputmethod.latin:id/extract_edit_text",
+          )
+      : undefined;
+    const props = field && getNodeProperties(field);
+    if (!props) {
+      throw new Error("Captured reply field is missing");
+    }
+    props.text = "wrong ";
+    expect(watchReplyText(conflicting.viewHierarchy)).toBeUndefined();
+  });
+
   test("reads title and body from the card's text lines, not the whole card as a header", () => {
     expect(
       watchNotifications(top.viewHierarchy).map(({ appLabel, title, body }) => [
@@ -543,15 +653,16 @@ describe("Wear OS 7 stream actions", () => {
 
   test.each([
     { replyText: "hi", textCommands: ["shell input text 'hi'"] },
-    { replyText: "it's a reply", textCommands: ["shell input text 'it'\\''s%sa%sreply'"] },
+    { replyText: "it's", textCommands: ["shell input text 'it'\\''s'"] },
     { replyText: "50%sale", textCommands: ["shell input text '50%'", "shell input text 'sale'"] },
   ])("replies inline with escaped text: $replyText", async ({ replyText, textCommands }) => {
+    const typed = withReplyText(`${replyText} `);
     const { tray, adb, timer } = setup((commands) => {
       if (commands.includes(TAP_SEND) || commands.includes(BACK)) {
         return replyCard;
       }
       if (commands.includes(TAP_SPACE)) {
-        return replyTyped;
+        return typed;
       }
       if (commands.includes(TAP_KEYBOARD)) {
         return replyKeyboard;
@@ -570,6 +681,138 @@ describe("Wear OS 7 stream actions", () => {
     ).toEqual([TAP_REPLY_CARD, TAP_KEYBOARD, ...textCommands, TAP_SPACE, TAP_SEND]);
     expect(adb.getExecutedCommands()).not.toContain("shell input keyevent 62");
     expect(timer.getSleepHistory()).toContain(250);
+  });
+
+  test.each(["", "one "])(
+    "clears a committed mismatch %j and retries before sending",
+    async (observed) => {
+      const mismatch = withReplyText(observed);
+      const typed = withReplyText("hello ");
+      const { tray, adb, timer } = setup((commands) => {
+        if (commands.includes(TAP_SEND) || commands.includes(BACK)) {
+          return replyCard;
+        }
+        const spaces = commands.filter((command) => command === TAP_SPACE).length;
+        if (spaces >= 2) {
+          return typed;
+        }
+        if (spaces === 1) {
+          return mismatch;
+        }
+        if (commands.includes(TAP_KEYBOARD)) {
+          return replyKeyboard;
+        }
+        return commands.includes(TAP_REPLY_CARD) ? replyInput : replyCard;
+      });
+      const result = await tray.execute({
+        action: "tap",
+        notification: { title: "Fixture alert", replyText: "hello" },
+      });
+      expect(result.payload.message).toBe("Replied to watch notification");
+      expect(
+        adb
+          .getExecutedCommands()
+          .filter((command) => command.startsWith("shell input") && command !== BACK),
+      ).toEqual([
+        TAP_REPLY_CARD,
+        TAP_KEYBOARD,
+        "shell input text 'hello'",
+        TAP_SPACE,
+        "shell input keyevent KEYCODE_MOVE_END",
+        `shell input keyevent ${Array<string>(8).fill("KEYCODE_DEL").join(" ")}`,
+        "shell input text 'hello'",
+        TAP_SPACE,
+        TAP_SEND,
+      ]);
+      expect(timer.getSleepHistory().filter((ms) => ms === REPLY_INPUT_SETTLE_MS)).toHaveLength(2);
+    },
+  );
+
+  test("never sends after all reply text attempts mismatch", async () => {
+    const mismatch = withReplyText("wrong reply ");
+    const { tray, adb, timer } = setup((commands) => {
+      if (commands.includes(BACK)) {
+        return replyCard;
+      }
+      if (commands.includes(TAP_SPACE)) {
+        return mismatch;
+      }
+      if (commands.includes(TAP_KEYBOARD)) {
+        return replyKeyboard;
+      }
+      return commands.includes(TAP_REPLY_CARD) ? replyInput : replyCard;
+    });
+    const pending = tray.execute({
+      action: "tap",
+      notification: { title: "Fixture alert", replyText: "hi" },
+    });
+    await expect(pending).rejects.toBeInstanceOf(ActionableError);
+    await expect(pending).rejects.toThrow('expected "hi ", observed "wrong reply "');
+    const commands = adb.getExecutedCommands();
+    expect(commands.filter((command) => command === "shell input text 'hi'")).toHaveLength(
+      MAX_REPLY_ATTEMPTS,
+    );
+    expect(commands.filter((command) => command === TAP_SPACE)).toHaveLength(MAX_REPLY_ATTEMPTS);
+    expect(
+      commands.filter((command) => command === "shell input keyevent KEYCODE_MOVE_END"),
+    ).toHaveLength(MAX_REPLY_ATTEMPTS - 1);
+    expect(
+      commands.filter(
+        (command) =>
+          command === `shell input keyevent ${Array<string>(14).fill("KEYCODE_DEL").join(" ")}`,
+      ),
+    ).toHaveLength(MAX_REPLY_ATTEMPTS - 1);
+    expect(commands).not.toContain(TAP_SEND);
+    expect(timer.getSleepHistory().filter((ms) => ms === REPLY_INPUT_SETTLE_MS)).toHaveLength(
+      MAX_REPLY_ATTEMPTS,
+    );
+  });
+
+  test("finishes the input settle sleep before the first text command", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const atCommands: { command: string; sleeps: number[]; time: number }[] = [];
+    await watchReply("hi", {
+      read: async () => replyTyped,
+      tap: async () => {},
+      command: async (command) => {
+        atCommands.push({ command, sleeps: timer.getSleepHistory(), time: timer.now() });
+      },
+      sleep: (ms) => timer.sleep(ms),
+    });
+    expect(atCommands).toEqual([
+      {
+        command: "shell input text 'hi'",
+        sleeps: [POLL_MS, REPLY_INPUT_SETTLE_MS],
+        time: POLL_MS + REPLY_INPUT_SETTLE_MS,
+      },
+    ]);
+  });
+
+  test("polls for committed text after Space without retyping while it redraws", async () => {
+    let afterSpace = 0;
+    const { tray, adb } = setup((commands) => {
+      if (commands.includes(TAP_SEND) || commands.includes(BACK)) {
+        return replyCard;
+      }
+      if (commands.includes(TAP_SPACE)) {
+        return ++afterSpace < MAX_SETTLE_READS ? replyKeyboard : replyTyped;
+      }
+      if (commands.includes(TAP_KEYBOARD)) {
+        return replyKeyboard;
+      }
+      return commands.includes(TAP_REPLY_CARD) ? replyInput : replyCard;
+    });
+    const result = await tray.execute({
+      action: "tap",
+      notification: { title: "Fixture alert", replyText: "hi" },
+    });
+    expect(result.isError).toBe(false);
+    expect(
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input text")),
+    ).toEqual(["shell input text 'hi'"]);
+    expect(adb.getExecutedCommands().filter((command) => command === TAP_SPACE)).toHaveLength(1);
+    expect(adb.getExecutedCommands().filter((command) => command === TAP_SEND)).toHaveLength(1);
   });
 
   test("waits for the soft Space key to redraw after typing", async () => {
@@ -650,9 +893,21 @@ describe("Wear OS 7 stream actions", () => {
   });
 
   test("does not tap Close keyboard when Send never appears", async () => {
+    const withoutSend = withReplyText("hi ");
+    for (const node of withoutSend.viewHierarchy
+      ? getHierarchyRoots(withoutSend.viewHierarchy).flatMap(watchNodes)
+      : []) {
+      const props = getNodeProperties(node);
+      if (props?.["content-desc"] === "Send") {
+        props["content-desc"] = "Close keyboard";
+      }
+    }
     const { tray, adb } = setup((commands) => {
       if (commands.includes(BACK)) {
         return replyCard;
+      }
+      if (commands.includes(TAP_SPACE)) {
+        return withoutSend;
       }
       if (commands.includes(TAP_KEYBOARD)) {
         return replyKeyboard;
@@ -661,7 +916,7 @@ describe("Wear OS 7 stream actions", () => {
     });
     await expect(
       tray.execute({ action: "tap", notification: { title: "Fixture alert", replyText: "hi" } }),
-    ).rejects.toThrow("Send button did not appear. Re-observe");
+    ).rejects.toThrow("Send button did not appear with verified text. Re-observe");
     expect(adb.getExecutedCommands()).toContain(TAP_SPACE);
     expect(adb.getExecutedCommands()).not.toContain(TAP_SEND);
   });

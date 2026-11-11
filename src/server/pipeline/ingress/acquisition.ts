@@ -9,8 +9,14 @@ import { stringifyToolResponse } from "../../../utils/toolUtils";
 import { unregisterDirectSession } from "../../../utils/directSessionDeviceRegistry";
 import {
   getAnyDevicePlatformFromResult,
+  getDeviceFormFactorFromResult,
   isDeviceSessionAcquisitionTool,
 } from "../../../daemon/deviceSessionResult";
+import {
+  formFactorDiscoveryTools,
+  isTvDevice,
+} from "../../../features/toolSelection/formFactorDiscoveryTools";
+import { getSessionToolSelectionService } from "../../../features/toolSelection/SessionToolSelectionService";
 import { platformCallableToolNames } from "../../applePlatformToolSupport";
 import type { McpServerOptions } from "../../index";
 import { ToolRegistry } from "../../toolRegistry";
@@ -119,6 +125,45 @@ export async function applyAcquisitionToolSelection(
 }
 
 /**
+ * The caller's `enableTools` plus the tools the acquired device lists by default (#18029): a TV
+ * session lists every tool registered `defaultEnabledOnTv` (`focusNavigate`) unless the operator or the session already chose its state. A
+ * failed read of that state only skips the form-factor tools; the caller's declaration stands.
+ */
+export async function withFormFactorDiscoveryTools(
+  service: McpServerOptions["sessionToolSelectionService"],
+  sessionUuid: string,
+  result: unknown,
+  enableTools: readonly string[],
+): Promise<string[]> {
+  const device = {
+    platform: getAnyDevicePlatformFromResult(result),
+    formFactor: getDeviceFormFactorFromResult(result),
+  };
+  if (!isTvDevice(device)) {
+    return [...enableTools];
+  }
+  try {
+    const formFactorTools = await formFactorDiscoveryTools(
+      service ?? getSessionToolSelectionService(),
+      sessionUuid,
+      {
+        device,
+        tvTools: ToolRegistry.getAllTools()
+          .filter((tool) => tool.defaultEnabledOnTv === true)
+          .map((tool) => tool.name),
+      },
+    );
+    return [...new Set([...enableTools, ...formFactorTools])];
+  } catch (error) {
+    logger.warn(
+      `[MCP] Could not read the form-factor tool defaults for session ${sessionUuid}: ${errorMessage(error)}`,
+      error,
+    );
+    return [...enableTools];
+  }
+}
+
+/**
  * Report a lost capability declaration on its own, for the path where the
  * optional enabled/gated report could not be built either (#6886 review). A
  * successful declaration leaves the result untouched.
@@ -167,7 +212,11 @@ export async function enrichProvisionDeviceResult<
   if (toolName !== "provisionDevice" || !sessionUuid) {
     return result;
   }
-  const failure = await applyAcquisitionToolSelection(service, sessionUuid, enableTools);
+  const failure = await applyAcquisitionToolSelection(
+    service,
+    sessionUuid,
+    await withFormFactorDiscoveryTools(service, sessionUuid, result, enableTools),
+  );
   try {
     return enrichAcquisitionResult(result, {
       // The connection profile is the other half of the union `tools/list` and
@@ -302,7 +351,12 @@ export async function enrichAcquiredSession<
   const capabilityFailure = await applyAcquisitionToolSelection(
     input.sessionToolSelectionService,
     acquiredSessionUuid,
-    input.requestedEnableTools,
+    await withFormFactorDiscoveryTools(
+      input.sessionToolSelectionService,
+      acquiredSessionUuid,
+      result,
+      input.requestedEnableTools,
+    ),
   );
   try {
     const listed = new Set(

@@ -343,6 +343,12 @@ export function getAnyDevicePlatformFromResult(result: unknown): Platform | unde
     : undefined;
 }
 
+/** The device form factor (`tv`, `phone`, ...) a device-start tool result describes (#18029). */
+export function getDeviceFormFactorFromResult(result: unknown): string | undefined {
+  const formFactor = readDeviceDescription(result)?.formFactor;
+  return typeof formFactor === "string" ? formFactor : undefined;
+}
+
 /**
  * Whether a tool RESULT is the daemon's refusal of a session held inside its suspect window
  * (#10051). The session still exists and its owner can restore it, so unlike

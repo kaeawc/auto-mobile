@@ -97,10 +97,11 @@ describe("assertToolSupportsDevicePlatform", () => {
     );
   });
 
-  test("visionOS allows lifecycle, app tools, observe and window-app input", () => {
+  test("visionOS allows lifecycle, app tools, plans, observe and window-app input", () => {
     expect([...APPLE_PLATFORM_SUPPORTED_TOOLS.visionos].sort()).toEqual(
       [
         ...DEVICE_LIFECYCLE_TOOLS,
+        "executePlan",
         "installApp",
         "uninstallApp",
         "launchApp",
@@ -113,6 +114,7 @@ describe("assertToolSupportsDevicePlatform", () => {
     );
     for (const tool of [
       ...DEVICE_LIFECYCLE_TOOLS,
+      "executePlan",
       "installApp",
       "uninstallApp",
       "launchApp",

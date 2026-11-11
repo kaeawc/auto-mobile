@@ -115,6 +115,16 @@ describe("PlanValidator", () => {
       );
     });
 
+    test("accepts a visionOS device", () => {
+      expect(() =>
+        PlanValidator.validateUntrusted({
+          name: "Vision",
+          devices: [{ label: "headset", platform: "visionos" }],
+          steps: [{ tool: "observe", params: { device: "headset" } }],
+        }),
+      ).not.toThrow();
+    });
+
     test("throws with a platform message on invalid device platform", () => {
       const plan = {
         name: "Test",

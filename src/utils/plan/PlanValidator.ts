@@ -62,8 +62,14 @@ function isUnvalidatedPlan(raw: unknown): raw is Plan {
 /**
  * Validates a plan structure and enforces multi-device rules.
  */
-/** Platforms a plan device may name: Android, iOS, and Apple TV (remote-driven steps only). */
-const PLAN_DEVICE_PLATFORMS: ReadonlySet<string> = new Set(["android", "ios", "tvos"]);
+/** Platforms a plan device may name: Android, iOS, tvOS, and visionOS (platform-allowlisted steps only). */
+const PLAN_DEVICE_PLATFORMS: ReadonlySet<string> = new Set([
+  "android",
+  "ios",
+  "tvos",
+  "visionos",
+  "watchos",
+]);
 
 export class PlanValidator {
   /**

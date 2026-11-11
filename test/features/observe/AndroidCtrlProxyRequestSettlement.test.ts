@@ -58,6 +58,40 @@ async function harness() {
   return { client, timer, socket, manager };
 }
 type Harness = Awaited<ReturnType<typeof harness>>;
+
+test("node-action facade carries the invisible opt in and omits false on the wire", async () => {
+  const h = await harness();
+  h.socket.onFrame = () => {
+    const frame: { requestId: string } = JSON.parse(h.socket.frames.at(-1)!);
+    h.manager.resolve(frame.requestId, { success: true, action: "click", totalTimeMs: 0 });
+  };
+  try {
+    for (const allowInvisible of [true, false, undefined]) {
+      const result = await h.client.requestNodeAction(
+        "click",
+        { resourceId: "id/button" },
+        {
+          expectedBounds: { left: 10, top: 20, right: 110, bottom: 120 },
+          allowInvisible,
+        },
+      );
+      expect(result.success).toBe(true);
+    }
+    expect(h.socket.frames).toHaveLength(3);
+    const [optedIn, optedOut, legacy] = h.socket.frames.map((data) => JSON.parse(data));
+    expect(optedIn).toMatchObject({
+      selector: { resourceId: "id/button" },
+      boundsLeft: 10,
+      boundsBottom: 120,
+      allowInvisible: true,
+    });
+    expect(optedOut).not.toHaveProperty("allowInvisible");
+    expect(legacy).not.toHaveProperty("allowInvisible");
+  } finally {
+    await h.client.close();
+  }
+});
+
 const perf = new NoOpPerformanceTracker();
 async function flushDispatch() {
   for (let i = 0; i < 32; i++) {

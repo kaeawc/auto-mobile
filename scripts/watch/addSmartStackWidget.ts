@@ -3,6 +3,14 @@ import { parseArgs } from "node:util";
 import { ActionableError, toActionableError } from "../../src/models/ActionableError";
 import { WebSocketWatchRunnerClient } from "../../src/features/watch/WatchRunnerClient";
 import { addWatchSmartStackWidget } from "../../src/features/watch/WatchSmartStackWidget";
+import {
+  daemonCliIdleWindowDeclarer,
+  withCliSessionIdleHold,
+} from "../../src/features/watch/WatchSessionIdleHold";
+import { DaemonClient } from "../../src/daemon/client/client";
+import { getCliSessionIdleTimeoutMs } from "../../src/daemon/wire/constants";
+import { defaultIdGenerator } from "../../src/utils/IdGenerator";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
@@ -13,28 +21,45 @@ async function main(): Promise<void> {
       steps: { type: "string" },
       attempts: { type: "string" },
       "retry-delay-ms": { type: "string" },
+      "session-uuid": { type: "string" },
     },
   });
   const port = Number(values.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535 || !values.app || !values.widget) {
     throw new ActionableError(
-      "Usage: --port <1-65535> --app <name> --widget <name> [--steps <0-100>] [--attempts <1-5>] [--retry-delay-ms <0-120000>]",
+      "Usage: --port <1-65535> --app <name> --widget <name> [--steps <0-100>] [--attempts <1-5>] [--retry-delay-ms <0-120000>] [--session-uuid <uuid>]",
     );
   }
+  const options = {
+    appName: values.app,
+    widgetName: values.widget,
+    maxAttempts: values.attempts === undefined ? undefined : Number(values.attempts),
+    retryDelayMs:
+      values["retry-delay-ms"] === undefined ? undefined : Number(values["retry-delay-ms"]),
+    galleryStepsFromBottom: values.steps === undefined ? undefined : Number(values.steps),
+  };
   const client = new WebSocketWatchRunnerClient(`ws://127.0.0.1:${port}/ws`);
+  const sessionId = values["session-uuid"];
+  const daemon = sessionId === undefined ? undefined : new DaemonClient();
   try {
-    const result = await addWatchSmartStackWidget(client, {
-      appName: values.app,
-      widgetName: values.widget,
-      maxAttempts: values.attempts === undefined ? undefined : Number(values.attempts),
-      retryDelayMs:
-        values["retry-delay-ms"] === undefined ? undefined : Number(values["retry-delay-ms"]),
-      galleryStepsFromBottom: values.steps === undefined ? undefined : Number(values.steps),
-    });
+    const add = () => addWatchSmartStackWidget(client, options);
+    // The runner WebSocket makes no daemon tool call, so hold the session's idle clock (#17992).
+    const result =
+      daemon && sessionId
+        ? await withCliSessionIdleHold(
+            daemonCliIdleWindowDeclarer(daemon, sessionId, defaultIdGenerator.next()),
+            defaultTimer,
+            add,
+            {
+              baseIdleTimeoutMs: getCliSessionIdleTimeoutMs(),
+            },
+          )
+        : await add();
     console.log(JSON.stringify(result));
     process.exitCode = result.success ? 0 : 1;
   } finally {
     client.close();
+    await daemon?.close();
   }
 }
 

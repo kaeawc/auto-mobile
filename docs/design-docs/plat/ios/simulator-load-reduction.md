@@ -165,7 +165,13 @@ string `off`. The setting is part of the clone template identity, so a template 
 never cloned for a flag-off request.
 The setting persists across reboots; write failures warn and provisioning continues independently of
 label application. This hides apsd debug logs needed for push-flow debugging; remote push itself is
-unaffected because only logging changes, with no launchd job disabled. Measure any CPU effect by
+unaffected because only logging changes, with no launchd job disabled. The flag covers only the
+`com.apple.apsd` subsystem: apsd also logs under shared subsystems (`com.apple.network`,
+`com.apple.PersistentConnection`, `com.apple.xpc`, `com.apple.CFNetwork`) and with no subsystem at all,
+and those lines are deliberately left on because the shared subsystems serve every other daemon and
+uncategorized lines cannot be filtered by subsystem. On a fresh iOS 26.5 simulator with the flag on,
+apsd still emitted about 1,160 lines in its first two minutes (peak about 11 lines/s), none under
+`com.apple.apsd` and about half with no subsystem. Measure any CPU effect by
 sampling `ps` cputime deltas over 60 seconds for simulator `diagnosticd`, `apsd`, and `logd`, and host
 `diagnosticd`. The flood was not reproduced on iOS 26.5 here, so no CPU benefit is claimed.
 

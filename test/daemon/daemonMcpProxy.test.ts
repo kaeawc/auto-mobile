@@ -6864,6 +6864,51 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("an unknown tool says it does not exist, names the observe field and close tools (#18024)", async () => {
+      const client = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolError: new Error("MCP error -32603: Unknown tool: screenSize"),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const matchingManager = matchingDaemonManager();
+      matchingManager.statusResult = { ...matchingManager.statusResult, buildId: "samebuild" };
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingManager,
+        autoStartDaemon: false,
+        buildIdentity: { entryScript: "/client/dist/index.js", buildId: "samebuild" },
+        staticToolDefinitionsProvider: () => [
+          {
+            name: "observe",
+            inputSchema: {},
+            outputSchema: { properties: { screenSize: {}, elements: {} } },
+          },
+          { name: "screenshotDiff", inputSchema: {} },
+          { name: "tapOn", inputSchema: {} },
+        ],
+      });
+      try {
+        let caught: unknown;
+        try {
+          await proxy.callTool("screenSize", {});
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(Error);
+        const message = (caught as Error).message;
+        expect(message).toContain('Unknown tool "screenSize". No tool with this name exists.');
+        expect(message).toContain("screenSize is a field of the observe result");
+        expect(message.toLowerCase()).not.toContain("restart");
+
+        expect((await proxy.buildToolUnavailableErrorForTesting("tapOm")).message).toBe(
+          'Unknown tool "tapOm". No tool with this name exists. Closest tools: tapOn.',
+        );
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("reports the migration for removed shared-storage tools", async () => {
       for (const toolName of ["stageSharedStorage", "stageSharedStorageFixtures"]) {
         const client = new ScriptedDaemonClient({

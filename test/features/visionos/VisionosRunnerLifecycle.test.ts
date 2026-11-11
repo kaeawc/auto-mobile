@@ -4,6 +4,7 @@ import {
   VISIONOS_RUNNER_HOST_BUNDLE_ID,
   VisionosRunnerLifecycle,
   requireVisionosRunner,
+  restartVisionosRunnerForMissingHost,
   withVisionosHostRecovery,
 } from "../../../src/features/visionos/VisionosRunnerLifecycle";
 import { visionosRunners } from "../../../src/features/visionos/VisionosRunnerRegistry";
@@ -352,5 +353,47 @@ test("other runner failures and a target app's absence are not treated as a lost
   await expect(
     withVisionosHostRecovery("owned-visionos", undefined, f.observe, f.owner),
   ).rejects.toThrow("com.example.target");
+  expect(f.launcher.launches).toHaveLength(1);
+});
+
+test("launchApp's missing host app restarts the owned runner that automates it (#17382)", async () => {
+  const f = fixture();
+  await requireVisionosRunner("owned-visionos", undefined, f.owner);
+  expect(await restartVisionosRunnerForMissingHost("owned-visionos", undefined, f.owner)).toBe(
+    true,
+  );
+  expect(f.launcher.launches).toHaveLength(2);
+  expect(f.launcher.stops).toBe(1);
+});
+
+test("a missing host app restarts nothing without an owned runner or for a target-app runner", async () => {
+  const f = fixture();
+  expect(await restartVisionosRunnerForMissingHost("owned-visionos", undefined, f.owner)).toBe(
+    false,
+  );
+  expect(f.launcher.launches).toEqual([]);
+
+  const targeted = new VisionosRunnerLifecycle({
+    launcher: f.launcher,
+    artifacts: f.artifacts,
+    ports: { allocate: () => 9011, release: () => undefined },
+    targetBundleId: () => "com.example.target",
+  });
+  owners.push(targeted);
+  await requireVisionosRunner("owned-visionos", undefined, targeted);
+  expect(await restartVisionosRunnerForMissingHost("owned-visionos", undefined, targeted)).toBe(
+    false,
+  );
+  expect(f.launcher.launches).toHaveLength(1);
+});
+
+test("an aborted launch does not restart the runner for a missing host app", async () => {
+  const f = fixture();
+  await requireVisionosRunner("owned-visionos", undefined, f.owner);
+  const controller = new AbortController();
+  controller.abort();
+  expect(
+    await restartVisionosRunnerForMissingHost("owned-visionos", controller.signal, f.owner),
+  ).toBe(false);
   expect(f.launcher.launches).toHaveLength(1);
 });

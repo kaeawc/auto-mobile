@@ -81,12 +81,7 @@ function xrNodeClickSelector(
     throw xrCoordinateError();
   }
   const entries = new SearchableHierarchy().project(hierarchy);
-  // Like TapTargetResolver, a container-scoped selection never promotes past its container.
-  const scoped = options.container !== undefined;
-  const container = scoped ? resolveContainer?.(hierarchy) : undefined;
-  const containerEntry = container ? findTapTargetNode(entries, container) : undefined;
-  const containerIndex = containerEntry ? entries.indexOf(containerEntry) : -1;
-  const scope = { scoped, containerIndex };
+  const scope = xrClickScope(entries, element, options, { hierarchy, resolveContainer });
   // Native selectors are global across windows, including for an ancestor click.
   const uniqueSelector = (candidate: Element, label?: Element) => {
     const selector = stableNodeSelectorForElement(candidate);
@@ -132,6 +127,35 @@ function xrNodeClickSelector(
   }
 
   return xrAncestorClickSelector(element, entries, uniqueSelector, scope);
+}
+
+/** A label container may identify its owning row, while unrelated targets stay scoped. */
+function xrClickScope(
+  entries: readonly SearchableEntry[],
+  element: Element,
+  options: XrNodeClickOptions,
+  {
+    hierarchy,
+    resolveContainer,
+  }: { hierarchy: ViewHierarchyResult; resolveContainer?: XrContainerResolver },
+): { scoped: boolean; containerIndex: number } {
+  const scoped = options.container !== undefined;
+  const container = scoped ? resolveContainer?.(hierarchy) : undefined;
+  const containerEntry = container ? findTapTargetNode(entries, container) : undefined;
+  const containerIndex = containerEntry ? entries.indexOf(containerEntry) : -1;
+  const targetEntry = findTapTargetNode(entries, element);
+  const targetIsContainerAncestor =
+    containerEntry &&
+    targetEntry &&
+    isInsideScope(entries, containerEntry, {
+      scoped: true,
+      containerIndex: entries.indexOf(targetEntry),
+    });
+  const scope = { scoped: scoped && !targetIsContainerAncestor, containerIndex };
+  if (scope.scoped && (!targetEntry || !isInsideScope(entries, targetEntry, scope))) {
+    throw xrCoordinateError();
+  }
+  return scope;
 }
 
 /** Whether `entry` is a strict descendant of the requested container (always, when unscoped). */

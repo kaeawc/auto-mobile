@@ -37,7 +37,8 @@ the panel id, and pushed display transitions have never carried a panel key.
   physical panel whether or not it is active) and `cmd device_state print-states`. Roles come from
   pixel area: the largest internal panel is `inner`, the smallest is `cover`. When there are two
   or more internal panels and no fold posture, `ro.build.characteristics` is read once. On an
-  `automotive` build, the first largest internal panel stays `inner` (the center display), every
+  `automotive` build, the first largest internal panel is the center display under role `unknown`
+  (the non-foldable role a phone's built-in panel has; `inner` and `cover` are fold panels), every
   other internal panel is `cluster` (the instrument cluster), and the inventory reports no
   postures, so no message offers `setPosture` on a car. The cluster app's own virtual display
   (`ClusterOsDouble-VD`) is reported under role `virtual`, as for any other app-created display.

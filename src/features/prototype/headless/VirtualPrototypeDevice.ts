@@ -1,0 +1,252 @@
+import type { PrototypeAssetRequestOptions } from "../../observe/android/CtrlProxyPrototypes";
+import type {
+  PrototypeAssetResult,
+  PrototypeDismiss,
+  PrototypeEvent,
+  PrototypeResult,
+  PrototypeState,
+  PrototypeStatusEntry,
+} from "../../observe/android/ctrlProxyProtocol";
+import type { Timer } from "../../../utils/SystemTimer";
+import type { AndroidPrototypeClient } from "../androidPrototypeTransport";
+import { applyPrototypePatch } from "../prototypePatch";
+import type { PrototypePatchReply, PrototypePatchRequest } from "../prototypePatchWire";
+import { collectPrototypeAssetReferences } from "../prototypeAssetReferences";
+import type { PrototypeAssetUpload } from "../prototypeAssets";
+import type { PrototypeData, PrototypeJson, PrototypeSpec } from "../prototypeSpec";
+import type { PrototypeShowOverrides } from "../PrototypeTransport";
+import { VIRTUAL_PROTOTYPE_CAPABILITIES } from "./headlessPrototypeMode";
+
+/** One prototype the virtual device is showing. */
+interface ShownPrototype {
+  spec: Record<string, unknown>;
+  state: PrototypeState;
+  pages: Record<string, number>;
+  lastSequence: number;
+  revision: number;
+  /** Highest revision a device-side state change produced; a stale `/state` patch conflicts. */
+  stateRevision: number;
+}
+
+/** What a renderer reports when the user acts on a shown prototype. */
+export interface VirtualPrototypeInput {
+  id: string;
+  kind: PrototypeEvent["kind"];
+  name: string | null;
+  payload?: PrototypeJson;
+  /** State keys the input changed, merged into the prototype's state before the event is sent. */
+  state?: PrototypeState;
+  pages?: Record<string, number>;
+}
+
+const SAVED_REFUSAL: PrototypeResult = {
+  success: false,
+  error: "The headless virtual device has no saved prototypes.",
+};
+
+const asState = (value: unknown): PrototypeState =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (structuredClone(value) as PrototypeState)
+    : {};
+
+/**
+ * The headless virtual device (#17974): answers the Android prototype protocol from memory, so the
+ * prototype tool's shared Android path (gates, status, events, patch mirror, web resource) runs
+ * unchanged with no CtrlProxy. Rendering is the host web renderer's; this holds only state.
+ */
+export class VirtualPrototypeDevice implements AndroidPrototypeClient {
+  private readonly shown = new Map<string, ShownPrototype>();
+  private readonly assets = new Set<string>();
+  private readonly listeners = new Set<(event: PrototypeEvent) => void>();
+  private readonly capabilities: ReadonlySet<string>;
+
+  constructor(
+    private readonly clock: Pick<Timer, "now">,
+    capabilities: readonly string[] = VIRTUAL_PROTOTYPE_CAPABILITIES,
+  ) {
+    this.capabilities = new Set(capabilities);
+  }
+
+  async supportsCommand(name: string): Promise<boolean> {
+    return this.capabilities.has(name);
+  }
+
+  async requestShowPrototype(
+    spec: PrototypeSpec,
+    _timeoutMs?: number,
+    _perf?: unknown,
+    overrides: PrototypeShowOverrides = {},
+  ): Promise<PrototypeResult> {
+    const previous = this.shown.get(spec.id);
+    if (overrides.replaceOthers !== false) {
+      [...this.shown.keys()].filter((id) => id !== spec.id).forEach((id) => this.shown.delete(id));
+    }
+    const inPlace = previous !== undefined && overrides.reset !== true;
+    const copy: Record<string, unknown> = { ...structuredClone(spec) };
+    this.shown.set(spec.id, {
+      spec: copy,
+      state: asState(copy.state),
+      pages: inPlace ? { ...previous.pages } : {},
+      // Sequences never rewind for an id, as on hardware.
+      lastSequence: previous?.lastSequence ?? 0,
+      revision: (previous?.revision ?? 0) + 1,
+      stateRevision: previous?.stateRevision ?? 0,
+    });
+    const missing = this.missingAssets(copy);
+    return {
+      success: true,
+      totalTimeMs: 0,
+      timestamp: this.clock.now(),
+      ...(missing.length > 0 ? { missingAssets: missing } : {}),
+    };
+  }
+
+  async requestDismissPrototype(target: PrototypeDismiss): Promise<PrototypeResult> {
+    if (target.all) {
+      this.shown.clear();
+    } else if (target.id !== undefined) {
+      this.shown.delete(target.id);
+    }
+    return { success: true, totalTimeMs: 0, timestamp: this.clock.now() };
+  }
+
+  async requestPatchPrototype(patch: PrototypePatchRequest): Promise<PrototypePatchReply> {
+    const entry = this.shown.get(patch.id);
+    if (!entry) {
+      return {
+        success: false,
+        delivery: "answered",
+        error: `No prototype with id ${patch.id} is shown on the virtual device.`,
+      };
+    }
+    const touchesState = patch.ops.some(
+      (op) => op.op !== "replaceNode" && op.path.startsWith("/state"),
+    );
+    if (
+      touchesState &&
+      patch.baseRevision !== undefined &&
+      patch.baseRevision < entry.stateRevision
+    ) {
+      return {
+        success: false,
+        delivery: "answered",
+        error: "conflict",
+        revision: entry.revision,
+        conflict: { revision: entry.revision, state: { ...entry.state } },
+      };
+    }
+    const current = { ...entry.spec, state: entry.state };
+    const applied = applyPrototypePatch(current, patch.ops);
+    if (!applied.success) {
+      return {
+        success: false,
+        delivery: "answered",
+        error: `Invalid patch at ${applied.error.path}: ${applied.error.message}`,
+      };
+    }
+    entry.spec = applied.spec;
+    entry.state = asState(applied.spec.state);
+    entry.revision += 1;
+    return { success: true, delivery: "answered", revision: entry.revision, totalTimeMs: 0 };
+  }
+
+  async requestInspectPrototypes(): Promise<PrototypeResult> {
+    const prototypes: PrototypeStatusEntry[] = [...this.shown.entries()].map(([id, entry]) => ({
+      id,
+      persistent: false,
+      state: { ...entry.state },
+      pages: { ...entry.pages },
+      lastSequence: entry.lastSequence,
+      ...(entry.spec.data === undefined
+        ? {}
+        : { data: structuredClone(entry.spec.data) as PrototypeData }),
+    }));
+    return { success: true, prototypes, droppedEvents: 0, timestamp: this.clock.now() };
+  }
+
+  async requestPutPrototypeAsset(
+    asset: PrototypeAssetUpload,
+    options?: PrototypeAssetRequestOptions,
+  ): Promise<PrototypeAssetResult> {
+    options?.abortSignal?.throwIfAborted();
+    options?.onDispatch?.();
+    this.assets.add(asset.id);
+    return { success: true, dispatched: true, acknowledged: true };
+  }
+
+  async requestRemovePrototypeAsset(
+    id: string,
+    options?: PrototypeAssetRequestOptions,
+  ): Promise<PrototypeAssetResult> {
+    options?.abortSignal?.throwIfAborted();
+    options?.onDispatch?.();
+    this.assets.delete(id);
+    return { success: true, dispatched: true, acknowledged: true };
+  }
+
+  async requestSavePrototype(): Promise<PrototypeResult> {
+    return SAVED_REFUSAL;
+  }
+
+  async requestListSavedPrototypes(): Promise<PrototypeResult> {
+    return SAVED_REFUSAL;
+  }
+
+  async requestPinSavedPrototype(): Promise<PrototypeResult> {
+    return SAVED_REFUSAL;
+  }
+
+  async requestDeleteSavedPrototype(): Promise<PrototypeResult> {
+    return SAVED_REFUSAL;
+  }
+
+  onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /**
+   * Delivers a user input on a shown prototype as the device's `prototype_event` push, so
+   * awaitEvent sees it exactly as from hardware. False when the id is not shown.
+   */
+  dispatch(input: VirtualPrototypeInput): boolean {
+    const entry = this.shown.get(input.id);
+    if (!entry) {
+      return false;
+    }
+    if (input.state !== undefined) {
+      entry.state = { ...entry.state, ...input.state };
+      entry.revision += 1;
+      entry.stateRevision = entry.revision;
+    }
+    if (input.pages !== undefined) {
+      entry.pages = { ...entry.pages, ...input.pages };
+    }
+    entry.lastSequence += 1;
+    const event: PrototypeEvent = {
+      type: "prototype_event",
+      timestamp: this.clock.now(),
+      id: input.id,
+      sequence: entry.lastSequence,
+      kind: input.kind,
+      name: input.name,
+      payload: input.payload ?? null,
+      state: { ...entry.state },
+      pages: { ...entry.pages },
+    };
+    [...this.listeners].forEach((listener) => listener(event));
+    return true;
+  }
+
+  /** Ids the virtual device is showing, oldest first. */
+  shownIds(): string[] {
+    return [...this.shown.keys()];
+  }
+
+  private missingAssets(spec: unknown): string[] {
+    const { images, fonts, shaders } = collectPrototypeAssetReferences(spec);
+    return [...images, ...fonts, ...shaders].filter((id) => !this.assets.has(id)).sort();
+  }
+}

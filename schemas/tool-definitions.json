@@ -31131,6 +31131,27 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "virtualDevice": {
+          "description": "Headless mode only (AUTOMOBILE_HEADLESS=1 or --headless): the call ran on the in-memory virtual device, not a real device; the prototype renders only as automobile:prototype/<id>/web, and specs or actions needing an unsupportedCapabilities entry are refused",
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "renderer": {
+              "type": "string",
+              "const": "web"
+            },
+            "unsupportedCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["deviceId", "renderer", "unsupportedCapabilities"],
+          "additionalProperties": false
+        },
         "screenMap": {
           "description": "screenMap only: the spec's screens and the actions that move between them",
           "type": "object",

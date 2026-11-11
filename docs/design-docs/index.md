@@ -32,3 +32,4 @@ Prototype diagnostics: [performance measurement](plat/android/prototype-performa
 iOS simulator prototypes: [prototype agent](plat/ios/prototype-agent.md).
 
 Prototype user testing: [session recording and reports](prototype-user-test-sessions.md).
+Headless prototypes: [virtual device contract](prototype-headless.md).

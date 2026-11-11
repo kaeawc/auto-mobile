@@ -1,3 +1,4 @@
+import { withoutHiddenXrChrome } from "./xrHiddenChrome";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import {
   TapAnyAndroidTapper,
@@ -179,6 +180,9 @@ export class TapAnyElement extends BaseVisualChange {
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ) => Promise<ViewHierarchyResult | null>;
+  private readonly selectionXr = new WeakMap<TapAnyElementOptions, boolean>();
+  private readonly selectionXrReads = new WeakMap<TapAnyElementOptions, Promise<boolean>>();
+  private readonly selectionXrDetector: AndroidXrDetector | undefined;
   private beforeAndroidTapForTesting?: () => void;
 
   private static readonly SEARCH_UNTIL_DEFAULT_MS = TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
@@ -196,6 +200,7 @@ export class TapAnyElement extends BaseVisualChange {
       timer: options.timer,
       displayFence: options,
     });
+    this.selectionXrDetector = options.xrDetector;
     this.lastRenderedObservation = options.lastRenderedObservation ?? sessionRenderedObservation;
     this.geometry = new DefaultElementGeometry();
     this.elementSelector =
@@ -280,8 +285,10 @@ export class TapAnyElement extends BaseVisualChange {
         beforeTap: () => this.beforeAndroidTapForTesting?.(),
         refreshViewHierarchy: (timeout, size, signal, forceCapture) =>
           this.refreshViewHierarchy(timeout, size, signal, forceCapture),
-        findClickableElement: (options, hierarchy, size) =>
-          this.findClickableElement(options, hierarchy, size),
+        findClickableElement: async (options, hierarchy, size) => {
+          await this.prepareXrSelection(options, hierarchy);
+          return this.findClickableElement(options, hierarchy, size);
+        },
         resolveTapPoint: (target, size) => this.resolveTapPoint(target, size),
       });
     const ios =
@@ -332,6 +339,25 @@ export class TapAnyElement extends BaseVisualChange {
     return isContainerAvailable(this.elementSelector, viewHierarchy, container);
   }
 
+  private async prepareXrSelection(
+    options: TapAnyElementOptions,
+    hierarchy: ViewHierarchyResult,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (
+      this.tapPlatform !== "android" ||
+      (!options.container && withoutHiddenXrChrome(hierarchy).hiddenNodes.size === 0)
+    ) {
+      return;
+    }
+    let read = this.selectionXrReads.get(options);
+    if (!read) {
+      read = isAndroidXr({ device: this.device, adb: this.adb, signal }, this.selectionXrDetector);
+      this.selectionXrReads.set(options, read);
+    }
+    this.selectionXr.set(options, await read);
+  }
+
   private findClickableElement(
     options: TapAnyElementOptions,
     viewHierarchy: ViewHierarchyResult,
@@ -339,6 +365,7 @@ export class TapAnyElement extends BaseVisualChange {
   ): { element: Element | null; containerFound: boolean } {
     return findTapAnyClickableElement(
       {
+        xr: this.selectionXr.get(options),
         elementSelector: this.elementSelector,
         isContainerAvailable: (hierarchy, container) =>
           this.isContainerAvailable(hierarchy, container),
@@ -471,7 +498,13 @@ export class TapAnyElement extends BaseVisualChange {
       // search into an unbounded tap.
       discardLateResult: true,
       signal,
-      fetch: (remainingTimeMs) => refresh(remainingTimeMs, observeResult.screenSize, signal),
+      fetch: async (remainingTimeMs) => {
+        const hierarchy = await refresh(remainingTimeMs, observeResult.screenSize, signal);
+        if (hierarchy) {
+          await this.prepareXrSelection(options, hierarchy, signal);
+        }
+        return hierarchy;
+      },
       accept: (refreshed) => {
         const hash = hierarchyFingerprint(refreshed);
         if (hash && hash !== lastHash) {
@@ -564,6 +597,7 @@ export class TapAnyElement extends BaseVisualChange {
     let changeCount = 0;
     const lastHash = hierarchyFingerprint(viewHierarchy);
 
+    await this.prepareXrSelection(options, selectedCapture.hierarchy, signal);
     const found = this.findClickableElement(options, selectedCapture.hierarchy, {
       observationScreenSize: observeResult.screenSize,
       display: observeResult.viewHierarchy,
@@ -603,6 +637,7 @@ export class TapAnyElement extends BaseVisualChange {
       selectedCapture = identifyObservedHierarchy(this.tapPlatform, viewHierarchy, "fresh", {
         timer: this.timer,
       });
+      await this.prepareXrSelection(options, selectedCapture.hierarchy, signal);
       const current = this.findClickableElement(options, selectedCapture.hierarchy, {
         observationScreenSize: observeResult.screenSize,
         display: viewHierarchy,
@@ -836,6 +871,7 @@ export class TapAnyElement extends BaseVisualChange {
     // Internal transport context; never part of public options or tool schemas.
     request?: { requestDeadlineMs?: number },
   ): Promise<TapAnyElementResult> {
+    options = { ...options }; // Per-call XR selection cache, including refreshed captures.
     if (!options.action) {
       return this.createErrorResult(options.action, "tap action is required");
     }

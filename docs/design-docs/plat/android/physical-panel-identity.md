@@ -41,6 +41,10 @@ the panel id, and pushed display transitions have never carried a panel key.
   other internal panel is `cluster` (the instrument cluster), and the inventory reports no
   postures, so no message offers `setPosture` on a car. The cluster app's own virtual display
   (`ClusterOsDouble-VD`) is reported under role `virtual`, as for any other app-created display.
+  A failed inventory read is retained as an unreadable outcome: explicit display keys, roles and
+  aggregate observations fail with retryable `DisplayInventoryUnavailableError` rather than treating
+  a fallback panel as a successful inventory. Unknown-key errors list real panels only after a
+  successful read; omitted and `active` selectors retain their default routing.
 - Overlay displays (`overlay_display_devices`, `type OVERLAY`, `uniqueId="overlay:N"`) have no
   SurfaceFlinger physical id, so they join the inventory after the physical panels under role
   `overlay` with the whole `overlay:N` as key: a bare `N` could be mistaken for a logical display

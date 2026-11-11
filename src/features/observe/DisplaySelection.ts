@@ -4,7 +4,11 @@ import type {
   Posture,
   DisconnectedPanelContext,
 } from "../../models/DisplayPanel";
-import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
+import {
+  displayInventoryOutcome,
+  type BootedDevice,
+  type DisplayInventoryOutcome,
+} from "../../models/DeviceInfo";
 import { POSTURE_PANEL_ROLES, selectablePanels } from "../../models/DisplayPanel";
 import {
   DisplayInventoryUnavailableError,
@@ -121,6 +125,30 @@ function pinnedPanel(inventory: DeviceDisplays | undefined, pin: string): Displa
 
 function postureDefault(posture: Posture | undefined): DisplayPanel["role"] | undefined {
   return POSTURE_PANEL_ROLES.find(([defaultPosture]) => defaultPosture === posture)?.[1];
+}
+
+/** An unreadable inventory cannot establish whether an explicit selector is available. */
+export function assertDisplayInventoryAvailable(
+  device: Pick<BootedDevice, "displays" | typeof displayInventoryOutcome>,
+  request: string | undefined,
+): void {
+  if (
+    request !== undefined &&
+    request !== "active" &&
+    device[displayInventoryOutcome]?.kind === "unreadable"
+  ) {
+    throw new DisplayInventoryUnavailableError({});
+  }
+}
+
+/** Device-aware selection preserves unreadable inventory evidence before resolving a selector. */
+export function resolveDeviceTargetDisplay(
+  device: Pick<BootedDevice, "displays" | typeof displayInventoryOutcome>,
+  request: string | undefined,
+  liveState: DisplayLiveState,
+): DisplayPanel {
+  assertDisplayInventoryAvailable(device, request);
+  return resolveTargetDisplay(device.displays, request, liveState);
 }
 
 /** Pure per-call panel selection. Inventory order is the stable final fallback. */

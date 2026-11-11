@@ -6,7 +6,7 @@ import type {
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
-import { resolveTargetDisplay } from "../observe/DisplaySelection";
+import { resolveDeviceTargetDisplay } from "../observe/DisplaySelection";
 import { displayTransitions } from "../observe/DisplayTransition";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { DisplayPanel, DisplayRef } from "../../models/DisplayPanel";
@@ -118,7 +118,7 @@ export async function resolvePressButtonDisplay(
     display === "active" && !focused && (device.displays?.panels.length ?? 0) > 1
       ? await state.liveDisplay(device, adb, signal)
       : undefined;
-  const panel = resolveTargetDisplay(device.displays, display, {
+  const panel = resolveDeviceTargetDisplay(device, display, {
     focusedPanelKey: focused?.key,
     activePanelKey: live?.key,
     posture: live?.posture,

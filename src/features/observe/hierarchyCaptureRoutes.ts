@@ -1,5 +1,6 @@
 import { findRunnerLaunchQueuedError } from "../../ctrlProxy/ios/RunnerLaunchQueuedError";
 import type { ViewHierarchyResult } from "../../models";
+import { DisplayInventoryUnavailableError } from "../../models/DisplayInventoryUnavailableError";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage as describeError } from "../../utils/describeUnknownError";
@@ -79,6 +80,7 @@ export function shouldPropagateCaptureError(
 ): boolean {
   if (
     error instanceof StrictSettledScreenshotCaptureError ||
+    error instanceof DisplayInventoryUnavailableError ||
     error instanceof DisplaySelectionError
   ) {
     return true;

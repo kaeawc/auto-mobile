@@ -10,7 +10,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
 import { StaleDisplayError, staleDisplayError } from "../observe/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
-import { DisplaySelectionError, resolveTargetDisplay } from "../observe/DisplaySelection";
+import { DisplaySelectionError, resolveDeviceTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type {
   ObserveScreen,
@@ -202,7 +202,7 @@ export async function resolveActionDisplay(
   const previous = (dependencies.lastRenderedObservation ?? sessionRenderedObservation)(
     device.deviceId,
   );
-  const panel = resolveTargetDisplay(device.displays, display, {
+  const panel = resolveDeviceTargetDisplay(device, display, {
     focusedPanelKey: previous?.display.key,
     activePanelKey: previous?.display.key,
     posture: previous?.display.posture,
@@ -273,7 +273,7 @@ export async function prepareTargetDisplayAction(
     previous,
     transitions,
   );
-  const panel = resolveTargetDisplay(device.displays, display, {
+  const panel = resolveDeviceTargetDisplay(device, display, {
     focusedPanelKey: previous?.display.key,
     activePanelKey: previous?.display.key,
     posture: previous?.display.posture,

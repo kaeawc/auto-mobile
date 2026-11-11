@@ -4,38 +4,13 @@ import { ActionableError, toActionableError } from "../../src/models/ActionableE
 import { WebSocketWatchRunnerClient } from "../../src/features/watch/WatchRunnerClient";
 import { addWatchSmartStackWidget } from "../../src/features/watch/WatchSmartStackWidget";
 import {
+  daemonCliIdleWindowDeclarer,
   withCliSessionIdleHold,
-  type CliIdleWindowDeclarer,
 } from "../../src/features/watch/WatchSessionIdleHold";
 import { DaemonClient } from "../../src/daemon/client/client";
-import {
-  CLI_KEEPER_LIVENESS_OWNER_KIND,
-  CLI_SESSION_LIVENESS_POLICY,
-  DAEMON_HEARTBEAT_METHOD,
-  getCliSessionIdleTimeoutMs,
-} from "../../src/daemon/wire/constants";
+import { getCliSessionIdleTimeoutMs } from "../../src/daemon/wire/constants";
+import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-
-const HEARTBEAT_TIMEOUT_MS = 5_000;
-
-/** Declares the session's CLI idle window over one daemon connection. */
-function daemonIdleWindowDeclarer(client: DaemonClient, sessionId: string): CliIdleWindowDeclarer {
-  return {
-    declareIdleWindow: async (idleTimeoutMs) => {
-      await client.connect();
-      await client.callDaemonMethod(
-        DAEMON_HEARTBEAT_METHOD,
-        {
-          sessionId,
-          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
-          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
-          idleTimeoutMs,
-        },
-        { timeoutMs: HEARTBEAT_TIMEOUT_MS },
-      );
-    },
-  };
-}
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
@@ -72,7 +47,7 @@ async function main(): Promise<void> {
     const result =
       daemon && sessionId
         ? await withCliSessionIdleHold(
-            daemonIdleWindowDeclarer(daemon, sessionId),
+            daemonCliIdleWindowDeclarer(daemon, sessionId, defaultIdGenerator.next()),
             defaultTimer,
             add,
             {

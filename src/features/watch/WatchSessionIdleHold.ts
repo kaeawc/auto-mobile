@@ -1,8 +1,10 @@
 import {
+  CLI_SESSION_LIVENESS_POLICY,
+  DAEMON_HEARTBEAT_METHOD,
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
 } from "../../daemon/wire/constants";
-import { toActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
@@ -14,6 +16,56 @@ import type { Timer } from "../../utils/SystemTimer";
  */
 export interface CliIdleWindowDeclarer {
   declareIdleWindow(idleTimeoutMs: number): Promise<void>;
+}
+
+/** The daemon control-socket calls {@link daemonCliIdleWindowDeclarer} makes. */
+export interface IdleWindowDaemonClient {
+  connect(): Promise<void>;
+  callDaemonMethod(
+    method: string,
+    params: Record<string, unknown>,
+    options: { timeoutMs: number },
+  ): Promise<unknown>;
+}
+
+const DECLARATION_TIMEOUT_MS = 5_000;
+
+/**
+ * Declares the window the way a one-shot `--cli` invocation does: a liveness ownership claim under
+ * `ownerToken` with the `cli` policy. A `cli-idle` session holds no lease against a claim, so the
+ * claim is admitted and the window applied. A `cli-keeper` heartbeat would be acknowledged without
+ * any change, and a tokenless one is ignored once the session has an owner token.
+ */
+export function daemonCliIdleWindowDeclarer(
+  client: IdleWindowDaemonClient,
+  sessionId: string,
+  ownerToken: string,
+): CliIdleWindowDeclarer {
+  return {
+    declareIdleWindow: async (idleTimeoutMs) => {
+      await client.connect();
+      const result = await client.callDaemonMethod(
+        DAEMON_HEARTBEAT_METHOD,
+        {
+          sessionId,
+          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerToken: ownerToken,
+          claimLivenessOwnership: true,
+          idleTimeoutMs,
+        },
+        { timeoutMs: DECLARATION_TIMEOUT_MS },
+      );
+      if (
+        typeof result === "object" &&
+        result !== null &&
+        Reflect.get(result, "livenessUnchanged") === true
+      ) {
+        throw new ActionableError(
+          `Session ${sessionId} did not take the CLI idle window (its liveness policy is unchanged), so it cannot be held while the watch runner is driven.`,
+        );
+      }
+    },
+  };
 }
 
 export interface CliSessionIdleHoldOptions {

@@ -400,12 +400,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ) = notImplemented()
 
   override fun listPerformanceAuditResults(
-    startTime: String?,
-    endTime: String?,
-    limit: Int?,
-    offset: Int?,
-    deviceId: String?,
-    deviceSessionUuid: String?,
+    query: dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditQuery,
   ) = notImplemented()
 
   override fun getTestTimings(

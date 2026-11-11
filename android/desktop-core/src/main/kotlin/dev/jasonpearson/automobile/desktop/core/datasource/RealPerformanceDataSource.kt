@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryResult
+import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditQuery
 import dev.jasonpearson.automobile.desktop.core.daemon.isUnknownDeviceSessionUuidFilter
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceRun
 
@@ -42,18 +43,15 @@ class RealPerformanceDataSource(
   }
 
   private fun readHistory(client: AutoMobileClient): PerformanceAuditHistoryResult {
+    val deviceScoped = PerformanceAuditQuery(limit = HISTORY_LIMIT, deviceId = deviceId)
     if (deviceSessionUuid == null) {
-      return client.listPerformanceAuditResults(limit = HISTORY_LIMIT, deviceId = deviceId)
+      return client.listPerformanceAuditResults(deviceScoped)
     }
     return try {
-      client.listPerformanceAuditResults(
-        limit = HISTORY_LIMIT,
-        deviceId = deviceId,
-        deviceSessionUuid = deviceSessionUuid,
-      )
+      client.listPerformanceAuditResults(deviceScoped.copy(deviceSessionUuid = deviceSessionUuid))
     } catch (e: McpConnectionException) {
       if (!e.isUnknownDeviceSessionUuidFilter()) throw e
-      client.listPerformanceAuditResults(limit = HISTORY_LIMIT, deviceId = deviceId)
+      client.listPerformanceAuditResults(deviceScoped)
     }
   }
 

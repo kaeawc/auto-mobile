@@ -15,6 +15,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.KillDeviceResult
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.ObserveResult
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryResult
+import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditQuery
 import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueRequest
 import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.SetActiveDeviceResult
@@ -306,13 +307,10 @@ internal class FakeFeatureOperations(private val state: FakeAutoMobileClientStat
   }
 
   override fun listPerformanceAuditResults(
-    startTime: String?,
-    endTime: String?,
-    limit: Int?,
-    offset: Int?,
-    deviceId: String?,
-    deviceSessionUuid: String?,
+    query: PerformanceAuditQuery,
   ): PerformanceAuditHistoryResult {
+    val deviceId = query.deviceId
+    val deviceSessionUuid = query.deviceSessionUuid
     return with(state) {
       calls.add("listPerformanceAuditResults")
       lastListPerformanceAuditResultsDeviceId = deviceId

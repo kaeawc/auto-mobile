@@ -53,14 +53,21 @@ data class PerformanceAuditHistoryResult(
 
 internal const val PERFORMANCE_RESULTS_RESOURCE_URI = "automobile:performance-results"
 
-internal fun buildPerformanceResultsUri(
-  startTime: String?,
-  endTime: String?,
-  limit: Int?,
-  offset: Int?,
-  deviceId: String?,
-  deviceSessionUuid: String? = null,
-): String {
+/** Filters for the performance-results resource; null fields are omitted from the URI. */
+data class PerformanceAuditQuery(
+  val startTime: String? = null,
+  val endTime: String? = null,
+  val limit: Int? = null,
+  val offset: Int? = null,
+  val deviceId: String? = null,
+  /**
+   * Only audits stamped with this device epoch. A daemon that predates the filter rejects it as an
+   * unknown query parameter ([isUnknownDeviceSessionUuidFilter]).
+   */
+  val deviceSessionUuid: String? = null,
+)
+
+internal fun PerformanceAuditQuery.toResourceUri(): String {
   return ResourceUriBuilder(PERFORMANCE_RESULTS_RESOURCE_URI)
     .apply {
       add("startTime", startTime)

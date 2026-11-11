@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryEntry
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryResult
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditMetrics
+import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditQuery
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -148,14 +149,9 @@ class RealPerformanceDataSourceTest {
     val client =
       object : AutoMobileClient by FakeAutoMobileClient() {
         override fun listPerformanceAuditResults(
-          startTime: String?,
-          endTime: String?,
-          limit: Int?,
-          offset: Int?,
-          deviceId: String?,
-          deviceSessionUuid: String?,
+          query: PerformanceAuditQuery,
         ): PerformanceAuditHistoryResult {
-          calls += deviceSessionUuid
+          calls += query.deviceSessionUuid
           throw McpConnectionException("Failed to retrieve performance audit results: boom")
         }
       }

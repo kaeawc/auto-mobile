@@ -120,15 +120,6 @@ interface AutoMobileFeatureOperations {
   fun setFeatureFlag(key: String, enabled: Boolean, config: JsonObject? = null): FeatureFlagState
 
   fun listPerformanceAuditResults(
-    startTime: String? = null,
-    endTime: String? = null,
-    limit: Int? = null,
-    offset: Int? = null,
-    deviceId: String? = null,
-    /**
-     * Only audits stamped with this device epoch. A daemon that predates the filter rejects it as
-     * an unknown query parameter ([isUnknownDeviceSessionUuidFilter]).
-     */
-    deviceSessionUuid: String? = null,
+    query: PerformanceAuditQuery = PerformanceAuditQuery(),
   ): PerformanceAuditHistoryResult
 }

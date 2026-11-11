@@ -54,6 +54,7 @@ import { registerNetworkTools } from "./networkTools";
 import { registerPortReverseTools } from "./portReverseTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSystemAlertTools } from "./systemAlertTools";
+import { registerContentSeedTools } from "./contentSeedTools";
 import { registerSensorTools } from "./sensorTools";
 import { registerAudioTools } from "./audioTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
@@ -154,6 +155,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerKillProfileTools();
   registerSystemAlertTools();
   registerSensorTools();
+  registerContentSeedTools();
   registerAudioTools();
   registerDisplayProfileTools();
   registerPersonaTools();

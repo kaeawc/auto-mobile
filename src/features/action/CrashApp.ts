@@ -125,6 +125,7 @@ export class CrashApp {
       dependencies.crashBackend ??
       resolveIosCrashBackend(device.deviceId, {
         simctl: dependencies.simctl ?? new SimCtlClient(device),
+        platform: device.platform,
       });
     this.uid = dependencies.uid ?? (() => os.userInfo().uid);
     this.timer = dependencies.timer ?? defaultTimer;
@@ -361,7 +362,7 @@ export class CrashApp {
     signal?: AbortSignal,
   ): Promise<CrashAppResult> {
     const base = {
-      platform: "ios" as const,
+      platform: this.device.platform,
       appId,
       timestamp,
       confirmed: false,

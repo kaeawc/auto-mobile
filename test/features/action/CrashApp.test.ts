@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { crashAppResultSchema } from "../../../src/server/appToolOutputSchemas";
 import type { ExecResult } from "../../../src/models";
 import {
   CrashApp,
   type CrashAppDependencies,
   findAndroidCrashEvidence,
   findIosSimulatorCrashEvidence,
+  findIosSimulatorAppProcess,
 } from "../../../src/features/action/CrashApp";
 import type {
   NativeCrashReport,
@@ -481,6 +484,18 @@ describe("CrashApp (Android)", () => {
 });
 
 describe("CrashApp (iOS)", () => {
+  test("parses the captured tvOS 26.5 launchctl process line", () => {
+    const processList = readFileSync(
+      new URL("../../fixtures/ios-simctl/launchctl-list-crashtv-tvos26-5.txt", import.meta.url),
+      "utf8",
+    );
+
+    expect(findIosSimulatorAppProcess(processList, "dev.jasonpearson.automobile.crashtv")).toEqual({
+      pid: 19876,
+      serviceLabel: "UIKitApplication:dev.jasonpearson.automobile.crashtv[2a7d][rb-legacy]",
+    });
+  });
+
   // RunningBoard lines are derived from the issue #6000 reproduction (NOT captured;
   // capture needed from a real simulator). Other-bundle-id lines change only the bundle-id token.
   const evidenceLines = [
@@ -530,50 +545,60 @@ describe("CrashApp (iOS)", () => {
     ).toBeDefined();
   });
 
-  test("signals and confirms the exact simulator app process", async () => {
-    const processList = [
-      "PID\tStatus\tLabel",
-      "111\t0\tUIKitApplication:com.example.app.beta[aaaa][rb-legacy]",
-      "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
-    ].join("\n");
-    const commands = new FakeSimulatorCommands(
-      [processList, processList, "PID\tStatus\tLabel\n"],
-      "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
-    );
-    const timer = new FakeTimer();
-    timer.advanceTime(1_700_000_000_000);
-    const action = new CrashApp(
-      iosSimulator,
-      dependencies({ simctl: commands, timer, uid: () => 501 }),
-    );
+  test.each(["ios", "tvos"] as const)(
+    "signals and confirms the exact %s simulator app process",
+    async (platform) => {
+      const processList = [
+        "PID\tStatus\tLabel",
+        "111\t0\tUIKitApplication:com.example.app.beta[aaaa][rb-legacy]",
+        "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
+      ].join("\n");
+      const commands = new FakeSimulatorCommands(
+        [processList, processList, "PID\tStatus\tLabel\n"],
+        "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
+      );
+      const timer = new FakeTimer();
+      timer.advanceTime(1_700_000_000_000);
+      const action = new CrashApp(
+        { ...iosSimulator, platform },
+        dependencies({ simctl: commands, timer, uid: () => 501 }),
+      );
 
-    const result = await action.execute("com.example.app");
+      const result = await action.execute("com.example.app");
 
-    expect(result).toMatchObject({
-      success: true,
-      supported: true,
-      platform: "ios",
-      appId: "com.example.app",
-      processId: 27955,
-      mechanism: "ios_simulator_sigabrt",
-      timestamp: 1_700_000_000_000,
-      wasRunning: true,
-      confirmed: true,
-      evidence: {
-        source: "ios_unified_log",
-      },
-    });
-    expect(commands.calls).toContainEqual([
-      "spawn",
-      iosSimulator.deviceId,
-      "launchctl",
-      "kill",
-      "SIGABRT",
-      "user/501/UIKitApplication:com.example.app[bbbb][rb-legacy]",
-    ]);
-    expect(commands.calls.flat()).not.toContain("terminate");
-    expect(commands.timeouts.every((timeoutMs) => (timeoutMs ?? 0) > 0)).toBe(true);
-  });
+      expect(result).toMatchObject({
+        success: true,
+        supported: true,
+        platform,
+        appId: "com.example.app",
+        processId: 27955,
+        mechanism: "ios_simulator_sigabrt",
+        timestamp: 1_700_000_000_000,
+        wasRunning: true,
+        confirmed: true,
+        evidence: {
+          source: "ios_unified_log",
+        },
+      });
+      expect(crashAppResultSchema.safeParse({ ...result, message: "Crashed app" }).success).toBe(
+        true,
+      );
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(commands.calls).toContainEqual([
+        "spawn",
+        iosSimulator.deviceId,
+        "launchctl",
+        "kill",
+        "SIGABRT",
+        `${platform === "tvos" ? "system" : "user/501"}/UIKitApplication:com.example.app[bbbb][rb-legacy]`,
+      ]);
+      if (platform === "tvos") {
+        expect(commands.calls.flat().some((arg) => arg.startsWith("user/"))).toBe(false);
+      }
+      expect(commands.calls.flat()).not.toContain("terminate");
+      expect(commands.timeouts.every((timeoutMs) => (timeoutMs ?? 0) > 0)).toBe(true);
+    },
+  );
 
   test("uses the host UID when signaling the simulator app process", async () => {
     const processList = "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]";

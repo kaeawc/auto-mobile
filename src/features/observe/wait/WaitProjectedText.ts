@@ -161,6 +161,8 @@ function isTextOnlyWait(waitFor: ObserveWaitForOptions): boolean {
     waitFor.contentDescription === undefined &&
     waitFor.container === undefined &&
     waitFor.selectionStrategy === undefined &&
+    // A row's label can come from a content description; displayed-text waits stay on the hierarchy.
+    waitFor.textSource === undefined &&
     !("layer" in waitFor && waitFor.layer !== undefined)
   );
 }

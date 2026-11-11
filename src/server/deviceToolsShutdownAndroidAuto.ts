@@ -1,3 +1,4 @@
+import { FileAvdColdBootMarkerStore } from "../utils/android-cmdline-tools/AvdColdBootMarkerStore";
 import type {
   DeviceToolsDependencies,
   ShutdownDeadlineContext,
@@ -11,11 +12,17 @@ import { stopProvisionedAndroidAuto } from "./provisioning/provisioningAndroidAu
  * Only a DHU this daemon spawned for this emulator; it would otherwise outlive it (#17839).
  * Its host port redirect is forgotten only once the kill succeeds, since a failed kill leaves
  * the emulator, and its redirect, in place. Other platforms have no DHU, so their deadline
- * errors keep naming their own step (#17877).
+ * errors keep naming their own step (#17877). `avdName` is the AVD the kill confirmed, which can
+ * differ from the entry device's name (an `Unknown (emulator-NNNN)` placeholder); the cold boot
+ * marker is written for it.
  */
 export async function stopAndroidAutoBeforeShutdown(
   shutdownContext: ShutdownDeadlineContext,
-  dependencies: DeviceToolsDependencies,
+  dependencies: Pick<
+    DeviceToolsDependencies,
+    "timer" | "androidAutoProjection" | "avdColdBootMarkers"
+  >,
+  avdName: string = shutdownContext.device.name,
 ): Promise<void> {
   const { device } = shutdownContext;
   if (device.platform !== "android") {
@@ -24,7 +31,19 @@ export async function stopAndroidAutoBeforeShutdown(
   await runWithinShutdownDeadline(device, dependencies.timer, shutdownContext.deadlineMs, {
     detail: "Desktop Head Unit stop did not complete",
     requestAbortSignal: shutdownContext.requestAbortSignal,
-    operation: async () => await stopProvisionedAndroidAuto(dependencies, device),
+    operation: async () => {
+      const stopped = await stopProvisionedAndroidAuto(dependencies, device);
+      if (stopped) {
+        try {
+          await (dependencies.avdColdBootMarkers ?? new FileAvdColdBootMarkerStore()).mark(avdName);
+        } catch (error) {
+          logger.warn(
+            `[AndroidAuto] Failed to mark AVD '${avdName}' for a cold boot: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }
+    },
     timeoutMs: shutdownContext.timeoutMs,
   });
 }
@@ -48,7 +67,9 @@ async function stopAndroidAutoAfterKill(
   if (device.platform !== "android") {
     return undefined;
   }
-  const stop = stopProvisionedAndroidAuto(dependencies, device, { deviceStopped: true });
+  const stop = stopProvisionedAndroidAuto(dependencies, device, { deviceStopped: true }).then(
+    () => {},
+  );
   try {
     await runWithinShutdownDeadline(device, dependencies.timer, shutdownContext.deadlineMs, {
       detail: "Desktop Head Unit stop after the kill did not complete",

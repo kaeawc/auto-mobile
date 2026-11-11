@@ -68,7 +68,12 @@ function observePayload(response: unknown) {
 
 isolateToolRegistry();
 
-const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+const device: BootedDevice = {
+  deviceId: "emulator-5554",
+  name: "Pixel",
+  platform: "android",
+  formFactor: "phone",
+};
 const callDeviceRead = (args: Record<string, unknown>) =>
   runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
     ToolRegistry.getTool("observe")!.handler(args),

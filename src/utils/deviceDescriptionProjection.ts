@@ -116,18 +116,24 @@ function androidSystemImageTag(device: DeviceInfo): string | undefined {
 }
 
 /**
- * `vehicle` for an automotive description (#16767), derived from the system-image tag: a non-Play
- * `android-automotive` image is a `userdebug` build that accepts driving-state simulation, while a
- * Play Store car image is a `user` build that refuses it. Vehicle state is injected on emulators
- * only, so a physical head unit supports neither. Any other form factor gets no `vehicle` key.
+ * `vehicle` for an automotive description (#16767). Live build-prop traits of a booted device
+ * (`ro.build.type` / `ro.debuggable`, #16775) win when supplied. Otherwise it is derived from the
+ * system-image tag: a non-Play `android-automotive` image is a `userdebug` build that accepts
+ * driving-state simulation, while a Play Store car image is a `user` build that refuses it.
+ * Vehicle state is injected on emulators only, so a physical head unit supports neither. Any other
+ * form factor gets no `vehicle` key, even when live traits are supplied.
  */
 export function vehicleFrom(
   device: DeviceInfo,
   formFactor: FormFactor,
   isVirtual: boolean,
+  live?: DeviceVehicleCapabilities,
 ): { vehicle?: DeviceVehicleCapabilities } {
   if (formFactor !== "automotive") {
     return {};
+  }
+  if (live) {
+    return { vehicle: { motion: live.motion, nightMode: live.nightMode } };
   }
   if (!isVirtual) {
     return { vehicle: { motion: "unsupported", nightMode: "unsupported" } };

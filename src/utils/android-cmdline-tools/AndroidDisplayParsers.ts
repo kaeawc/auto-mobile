@@ -18,6 +18,10 @@ export interface AndroidDisplayInfo {
   type?: "INTERNAL" | "EXTERNAL" | "VIRTUAL";
   sizePx?: DisplayPanel["sizePx"];
   hasDisplayInfo: boolean;
+  /** `FLAG_PRIVATE`: only the owner (and the system) can show content on the display. */
+  isPrivate?: boolean;
+  /** The package that created a virtual display (`owner <package> (uid <n>)`). */
+  ownerPackage?: string;
 }
 
 /** Read display-service records once for both default selection and inventory. */
@@ -55,22 +59,51 @@ function parseDisplayInfo(logicalId: string, line: string): AndroidDisplayInfo {
     type,
     sizePx: size ? { width: Number(size[1]), height: Number(size[2]) } : undefined,
     hasDisplayInfo: line.includes("DisplayInfo{"),
+    ...parseDisplayAccess(line),
   };
+}
+
+/** Who may show content on a display: its `FLAG_PRIVATE` flag and a virtual display's owner. */
+function parseDisplayAccess(line: string): Pick<AndroidDisplayInfo, "isPrivate" | "ownerPackage"> {
+  const ownerPackage = /\bowner ([\w.]+) \(uid \d+\)/.exec(line)?.[1];
+  return {
+    ...(/\bFLAG_PRIVATE\b/.test(line) ? { isPrivate: true } : {}),
+    ...(ownerPackage ? { ownerPackage } : {}),
+  };
+}
+
+/**
+ * Whether Android's accessibility service can report windows on a display. It does not track
+ * private virtual displays (`type VIRTUAL` with `FLAG_PRIVATE`), such as Android Auto's car
+ * displays or an emulator `-multidisplay` display created private, so no accessibility service,
+ * `getWindowsOnAllDisplays()` call or `uiautomator dump --display` can read their hierarchy. The
+ * display service still lists them, and `input -d <logicalId>` still reaches them.
+ */
+export function isAccessibilityUntrackedDisplay(info: AndroidDisplayInfo): boolean {
+  return info.type === "VIRTUAL" && info.isPrivate === true;
 }
 
 /**
  * Enabled records in dumpsys display's Logical Displays section, including private displays.
  * API 30 and older print no `mIsEnabled` line, so a record is enabled unless it says otherwise.
+ * Each record reads `mBaseDisplayInfo`; `current` reads `mOverrideDisplayInfo` when present
+ * instead, whose size is rotated the way window bounds are.
  */
-export function parseDumpsysLogicalDisplays(output: string): AndroidDisplayInfo[] {
+export function parseDumpsysLogicalDisplays(
+  output: string,
+  options: { current?: boolean } = {},
+): AndroidDisplayInfo[] {
   const records: AndroidDisplayInfo[] = [];
   let sectionIndent: number | undefined;
   let logicalId: string | undefined;
   let enabled: boolean | undefined;
   let baseInfo: string | undefined;
+  let overrideInfo: string | undefined;
   const finishRecord = () => {
-    if (enabled !== false && logicalId !== undefined && baseInfo !== undefined) {
-      records.push(parseDisplayInfo(logicalId, baseInfo));
+    // The override record is what windows see now: its `real` size follows the display rotation.
+    const info = (options.current ? overrideInfo : undefined) ?? baseInfo;
+    if (enabled !== false && logicalId !== undefined && baseInfo !== undefined && info) {
+      records.push(parseDisplayInfo(logicalId, info));
     }
   };
   for (const line of output.split(/\r?\n/)) {
@@ -86,6 +119,7 @@ export function parseDumpsysLogicalDisplays(output: string): AndroidDisplayInfo[
       logicalId = undefined;
       enabled = undefined;
       baseInfo = undefined;
+      overrideInfo = undefined;
       continue;
     }
     if (line.trim() && line.search(/\S/) <= sectionIndent) {
@@ -101,6 +135,9 @@ export function parseDumpsysLogicalDisplays(output: string): AndroidDisplayInfo[
     }
     if (/^ *mBaseDisplayInfo=DisplayInfo\{/.test(line)) {
       baseInfo = line;
+    }
+    if (/^ *mOverrideDisplayInfo=DisplayInfo\{/.test(line)) {
+      overrideInfo = line;
     }
   }
   finishRecord();

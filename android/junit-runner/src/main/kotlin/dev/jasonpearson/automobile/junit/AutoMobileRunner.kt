@@ -177,7 +177,11 @@ private constructor(
         )
         .toIntOrNull() ?: 2
     val safeConfiguredForks = if (configuredForks > 0) configuredForks else 1
-    val deviceCount = collaborators.deviceChecker.getDeviceCount()
+    val deviceCount =
+      PlanDeviceSelection.usableDeviceCount(
+        collaborators.deviceChecker.getDeviceCount(),
+        collaborators.environment,
+      )
     return if (deviceCount > 0) {
       safeConfiguredForks.coerceAtMost(deviceCount)
     } else {
@@ -249,7 +253,11 @@ private constructor(
         )
         .toIntOrNull() ?: 2
 
-    val deviceCount = collaborators.deviceChecker.getDeviceCount()
+    val deviceCount =
+      PlanDeviceSelection.usableDeviceCount(
+        collaborators.deviceChecker.getDeviceCount(),
+        collaborators.environment,
+      )
     val maxParallelForks =
       if (deviceCount > 0) {
         val effectiveForks = configuredForks.coerceAtMost(deviceCount)

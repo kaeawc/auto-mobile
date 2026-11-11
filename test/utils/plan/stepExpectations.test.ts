@@ -18,11 +18,11 @@ describe("expectationQuery (#16817)", () => {
     ],
     [
       { type: "textEquals", selector: { elementId: "n" }, text: "3" },
-      { elementId: "n", text: "3", textMatch: "exact" },
+      { elementId: "n", text: "3", textMatch: "exact", textSource: "displayed" },
     ],
     [
       { type: "textContains", text: "Hi" },
-      { text: "Hi", textMatch: "contains" },
+      { text: "Hi", textMatch: "contains", textSource: "displayed" },
     ],
   ])("%j becomes observe.waitFor %j", (expectation, waitFor) => {
     expect(expectationQuery(expectation)).toMatchObject({ kind: "evaluate", waitFor });

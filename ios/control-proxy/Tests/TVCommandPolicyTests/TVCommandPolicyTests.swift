@@ -32,6 +32,10 @@ final class TVCommandPolicyTests: XCTestCase {
         }
     }
 
+    func testRunnerAdvertisesRemoteHoldFeature() {
+        XCTAssertEqual(TVCommandPolicy.supportedFeatures, ["press_button_hold"])
+    }
+
     func testPlayPauseIsARemoteButton() {
         XCTAssertEqual(TVRemoteButton(rawValue: "playPause"), .playPause)
     }
@@ -681,7 +685,7 @@ final class TVCommandPolicyTests: XCTestCase {
         XCTAssertEqual(event["supportedCommands"] as? [String], [
             "request_hierarchy", "request_press_button", "request_append_text", "request_screenshot",
         ])
-        XCTAssertEqual(event["supportedFeatures"] as? [String], [])
+        XCTAssertEqual(event["supportedFeatures"] as? [String], ["press_button_hold"])
     }
 
     func testHostStaysTargetWhileFrontmost() {

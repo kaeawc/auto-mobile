@@ -72,6 +72,22 @@ test("correlates a real remote press result and reports runner errors", async ()
   client.close();
 });
 
+test("refuses a hold on a runner that does not advertise press_button_hold", async () => {
+  const { socket, client, timer } = fixture();
+  socket.receive({ ...connected, supportedFeatures: [] });
+  await expect(
+    client.request({ type: "request_press_button", action: "select", durationMs: 800 }),
+  ).rejects.toThrow("predates remote long presses");
+  expect(socket.sent).toEqual([]);
+  const plain = client.request({ type: "request_press_button", action: "select" });
+  await drainMicrotasks(2);
+  expect(socket.sent[0]).toMatchObject({ type: "request_press_button", action: "select" });
+  socket.receive({ ...pressResult, requestId: socket.sent[0].requestId });
+  await plain;
+  expect(timer.getSleepHistory()).toEqual([]);
+  client.close();
+});
+
 test.each([
   { type: "request_press_button", action: "menu" },
   { type: "request_press_button", action: "playPause", durationMs: 1500 },

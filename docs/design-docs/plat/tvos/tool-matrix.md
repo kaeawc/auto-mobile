@@ -138,7 +138,7 @@ fields identified by secure metadata, always redact their values.
 | `pinchOn`                     | refused-by-design | No touch surface.                                                                                                                                |
 | `portReverse`                 | refused-by-design | Android-only.                                                                                                                                    |
 | `postNotification`            | pass              | `simctl push` to the app named by `appId` (required).                                                                                            |
-| `pressButton`                 | pass              | Any remote button accepts `durationMs` (100–10000 ms) for long press. No `steps` or touch-surface swipes; XCUITest exposes only remote presses.  |
+| `pressButton`                 | pass              | Any remote button long-presses with `durationMs` (100–10000 ms) if the runner lists `press_button_hold`. No `steps` or touch-surface swipes.     |
 | `prototype`                   | not-supported     |                                                                                                                                                  |
 | `provisionDevice`             | pass              | Boots with readiness `none`.                                                                                                                     |
 | `putAppFile`                  | not-supported     |                                                                                                                                                  |

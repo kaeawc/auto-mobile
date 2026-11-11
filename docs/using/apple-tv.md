@@ -173,7 +173,8 @@ focused one.
 <!-- apple-tv-remote-buttons:end -->
 
 `playPause` toggles playback. Set `durationMs` to 100–10000 milliseconds to long-press any
-remote button; omit it for a normal press. `steps` is unsupported.
+remote button; omit it for a normal press. `steps` is unsupported. A tvOS runner built before
+long-press support refuses `durationMs` with `unsupported_on_tvos`; rebuild or update the runner.
 
 Touch-surface swipes are unavailable because XCUITest does not expose them on tvOS. Use
 directional presses and focus navigation instead.

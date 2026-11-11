@@ -9,6 +9,9 @@ enum TVCommandPolicy {
         "request_hierarchy", "request_press_button", "request_append_text", "request_screenshot",
     ]
 
+    /// Runner behaviours older runners lack; the daemon refuses a hold unless press_button_hold is listed.
+    static let supportedFeatures = ["press_button_hold"]
+
     static func supports(_ command: String) -> Bool {
         supportedCommands.contains(command)
     }

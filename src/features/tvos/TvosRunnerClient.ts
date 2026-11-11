@@ -25,6 +25,9 @@ export type TvosCommand =
   | { type: "request_press_button"; action: TVRemoteButton; durationMs?: number; bundleId?: string }
   | { type: "request_append_text"; text: string; bundleId?: string };
 
+/** Advertised in `supportedFeatures` by runners that honour `durationMs` on request_press_button. */
+export const TVOS_PRESS_BUTTON_HOLD_FEATURE = "press_button_hold";
+
 /** Each runner command's deadline; a runner that misses one is treated as stuck. */
 export const TVOS_RUNNER_COMMAND_TIMEOUT_MS = 5000;
 
@@ -82,6 +85,7 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
   private readonly pending = new Map<string, Pending>();
   private sequence = 0;
   private supported = new Set<string>();
+  private features = new Set<string>();
   private readonly ready: Promise<void>;
   private resolveReady!: () => void;
   private rejectReady!: (error: unknown) => void;
@@ -158,6 +162,11 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
         ? response.supportedCommands.filter((item): item is string => typeof item === "string")
         : [],
     );
+    this.features = new Set(
+      Array.isArray(response.supportedFeatures)
+        ? response.supportedFeatures.filter((item): item is string => typeof item === "string")
+        : [],
+    );
     this.resolveReady();
     return;
   }
@@ -217,6 +226,17 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
           if (!this.supported.has(command.type)) {
             throw new TvosRunnerError(
               `The tvos runner does not support ${command.type}.`,
+              "unsupported_on_tvos",
+            );
+          }
+          // An older runner decodes request_press_button without durationMs and would short-press.
+          if (
+            command.type === "request_press_button" &&
+            command.durationMs !== undefined &&
+            !this.features.has(TVOS_PRESS_BUTTON_HOLD_FEATURE)
+          ) {
+            throw new TvosRunnerError(
+              "The tvos runner predates remote long presses (durationMs); rebuild or update the tvOS runner.",
               "unsupported_on_tvos",
             );
           }

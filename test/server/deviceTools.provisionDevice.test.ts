@@ -125,7 +125,6 @@ import {
   type AndroidAutoProvisionReport,
 } from "../../src/features/androidAuto/AndroidAutoProjectionService";
 import { AndroidAutoProjectionProvisioner } from "../../src/features/androidAuto/AndroidAutoProjectionProvisioner";
-import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeLauncher, FakePhone, FakeSession, FakeUi } from "../fakes/FakeAndroidAutoProjection";
 
 /** Exact provision response body from the registered production handler, with deterministic dependencies. */

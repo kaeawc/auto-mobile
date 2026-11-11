@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { BootedDevice } from "../../../src/models";
 import { ProvisionDeviceError } from "../../../src/devices/exactDeviceProvisioning";
 import type {
   AndroidAutoProjectionApplier,
@@ -222,7 +223,7 @@ describe("provisionDevice androidAuto", () => {
   test("marks the device for a failure stop only when this run started its own DHU", async () => {
     const timer = new FakeTimer();
     const applier = new FakeApplier();
-    const applied: { androidAutoDevice?: unknown } = {};
+    const applied: { androidAutoDevice?: BootedDevice } = {};
     await applyProvisionAndroidAuto(
       args(),
       { androidAutoProjection: applier, timer },
@@ -238,7 +239,7 @@ describe("provisionDevice androidAuto", () => {
       steps: [{ step: "desktop-head-unit", status: "already-done" }],
       desktopHeadUnit: { running: true },
     };
-    const reused: { androidAutoDevice?: unknown } = {};
+    const reused: { androidAutoDevice?: BootedDevice } = {};
     await applyProvisionAndroidAuto(
       args(),
       { androidAutoProjection: applier, timer },
@@ -251,7 +252,7 @@ describe("provisionDevice androidAuto", () => {
     expect(reused.androidAutoDevice).toBeUndefined();
 
     applier.failure = new Error("onboarding failed");
-    const rejected: { androidAutoDevice?: unknown } = {};
+    const rejected: { androidAutoDevice?: BootedDevice } = {};
     await expect(
       applyProvisionAndroidAuto(args(), { androidAutoProjection: applier, timer }, androidDevice, {
         ...bounds(timer),

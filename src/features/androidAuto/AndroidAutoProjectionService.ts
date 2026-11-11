@@ -40,6 +40,12 @@ export interface AndroidAutoProvisionReport {
   desktopHeadUnit: { running: boolean; configPath: string };
 }
 
+/** How a DHU stop treats the phone's host port 5277 redirect. */
+export interface DesktopHeadUnitStopOptions {
+  deviceStopped?: boolean;
+  releaseRedirect?: boolean;
+}
+
 /** The provisionDevice seam: check host inputs before boot, project once the device is ready. */
 export interface AndroidAutoProjectionApplier {
   /** Throws an actionable error naming every missing host input (APK directory, DHU, config). */
@@ -63,9 +69,10 @@ export interface AndroidAutoProjectionApplier {
   /**
    * Stops the DHU this daemon spawned for `deviceId` (bounded; never rejects) and forgets it.
    * DHUs this daemon did not spawn are never touched. `deviceStopped` means the emulator itself
-   * is going away, so its host port redirect is forgotten too.
+   * is going away, so its host port redirect is forgotten too. `releaseRedirect` means the
+   * emulator keeps running but its session ended, so the redirect this daemon added is removed.
    */
-  stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }): Promise<void>;
+  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<void>;
 }
 
 /** The projection run, narrowed to the calls the applier makes. */
@@ -120,7 +127,7 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
     return report(result);
   }
 
-  stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }): Promise<void> {
+  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<void> {
     return this.provisioner.stopDesktopHeadUnit(deviceId, options);
   }
 }
@@ -178,17 +185,32 @@ export function createDefaultAndroidAutoProjectionProvisioner(
 }
 
 let defaultApplier: AndroidAutoProjectionApplier | undefined;
+let defaultProvisioner: AndroidAutoProjectionProvisioner | undefined;
 
 /**
  * The process-wide applier. One provisioner per host, because every projection dials host
  * port 5277 and the provisioner is what tracks which DHU holds it.
  */
 export function defaultAndroidAutoProjectionApplier(): AndroidAutoProjectionApplier {
-  defaultApplier ??= new DefaultAndroidAutoProjectionApplier(
-    { env: process.env, platform: process.platform, files: nodeAndroidAutoHostFiles },
-    createDefaultAndroidAutoProjectionProvisioner(),
-  );
+  if (!defaultApplier) {
+    defaultProvisioner = createDefaultAndroidAutoProjectionProvisioner();
+    defaultApplier = new DefaultAndroidAutoProjectionApplier(
+      { env: process.env, platform: process.platform, files: nodeAndroidAutoHostFiles },
+      defaultProvisioner,
+    );
+  }
   return defaultApplier;
+}
+
+/** What session-end cleanup asks of the host's provisioner: whether it holds 5277 for a phone. */
+export type AndroidAutoHostPortHolder = Pick<
+  AndroidAutoProjectionProvisioner,
+  "holdsHostPortFor" | "stopDesktopHeadUnit"
+>;
+
+/** The process-wide provisioner only when something already projected, like the applier below. */
+export function existingDefaultAndroidAutoHostPortHolder(): AndroidAutoHostPortHolder | undefined {
+  return defaultProvisioner;
 }
 
 /**

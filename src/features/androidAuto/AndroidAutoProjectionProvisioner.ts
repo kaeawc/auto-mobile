@@ -225,10 +225,16 @@ export class AndroidAutoProjectionProvisioner {
    * its own. Does nothing when this provisioner never spawned one for `deviceId`. Never rejects:
    * a DHU that will not exit stays tracked (it still holds host port 5277) but is never reused.
    * `deviceStopped` also forgets the host port redirect, which ended with that emulator.
+   * `releaseRedirect` is for a phone that keeps running after its session ended: once its DHU is
+   * gone, the redirect this provisioner added to it is removed, so host port 5277 is free for
+   * another phone. A redirect this provisioner did not add is never touched.
    */
   async stopDesktopHeadUnit(
     deviceId: string,
-    { deviceStopped = false }: { deviceStopped?: boolean } = {},
+    {
+      deviceStopped = false,
+      releaseRedirect = false,
+    }: { deviceStopped?: boolean; releaseRedirect?: boolean } = {},
   ): Promise<void> {
     if (deviceStopped && this.redirectOwner === deviceId) {
       this.redirectOwner = null;
@@ -239,6 +245,34 @@ export class AndroidAutoProjectionProvisioner {
         deviceId,
         session,
         deviceStopped ? "stopped device" : "failed provisioning",
+      );
+    }
+    if (releaseRedirect && !deviceStopped) {
+      await this.removeOwnedRedirect(deviceId);
+    }
+  }
+
+  /** Whether a DHU this provisioner spawned, or a redirect it added, is on `deviceId`. */
+  holdsHostPortFor(deviceId: string): boolean {
+    return this.sessions.has(deviceId) || this.redirectOwner === deviceId;
+  }
+
+  /** Removes this provisioner's redirect on `deviceId` once no DHU it spawned there is left. */
+  private async removeOwnedRedirect(deviceId: string): Promise<void> {
+    if (this.redirectOwner !== deviceId || this.sessions.has(deviceId)) {
+      // Not ours, or a DHU that would not exit still dials it: the redirect stays.
+      return;
+    }
+    try {
+      await this.deps.forDevice(deviceId).phone.removeHeadUnitRedirect();
+      if (this.redirectOwner === deviceId) {
+        this.redirectOwner = null;
+      }
+    } catch (error) {
+      // Kept as the owner, so the next projection's refusal still names this phone's redirect.
+      logger.warn(
+        `[AndroidAuto] removing the host port ${HEAD_UNIT_SERVER_PORT} redirect from ${deviceId} failed: ${errorMessage(error)}`,
+        error,
       );
     }
   }

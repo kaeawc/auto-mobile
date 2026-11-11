@@ -105,6 +105,19 @@ describe("AdbAndroidAutoPhone mutations", () => {
     expect(adb.calls).toEqual([["emu", "redir", "add", "tcp:5277:5277"]]);
   });
 
+  test("removes the head unit redirect on the emulator console", async () => {
+    const adb = new RecordingAdb();
+    await new AdbAndroidAutoPhone(adb).removeHeadUnitRedirect();
+    expect(adb.calls).toEqual([["emu", "redir", "del", "tcp:5277"]]);
+  });
+
+  test("a redirect removal the console refuses is an actionable error", async () => {
+    const adb = new RecordingAdb(() => result("KO: unknown redirect", {}));
+    await expect(new AdbAndroidAutoPhone(adb).removeHeadUnitRedirect()).rejects.toThrow(
+      "adb emu redir del tcp:5277 failed",
+    );
+  });
+
   test("a redirect the console refuses names the emulator requirement", async () => {
     const adb = new RecordingAdb(() => result("", { error: "no emulator console" }));
     await expect(new AdbAndroidAutoPhone(adb).addHeadUnitRedirect()).rejects.toThrow(

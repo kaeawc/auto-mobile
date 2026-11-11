@@ -260,6 +260,7 @@ nav:
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
       - "Android windowing": design-docs/plat/android/windowing.md
       - "Android form factors": design-docs/plat/android/form-factors.md
+      - "Android XR headset baseline": design-docs/plat/android/xr-headset.md
       - "Car App Library template snapshots": design-docs/plat/android/car-app-templates.md
       - "Android Auto projection provisioning": design-docs/plat/android/android-auto-projection-provisioning.md
       - "Emulator gRPC audio": design-docs/plat/android/emulator-grpc-audio.md

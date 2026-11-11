@@ -1,6 +1,10 @@
 import { logger } from "../../../../src/utils/logger";
 import { describe, expect, test, spyOn } from "bun:test";
-import { buildScaler, queryDensity } from "../../../../src/features/record/android/AxisRanges";
+import {
+  buildScaler,
+  queryDensity,
+  queryDisplaySize,
+} from "../../../../src/features/record/android/AxisRanges";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 
 /** Full axis+display description accepted by buildScaler. */
@@ -89,4 +93,10 @@ describe("queryDensity", () => {
       warn.mockRestore();
     }
   });
+});
+
+test("queryDisplaySize uses the logical override before the physical size", async () => {
+  const adb = new FakeAdbClient();
+  adb.setCommandResult("shell wm size", "Physical size: 2560x2558\nOverride size: 1280x1279");
+  expect(await queryDisplaySize(adb)).toEqual({ width: 1280, height: 1279 });
 });

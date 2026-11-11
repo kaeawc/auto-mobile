@@ -218,13 +218,23 @@ export class ScrollSearchSession {
         return outcome.result;
       }
       await this.settleAndSearch();
+      const forwardObservation = this.lastObservation;
+      const forwardFingerprint = this.host.computeHierarchyFingerprint(
+        forwardObservation.viewHierarchy!,
+      );
       const recoveryAttempted = this.foundElement
         ? false
         : await this.recoverAndSearch(step, outcome.failedAndroidSwipe);
       const currentFingerprint = this.foundElement
         ? this.host.computeHierarchyFingerprint(this.lastObservation.viewHierarchy!)
         : await this.recheckStaleObservation(recoveryAttempted);
-      this.recordMovedSwipe(currentFingerprint, outcome.failedAndroidSwipe, recoveryAttempted);
+      // Recovery may undo forward movement; count the forward step from its own evidence.
+      this.recordForwardMovement(
+        { observation: forwardObservation, fingerprint: forwardFingerprint },
+        currentFingerprint,
+        recoveryAttempted,
+        outcome.failedAndroidSwipe,
+      );
       if (this.foundElement) {
         break;
       }
@@ -325,15 +335,27 @@ export class ScrollSearchSession {
     });
   }
 
+  private recordForwardMovement(
+    forward: { observation: ObserveResult; fingerprint: string },
+    currentFingerprint: string,
+    recoveryAttempted: boolean,
+    failedAndroidSwipe: boolean,
+  ): void {
+    if (recoveryAttempted) {
+      this.recordMovedSwipe(forward.fingerprint, failedAndroidSwipe, forward.observation);
+    } else {
+      this.recordMovedSwipe(currentFingerprint, failedAndroidSwipe, this.lastObservation);
+    }
+  }
+
   private recordMovedSwipe(
     currentFingerprint: string,
     failedAndroidSwipe: boolean,
-    recoveryAttempted: boolean,
+    observation: ObserveResult,
   ): void {
     if (
       !failedAndroidSwipe &&
-      !recoveryAttempted &&
-      this.lastObservation.freshness?.isFresh !== false &&
+      observation.freshness?.isFresh !== false &&
       currentFingerprint &&
       this.lastFingerprint &&
       currentFingerprint !== this.lastFingerprint
@@ -417,6 +439,10 @@ export class ScrollSearchSession {
     await this.initialSearch();
     if (this.foundElement) {
       this.webScroll = outcome;
+    } else {
+      this.lastFingerprint = this.host.computeHierarchyFingerprint(
+        this.lastObservation.viewHierarchy!,
+      );
     }
   }
 

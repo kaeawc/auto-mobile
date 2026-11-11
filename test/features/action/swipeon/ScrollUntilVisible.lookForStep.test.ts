@@ -33,6 +33,7 @@ function listHarness({
   backStackAfterFirstSwipe,
   initialOffset = 0,
   pauseSwipes = [],
+  staleSwipes = [],
 }: {
   overshoot?: boolean;
   stuckRecovery?: boolean;
@@ -40,6 +41,7 @@ function listHarness({
   backStackAfterFirstSwipe?: BackStackInfo;
   initialOffset?: number;
   pauseSwipes?: number[];
+  staleSwipes?: number[];
 } = {}) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -48,6 +50,7 @@ function listHarness({
   const observe = (): ObserveResult => ({
     updatedAt: timer.now(),
     observationId: "test-observation",
+    freshness: { isFresh: !staleSwipes.includes(steps.length) },
     display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     screenSize: { width: 1080, height: 2400 },
@@ -249,17 +252,25 @@ test("every search step leaves at least a quarter viewport and holds before rele
   }
 });
 
-test("a two-viewport overshoot back-scrolls partially and still finds row 11", async () => {
-  const h = listHarness({ overshoot: true });
-  expect(await h.search("row 11")).toMatchObject({ found: true });
-  const backwards = h.steps.filter((step) => step.y2 > step.y1);
-  expect(backwards.length).toBeGreaterThan(0);
-  expect(backwards.length).toBeLessThanOrEqual(3);
-  expect(h.steps[1].y2).toBeGreaterThan(h.steps[1].y1);
-  for (const step of backwards) {
-    expect(Math.abs(step.y2 - step.y1)).toBe(VIEWPORT / 2);
-  }
-});
+test.each([true, false])(
+  "overlap recovery counts only the forward swipe's movement (fresh=%s)",
+  async (fresh) => {
+    const h = listHarness({ overshoot: true, staleSwipes: fresh ? [] : [1] });
+    expect(await h.search("row 11")).toMatchObject({
+      found: true,
+      scrollIterations: 1,
+      movedSwipes: fresh ? 1 : 0,
+      element: { text: "row 11" },
+    });
+    const backwards = h.steps.filter((step) => step.y2 > step.y1);
+    expect(backwards.length).toBeGreaterThan(0);
+    expect(backwards.length).toBeLessThanOrEqual(3);
+    expect(h.steps[1].y2).toBeGreaterThan(h.steps[1].y1);
+    for (const step of backwards) {
+      expect(Math.abs(step.y2 - step.y1)).toBe(VIEWPORT / 2);
+    }
+  },
+);
 
 test("overlap recovery refuses its back-scroll when the post-swipe XR pose is invalid", async () => {
   const backStack = xrBackStack("swipe-up");
@@ -417,6 +428,6 @@ test("review: failed overlap recovery continues forward to target", async () => 
 
 test("review: guard-restored original page is not end-of-list evidence", async () => {
   const h = scriptedPages([distinctPage("first"), distinctPage("second"), ["Target"]]);
-  expect(await h.search()).toMatchObject({ found: true, scrollIterations: 3 });
+  expect(await h.search()).toMatchObject({ found: true, scrollIterations: 3, movedSwipes: 3 });
   expect(h.backwards).toEqual([false, true, false, false]);
 });

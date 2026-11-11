@@ -141,6 +141,8 @@ export interface FreshnessInputs {
     sdkInt?: number;
     reason?: CtrlProxyIncompleteReason;
     accessibilityTool?: boolean;
+    /** The focused app's own window was read; another window's read was skipped. */
+    foregroundRead?: true;
   };
   /** Android has a foreground window but captured no accessible content (#6352). */
   emptyFocusedWindow?: boolean;
@@ -372,6 +374,18 @@ function readableElsewhereLead(reason: CtrlProxyIncompleteReason | undefined): s
   );
 }
 
+/**
+ * The focused app window was read, but a guarded read of another window — a
+ * notification shade, IME or dialog root over it — was skipped (#17817).
+ */
+function skippedOverlayWindowWarning(reason: CtrlProxyIncompleteReason | undefined): string {
+  const what =
+    reason === "window_list_skipped"
+      ? "the window listing read timed out (system_server stalled), so windows above it (a notification shade, IME or dialog) may be missing"
+      : "another window (such as a notification shade, IME or dialog over it) could not be read because its read timed out (system_server stalled), so that window's content is missing";
+  return `The accessibility service reported the capture as incomplete: the focused application window was read, but ${what}. Observe again before relying on an element being absent; until system_server recovers, a repeat observe may skip the same window.`;
+}
+
 function resolveIdentityMismatch(
   inputs: FreshnessInputs,
   ageMs: number | undefined,
@@ -424,7 +438,18 @@ function resolveIdentityMismatch(
   // the tree is honest about SOME window, but not about the focused
   // application (issue #6151).
   if (inputs.incompleteCapture) {
-    const { sdkInt, reason, accessibilityTool } = inputs.incompleteCapture;
+    const { sdkInt, reason, accessibilityTool, foregroundRead } = inputs.incompleteCapture;
+    if (foregroundRead) {
+      return {
+        requestedAfter,
+        actualTimestamp,
+        ageMs,
+        verified: false,
+        isFresh: false,
+        warning: skippedOverlayWindowWarning(reason),
+        category: "window_identity",
+      };
+    }
     const lead = readableElsewhereLead(reason);
     return {
       requestedAfter,

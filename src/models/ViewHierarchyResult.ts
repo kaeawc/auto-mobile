@@ -43,6 +43,13 @@ export type CtrlProxyIncompleteReason =
   | "window_read_skipped"
   | "window_list_skipped";
 
+/** A guarded system_server read was skipped: the capture is bounded, not withheld. */
+export function isSkippedWindowReadReason(
+  reason: CtrlProxyIncompleteReason | undefined,
+): reason is "window_read_skipped" | "window_list_skipped" {
+  return reason === "window_read_skipped" || reason === "window_list_skipped";
+}
+
 /**
  * Represents the ViewHierarchy dump result from a device.
  */

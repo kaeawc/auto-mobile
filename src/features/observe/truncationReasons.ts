@@ -79,6 +79,24 @@ export function collectWindowTruncations(
   return entries.length > 0 ? entries : undefined;
 }
 
+/** Lift CtrlProxy's incomplete-capture provenance out of a hierarchy about to be dropped. */
+export function collectCaptureIncomplete(
+  viewHierarchy: ObserveResult["viewHierarchy"],
+): ObserveResult["captureIncomplete"] {
+  if (viewHierarchy?.ctrlProxyIncomplete !== true) {
+    return undefined;
+  }
+  const { ctrlProxyIncompleteReason, skippedWindowReads, skippedWindowIds } = viewHierarchy;
+  return {
+    ctrlProxyIncomplete: true,
+    ...(ctrlProxyIncompleteReason ? { reason: ctrlProxyIncompleteReason } : {}),
+    ...(typeof skippedWindowReads === "number" ? { skippedWindowReads } : {}),
+    ...(Array.isArray(skippedWindowIds) && skippedWindowIds.length > 0
+      ? { skippedWindowIds: [...skippedWindowIds] }
+      : {}),
+  };
+}
+
 /** Whether this reason describes host-side output trimming rather than a partial capture. */
 export function isHostOutputTruncationReason(reason: string): boolean {
   return reason.startsWith(HOST_OUTPUT_CHILD_CAP_REASON_PREFIX);

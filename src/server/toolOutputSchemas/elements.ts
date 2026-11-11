@@ -144,6 +144,24 @@ export const windowTruncationsSchema = z
       "not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
   );
 
+export const captureIncompleteSchema = z
+  .object({
+    ctrlProxyIncomplete: z.literal(true),
+    reason: z.string().optional(),
+    skippedWindowReads: z.number().int().optional(),
+    skippedWindowIds: z.array(z.number().int()).optional(),
+  })
+  .optional()
+  .describe(
+    "Present when CtrlProxy reported the capture incomplete; skeleton/diff output lifts it from " +
+      "viewHierarchy.ctrlProxyIncomplete. reason is the cause (window_read_skipped / " +
+      "window_list_skipped: a system_server read stalled and was skipped, so a shade, IME or dialog " +
+      "window may be missing even when the app window was read; null_root, discarded_windows, " +
+      "extraction_error, or newer codes). skippedWindowReads counts skipped roots plus one for a " +
+      "skipped window listing; skippedWindowIds lists skipped roots. Observe again before relying " +
+      "on the absence of an element.",
+  );
+
 /**
  * The `viewHierarchy` sub-tree of an observe result (issue #3025). The
  * bounds-carrying sites are typed — the root `hierarchy.node`, per-window

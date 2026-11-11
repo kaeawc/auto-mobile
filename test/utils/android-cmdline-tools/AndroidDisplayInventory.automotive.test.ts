@@ -28,7 +28,7 @@ const carDisplayDeviceInfo = [
 const noStates = "Supported states: [\n]\n";
 
 const carPanels: DisplayPanel[] = [
-  { key: CENTER, role: "inner", sizePx: { width: 1024, height: 768 } },
+  { key: CENTER, role: "unknown", sizePx: { width: 1024, height: 768 } },
   { key: CLUSTER, role: "cluster", sizePx: { width: 528, height: 792 } },
   {
     key: "virtual:com.android.car.cluster.osdouble:ClusterDisplay",
@@ -79,7 +79,35 @@ describe("automotive display roles (#16741)", () => {
       parseAndroidDeviceDisplays(carSurfaceFlinger, sameSize, noStates, {
         automotive: true,
       })?.panels.map((panel) => panel.role),
-    ).toEqual(["inner", "cluster", "virtual"]);
+    ).toEqual(["unknown", "cluster", "virtual"]);
+  });
+
+  // Captured AAOS API 34 ext9 automotive_1080p_landscape dump (#17970): observe reported the
+  // center display 4619827259835644672 as role "inner" and the cluster 4619827551948147201 as
+  // "cluster". The center display is not a fold panel, so it takes the phone's non-foldable role.
+  test("the captured AAOS center display takes the non-foldable role, not inner (#17970)", () => {
+    const displays = parseAndroidDeviceDisplays(
+      carSurfaceFlinger,
+      fixture("aaos-multidisplay/dumpsys-display.txt"),
+      noStates,
+      { automotive: true },
+    );
+    expect(displays?.panels.slice(0, 2)).toEqual([
+      { key: CENTER, role: "unknown", sizePx: { width: 1024, height: 768 } },
+      { key: CLUSTER, role: "cluster", sizePx: { width: 400, height: 600 } },
+    ]);
+    expect(displays?.panels.map((panel) => panel.role)).not.toContain("inner");
+    expect(displays?.postures).toEqual([]);
+  });
+
+  test("a foldable keeps its inner and cover roles (#17970)", () => {
+    const displays = parseAndroidDeviceDisplays(
+      fixture("fold-surfaceflinger.txt"),
+      fixture("fold-open-display-device-info.txt"),
+      fixture("fold-states.txt"),
+    );
+    expect(displays?.panels.map((panel) => panel.role)).toEqual(["inner", "cover"]);
+    expect(displays?.postures).toContain("opened");
   });
 
   test("the inventory read probes the build class and classifies the cluster", async () => {
@@ -125,7 +153,7 @@ describe("automotive display roles (#16741)", () => {
 });
 
 describe("disconnected cluster guidance (#16741)", () => {
-  const connected = [{ key: CENTER, role: "inner" as const }];
+  const connected = [{ key: CENTER, role: "unknown" as const }];
 
   test("never offers a posture remedy for the cluster", () => {
     const message = buildDisconnectedPanelMessage(CLUSTER, "cluster", connected, {
@@ -133,14 +161,14 @@ describe("disconnected cluster guidance (#16741)", () => {
       pinned: false,
     });
     expect(message).toBe(
-      `Display "${CLUSTER}" (cluster) is not currently connected. Connected panels: ${CENTER} (inner). Target a connected panel, omit display, or use display: "active".`,
+      `Display "${CLUSTER}" (cluster) is not currently connected. Connected panels: ${CENTER} (unknown). Target a connected panel, omit display, or use display: "active".`,
     );
     expect(message).not.toContain("setPosture");
   });
 
   test("keeps the foldable cover message byte-identical", () => {
     expect(
-      buildDisconnectedPanelMessage(CLUSTER, "cover", connected, {
+      buildDisconnectedPanelMessage(CLUSTER, "cover", [{ key: CENTER, role: "inner" }], {
         hasPostures: true,
         pinned: false,
       }),

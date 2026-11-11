@@ -47,7 +47,9 @@ is still reaped as `missing-first-heartbeat` once it ends. The hold's execution 
 session or device loss (a released session, a retired device), and both post-bind steps run under
 that signal. Recoveries that keep the session (session-preserving recovery, an adb server reset, a
 discovery quarantine) cancel with `sessionPreserving` and leave the hold running, as before the
-signal existed, so a short device drop does not fail the provision.
+signal existed, so a short device drop does not fail the provision. A discovery quarantine that turns
+into a same-serial replacement ends the session, so the holder is cancelled and drained without
+`sessionPreserving` (the hold included) before the replacement runtime is published.
 It is bounded by the provision's total deadline as well as its abort signal; a request without
 `androidAuto` never reaches it, so its abort handling is unchanged. Once the run has connected its
 own DHU (`desktop-head-unit` reported `applied`), a later provision failure stops that DHU before
@@ -60,7 +62,12 @@ marker in the resolved AVD directory: the next launch skips the unusable quickbo
 `-no-snapshot-load` and consumes the marker only after the process spawns, even across a daemon
 restart (#17903). A post-kill stop that outlives the deadline keeps
 the serial's shutdown reservation until it settles, whether the rest of the shutdown succeeds or
-fails, so a replacement never boots under it. Only DHUs in this daemon's session map are stopped. A stopped session
+fails, so a replacement never boots under it. When the session holding the phone ends without a kill
+(release, heartbeat reap, idle expiry, a cancelled session), a session-release listener stops its DHU
+and removes the redirect this provisioner added, as pending device cleanup, so the emulator keeps
+running with host port 5277 free; a phone another live session already holds is skipped, and a
+replaced serial only stops the old DHU and forgets its redirect, without blocking the new device.
+The redirect stays while a DHU that would not exit still dials it. The stop runs outside the releasing request's context, so a cancelled request cannot cut the removal short, and every provisioning run waits for a removal in progress, so a new projection never reuses a redirect about to be deleted, even after the cleanup's acquisition cap lapses. Only DHUs in this daemon's session map are stopped. A stopped session
 is forgotten, so a later emulator that reuses the serial launches its own DHU; one whose stop fails
 stays tracked for the single-projection check but is never reused as `already-done`.
 The applier is a process-wide singleton: the provisioner it wraps is what tracks which DHU holds host

@@ -1,3 +1,6 @@
+import { CachedAndroidXrDisplaySize } from "./android/AndroidXrDisplaySize";
+import { queryDisplaySize } from "../record/android/AxisRanges";
+import { defaultAndroidXrDetector } from "../../utils/android-cmdline-tools/androidXrDevice";
 import type { DevicectlDisplayInfoSource } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { createProductionDevicectlPanelScreenshotSource } from "../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import { IosSdkMultiSceneError } from "./ios/sdkObservationBridge";
@@ -178,6 +181,8 @@ export class RealObserveScreen implements ObserveScreen {
   private readonly screenRound: ScreenRoundReader;
   private settleStage!: SingleDisplaySettleStage;
 
+  readonly xrDisplaySize: CachedAndroidXrDisplaySize;
+
   // ---------- Static API (kept for back-compat with resource handlers/daemon) ----------
 
   /**
@@ -285,7 +290,15 @@ export class RealObserveScreen implements ObserveScreen {
     this.idGenerator = idGenerator;
     this.screenRound = new AdbScreenRoundReader(this.adb);
 
+    const xrDisplaySize = (this.xrDisplaySize = new CachedAndroidXrDisplaySize({
+      device: () => this.device,
+      adb: () => this.adb,
+      xrDetector: defaultAndroidXrDetector,
+      readDisplaySize: () => queryDisplaySize(this.adb, { timeoutMs: 1000 }),
+      hierarchyCollector: () => this.hierarchyCollector,
+    }));
     const wiring = createObserveScreenWiring({
+      xrDisplaySize,
       device,
       adb: () => this.adb,
       adbFactory: () => this.adbFactory,
@@ -357,6 +370,7 @@ export class RealObserveScreen implements ObserveScreen {
     });
     // Lazy getters: tests may reassign these collaborators on the instance after construction.
     this.androidCollector = new DefaultAndroidObservationCollector({
+      xrDisplaySize,
       hierarchyCollector: () => this.hierarchyCollector,
       deviceStateCollector: () => this.deviceStateCollector,
       viewHierarchy: () => this.viewHierarchy,

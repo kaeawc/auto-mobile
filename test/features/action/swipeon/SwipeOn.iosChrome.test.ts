@@ -16,6 +16,7 @@ import { FakeFeatureFlagApplier } from "../../../fakes/FakeFeatureFlagApplier";
 import { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { screenshotPathProtection } from "../../../../src/features/observe/ScreenshotPathProtection";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";
+import type { ObserveResult } from "../../../../src/models";
 
 // An injected observer must also prevent constructor-time screenshot directory I/O
 // and retention intervals, including the cold first test in this file.
@@ -36,14 +37,15 @@ beforeEach(() => {
 });
 afterEach(() => restoreHostWorkGuards());
 
-function harness() {
-  const observation = {
+function harness(
+  observation: ObserveResult = {
     ...observeResultFromFixture({
       ...fixture,
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     }),
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  },
+) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation);
   const timer = new FakeTimer();
@@ -105,4 +107,44 @@ test("preserves the chrome warning when auto-target falls back to a screen swipe
   expect(result.success).toBe(true);
   expect(result.targetType).toBe("screen");
   expect(result.warning).toContain("swipe started in the navigation bar");
+});
+
+test("swipeOn drags a named sheet grabber from its centre past its bounds", async () => {
+  const grabber = {
+    class: "XCUIElementTypeOther",
+    text: "Sheet Grabber",
+    bounds: { left: 164, top: 617, right: 237, bottom: 641 },
+  };
+  const observation = observeResultFromFixture({
+    updatedAt: 0,
+    screenSize: { width: 402, height: 874 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    viewHierarchy: {
+      hierarchy: {
+        node: {
+          class: "XCUIApplication",
+          bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+          node: [grabber],
+        },
+      },
+    },
+  });
+  const { action, voiceOverExecutor } = harness(observation);
+  const result = await action.execute({
+    direction: "down",
+    autoTarget: false,
+    container: { text: "Sheet Grabber" },
+  });
+  expect(result.success).toBe(true);
+  expect(result.targetType).toBe("element");
+  expect(voiceOverExecutor.getSwipeCalls()).toHaveLength(1);
+  expect(voiceOverExecutor.getSwipeCalls()[0]).toMatchObject({
+    x1: 200,
+    y1: 629,
+    x2: 200,
+    y2: 869,
+    direction: "down",
+  });
+  expect(result.warning).toContain("Container is only 24 pt");
+  expect(result.warning).toContain("travels 240 pt");
 });

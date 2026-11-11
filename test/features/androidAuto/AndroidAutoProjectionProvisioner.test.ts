@@ -8,6 +8,7 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import type { DhuLaunchOutcome } from "../../../src/features/androidAuto/DesktopHeadUnit";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 import {
   FakeLauncher,
   FakePhone,
@@ -528,6 +529,65 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(status("transport")).toBe("already-done");
     expect(status("desktop-head-unit")).toBe("applied");
     expect(launcher.launches).toBe(2);
+  });
+
+  test("stopDesktopHeadUnit with releaseRedirect frees host port 5277 on a running emulator", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    await provisioner.stopDesktopHeadUnit("emulator-5554", { releaseRedirect: true });
+    expect(phone.changes).toContain("redirect-removed");
+    expect(provisioner.holdsHostPortFor("emulator-5554")).toBe(false);
+    const other = await provisioner.provision(request({ deviceId: "emulator-5556" }));
+    expect(other.steps.find((step) => step.step === "transport")?.status).toBe("applied");
+  });
+
+  test("a provision started during a session-end redirect removal waits for it to settle", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    const removal = Promise.withResolvers<void>();
+    phone.removeHeadUnitRedirect = async () => {
+      await removal.promise;
+      phone.changes.push("redirect-removed");
+      phone.redirected = false;
+    };
+    let runStarted = false;
+    const isKeyguardDisabled = phone.isKeyguardDisabled.bind(phone);
+    phone.isKeyguardDisabled = async () => {
+      runStarted = true;
+      return await isKeyguardDisabled();
+    };
+    const release = provisioner.stopDesktopHeadUnit("emulator-5554", { releaseRedirect: true });
+    const next = provisioner.provision(request());
+    await drainMicrotasks(50);
+    expect(runStarted).toBe(false);
+    removal.resolve();
+    await release;
+    const again = await next;
+    // The removal landed before the run, so it adds a fresh redirect instead of reusing the old.
+    expect(again.steps.find((step) => step.step === "transport")?.status).toBe("applied");
+    expect(phone.redirected).toBe(true);
+    expect(phone.changes.slice(-2)).toEqual(["redirect-removed", "redirect"]);
+  });
+
+  test("releaseRedirect never removes a redirect this provisioner added for another device", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    await provisioner.stopDesktopHeadUnit("emulator-5556", { releaseRedirect: true });
+    expect(phone.changes).not.toContain("redirect-removed");
+    expect(provisioner.holdsHostPortFor("emulator-5554")).toBe(true);
+  });
+
+  test("a failed redirect removal keeps the phone as the redirect's owner", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    phone.removeHeadUnitRedirect = async () => {
+      throw new ActionableError("adb emu redir del tcp:5277 failed");
+    };
+    await provisioner.stopDesktopHeadUnit("emulator-5554", { releaseRedirect: true });
+    expect(provisioner.holdsHostPortFor("emulator-5554")).toBe(true);
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "emulator-5554's redirect",
+    );
   });
 
   test("refusing another device names killDevice or re-provisioning as the recovery", async () => {

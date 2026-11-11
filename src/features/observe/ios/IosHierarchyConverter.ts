@@ -257,7 +257,7 @@ function isStructuralWrapper(attrs: Record<string, unknown>, hasChildren: boolea
   return isContainerClass && hasChildren;
 }
 
-/** Clean node attributes by removing false booleans and empty values */
+/** Clean default booleans and empty values, retaining known enabled/checked state. */
 export function cleanAttributes(attrs: Record<string, unknown>): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};
   const booleanFields = [
@@ -281,8 +281,13 @@ export function cleanAttributes(attrs: Record<string, unknown>): Record<string, 
       continue;
     }
 
-    // Skip false boolean values
-    if (key !== "enabled" && booleanFields.includes(key) && value === "false") {
+    // A known off state differs from an unknown checked state.
+    if (
+      key !== "enabled" &&
+      key !== "checked" &&
+      booleanFields.includes(key) &&
+      value === "false"
+    ) {
       continue;
     }
 

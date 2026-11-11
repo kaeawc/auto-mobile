@@ -55,6 +55,9 @@ include(":tv-fixture")
 
 include(":leanback-fixture")
 
+// Deterministic Android XR glasses input fixture for glasses checks (#16842).
+include(":glasses-fixture")
+
 include(":protocol")
 
 include(":prototype-compose")

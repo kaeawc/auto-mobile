@@ -156,6 +156,7 @@ nav:
       - "Android Auto and the DHU": using/android-auto.md
       - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
+      - "Android XR glasses": using/android-xr-glasses.md
       - "Apple TV": using/apple-tv.md
       - "Apple Watch": using/apple-watch.md
       - "Environment variables": using/environment-variables.md

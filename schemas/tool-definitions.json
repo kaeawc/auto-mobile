@@ -9599,6 +9599,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "glassesInput",
               "heapDump",
               "highlight",
               "hitTest",
@@ -9767,6 +9768,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "glassesInput",
               "heapDump",
               "highlight",
               "hitTest",
@@ -12216,6 +12218,99 @@
     },
     "_meta": {
       "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "glassesInput",
+    "title": "Glasses Focus Input",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Android XR glasses: tap clicks the focused item; swipeForward/swipeBack move focus using DPAD keys (vertical down/up by default, horizontal right/left). count repeats any gesture 1..20 times. Success means adb commands exited cleanly; no read-back is performed, so observe afterwards. Voice input uses the existing injectAudioInput tool. Long press and two-finger gestures are not injectable yet: key holds produce no long click and raw touchpad holds/gestures are swallowed by the unpaired glasses system UI (raw input also requires adb root). Direct DPAD avoids unreliable touchnavigation swipes and touchpad motion that does not change focus. Unconfirmed glasses receive a warning but input is still sent.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "gesture": {
+          "description": "tap clicks focus; swipeForward/swipeBack move focus along axis",
+          "type": "string",
+          "enum": ["tap", "swipeForward", "swipeBack"]
+        },
+        "axis": {
+          "description": "Focus axis, default vertical; ignored for tap",
+          "type": "string",
+          "enum": ["vertical", "horizontal"]
+        },
+        "count": {
+          "description": "Repeat the gesture 1..20 times, default 1 (including tap)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["gesture"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "gesture": {
+          "type": "string",
+          "enum": ["tap", "swipeForward", "swipeBack"]
+        },
+        "axis": {
+          "type": "string",
+          "enum": ["vertical", "horizontal"]
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "keyCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warningCode": {
+          "type": "string",
+          "enum": ["not_glasses", "traits_unavailable"]
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "message", "gesture", "axis", "count", "keyCodes", "commands"],
+      "additionalProperties": {}
     }
   },
   {
@@ -33602,6 +33697,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "glassesInput",
               "heapDump",
               "highlight",
               "hitTest",
@@ -46556,6 +46652,7 @@
             "getNetworkGraph",
             "getNotificationPolicy",
             "getPreference",
+            "glassesInput",
             "heapDump",
             "highlight",
             "hitTest",
@@ -46686,6 +46783,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "glassesInput",
               "heapDump",
               "highlight",
               "hitTest",

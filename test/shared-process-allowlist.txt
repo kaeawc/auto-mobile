@@ -1718,6 +1718,7 @@ test/scripts/testLaneClassification.test.ts
 test/scripts/toolDefinitionsDrift.test.ts
 test/scripts/trimBundledDeps.test.ts
 test/scripts/tsImportDeps.test.ts
+test/scripts/tvSmoke.test.ts
 test/scripts/typecheckBaselineBurndown.test.ts
 test/scripts/unitTimingBudgetWorkflow.test.ts
 test/scripts/validateMkdocsNav.test.ts

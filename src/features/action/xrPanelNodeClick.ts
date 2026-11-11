@@ -38,26 +38,31 @@ export function xrCoordinateError(): ActionableError {
   );
 }
 
-/** Only captured node fields identify the click; a tapped descendant can supply its label. */
+/**
+ * Only captured node fields identify the click; a tapped descendant can supply its label.
+ * The extractor maps generic classes (View, FrameLayout, ScrollView, TextView) to a null
+ * class, so the class hint is omitted then and CtrlProxy matches any class. The click
+ * refuses only when no hint at all would constrain the live node.
+ */
 function xrNodeIdentityHints(
   captured: Element,
   label?: Element,
 ): AndroidActionRequestOptions["identityHints"] {
-  const className = captured.class ?? captured.className;
-  if (typeof className !== "string" || !className) {
-    return undefined;
-  }
-  return {
-    className,
-    text: captured.text || undefined,
-    contentDesc: captured["content-desc"] || undefined,
-    ...(!captured.text && !captured["content-desc"]
-      ? {
-          labelText: label?.text || undefined,
-          labelContentDesc: label?.["content-desc"] || undefined,
-        }
-      : {}),
+  const rawClassName = captured.class ?? captured.className;
+  const ownLabeled = Boolean(captured.text || captured["content-desc"]);
+  const labelSource = ownLabeled ? undefined : label;
+  const hints = {
+    className: typeof rawClassName === "string" ? nonEmpty(rawClassName) : undefined,
+    text: nonEmpty(captured.text),
+    contentDesc: nonEmpty(captured["content-desc"]),
+    labelText: nonEmpty(labelSource?.text),
+    labelContentDesc: nonEmpty(labelSource?.["content-desc"]),
   };
+  return Object.values(hints).some((value) => value !== undefined) ? hints : undefined;
+}
+
+function nonEmpty(value: string | undefined): string | undefined {
+  return value || undefined;
 }
 
 function xrNodeClickSelector(

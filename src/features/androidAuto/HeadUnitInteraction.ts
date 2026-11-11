@@ -138,53 +138,69 @@ export function headUnitTapCommand(x: number, y: number): string {
   return `tap ${Math.round(x)} ${Math.round(y)}`;
 }
 
-/** Every projected session's top screen, ordered as the block orders apps and sessions. */
-export function headUnitScreens(templates: CarAppProjectedTemplates): HeadUnitScreen[] {
+/** One template read: every projected session's top screen, and the content they are compared by. */
+export interface HeadUnitRead {
+  screens: HeadUnitScreen[];
+  /**
+   * The screens' identity plus each top template's full content (items, toggles, tabs and the
+   * active tab's content), so a change inside the same template reads as a change too.
+   */
+  key: string;
+}
+
+/** Each projected session's top screen with its recorded template, in block order. */
+function topScreens(templates: CarAppProjectedTemplates) {
   return templates.projected.flatMap((app) =>
     app.sessions.flatMap((session) => {
       const top = session.screens.at(-1);
-      if (!top) {
-        return [];
-      }
-      const template = top.template;
-      return [
-        {
-          packageName: app.packageName,
-          carSessionId: session.id,
-          screenClass: top.screenClass,
-          ...(template ? { templateType: template.type } : {}),
-          ...(template?.title !== undefined ? { title: template.title } : {}),
-          depth: session.screens.length,
-          // A TabTemplate's bar can be loaded while its active tab's content still loads.
-          ...(template?.loading || template?.tabContent?.loading ? { loading: true as const } : {}),
-        },
-      ];
+      return top ? [{ packageName: app.packageName, session, top }] : [];
     }),
   );
 }
 
-function screensKey(screens: readonly HeadUnitScreen[]): string {
-  return JSON.stringify(
-    screens.map(({ packageName, carSessionId, screenClass, templateType, title, depth }) => [
+/** Every projected session's top screen, ordered as the block orders apps and sessions. */
+export function headUnitScreens(templates: CarAppProjectedTemplates): HeadUnitScreen[] {
+  return topScreens(templates).map(({ packageName, session, top }) => {
+    const template = top.template;
+    return {
       packageName,
-      carSessionId,
-      screenClass,
-      templateType ?? null,
-      title ?? null,
-      depth,
-    ]),
-  );
+      carSessionId: session.id,
+      screenClass: top.screenClass,
+      ...(template ? { templateType: template.type } : {}),
+      ...(template?.title !== undefined ? { title: template.title } : {}),
+      depth: session.screens.length,
+      // A TabTemplate's bar can be loaded while its active tab's content still loads.
+      ...(template?.loading || template?.tabContent?.loading ? { loading: true as const } : {}),
+    };
+  });
 }
 
-/** Compares two template reads: the top screen class, template type and title, and stack depth. */
+/** The screens of one template read, keyed by identity and top-template content. */
+export function headUnitRead(templates: CarAppProjectedTemplates): HeadUnitRead {
+  const key = JSON.stringify(
+    topScreens(templates).map(({ packageName, session, top }) => [
+      packageName,
+      session.id,
+      top.screenClass,
+      session.screens.length,
+      top.template ?? null,
+    ]),
+  );
+  return { screens: headUnitScreens(templates), key };
+}
+
+/**
+ * Compares two template reads: the top screen class and stack depth, and the top template's
+ * content, so a tab switch or an item refresh on the same screen counts as a change.
+ */
 export function deriveHeadUnitEffect(
-  before: readonly HeadUnitScreen[] | undefined,
-  after: readonly HeadUnitScreen[] | undefined,
+  before: HeadUnitRead | undefined,
+  after: HeadUnitRead | undefined,
 ): HeadUnitEffect {
   if (!before || !after) {
     return { basis: "no template data" };
   }
-  const changed = screensKey(before) !== screensKey(after);
+  const changed = before.key !== after.key;
   return {
     screenChanged: changed,
     basis: changed ? "carAppTemplates changed" : "carAppTemplates unchanged",
@@ -196,16 +212,19 @@ export function deriveHeadUnitEffect(
  * the input settles only once `unchangedWindowOver`, so a slow push is not taken for a no-op.
  */
 function isSettled(
-  current: readonly HeadUnitScreen[] | undefined,
-  previous: readonly HeadUnitScreen[] | undefined,
+  current: HeadUnitRead | undefined,
+  previous: HeadUnitRead | undefined,
   beforeKey: string | undefined,
   unchangedWindowOver: boolean,
-): current is HeadUnitScreen[] {
-  if (!current || !previous || [...current, ...previous].some((screen) => screen.loading)) {
+): current is HeadUnitRead {
+  if (
+    !current ||
+    !previous ||
+    [...current.screens, ...previous.screens].some((screen) => screen.loading)
+  ) {
     return false;
   }
-  const key = screensKey(current);
-  return key === screensKey(previous) && (key !== beforeKey || unchangedWindowOver);
+  return current.key === previous.key && (current.key !== beforeKey || unchangedWindowOver);
 }
 
 /**
@@ -236,20 +255,20 @@ export class HeadUnitInteraction {
       commands: [...commands],
       effect: deriveHeadUnitEffect(before, after),
       idle,
-      ...(before ? { before } : {}),
-      ...(after ? { after } : {}),
+      ...(before ? { before: before.screens } : {}),
+      ...(after ? { after: after.screens } : {}),
     };
   }
 
   private async waitForIdle(
-    before: HeadUnitScreen[] | undefined,
+    before: HeadUnitRead | undefined,
     signal?: AbortSignal,
-  ): Promise<{ idle: HeadUnitIdle; after: HeadUnitScreen[] | undefined }> {
+  ): Promise<{ idle: HeadUnitIdle; after: HeadUnitRead | undefined }> {
     const { pollMs, unchangedSettleMs, timeoutMs } = this.timing;
     const start = this.timer.now();
     const elapsed = () => this.timer.now() - start;
-    const beforeKey = before ? screensKey(before) : undefined;
-    let previous: HeadUnitScreen[] | undefined;
+    const beforeKey = before?.key;
+    let previous: HeadUnitRead | undefined;
     let sawData = false;
     while (elapsed() < timeoutMs) {
       await this.timer.sleep(pollMs);
@@ -274,7 +293,7 @@ export class HeadUnitInteraction {
     };
   }
 
-  private async readScreens(): Promise<HeadUnitScreen[] | undefined> {
+  private async readScreens(): Promise<HeadUnitRead | undefined> {
     try {
       const templates = await this.templates.read();
       const failed = templates?.projected.find((app) => app.error !== undefined);
@@ -284,7 +303,7 @@ export class HeadUnitInteraction {
         logger.debug(`[AndroidAuto] ${failed.packageName} template read failed: ${failed.error}`);
         return undefined;
       }
-      return templates ? headUnitScreens(templates) : undefined;
+      return templates ? headUnitRead(templates) : undefined;
     } catch (error) {
       logger.warn(`[AndroidAuto] head unit template read failed: ${errorMessage(error)}`, error);
       return undefined;

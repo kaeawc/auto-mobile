@@ -291,8 +291,9 @@ describe("app restart cache generation", () => {
       ]);
       h.adb.setCommandResponse("uninstall ", execResult("Success"));
       const invalidator = new FakeDeviceWindowCacheInvalidator(() => h.events.push("invalidate"));
+      const guard = { allowDestructiveRecovery: true };
       expect(
-        (await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 })).success,
+        (await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0, guard })).success,
       ).toBe(succeeds);
       expect(invalidator.calls).toEqual(succeeds ? [android, android] : [android]);
       const preceding = h.events.flatMap((event, i) =>

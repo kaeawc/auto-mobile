@@ -16,21 +16,28 @@ describe("removed tool registry", () => {
     }
   });
 
-  test("keeps one period and a restart hint for unknown tools", () => {
+  test("keeps one period and no restart hint for an unknown tool name (#18024)", () => {
     expect(formatDaemonToolError("otherTool", 'Unknown tool "otherTool".')).toBe(
-      'Error calling daemon: Unknown tool "otherTool". Try: auto-mobile --daemon restart',
+      'Error calling daemon: Unknown tool "otherTool".',
     );
   });
 
   test("a gated tool keeps its gate reason and gets no restart hint", () => {
     const message =
       'Tool "setUIState" is advertised by this AutoMobile client but is unavailable in the connected daemon\'s current configuration for this session. Daemon rejection: MCP error -32603: Unknown tool: setUIState. --debug is disabled.';
-    expect(formatDaemonToolError("setUIState", message, { gated: true })).toBe(
+    expect(formatDaemonToolError("setUIState", message)).toBe(
       `Error calling daemon: ${message.replace(/[.]+$/, "")}.`,
     );
-    expect(formatDaemonToolError("setUIState", message, { gated: true })).not.toContain("restart");
-    expect(formatDaemonToolError("setUIState", message)).toContain(
-      "Try: auto-mobile --daemon restart",
+    expect(formatDaemonToolError("setUIState", message)).not.toContain("restart");
+  });
+
+  test("only detected build skew gets the restart hint", () => {
+    expect(
+      formatDaemonToolError("setUIState", "the connected daemon does not provide it.", {
+        buildSkew: true,
+      }),
+    ).toBe(
+      "Error calling daemon: the connected daemon does not provide it. Try: auto-mobile --daemon restart",
     );
   });
 });

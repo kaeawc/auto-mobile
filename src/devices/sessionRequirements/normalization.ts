@@ -1,12 +1,20 @@
-import { resolveAndroidExactProfile, resolveIosModelReference, validateContext } from "./catalog";
+import {
+  iosModelTypeArchetype,
+  resolveAndroidExactProfile,
+  resolveIosModelReference,
+  validateContext,
+} from "./catalog";
 import { parseSessionDeviceRequirement } from "./parsing";
 import { failure, success } from "./result";
 import type {
   EffectiveOsSelector,
   EffectiveIosHardwareSelector,
+  IosArchetype,
+  IosArchetypeOsDefault,
   IosCatalogModel,
   IosSessionDeviceCatalog,
   IosSessionDeviceRequirement,
+  IosSessionRequirementDefaults,
   NormalizedAndroidSessionDeviceRequirement,
   NormalizedIosSessionDeviceRequirement,
   NormalizedSessionDeviceRequirement,
@@ -24,22 +32,48 @@ function invalidConfig(message: string, field?: string): RequirementResult<never
   return failure("invalid_config", message, field === undefined ? {} : { field });
 }
 
-function normalizeDefaultOs(policy: OsDefaultPolicy): RequirementResult<EffectiveOsSelector> {
-  const selector = normalizeOsSelector(policy.selector, "defaults.os.selector");
+function normalizeDefaultOs(
+  policy: OsDefaultPolicy,
+  field = "defaults.os",
+): RequirementResult<EffectiveOsSelector> {
+  const selector = normalizeOsSelector(policy.selector, `${field}.selector`);
   if (!selector.ok) {
     return invalidConfig(selector.error.message, selector.error.field);
   }
-  const preferred = parseNumericVersion(policy.preferredVersion, "defaults.os.preferredVersion");
+  const preferred = parseNumericVersion(policy.preferredVersion, `${field}.preferredVersion`);
   if (!preferred.ok) {
     return invalidConfig(preferred.error.message, preferred.error.field);
   }
   if (!osSelectorMatchesVersion(selector.value, preferred.value.value)) {
     return invalidConfig(
       `Preferred OS release '${policy.preferredVersion}' does not satisfy the configured default predicate.`,
-      "defaults.os.preferredVersion",
+      `${field}.preferredVersion`,
     );
   }
   return success(selector.value);
+}
+
+/** The archetype an iOS hardware selector targets, when known before resolution. */
+function iosHardwareArchetype(
+  hardware: EffectiveIosHardwareSelector,
+  exactModel: IosCatalogModel | undefined,
+): IosArchetype | undefined {
+  if (hardware.kind === "archetype") {
+    return hardware.archetype;
+  }
+  return hardware.kind === "model-type"
+    ? iosModelTypeArchetype(hardware.modelType)
+    : exactModel?.archetype;
+}
+
+/** The `defaults.os.archetypes` entry for an archetype, if the host configured one (#18003). */
+export function iosArchetypeOsDefault(
+  defaults: IosSessionRequirementDefaults,
+  archetype: IosArchetype | undefined,
+): { policy: IosArchetypeOsDefault; index: number } | undefined {
+  const entries = defaults.os.archetypes ?? [];
+  const index = archetype === undefined ? -1 : entries.findIndex((e) => e.archetype === archetype);
+  return index === -1 ? undefined : { policy: entries[index], index };
 }
 
 function effectiveOs(
@@ -53,12 +87,14 @@ function provenance(
   defaults: SessionRequirementDefaults,
   catalog: SessionDeviceCatalog,
   defaultsApplied: RequirementProvenance["defaultsApplied"],
+  osDefaultArchetype?: IosArchetype,
 ): RequirementProvenance {
   return {
     policyVersion: defaults.policyVersion,
     catalogSource: catalog.provenance.source,
     catalogRevision: catalog.provenance.revision,
     defaultsApplied,
+    ...(osDefaultArchetype === undefined ? {} : { osDefaultArchetype }),
   };
 }
 
@@ -118,20 +154,38 @@ function normalizeIos(
   if (!defaultOs.ok) {
     return defaultOs;
   }
-  const normalizedOs = effectiveOs(original.os, defaultOs.value);
-  if (!normalizedOs.ok) {
-    return normalizedOs;
-  }
   const exactModel = optionalExactModel(hardware.value, catalog);
   if (!exactModel.ok) {
     return exactModel;
+  }
+  // An archetype entry replaces the platform default only for an omitted OS; an explicit
+  // selector, exact included, is kept as requested.
+  const override =
+    original.os.kind === "omitted"
+      ? iosArchetypeOsDefault(defaults, iosHardwareArchetype(hardware.value, exactModel.value))
+      : undefined;
+  const overrideOs =
+    override === undefined
+      ? defaultOs
+      : normalizeDefaultOs(override.policy, `defaults.os.archetypes[${override.index}]`);
+  if (!overrideOs.ok) {
+    return overrideOs;
+  }
+  const normalizedOs = effectiveOs(original.os, overrideOs.value);
+  if (!normalizedOs.ok) {
+    return normalizedOs;
   }
   return success({
     platform: "ios",
     original,
     effective: { hardware: hardware.value, os: normalizedOs.value },
     ...(exactModel.value === undefined ? {} : { exactModel: exactModel.value }),
-    provenance: provenance(defaults, catalog, appliedDefaults(original)),
+    provenance: provenance(
+      defaults,
+      catalog,
+      appliedDefaults(original),
+      override?.policy.archetype,
+    ),
   });
 }
 

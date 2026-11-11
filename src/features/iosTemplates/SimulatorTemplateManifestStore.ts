@@ -15,6 +15,7 @@ export const templateManifestSchema = z
       profile: z.enum(
         Object.keys(PREBOOT_LEAN_PROFILES) as [PrebootLeanProfileName, ...PrebootLeanProfileName[]],
       ),
+      apsdLogSuppressed: z.literal(true).optional(),
     }),
     udid: z.union([z.literal(""), z.string().regex(IOS_SIMULATOR_UUID_PATTERN)]),
     state: z.enum(["building", "ready", "failed", "stale"]),

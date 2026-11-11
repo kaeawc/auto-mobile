@@ -1,4 +1,3 @@
-import { withoutHiddenXrChrome } from "./xrHiddenChrome";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import {
   TapAnyAndroidTapper,
@@ -286,7 +285,7 @@ export class TapAnyElement extends BaseVisualChange {
         refreshViewHierarchy: (timeout, size, signal, forceCapture) =>
           this.refreshViewHierarchy(timeout, size, signal, forceCapture),
         findClickableElement: async (options, hierarchy, size) => {
-          await this.prepareXrSelection(options, hierarchy);
+          await this.prepareXrSelection(options);
           return this.findClickableElement(options, hierarchy, size);
         },
         resolveTapPoint: (target, size) => this.resolveTapPoint(target, size),
@@ -341,13 +340,9 @@ export class TapAnyElement extends BaseVisualChange {
 
   private async prepareXrSelection(
     options: TapAnyElementOptions,
-    hierarchy: ViewHierarchyResult,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (
-      this.tapPlatform !== "android" ||
-      (!options.container && withoutHiddenXrChrome(hierarchy).hiddenNodes.size === 0)
-    ) {
+    if (this.tapPlatform !== "android") {
       return;
     }
     let read = this.selectionXrReads.get(options);
@@ -501,7 +496,7 @@ export class TapAnyElement extends BaseVisualChange {
       fetch: async (remainingTimeMs) => {
         const hierarchy = await refresh(remainingTimeMs, observeResult.screenSize, signal);
         if (hierarchy) {
-          await this.prepareXrSelection(options, hierarchy, signal);
+          await this.prepareXrSelection(options, signal);
         }
         return hierarchy;
       },
@@ -597,7 +592,7 @@ export class TapAnyElement extends BaseVisualChange {
     let changeCount = 0;
     const lastHash = hierarchyFingerprint(viewHierarchy);
 
-    await this.prepareXrSelection(options, selectedCapture.hierarchy, signal);
+    await this.prepareXrSelection(options, signal);
     const found = this.findClickableElement(options, selectedCapture.hierarchy, {
       observationScreenSize: observeResult.screenSize,
       display: observeResult.viewHierarchy,
@@ -637,7 +632,7 @@ export class TapAnyElement extends BaseVisualChange {
       selectedCapture = identifyObservedHierarchy(this.tapPlatform, viewHierarchy, "fresh", {
         timer: this.timer,
       });
-      await this.prepareXrSelection(options, selectedCapture.hierarchy, signal);
+      await this.prepareXrSelection(options, signal);
       const current = this.findClickableElement(options, selectedCapture.hierarchy, {
         observationScreenSize: observeResult.screenSize,
         display: viewHierarchy,

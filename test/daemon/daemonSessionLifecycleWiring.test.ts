@@ -96,8 +96,8 @@ describe("wireSessionLifecycle", () => {
       "onSessionDeviceUnbound",
       "onSessionRelease",
       "onSessionDeviceUnbound",
-      // The Android Auto head unit cleanup takes a release listener only.
       "onSessionRelease",
+      "onSessionDeviceUnbound",
       "onSessionRelease",
       "onSessionDeviceUnbound",
       "onSessionRelease",

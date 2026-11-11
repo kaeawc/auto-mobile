@@ -7,7 +7,11 @@ import { defaultTimer } from "../../../utils/SystemTimer";
 import { carryToolFailureMark } from "../../../utils/toolFailureSignal";
 import { stringifyToolResponse } from "../../../utils/toolUtils";
 import { unregisterDirectSession } from "../../../utils/directSessionDeviceRegistry";
-import { isDeviceSessionAcquisitionTool } from "../../../daemon/deviceSessionResult";
+import {
+  getAnyDevicePlatformFromResult,
+  isDeviceSessionAcquisitionTool,
+} from "../../../daemon/deviceSessionResult";
+import { platformCallableToolNames } from "../../applePlatformToolSupport";
 import type { McpServerOptions } from "../../index";
 import { ToolRegistry } from "../../toolRegistry";
 import {
@@ -170,10 +174,13 @@ export async function enrichProvisionDeviceResult<
       // the call gate apply, and the session this call just minted carries no
       // override of its own — so a capability enabled on the profile is
       // callable and belongs in this report (#6886 review).
-      enabledTools: await listEnabledToolNames(service, [sessionUuid], {
-        connectionProfileUuid,
-        labelSessionUuids: [],
-      }),
+      enabledTools: callableOnAcquiredDevice(
+        result,
+        await listEnabledToolNames(service, [sessionUuid], {
+          connectionProfileUuid,
+          labelSessionUuids: [],
+        }),
+      ),
       ...failure,
     });
   } catch (error) {
@@ -182,6 +189,22 @@ export async function enrichProvisionDeviceResult<
     // the optional enabled-set report cannot be built (#6886 review).
     return withCapabilityDeclarationFailure(result, failure);
   }
+}
+
+/**
+ * Advertise only tools the acquired device's platform admits (#18013): a visionOS session must not
+ * list tapAt or homeScreen, which refuse it at the platform gate. A result naming no platform keeps
+ * every name.
+ */
+function callableOnAcquiredDevice(result: unknown, names: readonly string[]): string[] {
+  const platform = getAnyDevicePlatformFromResult(result);
+  return platform === undefined
+    ? [...names]
+    : platformCallableToolNames(
+        names,
+        platform,
+        (name) => ToolRegistry.getRegisteredTool(name)?.deviceAwareHandler !== undefined,
+      );
 }
 
 /**
@@ -287,10 +310,13 @@ export async function enrichAcquiredSession<
         await awaitWithCancellation(input.listSessionTools(acquiredSessionUuid), requestSignal)
       ).tools.map((tool) => tool.name),
     );
-    const configurable = ToolRegistry.getAllTools()
-      .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
-      .map((tool) => tool.name)
-      .sort();
+    const configurable = callableOnAcquiredDevice(
+      result,
+      ToolRegistry.getAllTools()
+        .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
+        .map((tool) => tool.name)
+        .sort(),
+    );
     const gatedTools = configurable.filter((name) => !listed.has(name));
     const enabledTools = configurable.filter((name) => listed.has(name));
     result = enrichAcquisitionResult(result, {

@@ -4,7 +4,9 @@ export class FakeSimulatorHostState implements SimulatorHostState {
   readonly calls: unknown[][] = [];
   existing: Record<string, unknown> = {};
   written?: Record<string, unknown>;
+  readonly writtenPlists = new Map<string, Record<string, unknown>>();
   writeError?: Error;
+  writeErrorPath?: string;
   removeError?: Error;
   async mkdirPrivate(path: string): Promise<void> {
     this.calls.push(["mkdir", path]);
@@ -15,10 +17,11 @@ export class FakeSimulatorHostState implements SimulatorHostState {
   }
   async writeBinaryPlist(path: string, value: Record<string, unknown>): Promise<void> {
     this.calls.push(["write", path]);
-    if (this.writeError) {
+    if (this.writeError && (!this.writeErrorPath || this.writeErrorPath === path)) {
       throw this.writeError;
     }
     this.written = value;
+    this.writtenPlists.set(path, value);
   }
   async rmDir(path: string): Promise<void> {
     this.calls.push(["rm", path]);

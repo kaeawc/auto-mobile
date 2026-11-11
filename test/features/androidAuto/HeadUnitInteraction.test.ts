@@ -3,6 +3,7 @@ import {
   HeadUnitInteraction,
   deriveHeadUnitEffect,
   headUnitButtonCommands,
+  headUnitRead,
   headUnitScreens,
   headUnitTapCommand,
   type HeadUnitIdleTiming,
@@ -14,6 +15,10 @@ import {
   FIXTURE_CAR_APP_PACKAGE,
   fixtureProjectedTemplates,
 } from "../../helpers/androidAutoProjectionFixtures";
+
+type TopTemplate = NonNullable<
+  CarAppProjectedTemplates["projected"][number]["sessions"][number]["screens"][number]["template"]
+>;
 
 const MENU = fixtureProjectedTemplates(1);
 const LIST = fixtureProjectedTemplates(2);
@@ -101,21 +106,57 @@ describe("head unit screen identity from the captured templates", () => {
   });
 
   test("a push and a pop read as changed, the same stack as unchanged", () => {
-    const menu = headUnitScreens(MENU);
-    const list = headUnitScreens(LIST);
+    const menu = headUnitRead(MENU);
+    const list = headUnitRead(LIST);
     expect(deriveHeadUnitEffect(menu, list)).toEqual({
       screenChanged: true,
       basis: "carAppTemplates changed",
     });
     expect(deriveHeadUnitEffect(list, menu).screenChanged).toBe(true);
-    expect(deriveHeadUnitEffect(menu, headUnitScreens(fixtureProjectedTemplates(1)))).toEqual({
+    expect(deriveHeadUnitEffect(menu, headUnitRead(fixtureProjectedTemplates(1)))).toEqual({
       screenChanged: false,
       basis: "carAppTemplates unchanged",
     });
   });
 
+  test("a change inside the same top template reads as changed (#17911)", () => {
+    const edited = (edit: (template: TopTemplate) => TopTemplate) => {
+      const templates = fixtureProjectedTemplates(2);
+      const top = templates.projected[0].sessions[0].screens[1];
+      top.template = edit(top.template!);
+      return headUnitRead(templates);
+    };
+    const tabbed = (active: number) =>
+      edited((template) => ({
+        ...template,
+        type: "TabTemplate",
+        tabs: [0, 1].map((index) => ({
+          id: `tab${index}`,
+          contentId: `content${index}`,
+          title: `Tab ${index}`,
+          hasIcon: false,
+          active: index === active,
+        })),
+      }));
+    // A tab switch keeps the screen class, template type, title and depth.
+    expect(deriveHeadUnitEffect(tabbed(0), tabbed(1)).screenChanged).toBe(true);
+    expect(deriveHeadUnitEffect(tabbed(0), tabbed(0)).screenChanged).toBe(false);
+    // An item refresh: the first row's text changes in place.
+    const refreshed = edited((template) => ({
+      ...template,
+      items: template.items.map((item, index) =>
+        index === 0 ? { ...item, texts: [...item.texts, "updated"] } : item,
+      ),
+    }));
+    expect(deriveHeadUnitEffect(headUnitRead(LIST), refreshed)).toEqual({
+      screenChanged: true,
+      basis: "carAppTemplates changed",
+    });
+    expect(headUnitScreens(LIST)).toEqual(refreshed.screens);
+  });
+
   test("without template data on either side the change is unknown, not unchanged", () => {
-    expect(deriveHeadUnitEffect(undefined, headUnitScreens(LIST))).toEqual({
+    expect(deriveHeadUnitEffect(undefined, headUnitRead(LIST))).toEqual({
       basis: "no template data",
     });
   });
@@ -195,6 +236,34 @@ describe("HeadUnitInteraction", () => {
     expect(result.effect).toEqual({ basis: "no template data" });
     expect(result.idle).toEqual({ basis: "none", stable: false, waitedMs: 3_000 });
     expect(result.after).toBeUndefined();
+  });
+
+  test("a tap that toggles a row on the same screen reports the change (#17911)", async () => {
+    const toggled = fixtureProjectedTemplates(2);
+    const top = toggled.projected[0].sessions[0].screens[1];
+    top.template = {
+      ...top.template!,
+      items: top.template!.items.map((item, index) =>
+        index === 0 ? { ...item, toggle: !(item.toggle ?? false) } : item,
+      ),
+    };
+    const { interaction } = setup([LIST], [toggled]);
+    const result = await interaction.run(["tap 640 200"]);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "carAppTemplates changed" });
+    expect(result.idle).toEqual({ basis: "carAppTemplates", stable: true, waitedMs: 500 });
+  });
+
+  test("a projected app whose read failed makes the screen unknown, not changed (#17911)", async () => {
+    const partial = fixtureProjectedTemplates(2);
+    partial.projected.unshift({
+      packageName: "com.example.other",
+      sessions: [],
+      error: "template_read_failed",
+    });
+    const { interaction } = setup([LIST], [partial]);
+    const result = await interaction.run(["dpad down"]);
+    expect(result.effect).toEqual({ basis: "no template data" });
+    expect(result.idle.stable).toBe(false);
   });
 
   test("a loading active tab is not idle", async () => {

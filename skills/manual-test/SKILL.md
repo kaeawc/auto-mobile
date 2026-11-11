@@ -393,6 +393,29 @@ pass when both are.
   home return to the expected screen. `adb root` is refused on these images: use
   non-root ground truth (`dumpsys window`, `dumpsys activity`).
 
+**Apple Vision Pro simulator (every round, macOS only).** Takes an iOS slot
+(`device-slot.sh acquire ios`). Create your own simulator through the private
+daemon: `provisionDevice --readiness none` with `platform: "visionos"`, runtime
+`com.apple.CoreSimulator.SimRuntime.xrOS-26-5` and device type
+`com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K` (the plain
+`Apple-Vision-Pro` type is rejected). Never `simctl delete` anything but your own UDID.
+
+- Init the private daemon with `--env AUTOMOBILE_PROJECT_ROOT=<checkout>`,
+  `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true` and a private
+  `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`. Pre-build the runner through
+  `heavy-build-slot.sh xcodebuild build-for-testing -scheme AutoMobileVisionTest
+  -destination "generic/platform=visionOS Simulator"` into that derived data, so the
+  daemon finds the xctestrun instead of building outside the slot. Set
+  `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` for `--cli` calls, since a build outlasts the
+  2-minute default and ends the session.
+- Checklist: provision (record cold-boot seconds); `installApp` an `xrsimulator` `.app`;
+  `launchApp`; `observe` reports the window's elements; `tapOn` by identifier moves
+  list to detail and back (`BackButton`), opens a sheet and flips a toggle, and taps an
+  ornament button; confirm each effect in the screenshot, since the hierarchy carries
+  no toggle value; `terminateApp`, `uninstallApp`; delete the simulator and verify absence.
+- Record the visionOS gaps that remain (getLogs, executePlan, pressButton, homeScreen,
+  swipeOn, tapAt are refused) as SKIPPED with their issue, not as PASS.
+
 ## Device failure modes and repair
 
 Know these before calling anything a product bug. Repair only devices you own

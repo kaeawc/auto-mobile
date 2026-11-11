@@ -1,0 +1,6 @@
+getpwuid_r did not find a match for uid 501
+Timestamp               Ty Process[PID:TID]
+2026-11-11 13:22:24.030 Df DogfoodVision[68785:a908940] [dev.dogfood.vision:ui] detail opened Item 3
+2026-11-11 13:23:07.649 Df DogfoodVision[68785:a908940] [dev.dogfood.vision:ui] toggle true
+2026-11-11 13:23:13.192 Df DogfoodVision[68785:a908940] [dev.dogfood.vision:ui] ornament add tapped
+2026-11-11 13:23:20.068 Df DogfoodVision[68785:a908940] [dev.dogfood.vision:ui] toggle false

@@ -3,7 +3,7 @@ import { getRemovedToolHint } from "../utils/removedTools";
 export function formatDaemonToolError(
   toolName: string,
   message: string,
-  options: { gated?: boolean } = {},
+  options: { buildSkew?: boolean } = {},
 ): string {
   const hint = getRemovedToolHint(toolName);
   if (hint && /Unknown tool\b/i.test(message)) {
@@ -11,8 +11,8 @@ export function formatDaemonToolError(
   }
 
   const detail = message.replace(/[.]+$/, "");
-  // A gated tool (#10177) is daemon configuration, not a stale daemon: a restart cannot lift it.
-  const restartHint =
-    !options.gated && /Unknown tool\b/i.test(message) ? " Try: auto-mobile --daemon restart" : "";
+  // Only detected client/daemon build skew is fixed by a restart: an unknown tool name (#18024)
+  // or a gated tool (#10177) is the same after one.
+  const restartHint = options.buildSkew ? " Try: auto-mobile --daemon restart" : "";
   return `Error calling daemon: ${detail}.${restartHint}`;
 }

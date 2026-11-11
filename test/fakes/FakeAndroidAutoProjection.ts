@@ -99,7 +99,10 @@ export class FakeSession implements DesktopHeadUnitSession {
   running = true;
   /** The DHU process has not exited; an unhealthy session can still be alive. */
   alive = true;
-  sendCommand() {}
+  readonly commands: string[] = [];
+  sendCommand(command: string) {
+    this.commands.push(command);
+  }
   isRunning() {
     return this.running && this.alive;
   }

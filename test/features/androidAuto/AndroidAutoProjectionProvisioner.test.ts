@@ -525,4 +525,18 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(again.session).not.toBe(stuck);
     expect(launcher.launches).toBe(2);
   });
+
+  test("hands out the running DHU's console for head-unit input, never a stopped one", async () => {
+    const { provisioner } = setup();
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")).toBeUndefined();
+    const { session } = await provisioner.provision(request());
+
+    const dhuConsole = provisioner.desktopHeadUnitConsole("emulator-5554");
+    dhuConsole?.sendCommand("dpad back");
+    expect((session as FakeSession).commands).toEqual(["dpad back"]);
+    expect(provisioner.desktopHeadUnitConsole("emulator-5556")).toBeUndefined();
+
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")).toBeUndefined();
+  });
 });

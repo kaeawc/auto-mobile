@@ -22,6 +22,11 @@ import {
   systemTrayHandler,
 } from "./interactionToolHandlers";
 import type { InteractionToolDependencies } from "./interactionTools/dependencies";
+import {
+  headUnitPressButtonHandler,
+  headUnitTapAtHandler,
+} from "./interactionTools/headUnitHandlers";
+import { HEAD_UNIT_DISPLAY } from "../features/androidAuto/HeadUnitInteraction";
 import { withTvosHomeScreen } from "./tvosHomeScreen";
 import { withTvosOpenLink } from "./tvosOpenLink";
 import {
@@ -329,8 +334,11 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     selectAllTextHandler(device, args, { progress, signal, deps }),
   );
 
+  // display "headUnit" (#17842) acts on the Android Auto head unit; every other call is unchanged.
   pressButtonTool.register(ToolRegistry, (device, args, progress, signal) =>
-    pressButtonHandler(device, args, { progress, signal, deps }),
+    args.display === HEAD_UNIT_DISPLAY
+      ? headUnitPressButtonHandler(device, args, deps.headUnitInteractionFactory, signal)
+      : pressButtonHandler(device, args, { progress, signal, deps }),
   );
 
   ToolRegistry.registerDeviceAware(
@@ -393,7 +401,9 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     tapAtSchema,
     {
       handler: (device, args, progress, signal) =>
-        tapAtHandler(device, args, { progress, signal, deps }),
+        args.display === HEAD_UNIT_DISPLAY
+          ? headUnitTapAtHandler(device, args, deps.headUnitInteractionFactory, signal)
+          : tapAtHandler(device, args, { progress, signal, deps }),
       defaultEnabled: true,
       supportsProgress: true,
       ...PLAN_SKELETON,

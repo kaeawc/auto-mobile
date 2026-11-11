@@ -167,4 +167,6 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   visionAnalyzer?: import("../../../vision/VisionTypes").VisionAnalyzer;
   /** Android SDK route store; defaults to the device's existing CtrlProxy client. */
   sdkRouteSource?: import("./sdkRouteSettle").SdkRouteSource;
+  /** The shared XR predicate's detector; defaults to the process-wide cached one. */
+  xrDetector?: import("../../../utils/android-cmdline-tools/androidXrDevice").AndroidXrDetector;
 }

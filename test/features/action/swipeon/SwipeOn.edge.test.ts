@@ -9,6 +9,11 @@ import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import {
+  CachedAndroidXrDetector,
+  XR_SPATIAL_FEATURE,
+} from "../../../../src/utils/android-cmdline-tools/androidXrDevice";
+import { createExecResult } from "../../../../src/utils/execResult";
 
 const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
 
@@ -152,6 +157,70 @@ describe("SwipeOn fromEdge (#12537)", () => {
     const result = await createSwipeOn().execute({ direction: "up", autoTarget: false });
     expect(result.success).toBe(true);
     expect(gesture.getSwipeCalls()[0]).toMatchObject({ x1: 1280, y1: 2302, x2: 1280, y2: 255 });
+    expect(result.warning ?? "").not.toContain("default pose");
+  });
+});
+
+describe("SwipeOn asks the shared XR predicate (#17811)", () => {
+  // The captured panel task alone: no XR System UI task or activity in the back stack.
+  const panelOnlyBackStack = () => {
+    const backStack = xrBackStack("swipe-up");
+    backStack.tasks = backStack.tasks.filter((task) => task.id === 6);
+    backStack.activities = backStack.activities.filter((activity) => activity.taskId === 6);
+    return backStack;
+  };
+
+  const swipeUp = async (declaresXr: boolean, lookFor?: { text: string; maxTime: number }) => {
+    const gesture = new FakeGestureExecutor();
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult({
+      ...observation(),
+      screenSize: { width: 2560, height: 2558 },
+      backStack: panelOnlyBackStack(),
+    });
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      `pm has-feature ${XR_SPATIAL_FEATURE}`,
+      createExecResult(`${declaresXr}\n`, ""),
+    );
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const swipeOn = new SwipeOn(device, adb, {
+      executeGesture: gesture,
+      observeScreen: observe,
+      accessibilityDetector: new FakeAccessibilityDetector(),
+      xrDetector: new CachedAndroidXrDetector(timer),
+    });
+    const window = new FakeWindow();
+    window.configureCachedActiveWindow(null);
+    Object.assign(swipeOn, { awaitIdle: new FakeAwaitIdle(), window, timer });
+    const result = await swipeOn.execute({ direction: "up", autoTarget: false, lookFor });
+    return { result, call: gesture.getSwipeCalls()[0] };
+  };
+
+  test("a headset declaring the XR feature confines screen swipes to its panel", async () => {
+    const { result, call } = await swipeUp(true);
+    expect(result.success).toBe(true);
+    for (const x of [call.x1, call.x2]) {
+      expect(x).toBeWithin(0, 2048);
+    }
+    for (const y of [call.y1, call.y2]) {
+      expect(y).toBeWithin(48, 1328);
+    }
+    expect(result.warning).toContain("assume the app panel is in its default pose");
+  });
+
+  test("a headset declaring the XR feature confines lookFor search swipes to its panel", async () => {
+    const { call } = await swipeUp(true, { text: "Missing", maxTime: 1000 });
+    for (const y of [call.y1, call.y2]) {
+      expect(y).toBeWithin(48, 1328);
+    }
+  });
+
+  test("a phone with the same freeform task keeps full-screen swipes", async () => {
+    const { result, call } = await swipeUp(false);
+    expect(result.success).toBe(true);
+    expect(call).toMatchObject({ x1: 1280, y1: 2302, x2: 1280, y2: 255 });
     expect(result.warning ?? "").not.toContain("default pose");
   });
 });

@@ -1,3 +1,4 @@
+import { observedAndroidXr } from "../../../../src/features/xr/xrPanelSpace";
 import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
@@ -76,6 +77,8 @@ function listHarness({
   observation.setObserveResult(observe);
   const geometry = new DefaultElementGeometry();
   const scroll = new ScrollUntilVisible({
+    // No device handle: the shared predicate decides from the back stack.
+    androidXr: observedAndroidXr(() => ({ device: { deviceId: "fake-list", platform } })),
     device: { name: "fake", platform, deviceId: "fake-list" },
     geometry,
     timer,
@@ -234,6 +237,7 @@ function scriptedPages(pages: string[][], stuckBack = false) {
   const screen = new FakeObserveScreen();
   screen.setObserveResult(observe);
   const scroll = new ScrollUntilVisible({
+    androidXr: async () => false,
     device: { name: "fake", platform: "android", deviceId: "scripted-list" },
     geometry,
     timer,

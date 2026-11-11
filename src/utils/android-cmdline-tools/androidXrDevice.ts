@@ -44,12 +44,8 @@ const isXrSystemUiName = (name: string | undefined): boolean =>
   !!name &&
   (name.startsWith("com.android.systemui.xr") || name.startsWith("com.android.systemui/.xr"));
 
-/**
- * Whether the observed back stack holds Android XR System UI tasks or activities. This is
- * fallback evidence for {@link isAndroidXr}, not the decision: prefer the predicate wherever a
- * device handle exists.
- */
-export function hasXrSystemUi(backStack: BackStackInfo | undefined): backStack is BackStackInfo {
+/** Module-private fallback evidence: only {@link isAndroidXr} reads XR System UI in the back stack. */
+function hasXrSystemUi(backStack: BackStackInfo | undefined): boolean {
   return (
     !!backStack &&
     (backStack.activities.some((activity) => isXrSystemUiName(activity.name)) ||
@@ -108,7 +104,7 @@ export class CachedAndroidXrDetector implements AndroidXrDetector {
 export const defaultAndroidXrDetector: AndroidXrDetector = new CachedAndroidXrDetector();
 
 /**
- * The single XR predicate every tool asks (tapOn, tapAny, tapAt and sendKeys routing): the
+ * The single XR predicate every tool asks (tapOn, tapAny, tapAt, swipeOn and sendKeys routing): the
  * cached system feature, with the observed form factor and XR System UI as the fallback.
  */
 export function isAndroidXr(

@@ -1,4 +1,4 @@
-import { withXrPoseWarning, xrSwipeBounds } from "../../xr/xrPanelSpace";
+import { observedAndroidXr, withXrPoseWarning, xrScreenSwipeBounds } from "../../xr/xrPanelSpace";
 import { rejectTvosTouch } from "../../tvos/TvosActions";
 import { watchSwipeOn } from "../../watch/WatchActions";
 import { iosWebScrollIntoView } from "./IosSdkWebScrollIntoView";
@@ -148,6 +148,7 @@ export class SwipeOn extends BaseVisualChange {
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
   private readonly sdkRouteSourceOverride: SdkRouteSource | undefined;
+  private readonly androidXr: import("../../xr/xrPanelSpace").ObservedAndroidXr;
 
   constructor(
     device: BootedDevice,
@@ -173,6 +174,7 @@ export class SwipeOn extends BaseVisualChange {
       dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = dependencies.visionAnalyzer;
     this.sdkRouteSourceOverride = dependencies.sdkRouteSource;
+    this.androidXr = observedAndroidXr(() => this, dependencies.xrDetector);
     if (dependencies.observeScreen) {
       this.observeScreen = dependencies.observeScreen;
     }
@@ -184,6 +186,7 @@ export class SwipeOn extends BaseVisualChange {
     this.androidDisplay = new SwipeOnAndroidDisplay(() => ({
       device: this.device,
       adb: this.adb,
+      androidXr: this.androidXr,
       timer: this.timer,
       observeScreen: this.observeScreen,
       displayTransitionReader: this.displayTransitionReader,
@@ -239,6 +242,7 @@ export class SwipeOn extends BaseVisualChange {
       accessibilityService: this.accessibilityService,
       accessibilityDetector: this.accessibilityDetector,
       adb: this.adb,
+      androidXr: this.androidXr,
       featureFlags,
       overlayDetector: this.overlayDetector,
       talkBackExecutor: this.talkBackExecutor,
@@ -674,7 +678,7 @@ export class SwipeOn extends BaseVisualChange {
     const result: SwipeOnResult = await this.observedInteraction(
       async (observation, fence) => {
         previous = observation;
-        const swipe = await withXrPoseWarning(this.device.platform, block, observation, fence);
+        const swipe = await withXrPoseWarning(this.androidXr, block, observation, fence);
         swipeEndedAtMs = sdkRoutes ? this.timer.now() : undefined;
         return swipe;
       },
@@ -766,14 +770,6 @@ export class SwipeOn extends BaseVisualChange {
       : "Swipe did not change the screen; no scrollable region was found in the hierarchy.";
   }
 
-  private screenBoundsForSwipe(
-    observation: ObserveResult,
-    options: SwipeOnResolvedOptions,
-    fallback: Element["bounds"],
-  ): Element["bounds"] {
-    return xrSwipeBounds(observation.backStack, options.fromEdge, this.device.platform) ?? fallback;
-  }
-
   private async executeScreenSwipe(
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
@@ -797,10 +793,11 @@ export class SwipeOn extends BaseVisualChange {
         if (!screenSize) {
           throw new ActionableError("Could not determine screen size");
         }
-        const screenBounds = this.screenBoundsForSwipe(
+        const screenBounds = await xrScreenSwipeBounds(
           observeResult,
-          options,
+          this.androidXr,
           getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions)),
+          options.fromEdge,
         );
         const bounds = screenSwipeBounds(screenBounds, within, options.fromEdge);
 

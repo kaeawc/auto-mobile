@@ -2,6 +2,7 @@ import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { describe, expect, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../../src/models";
+import { isSkippedWindowReadReason } from "../../../src/models/ViewHierarchyResult";
 import { refreshAndroidViewHierarchy } from "../../../src/features/action/refreshAndroidViewHierarchy";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -132,6 +133,51 @@ describe("refresh fallback budget", () => {
       expect(calls[0].timeoutMs).toBe(800);
       expect(calls[1].timeoutMs).toBe(800);
       expect(calls[0].signal).toBe(controller.signal);
+      expect(result?.sources).toContain("uiautomator");
+    }
+  });
+});
+
+describe("incomplete capture recovery reasons", () => {
+  test.each([
+    "window_read_skipped",
+    "window_list_skipped",
+    "null_root",
+    "active_window_null_root",
+    "app_window_null_root",
+    "no_app_window_root",
+    "discarded_windows",
+  ] as const)("preserves recovery policy for %s", async (reason) => {
+    const timer = new FakeTimer();
+    const client = new FakeCtrlProxy();
+    client.setHierarchyData({ updatedAt: timer.now(), packageName: "com.test", hierarchy: {} });
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: { node: createFlatNodeForTest({ $: {} }) },
+      packageName: "com.test",
+      ctrlProxyIncomplete: true,
+      ctrlProxyIncompleteReason: reason,
+    };
+    client.setViewHierarchyResult(hierarchy);
+    const adb = new FakeAdbClient();
+    adb.setForegroundApp({ packageName: "com.test", userId: 0 });
+    adb.setCommandResult(
+      "shell cat /data/local/tmp/automobile-hierarchy-test.xml",
+      '<hierarchy><node package="com.test" class="Button" text="Missing" bounds="[0,0][10,10]"/></hierarchy>',
+    );
+    const result = await refreshAndroidViewHierarchy(client, 1000, undefined, {
+      adb,
+      timer,
+      idGenerator: new FakeIdGenerator(["test"]),
+    });
+    const skipped = reason === "window_read_skipped" || reason === "window_list_skipped";
+    expect(isSkippedWindowReadReason(reason)).toBe(skipped);
+    if (skipped) {
+      expect(result).toBe(hierarchy);
+      expect(adb.getCommandCalls()).toEqual([]);
+    } else {
+      expect(adb.getCommandCalls()[0].command).toBe(
+        "shell uiautomator dump /data/local/tmp/automobile-hierarchy-test.xml",
+      );
       expect(result?.sources).toContain("uiautomator");
     }
   });

@@ -16,7 +16,7 @@ import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { findTapTargetNode } from "./tapTargetSupport";
 
 type VerifiedNodeTarget = {
-  selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
+  selector?: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
   expectedBounds: Element["bounds"];
 };
 
@@ -52,11 +52,28 @@ function xrNodeClickSelector(
     throw xrCoordinateError();
   }
   const entries = new SearchableHierarchy().project(hierarchy);
+  // Like TapTargetResolver, a container-scoped selection never promotes past its container.
+  const scoped = options.container !== undefined;
+  const container = scoped ? resolveContainer?.(hierarchy) : undefined;
+  const containerEntry = container ? findTapTargetNode(entries, container) : undefined;
+  const containerIndex = containerEntry ? entries.indexOf(containerEntry) : -1;
+  const scope = { scoped, containerIndex };
   // Native selectors are global across windows, including for an ancestor click.
   const uniqueSelector = (candidate: Element) => {
     const selector = stableNodeSelectorForElement(candidate);
     if (!selector) {
-      return undefined;
+      const matches = entries.filter(
+        (entry) =>
+          entry.bounds &&
+          boundsNearlyEqual(entry.bounds, candidate.bounds, 0) &&
+          hasAccessibilityAction(entry.properties.actions, "click"),
+      );
+      // CtrlProxy resolves a bounds-only click across every window, so the one node at those
+      // bounds must also sit strictly inside a requested container.
+      return new Set(matches.map((entry) => entry.source)).size === 1 &&
+        isInsideScope(entries, matches[0], scope)
+        ? { expectedBounds: candidate.bounds }
+        : undefined;
     }
     const matches = entries.filter((entry) =>
       matchesCtrlProxyNodeSelector(entry.properties, selector),
@@ -75,12 +92,24 @@ function xrNodeClickSelector(
     throw xrCoordinateError();
   }
 
-  // Like TapTargetResolver, a container-scoped selection never promotes past its container.
-  const scoped = options.container !== undefined;
-  const container = scoped ? resolveContainer?.(hierarchy) : undefined;
-  const containerEntry = container ? findTapTargetNode(entries, container) : undefined;
-  const containerIndex = containerEntry ? entries.indexOf(containerEntry) : -1;
-  return xrAncestorClickSelector(element, entries, uniqueSelector, { scoped, containerIndex });
+  return xrAncestorClickSelector(element, entries, uniqueSelector, scope);
+}
+
+/** Whether `entry` is a strict descendant of the requested container (always, when unscoped). */
+function isInsideScope(
+  entries: readonly SearchableEntry[],
+  entry: SearchableEntry,
+  scope: { scoped: boolean; containerIndex: number },
+): boolean {
+  if (!scope.scoped) {
+    return true;
+  }
+  for (let at = entry.parentIndex; at !== undefined; at = entries[at].parentIndex) {
+    if (at === scope.containerIndex) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

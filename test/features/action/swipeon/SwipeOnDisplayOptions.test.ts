@@ -634,6 +634,7 @@ test("XR display container-element swipes resolve before the fromEdge panel refu
     options: { direction: "up", fromEdge: "bottom" },
     decision: { element },
     observation,
+    androidXr: true,
   });
   expect(resolved.targetType).toBe("element");
   for (const y of [resolved.y1, resolved.y2]) {

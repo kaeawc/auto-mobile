@@ -444,6 +444,7 @@ describe("gesture request sequences", () => {
     };
     const talkBack = new FakeTalkBackSwipeExecutor();
     const scroll = new ScrollUntilVisible({
+      androidXr: async () => false,
       device: { ...device, platform },
       timer,
       resolver: new FakeScrollElementResolver(lookup),

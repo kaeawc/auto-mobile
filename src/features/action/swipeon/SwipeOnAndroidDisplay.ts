@@ -1,4 +1,9 @@
-import { appendWarning, xrDefaultPoseWarning, xrSwipeBounds } from "../../xr/xrPanelSpace";
+import {
+  appendWarning,
+  type ObservedAndroidXr,
+  xrDefaultPoseWarning,
+  xrSwipeBounds,
+} from "../../xr/xrPanelSpace";
 import type { SwipeOnCtrlProxy } from "./types";
 import { freshSwipeHierarchy } from "./freshSwipeHierarchy";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./androidSearchDrag";
@@ -77,6 +82,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 export interface SwipeOnDisplayContext {
   device: BootedDevice;
   adb: AdbExecutor;
+  androidXr: ObservedAndroidXr;
   timer: Timer;
   observeScreen: ObserveScreen;
   displayTransitionReader: DisplayTransitionReader;
@@ -230,6 +236,7 @@ export class SwipeOnAndroidDisplay {
       options,
       decision,
       observation,
+      androidXr: await this.ctx().androidXr(observation, signal),
     });
     const duration = resolveSwipeDuration({ ...options, geometry: this.ctx().geometry });
     const boomerang = resolveBoomerangConfig(options);
@@ -386,12 +393,14 @@ export class SwipeOnAndroidDisplay {
     options,
     decision,
     observation,
+    androidXr,
   }: {
     options: SwipeOnOptions;
     decision: AutoTargetDecision;
     observation: ObserveResult;
+    androidXr: boolean;
   }): Pick<SwipeOnResult, "x1" | "y1" | "x2" | "y2" | "targetType" | "warning"> {
-    const xrWarning = xrDefaultPoseWarning(observation);
+    const xrWarning = xrDefaultPoseWarning(observation, androidXr);
     if (decision.element && observation.viewHierarchy) {
       const coordinates = this.ctx().resolveContainerSwipeCoordinates(
         { ...options, direction: options.direction! },
@@ -413,7 +422,9 @@ export class SwipeOnAndroidDisplay {
       throw new ActionableError("Swipe container not found on selected display");
     }
     // Container swipes never use XR panel bounds, so only screen swipes can refuse fromEdge.
-    const panelBounds = bounds ? undefined : xrSwipeBounds(observation.backStack, options.fromEdge);
+    const panelBounds = bounds
+      ? undefined
+      : xrSwipeBounds(observation.backStack, androidXr, options.fromEdge);
     return {
       ...displaySwipeCoordinates(
         options,

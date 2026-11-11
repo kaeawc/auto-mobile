@@ -349,6 +349,7 @@ describe("explicit action display", () => {
                 ? new SwipeOn(android, executor, {
                     ...deps,
                     observeScreen: observe,
+                    xrDetector: new FakeAndroidXrDetector(),
                   })
                 : new DragAndDrop(android, executor, timer, deps);
         action.observeScreen = observe;
@@ -797,6 +798,7 @@ describe("explicit action display", () => {
     const action = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
+      xrDetector: new FakeAndroidXrDetector(),
     });
     Object.assign(action, {
       observedInteraction: async (run: (observation: ObserveResult) => Promise<object>) =>
@@ -1757,6 +1759,7 @@ describe("CtrlProxy display-targeted action routing", () => {
               ? new SwipeOn(android, executor, {
                   ...deps,
                   observeScreen: observe,
+                  xrDetector: new FakeAndroidXrDetector(),
                 })
               : new DragAndDrop(android, executor, timer, deps);
       action.observeScreen = observe;
@@ -2254,6 +2257,7 @@ describe("display gesture dispatch boundary race", () => {
                 ? new SwipeOn(android, executor, {
                     ...deps,
                     observeScreen: observe,
+                    xrDetector: new FakeAndroidXrDetector(),
                   })
                 : kind === "drag"
                   ? new DragAndDrop(android, executor, timer, deps)

@@ -27,7 +27,7 @@ interface TapAtGestureOptions {
   pointSpace?: "native" | "screenshot";
   /**
    * Internal: the shared `isAndroidXr` predicate's answer, set by tapAt before resolution.
-   * Absent, the back stack's XR System UI decides. Absent from the schema.
+   * Absent means not XR. Absent from the schema.
    */
   androidXr?: boolean;
 }

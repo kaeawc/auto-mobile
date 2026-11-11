@@ -64,6 +64,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   ]),
   // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
   visionos: new Set<string>([
+    // simctl spawn <udid> log show, as on an iOS simulator (#18011).
+    "getLogs",
     "installApp",
     "uninstallApp",
     "launchApp",

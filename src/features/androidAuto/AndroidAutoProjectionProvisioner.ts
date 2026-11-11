@@ -283,7 +283,7 @@ export class AndroidAutoProjectionProvisioner {
     }
     if (request.androidAutoApks.length === 0) {
       throw new ActionableError(
-        "This phone still runs the Android Auto stub, which has no head unit server. Supply the split APKs of an Android Auto release (base plus config splits); AutoMobile never downloads them.",
+        "This phone still runs the Android Auto stub, which has no head unit server. Provision it with provisionDevice androidAuto.apkDirectory holding the split APKs of an Android Auto release (base plus config splits); AutoMobile never downloads them.",
       );
     }
     try {

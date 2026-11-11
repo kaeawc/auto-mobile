@@ -5,12 +5,16 @@ import type {
   AndroidAutoProjectionApplier,
   AndroidAutoProvisionReport,
 } from "../../../src/features/androidAuto/AndroidAutoProjectionService";
-import { provisionDeviceSchema } from "../../../src/features/deviceLifecycle/core/schemas";
+import {
+  provisionDeviceSchema,
+  startDeviceSchema,
+} from "../../../src/features/deviceLifecycle/core/schemas";
 import type { ProvisionDeviceArgs } from "../../../src/features/deviceLifecycle/deviceLifecycleCore";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   applyProvisionAndroidAuto,
   assertAndroidAutoInputsPresent,
+  startDeviceAndroidAutoHeadUnit,
   stopProvisionedAndroidAuto,
 } from "../../../src/server/provisioning/provisioningAndroidAuto";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -42,7 +46,7 @@ function args(overrides: Partial<ProvisionDeviceArgs> = {}): ProvisionDeviceArgs
 
 const REPORT: AndroidAutoProvisionReport = {
   steps: [{ step: "desktop-head-unit", status: "applied" }],
-  desktopHeadUnit: { running: true },
+  desktopHeadUnit: { running: true, configPath: "/dhu.ini" },
 };
 
 class FakeApplier implements AndroidAutoProjectionApplier {
@@ -69,8 +73,20 @@ class FakeApplier implements AndroidAutoProjectionApplier {
       acceptAndroidAutoTerms: false,
     };
   }
+  async resolveHeadUnitInputs() {
+    return { dhu: { binaryPath: "/dhu", configPath: "/dhu.ini" }, acceptAndroidAutoTerms: false };
+  }
+  /** The startDevice run: recorded apart from `apply`, with the same waits and failures. */
+  async startHeadUnit(device: { deviceId: string }, _options: unknown, signal?: AbortSignal) {
+    this.startedHeadUnits.push(device.deviceId);
+    return await this.run(signal);
+  }
+  readonly startedHeadUnits: string[] = [];
   async apply(device: { deviceId: string }, _options: unknown, signal?: AbortSignal) {
     this.applied.push(device.deviceId);
+    return await this.run(signal);
+  }
+  private async run(signal?: AbortSignal) {
     if (this.pending) {
       await this.pending;
       if (this.honorsAbort) {
@@ -237,7 +253,7 @@ describe("provisionDevice androidAuto", () => {
 
     applier.report = {
       steps: [{ step: "desktop-head-unit", status: "already-done" }],
-      desktopHeadUnit: { running: true },
+      desktopHeadUnit: { running: true, configPath: "/dhu.ini" },
     };
     const reused: { androidAutoDevice?: BootedDevice } = {};
     await applyProvisionAndroidAuto(
@@ -272,7 +288,7 @@ describe("provisionDevice androidAuto", () => {
       applier.failure = late.failure;
       applier.report = {
         steps: [{ step: "desktop-head-unit", status: late.status }],
-        desktopHeadUnit: { running: true },
+        desktopHeadUnit: { running: true, configPath: "/dhu.ini" },
       };
       let release!: () => void;
       applier.pending = new Promise<void>((resolve) => {
@@ -313,5 +329,107 @@ describe("provisionDevice androidAuto", () => {
       throw new Error("broken applier");
     };
     await stopProvisionedAndroidAuto({ androidAutoProjection: applier }, androidDevice);
+  });
+});
+
+describe("startDevice androidAuto.headUnit (#17840)", () => {
+  const HEAD_UNIT = { headUnit: { dhuConfig: "/hu.ini" } };
+
+  test("the schema accepts androidAuto.headUnit on Android and refuses it on iOS", () => {
+    const parsed = startDeviceSchema.parse({ platform: "android", androidAuto: HEAD_UNIT });
+    expect(parsed.androidAuto).toEqual(HEAD_UNIT);
+    const ios = startDeviceSchema.safeParse({ platform: "ios", androidAuto: HEAD_UNIT });
+    expect(ios.success).toBe(false);
+    expect(JSON.stringify(ios.error?.issues)).toContain("needs an Android phone emulator");
+    const noHeadUnit = startDeviceSchema.safeParse({ platform: "android", androidAuto: {} });
+    expect(noHeadUnit.success).toBe(false);
+    const apks = startDeviceSchema.safeParse({
+      platform: "android",
+      androidAuto: { ...HEAD_UNIT, apkDirectory: "/apks" },
+    });
+    expect(apks.success).toBe(false);
+  });
+
+  test("starts the head unit through the shared applier and reports it", async () => {
+    const applier = new FakeApplier();
+    const timer = new FakeTimer();
+    const report = await startDeviceAndroidAutoHeadUnit(
+      HEAD_UNIT,
+      { androidAutoProjection: applier, timer },
+      androidDevice,
+      bounds(timer),
+    );
+    expect(report).toEqual(REPORT);
+    expect(applier.startedHeadUnits).toEqual(["emulator-5554"]);
+    expect(applier.applied).toEqual([]);
+  });
+
+  test("a failed start stops no DHU it did not connect", async () => {
+    const applier = new FakeApplier();
+    applier.failure = new ActionableError("Host port 5277 is held by emulator-5556's redirect");
+    const timer = new FakeTimer();
+    await expect(
+      startDeviceAndroidAutoHeadUnit(
+        HEAD_UNIT,
+        { androidAutoProjection: applier, timer },
+        androidDevice,
+        bounds(timer),
+      ),
+    ).rejects.toThrow("held by emulator-5556's redirect");
+    expect(applier.stopped).toEqual([]);
+  });
+
+  test("the start's deadline bounds the head unit and stops a DHU it connects late", async () => {
+    const applier = new FakeApplier();
+    applier.honorsAbort = false;
+    let release!: () => void;
+    applier.pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const timer = new FakeTimer();
+    const settled = startDeviceAndroidAutoHeadUnit(
+      HEAD_UNIT,
+      { androidAutoProjection: applier, timer },
+      androidDevice,
+      bounds(timer, new AbortController().signal, 1_000),
+    ).then(
+      () => "resolved",
+      (error: unknown) => error,
+    );
+    timer.advanceTime(1_000);
+    expect(String(await settled)).toContain("timed out starting the Android Auto head unit");
+    expect(applier.stopped).toEqual([]);
+    release();
+    for (let tick = 0; tick < 20 && applier.stopped.length === 0; tick++) {
+      await Promise.resolve();
+    }
+    expect(applier.stopped).toEqual([{ deviceId: "emulator-5554" }]);
+  });
+
+  test("a late start that reused an earlier DHU leaves it running", async () => {
+    const applier = new FakeApplier();
+    applier.honorsAbort = false;
+    applier.report = {
+      steps: [{ step: "desktop-head-unit", status: "already-done" }],
+      desktopHeadUnit: { running: true, configPath: "/dhu.ini" },
+    };
+    let release!: () => void;
+    applier.pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const timer = new FakeTimer();
+    const settled = startDeviceAndroidAutoHeadUnit(
+      HEAD_UNIT,
+      { androidAutoProjection: applier, timer },
+      androidDevice,
+      bounds(timer, new AbortController().signal, 1_000),
+    ).catch((error: unknown) => error);
+    timer.advanceTime(1_000);
+    await settled;
+    release();
+    for (let tick = 0; tick < 10; tick++) {
+      await Promise.resolve();
+    }
+    expect(applier.stopped).toEqual([]);
   });
 });

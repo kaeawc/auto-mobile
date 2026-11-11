@@ -73,6 +73,8 @@ import * as os from "os";
 import { toolJson } from "../helpers/toolResponse";
 import { withWireConnection } from "../helpers/mcpConnection";
 
+import type { AndroidAutoProjectionApplier } from "../../src/features/androidAuto/AndroidAutoProjectionService";
+
 // Successful acquisitions in this suite always have a bound session.
 const startResultSchema = startDeviceOutputSchema.extend({
   runtime: deviceDescriptionSchema.shape.runtime.extend({
@@ -299,6 +301,75 @@ describe("startDevice handler", () => {
     await bootService.boot({ platform: "android", discardSnapshotOnExit: true });
     await bootService.boot({ platform: "android" });
     expect(received).toEqual([true, undefined]);
+  });
+
+  /** A startDevice head unit applier that records its runs (#17840). */
+  function headUnitApplier(failure?: Error) {
+    const started: Array<{ deviceId: string; options: unknown }> = [];
+    const applier: AndroidAutoProjectionApplier = {
+      resolveInputs: async () => {
+        throw new Error("not used by startDevice");
+      },
+      apply: async () => {
+        throw new Error("not used by startDevice");
+      },
+      resolveHeadUnitInputs: async () => {
+        throw new Error("startHeadUnit resolves its own inputs");
+      },
+      startHeadUnit: async (device, options) => {
+        started.push({ deviceId: device.deviceId, options });
+        if (failure) {
+          throw failure;
+        }
+        return {
+          steps: [{ step: "desktop-head-unit", status: "applied" }],
+          desktopHeadUnit: { running: true, configPath: "/hu.ini" },
+        };
+      },
+      stopDesktopHeadUnit: async () => {},
+    };
+    setDeviceToolsDependencies({ androidAutoProjection: applier });
+    return started;
+  }
+
+  it("starts the Android Auto head unit for the ready phone and reports it (#17840)", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    const started = headUnitApplier();
+    const result = await callStartDevice({
+      platform: "android",
+      androidAuto: { headUnit: { dhuConfig: "/hu.ini" }, acceptAndroidAutoTerms: true },
+    });
+    expect(started).toEqual([
+      {
+        deviceId: "mock-Pixel_7_API_34",
+        options: { headUnit: { dhuConfig: "/hu.ini" }, acceptAndroidAutoTerms: true },
+      },
+    ]);
+    expect(result.androidAuto).toEqual({
+      steps: [{ step: "desktop-head-unit", status: "applied" }],
+      desktopHeadUnit: { running: true, configPath: "/hu.ini" },
+    });
+  });
+
+  it("a start without androidAuto never touches the head unit applier", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    const started = headUnitApplier();
+    const result = await callStartDevice({ platform: "android" });
+    expect(started).toEqual([]);
+    expect(result.androidAuto).toBeUndefined();
+  });
+
+  it("a head unit failure names the ready phone and its bound session", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    headUnitApplier(new ActionableError("This phone still runs the Android Auto stub"));
+    await expect(
+      callStartDevice({ platform: "android", androidAuto: { headUnit: {} } }),
+    ).rejects.toThrow(
+      /mock-Pixel_7_API_34 is ready and bound to session .+, but its Android Auto head unit did not start: This phone still runs the Android Auto stub/,
+    );
   });
 
   it("renders cameraPosterQr to a poster and passes its path to the cold Android launch", async () => {

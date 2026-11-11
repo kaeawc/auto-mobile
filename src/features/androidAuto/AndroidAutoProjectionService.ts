@@ -16,23 +16,28 @@ import { AdbAndroidAutoScreenDriver } from "./AdbAndroidAutoScreenDriver";
 import { AdbAndroidAutoPhone } from "./AndroidAutoPhone";
 import {
   AndroidAutoProjectionProvisioner,
+  type AndroidAutoProjectionResult,
   type AndroidAutoProvisioningStep,
 } from "./AndroidAutoProjectionProvisioner";
 import { ScriptedAndroidAutoSettingsUi } from "./AndroidAutoSettingsUi";
 import { InspectingAndroidAutoSignerCheck } from "./AndroidAutoSignerCheck";
 import {
   resolveAndroidAutoProvisionInputs,
+  resolveDesktopHeadUnitInputs,
   type AndroidAutoHostFiles,
   type AndroidAutoInputEnvironment,
   type AndroidAutoProvisionInputs,
+  type DesktopHeadUnitInputs,
   type ProvisionAndroidAutoOptions,
+  type StartDeviceAndroidAutoOptions,
 } from "./androidAutoProvisionInputs";
 import { createDefaultDhuSpawner, SpawningDesktopHeadUnitLauncher } from "./DesktopHeadUnit";
 
-/** What `provisionDevice` reports under `androidAuto`. */
+/** What `provisionDevice` and `startDevice` report under `androidAuto`. */
 export interface AndroidAutoProvisionReport {
   steps: AndroidAutoProvisioningStep[];
-  desktopHeadUnit: { running: boolean };
+  /** The head unit this daemon runs for the phone: whether it holds its connection, and its config. */
+  desktopHeadUnit: { running: boolean; configPath: string };
 }
 
 /** The provisionDevice seam: check host inputs before boot, project once the device is ready. */
@@ -42,6 +47,17 @@ export interface AndroidAutoProjectionApplier {
   apply(
     device: BootedDevice,
     options: ProvisionAndroidAutoOptions,
+    signal?: AbortSignal,
+  ): Promise<AndroidAutoProvisionReport>;
+  /** Throws an actionable error naming a missing DHU binary or config. */
+  resolveHeadUnitInputs(options: StartDeviceAndroidAutoOptions): Promise<DesktopHeadUnitInputs>;
+  /**
+   * startDevice's head unit for a phone already provisioned for projection: the same run as
+   * `apply`, with no APKs, so a phone still on the Android Auto stub is refused, not installed.
+   */
+  startHeadUnit(
+    device: BootedDevice,
+    options: StartDeviceAndroidAutoOptions,
     signal?: AbortSignal,
   ): Promise<AndroidAutoProvisionReport>;
   /**
@@ -81,12 +97,42 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
       acceptAndroidAutoTerms: inputs.acceptAndroidAutoTerms,
       signal,
     });
-    return { steps: result.steps, desktopHeadUnit: { running: result.session.isRunning() } };
+    return report(result, inputs.dhu.configPath);
+  }
+
+  resolveHeadUnitInputs(options: StartDeviceAndroidAutoOptions): Promise<DesktopHeadUnitInputs> {
+    return resolveDesktopHeadUnitInputs(options, this.environment);
+  }
+
+  async startHeadUnit(
+    device: BootedDevice,
+    options: StartDeviceAndroidAutoOptions,
+    signal?: AbortSignal,
+  ): Promise<AndroidAutoProvisionReport> {
+    const inputs = await this.resolveHeadUnitInputs(options);
+    const result = await this.provisioner.provision({
+      deviceId: device.deviceId,
+      androidAutoApks: [],
+      dhu: inputs.dhu,
+      acceptAndroidAutoTerms: inputs.acceptAndroidAutoTerms,
+      signal,
+    });
+    return report(result, inputs.dhu.configPath);
   }
 
   stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }): Promise<void> {
     return this.provisioner.stopDesktopHeadUnit(deviceId, options);
   }
+}
+
+function report(
+  result: AndroidAutoProjectionResult,
+  configPath: string,
+): AndroidAutoProvisionReport {
+  return {
+    steps: result.steps,
+    desktopHeadUnit: { running: result.session.isRunning(), configPath },
+  };
 }
 
 async function statMatches(target: string, matches: (stat: Stats) => boolean): Promise<boolean> {

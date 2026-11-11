@@ -58,6 +58,61 @@ const androidProvisionDeviceRequestSpecSchema = z
   .strict()
   .superRefine(refineAndroidSpec);
 
+/** Android Auto projection set up on the booted phone emulator, with a headless DHU (#17839). */
+const provisionAndroidAutoSchema = z
+  .object({
+    apkDirectory: z
+      .string()
+      .min(1)
+      .describe(
+        "Host directory holding the Android Auto split APKs you supplied: base.apk plus its split_*.apk config splits for the emulator's ABI, language and density. AutoMobile never downloads them. Installed only while the phone still runs the image's Android Auto stub.",
+      ),
+    dhuPath: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "desktop-head-unit binary; defaults to $ANDROID_HOME/extras/google/auto/desktop-head-unit",
+      ),
+    dhuConfig: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Head unit config (.ini); defaults to config/default_720p.ini beside the DHU binary",
+      ),
+    acceptAndroidAutoTerms: z
+      .boolean()
+      .optional()
+      .describe(
+        "Tap Continue on Android Auto's welcome screen, which accepts its terms. Set only on the user's explicit instruction; otherwise a pending welcome screen is reported, not tapped.",
+      ),
+  })
+  .strict();
+
+export type ProvisionAndroidAutoOptions = z.output<typeof provisionAndroidAutoSchema>;
+
+/**
+ * startDevice's head unit for a phone emulator already provisioned for projection (#17840). It
+ * reuses provisionDevice's DHU fields; installing Android Auto stays provisionDevice's job.
+ */
+const startDeviceAndroidAutoSchema = z
+  .object({
+    headUnit: z
+      .object({
+        dhuPath: provisionAndroidAutoSchema.shape.dhuPath,
+        dhuConfig: provisionAndroidAutoSchema.shape.dhuConfig,
+      })
+      .strict()
+      .describe(
+        "Start a headless Desktop Head Unit projecting this phone. Pass {} for the SDK's DHU and default_720p.ini.",
+      ),
+    acceptAndroidAutoTerms: provisionAndroidAutoSchema.shape.acceptAndroidAutoTerms,
+  })
+  .strict();
+
+export type StartDeviceAndroidAutoOptions = z.output<typeof startDeviceAndroidAutoSchema>;
+
 export const startDeviceParametersSchema = z.object({
   platform: platformSchema,
   minOsVersion: z
@@ -181,6 +236,11 @@ export const startDeviceParametersSchema = z.object({
   // hidden compatibility surface capability-complete so a fresh/reconnected
   // client can declare the tools needed by its newly minted session.
   enableTools: enableToolsSchemaField,
+  androidAuto: startDeviceAndroidAutoSchema
+    .optional()
+    .describe(
+      "Android only. After the phone emulator is ready, start a headless Desktop Head Unit projecting it. The phone must already be provisioned for Android Auto (provisionDevice androidAuto); one projecting emulator per host.",
+    ),
 });
 
 /**
@@ -206,10 +266,17 @@ export function mergeLegacyStartDevicePayload(input: unknown): unknown {
 function refineStartDeviceParameters(
   value: Pick<
     z.output<typeof startDeviceParametersSchema>,
-    "cameraPosterQr" | "cameraPosterPath" | "avdName" | "name"
+    "cameraPosterQr" | "cameraPosterPath" | "avdName" | "name" | "androidAuto"
   > & { platform: string },
   context: z.RefinementCtx,
 ): void {
+  if (value.androidAuto !== undefined && value.platform !== "android") {
+    context.addIssue({
+      code: "custom",
+      path: ["androidAuto"],
+      message: "androidAuto.headUnit needs an Android phone emulator",
+    });
+  }
   if (value.cameraPosterQr !== undefined && value.cameraPosterPath !== undefined) {
     context.addIssue({
       code: "custom",
@@ -505,40 +572,6 @@ const provisionDeviceResourcesField = deviceResourceConfigurationSchema
   .describe(
     "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
   );
-
-/** Android Auto projection set up on the booted phone emulator, with a headless DHU (#17839). */
-const provisionAndroidAutoSchema = z
-  .object({
-    apkDirectory: z
-      .string()
-      .min(1)
-      .describe(
-        "Host directory holding the Android Auto split APKs you supplied: base.apk plus its split_*.apk config splits for the emulator's ABI, language and density. AutoMobile never downloads them. Installed only while the phone still runs the image's Android Auto stub.",
-      ),
-    dhuPath: z
-      .string()
-      .min(1)
-      .optional()
-      .describe(
-        "desktop-head-unit binary; defaults to $ANDROID_HOME/extras/google/auto/desktop-head-unit",
-      ),
-    dhuConfig: z
-      .string()
-      .min(1)
-      .optional()
-      .describe(
-        "Head unit config (.ini); defaults to config/default_720p.ini beside the DHU binary",
-      ),
-    acceptAndroidAutoTerms: z
-      .boolean()
-      .optional()
-      .describe(
-        "Tap Continue on Android Auto's welcome screen, which accepts its terms. Set only on the user's explicit instruction; otherwise a pending welcome screen is reported, not tapped.",
-      ),
-  })
-  .strict();
-
-export type ProvisionAndroidAutoOptions = z.output<typeof provisionAndroidAutoSchema>;
 
 /** provisionDevice's options after `device`, in their advertised order. */
 const provisionDeviceOptionFields = {

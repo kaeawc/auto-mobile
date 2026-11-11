@@ -29,6 +29,8 @@ export async function stopAndroidAutoBeforeShutdown(
   });
 }
 
+type AfterKillDependencies = Pick<DeviceToolsDependencies, "androidAutoProjection" | "timer">;
+
 /**
  * The kill succeeded, so the emulator's DHU and host port 5277 redirect went with it. Forget
  * them as soon as the stop is confirmed: before ownership retirement can publish a same-ID
@@ -40,7 +42,7 @@ export async function stopAndroidAutoBeforeShutdown(
  */
 async function stopAndroidAutoAfterKill(
   shutdownContext: ShutdownDeadlineContext,
-  dependencies: DeviceToolsDependencies,
+  dependencies: AfterKillDependencies,
 ): Promise<{ pending: Promise<void> } | undefined> {
   const { device } = shutdownContext;
   if (device.platform !== "android") {
@@ -72,33 +74,43 @@ type RetainReservation = (operation: Promise<void>, releaseAfterFailure: boolean
  * The post-kill DHU stop for one shutdown: `onShutdownConfirmed` runs it once the platform stop
  * is confirmed, and `releaseReservation` releases the shutdown reservation now or, while that
  * stop is still running, keeps it until the stop settles so no replacement claims the serial.
- * A shutdown that fails after the stop outlived its wait (ownership retirement throws) calls
- * `retainAfterFailure` instead, so the failure path never frees the serial under a running stop
- * nor waits on it past the deadline (#17889). The reservation is retained at most once.
+ * A shutdown that fails while that stop is still running, whether it already outlived its wait
+ * or the wait itself is still in flight (ownership retirement throws), calls `retainAfterFailure`
+ * instead, so the failure path never frees the serial under a running stop nor waits on it past
+ * the deadline (#17889). The reservation is retained at most once.
  */
 export function trackAndroidAutoStopAfterKill(
   shutdownContext: ShutdownDeadlineContext,
-  dependencies: DeviceToolsDependencies,
+  dependencies: AfterKillDependencies,
 ): {
   onShutdownConfirmed: () => Promise<void>;
   releaseReservation: (release: () => Promise<void>, retain: RetainReservation) => Promise<void>;
   retainAfterFailure: () => void;
 } {
   let lateStop: Promise<void> | undefined;
+  /** The post-kill wait while it is still running, settling once it and any late stop settle. */
+  let waiting: Promise<void> | undefined;
   let retained = false;
   const retainLateStop = (retain: RetainReservation): boolean => {
-    if (!lateStop) {
+    const pending = lateStop ?? waiting;
+    if (!pending) {
       return false;
     }
     if (!retained) {
       retained = true;
-      retain(lateStop, true);
+      retain(pending, true);
     }
     return true;
   };
   return {
     onShutdownConfirmed: async () => {
-      lateStop = (await stopAndroidAutoAfterKill(shutdownContext, dependencies))?.pending;
+      const wait = stopAndroidAutoAfterKill(shutdownContext, dependencies);
+      // Set before the first await: a failure that lands while the wait is still running (and
+      // `lateStop` is unset) must still hold the reservation until the stop settles.
+      waiting = wait.then(async (late) => await late?.pending);
+      const late = await wait;
+      lateStop = late?.pending;
+      waiting = undefined;
     },
     releaseReservation: async (release, retain) => {
       if (retainLateStop(retain)) {

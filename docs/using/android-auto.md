@@ -2,7 +2,8 @@
 
 Android Auto projects a phone app's car UI to a head unit. The Desktop Head Unit (DHU) is Google's
 desktop stand-in for that head unit. `provisionDevice` can set up projection on a phone emulator and
-start a headless DHU for you. AutoMobile does not read the projected car screen; this page covers the
+start a headless DHU for you, and `startDevice` can start the DHU again for a phone that is already set
+up. AutoMobile does not read the projected car screen; this page covers the
 setup, the manual steps it automates, and what to expect.
 
 For a full car Android build that AutoMobile drives directly, use an
@@ -56,6 +57,7 @@ The response gains an `androidAuto` block:
   and sometimes a `detail`. Running it again on a phone that is already set up reports `already-done`
   and reuses the running DHU.
 - `desktopHeadUnit.running`: whether the DHU holds its connection.
+- `desktopHeadUnit.configPath`: the head unit config the DHU started with.
 
 An `onboarding` step with status `skipped` means the welcome screen is waiting. Tap **Continue** on the
 phone, or provision again with `acceptAndroidAutoTerms: true`.
@@ -73,6 +75,42 @@ phone, or provision again with `acceptAndroidAutoTerms: true`.
 
 A failure after boot fails the whole request: an emulator the request created is rolled back, and a DHU
 that request started is stopped. A DHU an earlier provision started keeps running. `killDevice` on an emulator also stops its DHU.
+
+## Starting the head unit with `startDevice`
+
+For a phone emulator that `provisionDevice` already set up for Android Auto, pass `androidAuto.headUnit`
+to `startDevice`. Once the phone is ready, AutoMobile checks the same setup steps, starts a headless DHU
+against it and reports it. It never installs Android Auto here.
+
+```json
+{
+  "platform": "android",
+  "avdName": "Pixel_9_Play_36",
+  "androidAuto": { "headUnit": {} }
+}
+```
+
+| Parameter                            | Required | Description                                                                                                                              |
+| ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `androidAuto.headUnit`               | yes      | Start the head unit. Pass `{}` for the SDK's DHU and `default_720p.ini`.                                                                 |
+| `androidAuto.headUnit.dhuPath`       | no       | The `desktop-head-unit` binary. Defaults to `$ANDROID_HOME/extras/google/auto/desktop-head-unit`.                                        |
+| `androidAuto.headUnit.dhuConfig`     | no       | Head unit config (`.ini`). Defaults to `config/default_720p.ini` beside the DHU binary.                                                  |
+| `androidAuto.acceptAndroidAutoTerms` | no       | Tap **Continue** on **Welcome to Android Auto**, as for `provisionDevice`. Without it, a pending welcome screen is reported, not tapped. |
+
+The response gains the same `androidAuto` block as `provisionDevice` (`steps` and `desktopHeadUnit`). If
+a DHU is already projecting this phone, it is reused and reported as `already-done`.
+
+If the head unit does not start, `startDevice` fails with a message that names the phone and its
+session. The phone stays ready and held by that session: fix the cause and call `startDevice` again,
+or release the device. The errors are the ones in the `provisionDevice` table above, plus:
+
+| Error                                         | What to do                                                                                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| The phone still runs the Android Auto stub    | Run `provisionDevice` with `androidAuto.apkDirectory` first.                                                                        |
+| The Android Auto head unit is missing a DHU   | The message names the missing path. Install the DHU with `sdkmanager "extras;google;auto"`, or pass `androidAuto.headUnit.dhuPath`. |
+| Timed out starting the Android Auto head unit | Raise `timeoutMs` and call `startDevice` again. A DHU that connects after the timeout is stopped.                                   |
+
+`killDevice` on the phone stops its DHU. AutoMobile only ever stops a DHU it started itself.
 
 ## Setting up projection by hand
 

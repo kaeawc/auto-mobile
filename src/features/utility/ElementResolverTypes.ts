@@ -21,6 +21,8 @@ export interface ElementReference {
 }
 
 export interface ResolutionIntent {
+  /** Prefer complete sibling rows, then top/left/capture order; internal XR tapAny opt-in. */
+  readingOrder?: boolean;
   action: ResolutionAction;
   /** Preserve tap ranking while inspect keeps bounded inert labels addressable. */
   preferTap?: boolean;

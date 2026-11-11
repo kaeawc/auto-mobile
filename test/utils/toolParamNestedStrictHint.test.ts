@@ -65,7 +65,7 @@ const cases: readonly NestedCase[] = [
     schema: systemTraySchema,
     valid: { action: "find", notification: { title: "Hi" } },
     invalid: { action: "find", notification: { titel: "Hi" } },
-    keysLine: "Allowed notification keys: title, body, appId, tapActionLabel.",
+    keysLine: "Allowed notification keys: title, body, appId, tapActionLabel, replyText.",
   },
   {
     tool: "setDeviceState",

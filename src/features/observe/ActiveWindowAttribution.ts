@@ -1,3 +1,4 @@
+import type { AndroidXrDisplaySize } from "./android/AndroidXrDisplaySize";
 import type {
   AndroidOrIosPlatform,
   BootedDevice,
@@ -201,6 +202,11 @@ export function hasUsableHierarchy(hierarchy: ObserveResult["viewHierarchy"]): b
 }
 
 export interface ActiveWindowAttributionReconciler {
+  primeRecapturedHierarchy?(
+    result: ObserveResult,
+    hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+    signal?: AbortSignal,
+  ): Promise<void>;
   reconcileActiveWindowAttribution(
     result: ObserveResult,
     options?: { signal?: AbortSignal; readOnly?: boolean },
@@ -225,6 +231,7 @@ export interface ActiveWindowAttributionReconciler {
 }
 
 interface ActiveWindowAttributionDependencies {
+  xrDisplaySize?: AndroidXrDisplaySize;
   viewHierarchy: () => ViewHierarchyInterface;
   deviceStateCollector: () => Pick<
     DeviceStateCollector,
@@ -633,6 +640,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
     ) {
       return false;
     }
+    await this.primeRecapturedHierarchy(result, hierarchy, signal);
     this.applyRecapturedHierarchy(result, hierarchy);
     // `deviceLock` was sampled before the original capture (collectAllData), so a
     // keyguard that appeared during this recapture would otherwise be published
@@ -774,6 +782,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       return false;
     }
 
+    await this.primeRecapturedHierarchy(result, hierarchy, signal);
     this.applyRecapturedHierarchy(result, hierarchy);
     result.backStack = recapturedState.backStack;
     return true;
@@ -873,12 +882,18 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
     );
   }
 
-  applyRecapturedHierarchy(
+  async primeRecapturedHierarchy(
+    result: ObserveResult,
+    hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.dependencies.xrDisplaySize?.prime(result, hierarchy, signal);
+  }
+
+  private applyRecapturedGeometry(
     result: ObserveResult,
     hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
   ): void {
-    result.viewHierarchy = hierarchy;
-    result.updatedAt = hierarchy.updatedAt ?? result.updatedAt;
     if (hierarchy.screenWidth && hierarchy.screenHeight) {
       result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
     }
@@ -886,8 +901,18 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       result.screenSize = this.extractScreenSizeFromHierarchy(hierarchy) ?? result.screenSize;
       result.rotation = resolveIosObserveRotation(hierarchy.rotation, result.screenSize);
     } else {
+      this.dependencies.xrDisplaySize?.applyCached(result, hierarchy);
       result.rotation = hierarchy.rotation;
     }
+  }
+
+  applyRecapturedHierarchy(
+    result: ObserveResult,
+    hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+  ): void {
+    result.viewHierarchy = hierarchy;
+    result.updatedAt = hierarchy.updatedAt ?? result.updatedAt;
+    this.applyRecapturedGeometry(result, hierarchy);
     result.systemInsets = hierarchy.systemInsets ?? { top: 0, right: 0, bottom: 0, left: 0 };
     result.insets = hierarchy.insets ?? {
       available: false,

@@ -59,6 +59,16 @@ class DisplayControllerScreenDimensionsApi34Test {
     }
   }
 
+  private class FakeLogicalSizeReader(var size: Point? = null) : DisplayLogicalSizeReader {
+    var calls = 0
+      private set
+
+    override fun read(display: Display): Point? {
+      calls++
+      return size
+    }
+  }
+
   private fun displayManagerWith(displayId: Int, display: Display?): DisplayManager = mockk {
     every { getDisplay(displayId) } returns display
   }
@@ -85,6 +95,7 @@ class DisplayControllerScreenDimensionsApi34Test {
   fun xrUsesPhysicalModeInsteadOfContaminatedRealSize() {
     val display = realDisplay(1080, 608)
     val reader = FakePhysicalSizeReader()
+    val logicalReader = FakeLogicalSizeReader()
     every { display.rotation } returns Surface.ROTATION_0
     val host =
       FakeHost().apply {
@@ -94,21 +105,90 @@ class DisplayControllerScreenDimensionsApi34Test {
 
     assertEquals(
       ScreenDimensions(2560, 2558),
-      DisplayController(host, reader).getScreenDimensions(),
+      DisplayController(host, reader, logicalReader).getScreenDimensions(),
     )
+    assertEquals(1, logicalReader.calls)
     verify(exactly = 0) { display.getRealSize(any()) }
   }
 
   @Test
-  fun nonXrUsesContaminatedRealSizeWithoutReadingPhysicalSize() {
+  fun xrUsesLogicalOverrideLargerThanNativeMode() {
+    val display = realDisplay(1080, 608)
+    val physicalReader = FakePhysicalSizeReader()
+    val logicalReader = FakeLogicalSizeReader(Point(3000, 3000))
+    val host =
+      FakeHost().apply {
+        xrSpatialDevice = true
+        displayManager = displayManagerWith(Display.DEFAULT_DISPLAY, display)
+      }
+
+    assertEquals(
+      ScreenDimensions(3000, 3000),
+      DisplayController(host, physicalReader, logicalReader).getScreenDimensions(),
+    )
+    assertEquals(1, logicalReader.calls)
+    assertEquals(0, physicalReader.calls)
+    verify(exactly = 0) { display.getRealSize(any()) }
+  }
+
+  @Test
+  fun xrUsesSmallerLogicalOverrideInCurrentRotation() {
+    val display = realDisplay(1080, 608)
+    every { display.rotation } returns Surface.ROTATION_90
+    val physicalReader = FakePhysicalSizeReader()
+    val logicalReader = FakeLogicalSizeReader(Point(1600, 1200))
+    val host =
+      FakeHost().apply {
+        xrSpatialDevice = true
+        displayManager = displayManagerWith(Display.DEFAULT_DISPLAY, display)
+      }
+
+    assertEquals(
+      ScreenDimensions(1600, 1200),
+      DisplayController(host, physicalReader, logicalReader).getScreenDimensions(),
+    )
+    assertEquals(1, logicalReader.calls)
+    assertEquals(0, physicalReader.calls)
+    verify(exactly = 0) { display.getRealSize(any()) }
+    verify(exactly = 0) { display.rotation }
+  }
+
+  @Test
+  fun nonXrUsesContaminatedRealSizeWithoutReadingPhysicalOrLogicalSize() {
     val display = realDisplay(1080, 608)
     val reader = FakePhysicalSizeReader()
+    val logicalReader = FakeLogicalSizeReader(Point(3000, 3000))
     val host =
       FakeHost().apply { displayManager = displayManagerWith(Display.DEFAULT_DISPLAY, display) }
 
-    assertEquals(ScreenDimensions(1080, 608), DisplayController(host, reader).getScreenDimensions())
+    assertEquals(
+      ScreenDimensions(1080, 608),
+      DisplayController(host, reader, logicalReader).getScreenDimensions(),
+    )
     verify(exactly = 1) { display.getRealSize(any()) }
     assertEquals(0, reader.calls)
+    assertEquals(0, logicalReader.calls)
+  }
+
+  @Test
+  fun xrWithNonPositiveLogicalSizeFallsBackToPhysicalMode() {
+    val display = realDisplay(1080, 608)
+    every { display.rotation } returns Surface.ROTATION_0
+    val physicalReader = FakePhysicalSizeReader()
+    val logicalReader = FakeLogicalSizeReader()
+    val host =
+      FakeHost().apply {
+        xrSpatialDevice = true
+        displayManager = displayManagerWith(Display.DEFAULT_DISPLAY, display)
+      }
+    val controller = DisplayController(host, physicalReader, logicalReader)
+
+    for (size in listOf(Point(0, 2558), Point(2560, 0), Point(-1, 2558), Point(2560, -1))) {
+      logicalReader.size = size
+      assertEquals(ScreenDimensions(2560, 2558), controller.getScreenDimensions())
+    }
+    assertEquals(4, physicalReader.calls)
+    verify(exactly = 0) { display.getRealSize(any()) }
   }
 
   @Test

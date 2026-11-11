@@ -776,6 +776,7 @@ class CtrlProxy : AccessibilityService() {
 
           override fun densityDpi() = resources.displayMetrics.densityDpi
         },
+      logicalSizeReader = createDisplayLogicalSizeReader(this@CtrlProxy),
     )
   }
   internal val deviceInfoController by lazy {

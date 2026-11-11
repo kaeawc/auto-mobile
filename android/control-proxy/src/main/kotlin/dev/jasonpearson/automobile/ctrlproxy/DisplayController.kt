@@ -46,6 +46,7 @@ private fun readLegacyDisplayRotation(windowManager: WindowManager): Int? =
 internal class DisplayController(
   private val host: Host,
   private val physicalSizeReader: DisplayPhysicalSizeReader = DefaultDisplayPhysicalSizeReader,
+  private val logicalSizeReader: DisplayLogicalSizeReader = DisplayLogicalSizeReader { null },
 ) {
   /** Service-side operations the controller cannot perform without the service context. */
   interface Host {
@@ -73,6 +74,11 @@ internal class DisplayController(
   private fun readRealDisplaySize(display: Display, size: Point, isXrSpatialDevice: Boolean) {
     if (isXrSpatialDevice) {
       // XR process configuration can constrain getRealSize to the IME window's max bounds.
+      val logicalSize = logicalSizeReader.read(display)
+      if (logicalSize != null && logicalSize.x > 0 && logicalSize.y > 0) {
+        size.set(logicalSize.x, logicalSize.y)
+        return
+      }
       val physicalSize = physicalSizeReader.read(display)
       if (physicalSize != null && physicalSize.x > 0 && physicalSize.y > 0) {
         val rotation = display.rotation

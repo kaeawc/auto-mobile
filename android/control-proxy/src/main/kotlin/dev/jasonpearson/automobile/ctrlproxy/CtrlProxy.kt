@@ -754,6 +754,8 @@ class CtrlProxy : AccessibilityService() {
       resultSender = resultSender,
     )
   }
+  // Kept as a Lazy so teardown releases cached window contexts only if XR reads created any.
+  private val logicalSizeReaderDelegate = lazy { createDisplayLogicalSizeReader(this) }
   private val displayController by lazy {
     DisplayController(
       host =
@@ -776,7 +778,7 @@ class CtrlProxy : AccessibilityService() {
 
           override fun densityDpi() = resources.displayMetrics.densityDpi
         },
-      logicalSizeReader = createDisplayLogicalSizeReader(this@CtrlProxy),
+      logicalSizeReader = logicalSizeReaderDelegate.value,
     )
   }
   internal val deviceInfoController by lazy {
@@ -1528,6 +1530,8 @@ class CtrlProxy : AccessibilityService() {
     unregisterReceivers()
 
     stopDisplayTracking()
+
+    if (logicalSizeReaderDelegate.isInitialized()) logicalSizeReaderDelegate.value.close()
 
     stopLogcatForwarding()
 

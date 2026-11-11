@@ -63,7 +63,7 @@ final class PrototypeRecordingModeTests: XCTestCase {
         )
         let recorded = PrototypeRecordingMode.on.formatEnvironment(device: device)
         XCTAssertEqual(recorded.locale.identifier, "en_US_POSIX")
-        XCTAssertEqual(recorded.timeZone.identifier, "UTC")
+        assertUTC(recorded.timeZone)
         XCTAssertEqual(recorded.now, PrototypeRecordingMode.now)
         XCTAssertEqual(PrototypeDate.string(from: PrototypeRecordingMode.now), "2026-01-15")
 
@@ -77,7 +77,7 @@ final class PrototypeRecordingModeTests: XCTestCase {
         let clock = PrototypeLibraryFakeClock()
         let recorded = PrototypeFormatEnvironment.device(clock: clock, recording: .on)
         XCTAssertEqual(recorded.now, PrototypeRecordingMode.now)
-        XCTAssertEqual(recorded.timeZone.identifier, "UTC")
+        assertUTC(recorded.timeZone)
         let viewing = PrototypeFormatEnvironment.device(clock: clock, recording: .off)
         XCTAssertEqual(viewing.now, Date(timeIntervalSince1970: 1))
         XCTAssertEqual(viewing.timeZone, .current)
@@ -86,12 +86,19 @@ final class PrototypeRecordingModeTests: XCTestCase {
     func testRecordingPinsTheDatePickerCalendarAndLocale() {
         let calendar = PrototypeRecordingMode.on.dateCalendar
         XCTAssertEqual(calendar.identifier, .gregorian)
-        XCTAssertEqual(calendar.timeZone.identifier, "UTC")
+        assertUTC(calendar.timeZone)
         XCTAssertEqual(calendar.locale?.identifier, "en_US_POSIX")
         XCTAssertEqual(calendar.firstWeekday, 1)
         XCTAssertEqual(PrototypeRecordingMode.on.locale.identifier, "en_US_POSIX")
 
         XCTAssertEqual(PrototypeRecordingMode.off.dateCalendar, PrototypeDate.calendar)
         XCTAssertEqual(PrototypeRecordingMode.off.locale, .autoupdatingCurrent)
+    }
+
+    /// Apple's Foundation names `TimeZone(identifier: "UTC")` "GMT"; the zone, not its name, is pinned.
+    private func assertUTC(_ zone: TimeZone, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(zone, PrototypeRecordingMode.timeZone, file: file, line: line)
+        XCTAssertEqual(zone.secondsFromGMT(for: PrototypeRecordingMode.now), 0, file: file, line: line)
+        XCTAssertEqual(zone.secondsFromGMT(for: Date(timeIntervalSince1970: 1_783_000_000)), 0, file: file, line: line)
     }
 }

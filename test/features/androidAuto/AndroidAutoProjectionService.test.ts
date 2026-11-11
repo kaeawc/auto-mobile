@@ -34,7 +34,7 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
           configPath: request.dhu.configPath,
         };
       },
-      stopDesktopHeadUnit: async () => {},
+      stopDesktopHeadUnit: async () => false,
     };
     const applier = new DefaultAndroidAutoProjectionApplier(environment, runner);
     const report = await applier.apply(device, { apkDirectory: path.resolve("/apks") });
@@ -57,7 +57,7 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
         runs++;
         throw new Error("unreachable");
       },
-      stopDesktopHeadUnit: async () => {},
+      stopDesktopHeadUnit: async () => false,
     };
     const applier = new DefaultAndroidAutoProjectionApplier(environment, runner);
     await expect(applier.apply(device, { apkDirectory: "/missing" })).rejects.toThrow(
@@ -74,10 +74,11 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
       },
       stopDesktopHeadUnit: async (deviceId, options) => {
         stops.push([deviceId, options]);
+        return true;
       },
     };
     const applier = new DefaultAndroidAutoProjectionApplier(environment, runner);
-    await applier.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true });
+    expect(await applier.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true })).toBe(true);
     expect(stops).toEqual([["emulator-5554", { deviceStopped: true }]]);
   });
 
@@ -98,7 +99,7 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
           configPath: request.dhu.configPath,
         };
       },
-      stopDesktopHeadUnit: async () => {},
+      stopDesktopHeadUnit: async () => false,
     });
 
     test("runs the same provisioner with no APKs, so a stub phone is refused rather than installed", async () => {

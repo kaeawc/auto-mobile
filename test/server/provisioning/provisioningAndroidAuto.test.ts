@@ -62,6 +62,7 @@ class FakeApplier implements AndroidAutoProjectionApplier {
   constructor(private readonly missing?: string) {}
   async stopDesktopHeadUnit(deviceId: string, options?: { deviceStopped?: boolean }) {
     this.stopped.push({ deviceId, ...options });
+    return true;
   }
   async resolveInputs() {
     if (this.missing) {

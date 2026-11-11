@@ -57,7 +57,10 @@ rollback; a run that outlives the deadline is stopped once it resolves that way.
 or that reused a DHU an earlier provision started, leaves the existing DHU running: the provisioner
 already stops a DHU it applied and then failed on. `killDevice` of that emulator stops its DHU within
 the shutdown deadline and forgets its host port redirect only once the kill succeeds, since a failed
-kill leaves the emulator and its redirect in place. A post-kill stop that outlives the deadline keeps
+kill leaves the emulator and its redirect in place. Stopping an owned DHU before the kill writes a
+marker in the resolved AVD directory: the next launch skips the unusable quickboot snapshot with
+`-no-snapshot-load` and consumes the marker only after the process spawns, even across a daemon
+restart (#17903). A post-kill stop that outlives the deadline keeps
 the serial's shutdown reservation until it settles, whether the rest of the shutdown succeeds or
 fails, so a replacement never boots under it. When the session holding the phone ends without a kill
 (release, heartbeat reap, idle expiry, a cancelled session), a session-release listener stops its DHU

@@ -547,7 +547,9 @@ describe("AndroidAutoProjectionProvisioner", () => {
     const { phone, launcher, provisioner } = setup([{ status: "connected", session: first }]);
     await provisioner.provision(request());
 
-    await provisioner.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true });
+    expect(await provisioner.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true })).toBe(
+      true,
+    );
     expect(stops).toBe(1);
     // The emulator and its redirect are gone; a new emulator takes the same serial.
     phone.redirected = false;
@@ -656,7 +658,9 @@ describe("AndroidAutoProjectionProvisioner", () => {
     };
     const { provisioner } = setup([{ status: "connected", session: first }]);
     await provisioner.provision(request());
-    await provisioner.stopDesktopHeadUnit("emulator-5556", { deviceStopped: true });
+    expect(await provisioner.stopDesktopHeadUnit("emulator-5556", { deviceStopped: true })).toBe(
+      false,
+    );
     expect(stops).toBe(0);
     expect(first.isRunning()).toBe(true);
   });
@@ -674,7 +678,7 @@ describe("AndroidAutoProjectionProvisioner", () => {
     };
     const { phone, launcher, provisioner } = setup([{ status: "connected", session: stuck }]);
     await provisioner.provision(request());
-    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    expect(await provisioner.stopDesktopHeadUnit("emulator-5554")).toBe(false);
     // Still alive, so another device is refused...
     phone.redirected = false;
     await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(

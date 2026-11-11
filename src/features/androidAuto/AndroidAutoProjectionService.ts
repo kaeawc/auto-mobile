@@ -78,8 +78,9 @@ export interface AndroidAutoProjectionApplier {
    * DHUs this daemon did not spawn are never touched. `deviceStopped` means the emulator itself
    * is going away, so its host port redirect is forgotten too. `releaseRedirect` means the
    * emulator keeps running but its session ended, so the redirect this daemon added is removed.
+   * Returns true when an owned DHU stopped, false when absent or stopping failed.
    */
-  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<void>;
+  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<boolean>;
 }
 
 /** The projection run, narrowed to the calls the applier makes. */
@@ -138,7 +139,7 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
     return report(result);
   }
 
-  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<void> {
+  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<boolean> {
     return this.provisioner.stopDesktopHeadUnit(deviceId, options);
   }
 }

@@ -64,7 +64,10 @@ append_step_summary() {
 stop_private_daemon() {
   if [[ "${private_daemon}" -eq 1 ]]; then
     private_daemon=0
-    run_with_timeout 60 bun "${server_entry}" --daemon stop > "${out_dir}/daemon-stop.log" 2>&1 || true
+    # set -e is lifted around the call so run_with_timeout keeps it inside (SC2310).
+    set +e
+    run_with_timeout 60 bun "${server_entry}" --daemon stop > "${out_dir}/daemon-stop.log" 2>&1
+    set -e
   fi
 }
 

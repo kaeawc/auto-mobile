@@ -32,3 +32,18 @@ test("a blocking activity with no task under it still reports the blocker", () =
     }),
   ).toEqual({ blockedBy: ACTIVITY_BLOCKING_ACTIVITY });
 });
+
+test("only activities listed after the blocker can be the one it covers", () => {
+  const { backStack } = readSettingsWhileDrivingObservation();
+  const [blocker, settings, ...rest] = backStack?.activities ?? [];
+  // Another display's activities listed ahead of the blocker are not under it.
+  expect(
+    detectDrivingRestrictionBlock({
+      activities: [...rest, blocker, settings],
+      currentActivity: backStack?.currentActivity,
+    }),
+  ).toEqual({
+    blockedBy: ACTIVITY_BLOCKING_ACTIVITY,
+    blockedActivity: "dev.dogfood.garage.SettingsActivity",
+  });
+});

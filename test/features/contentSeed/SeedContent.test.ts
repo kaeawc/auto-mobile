@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SeedContent, parseSeedBroadcast } from "../../../src/features/contentSeed/SeedContent";
+import {
+  SeedContent,
+  parseSeedBroadcast,
+  withoutProviderRows,
+} from "../../../src/features/contentSeed/SeedContent";
 import {
   ACCOUNT_TYPE,
   highestRawContactId,
@@ -37,6 +41,7 @@ class FakeAdb implements Pick<AdbExecutor, "execute"> {
   options: (AdbExecuteOptions | undefined)[] = [];
   installed = true;
   rows = { contacts: 2, calls: 2 };
+  accountName = "automobile.ns1";
   reply?: (args: string[]) => string | undefined;
   private respond(args: string[]): string {
     const command = args.join(" ");
@@ -70,7 +75,7 @@ class FakeAdb implements Pick<AdbExecutor, "execute"> {
       (_, index) =>
         `Row: ${index} _id=${index + 1}${
           command.includes("_id:account_name:account_type")
-            ? `, account_name=automobile.ns1, account_type=${ACCOUNT_TYPE}`
+            ? `, account_name=${this.accountName}, account_type=${ACCOUNT_TYPE}`
             : ""
         }`,
     ).join("\n");
@@ -428,6 +433,36 @@ describe("seedContent", () => {
     ]) {
       expect(() => parseSeedBroadcast(output)).toThrow();
     }
+  });
+
+  test("provider rows naming exception/error are data, not shell failures", async () => {
+    const adb = new FakeAdb();
+    adb.accountName = "automobile.exception_error";
+    const result = await client(adb).seed({
+      namespace: "exception_error",
+      contacts: [{ name: "Ada" }],
+    });
+    expect(result.inserted.contacts).toBe(1);
+    expect(withoutProviderRows("Row: 0 _id=1, account_name=a.exception\nError: real")).toBe(
+      "Error: real",
+    );
+  });
+
+  test("relative APK override resolves against the daemon launch directory", async () => {
+    const adb = new FakeAdb();
+    adb.installed = false;
+    const launch = path.resolve("/launch-dir");
+    const apk = path.join(launch, "seeder.apk");
+    const seed = new SeedContent({
+      adb,
+      env: {
+        AUTOMOBILE_CONTENT_SEEDER_APK_PATH: "seeder.apk",
+        AUTOMOBILE_DAEMON_LAUNCH_CWD: launch,
+      },
+      exists: async (candidate) => candidate === apk,
+    });
+    await seed.seed({ namespace: "ns1", smsInbox: [{ address: "555", body: "hi", date }] });
+    expect(adb.calls[1]).toEqual(["install", "-t", apk]);
   });
 
   test("content usage failures are surfaced, not reported as inserts", async () => {

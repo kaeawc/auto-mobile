@@ -9,6 +9,7 @@ import {
 } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { shellQuote } from "../../utils/shellQuote";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { parseBroadcastOutput } from "../intent/SendBroadcast";
 import { z } from "zod/v4";
 import {
@@ -30,6 +31,14 @@ import {
 } from "./seedContentInput";
 
 const PACKAGE = "dev.jasonpearson.automobile.contentseeder";
+
+/** Drop `content query` result rows so row values cannot read as shell diagnostics. */
+export function withoutProviderRows(stdout: string): string {
+  return stdout
+    .split("\n")
+    .filter((line) => !/^Row: \d+ /.test(line.trim()))
+    .join("\n");
+}
 const countsSchema = z
   .object({
     inserted: z.number().int().nonnegative(),
@@ -39,6 +48,8 @@ const countsSchema = z
 export interface SeedContentDependencies {
   adb: Pick<AdbExecutor, "execute">;
   apkPath?: string;
+  /** Environment for the APK override and daemon launch directory; defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
   exists?: (path: string) => Promise<boolean>;
 }
 
@@ -253,10 +264,14 @@ export class SeedContent {
         timeoutMs: 120_000,
       });
       const output = `${reply.stdout}\n${reply.stderr}`.trim();
+      // Provider rows echo caller data (namespaces, names, bodies); only diagnostics are inspected.
+      const diagnostics = withoutProviderRows(reply.stdout);
       if (
         reply.error ||
-        outputLooksLikeShellFailure(reply.stdout, reply.stderr) ||
-        /(?:^|\n)usage: adb shell content|Error while accessing provider|Failure \[/i.test(output)
+        outputLooksLikeShellFailure(diagnostics, reply.stderr) ||
+        /(?:^|\n)usage: adb shell content|Error while accessing provider|Failure \[/i.test(
+          `${diagnostics}\n${reply.stderr}`,
+        )
       ) {
         throw new ActionableError(
           `seedContent command failed: ${reply.error ?? output}. Check provider availability, permissions and the seeder APK; partial writes may remain. Retry with reset to replace this namespace.`,
@@ -281,7 +296,11 @@ export class SeedContent {
 
   private async resolveApkPath(): Promise<string> {
     const exists = this.deps.exists ?? pathExists;
-    let apk = this.deps.apkPath ?? readEnvTrimmed(ENV.CONTENT_SEEDER_APK_PATH);
+    const env = this.deps.env ?? process.env;
+    const override = readEnvTrimmed(ENV.CONTENT_SEEDER_APK_PATH, env);
+    let apk =
+      this.deps.apkPath ??
+      (override ? resolvePathFromDaemonLaunchWorkingDirectory(override, env) : undefined);
     if (!apk) {
       let root = dirname(fileURLToPath(import.meta.url));
       while (!(await exists(join(root, "package.json"))) && dirname(root) !== root) {

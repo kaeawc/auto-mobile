@@ -4,7 +4,16 @@ import { TapTargetUnavailableError } from "./tapTargetSupport";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { childrenOf, nodeAttributes } from "../../models/ViewHierarchyResult";
-import { attachRawViewHierarchy, getRawViewHierarchy } from "../utility/viewHierarchySearch";
+import {
+  attachRawViewHierarchy,
+  getRawViewHierarchy,
+  resolveViewHierarchyForSearch,
+} from "../utility/viewHierarchySearch";
+import { SearchableHierarchy, matchesCtrlProxyNodeSelector } from "../utility/SearchableNode";
+import { stableNodeSelectorForElement } from "../talkback/nodeActionTarget";
+import { isCompleteHierarchy } from "../talkback/resourceIdActionError";
+import { hasAccessibilityAction } from "../utility/elementProperties";
+import { boundsNearlyEqual } from "../../utils/bounds";
 
 /**
  * Selection-only projection: preserve visible descendants, never promote hidden XR chrome.
@@ -15,22 +24,75 @@ export function withoutHiddenXrChrome(hierarchy: ViewHierarchyResult): {
   hierarchy: ViewHierarchyResult;
   hiddenNodes: ReadonlySet<ViewHierarchyNode>;
 } {
-  const hiddenNodes = new Set<ViewHierarchyNode>();
+  return projectWithoutHiddenXrChrome(hierarchy);
+}
+
+/**
+ * Whether the hidden-chrome gate approves `node` of `hierarchy` as a hidden System UI node-click
+ * target: hidden XR chrome (visible-to-user false, systemui) that tapOn may select because its
+ * stable selector is unique. Only such a node may ask CtrlProxy to click a node that is not
+ * visible to the user; any other hidden node (a covered app control included) keeps CtrlProxy's
+ * visibility refusal. The click re-asks against its own hierarchy because pre-tap re-selection
+ * can replace the selected element after the gate ran.
+ */
+export function isApprovedHiddenSystemUiClick(
+  hierarchy: ViewHierarchyResult,
+  node: ViewHierarchyNode,
+): boolean {
+  return projectWithoutHiddenXrChrome(
+    hierarchy,
+    hiddenNodeClickTargets(hierarchy),
+  ).approvedClickNodes.has(node);
+}
+
+interface ChromeProjection {
+  hierarchy: ViewHierarchyResult;
+  hiddenNodes: ReadonlySet<ViewHierarchyNode>;
+  /** Projected nodes kept only because they are verified hidden System UI click targets. */
+  approvedClickNodes: ReadonlySet<ViewHierarchyNode>;
+}
+
+function projectWithoutHiddenXrChrome(
+  hierarchy: ViewHierarchyResult,
+  nodeClickTargets: ReadonlySet<ViewHierarchyNode> = new Set(),
+): ChromeProjection {
+  const sets: ProjectionSets = {
+    hiddenNodes: new Set(),
+    approvedClickNodes: new Set(),
+    nodeClickTargets,
+  };
   const raw = getRawViewHierarchy(hierarchy);
-  const projected = projectTree(hierarchy, hiddenNodes);
-  const projectedRaw = raw && raw !== hierarchy ? projectTree(raw, hiddenNodes) : undefined;
+  const projected = projectTree(hierarchy, sets);
+  const projectedRaw = raw && raw !== hierarchy ? projectTree(raw, sets) : undefined;
+  const { hiddenNodes, approvedClickNodes } = sets;
   if (hiddenNodes.size === 0) {
-    return { hierarchy, hiddenNodes };
+    return { hierarchy, hiddenNodes, approvedClickNodes };
   }
   if (projectedRaw) {
     attachRawViewHierarchy(projected, projectedRaw);
   }
-  return { hierarchy: projected, hiddenNodes };
+  return { hierarchy: projected, hiddenNodes, approvedClickNodes };
+}
+
+interface ProjectionSets {
+  hiddenNodes: Set<ViewHierarchyNode>;
+  approvedClickNodes: Set<ViewHierarchyNode>;
+  nodeClickTargets: ReadonlySet<ViewHierarchyNode>;
+}
+
+function isHiddenSystemUiNode(node: ViewHierarchyNode, owner: boolean): boolean {
+  const attrs = nodeAttributes(node);
+  return (
+    attrs["visible-to-user"] === false &&
+    (owner ||
+      (typeof attrs["resource-id"] === "string" &&
+        attrs["resource-id"].startsWith("com.android.systemui")))
+  );
 }
 
 function projectTree(
   hierarchy: ViewHierarchyResult,
-  hiddenNodes: Set<ViewHierarchyNode>,
+  { hiddenNodes, approvedClickNodes, nodeClickTargets }: ProjectionSets,
 ): ViewHierarchyResult {
   const hiddenBefore = hiddenNodes.size;
   const systemWindows = new Set(
@@ -47,22 +109,22 @@ function projectTree(
     const owner =
       systemWindow || (typeof attrs.windowId === "number" && systemWindows.has(attrs.windowId));
     const children = childrenOf(node).flatMap((child) => filter(child, owner));
-    if (
-      attrs["visible-to-user"] === false &&
-      (owner ||
-        (typeof attrs["resource-id"] === "string" &&
-          attrs["resource-id"].startsWith("com.android.systemui")))
-    ) {
+    const hiddenSystemUi = isHiddenSystemUiNode(node, owner);
+    if (hiddenSystemUi && !nodeClickTargets.has(node)) {
       hiddenNodes.add(node);
       return children;
     }
     const originalChildren = childrenOf(node);
-    return [
+    const kept =
       children.length === originalChildren.length &&
       children.every((child, index) => child === originalChildren[index])
         ? node
-        : { ...node, node: children },
-    ];
+        : { ...node, node: children };
+    if (hiddenSystemUi) {
+      approvedClickNodes.add(node);
+      approvedClickNodes.add(kept);
+    }
+    return [kept];
   }
   const roots = hierarchy.hierarchy.node ? filter(hierarchy.hierarchy.node) : [];
   const windows = hierarchy.windows?.map((window) => ({
@@ -89,6 +151,41 @@ interface ChromeSelection {
 }
 type Select = (options: TapVerificationOptions, hierarchy: ViewHierarchyResult) => ChromeSelection;
 
+/** Mirror the stable-selector branch of xrPanelNodeClick; hidden nodes never use bounds alone. */
+function hiddenNodeClickTargets(hierarchy: ViewHierarchyResult): ReadonlySet<ViewHierarchyNode> {
+  const capture = resolveViewHierarchyForSearch(hierarchy) ?? null;
+  if (!isCompleteHierarchy(capture)) {
+    return new Set();
+  }
+  const entries = new SearchableHierarchy().project(capture);
+  return new Set(
+    entries
+      .filter((entry) => {
+        if (
+          entry.properties["visible-to-user"] !== false ||
+          !entry.bounds ||
+          entry.properties["hierarchy-source"] === "uiautomator" ||
+          !hasAccessibilityAction(entry.properties.actions, "click")
+        ) {
+          return false;
+        }
+        const selector = stableNodeSelectorForElement(entry.properties);
+        if (!selector) {
+          return false;
+        }
+        const matches = entries.filter((candidate) =>
+          matchesCtrlProxyNodeSelector(candidate.properties, selector),
+        );
+        return (
+          new Set(matches.map((candidate) => candidate.source)).size === 1 &&
+          !!matches[0]?.bounds &&
+          boundsNearlyEqual(matches[0].bounds, entry.bounds, 0)
+        );
+      })
+      .map((entry) => entry.source),
+  );
+}
+
 function hiddenChromeFailure(
   options: TapVerificationOptions,
   original: ChromeSelection,
@@ -108,13 +205,36 @@ function hiddenChromeFailure(
   );
 }
 
+function withHiddenChromeFailure(
+  result: ChromeSelection,
+  hiddenFailure: () => TapTargetUnavailableError | undefined,
+): ChromeSelection {
+  const match = result.selection.matchedElement ?? result.selection.element;
+  // Do not turn a refused exact hidden match ("Launcher") into a different
+  // hidden substring match ("Open Launcher Panel"). Visible matches still win.
+  const refused = match?.["visible-to-user"] === false ? hiddenFailure() : undefined;
+  if (refused) {
+    return {
+      ...result,
+      selection: { ...result.selection, element: null, matchedElement: undefined },
+      visibilityError: refused,
+    };
+  }
+  return result.selection.element || result.selection.matchedElement
+    ? result
+    : { ...result, visibilityError: hiddenFailure() };
+}
+
 /** Pure selection with the caller's synchronous selector; observations remain unmodified. */
 export function selectWithoutHiddenXrChrome(
   options: TapVerificationOptions,
   hierarchy: ViewHierarchyResult,
   select: Select,
 ): ChromeSelection {
-  const filtered = withoutHiddenXrChrome(hierarchy);
+  const filtered = projectWithoutHiddenXrChrome(
+    hierarchy,
+    options.action === "tap" ? hiddenNodeClickTargets(hierarchy) : undefined,
+  );
   if (filtered.hiddenNodes.size === 0) {
     return select(options, hierarchy);
   }
@@ -122,10 +242,7 @@ export function selectWithoutHiddenXrChrome(
   const hiddenFailure = () =>
     hiddenChromeFailure(options, select(inspectOptions, hierarchy), filtered.hiddenNodes);
   try {
-    const result = select(options, filtered.hierarchy);
-    return result.selection.element || result.selection.matchedElement
-      ? result
-      : { ...result, visibilityError: hiddenFailure() };
+    return withHiddenChromeFailure(select(options, filtered.hierarchy), hiddenFailure);
   } catch (error) {
     if (!(error instanceof ActionableError)) {
       throw error;

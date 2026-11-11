@@ -54,6 +54,12 @@ data class NodeExpectedBounds(
   }
 }
 
+internal data class NodeBoundsConstraint(
+  val expectedBounds: NodeExpectedBounds? = null,
+  val identityHints: NodeIdentityHints? = null,
+  val allowInvisible: Boolean = false,
+)
+
 /** All selector matches, including invisible nodes. The caller owns the returned nodes. */
 internal fun findNodesBySelector(
   root: AccessibilityNodeInfo,
@@ -97,11 +103,14 @@ internal fun selectNodeWithBounds(
   expectedBounds: NodeExpectedBounds,
   boundsOnly: Boolean = false,
   identityHints: NodeIdentityHints? = null,
+  allowInvisible: Boolean = false,
 ): AccessibilityNodeInfo {
   val qualifying = nodes.filter {
     val bounds = Rect()
     it.getBoundsInScreen(bounds)
-    val visible = if (boundsOnly) bounds.width() > 0 && bounds.height() > 0 else it.isVisibleToUser
+    val visible =
+      if (boundsOnly || allowInvisible) bounds.width() > 0 && bounds.height() > 0
+      else it.isVisibleToUser
     visible && expectedBounds.matches(it)
   }
   val selected = qualifying.singleOrNull()

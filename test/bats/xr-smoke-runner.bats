@@ -21,7 +21,13 @@ STUB
 #!/usr/bin/env bash
 printf '%s %s apk=%s\n' "${1##*/}" "${XR_SMOKE_OS_VERSION:-}" "${AUTOMOBILE_CTRL_PROXY_APK_PATH:-}" >> "$BUN_LOG"
 case "$1" in
+  *index.js)
+    printf 'server %s aux=%s harness=%s\n' "${*:2}" "${AUTOMOBILE_AUX_SOCKET_DIR:-}" \
+      "${AUTOMOBILE_HARNESS_PRIVATE_DAEMON:-}" >> "$BUN_LOG"
+    ;;
   *xrSmoke.ts)
+    printf 'smoke aux=%s harness=%s\n' "${AUTOMOBILE_AUX_SOCKET_DIR:-}" \
+      "${AUTOMOBILE_HARNESS_PRIVATE_DAEMON:-}" >> "$BUN_LOG"
     if [[ -n "${FAKE_SMOKE_SUMMARY:-}" ]]; then : > "$XR_SMOKE_OUT_DIR/summary.md"; fi
     exit "${FAKE_SMOKE_STATUS:-0}"
     ;;
@@ -30,8 +36,11 @@ STUB
   cat > "$SDK/cmdline-tools/latest/bin/sdkmanager" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SDK_LOG"
-if [[ "$1" == "${FAKE_SDK_STALL:-none}" ]]; then exec sleep 30; fi
-if [[ "$1" == --install ]]; then exit "${FAKE_INSTALL_STATUS:-0}"; fi
+# The command is the first argument after any leading --channel option.
+command="$1"
+if [[ "${command}" == --channel=* ]]; then command="$2"; fi
+if [[ "${command}" == "${FAKE_SDK_STALL:-none}" ]]; then exec sleep 30; fi
+if [[ "${command}" == --install ]]; then exit "${FAKE_INSTALL_STATUS:-0}"; fi
 # Read one answer, as sdkmanager stops reading once the licenses are accepted.
 head -n 1 > /dev/null
 STUB
@@ -43,7 +52,9 @@ STUB
   export XR_SMOKE_DIAGNOSTICS_SCRIPT="$BATS_TEST_TMPDIR/diagnostics.sh"
   export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/step-summary.md"
   unset XR_SMOKE_OS_VERSION XR_SMOKE_SYSTEM_IMAGE XR_SMOKE_SKIP_IMAGE_INSTALL ANDROID_SDK_ROOT \
-    XR_SMOKE_CTRLPROXY_APK XR_SMOKE_GRADLEW
+    XR_SMOKE_CTRLPROXY_APK XR_SMOKE_GRADLEW XR_SMOKE_SDK_CHANNEL AUTOMOBILE_AUX_SOCKET_DIR \
+    AUTOMOBILE_HARNESS_PRIVATE_DAEMON
+  export XR_SMOKE_SERVER="$BATS_TEST_TMPDIR/index.js"
   # A prebuilt debug APK by default, so only the build tests run (a stubbed) Gradle.
   : > "$BATS_TEST_TMPDIR/ctrlproxy.apk"
   export XR_SMOKE_CTRLPROXY_APK="$BATS_TEST_TMPDIR/ctrlproxy.apk"
@@ -102,7 +113,8 @@ STUB
   XR_SMOKE_OS_VERSION=15 XR_SMOKE_SYSTEM_IMAGE="system-images;android-35-ext15;google-xr;x86_64" \
     run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  grep -qx -- "--install system-images;android-35-ext15;google-xr;x86_64" "$SDK_LOG"
+  grep -qx -- "--channel=3 --install system-images;android-35-ext15;google-xr;x86_64" "$SDK_LOG"
+  grep -qx -- "--channel=3 --licenses" "$SDK_LOG"
   grep -q "^xrSmoke.ts 15 " "$BUN_LOG"
   # A passing run still collects diagnostics once, and the trap adds nothing.
   [ "$(wc -l < "$DIAG_LOG")" -eq 1 ]
@@ -172,4 +184,33 @@ STUB
   FAKE_SMOKE_SUMMARY=1 FAKE_SMOKE_STATUS=1 XR_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [ ! -e "$GITHUB_STEP_SUMMARY" ]
+}
+
+@test "an overridden SDK channel reaches sdkmanager and an invalid one is rejected" {
+  XR_SMOKE_SDK_CHANNEL=0 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -q -- "^--channel=0 --install system-images;android-34;google-xr;" "$SDK_LOG"
+  XR_SMOKE_SDK_CHANNEL=canary run bash "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"XR_SMOKE_SDK_CHANNEL must be an sdkmanager channel"* ]]
+}
+
+@test "the smoke runs on a private harness daemon that is stopped afterwards" {
+  AUTOMOBILE_AUX_SOCKET_DIR=/resident XR_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx "smoke aux=$OUT/daemon harness=1" "$BUN_LOG"
+  grep -qx "server --daemon stop aux=$OUT/daemon harness=1" "$BUN_LOG"
+  [ "$(grep -c -- "--daemon stop" "$BUN_LOG")" -eq 1 ]
+}
+
+@test "a failed smoke still stops its private daemon once" {
+  FAKE_SMOKE_STATUS=1 XR_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [ "$(grep -c -- "--daemon stop" "$BUN_LOG")" -eq 1 ]
+}
+
+@test "a setup failure before the smoke starts no daemon stop" {
+  FAKE_INSTALL_STATUS=3 run bash "$SCRIPT"
+  [ "$status" -eq 3 ]
+  [ ! -e "$BUN_LOG" ]
 }

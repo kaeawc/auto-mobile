@@ -77,5 +77,6 @@ jobs:
           path: |
             scratch/xr-smoke/
             !scratch/xr-smoke/db/
+            !scratch/xr-smoke/daemon/
           if-no-files-found: warn
           retention-days: 14

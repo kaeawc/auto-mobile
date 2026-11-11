@@ -16,10 +16,14 @@
 #   XR_SMOKE_OS_VERSION      Android version the plan pins startDevice to (default: 14); the
 #                              system image's API level must match it (14 = API 34)
 #   XR_SMOKE_SYSTEM_IMAGE    sdkmanager package (default: API 34 google-xr, host ABI)
+#   XR_SMOKE_SDK_CHANNEL     sdkmanager --channel for the install (default: 3, canary, where
+#                              XR images are published; see src/devices/androidXrImageFamilies.ts)
 #   XR_SMOKE_TIMEOUT_SECONDS wall-clock bound for the smoke run (default: 1800)
 #   XR_SMOKE_SDKMANAGER_TIMEOUT_SECONDS bound for each sdkmanager call (default: 900)
 #   XR_SMOKE_BREAK_ASSERTION 1 swaps in an impossible assertion (proves failures are readable)
 #   XR_SMOKE_SKIP_IMAGE_INSTALL 1 skips sdkmanager (image already installed)
+#   XR_SMOKE_SERVER          MCP server entry the private daemon runs from (default:
+#                              dist/src/index.js, as the smoke client uses; tests stub it)
 #   XR_SMOKE_DIAGNOSTICS_SCRIPT diagnostics collector (default:
 #                              scripts/android/collect-emulator-diagnostics.sh; tests stub it)
 set -euo pipefail
@@ -41,6 +45,7 @@ diagnostics_script="${XR_SMOKE_DIAGNOSTICS_SCRIPT:-${project_root}/scripts/andro
 # What the run is doing, named in the failure line when setup exits early.
 phase="validating XR_SMOKE_* settings"
 diagnostics_collected=0
+private_daemon=0
 
 collect_diagnostics() {
   diagnostics_collected=1
@@ -55,9 +60,18 @@ append_step_summary() {
   fi
 }
 
+# Stop the run-private daemon the smoke started; best-effort and never masks the status.
+stop_private_daemon() {
+  if [[ "${private_daemon}" -eq 1 ]]; then
+    private_daemon=0
+    run_with_timeout 60 bun "${server_entry}" --daemon stop > "${out_dir}/daemon-stop.log" 2>&1 || true
+  fi
+}
+
 # shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap.
 on_exit() {
   local status=$?
+  stop_private_daemon
   if [[ "${status}" -ne 0 && "${diagnostics_collected}" -eq 0 ]]; then
     local reason="XR smoke setup failed while ${phase} (exit ${status})"
     echo "::error title=XR smoke::${reason}"
@@ -87,6 +101,8 @@ if [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]]; then default_ab
 system_image="${XR_SMOKE_SYSTEM_IMAGE:-system-images;android-34;google-xr;${default_abi}}"
 timeout_seconds="${XR_SMOKE_TIMEOUT_SECONDS:-1800}"
 sdkmanager_timeout_seconds="${XR_SMOKE_SDKMANAGER_TIMEOUT_SECONDS:-900}"
+sdk_channel="${XR_SMOKE_SDK_CHANNEL:-3}"
+server_entry="${XR_SMOKE_SERVER:-${project_root}/dist/src/index.js}"
 build_timeout_seconds="${XR_SMOKE_BUILD_TIMEOUT_SECONDS:-1200}"
 for setting in XR_SMOKE_TIMEOUT_SECONDS:"${timeout_seconds}" \
   XR_SMOKE_SDKMANAGER_TIMEOUT_SECONDS:"${sdkmanager_timeout_seconds}" \
@@ -96,6 +112,10 @@ for setting in XR_SMOKE_TIMEOUT_SECONDS:"${timeout_seconds}" \
     exit 2
   fi
 done
+if [[ ! "${sdk_channel}" =~ ^[0-3]$ ]]; then
+  echo "XR_SMOKE_SDK_CHANNEL must be an sdkmanager channel 0-3: ${sdk_channel}" >&2
+  exit 2
+fi
 if [[ "${system_image}" != *";google-xr;"* && "${system_image}" != *";android-xr-v3-playstore;"* && "${system_image}" != *";android-xr-preview-playstore;"* ]]; then
   echo "XR_SMOKE_SYSTEM_IMAGE must use a supported XR headset image tag: ${system_image}" >&2
   exit 2
@@ -125,7 +145,7 @@ if [[ "${XR_SMOKE_SKIP_IMAGE_INSTALL:-0}" != "1" ]]; then
   sdkmanager="$(locate_sdkmanager)"
   phase="installing ${system_image}"
   install_system_image "XR smoke" "${sdkmanager}" "${sdkmanager_timeout_seconds}" \
-    "${system_image}" "${out_dir}"
+    "${system_image}" "${out_dir}" "--channel=${sdk_channel}"
 fi
 
 # The daemon installs the CtrlProxy APK on the headset; point it at a debug build of this checkout
@@ -154,6 +174,12 @@ export AUTOMOBILE_CTRL_PROXY_APK_PATH="${ctrl_proxy_apk}"
 # A run-private database keeps the created AVD records off any other host state.
 export AUTOMOBILE_DB_PATH="${out_dir}/db/auto-mobile.db"
 mkdir -p "$(dirname "${AUTOMOBILE_DB_PATH}")"
+# The database alone does not isolate the run: the daemon namespace comes from the auxiliary
+# socket directory, so without one the smoke would join a resident daemon (its database and
+# CtrlProxy APK). Run a private, harness-marked daemon and stop it when the script exits.
+export AUTOMOBILE_AUX_SOCKET_DIR="${out_dir}/daemon"
+export AUTOMOBILE_HARNESS_PRIVATE_DAEMON=1
+mkdir -p "${AUTOMOBILE_AUX_SOCKET_DIR}"
 
 phase="running the smoke"
 export XR_SMOKE_OUT_DIR="${out_dir}"
@@ -163,11 +189,13 @@ rm -f "${out_dir}/summary.md"
 # pipefail makes the pipeline report the smoke's own status (124 on timeout). set -e is
 # lifted around the call rather than using `|| status=$?`, which would disable it inside
 # run_with_timeout (SC2310).
+private_daemon=1
 set +e
 run_with_timeout "${timeout_seconds}" bun "${script_dir}/xrSmoke.ts" 2>&1 \
   | tee "${out_dir}/smoke.log"
 status=$?
 set -e
+stop_private_daemon
 
 reason="XR smoke exited ${status}"
 if [[ "${status}" -eq 124 ]]; then

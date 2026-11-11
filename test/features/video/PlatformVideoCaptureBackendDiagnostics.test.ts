@@ -189,6 +189,29 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
     }
   });
 
+  test("a retry's quality window excludes the failed attempt and its cleanup", async () => {
+    const { backend, client, timer, config } = setup(1, 4000);
+    // The failed attempt's cleanup runs to its full deadline before the retry launches.
+    client.setSpawnRunning(`shell rm ${DEVICE_FILE}`);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const handle = await backend.start(config);
+      expect(client.launches).toBe(2);
+      expect(timer.now()).toBeGreaterThan(10_000);
+      timer.advanceTime(3000);
+      exit(client.getSpawnedProcesses()[client.getSpawnedProcesses().length - 1], 0);
+      client.setCommandResult(`shell stat -c %s ${RETRY_DEVICE_FILE}`, "20000");
+      await fs.writeFile(config.outputPath, Buffer.alloc(20000));
+
+      const result = await backend.stop(handle);
+
+      // A healthy ~4 s retry video over its own ~4 s window: no evidence warning.
+      expect(result.warnings).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("an aborted startup is never retried", async () => {
     const { backend, client, timer, config } = setup(2);
     const controller = new AbortController();
@@ -252,9 +275,9 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
     async (bytes, duration, window, warning) => {
       const { backend, client, timer, config } = setup(0, duration);
       const handle = await backend.start(config);
-      // The recording window starts at handle.startedAt and ends before stop's finalization waits.
+      // The recording window starts at the accepted launch (t=0) and ends before stop's
+      // finalization waits.
       timer.advanceTime(Math.max(0, window - timer.now()));
-      handle.startedAt = new Date(timer.now() - window).toISOString();
       exit(client.getSpawnedProcesses()[0], 0);
       client.setCommandResult(`shell stat -c %s ${DEVICE_FILE}`, String(bytes));
       await fs.writeFile(config.outputPath, Buffer.alloc(bytes));

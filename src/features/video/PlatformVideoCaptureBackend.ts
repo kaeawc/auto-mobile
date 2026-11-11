@@ -66,6 +66,11 @@ interface AndroidBackendHandle {
   stopRequested?: boolean;
   stopRequestedAtMs?: number;
   exitedBeforeStop?: boolean;
+  /**
+   * Injected-timer time the accepted recorder was launched. The recording window is measured
+   * from here, so a failed first attempt and its cleanup never count against the retry's video.
+   */
+  launchedAtMs: number;
 }
 
 const gracefulExitTimeout = new Error("Video capture graceful exit deadline elapsed");
@@ -275,7 +280,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       if (backendHandle.stderr.length > 0) {
         logger.info(`[VideoCapture] Stderr output: ${recordingStderrTail(backendHandle.stderr)}`);
       }
-      const warnings = this.recordingWarnings(handle, backendHandle, sizeBytes, videoDurationMs);
+      const warnings = this.recordingWarnings(backendHandle, sizeBytes, videoDurationMs);
       return {
         recordingId: handle.recordingId,
         outputPath: handle.outputPath,
@@ -295,7 +300,6 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   private recordingWarnings(
-    handle: RecordingHandle,
     backendHandle: AndroidBackendHandle,
     sizeBytes: number,
     videoDurationMs: number | undefined,
@@ -308,7 +312,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
     }
     const windowMs =
-      (backendHandle.stopRequestedAtMs ?? this.timer.now()) - Date.parse(handle.startedAt);
+      (backendHandle.stopRequestedAtMs ?? this.timer.now()) - backendHandle.launchedAtMs;
     if (
       sizeBytes < 10_000 ||
       (videoDurationMs !== undefined && windowMs >= 3000 && videoDurationMs < windowMs / 2)
@@ -840,6 +844,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       device,
       deviceTempPath,
       devicePid,
+      launchedAtMs,
     };
     // Observe both outcomes: a process error must never become an unhandled rejection
     // while the recording owner is still running its plan, before it calls stop.

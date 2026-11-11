@@ -93,7 +93,8 @@ export async function bindProvisionedDeviceSession(
 }
 
 /**
- * Run provisionDevice's post-bind steps while holding the session they work on (#17885). The
+ * Run an acquiring call's post-bind steps (provisionDevice's, startDevice's head unit) while
+ * holding the session they work on (#17885). The
  * caller learns the session id only when the call returns, so nothing heartbeats it meanwhile;
  * the hold keeps it from the missing-first-heartbeat reap until `deadlineMs`, restarts the grace
  * when it ends, and is released before any rollback runs, so an abandoned session is still
@@ -102,14 +103,18 @@ export async function bindProvisionedDeviceSession(
  */
 export async function whileHoldingProvisionedSession<T>(
   deps: Pick<DeviceToolsDependencies, "holdAcquiringSession">,
-  { sessionUuid, deadlineMs }: { sessionUuid: string; deadlineMs: number },
+  {
+    sessionUuid,
+    deadlineMs,
+    toolName = "provisionDevice",
+  }: { sessionUuid: string; deadlineMs: number; toolName?: string },
   steps: (holdSignal: AbortSignal) => Promise<T>,
 ): Promise<T> {
   const hold =
     deps.holdAcquiringSession ??
     ((uuid: string, deadline: number) =>
       holdAcquiringSession(executionTracker, defaultDaemonContext.sessionManager(), {
-        toolName: "provisionDevice",
+        toolName,
         sessionUuid: uuid,
         deadlineMs: deadline,
       }));

@@ -361,6 +361,52 @@ describe("startDevice handler", () => {
     expect(result.androidAuto).toBeUndefined();
   });
 
+  it("holds the bound session while the head unit starts and stops when that session's device is lost", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    const deviceLost = new AbortController();
+    const holds: string[] = [];
+    let released = 0;
+    let startSignal: AbortSignal | undefined;
+    const applier: AndroidAutoProjectionApplier = {
+      resolveInputs: async () => {
+        throw new Error("not used by startDevice");
+      },
+      apply: async () => {
+        throw new Error("not used by startDevice");
+      },
+      resolveHeadUnitInputs: async () => {
+        throw new Error("startHeadUnit resolves its own inputs");
+      },
+      startHeadUnit: async (_device, _options, signal) => {
+        startSignal = signal;
+        // A killDevice of the phone cancels the session's work while the run is still going.
+        deviceLost.abort(new Error("device lost"));
+        signal?.throwIfAborted();
+        throw new Error("the run ignored the lost device");
+      },
+      stopDesktopHeadUnit: async () => {},
+    };
+    setDeviceToolsDependencies({
+      androidAutoProjection: applier,
+      holdAcquiringSession: (sessionUuid) => {
+        holds.push(sessionUuid);
+        return {
+          signal: deviceLost.signal,
+          release: () => {
+            released++;
+          },
+        };
+      },
+    });
+    await expect(
+      callStartDevice({ platform: "android", androidAuto: { headUnit: {} } }),
+    ).rejects.toThrow(/but its Android Auto head unit did not start: device lost/);
+    expect(holds).toHaveLength(1);
+    expect(released).toBe(1);
+    expect(startSignal?.aborted).toBe(true);
+  });
+
   it("a head unit failure names the ready phone and its bound session", async () => {
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setImageResult(androidImage);

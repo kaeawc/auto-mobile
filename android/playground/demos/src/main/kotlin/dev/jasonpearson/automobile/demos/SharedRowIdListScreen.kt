@@ -32,7 +32,10 @@ import dev.jasonpearson.automobile.sdk.TrackRecomposition
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SharedRowIdListScreen(onNavigateBack: () -> Unit) {
-  TrackRecomposition(id = "screen.demo.lists.shared_row_id", composableName = "SharedRowIdListScreen") {
+  TrackRecomposition(
+    id = "screen.demo.lists.shared_row_id",
+    composableName = "SharedRowIdListScreen",
+  ) {
     Scaffold(
       topBar = {
         AutoMobileTopAppBar(

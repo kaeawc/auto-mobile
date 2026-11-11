@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.demos
 
-/** Row count of the shared-row-id list; enough rows that a page swipe replaces every visible row. */
+/**
+ * Row count of the shared-row-id list; enough rows that a page swipe replaces every visible row.
+ */
 const val SHARED_ROW_ID_ROW_COUNT = 60
 
 /**

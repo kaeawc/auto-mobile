@@ -267,7 +267,7 @@ test("XR excludes environment and barrier tasks even when they precede the app",
       Number(a.packageName?.startsWith("com.android.systemui")),
   );
   const resolved = resolveTapAtCoordinates(
-    { x: 553, y: 1178 },
+    { x: 553, y: 1178, androidXr: true },
     { ...observation(2560, 2558), backStack },
     "android",
   );

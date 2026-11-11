@@ -1,4 +1,4 @@
-import { appendWarning, xrDefaultPoseWarning, xrSwipeBounds } from "../../xr/xrPanelSpace";
+import { appendWarning, xrPoseWarning, xrScreenSwipeBounds } from "../../xr/xrPanelSpace";
 import type { IosSdkWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { ScrollSearchSession } from "./ScrollSearchSession";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
@@ -106,6 +106,7 @@ export interface ScrollUntilVisibleDependencies {
   accessibilityService: ScrollAccessibilityService;
   accessibilityDetector: AccessibilityDetector;
   adb: AdbExecutor;
+  androidXr: import("../../xr/xrPanelSpace").ObservedAndroidXr;
   featureFlags?: FeatureFlagReader;
   overlayDetector: OverlayAnalyzer;
   talkBackExecutor: TalkBackSwipeRunner;
@@ -518,7 +519,7 @@ export class ScrollUntilVisible {
     onXrPoseWarning: (warning: string) => void = () => {},
   ): Promise<SwipeResult> {
     if (this.swipePlatform() === "android") {
-      const xrWarning = xrDefaultPoseWarning(dispatch.observation);
+      const xrWarning = await xrPoseWarning(dispatch.observation, this.deps.androidXr);
       xrWarning && onXrPoseWarning(xrWarning);
     }
     return this.dispatchPoseCheckedSearchSwipe(dispatch);
@@ -759,8 +760,9 @@ export class ScrollUntilVisible {
   async findScrollableContainer(
     options: SwipeOnOptions,
     observeResult: ObserveResult,
-    fallbackElement: Element = this.screenBoundsContainer({ observation: observeResult }),
+    fallbackElement?: Element,
   ): Promise<Element> {
+    fallbackElement ??= await this.screenBoundsContainer({ observation: observeResult });
     let element: Element | null = null;
     const viewHierarchy = scopeHierarchyForSelector(observeResult.viewHierarchy!, options.layer);
 
@@ -803,19 +805,18 @@ export class ScrollUntilVisible {
     return element;
   }
 
-  private screenBoundsContainer({
+  private async screenBoundsContainer({
     observation,
     includeSystemInsets,
   }: {
     observation: ObserveResult;
     includeSystemInsets?: boolean;
-  }): Element {
+  }): Promise<Element> {
     const insetOptions = { observation, platform: this.swipePlatform(), includeSystemInsets };
     const screenSize = swipeScreenSize(insetOptions) || { width: 1080, height: 1920 };
+    const screen = getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions));
     return {
-      bounds:
-        (this.swipePlatform() === "android" ? xrSwipeBounds(observation.backStack) : undefined) ??
-        getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions)),
+      bounds: await xrScreenSwipeBounds(observation, this.deps.androidXr, screen),
       scrollable: true,
     } as Element;
   }

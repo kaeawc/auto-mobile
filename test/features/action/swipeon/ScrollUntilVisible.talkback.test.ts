@@ -111,6 +111,7 @@ function makeScrollUntilVisible({
   };
 
   return new ScrollUntilVisible({
+    androidXr: async () => false,
     device,
     resolver: scrollResolver,
     geometry: fakeGeometry,

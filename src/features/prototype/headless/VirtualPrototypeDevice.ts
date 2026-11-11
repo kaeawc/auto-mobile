@@ -13,19 +13,26 @@ import { applyPrototypePatch } from "../prototypePatch";
 import { prototypeDataPointerTokens } from "../prototypeData";
 import type { PrototypePatchReply, PrototypePatchRequest } from "../prototypePatchWire";
 import { collectPrototypeAssetReferences } from "../prototypeAssetReferences";
+import { record } from "../prototypeTemplate";
 import { walkPrototypeNodes } from "../prototypeNodeChildren";
 import type { PrototypeAssetUpload } from "../prototypeAssets";
 import type { PrototypeData, PrototypeJson, PrototypeSpec } from "../prototypeSpec";
 import type { PrototypeShowOverrides } from "../PrototypeTransport";
 import { VIRTUAL_PROTOTYPE_CAPABILITIES } from "./headlessPrototypeMode";
 
+/** Per-id counters survive dismissal and replacement, as the controller ledger does. */
+interface PrototypeLedger {
+  lastSequence: number;
+  revision: number;
+}
+
 /** One prototype the virtual device is showing. */
 interface ShownPrototype {
   spec: Record<string, unknown>;
   state: PrototypeState;
   pages: Record<string, number>;
-  lastSequence: number;
-  revision: number;
+  ledger: PrototypeLedger;
+  stacks: NonNullable<PrototypeEvent["stacks"]>;
   /**
    * The revision that last wrote each state key, as CtrlProxy keeps it: a `/state` patch from a
    * `baseRevision` older than a key it touches conflicts, whoever wrote the key.
@@ -65,12 +72,14 @@ function stampChangedKeys(
   before: PrototypeState,
   after: PrototypeState,
   revision: number,
-): void {
-  new Set([...Object.keys(before), ...Object.keys(after)]).forEach((key) => {
-    if (before[key] !== after[key]) {
-      revisions.set(key, revision);
-    }
-  });
+): string[] {
+  const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+    (key) => before[key] !== after[key],
+  );
+  for (const key of changed) {
+    revisions.set(key, revision);
+  }
+  return changed;
 }
 
 /** The refusal CtrlProxy answers a `/state` patch with before applying it, if any. */
@@ -83,15 +92,15 @@ function stateGuardReply(
     return undefined;
   }
   const { baseRevision } = patch;
-  if (baseRevision === undefined || baseRevision > entry.revision) {
+  if (baseRevision === undefined || baseRevision > entry.ledger.revision) {
     return {
       success: false,
       delivery: "answered",
-      revision: entry.revision,
+      revision: entry.ledger.revision,
       error:
         baseRevision === undefined
           ? "baseRevision is required when a patch has /state ops"
-          : `baseRevision ${baseRevision} is newer than the device revision ${entry.revision}`,
+          : `baseRevision ${baseRevision} is newer than the device revision ${entry.ledger.revision}`,
     };
   }
   const stale = keys.filter((key) => (entry.stateRevisions.get(key) ?? 0) > baseRevision);
@@ -105,8 +114,8 @@ function stateGuardReply(
     success: false,
     delivery: "answered",
     error: "conflict",
-    revision: entry.revision,
-    conflict: { revision: entry.revision, state },
+    revision: entry.ledger.revision,
+    conflict: { revision: entry.ledger.revision, state },
   };
 }
 
@@ -132,6 +141,24 @@ function boundPages(
   return pages;
 }
 
+/** Initial navigation only; route declarations describe types, not parameter values. */
+function initialStacks(spec: Record<string, unknown>): NonNullable<PrototypeEvent["stacks"]> {
+  const stacks: NonNullable<PrototypeEvent["stacks"]> = {};
+  walkPrototypeNodes({ root: spec.root }, (node) => {
+    if (node.type !== "stack" || typeof node.id !== "string" || typeof node.start !== "string") {
+      return;
+    }
+    const route = record(record(node.routes)?.[node.start]);
+    stacks[node.id] = {
+      path: [node.start],
+      depth: 1,
+      // Valid start routes have no required params, so their initial values are empty.
+      ...(route?.params === undefined ? {} : { params: [{}] }),
+    };
+  });
+  return stacks;
+}
+
 const asState = (value: unknown): PrototypeState =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (structuredClone(value) as PrototypeState)
@@ -144,6 +171,7 @@ const asState = (value: unknown): PrototypeState =>
  */
 export class VirtualPrototypeDevice implements AndroidPrototypeClient {
   private readonly shown = new Map<string, ShownPrototype>();
+  private readonly ledgers = new Map<string, PrototypeLedger>();
   private readonly assets = new Set<string>();
   private readonly listeners = new Set<(event: PrototypeEvent) => void>();
   private readonly capabilities: ReadonlySet<string>;
@@ -172,14 +200,15 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
     const inPlace = previous !== undefined && overrides.reset !== true;
     const copy: Record<string, unknown> = { ...structuredClone(spec) };
     const state = asState(copy.state);
-    const revision = (previous?.revision ?? 0) + 1;
+    const ledger = this.ledgers.get(spec.id) ?? { revision: 0, lastSequence: 0 };
+    const revision = ++ledger.revision;
+    this.ledgers.set(spec.id, ledger);
     this.shown.set(spec.id, {
       spec: copy,
       state,
       pages: boundPages(copy, state, inPlace ? previous.pages : {}),
-      // Sequences never rewind for an id, as on hardware.
-      lastSequence: previous?.lastSequence ?? 0,
-      revision,
+      ledger,
+      stacks: initialStacks(copy),
       // A show writes every declared key, as CtrlProxy stamps them with the show's revision.
       stateRevisions: new Map(Object.keys(state).map((key) => [key, revision])),
     });
@@ -224,11 +253,32 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
       };
     }
     const state = asState(applied.spec.state);
-    entry.revision += 1;
-    stampChangedKeys(entry.stateRevisions, entry.state, state, entry.revision);
+    entry.ledger.revision += 1;
+    const changed = stampChangedKeys(
+      entry.stateRevisions,
+      entry.state,
+      state,
+      entry.ledger.revision,
+    ).filter((key) => key in state);
     entry.spec = applied.spec;
     entry.state = state;
-    return { success: true, delivery: "answered", revision: entry.revision, totalTimeMs: 0 };
+    entry.pages = boundPages(entry.spec, state, entry.pages);
+    entry.stacks = initialStacks(entry.spec);
+    if (changed.length > 0) {
+      this.dispatch({
+        id: patch.id,
+        kind: "change",
+        name: "change",
+        payload:
+          changed.length === 1
+            ? { key: changed[0], value: state[changed[0]] }
+            : {
+                keys: changed,
+                values: Object.fromEntries(changed.map((key) => [key, state[key]])),
+              },
+      });
+    }
+    return { success: true, delivery: "answered", revision: entry.ledger.revision, totalTimeMs: 0 };
   }
 
   async requestInspectPrototypes(): Promise<PrototypeResult> {
@@ -237,12 +287,20 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
       persistent: false,
       state: { ...entry.state },
       pages: { ...entry.pages },
-      lastSequence: entry.lastSequence,
+      ...(Object.keys(entry.stacks).length ? { stacks: structuredClone(entry.stacks) } : {}),
+      lastSequence: entry.ledger.lastSequence,
       ...(entry.spec.data === undefined
         ? {}
         : { data: structuredClone(entry.spec.data) as PrototypeData }),
     }));
-    return { success: true, prototypes, droppedEvents: 0, timestamp: this.clock.now() };
+    const stacks = Object.assign({}, ...prototypes.map((prototype) => prototype.stacks ?? {}));
+    return {
+      success: true,
+      prototypes,
+      droppedEvents: 0,
+      timestamp: this.clock.now(),
+      ...(Object.keys(stacks).length ? { stacks } : {}),
+    };
   }
 
   async requestPutPrototypeAsset(
@@ -299,24 +357,25 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
     }
     if (input.state !== undefined) {
       const state = { ...entry.state, ...input.state };
-      entry.revision += 1;
-      stampChangedKeys(entry.stateRevisions, entry.state, state, entry.revision);
+      entry.ledger.revision += 1;
+      stampChangedKeys(entry.stateRevisions, entry.state, state, entry.ledger.revision);
       entry.state = state;
     }
     if (input.pages !== undefined) {
       entry.pages = { ...entry.pages, ...input.pages };
     }
-    entry.lastSequence += 1;
+    entry.ledger.lastSequence += 1;
     const event: PrototypeEvent = {
       type: "prototype_event",
       timestamp: this.clock.now(),
       id: input.id,
-      sequence: entry.lastSequence,
+      sequence: entry.ledger.lastSequence,
       kind: input.kind,
       name: input.name,
       payload: input.payload ?? null,
       state: { ...entry.state },
       pages: { ...entry.pages },
+      ...(Object.keys(entry.stacks).length ? { stacks: structuredClone(entry.stacks) } : {}),
     };
     [...this.listeners].forEach((listener) => listener(event));
     return true;

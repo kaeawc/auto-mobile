@@ -5,6 +5,7 @@ import {
   CAR_APP_TEMPLATES_NOTE,
   carAppTemplateDocumentSchema,
   type CarAppForegroundTemplates,
+  type CarAppProjectedTemplates,
   type CarAppTemplateDocument,
   type CarAppTemplates,
 } from "../../../models/CarAppTemplates";
@@ -16,7 +17,14 @@ import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { shellQuote } from "../../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
-import { parseProjectedCarApps, type ProjectedCarApp } from "./projectedCarApps";
+import {
+  ANDROID_AUTO_PROJECTION_NOTE,
+  type AndroidAutoProjection,
+} from "../../../models/AndroidAutoProjection";
+import {
+  parseAndroidAutoProjectionServices,
+  type AndroidAutoProjectionServices,
+} from "./projectedCarApps";
 
 /**
  * Resolves the optional `carAppTemplates` block for an observation (#16751), or undefined when no
@@ -27,6 +35,15 @@ export type CarAppTemplatesResolver = (
   device: BootedDevice,
   result: ObserveResult,
 ) => Promise<CarAppTemplates | undefined>;
+
+/**
+ * Resolves the optional `androidAuto` block (#17841) from an observation that already carries its
+ * `carAppTemplates`, or undefined when Android Auto is not seen projecting.
+ */
+export type AndroidAutoProjectionResolver = (
+  device: BootedDevice,
+  result: ObserveResult,
+) => Promise<AndroidAutoProjection | undefined>;
 
 export type CarAppAdb = Pick<AdbExecutor, "executeCommand" | "getForegroundApp">;
 
@@ -74,10 +91,10 @@ export class CarAppTemplateReader {
   /** The Android user each device's package was last read as; the hint for skipping a lookup. */
   private readonly lastUser = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<CarAppForegroundTemplates | undefined>>();
-  /** Per device: the last successful services dump's projected apps, or the dump still running. */
-  private readonly projectedAppsCache = new Map<
+  /** Per device: the last successful services dump, parsed, or the dump still running. */
+  private readonly projectionCache = new Map<
     string,
-    { apps: Promise<ProjectedCarApp[] | undefined>; until: number }
+    { services: Promise<AndroidAutoProjectionServices | undefined>; until: number }
   >();
 
   constructor(
@@ -131,7 +148,7 @@ export class CarAppTemplateReader {
    * answers enabled, so the payload is unchanged.
    */
   private async resolveProjected(device: BootedDevice): Promise<CarAppTemplates | undefined> {
-    const apps = await this.projectedApps(device);
+    const apps = (await this.projectionServices(device))?.apps ?? [];
     const blocks = await Promise.all(
       apps.map((app) =>
         this.shared(device, app.packageName, app.userId, () =>
@@ -163,34 +180,72 @@ export class CarAppTemplateReader {
   }
 
   /**
-   * The apps Android Auto has bound, from a services dump reused for
-   * {@link CAR_APP_PROJECTED_SERVICES_TTL_MS}; overlapping observations share the running dump. A
-   * failed dump is not cached, so the next observation dumps again.
+   * The `androidAuto` block while Android Auto is the foreground app and one of its Car App Library
+   * template hosts is bound, which means a head unit session is hosting car app templates. Reuses
+   * the services dump {@link resolve} just read. `apps` keeps the bound apps whose route answered,
+   * the only ones known to be Car App Library apps; none is marked visible, because a bound app
+   * stays bound while another app is on the head unit (#17827).
    */
-  private async projectedApps(device: BootedDevice): Promise<ProjectedCarApp[]> {
+  readonly resolveAndroidAuto: AndroidAutoProjectionResolver = async (device, result) => {
+    if (device.platform !== "android" || result.activeWindow?.appId !== ANDROID_AUTO_PACKAGE) {
+      return undefined;
+    }
+    const services = await this.projectionServices(device);
+    if (!services || services.templateHosts.length === 0) {
+      return undefined;
+    }
+    const block = result.carAppTemplates;
+    const answered = new Set(
+      block && isProjectedTemplates(block) ? block.projected.map((app) => app.packageName) : [],
+    );
+    return {
+      projecting: true,
+      projectedBy: ANDROID_AUTO_PACKAGE,
+      templateHosts: services.templateHosts,
+      apps: services.apps
+        .filter((app) => answered.has(app.packageName))
+        .map(({ packageName, userId, services: bound }) => ({
+          packageName,
+          userId,
+          services: bound,
+        })),
+      note: ANDROID_AUTO_PROJECTION_NOTE,
+    };
+  };
+
+  /**
+   * The parsed services dump, reused for {@link CAR_APP_PROJECTED_SERVICES_TTL_MS}; overlapping
+   * observations share the running dump. A failed dump is not cached, so the next observation dumps
+   * again.
+   */
+  private async projectionServices(
+    device: BootedDevice,
+  ): Promise<AndroidAutoProjectionServices | undefined> {
     const now = this.timer.now();
-    for (const [deviceId, entry] of this.projectedAppsCache) {
+    for (const [deviceId, entry] of this.projectionCache) {
       if (entry.until <= now) {
-        this.projectedAppsCache.delete(deviceId);
+        this.projectionCache.delete(deviceId);
       }
     }
-    const cached = this.projectedAppsCache.get(device.deviceId);
+    const cached = this.projectionCache.get(device.deviceId);
     if (cached) {
-      return (await cached.apps) ?? [];
+      return cached.services;
     }
-    const entry = { apps: this.dumpProjectedApps(device), until: Number.POSITIVE_INFINITY };
-    this.projectedAppsCache.set(device.deviceId, entry);
-    const apps = await entry.apps;
-    if (apps === undefined) {
-      this.projectedAppsCache.delete(device.deviceId);
-      return [];
+    const entry = { services: this.dumpProjection(device), until: Number.POSITIVE_INFINITY };
+    this.projectionCache.set(device.deviceId, entry);
+    const services = await entry.services;
+    if (services === undefined) {
+      this.projectionCache.delete(device.deviceId);
+      return undefined;
     }
     entry.until = this.timer.now() + CAR_APP_PROJECTED_SERVICES_TTL_MS;
-    return apps;
+    return services;
   }
 
   /** One services dump, parsed; undefined when it failed. */
-  private async dumpProjectedApps(device: BootedDevice): Promise<ProjectedCarApp[] | undefined> {
+  private async dumpProjection(
+    device: BootedDevice,
+  ): Promise<AndroidAutoProjectionServices | undefined> {
     try {
       const result = await raceWithDeadline(
         () =>
@@ -205,9 +260,9 @@ export class CarAppTemplateReader {
           label: "bound car app services during Android Auto projection",
         },
       );
-      return parseProjectedCarApps(result.stdout);
+      return parseAndroidAutoProjectionServices(result.stdout);
     } catch (error) {
-      // The block is optional; an unreadable services dump just omits it for this observation.
+      // The blocks are optional; an unreadable services dump just omits them for this observation.
       logger.debug(`car app services dump failed during projection: ${errorMessage(error)}`);
       return undefined;
     }
@@ -359,6 +414,11 @@ export class CarAppTemplateReader {
     }
     return parseRouteOutput(packageName, output);
   }
+}
+
+/** The projection shape of the block: it names the projecting host. */
+function isProjectedTemplates(block: CarAppTemplates): block is CarAppProjectedTemplates {
+  return "projectedBy" in block;
 }
 
 /** Quiet-map user segment for a foreground lookup that named no usable user. */

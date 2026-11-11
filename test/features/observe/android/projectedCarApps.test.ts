@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { parseProjectedCarApps } from "../../../../src/features/observe/android/projectedCarApps";
+import {
+  parseAndroidAutoProjectionServices,
+  parseProjectedCarApps,
+} from "../../../../src/features/observe/android/projectedCarApps";
 import { projectionServicesDump } from "../../../helpers/androidAutoProjectionFixtures";
 
 describe("parseProjectedCarApps (#17826)", () => {
@@ -64,5 +67,57 @@ describe("parseProjectedCarApps (#17826)", () => {
   test("empty or unrelated output yields no apps", () => {
     expect(parseProjectedCarApps("")).toEqual([]);
     expect(parseProjectedCarApps("Permission Denial: can't dump ActivityManager")).toEqual([]);
+  });
+});
+
+describe("parseAndroidAutoProjectionServices (#17841)", () => {
+  test("the captured dump names the bound navigation template host and each app's bound components", () => {
+    const parsed = parseAndroidAutoProjectionServices(projectionServicesDump("one"));
+    expect(parsed.templateHosts).toEqual([
+      "com.google.android.projection.gearhead/.apphost.TemplateNavigationService",
+    ]);
+    expect(parsed.apps.map(({ packageName, userId }) => ({ packageName, userId }))).toEqual(
+      parseProjectedCarApps(projectionServicesDump("one")),
+    );
+    expect(
+      parsed.apps.find(
+        (app) => app.packageName === "dev.jasonpearson.automobile.automotivefixture",
+      ),
+    ).toEqual({
+      packageName: "dev.jasonpearson.automobile.automotivefixture",
+      userId: 0,
+      services: ["dev.jasonpearson.automobile.automotivefixture/.car.FixtureCarAppService"],
+    });
+    expect(
+      parsed.apps.find((app) => app.packageName === "com.google.android.gms")?.services,
+    ).toEqual([
+      "com.google.android.gms/.chimera.PersistentApiService",
+      "com.google.android.gms/.chimera.PersistentDirectBootAwareApiService",
+      "com.google.android.gms/com.google.android.location.internal.GoogleLocationManagerService",
+    ]);
+  });
+
+  test("a dump taken after projection ended has no template host and no apps", () => {
+    expect(parseAndroidAutoProjectionServices(projectionServicesDump("none"))).toEqual({
+      templateHosts: [],
+      apps: [],
+    });
+  });
+
+  test("a template host record with no live Android Auto binding is not counted", () => {
+    const dump = [
+      "  * ServiceRecord{1 u0 com.google.android.projection.gearhead/.apphost.TemplateNavigationService c:com.google.android.projection.gearhead}",
+      "    intent={cmp=com.google.android.projection.gearhead/.apphost.TemplateNavigationService}",
+      "    Bindings:",
+    ].join("\n");
+    expect(parseAndroidAutoProjectionServices(dump).templateHosts).toEqual([]);
+  });
+
+  test("Android Auto's other bound services are not template hosts", () => {
+    const parsed = parseAndroidAutoProjectionServices(projectionServicesDump("one"));
+    expect(parsed.templateHosts.every((host) => host.includes("/.apphost.Template"))).toBe(true);
+    expect(
+      parsed.apps.some((app) => app.packageName === "com.google.android.projection.gearhead"),
+    ).toBe(false);
   });
 });

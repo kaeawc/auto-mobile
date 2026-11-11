@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { androidAutoProjectionSchema } from "../../models/AndroidAutoProjection";
 import { carAppTemplatesSchema } from "../../models/CarAppTemplates";
 import { IMPORTED_PROTOTYPE_CONTENT } from "../../features/observe/importedPrototypeContent";
 import {
@@ -537,6 +538,13 @@ export const observeResultSchema = z
           "This is what the app built, not what the car host rendered. " +
           "While Android Auto projects, projected[] lists each app it bound whose route answered; " +
           "Android Auto does not say which of them the head unit shows.",
+      ),
+    androidAuto: androidAutoProjectionSchema
+      .optional()
+      .describe(
+        "Present while the phone projects to a head unit through Android Auto: the template hosts " +
+          "Android Auto has bound and the bound Car App Library apps. No app is marked visible: " +
+          "Android Auto keeps every connected app bound while another is on screen.",
       ),
     layoutWarnings: z
       .object({

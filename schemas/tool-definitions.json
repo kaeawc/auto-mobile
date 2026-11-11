@@ -24366,6 +24366,59 @@
             }
           ]
         },
+        "androidAuto": {
+          "description": "Present while the phone projects to a head unit through Android Auto: the template hosts Android Auto has bound and the bound Car App Library apps. No app is marked visible: Android Auto keeps every connected app bound while another is on screen.",
+          "type": "object",
+          "properties": {
+            "projecting": {
+              "type": "boolean",
+              "const": true
+            },
+            "projectedBy": {
+              "description": "The projecting host package (Android Auto).",
+              "type": "string"
+            },
+            "templateHosts": {
+              "description": "Android Auto's bound Car App Library template host services, one per app category, sorted.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "apps": {
+              "description": "Bound apps whose AutoMobile SDK template route answered (so they are Car App Library apps), ordered by package name. Their templates are in carAppTemplates.projected[].",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "packageName": {
+                    "type": "string"
+                  },
+                  "userId": {
+                    "description": "The Android user the app's bound service runs as.",
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "services": {
+                    "description": "Components (<package>/<class>) Android Auto holds a live binding to, sorted.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["packageName", "userId", "services"],
+                "additionalProperties": {}
+              }
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["projecting", "projectedBy", "templateHosts", "apps", "note"],
+          "additionalProperties": {}
+        },
         "layoutWarnings": {
           "type": "object",
           "properties": {

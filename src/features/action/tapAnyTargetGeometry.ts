@@ -1,4 +1,4 @@
-import { boundsArea } from "../../utils/bounds";
+import { boundsArea, intersectBounds, parseBounds } from "../../utils/bounds";
 import { withoutHiddenXrChrome } from "./xrHiddenChrome";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { isWithin, promoteClickableAncestor } from "../utility/ElementResolverNodes";
@@ -10,8 +10,10 @@ import {
   ActionableError,
   type AndroidOrIosPlatform,
   Element,
+  type ElementBounds,
   TapAnyElementOptions,
   ViewHierarchyResult,
+  type ViewHierarchyWindowInfo,
 } from "../../models";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import {
@@ -122,9 +124,12 @@ export function resolveTapAnyPoint(
 }
 
 /**
- * Prefer application windows to SystemUI's separate, window-local caption buttons. Every
- * application window stays, whatever its package, so window ranking puts a higher-layer dialog
- * from another package (a permission prompt) ahead of the pane behind it.
+ * Prefer application windows to SystemUI's separate, window-local caption buttons. A window of
+ * another package stays only when it is an application window that overlaps one of the capture
+ * package's windows, so window ranking puts a higher-layer dialog from another package (a
+ * permission prompt) ahead of the pane behind it while a separate panel beside it (another app)
+ * cannot win. A window without a package is foreign here: its type decides, so a package-less IME
+ * window is dropped.
  */
 function xrTapAnyHierarchy(
   viewHierarchy: ViewHierarchyResult,
@@ -132,19 +137,23 @@ function xrTapAnyHierarchy(
 ): ViewHierarchyResult {
   viewHierarchy = withoutHiddenXrChrome(viewHierarchy).hierarchy;
   const prototypes = new Set(ownPrototypeWindows(viewHierarchy));
-  const appWindows = viewHierarchy.windows?.filter((window) => {
-    // An unnamed window falls back to the capture's package, as the window contract documents.
-    const packageName = window.packageName ?? viewHierarchy.packageName;
-    return (
-      window.hierarchy !== undefined &&
-      !prototypes.has(window) &&
-      !packageName?.startsWith("com.android.systemui") &&
-      (packageName === viewHierarchy.packageName ||
-        window.type === undefined ||
-        window.type === ACCESSIBILITY_WINDOW_TYPE_APPLICATION)
-    );
-  });
-  if (!options.container && appWindows?.length) {
+  const isOwn = (window: ViewHierarchyWindowInfo) =>
+    window.packageName !== undefined && window.packageName === viewHierarchy.packageName;
+  const candidates =
+    viewHierarchy.windows?.filter(
+      (window) =>
+        window.hierarchy !== undefined &&
+        !prototypes.has(window) &&
+        !window.packageName?.startsWith("com.android.systemui") &&
+        (isOwn(window) ||
+          window.type === undefined ||
+          window.type === ACCESSIBILITY_WINDOW_TYPE_APPLICATION),
+    ) ?? [];
+  const ownBounds = candidates.filter(isOwn).flatMap((window) => parseBounds(window.bounds) ?? []);
+  const appWindows = candidates.filter(
+    (window) => isOwn(window) || overlapsOwnWindow(window, ownBounds),
+  );
+  if (!options.container && appWindows.length) {
     viewHierarchy = {
       ...viewHierarchy,
       hierarchy: {
@@ -156,6 +165,15 @@ function xrTapAnyHierarchy(
     };
   }
   return viewHierarchy;
+}
+
+/** Without bounds on either side, overlap is unknown and the window stays. */
+function overlapsOwnWindow(
+  window: ViewHierarchyWindowInfo,
+  ownBounds: readonly ElementBounds[],
+): boolean {
+  const bounds = parseBounds(window.bounds);
+  return !bounds || ownBounds.length === 0 || ownBounds.some((own) => intersectBounds(bounds, own));
 }
 
 function xrContainerOwner(
@@ -226,7 +244,7 @@ function withinScrollingRoot(node: SearchableEntry, nodes: readonly SearchableEn
 
 /**
  * Bound leaf ownership to three ancestors, a quarter window, the enclosing container (when the
- * selector nests one), and no unrelated controls.
+ * selector nests one; that container itself may own the leaf), and no unrelated controls.
  */
 function xrContainerScope(
   node: SearchableEntry,
@@ -253,12 +271,7 @@ function xrContainerScope(
   let scope = node;
   for (let level = 0; level < 3 && scope.parentIndex !== undefined; level++) {
     const parent = nodes[scope.parentIndex];
-    if (
-      parent === root ||
-      parent.source === boundary ||
-      !parent.bounds ||
-      boundsArea(parent.bounds) > windowArea / 4
-    ) {
+    if (parent === root || !parent.bounds || boundsArea(parent.bounds) > windowArea / 4) {
       break;
     }
     if (
@@ -273,6 +286,10 @@ function xrContainerScope(
     }
     chain.add(parent.index);
     scope = parent;
+    if (parent.source === boundary) {
+      // The outer container may itself be the clickable row; nothing above it qualifies.
+      break;
+    }
   }
   return scope;
 }

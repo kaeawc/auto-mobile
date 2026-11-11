@@ -22,6 +22,7 @@ test("template names are deterministic, reserved, and sensitive to every key fie
     { ...key, xcodeBuild: "X2" },
     { ...key, deviceType: "tablet" },
     { ...key, profile: "minimal" as const },
+    { ...key, apsdLogSuppressed: true as const },
   ]) {
     expect(templateKeyHash(other)).not.toBe(templateKeyHash(key));
   }
@@ -38,4 +39,7 @@ test("clone flag is off by default and opt-in with 1/true", () => {
   for (const value of ["0", "false", "invalid", ""]) {
     expect(resolveTemplateCloneEnabled({ AUTOMOBILE_IOS_TEMPLATE_CLONE: value })).toBe(false);
   }
+});
+test("an absent apsd suppression flag keeps the pre-flag template hash", () => {
+  expect(templateKeyHash({ ...key, apsdLogSuppressed: undefined })).toBe(templateKeyHash(key));
 });

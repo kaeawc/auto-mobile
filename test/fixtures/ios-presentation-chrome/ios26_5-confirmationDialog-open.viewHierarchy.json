@@ -1,0 +1,270 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": "Matrix",
+        "class": "XCUIApplication",
+        "bounds": [
+          0,
+          0,
+          402,
+          874
+        ]
+      },
+      "node": [
+        {
+          "$": {
+            "text": "App underneath",
+            "class": "UILabel",
+            "bounds": [
+              124,
+              390,
+              277,
+              416
+            ],
+            "role": "text",
+            "view-id": "s2-4906c5c783613e09"
+          }
+        },
+        {
+          "$": {
+            "text": "app-tap 0",
+            "resource-id": "app-button",
+            "class": "UIButton",
+            "bounds": [
+              151,
+              437,
+              250,
+              471
+            ],
+            "clickable": "true",
+            "role": "button",
+            "view-id": "app-button"
+          }
+        },
+        {
+          "$": {
+            "text": "tapcount 0",
+            "resource-id": "app-count",
+            "class": "UILabel",
+            "bounds": [
+              159,
+              491,
+              242,
+              511
+            ],
+            "role": "text",
+            "view-id": "app-count"
+          }
+        },
+        {
+          "$": {
+            "text": "dismiss popup",
+            "resource-id": "PopoverDismissRegion",
+            "class": "UIView",
+            "bounds": [
+              0,
+              0,
+              402,
+              874
+            ],
+            "view-id": "PopoverDismissRegion"
+          }
+        },
+        {
+          "$": {
+            "class": "UIImageView",
+            "bounds": [
+              -69,
+              210,
+              471,
+              690
+            ],
+            "clickable": "true",
+            "role": "image",
+            "view-id": "s2-7edfbf5215a4f07c"
+          }
+        },
+        {
+          "$": {
+            "text": "Dialog title",
+            "class": "UIActionSheet",
+            "bounds": [
+              81,
+              360,
+              321,
+              540
+            ],
+            "clickable": "true",
+            "view-id": "s2-4fda61b0c63af0c9"
+          },
+          "node": [
+            {
+              "$": {
+                "class": "UIScrollView",
+                "bounds": [
+                  81,
+                  360,
+                  321,
+                  404
+                ],
+                "scrollable": "true",
+                "view-id": "s2-43a08e6a18cb1ff0"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "Dialog title",
+                    "class": "UILabel",
+                    "bounds": [
+                      111,
+                      382,
+                      291,
+                      402
+                    ],
+                    "role": "text",
+                    "view-id": "s2-bce73e2234165c71"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Horizontal scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [
+                      81,
+                      379,
+                      321,
+                      401
+                    ],
+                    "view-id": "s2-a79830a9c63cf5c5-1"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [
+                      288,
+                      382,
+                      318,
+                      404
+                    ],
+                    "view-id": "s2-edd1e9ee444fedac-1"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "class": "UIScrollView",
+                "bounds": [
+                  81,
+                  404,
+                  321,
+                  540
+                ],
+                "scrollable": "true",
+                "view-id": "s2-3b301e980d07d684"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "Option A",
+                    "class": "UIButton",
+                    "bounds": [
+                      97,
+                      420,
+                      305,
+                      468
+                    ],
+                    "clickable": "true",
+                    "role": "button",
+                    "view-id": "s2-d6a940c304de8055"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Delete",
+                    "class": "UIButton",
+                    "bounds": [
+                      97,
+                      476,
+                      305,
+                      524
+                    ],
+                    "clickable": "true",
+                    "role": "button",
+                    "view-id": "s2-b4cf3a2043198f01"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [
+                      288,
+                      404,
+                      318,
+                      506
+                    ],
+                    "view-id": "s2-edd1e9ee444fedac-2"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Horizontal scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [
+                      114,
+                      507,
+                      287,
+                      537
+                    ],
+                    "view-id": "s2-a79830a9c63cf5c5-2"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "packageName": "dev.vq.l24.matrix",
+  "updatedAt": 1794418552047,
+  "windows": [
+    {
+      "bounds": [
+        0,
+        0,
+        402,
+        874
+      ],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "screenScale": 3,
+  "screenWidth": 402,
+  "screenHeight": 874,
+  "nativeScale": 3,
+  "pixelWidth": 1206,
+  "pixelHeight": 2622,
+  "insets": {
+    "available": false,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "receivedAt": 1794418552050,
+  "fresh": true,
+  "frameContext": "C28E8601-E799-43D8-81F3-1083853EF255:1:cefdfe8b34e02cfa",
+  "projectedScreenSize": {
+    "width": 402,
+    "height": 874
+  }
+}

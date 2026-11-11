@@ -4,6 +4,7 @@ import {
   resolveAndroidSdkRoot,
   type AndroidSdkEnvironment,
 } from "../../utils/android-cmdline-tools/androidSdkRoot";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import type { ProvisionAndroidAutoOptions } from "../deviceLifecycle/core/schemas";
 
 export type { ProvisionAndroidAutoOptions };
@@ -40,12 +41,20 @@ function dhuBinaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "desktop-head-unit.exe" : "desktop-head-unit";
 }
 
+/**
+ * A caller's relative path means the directory the daemon was launched from: the detached
+ * daemon itself runs from the home directory.
+ */
+function userPath(target: string, env: AndroidSdkEnvironment): string {
+  return path.resolve(resolvePathFromDaemonLaunchWorkingDirectory(target, env));
+}
+
 async function resolveApks(
   apkDirectory: string,
-  files: AndroidAutoHostFiles,
+  { env, files }: AndroidAutoInputEnvironment,
   missing: string[],
 ): Promise<string[]> {
-  const directory = path.resolve(apkDirectory);
+  const directory = userPath(apkDirectory, env);
   if (!(await files.isDirectory(directory))) {
     missing.push(
       `the Android Auto APK directory ${directory} does not exist; put the split APKs of an Android Auto release (base.apk plus its split_config.*.apk files) there`,
@@ -70,7 +79,7 @@ async function resolveDhu(
 ): Promise<{ binaryPath: string; configPath: string }> {
   let binaryPath: string;
   if (options.dhuPath) {
-    binaryPath = path.resolve(options.dhuPath);
+    binaryPath = userPath(options.dhuPath, env);
   } else {
     const sdkRoot = resolveAndroidSdkRoot(env);
     if (!sdkRoot) {
@@ -88,7 +97,7 @@ async function resolveDhu(
     );
   }
   const configPath = options.dhuConfig
-    ? path.resolve(options.dhuConfig)
+    ? userPath(options.dhuConfig, env)
     : path.join(path.dirname(binaryPath), DEFAULT_DHU_CONFIG);
   // A default config beside a missing binary is the same missing install; report it once.
   if ((binaryFound || options.dhuConfig) && !(await files.isFile(configPath))) {
@@ -106,7 +115,7 @@ export async function resolveAndroidAutoProvisionInputs(
   host: AndroidAutoInputEnvironment,
 ): Promise<AndroidAutoProvisionInputs> {
   const missing: string[] = [];
-  const androidAutoApks = await resolveApks(options.apkDirectory, host.files, missing);
+  const androidAutoApks = await resolveApks(options.apkDirectory, host, missing);
   const dhu = await resolveDhu(options, host, missing);
   if (missing.length > 0) {
     throw new ActionableError(`Android Auto projection is missing ${missing.join("; and ")}.`);

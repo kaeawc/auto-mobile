@@ -57,7 +57,7 @@ function setup(screens: string[]) {
       .getExecutedCommands()
       .filter((command) => command.startsWith("shell input"))
       .map((command) => command.replace("shell ", ""));
-  return { driver, actions };
+  return { driver, actions, commands: () => adb.getExecutedCommands() };
 }
 
 describe("AdbAndroidAutoScreenDriver", () => {
@@ -99,6 +99,18 @@ describe("AdbAndroidAutoScreenDriver", () => {
       '"Developer settings" is not on the phone screen after 2 reads',
     );
     expect(actions()).toEqual([]);
+  });
+
+  test("removes the previous dump first, so a failed dump reads as empty, not stale", async () => {
+    const { driver, actions, commands } = setup(["", screen(VERSION_ROW)]);
+    await driver.tapText("Version");
+    expect(actions()).toEqual(["input tap 540 1850"]);
+    const dumpCycle = commands().filter((command) => !command.startsWith("shell input"));
+    expect(dumpCycle.slice(0, 3)).toEqual([
+      "shell rm -f /data/local/tmp/automobile-android-auto.xml",
+      "shell uiautomator dump /data/local/tmp/automobile-android-auto.xml",
+      "shell cat /data/local/tmp/automobile-android-auto.xml 2>/dev/null || true",
+    ]);
   });
 
   test("scrolls up until the text appears", async () => {

@@ -1,5 +1,7 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import type { PortAvailabilityChecker } from "../../utils/PortManager";
 import type { Timer } from "../../utils/SystemTimer";
 import { HEAD_UNIT_SERVER_PORT } from "./androidAutoProjection";
@@ -181,8 +183,37 @@ export class AndroidAutoProjectionProvisioner {
     steps.push(await this.ensureHeadUnitServer(device, signal));
     steps.push(await this.ensureTransport(phone, request.deviceId, signal));
     const dhu = await this.ensureDesktopHeadUnit(device, request);
-    steps.push(dhu.step, await this.handleOnboarding(ui, request));
+    try {
+      steps.push(dhu.step, await this.handleOnboarding(ui, request));
+    } catch (error) {
+      if (dhu.step.status === "applied") {
+        await this.stopLaunchedSession(request.deviceId, dhu.session);
+      }
+      throw error;
+    }
     return { steps, session: dhu.session };
+  }
+
+  /**
+   * A run that fails after starting its own DHU stops it, so the failure does not leave a live
+   * DHU holding host port 5277 for a projection nobody received. A DHU that will not exit stays
+   * tracked, so the single-projection check still sees it and the next provision retries.
+   */
+  private async stopLaunchedSession(
+    deviceId: string,
+    session: DesktopHeadUnitSession,
+  ): Promise<void> {
+    try {
+      await session.stop();
+      if (this.sessions.get(deviceId) === session) {
+        this.sessions.delete(deviceId);
+      }
+    } catch (stopError) {
+      logger.warn(
+        `[AndroidAuto] failed provisioning of ${deviceId} could not stop its Desktop Head Unit; it stays tracked: ${errorMessage(stopError)}`,
+        stopError,
+      );
+    }
   }
 
   /**

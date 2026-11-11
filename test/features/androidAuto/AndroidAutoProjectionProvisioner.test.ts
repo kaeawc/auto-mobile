@@ -354,6 +354,64 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(launcher.launches).toBe(2);
   });
 
+  test("a failure after this run started its DHU stops that DHU so other devices are not blocked", async () => {
+    const launched = new FakeSession();
+    let stops = 0;
+    const stop = launched.stop.bind(launched);
+    launched.stop = async () => {
+      stops++;
+      await stop();
+    };
+    const { ui, phone, launcher, provisioner } = setup([
+      { status: "connected", session: launched },
+    ]);
+    ui.onboardingPending = true;
+    ui.isOnboardingPending = async () => {
+      throw new ActionableError("uiautomator dump failed");
+    };
+    await expect(provisioner.provision(request())).rejects.toThrow("uiautomator dump failed");
+    expect(stops).toBe(1);
+
+    phone.redirected = false;
+    ui.isOnboardingPending = async () => false;
+    const other = await provisioner.provision(request({ deviceId: "emulator-5556" }));
+    expect(other.session.isRunning()).toBe(true);
+    expect(launcher.launches).toBe(2);
+  });
+
+  test("a failed run's DHU that will not stop stays tracked and keeps blocking other devices", async () => {
+    const stuck = new FakeSession();
+    stuck.stop = async () => {
+      stuck.running = false;
+      throw new ActionableError("The Desktop Head Unit did not exit");
+    };
+    const { ui, phone, provisioner } = setup([{ status: "connected", session: stuck }]);
+    ui.isOnboardingPending = async () => {
+      throw new ActionableError("uiautomator dump failed");
+    };
+    await expect(provisioner.provision(request())).rejects.toThrow("uiautomator dump failed");
+    phone.redirected = false;
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "for emulator-5554 is unhealthy but still running",
+    );
+  });
+
+  test("a failed rerun does not stop a DHU an earlier run started", async () => {
+    const first = new FakeSession();
+    let stops = 0;
+    first.stop = async () => {
+      stops++;
+    };
+    const { ui, provisioner } = setup([{ status: "connected", session: first }]);
+    await provisioner.provision(request());
+    ui.isOnboardingPending = async () => {
+      throw new ActionableError("uiautomator dump failed");
+    };
+    await expect(provisioner.provision(request())).rejects.toThrow("uiautomator dump failed");
+    expect(stops).toBe(0);
+    expect(first.isRunning()).toBe(true);
+  });
+
   test("gives up after the recovery budget with every attempt's reason", async () => {
     const stall: DhuLaunchOutcome = { status: "no-connect", detail: "no connected." };
     const { launcher, provisioner } = setup([stall, stall, stall]);

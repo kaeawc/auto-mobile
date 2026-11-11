@@ -5,6 +5,7 @@ import {
   type AndroidAutoHostFiles,
 } from "../../../src/features/androidAuto/androidAutoProvisionInputs";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
 const SDK = path.resolve("/sdk");
 const APK_DIR = path.resolve("/apks");
@@ -103,6 +104,20 @@ describe("resolveAndroidAutoProvisionInputs", () => {
       dhuConfig: config,
     });
     expect(inputs.dhu).toEqual({ binaryPath: dhu, configPath: config });
+  });
+
+  test("relative paths resolve against the directory the daemon was launched from", async () => {
+    const launch = path.resolve("/work/project");
+    const apks = path.join(launch, "aa-apks");
+    const inputs = await resolveAndroidAutoProvisionInputs(
+      { apkDirectory: "aa-apks" },
+      {
+        env: { ANDROID_HOME: SDK, [DAEMON_LAUNCH_CWD_ENV]: launch },
+        platform: "linux",
+        files: hostFiles({ [apks]: ["base.apk"] }, [DHU, CONFIG]),
+      },
+    );
+    expect(inputs.androidAutoApks).toEqual([path.join(apks, "base.apk")]);
   });
 
   test("looks for the Windows DHU binary on Windows", async () => {

@@ -84,7 +84,11 @@ SIGKILL), so a relaunch never races the old process. A DHU that survives both se
 `unkillable` with the session that still owns it; the provisioner keeps that session tracked (unhealthy,
 alive) and fails the provisioning without relaunching. Because it stays in the session map, the
 single-projection check refuses other devices while it lives, and the next provision of the same
-device retries its stop before any relaunch; once the process exits, launches proceed.
+device retries its stop before any relaunch; once the process exits, launches proceed. A run that fails after it
+started its own DHU (the welcome-screen step is the only one after it) stops that DHU, so the failure
+does not leave host port 5277 held; if the stop fails, the session stays tracked the same way. Caller
+paths (`apkDirectory`, `dhuPath`, `dhuConfig`) resolve against the daemon's launch directory, because
+the detached daemon runs from the home directory.
 After a failure the provisioner waits the injected backoff,
 force-stops Android Auto, starts the head unit server again and relaunches, up to two relaunches by
 default.

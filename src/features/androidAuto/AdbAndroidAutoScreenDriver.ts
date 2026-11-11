@@ -183,9 +183,13 @@ export class AdbAndroidAutoScreenDriver implements AndroidAutoScreenDriver {
   private async readScreen(signal?: AbortSignal): Promise<ScreenNode[]> {
     await this.timer.sleep(this.options.settleMs);
     signal?.throwIfAborted();
+    // The old dump is removed first: `uiautomator dump` can fail (for example "could not get
+    // idle state") and still exit 0, and reading the previous file would act on a stale screen.
+    // A missing file reads as an empty screen, which the callers' bounded retries handle.
     const xml = await uiautomatorDumpLock(this.deviceId).runExclusive(async () => {
+      await this.shell(["rm", "-f", DUMP_PATH], signal);
       await this.shell(["uiautomator", "dump", DUMP_PATH], signal);
-      return this.shell(["cat", DUMP_PATH], signal);
+      return this.shell([`cat ${DUMP_PATH} 2>/dev/null || true`], signal);
     });
     return parseScreenNodes(xml);
   }

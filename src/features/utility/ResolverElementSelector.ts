@@ -26,6 +26,7 @@ import {
   type ScreenSizeForOffscreenCheckOptions,
 } from "./ElementGeometry";
 import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
+import { countTappableMatches } from "./tappableMatchCount";
 
 /** A text selector, the kind a client copies from an observed label. */
 function selectsByText(selector: ResolverSelector): boolean {
@@ -326,6 +327,7 @@ export class ResolverElementSelector implements ElementSelector {
     selector?: ResolverSelector,
   ): ElementSelectionResult {
     const source = matchedSourceNode(result, selector);
+    const tappableMatches = countTappableMatches(result.candidates);
     return {
       element: result.chosen?.element ?? null,
       ...(source?.element ? { matchedElement: source.element } : {}),
@@ -334,6 +336,10 @@ export class ResolverElementSelector implements ElementSelector {
         : {}),
       indexInMatches: result.indexInMatches ?? -1,
       totalMatches: result.candidates.length,
+      // Only a differing, nonzero count is informative; a label-only match keeps the total.
+      ...(tappableMatches > 0 && tappableMatches < result.candidates.length
+        ? { tappableMatches }
+        : {}),
       strategy,
     };
   }

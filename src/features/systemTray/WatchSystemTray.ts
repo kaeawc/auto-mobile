@@ -10,6 +10,7 @@ import {
 import { prepareWatchSystemTray, openWatchSystemTray } from "./helpers/watchOpening";
 import { readActiveNotificationKeysForApp } from "./helpers/listing";
 import { restoreWatchStream, unrestoredDismissal } from "./helpers/watchRestore";
+import { MAX_SETTLE_READS, POLL_MS, watchReply, watchTapLabel } from "./helpers/watchReply";
 import { watchAwaySurface } from "./helpers/watchFace";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import { getSystemTrayDependencies, resolveUniqueTrayAppLabel } from "./helpers/dependencies";
@@ -38,8 +39,6 @@ import { WATCH_LIST_SCAN_TIMEOUT_MS, listMessage, type ListCutShort } from "./wa
 import type { SystemTrayArgs, SystemTrayNotificationArgs } from "./systemTrayTypes";
 
 const MAX_STREAM_PAGES = 20;
-const POLL_MS = 250;
-const MAX_SETTLE_READS = 6;
 const SETTLE_MS = 500;
 // A loaded watch can take seconds to draw a scroll, and an unmoved page ends the scan.
 const MAX_UNMOVED_RETRIES = 6;
@@ -773,7 +772,8 @@ export class WatchSystemTray {
   ): Promise<SystemTrayOutcome> {
     await this.tap(card.element, observation);
     this.expandedByUs = true;
-    const text = args.notification?.tapActionLabel ?? card.title ?? card.body;
+    const replyText = args.notification?.replyText;
+    const text = watchTapLabel(args.notification ?? {}, card);
     // The card expands over a few hundred ms and its actions only appear once it has, so re-read
     // until the labelled target shows up (bounded).
     let expanded = observation;
@@ -797,6 +797,15 @@ export class WatchSystemTray {
       );
     }
     await this.tap(target, expanded);
+    if (replyText !== undefined) {
+      return watchReply(replyText, {
+        read: () => this.read(),
+        tap: (element, current) => this.tap(element, current),
+        command: (command) => this.command(command),
+        sleep,
+        signal: this.signal,
+      });
+    }
     return outcome({ message: "Tapped watch notification", observation: await this.read() });
   }
 

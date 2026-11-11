@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import toggleCapture from "../../fixtures/tvos-xcuitest/tvos-runner-hierarchy-tvdog-settings-toggle.json";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
 import { tvosTapOn } from "../../../src/features/tvos/TvosFocusNavigation";
@@ -464,4 +465,54 @@ test.each<TapOnElementOptions>([
 ])("rejects unsupported options before reading hierarchy: %j", async (options) => {
   await expect(tvosTapOn(deviceId, options)).rejects.toThrow();
   expect(client.commands).toEqual([]);
+});
+
+test("selects the focused row for its captured nested toggle identifier", async () => {
+  unregister();
+  const replay = new FakeTvosRunnerClient(structuredClone(toggleCapture.data));
+  unregister = tvosRunners.register(deviceId, replay);
+  const result = await tvosTapOn(deviceId, { action: "tap", elementId: "autoplay-toggle" });
+  expect(result).toMatchObject({
+    success: true,
+    element: { "resource-id": "autoplay-toggle", class: "40" },
+  });
+  expect(result.debug?.activatedAncestor).toMatchObject({
+    text: "Autoplay",
+    class: "75",
+    focused: "true",
+  });
+  expect(replay.commands).toEqual([hierarchy, press("select")]);
+});
+
+test("a captured target outside the focused row still reports refused focus progress", async () => {
+  unregister();
+  const replay = new FakeTvosRunnerClient(structuredClone(toggleCapture.data));
+  unregister = tvosRunners.register(deviceId, replay);
+  await expect(tvosTapOn(deviceId, { action: "tap", text: "Settings" })).rejects.toThrow(
+    "focus stopped making progress from Autoplay toward Settings",
+  );
+  expect(replay.commands).toEqual([hierarchy, press("up"), hierarchy]);
+});
+
+test("a separately focusable child inside focus still requires a focus move", async () => {
+  const owner = client.buttons.find((button) => button.focused === "true")!;
+  const child = {
+    ...owner,
+    "resource-id": "focusable-child",
+    focusable: "true",
+    focused: "false",
+    bounds: {
+      left: owner.bounds.left + 5,
+      top: owner.bounds.top + 5,
+      right: owner.bounds.right - 5,
+      bottom: owner.bounds.bottom - 5,
+    },
+    node: [],
+  };
+  owner.node = [child];
+  client.ignorePresses = true;
+  await expect(
+    tvosTapOn(deviceId, { action: "tap", elementId: "focusable-child" }),
+  ).rejects.toThrow("focus stopped making progress");
+  expect(client.commands).not.toContainEqual(press("select"));
 });

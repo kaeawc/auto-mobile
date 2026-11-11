@@ -1,5 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { Element, TapOnElementOptions, TapOnElementResult } from "../../models";
+import { isTruthy } from "../../models/Element";
 import { boundsArea } from "../../utils/bounds";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { compareSelectionRank, selectableCandidates } from "../utility/selectionRank";
@@ -103,6 +104,14 @@ function focusOwner(target: Element, matches: Element[]): Element {
       ? candidate
       : owner;
   }, target);
+}
+
+/** A row can select its non-focusable child without another focus move. */
+function canSelectAtFocus(focus: Element, target: Element): boolean {
+  return (
+    sameBounds(focus, target) ||
+    (!isTruthy(target.focusable) && focusOwner(target, [focus]) === focus)
+  );
 }
 
 interface TargetIdentity {
@@ -318,9 +327,14 @@ export async function tvosTapOn(
     const state = await locate(lookup, identity, maxSearchMoves);
     const { focus, target } = state;
     identity = state.identity;
-    if (sameBounds(focus, target)) {
+    if (canSelectAtFocus(focus, target)) {
       await client.request({ type: "request_press_button", action: "select" }, signal);
-      return { success: true, action: "tap", element: target };
+      return {
+        success: true,
+        action: "tap",
+        element: target,
+        ...(sameBounds(focus, target) ? {} : { debug: { activatedAncestor: focus } }),
+      };
     }
     // A press that leaves the focus signature unchanged was refused at this focus position.
     const refused = blocked.get(state.signature) ?? new Set<Direction>();

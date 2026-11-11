@@ -79,9 +79,20 @@ function sharesBand(a: ElementBounds, b: ElementBounds): boolean {
   return Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top);
 }
 
+function sharesColumn(a: ElementBounds, b: ElementBounds): boolean {
+  return Math.min(a.right, b.right) > Math.max(a.left, b.left);
+}
+
+/**
+ * Every anchor in one band, and at least two side by side. Nodes that overlap on both axes are one
+ * card seen twice (a parent's content-desc and its child's text), not two cards in a row.
+ */
 function isHorizontalRow(elements: readonly Element[]): boolean {
   const pairs = elements.flatMap((a, i) => elements.slice(i + 1).map((b) => [a, b] as const));
-  return pairs.length > 0 && pairs.every(([a, b]) => sharesBand(a.bounds, b.bounds));
+  return (
+    pairs.every(([a, b]) => sharesBand(a.bounds, b.bounds)) &&
+    pairs.some(([a, b]) => !sharesColumn(a.bounds, b.bounds))
+  );
 }
 
 /** Whether the focused element sits in the anchor's row: it shares a band with an anchor. */

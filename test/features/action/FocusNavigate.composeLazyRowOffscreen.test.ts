@@ -246,6 +246,12 @@ describe("FocusNavigate to a LazyRow card that is not composed yet (#18027)", ()
       { bounds: below, text: "Item 2" },
     ];
     expect(findRowAnchor(stacked, { label: "Item 6" })).toBe(undefined);
+    // One card labelled twice: a parent's content-desc and its child's text.
+    const nested = [
+      { bounds: TRENDING_1.bounds, "content-desc": "Item 1" },
+      { bounds: TRENDING_1.bounds, text: "Item 1" },
+    ];
+    expect(findRowAnchor(nested, { label: "Item 2" })).toBe(undefined);
     const row = [
       { bounds: TRENDING_1.bounds, text: "Item 1" },
       { bounds: beside, text: "Item 2" },

@@ -12,6 +12,8 @@ shift
 # Compare case-insensitively so this exclusion cannot be bypassed by lower-case input.
 [[ "$(printf '%s' "${udid}" | tr '[:lower:]' '[:upper:]')" != 18A2D9B1-CDFA-445A-93AA-A532EA4B5498 ]] || fail 'refusing the CI iPhone UDID'
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/ios/run_with_timeout.sh
+source "${repo_root}/scripts/ios/run_with_timeout.sh"
 viewer="${repo_root}/scratch/prototype-viewer/PrototypeViewer.app"
 out="${repo_root}/ios/prototype-agent/Goldens/iphone-16"
 names=()
@@ -30,8 +32,12 @@ done
 [[ -d "${viewer}" ]] || fail "viewer app not found: ${viewer}; run scripts/ios/prototype-viewer-build.sh"
 stable_max_captures="${PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES:-8}"
 stable_budget_secs="${PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS:-15}"
+stable_settle_secs="${PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS:-1.5}"
+capture_timeout_secs="${PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS:-10}"
 [[ "${stable_max_captures}" =~ ^[1-9][0-9]*$ ]] || fail 'PROTOTYPE_GOLDEN_STABLE_MAX_CAPTURES must be a positive integer'
 [[ "${stable_budget_secs}" =~ ^(0|[1-9][0-9]*)$ ]] || fail 'PROTOTYPE_GOLDEN_STABLE_BUDGET_SECS must be a nonnegative integer'
+[[ "${stable_settle_secs}" =~ ^(0|[1-9][0-9]*)(\.[0-9]+)?$ ]] || fail 'PROTOTYPE_GOLDEN_STABLE_SETTLE_SECS must be a nonnegative number of seconds'
+[[ "${capture_timeout_secs}" =~ ^[1-9][0-9]*$ ]] || fail 'PROTOTYPE_GOLDEN_CAPTURE_TIMEOUT_SECS must be a positive integer'
 for command in bun jq xcrun sips cmp date; do
   command -v "${command}" >/dev/null || fail "required command not found: ${command}"
 done
@@ -77,24 +83,59 @@ check_size() {
   size="$(sips -g pixelWidth -g pixelHeight "${image}")"
   [[ "$(awk '/pixelWidth:/ {print $2}' <<< "${size}")" == "${expected_width}" && "$(awk '/pixelHeight:/ {print $2}' <<< "${size}")" == "${expected_height}" ]] || fail "wrong screenshot size (expected ${expected_width}x${expected_height}): ${size}"
 }
+# One bounded screenshot into screen.png. Leaves capture_error empty only for a nonempty file;
+# a nonzero status, a timeout (run_with_timeout returns 124) or an empty file sets it, so a bad
+# capture never counts as a frame. It returns 0 either way so callers branch on capture_error.
+capture_error=''
+take_screenshot() {
+  local timeout_secs="$1" status
+  rm -f "${tmp_dir}/screen.png"
+  # The status is the result here, so this one call runs without errexit.
+  set +e
+  run_with_timeout "${timeout_secs}" xcrun simctl io "${udid}" screenshot --type=png "${tmp_dir}/screen.png"
+  status=$?
+  set -e
+  capture_error=''
+  if [[ "${status}" == 124 ]]; then
+    capture_error="timed out after ${timeout_secs}s"
+  elif [[ "${status}" != 0 ]]; then
+    capture_error="failed with status ${status}"
+  elif [[ ! -s "${tmp_dir}/screen.png" ]]; then
+    capture_error='wrote an empty file'
+  fi
+}
 # Compare complete PNGs, including system chrome, before cropping the chosen capture.
+# Two identical frames prove the screen is static, not that the viewer finished rendering, so no
+# capture is taken before the settle floor: a static blank launch frame cannot become stable.
 capture_until_stable() {
-  local golden="$1" captures=0 started
+  local golden="$1" captures=0 started elapsed timeout_secs
   started="$(date +%s)"
-  sleep 0.5
+  sleep "${stable_settle_secs}"
+  rm -f "${tmp_dir}/screen.prev.png"
   while (( captures < stable_max_captures && $(date +%s) - started < stable_budget_secs )); do
-    xcrun simctl io "${udid}" screenshot --type=png "${tmp_dir}/screen.png"
+    # Bound each capture by the budget left, so a hung screenshot cannot overrun it.
+    elapsed=$(($(date +%s) - started))
+    timeout_secs=$((stable_budget_secs - elapsed))
+    if (( timeout_secs > capture_timeout_secs )); then timeout_secs="${capture_timeout_secs}"; fi
     captures=$((captures + 1))
-    if (( captures > 1 )) && cmp -s "${tmp_dir}/screen.png" "${tmp_dir}/screen.prev.png"; then
-      printf 'prototype-record-goldens: %s: capture=stable (%s captures)\n' "${golden}" "${captures}" >&2
-      return
+    take_screenshot "${timeout_secs}"
+    if [[ -n "${capture_error}" ]]; then
+      # Stability needs two consecutive good frames; never compare across a bad capture.
+      printf 'prototype-record-goldens: %s: capture %s %s; discarding it\n' "${golden}" "${captures}" "${capture_error}" >&2
+      rm -f "${tmp_dir}/screen.prev.png"
+    else
+      if [[ -f "${tmp_dir}/screen.prev.png" ]] && cmp -s "${tmp_dir}/screen.png" "${tmp_dir}/screen.prev.png"; then
+        printf 'prototype-record-goldens: %s: capture=stable (%s captures)\n' "${golden}" "${captures}" >&2
+        return
+      fi
+      cp "${tmp_dir}/screen.png" "${tmp_dir}/screen.prev.png"
     fi
-    cp "${tmp_dir}/screen.png" "${tmp_dir}/screen.prev.png"
     if (( captures < stable_max_captures )); then sleep 0.5; fi
   done
   # Preserve the original settle-and-capture behavior when the bounded polling fails.
   sleep 2
-  xcrun simctl io "${udid}" screenshot --type=png "${tmp_dir}/screen.png"
+  take_screenshot "${capture_timeout_secs}"
+  [[ -z "${capture_error}" ]] || fail "${golden}: fallback screenshot ${capture_error}"
   printf 'prototype-record-goldens: %s: capture=fallback (not stable after %s captures)\n' "${golden}" "${captures}" >&2
 }
 mkdir -p "${out}"

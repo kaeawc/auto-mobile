@@ -122,14 +122,18 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
 
     func tap(x: Double, y: Double) throws {
         try performGesture {
-            let hasAlerts = !systemAlerts().isEmpty
-            if !hasAlerts, app.state != .runningForeground {
-                let offset = try watchTapNormalizedOffset(x: x, y: y, frame: clockface.frame)
+            let route = try watchTapRoute(
+                x: x, y: y, hasAlerts: !systemAlerts().isEmpty,
+                appForeground: app.state == .runningForeground, clockfaceFrame: { clockface.frame }
+            )
+            switch route {
+            case let .clockface(offset):
                 clockface.coordinate(withNormalizedOffset: offset).tap()
-                return
+            case .systemAlert:
+                system.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
+            case .app:
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
             }
-            let target = hasAlerts ? system : app
-            target.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
         }
     }
 

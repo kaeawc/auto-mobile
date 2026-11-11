@@ -56,6 +56,10 @@ import type { BootedDevice, ObserveResult } from "../../../models";
 import { requireAndroidOrIosPlatform } from "../../../models/Platform";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  defaultAndroidXrDetector,
+  type AndroidXrDetector,
+} from "../../../utils/android-cmdline-tools/androidXrDevice";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
@@ -92,6 +96,8 @@ export interface SendKeysPlatformDependencies {
   iosSdkTextRouter?: IosSdkBridgeTextRouter;
   iosSdkWebTextRouter?: IosSdkWebTextRouter;
   pendingImeRestores?: PendingImeRestoreRegistry;
+  /** The shared Android XR predicate; defaults to the process-wide cached detector. */
+  xrDetector?: AndroidXrDetector;
   imeSpanService?: Pick<
     ImeSpanService,
     "imeSpan" | "withImeSpan" | "acquireImeSpan" | "restoreImeSpan"
@@ -187,7 +193,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       observe: (signal) => this.observer.execute({ hierarchyOnly: true, signal }),
     });
     this.clearVerifier = this.createClearVerifier();
-    this.passwordRouting = this.createPasswordRouting();
+    this.passwordRouting = this.createPasswordRouting(dependencies.xrDetector);
     this.iosTyper = this.createIosTyper();
     this.inputKey = dependencies.inputKey ?? new InputKey(device, { adbFactory });
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
@@ -311,10 +317,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     });
   }
 
-  private createPasswordRouting(): PasswordRouting {
+  private createPasswordRouting(
+    xrDetector: AndroidXrDetector = defaultAndroidXrDetector,
+  ): PasswordRouting {
     return new PasswordRouting({
       platform: () => this.device.platform,
-      formFactor: () => this.device.formFactor,
+      isAndroidXr: (signal) => xrDetector.isAndroidXr(this.adb, this.device, signal),
       observer: { execute: (options) => this.observer.execute(options) },
       targetLayer: () => this.targetLayer,
       resolveMode: (requestedMode) => this.resolveMode(requestedMode),

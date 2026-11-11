@@ -20,6 +20,7 @@ import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionRe
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
 
 export const android: BootedDevice = {
@@ -191,7 +192,10 @@ export function createSendKeysHarness(
   device: BootedDevice,
   observe: SendKeysObserver = observer,
   timer = autoAdvancingTimer(),
-  dependencies: Pick<SendKeysPlatformDependencies, "iosSdkTextRouter" | "iosSdkWebTextRouter"> = {},
+  dependencies: Pick<
+    SendKeysPlatformDependencies,
+    "iosSdkTextRouter" | "iosSdkWebTextRouter" | "xrDetector"
+  > = {},
 ) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
@@ -259,6 +263,8 @@ export function createSendKeysHarness(
       timer,
       textClient: client,
       inputKey: { press: async () => ({ success: true }) },
+      // A fresh non-XR detector, so no test inherits the process-wide cache's verdict.
+      xrDetector: new FakeAndroidXrDetector(false),
       ...dependencies,
     }),
   };

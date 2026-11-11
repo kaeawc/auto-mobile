@@ -6,8 +6,6 @@ import { hasFocusedTextInput } from "../ClearText";
 import { focusedImeFieldClass } from "../imeFailureDiagnostics";
 import { AUTO_MOBILE_IME_ID } from "../AndroidImeCatalog";
 import { getCapturedKeyboard } from "../../observe/output/elementProvenance";
-import type { FormFactor } from "../../../models/DeviceMatchCriteria";
-import { hasXrSystemUi } from "../../xr/xrPanelSpace";
 import {
   NoFocusedEditableError,
   isPrintableAscii,
@@ -25,33 +23,22 @@ type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeTe
 const AUTO_MOBILE_IME_PACKAGE = AUTO_MOBILE_IME_ID.split("/")[0];
 
 /**
- * Whether the device is an Android XR headset or glasses: the announced form factor, or XR
- * system UI windows in the observed back stack (`hasXrSystemUi`, shared with XR panel detection).
- */
-export function isAndroidXrDevice(
-  observation: Pick<ObserveResult, "backStack">,
-  formFactor?: FormFactor,
-): boolean {
-  if (formFactor === "xr-headset" || formFactor === "xr-glasses") {
-    return true;
-  }
-  return hasXrSystemUi(observation.backStack);
-}
-
-/**
  * The on-screen keyboard package when Auto cannot use the AutoMobile IME on this device: an
- * Android XR device shows another keyboard while no focused editable field is readable. The IME
- * commit is verified against that field, so it can never succeed there; the accessibility path
- * finds the input itself (#17801). Phones keep the AutoMobile IME as the default even when
- * Gboard is visible and focus is unreadable (a WebView or Compose field), per #16428.
+ * Android XR device (`isAndroidXr`, from the shared `AndroidXrDetector`) shows another keyboard
+ * while no focused editable field is readable. The IME commit is verified against that field, so
+ * it can never succeed there; the accessibility path finds the input itself (#17801). Phones keep
+ * the AutoMobile IME as the default even when Gboard is visible and focus is unreadable (a
+ * WebView or Compose field), per #16428.
  */
 export function unusableImeKeyboard(
   observation: ObserveResult,
-  formFactor?: FormFactor,
+  isAndroidXr: boolean,
 ): string | undefined {
-  if (!isAndroidXrDevice(observation, formFactor)) {
-    return undefined;
-  }
+  return isAndroidXr ? foreignKeyboardWithoutFocus(observation) : undefined;
+}
+
+/** A visible keyboard other than the AutoMobile IME, with no readable focused editable field. */
+function foreignKeyboardWithoutFocus(observation: ObserveResult): string | undefined {
   // A raw observation carries the keyboard the capture vouched for on `elements`; the
   // top-level field is only filled in by output sanitization.
   const keyboard =
@@ -87,8 +74,8 @@ export function noteAutoA11yFallback(
 
 export interface PasswordRoutingDeps {
   platform(): string;
-  /** The device's announced form factor, when known. */
-  formFactor?(): FormFactor | undefined;
+  /** The shared Android XR predicate (`AndroidXrDetector`) for this device. */
+  isAndroidXr(signal?: AbortSignal): Promise<boolean>;
   observer: Pick<SendKeysObserver, "execute">;
   targetLayer(): HierarchyLayer | undefined;
   resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode;
@@ -132,12 +119,9 @@ export class PasswordRouting {
       operation,
       signal,
       display,
-      (observation) => {
+      (observation, fallbackKeyboard) => {
         focusedFieldClass = focusedImeFieldClass(observation);
-        imeFallbackKeyboard =
-          this.deps.targetLayer() === "prototype"
-            ? undefined
-            : unusableImeKeyboard(observation, this.deps.formFactor?.());
+        imeFallbackKeyboard = fallbackKeyboard;
       },
     );
     const focusedInputVerified = password !== undefined;
@@ -215,7 +199,7 @@ export class PasswordRouting {
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
-    onObservation?: (observation: ObserveResult) => void,
+    onObservation?: (observation: ObserveResult, imeFallbackKeyboard: string | undefined) => void,
   ): Promise<boolean | undefined> {
     const observation = await this.deps.observer.execute({
       signal,
@@ -223,7 +207,8 @@ export class PasswordRouting {
       skipScreenshot: true,
       ...(display === undefined ? {} : { display }),
     });
-    onObservation?.(observation);
+    const imeFallbackKeyboard = await this.imeFallbackKeyboard(observation, signal);
+    onObservation?.(observation, imeFallbackKeyboard);
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       // Auto insert already reads focus for password routing. Reject before dispatch
@@ -232,7 +217,7 @@ export class PasswordRouting {
       if (
         operation === "insert" &&
         this.deps.targetLayer() !== "prototype" &&
-        unusableImeKeyboard(observation, this.deps.formFactor?.()) === undefined
+        imeFallbackKeyboard === undefined
       ) {
         throw new NoFocusedEditableError();
       }
@@ -240,5 +225,20 @@ export class PasswordRouting {
       return undefined;
     }
     return this.deps.hasFocusedPasswordField(hierarchy);
+  }
+
+  /**
+   * {@link unusableImeKeyboard} for this device. The XR predicate is only asked when another
+   * keyboard is shown without readable focus, so ordinary phone typing never probes for it.
+   */
+  private async imeFallbackKeyboard(
+    observation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (this.deps.targetLayer() === "prototype") {
+      return undefined;
+    }
+    const keyboard = foreignKeyboardWithoutFocus(observation);
+    return keyboard !== undefined && (await this.deps.isAndroidXr(signal)) ? keyboard : undefined;
   }
 }

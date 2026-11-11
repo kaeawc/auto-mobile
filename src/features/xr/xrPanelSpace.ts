@@ -35,7 +35,10 @@ export function hasXrSystemUi(backStack: BackStackInfo | undefined): backStack i
   );
 }
 
-/** Undefined means non-XR; a null panel means XR system UI without an app panel. */
+/**
+ * Undefined means non-XR; a null panel means XR system UI without an app panel. Panel geometry
+ * only: "is this device XR?" belongs to the shared `AndroidXrDetector` (androidXrDevice.ts).
+ */
 export function detectXrPanel(
   backStack: BackStackInfo | undefined,
 ): { panel: XrPanel | null } | undefined {

@@ -5,9 +5,15 @@ import type { ObserveResult } from "../../../../src/models";
 import type { SendKeysCommandResult } from "../../../../src/features/action/SendKeys";
 import {
   autoA11yFallbackWarning,
-  isAndroidXrDevice,
   unusableImeKeyboard,
 } from "../../../../src/features/action/sendkeys/PasswordRouting";
+import {
+  CachedAndroidXrDetector,
+  XR_SPATIAL_FEATURE,
+} from "../../../../src/utils/android-cmdline-tools/androidXrDevice";
+import { createExecResult } from "../../../../src/utils/execResult";
+import { FakeAndroidXrDetector } from "../../../fakes/FakeAndroidXrDetector";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
 import { setCapturedKeyboard } from "../../../../src/features/observe/output/elementProvenance";
 import { android, createSendKeysHarness, focused } from "../SendKeysTestHarness";
@@ -40,13 +46,29 @@ const xrObservation = autoCapture.observation;
 const GBOARD = "com.google.android.inputmethod.latin";
 
 function xrHarness(observation: ObserveResult = xrObservation) {
-  return createSendKeysHarness(android, { execute: async () => observation });
+  return createSendKeysHarness(android, { execute: async () => observation }, undefined, {
+    xrDetector: new FakeAndroidXrDetector(true),
+  });
+}
+
+const XR_FEATURE_PROBE = `pm has-feature ${XR_SPATIAL_FEATURE}`;
+
+/** A harness whose XR verdict comes from the real shared detector reading `pm has-feature`. */
+function featureProbedHarness(observation: ObserveResult, declaresXr: boolean) {
+  const harness = createSendKeysHarness(android, { execute: async () => observation }, undefined, {
+    xrDetector: new CachedAndroidXrDetector(new FakeTimer()),
+  });
+  harness.adb.setCommandResponse(XR_FEATURE_PROBE, createExecResult(`${declaresXr}\n`, ""));
+  const probes = () =>
+    harness.adb.getExecutedCommands().filter((command) => command.includes(XR_FEATURE_PROBE))
+      .length;
+  return { ...harness, probes };
 }
 
 describe("Auto falls back to a11y when the AutoMobile IME cannot be used (#17801)", () => {
   test("the captured headset observation shows Gboard and no readable focused editor", () => {
     expect(xrObservation.keyboard).toEqual({ visible: true, package: GBOARD });
-    expect(unusableImeKeyboard(xrObservation)).toBe(GBOARD);
+    expect(unusableImeKeyboard(xrObservation, true)).toBe(GBOARD);
     expect(autoCapture.commands[0]).toMatchObject({
       requestedMode: "auto",
       resolvedMode: "ime",
@@ -84,7 +106,7 @@ describe("Auto falls back to a11y when the AutoMobile IME cannot be used (#17801
     };
     setCapturedKeyboard(elements, xrObservation.keyboard);
     const raw: ObserveResult = { ...xrObservation, keyboard: undefined, elements };
-    expect(unusableImeKeyboard(raw)).toBe(GBOARD);
+    expect(unusableImeKeyboard(raw, true)).toBe(GBOARD);
     const harness = xrHarness(raw);
     const result = await harness.executor.type({ action: "type", text: "wifi" });
     expect(result).toMatchObject({
@@ -138,7 +160,7 @@ describe("Auto falls back to a11y when the AutoMobile IME cannot be used (#17801
       ...xrObservation,
       keyboard: { visible: true, package: "dev.jasonpearson.automobile.ctrlproxy" },
     };
-    expect(unusableImeKeyboard(observation)).toBeUndefined();
+    expect(unusableImeKeyboard(observation, true)).toBeUndefined();
     const harness = xrHarness(observation);
     const result = await harness.executor.type({ action: "type", text: "wifi" });
     expect(result).toMatchObject({
@@ -162,7 +184,7 @@ describe("Auto falls back to a11y when the AutoMobile IME cannot be used (#17801
       ...focused,
       keyboard: { visible: true, package: GBOARD },
     };
-    expect(unusableImeKeyboard(observation)).toBeUndefined();
+    expect(unusableImeKeyboard(observation, true)).toBeUndefined();
     const harness = xrHarness(observation);
     const result = await harness.executor.type({ action: "type", text: "wifi" });
     expect(result).toMatchObject({ success: true, resolvedMode: "ime", backend: "autoMobileIme" });
@@ -185,9 +207,16 @@ const phoneWebView: ObserveResult = buildObserveResult({
 
 describe("phones keep the AutoMobile IME under Gboard (#16428)", () => {
   test("a phone WebView with Gboard visible is not an XR device and keeps the IME", () => {
-    expect(isAndroidXrDevice(phoneWebView, android.formFactor)).toBe(false);
-    expect(unusableImeKeyboard(phoneWebView)).toBeUndefined();
-    expect(unusableImeKeyboard(phoneWebView, "phone")).toBeUndefined();
+    expect(unusableImeKeyboard(phoneWebView, false)).toBeUndefined();
+  });
+
+  test("a phone with Gboard is not XR for sendKeys: the shared detector keeps the IME", async () => {
+    const harness = featureProbedHarness(phoneWebView, false);
+    const result = await harness.executor.type({ action: "type", text: "wifi" });
+    expect(result).toMatchObject({ resolvedMode: "ime", errorCode: "NO_FOCUSED_EDITABLE" });
+    expect(result.warning ?? "").not.toContain("Auto mode typed through accessibility");
+    expect(harness.inserted).toEqual([]);
+    expect(harness.probes()).toBe(1);
   });
 
   test("auto type into an unfocused WebView field stays on the AutoMobile IME", async () => {
@@ -216,19 +245,13 @@ describe("phones keep the AutoMobile IME under Gboard (#16428)", () => {
   });
 });
 
-describe("Android XR detection for the fallback", () => {
-  test("the captured headset back stack is detected as XR", () => {
-    expect(isAndroidXrDevice(xrObservation)).toBe(true);
-  });
+describe("sendKeys asks the shared Android XR detector (#17811)", () => {
+  /** The headset capture with no announced form factor and no XR System UI in the back stack. */
+  const bareHeadset: ObserveResult = { ...xrObservation, backStack: undefined };
 
-  test("an announced xr-headset form factor falls back with the warning without XR windows", async () => {
-    const observation: ObserveResult = { ...xrObservation, backStack: undefined };
-    expect(isAndroidXrDevice(observation)).toBe(false);
-    expect(unusableImeKeyboard(observation, "xr-headset")).toBe(GBOARD);
-    const harness = createSendKeysHarness(
-      { ...android, formFactor: "xr-headset" },
-      { execute: async () => observation },
-    );
+  test("a headset declaring the XR feature, with no form factor or XR System UI, falls back", async () => {
+    expect(android.formFactor).toBeUndefined();
+    const harness = featureProbedHarness(bareHeadset, true);
     const result = await harness.executor.type({ action: "type", text: "wifi" });
     expect(result).toMatchObject({
       success: true,
@@ -236,5 +259,23 @@ describe("Android XR detection for the fallback", () => {
       warning: autoA11yFallbackWarning(GBOARD),
     });
     expect(harness.inserted).toEqual(["wifi"]);
+    expect(harness.probes()).toBe(1);
+  });
+
+  test("XR System UI windows alone no longer make a device XR", async () => {
+    const harness = featureProbedHarness(xrObservation, false);
+    const result = await harness.executor.type({ action: "type", text: "wifi" });
+    expect(result).toMatchObject({ resolvedMode: "ime", errorCode: "NO_FOCUSED_EDITABLE" });
+    expect(harness.inserted).toEqual([]);
+  });
+
+  test("a readable focused field never asks the detector", async () => {
+    const harness = featureProbedHarness(
+      { ...focused, keyboard: { visible: true, package: GBOARD } },
+      true,
+    );
+    const result = await harness.executor.type({ action: "type", text: "wifi" });
+    expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+    expect(harness.probes()).toBe(0);
   });
 });

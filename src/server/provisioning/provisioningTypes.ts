@@ -1,6 +1,7 @@
 import type { DeleteDeviceOptions } from "../../features/deviceLifecycle/teardown/teardownContracts";
 import type { DeviceResourceConfigurationResult } from "../../models/DeviceResourceConfiguration";
 import { BootedDevice, DeviceInfo } from "../../models";
+import type { AndroidAutoProvisionReport } from "../../features/androidAuto/AndroidAutoProjectionService";
 import { createPerformanceTracker } from "../../utils/PerformanceTracker";
 import { type AcquisitionReceipt } from "../../daemon/acquisitionReceipt";
 import type { DeviceReadinessLevel } from "../../daemon/readiness/DeviceReadiness";
@@ -96,6 +97,8 @@ export type ProvisionSettlementState = {
   unownedColdBootSettlement?: Promise<void>;
   bindingSettlements: Promise<unknown>[];
   readinessReservation?: DeviceReadinessReservation;
+  /** Set once an `androidAuto` run connected its own DHU, so a failed provision stops that one. */
+  androidAutoDevice?: BootedDevice;
 };
 
 export type ProvisionBootResult = {
@@ -106,4 +109,6 @@ export type ProvisionBootResult = {
   resources?: DeviceResourceConfigurationResult;
   /** The applied `deviceProfile` (#14058), in the manufacturerProfile tool's result shape. */
   manufacturerProfile?: Record<string, unknown>;
+  /** The `androidAuto` projection report (#17839). */
+  androidAuto?: AndroidAutoProvisionReport;
 };

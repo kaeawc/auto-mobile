@@ -2,7 +2,7 @@ import { type FormFactor, type DeviceMatchCriteria } from "../../../models/Devic
 import { type ExactDeviceSpecification } from "../../../devices/exactDeviceProvisioning";
 import { type DeviceResourceConfiguration } from "../../../models/DeviceResourceConfiguration";
 import { BootedDevice, Platform } from "../../../models";
-import type { ProvisionDeviceProfile } from "./schemas";
+import type { ProvisionAndroidAutoOptions, ProvisionDeviceProfile } from "./schemas";
 
 // Export interfaces for type safety
 export interface StartDeviceArgs {
@@ -70,6 +70,8 @@ export interface ProvisionDeviceArgs {
   boot: boolean;
   readiness: "automation" | "none";
   resources?: DeviceResourceConfiguration;
+  /** Android Auto projection set up after boot (#17839). */
+  androidAuto?: ProvisionAndroidAutoOptions;
   timeoutMs?: number;
   /** The request's absolute transport deadline, from the ambient call context (#15663). */
   transportDeadlineMs?: number;

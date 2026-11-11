@@ -1,8 +1,9 @@
 # Android Auto and the Desktop Head Unit
 
 Android Auto projects a phone app's car UI to a head unit. The Desktop Head Unit (DHU) is Google's
-desktop stand-in for that head unit. AutoMobile has no tool that drives the DHU or reads the projected
-car screen; this page covers what you can set up yourself and what to expect.
+desktop stand-in for that head unit. `provisionDevice` can set up projection on a phone emulator and
+start a headless DHU for you. AutoMobile does not read the projected car screen; this page covers the
+setup, the manual steps it automates, and what to expect.
 
 For a full car Android build that AutoMobile drives directly, use an
 [Android Automotive OS emulator](android-automotive.md) instead.
@@ -14,6 +15,64 @@ read the `carAppTemplates` block from `observe` on a phone emulator. See
 [Car App Library templates in `observe`](android-automotive.md#car-app-library-templates-in-observe).
 It reports what the app built, not what the head unit rendered. For template unit tests, use
 `androidx.car.app.testing` (`TestCarContext`, `ScreenController`).
+
+## Setting up projection with `provisionDevice`
+
+Pass `androidAuto` to `provisionDevice` for an Android phone AVD on a Google Play system image (such as
+`google_apis_playstore`). After boot, AutoMobile installs Android Auto from your APKs, prepares it and
+starts a headless DHU against the emulator. No Google account is needed.
+
+```json
+{
+  "device": {
+    "platform": "android",
+    "name": "Pixel_9_Play_36",
+    "spec": {
+      "runtime": "system-images;android-36;google_apis_playstore;arm64-v8a",
+      "deviceType": "pixel_9"
+    }
+  },
+  "androidAuto": { "apkDirectory": "/path/to/android-auto-apks" }
+}
+```
+
+| Parameter                            | Required | Description                                                                                                                                                                                                                                       |
+| ------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `androidAuto.apkDirectory`           | yes      | Host directory with the Android Auto split APKs you supplied: `base.apk` plus its `split_*.apk` files for the emulator's ABI, language and density. AutoMobile never downloads them. They are installed only while the phone still runs the stub. |
+| `androidAuto.dhuPath`                | no       | The `desktop-head-unit` binary. Defaults to `$ANDROID_HOME/extras/google/auto/desktop-head-unit`.                                                                                                                                                 |
+| `androidAuto.dhuConfig`              | no       | Head unit config (`.ini`). Defaults to `config/default_720p.ini` beside the DHU binary.                                                                                                                                                           |
+| `androidAuto.acceptAndroidAutoTerms` | no       | Tap **Continue** on **Welcome to Android Auto**, which accepts Android Auto's terms. Set it only when you have decided to accept them. Without it, a pending welcome screen is reported, not tapped.                                              |
+
+`androidAuto` requires `boot: true` (the default). The emulator's language must be English, because
+Android Auto's settings are driven by their visible labels.
+
+### Result
+
+The response gains an `androidAuto` block:
+
+- `steps`: one entry per step, in order: `android-auto-apk`, `keyguard`, `stay-awake`,
+  `notification-access`, `developer-mode`, `unknown-sources`, `head-unit-server`, `transport`,
+  `desktop-head-unit` and `onboarding`. Each has a `status` of `applied`, `already-done` or `skipped`,
+  and sometimes a `detail`. Running it again on a phone that is already set up reports `already-done`
+  and reuses the running DHU.
+- `desktopHeadUnit.running`: whether the DHU holds its connection.
+
+An `onboarding` step with status `skipped` means the welcome screen is waiting. Tap **Continue** on the
+phone, or provision again with `acceptAndroidAutoTerms: true`.
+
+### Errors
+
+| Error                                                                                                  | What to do                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unsupported`: Android Auto projection is missing the APK directory, `base.apk`, the DHU or the config | Nothing was created or booted. The message names every missing path. Install the DHU with `sdkmanager "extras;google;auto"`, or pass `dhuPath`.                                                      |
+| The phone still runs the Android Auto stub and the APK signer check fails                              | Supply the APKs of an official Android Auto release. Android rejects an update signed by a different key.                                                                                            |
+| A Desktop Head Unit is already projecting another emulator, or one is unhealthy but still running      | One emulator per host can project, because the DHU dials host port 5277. Call `killDevice` on that emulator, which stops its DHU, or provision that emulator again, which restarts an unhealthy DHU. |
+| The DHU did not exit after SIGTERM and SIGKILL                                                         | End the `desktop-head-unit` process yourself, then provision again. Until it exits, other emulators are refused.                                                                                     |
+| Host port 5277 is held by a redirect or process AutoMobile did not create                              | Remove it (`adb -s <serial> emu redir del tcp:5277`) or stop the process, then retry.                                                                                                                |
+| The head unit server is not listening, or the DHU did not hold a connection                            | Check developer mode in Android Auto and start the head unit server from its overflow menu, then retry.                                                                                              |
+
+A failure after boot fails the whole request: an emulator the request created is rolled back, and a DHU
+that request started is stopped. A DHU an earlier provision started keeps running. `killDevice` on an emulator also stops its DHU.
 
 ## Setting up projection by hand
 

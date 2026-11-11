@@ -119,6 +119,13 @@ import {
   setVideoRecordingManagerDependencies,
 } from "../../src/daemon/videoRecordingManager";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import {
+  DefaultAndroidAutoProjectionApplier,
+  type AndroidAutoProjectionApplier,
+  type AndroidAutoProvisionReport,
+} from "../../src/features/androidAuto/AndroidAutoProjectionService";
+import { AndroidAutoProjectionProvisioner } from "../../src/features/androidAuto/AndroidAutoProjectionProvisioner";
+import { FakeLauncher, FakePhone, FakeSession, FakeUi } from "../fakes/FakeAndroidAutoProjection";
 
 /** Exact provision response body from the registered production handler, with deterministic dependencies. */
 function assertProvisionSurface(name: string, payload: unknown): void {
@@ -673,6 +680,250 @@ describe("provisionDevice handler", () => {
         capabilities: [{ id: "samsung-dex" }],
       });
       expect(provisioned).toBe(false);
+    });
+  });
+
+  describe("androidAuto (#17839)", () => {
+    class RecordingAndroidAutoApplier implements AndroidAutoProjectionApplier {
+      readonly events: string[] = [];
+      failure?: Error;
+      async resolveInputs() {
+        return {
+          androidAutoApks: ["/apks/base.apk"],
+          dhu: { binaryPath: "/dhu", configPath: "/dhu.ini" },
+          acceptAndroidAutoTerms: false,
+        };
+      }
+      async apply(device: BootedDevice): Promise<AndroidAutoProvisionReport> {
+        this.events.push(`apply:${device.deviceId}`);
+        if (this.failure) {
+          throw this.failure;
+        }
+        return {
+          steps: [{ step: "desktop-head-unit", status: "applied" }],
+          desktopHeadUnit: { running: true },
+        };
+      }
+      async stopDesktopHeadUnit(deviceId: string) {
+        this.events.push(`stop:${deviceId}`);
+      }
+    }
+
+    const androidAutoArgs = () => ({
+      ...provisionTestArgs("android"),
+      androidAuto: { apkDirectory: "/apks" },
+    });
+
+    function createdAndroid(applier: RecordingAndroidAutoApplier): void {
+      const provisioned = provisionedTestDevice("android", true);
+      exactProvisioner.provision = async () => provisioned;
+      deviceManager.setDeviceImages("android", [provisioned.device]);
+      configureProvisionBootAndTeardown(deviceManager, "android");
+      const destroy = deviceManager.destroyDevice.bind(deviceManager);
+      deviceManager.destroyDevice = async (...destroyArgs) => {
+        applier.events.push("destroy");
+        return await destroy(...destroyArgs);
+      };
+      setDeviceToolsDependencies({
+        timer: new FakeTimer(),
+        ensureCtrlProxyReady: async () => {},
+        androidAutoProjection: applier,
+      });
+    }
+
+    test("projects the bound device and reports it", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      createdAndroid(applier);
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.androidAuto).toEqual({
+        steps: [{ step: "desktop-head-unit", status: "applied" }],
+        desktopHeadUnit: { running: true },
+      });
+      expect(applier.events).toEqual(["apply:emulator-5554"]);
+    });
+
+    /** The real applier and provisioner, with fakes only for the phone, its UI and the DHU. */
+    function realProjectionStack(events: string[]) {
+      const ui = new FakeUi();
+      const phone = new FakePhone(ui);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const sessions: FakeSession[] = [];
+      const launcher = new FakeLauncher();
+      launcher.launch = async () => {
+        const session = new FakeSession();
+        const stop = session.stop.bind(session);
+        session.stop = async () => {
+          events.push("dhu-stop");
+          await stop();
+        };
+        sessions.push(session);
+        return { status: "connected", session };
+      };
+      const provisioner = new AndroidAutoProjectionProvisioner({
+        forDevice: () => ({ phone, ui, signerCheck: { verify: async () => {} } }),
+        dhu: launcher,
+        hostPorts: { isPortAvailable: () => !phone.redirected },
+        timer,
+        recoveryBackoff: fixedBackoff(1_000),
+      });
+      const applier = new DefaultAndroidAutoProjectionApplier(
+        {
+          env: { ANDROID_HOME: "/sdk" },
+          platform: "linux",
+          files: {
+            isDirectory: async () => true,
+            isFile: async () => true,
+            list: async () => ["base.apk"],
+          },
+        },
+        provisioner,
+      );
+      return { ui, applier, sessions };
+    }
+
+    test("a run that started its DHU and then fails stops that DHU before rolling back", async () => {
+      const events: string[] = [];
+      const { ui, applier, sessions } = realProjectionStack(events);
+      ui.isOnboardingPending = async () => {
+        throw new ActionableError("Android Auto onboarding read failed");
+      };
+      const recording = new RecordingAndroidAutoApplier();
+      createdAndroid(recording);
+      setDeviceToolsDependencies({ androidAutoProjection: applier });
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.success).toBe(false);
+      expect(JSON.stringify(payload)).toContain("Android Auto onboarding read failed");
+      expect(payload.cleanup).toMatchObject({ status: "succeeded" });
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.isAlive()).toBe(false);
+      expect(recording.events).toContain("destroy");
+      // The DHU stops inside the run, so before the created emulator is rolled back.
+      expect(events).toEqual(["dhu-stop"]);
+    });
+
+    test("a failed rerun on a reused emulator leaves the DHU an earlier provision started", async () => {
+      const events: string[] = [];
+      const { ui, applier, sessions } = realProjectionStack(events);
+      const args = provisionTestArgs("android");
+      const device: BootedDevice = {
+        name: args.device.name,
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      // The earlier provision: it connected a DHU that is still projecting this emulator.
+      await applier.apply(device, { apkDirectory: "/apks" });
+      expect(sessions).toHaveLength(1);
+      ui.isOnboardingPending = async () => {
+        throw new ActionableError("uiautomator dump failed");
+      };
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      deviceManager.setBootedDevices("android", [device]);
+      setDeviceToolsDependencies({
+        timer: new FakeTimer(),
+        ensureCtrlProxyReady: async () => {},
+        androidAutoProjection: applier,
+      });
+
+      const payload = JSON.parse(
+        await provisionResponseText({ ...args, androidAuto: { apkDirectory: "/apks" } }),
+      );
+
+      expect(payload.success).toBe(false);
+      expect(JSON.stringify(payload)).toContain("uiautomator dump failed");
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.isRunning()).toBe(true);
+      expect(events).toEqual([]);
+    });
+
+    test("a projection that rejects is not stopped again by the failed provision", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      applier.failure = new ActionableError("Android Auto onboarding read failed");
+      createdAndroid(applier);
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.success).toBe(false);
+      expect(applier.events).toContain("destroy");
+      expect(applier.events).not.toContain("stop:emulator-5554");
+    });
+
+    test("a plain provision whose lifecycle abort lands after the session is bound still succeeds", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      const lateAbort = new AbortController();
+      const inner = new InMemoryVirtualDeviceLifecycleCoordinator();
+      // The real coordinator, with the provision lease's signal also aborted by `lateAbort`.
+      const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+        isReserved: (identity) => inner.isReserved(identity),
+        reserve: async (identity, options) => {
+          const lease = await inner.reserve(identity, options);
+          if (options.operation !== "provision") {
+            return lease;
+          }
+          const signal = AbortSignal.any([lease.signal, lateAbort.signal]);
+          return {
+            get signal() {
+              return signal;
+            },
+            get identity() {
+              return lease.identity;
+            },
+            get precedingOperations() {
+              return lease.precedingOperations;
+            },
+            bindCanonicalIdentity: (canonical, revalidate) =>
+              lease.bindCanonicalIdentity(canonical, revalidate),
+            transitionToTeardown: () => lease.transitionToTeardown(),
+            markHeldByUnkillableProcess: (pid) => lease.markHeldByUnkillableProcess?.(pid),
+            release: () => lease.release(),
+          };
+        },
+      };
+      const args = provisionTestArgs("android");
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      deviceManager.setBootedDevices("android", [
+        { name: args.device.name, platform: "android", deviceId: "emulator-5554" },
+      ]);
+      setDeviceToolsDependencies({
+        lifecycleCoordinator,
+        ensureCtrlProxyReady: async () => {},
+        androidAutoProjection: applier,
+        manufacturerProfileApplier: {
+          apply: async (device) => {
+            lateAbort.abort(new Error("lifecycle aborted after binding"));
+            return {
+              message: "Applied manufacturer profile samsung-oneui v1",
+              deviceId: device.deviceId,
+              action: "apply",
+              catalogVersion: 1,
+              persona: { id: "samsung-oneui", version: 1, displayName: "Samsung One UI" },
+              status: "applied",
+              facets: [],
+              nonEmulatable: [],
+            };
+          },
+        },
+      });
+
+      const payload = JSON.parse(
+        await provisionResponseText({
+          ...args,
+          device: {
+            ...args.device,
+            spec: { ...args.device.spec, deviceProfile: { manufacturerProfile: "samsung-oneui" } },
+          },
+        }),
+      );
+
+      expect(lateAbort.signal.aborted).toBe(true);
+      expect(payload.error).toBeUndefined();
+      expect(payload.sessionId).toEqual(expect.any(String));
+      expect(applier.events).toEqual([]);
     });
   });
 

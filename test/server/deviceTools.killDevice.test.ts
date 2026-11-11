@@ -932,6 +932,64 @@ describe("killDevice handler", () => {
     ).toBe(false);
   });
 
+  test("killDevice stops the Desktop Head Unit this daemon spawned for that emulator", async () => {
+    const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+    manager = new SuccessfulKillDeviceManager();
+    manager.setBootedDevices("android", [device]);
+    const stops: Array<{ deviceId: string; deviceStopped?: boolean }> = [];
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      timer: new FakeTimer(),
+      androidAutoProjection: {
+        resolveInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        stopDesktopHeadUnit: async (deviceId, options) => {
+          stops.push({ deviceId, ...options });
+        },
+      },
+    });
+
+    await ToolRegistry.getTool("killDevice")!.handler({ device });
+
+    // Stopped before the kill; its redirect is forgotten only once the kill succeeded.
+    expect(stops).toEqual([
+      { deviceId: "emulator-5554", deviceStopped: false },
+      { deviceId: "emulator-5554", deviceStopped: true },
+    ]);
+  });
+
+  test("a failed kill stops the DHU but keeps its host port redirect for a re-provision", async () => {
+    const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+    manager = new FailingKillDeviceManager();
+    manager.setBootedDevices("android", [device]);
+    const stops: Array<{ deviceId: string; deviceStopped?: boolean }> = [];
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      timer: new FakeTimer(),
+      androidAutoProjection: {
+        resolveInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        stopDesktopHeadUnit: async (deviceId, options) => {
+          stops.push({ deviceId, ...options });
+        },
+      },
+    });
+
+    await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).rejects.toThrow(
+      "adb emu kill failed",
+    );
+    expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
+    expect(stops).toEqual([{ deviceId: "emulator-5554", deviceStopped: false }]);
+  });
+
   test("confirmed direct-mode kill keeps IME quarantine without a pool", async () => {
     const device: BootedDevice = {
       deviceId: "ime-direct-kill",

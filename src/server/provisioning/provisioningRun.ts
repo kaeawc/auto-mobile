@@ -33,8 +33,10 @@ import {
   reserveIosSelectorProvisionDeviceLifecycle,
 } from "./provisioningReservation";
 import { bootExactProvisionedDevice, provisionExactDevice } from "./provisioningBoot";
+import { stopProvisionedAndroidAuto } from "./provisioningAndroidAuto";
 import { buildProvisionDeviceResult } from "./provisioningReadiness";
 import { assertDeviceProfileEmulatable } from "./provisioningDeviceProfile";
+import { assertAndroidAutoInputsPresent } from "./provisioningAndroidAuto";
 import {
   rethrowFailedProvisionDeviceLifecycle,
   undeliveredProvisionRollback,
@@ -61,6 +63,7 @@ export async function executeProvisionDevice(
   const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
   // Before any lease, creation or boot: a stock emulator can never serve this request (#14058).
   assertDeviceProfileEmulatable(args);
+  await assertAndroidAutoInputsPresent(args, deps);
   try {
     return await runProvisionDeviceLifecycle(ctx, args, deps, {
       recordLifecycle,
@@ -248,6 +251,10 @@ async function runProvisionDeviceLifecycle(
     return buildProvisionDeviceResult(args, provisioned, createdByRequest, { perf, booted });
   } catch (error) {
     perf.end();
+    if (settlementState.androidAutoDevice) {
+      // Before rollback: a DHU this request connected must not outlive the failed provision.
+      await stopProvisionedAndroidAuto(deps, settlementState.androidAutoDevice);
+    }
     return await rethrowFailedProvisionDeviceLifecycle(ctx, args, deps, {
       deviceManager,
       provisioned,

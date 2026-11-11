@@ -1,8 +1,8 @@
 # Android Auto projection provisioning
 
 AutoMobile prepares a phone emulator for Android Auto projection with no person at the screen, then
-starts a headless Desktop Head Unit (DHU) against it. The code lives in `src/features/androidAuto/`.
-No tool exposes it yet.
+starts a headless Desktop Head Unit (DHU) against it. The code lives in `src/features/androidAuto/`;
+`provisionDevice` exposes it through its `androidAuto` option.
 
 ## No Google account, no credentials
 
@@ -27,8 +27,29 @@ A flow that needs a signed-in device uses an AVD snapshot that a person signed i
 | `AndroidAutoSignerCheck`           | Refuses user-supplied APKs unless their signers match the installed stub (or carry it in their rotation lineage), reusing the package signing inspection.       |
 | `AndroidAutoSettingsUi`            | The steps with no adb equivalent: developer mode, Unknown sources, Start head unit server, the welcome screen.                                                  |
 | `ScriptedAndroidAutoSettingsUi`    | Implements those steps by visible text over an `AndroidAutoScreenDriver` (observe and tap).                                                                     |
+| `AdbAndroidAutoScreenDriver`       | The production screen driver: `uiautomator dump` (under the device's shared dump lock) and `input`, so it works before AutoMobile's on-device service exists.   |
 | `DesktopHeadUnitLauncher`          | Spawns `desktop-head-unit --headless -c <config>`, waits for `connected.`, watches a settle window and then sends `focus video`.                                |
-| `AndroidAutoProjectionProvisioner` | Runs the steps in order and owns one DHU session per emulator.                                                                                                  |
+| `AndroidAutoProjectionProvisioner` | Runs the steps in order and owns one DHU session per emulator. One instance per host; it resolves each emulator's phone-side adapters per request.              |
+| `AndroidAutoProjectionApplier`     | The `provisionDevice` seam: resolves the host inputs (APK directory, DHU binary, config) and runs the provisioner on the bound device.                          |
+
+## provisionDevice entry point
+
+`provisionDevice` resolves the host inputs before any lease, creation or boot, and refuses with one
+`unsupported` error naming every missing path, because the run could only fail after a long boot.
+The projection runs after the session is bound (beside the manufacturer profile), inside the
+provision's try block, so its failure rolls back a created emulator like any other post-boot step.
+It is bounded by the provision's total deadline as well as its abort signal; a request without
+`androidAuto` never reaches it, so its abort handling is unchanged. Once the run has connected its
+own DHU (`desktop-head-unit` reported `applied`), a later provision failure stops that DHU before
+rollback; a run that outlives the deadline is stopped once it resolves that way. A run that rejects,
+or that reused a DHU an earlier provision started, leaves the existing DHU running: the provisioner
+already stops a DHU it applied and then failed on. `killDevice` of that emulator stops its DHU within
+the shutdown deadline and forgets its host port redirect only once the kill succeeds, since a failed
+kill leaves the emulator and its redirect in place. Only DHUs in this daemon's session map are stopped. A stopped session
+is forgotten, so a later emulator that reuses the serial launches its own DHU; one whose stop fails
+stays tracked for the single-projection check but is never reused as `already-done`.
+The applier is a process-wide singleton: the provisioner it wraps is what tracks which DHU holds host
+port 5277, so two instances would each think the port was theirs.
 
 ## Order and idempotence
 
@@ -69,7 +90,15 @@ held connection from that case. The launch reports `connected` only after the pi
 listeners on the child and on its stdin are attached before the first write, so a later EPIPE or
 process error marks the session not running instead of escaping as an unhandled `error` event.
 A failed launch settles only after its DHU exited through the session's bounded stop (SIGTERM, then
-SIGKILL), so a relaunch never races the old process; a DHU that survives both fails the provisioning.
+SIGKILL), so a relaunch never races the old process. A DHU that survives both settles as
+`unkillable` with the session that still owns it; the provisioner keeps that session tracked (unhealthy,
+alive) and fails the provisioning without relaunching. Because it stays in the session map, the
+single-projection check refuses other devices while it lives, and the next provision of the same
+device retries its stop before any relaunch; once the process exits, launches proceed. A run that fails after it
+started its own DHU (the welcome-screen step is the only one after it) stops that DHU, so the failure
+does not leave host port 5277 held; if the stop fails, the session stays tracked the same way. Caller
+paths (`apkDirectory`, `dhuPath`, `dhuConfig`) resolve against the daemon's launch directory, because
+the detached daemon runs from the home directory.
 After a failure the provisioner waits the injected backoff,
 force-stops Android Auto, starts the head unit server again and relaunches, up to two relaunches by
 default.

@@ -1,3 +1,5 @@
+import type { AndroidAutoProvisionReport } from "../../features/androidAuto/AndroidAutoProjectionService";
+import { applyProvisionAndroidAuto } from "./provisioningAndroidAuto";
 import { currentBindingReconciler } from "../../daemon/sessionBroker/provisioning/exclusion";
 import type { InternalProvisionDeviceArgs } from "../../features/deviceLifecycle/core/contracts";
 import { toProvisionDeviceError } from "./provisioningErrors";
@@ -332,6 +334,7 @@ export async function bootExactProvisionedDevice(
   let readinessReservation: DeviceReadinessReservation | undefined;
   let resources: DeviceResourceConfigurationResult | undefined;
   let manufacturerProfile: Record<string, unknown> | undefined;
+  let androidAuto: AndroidAutoProvisionReport | undefined;
   try {
     const alreadyBooted = await discoverAlreadyBootedDevices(args, deps, deviceManager, {
       totalDeadlineMs,
@@ -419,6 +422,10 @@ export async function bootExactProvisionedDevice(
           boundSessionId: bound,
           signal: operationSignal,
         });
+        androidAuto = await applyProvisionAndroidAuto(args, deps, boot!.device, {
+          ...mappingOptions,
+          settlementState,
+        });
         return bound;
       },
     );
@@ -434,6 +441,7 @@ export async function bootExactProvisionedDevice(
       sourceImage: boot.sourceImage,
       resources,
       ...(manufacturerProfile ? { manufacturerProfile } : {}),
+      androidAuto,
     };
   } catch (error) {
     settlementState.retainCreatedForRetry = retainCreatedForReadinessRetry(

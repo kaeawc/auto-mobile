@@ -1,134 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import type { AndroidAutoPhone } from "../../../src/features/androidAuto/AndroidAutoPhone";
 import {
   AndroidAutoProjectionProvisioner,
   type AndroidAutoProjectionRequest,
 } from "../../../src/features/androidAuto/AndroidAutoProjectionProvisioner";
 import type { AndroidAutoSignerCheck } from "../../../src/features/androidAuto/AndroidAutoSignerCheck";
 import { ActionableError } from "../../../src/models/ActionableError";
-import type { AndroidAutoSettingsUi } from "../../../src/features/androidAuto/AndroidAutoSettingsUi";
-import type {
-  DesktopHeadUnitLauncher,
-  DesktopHeadUnitSession,
-  DhuLaunchOutcome,
-} from "../../../src/features/androidAuto/DesktopHeadUnit";
+import type { DhuLaunchOutcome } from "../../../src/features/androidAuto/DesktopHeadUnit";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
-
-/** A phone whose provisioning state lives in plain fields; every mutation is recorded. */
-class FakePhone implements AndroidAutoPhone {
-  readonly changes: string[] = [];
-  sideloaded = false;
-  keyguardDisabled = false;
-  stayOn = false;
-  listenerAllowed = false;
-  serverListening = false;
-  redirected = false;
-
-  constructor(private readonly ui: FakeUi) {}
-
-  async isAndroidAutoSideloaded() {
-    return this.sideloaded;
-  }
-  async installSplitApks(paths: readonly string[]) {
-    this.changes.push(`install:${paths.join(",")}`);
-    this.sideloaded = true;
-  }
-  async isKeyguardDisabled() {
-    return this.keyguardDisabled;
-  }
-  async disableKeyguard() {
-    this.changes.push("keyguard");
-    this.keyguardDisabled = true;
-  }
-  async isStayOnEnabled() {
-    return this.stayOn;
-  }
-  async enableStayOn() {
-    this.changes.push("stay-on");
-    this.stayOn = true;
-  }
-  async isNotificationListenerAllowed() {
-    return this.listenerAllowed;
-  }
-  async allowNotificationListener() {
-    this.changes.push("listener");
-    this.listenerAllowed = true;
-  }
-  async isHeadUnitServerListening() {
-    return this.serverListening || this.ui.serverStarted;
-  }
-  async openAndroidAutoSettings() {}
-  async forceStopAndroidAuto() {
-    this.changes.push("force-stop");
-    this.ui.serverStarted = false;
-    this.serverListening = false;
-  }
-  async addHeadUnitRedirect() {
-    this.changes.push("redirect");
-    this.redirected = true;
-  }
-}
-
-class FakeUi implements AndroidAutoSettingsUi {
-  readonly changes: string[] = [];
-  developerMode = false;
-  unknownSources = false;
-  serverStarted = false;
-  onboardingPending = false;
-
-  async isDeveloperModeEnabled() {
-    return this.developerMode;
-  }
-  async enableDeveloperMode() {
-    this.changes.push("developer-mode");
-    this.developerMode = true;
-  }
-  async isUnknownSourcesEnabled() {
-    return this.unknownSources;
-  }
-  async enableUnknownSources() {
-    this.changes.push("unknown-sources");
-    this.unknownSources = true;
-  }
-  async startHeadUnitServer() {
-    this.changes.push("start-server");
-    this.serverStarted = true;
-  }
-  async isOnboardingPending() {
-    return this.onboardingPending;
-  }
-  async acceptOnboarding() {
-    this.changes.push("onboarding");
-    this.onboardingPending = false;
-  }
-}
-
-class FakeSession implements DesktopHeadUnitSession {
-  running = true;
-  /** The DHU process has not exited; an unhealthy session can still be alive. */
-  alive = true;
-  sendCommand() {}
-  isRunning() {
-    return this.running && this.alive;
-  }
-  isAlive() {
-    return this.alive;
-  }
-  async stop() {
-    this.running = false;
-    this.alive = false;
-  }
-}
-
-class FakeLauncher implements DesktopHeadUnitLauncher {
-  launches = 0;
-  constructor(private readonly outcomes: DhuLaunchOutcome[] = []) {}
-  async launch(): Promise<DhuLaunchOutcome> {
-    this.launches++;
-    return this.outcomes.shift() ?? { status: "connected", session: new FakeSession() };
-  }
-}
+import {
+  FakeLauncher,
+  FakePhone,
+  FakeSession,
+  FakeUi,
+} from "../../fakes/FakeAndroidAutoProjection";
 
 function setup(
   outcomes: DhuLaunchOutcome[] = [],
@@ -141,14 +26,13 @@ function setup(
   const launcher = new FakeLauncher(outcomes);
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const provisioner = new AndroidAutoProjectionProvisioner({
-    phone,
-    ui,
-    signerCheck: signerCheck ?? {
-      verify: async (paths) => {
-        verified.push([...paths]);
-      },
+  const signers: AndroidAutoSignerCheck = signerCheck ?? {
+    verify: async (paths) => {
+      verified.push([...paths]);
     },
+  };
+  const provisioner = new AndroidAutoProjectionProvisioner({
+    forDevice: () => ({ phone, ui, signerCheck: signers }),
     dhu: launcher,
     hostPorts: { isPortAvailable: () => !phone.redirected && !portHeldElsewhere },
     timer,
@@ -313,6 +197,106 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(launcher.launches).toBe(1);
   });
 
+  test("tracks a failed launch's DHU that survives SIGKILL so another device is refused", async () => {
+    const zombie = new FakeSession();
+    zombie.running = false;
+    let stops = 0;
+    zombie.stop = async () => {
+      stops++;
+      throw new ActionableError("The Desktop Head Unit did not exit");
+    };
+    const { phone, launcher, provisioner } = setup([
+      { status: "unkillable", detail: "no-connect: no connected.; did not exit", session: zombie },
+    ]);
+    const failed = provisioner.provision(request());
+    await expect(failed).rejects.toBeInstanceOf(ActionableError);
+    await expect(failed).rejects.toThrow("did not exit after SIGTERM and SIGKILL");
+    expect(launcher.launches).toBe(1);
+
+    phone.redirected = false;
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "for emulator-5554 is unhealthy but still running",
+    );
+    expect(launcher.launches).toBe(1);
+
+    // Re-provisioning the same device retries the stop and still refuses to relaunch beside it.
+    await expect(provisioner.provision(request())).rejects.toThrow("did not exit");
+    expect(stops).toBe(1);
+    expect(launcher.launches).toBe(1);
+  });
+
+  test("launches again once a tracked unkillable DHU finally exits", async () => {
+    const zombie = new FakeSession();
+    zombie.running = false;
+    const { phone, launcher, provisioner } = setup([
+      { status: "unkillable", detail: "stalled: exited; did not exit", session: zombie },
+    ]);
+    await expect(provisioner.provision(request())).rejects.toThrow("still holds host port 5277");
+    zombie.alive = false;
+    phone.redirected = false;
+    const result = await provisioner.provision(request({ deviceId: "emulator-5556" }));
+    expect(result.session.isRunning()).toBe(true);
+    expect(launcher.launches).toBe(2);
+  });
+
+  test("a failure after this run started its DHU stops that DHU so other devices are not blocked", async () => {
+    const launched = new FakeSession();
+    let stops = 0;
+    const stop = launched.stop.bind(launched);
+    launched.stop = async () => {
+      stops++;
+      await stop();
+    };
+    const { ui, phone, launcher, provisioner } = setup([
+      { status: "connected", session: launched },
+    ]);
+    ui.onboardingPending = true;
+    ui.isOnboardingPending = async () => {
+      throw new ActionableError("uiautomator dump failed");
+    };
+    await expect(provisioner.provision(request())).rejects.toThrow("uiautomator dump failed");
+    expect(stops).toBe(1);
+
+    phone.redirected = false;
+    ui.isOnboardingPending = async () => false;
+    const other = await provisioner.provision(request({ deviceId: "emulator-5556" }));
+    expect(other.session.isRunning()).toBe(true);
+    expect(launcher.launches).toBe(2);
+  });
+
+  test("a failed run's DHU that will not stop stays tracked and keeps blocking other devices", async () => {
+    const stuck = new FakeSession();
+    stuck.stop = async () => {
+      stuck.running = false;
+      throw new ActionableError("The Desktop Head Unit did not exit");
+    };
+    const { ui, phone, provisioner } = setup([{ status: "connected", session: stuck }]);
+    ui.isOnboardingPending = async () => {
+      throw new ActionableError("uiautomator dump failed");
+    };
+    await expect(provisioner.provision(request())).rejects.toThrow("uiautomator dump failed");
+    phone.redirected = false;
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "for emulator-5554 is unhealthy but still running",
+    );
+  });
+
+  test("a failed rerun does not stop a DHU an earlier run started", async () => {
+    const first = new FakeSession();
+    let stops = 0;
+    first.stop = async () => {
+      stops++;
+    };
+    const { ui, provisioner } = setup([{ status: "connected", session: first }]);
+    await provisioner.provision(request());
+    ui.isOnboardingPending = async () => {
+      throw new ActionableError("uiautomator dump failed");
+    };
+    await expect(provisioner.provision(request())).rejects.toThrow("uiautomator dump failed");
+    expect(stops).toBe(0);
+    expect(first.isRunning()).toBe(true);
+  });
+
   test("gives up after the recovery budget with every attempt's reason", async () => {
     const stall: DhuLaunchOutcome = { status: "no-connect", detail: "no connected." };
     const { launcher, provisioner } = setup([stall, stall, stall]);
@@ -427,5 +411,97 @@ describe("AndroidAutoProjectionProvisioner", () => {
       "is in progress",
     );
     await first;
+  });
+
+  test("stopDesktopHeadUnit stops the spawned DHU, so a reused serial launches its own", async () => {
+    const first = new FakeSession();
+    let stops = 0;
+    const stop = first.stop.bind(first);
+    first.stop = async () => {
+      stops++;
+      await stop();
+    };
+    const { phone, launcher, provisioner } = setup([{ status: "connected", session: first }]);
+    await provisioner.provision(request());
+
+    await provisioner.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true });
+    expect(stops).toBe(1);
+    // The emulator and its redirect are gone; a new emulator takes the same serial.
+    phone.redirected = false;
+    const again = await provisioner.provision(request());
+    const status = (name: string) => again.steps.find((step) => step.step === name)?.status;
+    expect(status("desktop-head-unit")).toBe("applied");
+    expect(status("transport")).toBe("applied");
+    expect(launcher.launches).toBe(2);
+    expect(again.session).not.toBe(first);
+  });
+
+  test("stopDesktopHeadUnit after a failed provision frees the host for another device", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    phone.redirected = false;
+    const other = await provisioner.provision(request({ deviceId: "emulator-5556" }));
+    expect(other.session.isRunning()).toBe(true);
+  });
+
+  test("stopDesktopHeadUnit without deviceStopped keeps the redirect, so the same emulator re-provisions", async () => {
+    const { launcher, provisioner } = setup();
+    await provisioner.provision(request());
+    // A kill that failed after the DHU stopped: the emulator and its redirect are still there.
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    const again = await provisioner.provision(request());
+    const status = (name: string) => again.steps.find((step) => step.step === name)?.status;
+    expect(status("transport")).toBe("already-done");
+    expect(status("desktop-head-unit")).toBe("applied");
+    expect(launcher.launches).toBe(2);
+  });
+
+  test("refusing another device names killDevice or re-provisioning as the recovery", async () => {
+    const { phone, provisioner } = setup();
+    await provisioner.provision(request());
+    phone.redirected = false;
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "Call killDevice on emulator-5554 (which stops its DHU), or re-provision emulator-5554",
+    );
+  });
+
+  test("stopDesktopHeadUnit never touches a DHU it did not spawn for that device", async () => {
+    const first = new FakeSession();
+    let stops = 0;
+    first.stop = async () => {
+      stops++;
+    };
+    const { provisioner } = setup([{ status: "connected", session: first }]);
+    await provisioner.provision(request());
+    await provisioner.stopDesktopHeadUnit("emulator-5556", { deviceStopped: true });
+    expect(stops).toBe(0);
+    expect(first.isRunning()).toBe(true);
+  });
+
+  test("a DHU whose stop fails stays tracked but is never reused as already-done", async () => {
+    const stuck = new FakeSession();
+    let stops = 0;
+    stuck.stop = async () => {
+      stops++;
+      if (stops === 1) {
+        throw new ActionableError("The Desktop Head Unit did not exit");
+      }
+      stuck.running = false;
+      stuck.alive = false;
+    };
+    const { phone, launcher, provisioner } = setup([{ status: "connected", session: stuck }]);
+    await provisioner.provision(request());
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    // Still alive, so another device is refused...
+    phone.redirected = false;
+    await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(
+      "is already projecting emulator-5554",
+    );
+    // ...and the same serial retries the stop and launches a fresh DHU instead of reusing it.
+    const again = await provisioner.provision(request());
+    expect(stops).toBe(2);
+    expect(again.session).not.toBe(stuck);
+    expect(launcher.launches).toBe(2);
   });
 });

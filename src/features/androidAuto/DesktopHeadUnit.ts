@@ -56,7 +56,13 @@ export type DhuLaunchOutcome =
   /** No `connected.` line before the connect timeout. */
   | { status: "no-connect"; detail: string }
   /** The DHU exited, or kept reporting ping timeouts, after it connected. */
-  | { status: "stalled"; detail: string };
+  | { status: "stalled"; detail: string }
+  /**
+   * The attempt failed and its DHU survived SIGTERM and SIGKILL. `session` still owns that
+   * process (unhealthy, alive) so a caller can keep it counted as holding host port 5277 and
+   * retry `session.stop()` later.
+   */
+  | { status: "unkillable"; detail: string; session: DesktopHeadUnitSession };
 
 export interface DesktopHeadUnitLauncher {
   launch(options: DhuLaunchOptions): Promise<DhuLaunchOutcome>;
@@ -202,7 +208,8 @@ type Phase = "connecting" | "settling" | "done";
  * One launch attempt: wait for `connected.`, then watch a settle window in which an
  * exit or repeated ping timeouts mark the projection as stalled. A failed attempt settles
  * only once its DHU exited (the session's bounded SIGTERM-then-SIGKILL stop), so a relaunch
- * never races the old process for host port 5277; it rejects when the DHU never exits.
+ * never races the old process for host port 5277. When the DHU never exits it settles as
+ * `unkillable` with the session that still owns the process.
  */
 function watchLaunch(
   child: DhuChildProcess,
@@ -210,7 +217,7 @@ function watchLaunch(
   timing: DhuLaunchTiming,
   signal?: AbortSignal,
 ): Promise<DhuLaunchOutcome> {
-  return new Promise<DhuLaunchOutcome>((resolve, reject) => {
+  return new Promise<DhuLaunchOutcome>((resolve) => {
     const dhuConsole = childSession(child, timer, timing.stopTimeoutMs);
     let phase: Phase = "connecting";
     let pingTimeouts = 0;
@@ -243,7 +250,15 @@ function watchLaunch(
     const fail = (status: "no-connect" | "stalled", detail: string) => {
       // Settle first: a synchronous exit from the kill must not replace this reason.
       if (settle()) {
-        dhuConsole.session.stop().then(() => resolve({ status, detail }), reject);
+        dhuConsole.session.stop().then(
+          () => resolve({ status, detail }),
+          (error: unknown) =>
+            resolve({
+              status: "unkillable",
+              detail: `${status}: ${detail}; ${errorMessage(error)}`,
+              session: dhuConsole.session,
+            }),
+        );
       }
     };
     // Connected only once the pipe accepted `focus video`; a closed console is a stalled start.

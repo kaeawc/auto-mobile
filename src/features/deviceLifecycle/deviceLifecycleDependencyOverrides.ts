@@ -12,8 +12,10 @@ export function provisionDeviceDependencyOverrides(
   | "checkBootCapacity"
   | "provisionAndroidIdentityBackoff"
   | "manufacturerProfileApplier"
+  | "androidAutoProjection"
 > {
   return {
+    androidAutoProjection: deps.androidAutoProjection ?? currentDeps.androidAutoProjection,
     manufacturerProfileApplier:
       deps.manufacturerProfileApplier ?? currentDeps.manufacturerProfileApplier,
     exactDeviceProvisionerFactory:

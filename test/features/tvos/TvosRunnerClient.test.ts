@@ -167,3 +167,32 @@ test("bounds a missing handshake and never dispatches after its deadline", async
   expect(timer.getSleepHistory()).toEqual([]);
   client.close();
 });
+
+test("budgets a read queued behind an in-flight hold for the hold's remaining time", async () => {
+  const { socket, client, timer } = fixture();
+  socket.receive(connected);
+  const hold = client.request(
+    { type: "request_press_button", action: "select", durationMs: 8000 },
+    undefined,
+    { timeoutMs: 13000 },
+  );
+  await drainMicrotasks(2);
+  timer.advanceTime(1000);
+  const read = client.request({ type: "request_hierarchy" });
+  await drainMicrotasks(2);
+  expect(socket.sent.map((sent) => sent.type)).toEqual([
+    "request_press_button",
+    "request_hierarchy",
+  ]);
+  // The runner serves commands serially: the read cannot start until the 8 s hold ends.
+  timer.advanceTime(7000);
+  await drainMicrotasks(2);
+  expect(socket.closed).toBe(false);
+  socket.receive({ ...pressResult, requestId: socket.sent[0].requestId });
+  await hold;
+  timer.advanceTime(500);
+  socket.receive({ ...b01, requestId: socket.sent[1].requestId });
+  await expect(read).resolves.toBeDefined();
+  expect(client.isUsable()).toBe(true);
+  client.close();
+});

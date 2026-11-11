@@ -90,6 +90,8 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
   private resolveReady!: () => void;
   private rejectReady!: (error: unknown) => void;
   private failure?: ActionableError;
+  /** When the latest dispatched remote hold ends; the runner's serial queue is busy until then. */
+  private holdEndsAt = 0;
 
   constructor(
     url: string,
@@ -199,8 +201,11 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
     options?: { timeoutMs?: number },
   ): Promise<unknown> {
     const timer = this.options.timer ?? defaultTimer;
+    // The runner executes commands serially, so a command issued during a hold also waits out
+    // the rest of that hold before its own budget starts to matter.
     const timeoutMs =
-      options?.timeoutMs ?? this.options.timeoutMs ?? TVOS_RUNNER_COMMAND_TIMEOUT_MS;
+      (options?.timeoutMs ?? this.options.timeoutMs ?? TVOS_RUNNER_COMMAND_TIMEOUT_MS) +
+      Math.max(0, this.holdEndsAt - timer.now());
     // One budget covers both handshake and command; correlation entries are removed even on abort.
     const requestId = String(++this.sequence);
     const cancellation = new AbortController();
@@ -243,6 +248,9 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
           return new Promise<unknown>((resolve, reject) => {
             this.pending.set(requestId, { type: command.type, resolve, reject });
             dispatched = true;
+            if (command.type === "request_press_button" && command.durationMs !== undefined) {
+              this.holdEndsAt = Math.max(this.holdEndsAt, timer.now() + command.durationMs);
+            }
             this.socket.send(message);
           });
         },

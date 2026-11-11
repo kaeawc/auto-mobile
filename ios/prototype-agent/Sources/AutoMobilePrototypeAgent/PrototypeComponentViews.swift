@@ -985,7 +985,9 @@
         private var use24: Bool {
             switch node.is24Hour {
             case let explicit?: explicit
-            case nil: !(DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .autoupdatingCurrent) ?? "")
+            case nil: !(DateFormatter.dateFormat(
+                    fromTemplate: "j", options: 0, locale: PrototypeRecordingMode.current.locale
+                ) ?? "")
                 .contains("a")
             }
         }
@@ -1013,12 +1015,25 @@
                     if picked != bound { model.choose(key: key, value: picked, then: node.onTap ?? []) }
                 }
             )
+            let recording = PrototypeRecordingMode.current
             DatePicker("", selection: selection, in: PrototypeDate.range, displayedComponents: .date)
                 .labelsHidden()
                 .datePickerStyle(.graphical)
-                .environment(\.calendar, PrototypeDate.calendar)
-                .environment(\.timeZone, PrototypeDate.calendar.timeZone)
+                .environment(\.calendar, recording.dateCalendar)
+                .environment(\.timeZone, recording.dateCalendar.timeZone)
+                .modifier(PrototypeRecordingLocale(recording: recording))
+                .transaction { if recording.enabled { $0.disablesAnimations = true } }
                 .accessibilityValue(bound ?? "")
+        }
+    }
+
+    /// Pins the locale only while recording; normal viewing keeps the inherited environment.
+    @MainActor
+    private struct PrototypeRecordingLocale: ViewModifier {
+        let recording: PrototypeRecordingMode
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if recording.enabled { content.environment(\.locale, PrototypeRecordingMode.locale) } else { content }
         }
     }
 
@@ -1096,6 +1111,8 @@
                                 .accessibilityHidden(true)
                             NodeView(node: node, model: model, presentedAsModal: true)
                         }
+                        // Recording captures the dialog at rest, never mid-entrance.
+                        .transaction { if PrototypeRecordingMode.current.enabled { $0.disablesAnimations = true } }
                         .reportFrame(key: "modal.\(index)", model: model)
                     } else {
                         NodeView(node: node, model: model, presentedAsModal: true)

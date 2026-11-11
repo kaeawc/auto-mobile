@@ -74,11 +74,16 @@ struct PrototypeMotion: Equatable {
 
     init(
         specMotion: String?, reduceMotion: Bool,
-        accessibility: PrototypeAccessibilityProviding = PrototypeSystemAccessibility()
+        accessibility: PrototypeAccessibilityProviding = PrototypeSystemAccessibility(),
+        recording: PrototypeRecordingMode = .current
     ) {
         let systemReduces = reduceMotion || accessibility.isReduceMotionEnabled
             || accessibility.prefersCrossFadeTransitions
-        profile = specMotion == "none" ? .off : (specMotion == "reduced" || systemReduces ? .reduced : .full)
+        // Recording turns motion off as `motion: "none"` does: spinners draw a fixed frame and
+        // dialogs and other modals appear without an entrance animation.
+        profile = recording.enabled || specMotion == "none"
+            ? .off
+            : (specMotion == "reduced" || systemReduces ? .reduced : .full)
     }
 
     /// Nodes without `visibleWhen` have nothing to animate, so callers pass the transition only for

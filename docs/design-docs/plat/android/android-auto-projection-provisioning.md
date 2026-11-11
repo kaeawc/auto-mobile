@@ -52,7 +52,9 @@ changes nothing when it already holds, so a rerun on a provisioned phone reports
   this provisioner redirected it to the same device; any other holder, such as another emulator's
   leftover redirect, is refused rather than risk projecting the wrong phone. The DHU dials host port
   5277, so one emulator per host projects at a time: a concurrent call for the same device joins the
-  run in progress, and the provisioner refuses another device while a run or a session is active.
+  run in progress, and the provisioner refuses another device while a run is in progress or another
+  device's DHU has not exited. An unhealthy but live DHU still holds the port, so it is refused too
+  (naming the device), not stopped: provisioning never tears down another device's projection.
 - **Welcome screen.** **Continue** accepts Android Auto's terms on the user's behalf, so it is tapped
   only when the request sets `acceptAndroidAutoTerms`; otherwise a pending screen is reported as
   `skipped`.
@@ -66,6 +68,8 @@ held connection from that case. The launch reports `connected` only after the pi
 `focus video`; a write the DHU's closed console rejects (EPIPE) is a `stalled` launch. Error
 listeners on the child and on its stdin are attached before the first write, so a later EPIPE or
 process error marks the session not running instead of escaping as an unhandled `error` event.
+A failed launch settles only after its DHU exited through the session's bounded stop (SIGTERM, then
+SIGKILL), so a relaunch never races the old process; a DHU that survives both fails the provisioning.
 After a failure the provisioner waits the injected backoff,
 force-stops Android Auto, starts the head unit server again and relaunches, up to two relaunches by
 default.

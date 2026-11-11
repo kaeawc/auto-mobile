@@ -175,15 +175,24 @@ export class AndroidAutoProjectionProvisioner {
     return { steps, session: dhu.session };
   }
 
+  /**
+   * Any other device's DHU that has not exited holds host port 5277, healthy or not. It is
+   * refused rather than stopped: this call never tears down another device's projection, and
+   * that device's redirect would still hold the port. Stopping that session (or re-provisioning
+   * its device, which restarts an unhealthy DHU) frees it.
+   */
   private assertSingleProjection(deviceId: string): void {
-    const other = [...this.sessions].find(
-      ([id, session]) => id !== deviceId && session.isRunning(),
-    );
-    if (other) {
-      throw new ActionableError(
-        `A Desktop Head Unit is already projecting ${other[0]}. The DHU dials host port ${HEAD_UNIT_SERVER_PORT}, so only one emulator per host can project; stop that session first.`,
-      );
+    const other = [...this.sessions].find(([id, session]) => id !== deviceId && session.isAlive());
+    if (!other) {
+      return;
     }
+    const [holder, session] = other;
+    const state = session.isRunning()
+      ? `is already projecting ${holder}`
+      : `for ${holder} is unhealthy but still running`;
+    throw new ActionableError(
+      `A Desktop Head Unit ${state}. The DHU dials host port ${HEAD_UNIT_SERVER_PORT}, so only one emulator per host can project; stop that session (or re-provision ${holder}, which restarts an unhealthy DHU) first.`,
+    );
   }
 
   private async installAndroidAuto(

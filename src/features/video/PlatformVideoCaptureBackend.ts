@@ -777,7 +777,11 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
     // Android screenrecord doesn't support stdout on all versions
     // Record to a temp file on the device, then pull it
-    const deviceTempPath = `/sdcard/auto-mobile-${config.recordingId}.mp4`;
+    // The retry gets its own file so a late failed-start `rm` of the first cannot unlink it.
+    const deviceTempPaths = [
+      `/sdcard/auto-mobile-${config.recordingId}.mp4`,
+      `/sdcard/auto-mobile-${config.recordingId}-retry.mp4`,
+    ] as const;
 
     const args = [
       "screenrecord",
@@ -795,13 +799,11 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       args.push("--size", `${config.resolution.width}x${config.resolution.height}`);
     }
 
-    args.push(deviceTempPath);
-
     logger.info(`[VideoCapture] Starting Android recording`);
     // The argv, device temp path and host output path embed the recording id
     // and local username; keep them diagnostic-only.
     logger.debug(`[VideoCapture] Screenrecord argv: ${args.join(" ")}`);
-    logger.debug(`[VideoCapture] Device temp path: ${deviceTempPath}`);
+    logger.debug(`[VideoCapture] Device temp paths: ${deviceTempPaths.join(", ")}`);
     logger.debug(`[VideoCapture] Output path: ${config.outputPath}`);
     logger.info(
       `[VideoCapture] Bitrate: ${bitrateKbps}kbps (${bitrateBps}bps), Time limit: ${timeLimitSeconds}s`,
@@ -814,7 +816,8 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       device,
       physicalDisplayId,
       timer: this.timer,
-      cleanupFailedStart: (pid) => this.cleanupFailedAndroidStartDetached(adb, deviceTempPath, pid),
+      deviceTempPaths,
+      cleanupFailedStart: (pid, path) => this.cleanupFailedAndroidStartDetached(adb, path, pid),
     };
     const {
       process,
@@ -825,6 +828,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       warning,
       launchedAtMs,
       physicalDisplayId: effectivePhysicalId,
+      deviceTempPath,
     } = await startScreenrecordProcess(adb, args, config, start);
 
     const backendHandle: AndroidBackendHandle = {

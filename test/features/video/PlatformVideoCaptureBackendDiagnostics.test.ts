@@ -14,6 +14,7 @@ import { useScratchRoot } from "../../helpers/scratchRoot";
 
 const LAUNCH = "exec screenrecord";
 const DEVICE_FILE = "/sdcard/auto-mobile-diagnostics.mp4";
+const RETRY_DEVICE_FILE = "/sdcard/auto-mobile-diagnostics-retry.mp4";
 
 /** Schedules recorder failures on injected time; all other commands use the existing fake. */
 class StartupAdb extends FakeAdbClient {
@@ -142,6 +143,7 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
       const spawns = client.getSpawnCalls().map((args) => args.join(" "));
       expect(spawns[1]).toBe(`shell rm ${DEVICE_FILE}`);
       expect(spawns[2]).toContain(LAUNCH);
+      expect(spawns[2]).toEndWith(RETRY_DEVICE_FILE);
       expect(timer.getCurrentTime()).toBeGreaterThanOrEqual(1700);
       expect(timer.getSleepHistory()).toEqual([]);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("encoder failed"));
@@ -157,9 +159,34 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
     expect(error).toBeInstanceOf(ActionableError);
     expect(error).toMatchObject({ message: expect.stringContaining("code 255") });
     expect(client.launches).toBe(2);
-    expect(
-      client.getSpawnCalls().filter((args) => args.join(" ") === `shell rm ${DEVICE_FILE}`),
-    ).toHaveLength(2);
+    const removals = client
+      .getSpawnCalls()
+      .map((args) => args.join(" "))
+      .filter((command) => command.startsWith("shell rm "));
+    expect(removals).toEqual([`shell rm ${DEVICE_FILE}`, `shell rm ${RETRY_DEVICE_FILE}`]);
+  });
+
+  test("a failed-start cleanup that never finishes cannot remove the retry's recording", async () => {
+    const { backend, client, config } = setup(1);
+    // The first attempt's rm hangs past the cleanup deadline and is abandoned, still pending.
+    client.setSpawnRunning(`shell rm ${DEVICE_FILE}`);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const handle = await backend.start(config);
+      expect(client.launches).toBe(2);
+      expect(warn.mock.calls.map(([message]) => String(message))).toContainEqual(
+        expect.stringContaining("cleanup did not finish"),
+      );
+      const launches = client
+        .getSpawnCalls()
+        .map((args) => args.join(" "))
+        .filter((command) => command.includes(LAUNCH));
+      expect(launches[1]).toEndWith(RETRY_DEVICE_FILE);
+      // The accepted recording lives at a path the abandoned rm does not name.
+      expect(handle.backendHandle).toMatchObject({ deviceTempPath: RETRY_DEVICE_FILE });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("an aborted startup is never retried", async () => {

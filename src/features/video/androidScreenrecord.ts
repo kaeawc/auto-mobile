@@ -118,16 +118,23 @@ export function describeAbnormalExit(
   return `exited${at} with ${how}${detail ? `: ${detail}` : ""}`;
 }
 
-/** What a start needs beyond adb and argv: its target, time and failed-start cleanup. */
+/** What a start needs beyond adb and argv: its target, time, output paths and failed-start cleanup. */
 export interface ScreenrecordStartContext {
   device: BootedDevice;
   physicalDisplayId: string | undefined;
   timer: Timer;
   /**
-   * Called when the start fails after the recorder was launched, with the device pid the
-   * launch shell reported (possibly still unknown). Best-effort: it must not throw.
+   * Device output file for the first launch and for the one retry. They must differ: a
+   * failed start's cleanup is time-bounded, so an abandoned `rm` of the first path can still
+   * land after the retry started and must not unlink the retry's recording.
    */
-  cleanupFailedStart(devicePid: DeviceRecorderPid): Promise<void>;
+  deviceTempPaths: readonly [first: string, retry: string];
+  /**
+   * Called when the start fails after the recorder was launched, with the device pid the
+   * launch shell reported (possibly still unknown) and that attempt's output path.
+   * Best-effort: it must not throw.
+   */
+  cleanupFailedStart(devicePid: DeviceRecorderPid, deviceTempPath: string): Promise<void>;
 }
 
 interface ScreenrecordProcess {
@@ -139,6 +146,8 @@ interface ScreenrecordProcess {
   warning?: string;
   physicalDisplayId?: string;
   launchedAtMs: number;
+  /** The device output file this recorder writes. */
+  deviceTempPath: string;
 }
 
 interface FailedScreenrecordStart {
@@ -155,7 +164,13 @@ export async function startScreenrecordProcess(
   context: ScreenrecordStartContext,
 ): Promise<ScreenrecordProcess> {
   config.abortSignal?.throwIfAborted();
-  const first = await startScreenrecordAttempt(adb, screenrecordArgv, config, context);
+  const [firstPath, retryPath] = context.deviceTempPaths;
+  const first = await startScreenrecordAttempt(
+    adb,
+    { argv: screenrecordArgv, deviceTempPath: firstPath },
+    config,
+    context,
+  );
   if (!("failure" in first)) {
     return first;
   }
@@ -164,11 +179,16 @@ export async function startScreenrecordProcess(
       `[VideoCapture] ${first.failure.message} ${recordingStderrTail(first.stderr) ? "" : "stderr was empty; "}retrying once after ${context.timer.now() - first.launchedAtMs} ms since launch.`,
     );
   }
-  await context.cleanupFailedStart(first.devicePid);
+  await context.cleanupFailedStart(first.devicePid, firstPath);
   config.abortSignal?.throwIfAborted();
-  const retry = await startScreenrecordAttempt(adb, screenrecordArgv, config, context);
+  const retry = await startScreenrecordAttempt(
+    adb,
+    { argv: screenrecordArgv, deviceTempPath: retryPath },
+    config,
+    context,
+  );
   if ("failure" in retry) {
-    await context.cleanupFailedStart(retry.devicePid);
+    await context.cleanupFailedStart(retry.devicePid, retryPath);
     config.abortSignal?.throwIfAborted();
     throw retry.failure;
   }
@@ -177,10 +197,11 @@ export async function startScreenrecordProcess(
 
 async function startScreenrecordAttempt(
   adb: Pick<AdbExecutor, "spawn">,
-  screenrecordArgv: string[],
+  { argv, deviceTempPath }: { argv: string[]; deviceTempPath: string },
   config: VideoCaptureConfig,
   { device, physicalDisplayId, timer, cleanupFailedStart }: ScreenrecordStartContext,
 ): Promise<ScreenrecordProcess | FailedScreenrecordStart> {
+  const screenrecordArgv = [...argv, deviceTempPath];
   let launchedAtMs = timer.now();
   let process = await adb.spawn(buildPidReportingScreenrecordArgs(screenrecordArgv), {
     signal: config.abortSignal,
@@ -248,12 +269,13 @@ async function startScreenrecordAttempt(
       warning,
       physicalDisplayId: effectivePhysicalId,
       launchedAtMs,
+      deviceTempPath,
     };
   } catch (error) {
     // The recorder runs on the device, so a dead host `adb shell` (a dropped transport, an
     // adb server restart) does not mean it stopped. No handle is returned, so nothing would
     // ever stop it or remove its temp file; do it here.
-    await cleanupFailedStart(devicePid);
+    await cleanupFailedStart(devicePid, deviceTempPath);
     throw error;
   } finally {
     config.abortSignal?.removeEventListener("abort", abortStartup);

@@ -87,6 +87,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
     arguments: NodeActionArguments,
     expectedBounds: NodeExpectedBounds?,
+    identityHints: NodeIdentityHints?,
   ) = Unit
 
   override suspend fun requestActivateAccessibilityLink(
@@ -390,7 +391,18 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
     arguments: NodeActionArguments,
     expectedBounds: NodeExpectedBounds?,
-  ) = record("requestAction", requestId, action, resourceId, selector, arguments, expectedBounds)
+    identityHints: NodeIdentityHints?,
+  ) =
+    record(
+      "requestAction",
+      requestId,
+      action,
+      resourceId,
+      selector,
+      arguments,
+      expectedBounds,
+      identityHints,
+    )
 
   override suspend fun requestActivateAccessibilityLink(
     requestId: String?,

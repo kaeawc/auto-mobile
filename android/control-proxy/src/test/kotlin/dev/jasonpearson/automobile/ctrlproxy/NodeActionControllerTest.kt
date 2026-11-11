@@ -152,26 +152,40 @@ class NodeActionControllerTest {
     }
 
   @Test
-  fun `verified click refuses an invisible duplicate at the same bounds`() = runTest {
-    val (controller, host) = setup()
-    val hidden = boundsNode(visible = false)
-    val visible = boundsNode()
-    host.windowRoots = listOf(tree(hidden, visible))
+  fun `verified click skips an invisible duplicate and clicks the visible bounds match`() =
+    runTest {
+      val (controller, host) = setup()
+      val hidden = boundsNode(visible = false)
+      val visible = boundsNode()
+      host.windowRoots = listOf(tree(hidden, visible))
 
-    controller.performNodeAction(
-      "bounds",
-      "click",
-      null,
-      selector,
-      expectedBounds = expectedBounds,
-    )
+      controller.performNodeAction(
+        "bounds",
+        "click",
+        null,
+        selector,
+        expectedBounds = expectedBounds,
+      )
+
+      assertTrue(host.results.single().success)
+      verify(exactly = 0) { hidden.performAction(any()) }
+      verify(exactly = 1) { visible.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+      verify(exactly = 1) { hidden.recycle() }
+      verify(exactly = 1) { visible.recycle() }
+    }
+
+  @Test
+  fun `selector plus bounds refuses an invisible node`() = runTest {
+    val (controller, host) = setup()
+    val target = boundsNode(visible = false)
+    host.windowRoots = listOf(tree(target))
+
+    controller.performNodeAction("hidden", "click", null, selector, expectedBounds = expectedBounds)
 
     assertFalse(host.results.single().success)
-    assertTrue(host.results.single().error?.startsWith("node_bounds_ambiguous:") == true)
-    verify(exactly = 0) { hidden.performAction(any()) }
-    verify(exactly = 0) { visible.performAction(any()) }
-    verify(exactly = 1) { hidden.recycle() }
-    verify(exactly = 1) { visible.recycle() }
+    assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
+    verify(exactly = 0) { target.performAction(any()) }
+    verify(exactly = 1) { target.recycle() }
   }
 
   @Test
@@ -196,12 +210,123 @@ class NodeActionControllerTest {
   private fun capturedRow(right: Int = 696, clickable: Boolean = true): AccessibilityNodeInfo =
     node(actions = if (clickable) listOf(AccessibilityNodeInfo.ACTION_CLICK) else emptyList())
       .also {
+        every { it.className } returns "android.widget.LinearLayout"
+        every { it.text } returns null
+        every { it.contentDescription } returns null
         every { it.isVisibleToUser } returns false
         every { it.getBoundsInScreen(any()) } answers
           {
             firstArg<Rect>().set(48, 372, right, 548)
           }
       }
+
+  @Test
+  fun `bounds-only click verifies each hinted own identity field before clicking`() = runTest {
+    for (mode in listOf("match", "class", "text", "description")) {
+      val (controller, host) = setup()
+      val target = capturedRow()
+      every { target.className } returns
+        if (mode == "class") "android.widget.FrameLayout" else "android.widget.LinearLayout"
+      every { target.text } returns if (mode == "text") "Other row" else "Connected devices"
+      every { target.contentDescription } returns if (mode == "description") "Other" else "Settings"
+      host.windowRoots = listOf(tree(target))
+
+      controller.performNodeAction(
+        "identity",
+        "click",
+        null,
+        null,
+        expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+        identityHints =
+          NodeIdentityHints(
+            className = "android.widget.LinearLayout",
+            text = "Connected devices",
+            contentDesc = "Settings",
+          ),
+      )
+
+      assertEquals(mode == "match", host.results.single().success)
+      if (mode != "match") {
+        assertTrue(host.results.single().error?.startsWith("node_identity_mismatch:") == true)
+        assertFalse("publish" in host.events)
+      }
+      verify(exactly = if (mode == "match") 1 else 0) {
+        target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+      }
+      verify(exactly = 1) { target.recycle() }
+    }
+  }
+
+  @Test
+  fun `bounds-only label identity matches own or descendant text and description`() = runTest {
+    for (location in listOf("own", "descendant")) {
+      val (controller, host) = setup()
+      val target = capturedRow()
+      val label = if (location == "own") target else node()
+      every { label.text } returns "Connected devices"
+      every { label.contentDescription } returns "Connections"
+      if (location == "descendant") {
+        val frame = tree(label)
+        every { target.childCount } returns 1
+        every { target.getChild(0) } returns frame
+      }
+      host.windowRoots = listOf(tree(target))
+
+      controller.performNodeAction(
+        "label",
+        "click",
+        null,
+        null,
+        expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+        identityHints =
+          NodeIdentityHints(
+            className = "android.widget.LinearLayout",
+            labelText = "Connected devices",
+            labelContentDesc = "Connections",
+          ),
+      )
+
+      assertTrue(host.results.single().success)
+      verify(exactly = 1) { target.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+      verify(exactly = 1) { target.recycle() }
+    }
+  }
+
+  @Test
+  fun `a different row at the captured bounds refuses stale label identity`() = runTest {
+    for (mode in listOf("text", "description", "missing")) {
+      val (controller, host) = setup()
+      val target = capturedRow()
+      val label = node()
+      every { label.text } returns "Display"
+      every { label.contentDescription } returns "Display settings"
+      if (mode != "missing") {
+        every { target.childCount } returns 1
+        every { target.getChild(0) } returns label
+      }
+      host.windowRoots = listOf(tree(target))
+
+      controller.performNodeAction(
+        "stale-row",
+        "click",
+        null,
+        null,
+        expectedBounds = NodeExpectedBounds(48, 372, 696, 548),
+        identityHints =
+          NodeIdentityHints(
+            className = "android.widget.LinearLayout",
+            labelText = if (mode == "description") null else "Connected devices",
+            labelContentDesc = if (mode == "description") "Connections" else null,
+          ),
+      )
+
+      assertFalse(host.results.single().success)
+      assertTrue(host.results.single().error?.startsWith("node_identity_mismatch:") == true)
+      verify(exactly = 0) { target.performAction(any()) }
+      verify(exactly = 1) { target.recycle() }
+      assertFalse("publish" in host.events)
+    }
+  }
 
   @Test
   fun `bounds-only click refuses duplicate captured rows across windows`() = runTest {

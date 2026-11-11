@@ -240,7 +240,7 @@ export interface AndroidCtrlProxy
     signal?: AbortSignal,
   ): Promise<A11yActionResult>;
 
-  /** A missing selector is accepted only for a click with expectedBounds. */
+  /** A missing selector requires click bounds; new XR callers also supply captured identity hints. */
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector | undefined,

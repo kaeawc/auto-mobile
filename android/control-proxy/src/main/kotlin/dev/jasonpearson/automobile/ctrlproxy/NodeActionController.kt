@@ -272,6 +272,7 @@ internal class NodeActionController(
     selector: NodeSelector?,
     arguments: NodeActionArguments = NodeActionArguments(),
     expectedBounds: NodeExpectedBounds? = null,
+    identityHints: NodeIdentityHints? = null,
   ) {
     host.forgetRememberedInsert()
     val startTime = timeProvider.currentTimeMillis()
@@ -280,7 +281,7 @@ internal class NodeActionController(
     Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
     perfProvider.serial("performAction")
 
-    NodeActionOperation(requestId, action, startTime, arguments, expectedBounds)
+    NodeActionOperation(requestId, action, startTime, arguments, expectedBounds, identityHints)
       .run(
         NodeActionTarget(effectiveSelector, resourceId, targetDescription),
       )
@@ -292,6 +293,7 @@ internal class NodeActionController(
     private val startTime: Long,
     private val arguments: NodeActionArguments,
     private val expectedBounds: NodeExpectedBounds?,
+    private val identityHints: NodeIdentityHints?,
   ) {
     suspend fun run(target: NodeActionTarget) {
       try {
@@ -327,6 +329,8 @@ internal class NodeActionController(
               else findNodesBySelector(it, selector)
             },
             expectedBounds,
+            boundsOnly,
+            identityHints,
           )
         } else {
           findActionNode(target.selector, target.resourceId)

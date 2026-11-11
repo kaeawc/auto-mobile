@@ -355,7 +355,27 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
     )
     assertEquals(
       "requestAction" to
-        listOf<Any?>("a1", "long_click", "com.app:id/x", null, NodeActionArguments(), null),
+        listOf<Any?>("a1", "long_click", "com.app:id/x", null, NodeActionArguments(), null, null),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `dispatches captured node and label identity with bounds-only clicks`() = runTest {
+    dispatch(
+      """{"type":"request_action","requestId":"identity","action":"click","boundsLeft":10,"boundsTop":20,"boundsRight":110,"boundsBottom":120,"identityClassName":"Row","identityText":"","identityContentDesc":"","identityLabelText":"Connected devices","identityLabelContentDesc":"Connections"}""",
+    )
+    assertEquals(
+      "requestAction" to
+        listOf<Any?>(
+          "identity",
+          "click",
+          null,
+          null,
+          NodeActionArguments(),
+          NodeExpectedBounds(10, 20, 110, 120),
+          NodeIdentityHints("Row", "", "", "Connected devices", "Connections"),
+        ),
       lastCall,
     )
   }
@@ -376,6 +396,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
             null,
             NodeActionArguments(),
             NodeExpectedBounds(10, 20, 110, bottom),
+            null,
           ),
         lastCall,
       )
@@ -396,6 +417,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
           null,
           NodeActionArguments(customAction = "Archive"),
           null,
+          null,
         ),
       lastCall,
     )
@@ -410,6 +432,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
           "com.app:id/slider",
           null,
           NodeActionArguments(progress = 0.75f),
+          null,
           null,
         ),
       lastCall,
@@ -433,6 +456,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
             collectionColumn = 0,
           ),
           NodeActionArguments(),
+          null,
           null,
         ),
       lastCall,

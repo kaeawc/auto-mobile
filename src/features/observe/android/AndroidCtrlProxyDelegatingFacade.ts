@@ -680,6 +680,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       perf,
       signal,
       expectedBounds,
+      identityHints,
     }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
     return this.getActionDispatcher().requestNodeAction(action, selector, {
@@ -687,6 +688,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       perf,
       signal,
       expectedBounds,
+      identityHints,
     });
   }
 

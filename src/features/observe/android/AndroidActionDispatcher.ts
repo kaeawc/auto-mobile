@@ -36,6 +36,13 @@ export interface AndroidActivateAccessibilityLinkRequest {
 export interface AndroidActionRequestOptions {
   selector?: AccessibilityNodeSelector;
   expectedBounds?: { left: number; top: number; right: number; bottom: number };
+  identityHints?: {
+    className?: string;
+    text?: string;
+    contentDesc?: string;
+    labelText?: string;
+    labelContentDesc?: string;
+  };
   signal?: AbortSignal;
 }
 
@@ -83,7 +90,7 @@ export class AndroidActionDispatcher {
       ...options
     }: AndroidActionRequestOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
-    const { selector, signal, expectedBounds } = options;
+    const { selector, signal, expectedBounds, identityHints } = options;
     return this.dispatchActionRequest(
       action,
       (requestId) =>
@@ -93,6 +100,11 @@ export class AndroidActionDispatcher {
             action,
             resourceId,
             selector,
+            identityClassName: identityHints?.className,
+            identityText: identityHints?.text,
+            identityContentDesc: identityHints?.contentDesc,
+            identityLabelText: identityHints?.labelText,
+            identityLabelContentDesc: identityHints?.labelContentDesc,
             ...(expectedBounds
               ? {
                   boundsLeft: expectedBounds.left,
@@ -336,6 +348,7 @@ export class AndroidActionDispatcher {
       perf = new NoOpPerformanceTracker(),
       signal,
       expectedBounds,
+      identityHints,
     }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
     if (!selector && (action !== "click" || !expectedBounds)) {
@@ -348,6 +361,7 @@ export class AndroidActionDispatcher {
       selector,
       signal,
       expectedBounds,
+      identityHints,
     });
   }
 

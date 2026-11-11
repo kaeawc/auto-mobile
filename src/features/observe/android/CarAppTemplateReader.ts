@@ -60,8 +60,8 @@ export function parseCarAppTemplateCallOutput(output: string): unknown {
  * that has no route, or whose route answered disabled, is remembered per device, user and package
  * so ordinary observations pay for at most one call per package per TTL; a failed read is retried
  * after a short interval. Overlapping observations of the same app share one read. While Android
- * Auto projects, its foreground package is not the projected app, so the bound `CarAppService`
- * apps from `dumpsys activity services` are each read through the same per-package path.
+ * Auto projects, its foreground package is not the projected app, so the apps bound by Android Auto
+ * from `dumpsys activity services` are each read through the same per-package path.
  */
 export class CarAppTemplateReader {
   private readonly quietUntil = new Map<string, number>();

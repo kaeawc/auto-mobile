@@ -141,8 +141,8 @@ const carAppProjectedAppSchema = () =>
     .passthrough();
 
 /**
- * The block while Android Auto projects (#17826): the apps whose `CarAppService` Android Auto has
- * bound, each read through its own route, because the foreground package is Android Auto itself.
+ * The block while Android Auto projects (#17826): the apps Android Auto has bound a service of
+ * that answer the route, each read through its own route, because the foreground package is Android Auto itself.
  */
 export const carAppProjectedTemplatesSchema = () =>
   z

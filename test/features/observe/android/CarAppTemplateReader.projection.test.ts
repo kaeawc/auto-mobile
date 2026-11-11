@@ -16,6 +16,7 @@ import { createExecResult } from "../../../../src/utils/execResult";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import {
   contentCallBundle,
+  fixtureListBundle,
   fixtureListSnapshot,
   projectionServicesDump,
   type ProjectionServicesFixture,
@@ -23,7 +24,10 @@ import {
 
 const phone: BootedDevice = { deviceId: "emulator-5580", name: "Pixel 9", platform: "android" };
 const FIXTURE_APP = "dev.jasonpearson.automobile.automotivefixture";
-const NAV_APP = "com.example.nav";
+const MAPS_APP = "com.google.android.apps.maps";
+const PLAY_APP = "com.android.vending";
+/** Every package with a live Android Auto binding in the captured dump, besides the fixture. */
+const OTHER_BOUND_APPS = 5;
 const DUMP = "shell dumpsys activity services";
 const MISSING =
   "Error while accessing provider:x\njava.lang.IllegalArgumentException: Unknown authority";
@@ -88,9 +92,9 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
     expect(adb.foregroundLookups).toBe(0);
   });
 
-  test("one bound app's enabled route becomes the projection block, read as its service user", async () => {
+  test("the answering bound app becomes the projection block, read as its service user", async () => {
     const { adb, reader } = setup("one");
-    adb.routes.set(FIXTURE_APP, contentCallBundle(fixtureListSnapshot()));
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
 
     const block = await reader.resolve(phone, projecting);
 
@@ -101,17 +105,18 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
       projectedNote: CAR_APP_PROJECTED_NOTE,
       projected: [{ packageName: FIXTURE_APP, sessions: fixtureDocument.sessions }],
     });
-    expect(adb.contentCalls()).toEqual([
+    expect(adb.contentCalls()).toHaveLength(1 + OTHER_BOUND_APPS);
+    expect(adb.contentCalls()).toContain(
       `shell content call --user 0 --uri 'content://${FIXTURE_APP}.automobile.carapptemplates' --method snapshot`,
-    ]);
+    );
     expect(adb.foregroundLookups).toBe(0);
   });
 
-  test("two bound apps are both listed by package name, none marked visible", async () => {
-    const { adb, reader } = setup("two");
-    adb.routes.set(FIXTURE_APP, contentCallBundle(fixtureListSnapshot()));
+  test("two answering apps are both listed by package name, none marked visible", async () => {
+    const { adb, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
     adb.routes.set(
-      NAV_APP,
+      MAPS_APP,
       contentCallBundle({ ...fixtureDocument, error: "main_thread_timeout", sessions: [] }),
     );
 
@@ -120,18 +125,18 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
     expect(block).toMatchObject({
       projectedNote: CAR_APP_PROJECTED_NOTE,
       projected: [
-        { packageName: NAV_APP, sessions: [], error: "main_thread_timeout" },
+        { packageName: MAPS_APP, sessions: [], error: "main_thread_timeout" },
         { packageName: FIXTURE_APP, sessions: fixtureDocument.sessions },
       ],
     });
     expect(adb.contentCalls()).toContain(
-      `shell content call --user 10 --uri 'content://${NAV_APP}.automobile.carapptemplates' --method snapshot`,
+      `shell content call --user 0 --uri 'content://${MAPS_APP}.automobile.carapptemplates' --method snapshot`,
     );
   });
 
   test("a bound app without the route costs one cached failed call", async () => {
-    const { adb, timer, reader } = setup("two");
-    adb.routes.set(FIXTURE_APP, contentCallBundle(fixtureListSnapshot()));
+    const { adb, timer, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
 
     const first = await reader.resolve(phone, projecting);
     await reader.resolve(phone, projecting);
@@ -139,13 +144,14 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
     await reader.resolve(phone, projecting);
 
     expect(first).toMatchObject({ projected: [{ packageName: FIXTURE_APP }] });
-    const navCalls = adb.contentCalls().filter((command) => command.includes(NAV_APP));
-    expect(navCalls).toHaveLength(1);
+    const playCalls = adb.contentCalls().filter((command) => command.includes(PLAY_APP));
+    expect(playCalls).toHaveLength(1);
+    expect(adb.contentCalls()).toHaveLength(1 + OTHER_BOUND_APPS + 2);
     expect(adb.contentCalls().filter((command) => command.includes(FIXTURE_APP))).toHaveLength(3);
   });
 
   test("no bound app answering enabled leaves no block", async () => {
-    const { adb, reader } = setup("two");
+    const { adb, reader } = setup("one");
     adb.routes.set(
       FIXTURE_APP,
       contentCallBundle({ schemaVersion: 1, enabled: false, sessions: [] }),
@@ -162,7 +168,7 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
 
   test("a non-Android-Auto foreground app never runs the services dump", async () => {
     const { adb, reader } = setup("one");
-    adb.routes.set(FIXTURE_APP, contentCallBundle(fixtureListSnapshot()));
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
 
     const block = await reader.resolve(phone, observation(FIXTURE_APP));
 

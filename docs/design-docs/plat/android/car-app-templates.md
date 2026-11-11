@@ -77,9 +77,11 @@ first-record order, so it can change after `disable()` and `enable()`.
 - During Android Auto projection the foreground package is `com.google.android.projection.gearhead`
   (its `GhostActivity`), not the projected app, while the projected app keeps recording. When the
   foreground is gearhead, the reader runs `dumpsys activity services` (about 40 ms and 360 KB on API
-  36, under the same 1.5 s deadline) and takes each ServiceRecord whose intent action is
-  `androidx.car.app.CarAppService` and whose binding client is a gearhead process, excluding
-  gearhead's own services. Each app is read as the user in its ServiceRecord, with no foreground
+  36, under the same 1.5 s deadline) and takes each ServiceRecord whose binding client
+  is a gearhead process, excluding gearhead's own services. The bind intent carries no
+  `androidx.car.app.CarAppService` action (API 36 shows `intent={id=0/main cmp=<pkg>/<class>}`), so
+  Maps, media and Play services are candidates too, and only the apps whose route answers enabled
+  are kept; the others cost one cached failed call per absent TTL. Each app is read as the user in its ServiceRecord, with no foreground
   lookup, through the same per-package path, so quiet entries, deadlines and shared in-flight reads
   apply unchanged. The block then has `projectedBy`, `projectedNote` and `projected[]` (package,
   sessions, error) instead of a top-level `packageName`. Android Auto does not say which bound app is

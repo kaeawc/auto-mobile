@@ -7,9 +7,6 @@ export interface ProjectedCarApp {
   userId: number;
 }
 
-/** The intent action a Car App Library host binds an app's `CarAppService` with. */
-export const CAR_APP_SERVICE_ACTION = "androidx.car.app.CarAppService";
-
 /** `* ServiceRecord{<hash> u<user> <package>/<class>[ c:<client>]}` */
 const SERVICE_RECORD_HEADER =
   /^(\s*)\* ServiceRecord\{[0-9a-f]+ u(\d+) ([A-Za-z0-9_.]+)\/[^\s}]+(?: [^}]*)?\}/;
@@ -57,10 +54,13 @@ function serviceBlocks(dump: string): ServiceBlock[] {
 }
 
 /**
- * The apps Android Auto has bound a `CarAppService` of, from `dumpsys activity services`: a
- * ServiceRecord whose intent carries {@link CAR_APP_SERVICE_ACTION} and whose binding client is
- * Android Auto's process. Android Auto's own services are excluded. Each package and user appears
- * once, ordered by package name then user: the dump's order says nothing about which app is shown.
+ * The candidate projected apps, from `dumpsys activity services`: every ServiceRecord outside
+ * Android Auto whose live binding client is Android Auto's process. The bind intent carries no
+ * `androidx.car.app.CarAppService` action (a live API 36 capture shows `intent={id=0/main
+ * cmp=<pkg>/<class>}`), so a Car App Library app is not told apart here: Android Auto also binds
+ * Maps, media and Play services, and the per-package template route read keeps only the apps that
+ * answer enabled. Each package and user appears once, ordered by package name then user: the
+ * dump's order says nothing about which app is shown.
  */
 export function parseProjectedCarApps(dump: string): ProjectedCarApp[] {
   const found = new Map<string, ProjectedCarApp>();
@@ -69,7 +69,6 @@ export function parseProjectedCarApps(dump: string): ProjectedCarApp[] {
     if (
       block.packageName === ANDROID_AUTO_PACKAGE ||
       !ANDROID_PACKAGE_NAME_PATTERN.test(block.packageName) ||
-      !body.includes(`act=${CAR_APP_SERVICE_ACTION}`) ||
       !ANDROID_AUTO_CLIENT.test(body)
     ) {
       continue;

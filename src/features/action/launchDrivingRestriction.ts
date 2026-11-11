@@ -17,7 +17,14 @@ export function describeLaunchDrivingRestriction(
   if (!block?.blockedActivity) {
     return undefined;
   }
-  const covered = backStack?.activities.find((activity) => activity.name === block.blockedActivity);
+  const activities = backStack?.activities ?? [];
+  const blocker = backStack?.currentActivity;
+  const blockerIndex = activities.findIndex(
+    (activity) => activity.name === blocker?.name && activity.taskId === blocker?.taskId,
+  );
+  const covered = activities
+    .slice(blockerIndex + 1)
+    .find((activity) => activity.taskId !== blocker?.taskId);
   const coveredPackage = backStack?.tasks.find((task) => task.id === covered?.taskId)?.packageName;
   if (coveredPackage !== expectedPackageName) {
     return undefined;

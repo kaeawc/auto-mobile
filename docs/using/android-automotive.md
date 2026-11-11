@@ -160,8 +160,8 @@ parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/n
 the effective UI night mode. A state that cannot be confirmed returns `unsupported`.
 
 While driving, `launchApp` of an activity that is not distraction optimized fails right away with an
-error containing `blocked_by_driving_restrictions`, the activity's name and the car's blocking activity
-(`com.android.systemui.car.activity.ActivityBlockingActivity`). Park with
+error containing `blocked_by_driving_restrictions` that names the blocked activity and the car's
+blocking activity. Park with
 `{ "deviceCondition": { "vehicle": { "motion": "parked" } } }` and launch again, or launch an activity
 declared `distractionOptimized`.
 

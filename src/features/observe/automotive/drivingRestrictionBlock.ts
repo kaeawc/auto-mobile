@@ -10,7 +10,7 @@ export const ACTIVITY_BLOCKING_ACTIVITY =
 export interface DrivingRestrictionBlock {
   /** The blocking activity in front. */
   blockedBy: string;
-  /** The activity it covers: the top activity of the next task down, when the stack lists one. */
+  /** The activity it covers: the top activity of the next task below it, when the stack lists one. */
   blockedActivity?: string;
 }
 
@@ -22,6 +22,15 @@ export function detectDrivingRestrictionBlock(
   if (current?.name !== ACTIVITY_BLOCKING_ACTIVITY) {
     return undefined;
   }
-  const blocked = backStack?.activities.find((activity) => activity.taskId !== current.taskId);
+  // `activities` spans every display in dump order, but the blocker is started in its own task
+  // directly above the task it blocks on the same display: search only the entries after it.
+  const activities = backStack?.activities ?? [];
+  const blockerIndex = activities.findIndex(
+    (activity) => activity.name === current.name && activity.taskId === current.taskId,
+  );
+  const blocked =
+    blockerIndex < 0
+      ? undefined
+      : activities.slice(blockerIndex + 1).find((activity) => activity.taskId !== current.taskId);
   return { blockedBy: current.name, ...(blocked ? { blockedActivity: blocked.name } : {}) };
 }

@@ -60,3 +60,20 @@ test("a block over another app's task is not reported as this launch's restricti
   );
   expect(describeLaunchDrivingRestriction({}, appId)).toBeUndefined();
 });
+
+test("a block on another display over another app does not name this launch", () => {
+  const blocked = readSettingsWhileDrivingObservation();
+  const backStack = blocked.backStack;
+  const [blocker, settings, carApp, ...rest] = backStack?.activities ?? [];
+  expect(
+    describeLaunchDrivingRestriction(
+      {
+        backStack: backStack && {
+          ...backStack,
+          activities: [settings, carApp, blocker, ...rest],
+        },
+      },
+      appId,
+    ),
+  ).toBeUndefined();
+});

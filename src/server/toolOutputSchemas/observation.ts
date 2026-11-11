@@ -505,6 +505,12 @@ export const observeResultSchema = z
       .describe(
         "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
       ),
+    surface: z
+      .enum(["tile", "watchface", "launcher", "app"])
+      .optional()
+      .describe(
+        "Wear OS watch devices only: the captured foreground surface. Omitted when it cannot be identified, including the notification tray.",
+      ),
     hierarchyUnavailable: z
       .object({
         platform: z.union([z.literal("watchos"), z.literal("tvos"), z.literal("visionos")]),

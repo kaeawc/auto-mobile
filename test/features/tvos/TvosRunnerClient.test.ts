@@ -74,6 +74,7 @@ test("correlates a real remote press result and reports runner errors", async ()
 
 test.each([
   { type: "request_press_button", action: "menu" },
+  { type: "request_press_button", action: "playPause", durationMs: 1500 },
   { type: "request_hierarchy" },
   { type: "request_append_text", text: "hello" },
 ] satisfies TvosCommand[])(

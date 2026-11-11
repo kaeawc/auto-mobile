@@ -138,7 +138,7 @@ fields identified by secure metadata, always redact their values.
 | `pinchOn`                     | refused-by-design | No touch surface.                                                                                                                                |
 | `portReverse`                 | refused-by-design | Android-only.                                                                                                                                    |
 | `postNotification`            | pass              | `simctl push` to the app named by `appId` (required).                                                                                            |
-| `pressButton`                 | pass              | `up`, `down`, `left`, `right`, `select`, `menu`, `home`, `playPause`. Long press and `steps` are not supported ([#16726]).                       |
+| `pressButton`                 | pass              | Any remote button accepts `durationMs` (100–10000 ms) for long press. No `steps` or touch-surface swipes; XCUITest exposes only remote presses.  |
 | `prototype`                   | not-supported     |                                                                                                                                                  |
 | `provisionDevice`             | pass              | Boots with readiness `none`.                                                                                                                     |
 | `putAppFile`                  | not-supported     |                                                                                                                                                  |
@@ -174,8 +174,8 @@ fields identified by secure metadata, always redact their values.
 | `sqlQuery`                    | not-supported     |                                                                                                                                                  |
 | `statusBar`                   | refused-by-design | The tvOS simulator runtime has no status bar override; the refusal says so.                                                                      |
 | `stopAudioInput`              | not-supported     |                                                                                                                                                  |
-| `swipeAt`                     | refused-by-design | No touch surface. Siri Remote touch-surface swipes are [#16726].                                                                                 |
-| `swipeOn`                     | refused-by-design | No touch surface. Siri Remote touch-surface swipes are [#16726].                                                                                 |
+| `swipeAt`                     | refused-by-design | XCUITest does not expose touch-surface swipes on tvOS; use directional presses and focus navigation.                                             |
+| `swipeOn`                     | refused-by-design | XCUITest does not expose touch-surface swipes on tvOS; use directional presses and focus navigation.                                             |
 | `systemAlerts`                | not-supported     |                                                                                                                                                  |
 | `systemTray`                  | refused-by-design | No notification shade.                                                                                                                           |
 | `tapAny`                      | refused-by-design | No touch surface; use `tapOn` or `focusNavigate`.                                                                                                |
@@ -192,5 +192,4 @@ allowlist also holds `startDevice`, which is not in the published tool
 definitions; it boots the simulator and connects the runner.
 
 [#16723]: https://github.com/kaeawc/auto-mobile/issues/16723
-[#16726]: https://github.com/kaeawc/auto-mobile/issues/16726
 [#17528]: https://github.com/kaeawc/auto-mobile/issues/17528

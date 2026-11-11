@@ -14,6 +14,28 @@ private final class FakeTVUptimeClock: TVUptimeClock {
 }
 
 final class TVCommandPolicyTests: XCTestCase {
+    func testRemoteHoldAllowsTapAndConvertsMillisecondsToSeconds() throws {
+        XCTAssertNil(try TVRemoteHold.seconds(durationMs: nil))
+        XCTAssertEqual(try TVRemoteHold.seconds(durationMs: 100), 0.1)
+        XCTAssertEqual(try TVRemoteHold.seconds(durationMs: 1500), 1.5)
+        XCTAssertEqual(try TVRemoteHold.seconds(durationMs: 10000), 10)
+    }
+
+    func testRemoteHoldRejectsDurationsOutsideBounds() {
+        for duration in [99, 10001] {
+            XCTAssertThrowsError(try TVRemoteHold.seconds(durationMs: duration)) { error in
+                guard case let CommandError.invalidParameter(parameter, _) = error else {
+                    return XCTFail("Expected invalidParameter, got \(error)")
+                }
+                XCTAssertEqual(parameter, "durationMs")
+            }
+        }
+    }
+
+    func testPlayPauseIsARemoteButton() {
+        XCTAssertEqual(TVRemoteButton(rawValue: "playPause"), .playPause)
+    }
+
     func testTextInputEmitsValueWhenLabelIsEmpty() {
         XCTAssertEqual(TVElementText.text(label: "", value: "hello", isTextInput: true, isSecure: false), "hello")
     }

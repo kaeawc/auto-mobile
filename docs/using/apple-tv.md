@@ -172,6 +172,12 @@ focused one.
 
 <!-- apple-tv-remote-buttons:end -->
 
+`playPause` toggles playback. Set `durationMs` to 100–10000 milliseconds to long-press any
+remote button; omit it for a normal press. `steps` is unsupported.
+
+Touch-surface swipes are unavailable because XCUITest does not expose them on tvOS. Use
+directional presses and focus navigation instead.
+
 `tapOn` replaces tapping: it moves focus to a matched element with directional presses and then
 presses `select`.
 
@@ -271,5 +277,5 @@ but is not read back, and `getAppPermissions` is not available.
 - Physical Apple TV hardware.
 - Prototypes: `launchApp` with `prototype: true` is refused, and prototype overlays are not
   supported.
-- Touch gestures and long press.
+- Touch gestures, including Siri Remote touch-surface swipes.
 - Downloading tvOS runtimes.

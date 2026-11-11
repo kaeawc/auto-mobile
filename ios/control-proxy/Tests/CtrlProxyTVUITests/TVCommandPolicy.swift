@@ -1,4 +1,7 @@
 import Foundation
+#if SWIFT_PACKAGE
+    import CtrlProxy
+#endif
 
 // Kept independent of XCTest and UIKit so macOS SwiftPM tests cover the capability boundary.
 enum TVCommandPolicy {
@@ -14,6 +17,17 @@ enum TVCommandPolicy {
 enum TVRemoteButton: String, CaseIterable {
     case moveUp = "up"
     case down, left, right, select, menu, home, playPause
+}
+
+/// Remote holds use the same 100...10000 ms contract as pressButtonPolicy.ts.
+enum TVRemoteHold {
+    static func seconds(durationMs: Int?) throws -> TimeInterval? {
+        guard let durationMs else { return nil }
+        guard (100...10000).contains(durationMs) else {
+            throw CommandError.invalidParameter("durationMs", "\(durationMs); expected 100...10000 ms")
+        }
+        return TimeInterval(durationMs) / 1000
+    }
 }
 
 enum TVElementText {

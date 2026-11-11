@@ -975,10 +975,17 @@ describe("rejectUnsupportedHold (#16734)", () => {
     expect(() => rejectUnsupportedHold("android", "SELECT", 800)).not.toThrow();
   });
 
+  test.each(["up", "down", "left", "right", "select", "menu", "home", "playPause"])(
+    "allows a tvOS hold of %s",
+    (button) => {
+      expect(() => rejectUnsupportedHold("tvos", button, 800)).not.toThrow();
+    },
+  );
+
   test.each([
     ["android", "playPause", "select (D-pad center) only"],
-    ["tvos", "select", "Android only"],
-    ["ios", "select", "Android only"],
+    ["tvos", "power", "remote button"],
+    ["ios", "select", "Android and tvOS only"],
   ])("refuses a hold on %s %s", (platform, button, message) => {
     expect(() => rejectUnsupportedHold(platform, button, 800)).toThrow(message);
   });

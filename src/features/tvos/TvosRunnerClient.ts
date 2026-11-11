@@ -22,7 +22,7 @@ export type TVRemoteButton = (typeof TV_REMOTE_BUTTONS)[number];
 export type TvosCommand =
   | { type: "request_hierarchy"; bundleId?: string }
   | { type: "request_screenshot" }
-  | { type: "request_press_button"; action: TVRemoteButton; bundleId?: string }
+  | { type: "request_press_button"; action: TVRemoteButton; durationMs?: number; bundleId?: string }
   | { type: "request_append_text"; text: string; bundleId?: string };
 
 /** Each runner command's deadline; a runner that misses one is treated as stuck. */

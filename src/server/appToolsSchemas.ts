@@ -54,6 +54,7 @@ export const crashAppSchema = withAppIdAliases(
     z
       .object({
         appId: z.string().trim().min(1),
+        platform: watchAwarePlatformSchema(),
       })
       .strict(),
   ),

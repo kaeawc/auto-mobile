@@ -185,8 +185,14 @@ internal class PlanAttemptLoop(
         "sessionUuid" to JsonPrimitive(sessionUuid),
       )
 
-    // Pin to the recovered device if specified, otherwise use the configured device
-    val effectiveDeviceId = deviceIdOverride ?: options.device.takeIf { it != "auto" }
+    // Pin to the recovered device if specified, otherwise the configured device or ANDROID_SERIAL
+    val effectiveDeviceId =
+      deviceIdOverride
+        ?: PlanDeviceSelection.resolveDeviceId(
+          options.device,
+          planContent,
+          collaborators.environment,
+        )
     if (effectiveDeviceId != null) {
       args["deviceId"] = JsonPrimitive(effectiveDeviceId)
     }

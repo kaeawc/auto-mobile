@@ -12,6 +12,8 @@ export interface PerformanceAuditQueryParams {
   limit?: number;
   offset?: number;
   deviceId?: string;
+  /** Only audits stamped with this device epoch; unstamped rows never match. */
+  deviceSessionUuid?: string;
 }
 
 interface PerformanceAuditResponse {
@@ -73,6 +75,7 @@ export async function buildPerformanceAuditResponse(
     limit,
     offset,
     deviceId: args.deviceId,
+    deviceSessionUuid: args.deviceSessionUuid,
   });
 
   const range = getTimestampRange(page.results.map((result) => result.timestamp));

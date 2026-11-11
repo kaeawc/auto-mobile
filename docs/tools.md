@@ -142,6 +142,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🔊 <code>captureAudio</code>                | Emulator or simulator: record audio output and report its level. Off by default         |
 | 📞 <code>phoneCall</code>                   | Simulate an incoming phone call (iOS Simulator: accept/hold are partial)                |
 | 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                                |
+| 🌱 <code>seedContent</code>                 | [Seed Android contacts, calendars, calls and SMS](using/seed-content.md)                |
 | 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                                  |
 | 📣 <code>postNotification</code>            | Post notification via Android SDK hooks or iOS Simulator simctl push                    |
 | 🔕 <code>getNotificationPolicy</code>       | Read app notification/DND policy state                                                  |
@@ -165,7 +166,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🚧 <code>barrier</code>              | Sync multiple devices at a point in a plan                                                                                                                                        |
 | ⏺️ <code>recordToolCalls</code>      | Record MCP tool calls to YAML                                                                                                                                                     |
 | 🎬 <code>recordDeviceGestures</code> | Start recording on-device user input (not tool calls) for exportPlan                                                                                                              |
-| 📤 <code>exportPlan</code>           | Stop active recording and export a YAML plan                                                                                                                                      |
+| 📤 <code>exportPlan</code>           | Stop the active recordDeviceGestures or recordToolCalls recording and export a YAML plan                                                                                          |
 | 🎥 <code>videoRecording</code>       | Start or stop device video recording                                                                                                                                              |
 | 📈 <code>performanceTrace</code>     | Record an xctrace / Perfetto trace; read it back at <code>automobile:device-session/{sessionUuid}/performance-traces/{traceId}{?offset,maxBytes}</code>                           |
 | 🔬 <code>captureTrace</code>         | Android: record a Perfetto trace from typed categories (`sched`, `gfx`, `view`, `am`, `wm`, `binder_driver`, `memory`, `app`); `stop` pulls the `.perfetto-trace`. Off by default |

@@ -152,6 +152,34 @@ describe("buildTapOnResultMessage", () => {
     expect(first).not.toBe(third);
   });
 
+  // #17939: iOS reported "2 matches (index 0)" for one tappable Add button (a context label
+  // repeated the text) and for a Dark mode row plus its own switch.
+  test("counts only tappable matches when the selection reports fewer than the total", () => {
+    const message = buildTapOnResultMessage(
+      selected({ text: "Add", totalMatches: 2, tappableMatches: 1, indexInMatches: 0 }),
+      undefined,
+    );
+    expect(message).toBe('Tapped on element (matched text="Add"; 1 match)');
+  });
+
+  test("keeps the full-list index and names the total when several tappables remain", () => {
+    const message = buildTapOnResultMessage(
+      selected({ text: "Row", totalMatches: 3, tappableMatches: 2, indexInMatches: 1 }),
+      undefined,
+    );
+    expect(message).toBe(
+      'Tapped on element (matched text="Row"; 2 matches (index 1 of 3 candidates))',
+    );
+  });
+
+  test("ignores a zero tappable count (a label-only coordinate tap)", () => {
+    const message = buildTapOnResultMessage(
+      selected({ text: "Row", totalMatches: 2, tappableMatches: 0, indexInMatches: 0 }),
+      undefined,
+    );
+    expect(message).toContain("2 matches (index 0)");
+  });
+
   // A testTag-selected Compose node may expose only a test tag (no text, no id);
   // the message must name it so tapping message_row_42 vs another tag is not
   // byte-identical.
@@ -287,7 +315,12 @@ describe("tapOnHandler (registered handler wiring)", () => {
   });
 
   test("IME-occluded Android focus keeps the tapOn MCP failure payload", async () => {
-    const device: BootedDevice = { name: "Pixel", deviceId: "fake", platform: "android" };
+    const device: BootedDevice = {
+      name: "Pixel",
+      deviceId: "fake",
+      platform: "android",
+      formFactor: "phone",
+    };
     const hierarchy = imeOcclusionHierarchy();
     const element = new DefaultElementParser()
       .flattenViewHierarchy(hierarchy, { includeWindows: true })

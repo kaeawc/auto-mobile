@@ -125,6 +125,7 @@ import {
   type AndroidAutoProvisionReport,
 } from "../../src/features/androidAuto/AndroidAutoProjectionService";
 import { AndroidAutoProjectionProvisioner } from "../../src/features/androidAuto/AndroidAutoProjectionProvisioner";
+import { AndroidAutoPhoneOfflineError } from "../../src/features/androidAuto/AndroidAutoPhoneOfflineError";
 import { FakeLauncher, FakePhone, FakeSession, FakeUi } from "../fakes/FakeAndroidAutoProjection";
 
 /** Exact provision response body from the registered production handler, with deterministic dependencies. */
@@ -713,6 +714,7 @@ describe("provisionDevice handler", () => {
       }
       async stopDesktopHeadUnit(deviceId: string) {
         this.events.push(`stop:${deviceId}`);
+        return false;
       }
       async resolveHeadUnitInputs(): Promise<never> {
         throw new Error("not used by provisionDevice");
@@ -1001,6 +1003,38 @@ describe("provisionDevice handler", () => {
       expect(payload.success).toBe(false);
       expect(applier.events).toContain("destroy");
       expect(applier.events).not.toContain("stop:emulator-5554");
+    });
+
+    test.each([
+      {
+        failure: new AndroidAutoPhoneOfflineError(
+          "emulator-5554",
+          "adb still reports emulator-5554 as not ready (offline) after 60 s",
+        ),
+        code: "device_offline",
+      },
+      {
+        failure: new ActionableError("Android Auto onboarding read failed"),
+        code: "cleanup_failed",
+      },
+    ])("a failed rollback after a projection failure reports $code", async ({ failure, code }) => {
+      const applier = new RecordingAndroidAutoApplier();
+      applier.failure = failure;
+      createdAndroid(applier);
+      deviceManager.destroyDevice = async () => {
+        throw new Error("platform delete failed");
+      };
+
+      const payload = JSON.parse(await provisionResponseText(androidAutoArgs()));
+
+      expect(payload.success).toBe(false);
+      expect(payload.error.code).toBe(code);
+      expect(payload.error.message).toContain(failure.message);
+      // An offline phone changed nothing, so only the failed cleanup's own field reports it.
+      expect(payload.error.message.includes("Cleanup of the newly created device")).toBe(
+        code === "cleanup_failed",
+      );
+      expect(payload.cleanup).toMatchObject({ status: "failed" });
     });
 
     test("a plain provision whose lifecycle abort lands after the session is bound still succeeds", async () => {

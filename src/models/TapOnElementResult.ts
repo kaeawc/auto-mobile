@@ -36,6 +36,8 @@ export interface TapOnSelectedElement {
   bounds: TapOnSelectedElementBounds;
   indexInMatches: number;
   totalMatches: number;
+  /** iOS: distinct tappable targets among {@link totalMatches}; the reported match count (#17939). */
+  tappableMatches?: number;
   selectionStrategy: ElementSelectionStrategy;
 }
 

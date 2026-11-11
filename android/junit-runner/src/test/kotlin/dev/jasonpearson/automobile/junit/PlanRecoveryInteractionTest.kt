@@ -54,6 +54,8 @@ class PlanRecoveryInteractionTest {
         deviceChecker = PlanInteractionDeviceChecker(),
         daemon = daemon,
         heartbeat = heartbeat,
+        // Empty environment: the host's ANDROID_SERIAL must not leak into auto-mode requests.
+        environment = { null },
       )
     System.setProperty("automobile.ci.mode", "false")
   }

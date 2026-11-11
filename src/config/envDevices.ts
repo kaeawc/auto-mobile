@@ -2,6 +2,12 @@ import type { EnvVarSpec } from "./envSpec";
 
 /** Device, emulator, simulator and CtrlProxy variables. */
 export const DEVICES_ENV = {
+  CONTENT_SEEDER_APK_PATH: {
+    name: "AUTOMOBILE_CONTENT_SEEDER_APK_PATH",
+    kind: "string",
+    default: "checkout content-seeder debug APK",
+    doc: "Path to the Android content seeder debug/test-only APK used for contacts, calendar and SMS fixtures.",
+  },
   CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS: {
     name: "AUTOMOBILE_CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS",
     kind: "int",

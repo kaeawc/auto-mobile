@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { makePool } from "../helpers/makePool";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
@@ -102,6 +103,7 @@ describe("platform device preparation tools", () => {
     matcher = new FakeDeviceMatcher();
     timer = new FakeTimer();
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       deviceManagerFactory: () => deviceUtils,
       avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
       deviceMatcherFactory: () => matcher,

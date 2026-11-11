@@ -348,6 +348,7 @@ const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
   name: "Pixel",
   platform: "android",
+  formFactor: "phone",
 };
 
 const iosDevice: BootedDevice = {

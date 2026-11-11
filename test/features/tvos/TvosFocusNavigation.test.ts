@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import toggleCapture from "../../fixtures/tvos-xcuitest/tvos-runner-hierarchy-tvdog-settings-toggle.json";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
 import { tvosTapOn } from "../../../src/features/tvos/TvosFocusNavigation";
 import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
 import type { TvosCommand, TVRemoteButton } from "../../../src/features/tvos/TvosRunnerClient";
 import type { TapOnElementOptions } from "../../../src/models";
+import type { CtrlProxyNode } from "../../../src/features/observe/ios/types";
 import { FocusAwareFakeTvosRunnerClient } from "../../fakes/FocusAwareFakeTvosRunnerClient";
 import {
   itemId,
@@ -464,4 +466,59 @@ test.each<TapOnElementOptions>([
 ])("rejects unsupported options before reading hierarchy: %j", async (options) => {
   await expect(tvosTapOn(deviceId, options)).rejects.toThrow();
   expect(client.commands).toEqual([]);
+});
+
+function registerToggleReplay() {
+  unregister();
+  const replay = new FakeTvosRunnerClient(structuredClone(toggleCapture.data));
+  const pending: CtrlProxyNode[] = [replay.tree.hierarchy];
+  const switches: CtrlProxyNode[] = [];
+  for (const node of pending) {
+    if (node.className === "40") {
+      switches.push(node);
+      // The old capture has no state. Add only the new runner wire fields; preserve geometry and focus.
+      node.checkable = "true";
+      node.checked = "false";
+    }
+    pending.push(...[node.node ?? []].flat());
+  }
+  expect(switches).toHaveLength(2);
+  unregister = tvosRunners.register(deviceId, replay);
+  return { replay, switches };
+}
+
+test("selects the focused row for its captured nested toggle identifier", async () => {
+  const { replay } = registerToggleReplay();
+  const result = await tvosTapOn(deviceId, { action: "tap", elementId: "autoplay-toggle" });
+  expect(result).toMatchObject({
+    success: true,
+    element: { "resource-id": "autoplay-toggle", class: "40", checkable: "true" },
+  });
+  expect(result.debug?.activatedAncestor).toMatchObject({
+    text: "Autoplay",
+    class: "75",
+    focused: "true",
+  });
+  expect(replay.commands).toEqual([hierarchy, press("select")]);
+});
+
+test("a captured target outside the focused row still reports refused focus progress", async () => {
+  unregister();
+  const replay = new FakeTvosRunnerClient(structuredClone(toggleCapture.data));
+  unregister = tvosRunners.register(deviceId, replay);
+  await expect(tvosTapOn(deviceId, { action: "tap", text: "Settings" })).rejects.toThrow(
+    "focus stopped making progress from Autoplay toward Settings",
+  );
+  expect(replay.commands).toEqual([hierarchy, press("up"), hierarchy]);
+});
+
+test("a captured nested non-checkable target requires a focus move without selecting its row", async () => {
+  const { replay, switches } = registerToggleReplay();
+  // Mutate only the matched captured node; the other switch still has the runner's state fields.
+  delete switches[0].checkable;
+  delete switches[0].checked;
+  await expect(
+    tvosTapOn(deviceId, { action: "tap", elementId: "autoplay-toggle" }),
+  ).rejects.toThrow("focus stopped making progress from Autoplay toward autoplay-toggle");
+  expect(replay.commands).toEqual([hierarchy, press("left"), hierarchy]);
 });

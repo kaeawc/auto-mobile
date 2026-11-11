@@ -1,16 +1,18 @@
 # iOS Simulator camera poster
 
-The iOS Simulator has no camera. AutoMobile gives a simulator app one by injecting a
-library that supplies a fake capture pipeline fed from a still image or a generated QR code,
-the parity target for Android's `cameraPosterPath` / `cameraPosterQr` / `setDeviceState cameraPoster`
+The iOS Simulator has no camera. A proof-of-concept injection library supplies a simulator app
+with a fake capture pipeline fed from a still image or a generated QR code. It is the planned
+parity target for Android's `cameraPosterPath` / `cameraPosterQr` / `setDeviceState cameraPoster`
 (#6844, #10784). Tracking issue: #17982. Source: `ios/CameraPosterInjection/`.
 
 ## Approach
 
-`launchApp` on a simulator adds `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=<libAMCameraPoster.dylib>` and
-one of `SIMCTL_CHILD_AM_CAMERA_POSTER_PATH=<png|jpeg>` / `SIMCTL_CHILD_AM_CAMERA_POSTER_QR=<text>`.
+The library is activated by launching the app with
+`SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=<libAMCameraPoster.dylib>` and one of `SIMCTL_CHILD_AM_CAMERA_POSTER_PATH=<png|jpeg>` / `SIMCTL_CHILD_AM_CAMERA_POSTER_QR=<text>`.
 The path wins when both are set; an unreadable path disables the injection rather than falling
 back. With neither variable the library does nothing. No app change or SDK is needed.
+`ios/CameraPosterInjection/build.sh` builds the library and a fixture app; today the variables
+are set by hand (`xcrun simctl launch`). `launchApp` does not add them yet.
 
 The library swizzles the public AVFoundation surface:
 
@@ -29,13 +31,14 @@ The library swizzles the public AVFoundation surface:
 Fake objects are runtime subclasses made with `class_createInstance` (the real initializers are
 unavailable without hardware). Their `dealloc` is a no-op, so they leak; objects are few.
 
-## Tool surface
+## Planned tool surface
 
-Same as Android: `startDevice cameraPosterPath` / `cameraPosterQr` and `setDeviceState cameraPoster`.
-On iOS Simulator the values are stored on the session and applied at the next `launchApp`
-(environment is fixed at process start, so changing the poster needs an app relaunch; Android
-changes it live). Physical iOS devices and a launch that did not pass the injection return a
-typed unsupported error.
+Not wired yet: `startDevice`, `setDeviceState` and `launchApp` do not accept or apply a camera
+poster on iOS today. The plan is the same surface as Android: `startDevice cameraPosterPath` /
+`cameraPosterQr` and `setDeviceState cameraPoster`. On iOS Simulator the values would be stored on
+the session and applied at the next `launchApp` (environment is fixed at process start, so changing
+the poster would need an app relaunch; Android changes it live). Physical iOS devices and a launch
+that did not pass the injection would return a typed unsupported error.
 
 ## Limits
 

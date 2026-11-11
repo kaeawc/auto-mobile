@@ -31,14 +31,14 @@ export async function stopAndroidAutoBeforeShutdown(
 
 /**
  * The kill succeeded, so the emulator's DHU and host port 5277 redirect went with it. Forget
- * them while the shutdown reservation still holds the serial, so a replacement emulator that
- * reuses it can never have its DHU stopped or its redirect owner cleared (#17877). The stop
- * starts even on a spent deadline, since a stale redirect owner would refuse every later
- * projection; it is waited on within the deadline and request abort, and one that outlives
- * them is returned, wrapped so the await does not adopt it, and the caller keeps the
- * reservation until it settles.
+ * them as soon as the stop is confirmed: before ownership retirement can publish a same-ID
+ * replacement, and while the shutdown reservation still holds the serial, so a replacement
+ * emulator that reuses it can never have its DHU stopped or its redirect owner cleared
+ * (#17877). The stop starts even on a spent deadline, since a stale redirect owner would refuse
+ * every later projection; it is waited on within the deadline and request abort, and one that
+ * outlives them is returned so the caller keeps the reservation until it settles.
  */
-export async function stopAndroidAutoAfterKill(
+async function stopAndroidAutoAfterKill(
   shutdownContext: ShutdownDeadlineContext,
   dependencies: DeviceToolsDependencies,
 ): Promise<{ pending: Promise<void> } | undefined> {
@@ -61,6 +61,37 @@ export async function stopAndroidAutoAfterKill(
       `[DeviceTools] Desktop Head Unit stop for ${device.deviceId} outlived the shutdown wait; holding the shutdown reservation until it settles: ${errorMessage(error)}`,
       error,
     );
+    // Wrapped: returning the pending stop itself would make the caller's await adopt it.
     return { pending: stop };
   }
+}
+
+/**
+ * The post-kill DHU stop for one shutdown: `onShutdownConfirmed` runs it once the platform stop
+ * is confirmed, and `releaseReservation` releases the shutdown reservation now or, while that
+ * stop is still running, keeps it until the stop settles so no replacement claims the serial.
+ */
+export function trackAndroidAutoStopAfterKill(
+  shutdownContext: ShutdownDeadlineContext,
+  dependencies: DeviceToolsDependencies,
+): {
+  onShutdownConfirmed: () => Promise<void>;
+  releaseReservation: (
+    release: () => Promise<void>,
+    retain: (operation: Promise<void>, releaseAfterFailure: boolean) => void,
+  ) => Promise<void>;
+} {
+  let lateStop: Promise<void> | undefined;
+  return {
+    onShutdownConfirmed: async () => {
+      lateStop = (await stopAndroidAutoAfterKill(shutdownContext, dependencies))?.pending;
+    },
+    releaseReservation: async (release, retain) => {
+      if (lateStop) {
+        retain(lateStop, true);
+        return;
+      }
+      await release();
+    },
+  };
 }

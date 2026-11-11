@@ -1017,6 +1017,20 @@ describe("killDevice handler", () => {
       deviceId: image.deviceId!,
       incarnation: 1,
     };
+    const replacementProjects = () => {
+      if (incarnation === 1) {
+        incarnation = 2;
+        runningDhus.add(2);
+        redirectOwner = { deviceId: image.deviceId!, incarnation: 2 };
+      }
+    };
+    // Ownership retirement is the earliest point a same-serial replacement can be published.
+    const retire = pool.retireDeviceForShutdown.bind(pool);
+    pool.retireDeviceForShutdown = async (...args) => {
+      const retired = await retire(...args);
+      replacementProjects();
+      return retired;
+    };
     const reserve = pool.reserveDeviceForShutdown.bind(pool);
     pool.reserveDeviceForShutdown = async (...args) => {
       const reservation = await reserve(...args);
@@ -1027,12 +1041,8 @@ describe("killDevice handler", () => {
         ...reservation,
         release: async () => {
           await reservation.release();
-          if (incarnation === 1) {
-            // The serial is free: a replacement boots on it and projects its own DHU.
-            incarnation = 2;
-            runningDhus.add(2);
-            redirectOwner = { deviceId: image.deviceId!, incarnation: 2 };
-          }
+          // The serial is free: a replacement boots on it and projects its own DHU.
+          replacementProjects();
         },
       };
     };

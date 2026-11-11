@@ -52,8 +52,8 @@ import { waitForEmulatorShutdownWithEscalation } from "../features/deviceLifecyc
 import { exponentialBackoff } from "../utils/Backoff";
 import { stopWatchRunnerBeforeShutdown } from "../features/deviceLifecycle/teardown/shutdownPreparation";
 import {
-  stopAndroidAutoAfterKill,
   stopAndroidAutoBeforeShutdown,
+  trackAndroidAutoStopAfterKill,
 } from "./deviceToolsShutdownAndroidAuto";
 import {
   AndroidObserverShutdownState,
@@ -325,6 +325,8 @@ interface KillProcessAndRetireOwnershipOptions {
     retirement: Promise<void>,
     releaseReservationAfterFailure?: boolean,
   ) => void;
+  /** Runs once the platform stop is confirmed, before a same-ID replacement can be published. */
+  onShutdownConfirmed: () => Promise<void>;
 }
 
 async function confirmIosShutdownAfterTimeout(
@@ -607,6 +609,7 @@ async function killProcessAndRetireOwnership(
 
   if (alreadyStoppedMessage !== undefined) {
     await commitStoppedRestartHold(context, dependencies, commitRestartHoldStop, timeoutMs);
+    await options.onShutdownConfirmed();
     return alreadyStoppedMessage;
   }
 
@@ -629,6 +632,7 @@ async function killProcessAndRetireOwnership(
     perf.endOperation("waitForShutdown");
     shutdownWasConfirmed = true;
     await commitStoppedRestartHold(context, dependencies, commitRestartHoldStop, timeoutMs);
+    await options.onShutdownConfirmed();
 
     perf.startOperation("retireOwnership");
     await retireShutdownOwnership(
@@ -897,6 +901,7 @@ export async function shutdownDevice(
             requestAbortSignal,
             retainReservationUntil: retainShutdownUntil,
           };
+          const androidAutoStop = trackAndroidAutoStopAfterKill(shutdownContext, dependencies);
           const { killTarget, stopIdentity, androidObserverState } = await preparePlatformShutdown(
             { dependencies, context, options, devicePool, shutdownContext, perf },
             fence.clear,
@@ -926,6 +931,7 @@ export async function shutdownDevice(
                 killTarget,
                 force: pooledAvdIdentity?.force ?? false,
                 processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
+                onShutdownConfirmed: androidAutoStop.onShutdownConfirmed,
               },
             },
           );
@@ -965,15 +971,10 @@ export async function shutdownDevice(
           // syncInstalledAppResources() re-invalidating the same, already-gone
           // device) fence it without starting a phantom incarnation, so the
           // release still finds and frees the bookkeeping (#6704).
-          const lateDhuStop = await stopAndroidAutoAfterKill(shutdownContext, dependencies);
           const retiredIncarnation = getInstalledAppsCacheWriteCoordinator().retireIncarnation(
             device.deviceId,
           );
-          if (lateDhuStop) {
-            retainShutdownUntil(lateDhuStop.pending, true);
-          } else {
-            await releaseShutdownReservation();
-          }
+          await androidAutoStop.releaseReservation(releaseShutdownReservation, retainShutdownUntil);
           unregisterDirectSessionsForDevice(device.deviceId);
 
           await finishShutdownCleanup(shutdownContext, dependencies, perf, {

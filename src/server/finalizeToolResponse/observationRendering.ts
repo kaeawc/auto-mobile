@@ -26,6 +26,7 @@ import {
 } from "../../features/action/observationActionClass";
 import { serverConfig } from "../../utils/ServerConfig";
 import {
+  collectCaptureIncomplete,
   collectWindowTruncations,
   isHostOutputTruncationReason,
 } from "../../features/observe/truncationReasons";
@@ -57,7 +58,7 @@ export function resolveObserveProjection(args?: Record<string, unknown>): "full"
  * diff-mode client needs with the same shape as a full observation. Sourced
  * from the raw (pre-sanitize) observation so projection never suppresses it.
  * Add a field here when it is a straight copy; the contract test walks this
- * list. `skeleton`, `context`, `keyboard`, `truncationReasons`, and `windowTruncations` are excluded
+ * list. `skeleton`, `context`, `keyboard`, `truncationReasons`, `windowTruncations`, and `captureIncomplete` are excluded
  * because they require projection or provenance merging.
  */
 export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
@@ -522,6 +523,9 @@ function emitActionObservationDiff(
     servedObservation.windowTruncations ??
     collectWindowTruncations(rawObservation.viewHierarchy?.windows);
   Object.assign(diff, windowTruncations ? { windowTruncations } : {});
+  const captureIncomplete =
+    servedObservation.captureIncomplete ?? collectCaptureIncomplete(rawObservation.viewHierarchy);
+  Object.assign(diff, captureIncomplete ? { captureIncomplete } : {});
   const emitFull = shouldEmitFullActionObservation(
     { payload, baseline, sanitized, servedObservation, diff },
     ctx,

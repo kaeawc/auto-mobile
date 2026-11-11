@@ -9,6 +9,7 @@ internal class CtrlProxyWorkStats {
   val unchangedCaptures = AtomicLong()
   val coalescedEvents = AtomicLong()
   val nodesVisited = AtomicLong()
+  val skippedWindowReads = AtomicLong()
   val occlusionCandidateComparisons = AtomicLong()
   val occlusionIndexEntriesVisited = AtomicLong()
   val forwardedLogLines = AtomicLong()

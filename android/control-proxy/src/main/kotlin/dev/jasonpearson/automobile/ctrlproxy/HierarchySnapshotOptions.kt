@@ -33,7 +33,13 @@ private constructor(
     slotCount: Int = 1,
   ) : this(SharedBudget(options, slotCount), options.maxNodes, false)
 
-  private class SharedBudget(val options: HierarchySnapshotOptions, slotCount: Int) {
+  private class SharedBudget(
+    val options: HierarchySnapshotOptions,
+    slotCount: Int,
+    // Long arithmetic avoids overflow for a large caller-provided slot count.
+    val reservation: Int =
+      maxOf(1, (options.maxNodes.toLong() / (2L * maxOf(1, slotCount))).toInt()),
+  ) {
     init {
       require(slotCount > 0) { "slotCount must be > 0" }
     }
@@ -41,8 +47,6 @@ private constructor(
     var nodes = 0
     var remainingSlots = slotCount
     var scopeOpen = false
-    // Long arithmetic avoids overflow for a large caller-provided slot count.
-    val reservation = maxOf(1, (options.maxNodes.toLong() / (2L * slotCount)).toInt())
     val reasons = linkedSetOf<String>()
   }
 

@@ -12,4 +12,5 @@ data class HierarchyExtractionOptions(
   val snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   val displayId: Int? = null,
   val panelUniqueId: String? = null,
+  val listingSkipped: Boolean = false,
 )

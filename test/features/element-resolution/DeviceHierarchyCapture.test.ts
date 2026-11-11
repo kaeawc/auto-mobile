@@ -207,6 +207,32 @@ test("persistent incomplete hierarchy retries once then supplements within the o
   expect(snapshot.hierarchy.ctrlProxyIncomplete).toBe(true);
 });
 
+test.each(["window_read_skipped", "window_list_skipped"] as const)(
+  "%s capture is returned as-is without a retry or uiautomator dump",
+  async (reason) => {
+    const { capture, adb, timer, reads, raw } = fixture(0);
+    raw.ctrlProxyIncompleteReason = reason;
+    raw.skippedWindowReads = 1;
+    const snapshot = await capture.capture({ freshness: "fresh", timeoutMs: 1000 });
+    expect(reads).toHaveLength(1);
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(adb.getCommandCalls()).toEqual([]);
+    expect(snapshot.hierarchy.ctrlProxyIncomplete).toBe(true);
+    expect(snapshot.hierarchy.ctrlProxyIncompleteReason).toBe(reason);
+    expect(snapshot.hierarchy.sources ?? []).not.toContain("uiautomator");
+  },
+);
+
+test("retry that comes back window_read_skipped does not dump", async () => {
+  const { capture, adb, timer, replies, reads, raw } = fixture(0);
+  replies.push({ ...raw, ctrlProxyIncompleteReason: "window_read_skipped" });
+  const snapshot = await capture.capture({ freshness: "fresh", timeoutMs: 1000 });
+  expect(reads).toHaveLength(2);
+  expect(timer.getSleepHistory()).toEqual([100]);
+  expect(adb.getCommandCalls()).toEqual([]);
+  expect(snapshot.hierarchy.ctrlProxyIncompleteReason).toBe("window_read_skipped");
+});
+
 test.each([null, new Error("service absent")])(
   "initial unavailable service preserves the existing failure without retry or dump: %s",
   async (reply) => {

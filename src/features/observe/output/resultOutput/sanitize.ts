@@ -15,6 +15,7 @@ import { markOccludedRowsOnFullProjection } from "../FullProjectionOcclusion";
 import { capLayoutWarnings } from "../../audits/SafeAreaAuditor";
 import {
   captureFidelityTruncationReasons,
+  collectCaptureIncomplete,
   collectWindowTruncations,
   normalizeHierarchyOptionalFields,
 } from "../../truncationReasons";
@@ -282,6 +283,14 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
     out.windowTruncations = windowTruncations;
   } else {
     delete out.windowTruncations;
+  }
+  // A skipped shade/IME/dialog root (#17817) leaves the app window readable, so the
+  // freshness verdict may stay fresh; this flag is then the only completeness signal.
+  const captureIncomplete = collectCaptureIncomplete(out.viewHierarchy);
+  if (captureIncomplete) {
+    out.captureIncomplete = captureIncomplete;
+  } else {
+    delete out.captureIncomplete;
   }
   delete out.viewHierarchy;
   delete out.elements;

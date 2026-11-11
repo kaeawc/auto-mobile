@@ -245,18 +245,30 @@ test.each([
   "active_window_null_root",
   "app_window_null_root",
   "no_app_window_root",
+  "window_read_skipped",
+  "window_list_skipped",
   undefined,
 ] as const)("captured hierarchy conversion preserves optional incomplete reason: %s", (reason) => {
   const wire: AccessibilityHierarchy = JSON.parse(capture.rawViewHierarchy.json);
   wire.ctrlProxyIncomplete = true;
+  wire.skippedWindowReads = 2;
+  wire.skippedWindowIds = [42];
   if (reason === undefined) {
     delete wire.ctrlProxyIncompleteReason;
   } else {
     wire.ctrlProxyIncompleteReason = reason;
   }
-  expect(converter().convertToViewHierarchyResult(wire).ctrlProxyIncompleteReason).toBe(reason);
+  expect(converter().convertToViewHierarchyResult(wire)).toMatchObject({
+    ctrlProxyIncompleteReason: reason,
+    skippedWindowReads: 2,
+    skippedWindowIds: [42],
+  });
   // Both the readable and rootless conversion branches retain the wire metadata.
   const rootless: Partial<AccessibilityHierarchy> = wire;
   delete rootless.hierarchy;
-  expect(converter().convertToViewHierarchyResult(wire).ctrlProxyIncompleteReason).toBe(reason);
+  expect(converter().convertToViewHierarchyResult(wire)).toMatchObject({
+    ctrlProxyIncompleteReason: reason,
+    skippedWindowReads: 2,
+    skippedWindowIds: [42],
+  });
 });

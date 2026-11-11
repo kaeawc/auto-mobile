@@ -142,6 +142,10 @@ export interface AccessibilityHierarchy {
    * extraction throw. Absent on pre-#6172 runners — treated as `null_root`.
    */
   ctrlProxyIncompleteReason?: CtrlProxyIncompleteReason;
+  /** Distinct skipped window roots plus one when the window listing was skipped. */
+  skippedWindowReads?: number;
+  /** IDs of skipped roots; a skipped listing contributes no ID. */
+  skippedWindowIds?: number[];
   error?: string;
   /** Screen width from accessibility service (eliminates need for dumpsys) */
   screenWidth?: number;

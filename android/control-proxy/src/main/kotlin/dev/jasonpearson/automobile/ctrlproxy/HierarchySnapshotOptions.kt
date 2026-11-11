@@ -33,7 +33,13 @@ private constructor(
     slotCount: Int = 1,
   ) : this(SharedBudget(options, slotCount), options.maxNodes, false)
 
-  private class SharedBudget(val options: HierarchySnapshotOptions, slotCount: Int) {
+  private class SharedBudget(
+    val options: HierarchySnapshotOptions,
+    slotCount: Int,
+    // Long arithmetic avoids overflow for a large caller-provided slot count.
+    val reservation: Int =
+      maxOf(1, (options.maxNodes.toLong() / (2L * maxOf(1, slotCount))).toInt()),
+  ) {
     init {
       require(slotCount > 0) { "slotCount must be > 0" }
     }
@@ -41,13 +47,29 @@ private constructor(
     var nodes = 0
     var remainingSlots = slotCount
     var scopeOpen = false
-    // Long arithmetic avoids overflow for a large caller-provided slot count.
-    val reservation = maxOf(1, (options.maxNodes.toLong() / (2L * slotCount)).toInt())
     val reasons = linkedSetOf<String>()
   }
 
   private val reasons = linkedSetOf<String>()
   private var finished = false
+
+  /** Worker-private accounting. Abandoned reads must never consume the caller's snapshot cap. */
+  fun fork(): HierarchySnapshotBudget {
+    check(!isScope && !shared.scopeOpen)
+    val local = SharedBudget(shared.options, maxOf(1, shared.remainingSlots), shared.reservation)
+    local.nodes = shared.nodes
+    local.remainingSlots = shared.remainingSlots
+    return HierarchySnapshotBudget(local, nodeLimit, isScope)
+  }
+
+  /** Only the capture caller merges a read that completed within its time budget. */
+  fun mergeCompleted(local: HierarchySnapshotBudget) {
+    check(!isScope && !shared.scopeOpen)
+    shared.nodes = local.shared.nodes
+    shared.remainingSlots = local.shared.remainingSlots
+    reasons += local.reasons
+    shared.reasons += local.shared.reasons
+  }
 
   /** Only one scope may be open: unused nodes become available to the next scope on finish. */
   fun openScope(reserved: Boolean = true): HierarchySnapshotBudget {

@@ -14,6 +14,7 @@ import type {
   DevicePoolStatus,
   DeviceSessionOwnership,
   DeviceServiceStatusLike,
+  DeviceVehicleCapabilities,
 } from "../models/deviceDescription";
 export type {
   DeviceHeldBy,
@@ -69,6 +70,8 @@ export type DeviceDescriptionInput =
       reserved?: boolean;
       /** The pool's own bucket for this device (`DevicePool.poolBucket`); wins over any local derivation. */
       poolStatus?: PoolStatusBucket | null;
+      /** Live build-prop vehicle traits; win over the image-tag rule on an automotive description (#16775). */
+      vehicle?: DeviceVehicleCapabilities;
     }
   | {
       kind: "provisioned";
@@ -82,6 +85,8 @@ export type DeviceDescriptionInput =
       serviceStatus?: DeviceServiceStatusLike;
       locked?: boolean;
       orientation?: "portrait" | "landscape";
+      /** Live build-prop vehicle traits of the booted device (#16775); ignored before boot. */
+      vehicle?: DeviceVehicleCapabilities;
     };
 
 type ImageLike = DeviceInfo | StableConfiguredDeviceImage;
@@ -129,6 +134,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     reserved: input.kind === "booted" ? input.reserved : undefined,
     poolBucket: input.kind === "booted" ? input.poolStatus : undefined,
     unhealthy: input.unhealthy !== undefined,
+    liveVehicle: input.vehicle,
   });
   return input.unhealthy ? { ...description, unhealthy: input.unhealthy } : description;
 }
@@ -189,10 +195,13 @@ interface BootedDescriptionOptions {
   unhealthy?: boolean;
   /** The pool's bucket for the device; when present it is the only status authority. */
   poolBucket?: PoolStatusBucket | null;
+  /** Live build-prop vehicle traits; preferred over the image-tag rule (#16775). */
+  liveVehicle?: DeviceVehicleCapabilities;
 }
 
 function describeBooted(options: BootedDescriptionOptions): DeviceDescription {
-  const { device, admittedImage, admittedImageAuthoritative, pooled, configured } = options;
+  const { device, admittedImage, admittedImageAuthoritative, pooled, configured, liveVehicle } =
+    options;
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
   // though the selected configured image proves this is a virtual device.
@@ -213,7 +222,7 @@ function describeBooted(options: BootedDescriptionOptions): DeviceDescription {
     display: displayFrom(merged),
     ...(merged.displays?.panels.length ? { displays: merged.displays } : {}),
     capabilityInventory: capabilityInventory(merged, isVirtual),
-    ...vehicleFrom(merged, staticFacts.formFactor, isVirtual),
+    ...vehicleFrom(merged, staticFacts.formFactor, isVirtual, liveVehicle),
     image: imageLinkWithConfiguredFallback(admittedImage, configured),
     availabilityError: device.platform === "ios" ? (merged.availabilityError ?? null) : null,
     runtime: describeBootedRuntime(options),
@@ -372,6 +381,21 @@ export function withDeviceLifecycle(
   lifecycle: DeviceDescription["runtime"]["lifecycle"],
 ): DeviceDescription {
   return { ...description, runtime: { ...description.runtime, lifecycle } };
+}
+
+/**
+ * Applies live build-prop vehicle traits read after the description was built (the booted-devices
+ * resource probes traits last). Same rule as {@link describeDevice}: only an automotive
+ * description takes them, and every other description is returned unchanged (#16775).
+ */
+export function withLiveVehicleCapabilities(
+  description: DeviceDescription,
+  vehicle: DeviceVehicleCapabilities | undefined,
+): DeviceDescription {
+  if (!vehicle || description.formFactor !== "automotive") {
+    return description;
+  }
+  return { ...description, vehicle: { motion: vehicle.motion, nightMode: vehicle.nightMode } };
 }
 
 /** Applies observed live state without rebuilding or reinterpreting static device facts. */

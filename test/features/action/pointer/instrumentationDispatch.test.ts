@@ -502,4 +502,30 @@ describe("createInstrumentationDispatch", () => {
     await expect(dispatch).rejects.toThrow("Operation cancelled");
     expect(ambient).toEqual([undefined]);
   });
+
+  test("the failed-close CANCEL ignores an aborted ambient request signal", async () => {
+    const ambient: Array<AbortSignal | undefined> = [];
+    class AmbientRecordingAdb extends FakeAdbExecutor {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
+        if (command.includes("motionevent CANCEL")) {
+          ambient.push(getAbortSignal());
+        }
+        return super.executeCommand(command, options);
+      }
+    }
+    const adb = new AmbientRecordingAdb();
+    adb.setCommandResponse(
+      "am instrument",
+      refusal(3, "the system refused MOVE at 48 ms; the pointer could not be closed"),
+    );
+    const controller = new AbortController();
+    controller.abort();
+    // The run itself has no explicit signal; only the request's ambient one is aborted.
+    await expect(
+      runWithAbortSignal(controller.signal, () =>
+        createInstrumentationDispatch(adb, DEVICE)(hover),
+      ),
+    ).rejects.toThrow("after 3 events");
+    expect(ambient).toEqual([undefined]);
+  });
 });

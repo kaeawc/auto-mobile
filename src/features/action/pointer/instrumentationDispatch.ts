@@ -148,9 +148,13 @@ async function sendPointerCancel(
 ): Promise<void> {
   const point = request.points[0];
   try {
-    await adb.executeCommand(
-      `shell input stylus motionevent CANCEL ${Math.round(point.x)} ${Math.round(point.y)}`,
-      { timeoutMs: POINTER_CANCEL_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+    // The ambient signal is set to `signal` too: AdbClient falls back to it when none is passed,
+    // so cleanup without a signal must not inherit an already-aborted request.
+    await runWithAbortSignal(signal, () =>
+      adb.executeCommand(
+        `shell input stylus motionevent CANCEL ${Math.round(point.x)} ${Math.round(point.y)}`,
+        { timeoutMs: POINTER_CANCEL_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+      ),
     );
   } catch (error) {
     // Safe to continue: the caller reports the run's own outcome, and a later refusal retries CANCEL.
@@ -173,10 +177,7 @@ async function runClosingOnAbandon(
     return await run();
   } catch (error) {
     if (!(error instanceof PointerNotSentError)) {
-      // Clear the ambient request signal too: AdbClient falls back to it, and it is already aborted.
-      await runWithAbortSignal(undefined, () =>
-        sendPointerCancel(adb, request, "an abandoned pointer run"),
-      );
+      await sendPointerCancel(adb, request, "an abandoned pointer run");
     }
     throw error;
   }

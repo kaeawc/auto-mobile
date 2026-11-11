@@ -22,17 +22,17 @@ fail() {
   exit 1
 }
 
-sha256_of() {
-  local file="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "${file}" | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "${file}" | awk '{print $1}'
-  elif command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 "${file}" | awk '{print $2}'
-  else
-    fail "need sha256sum, shasum, or openssl to verify MediaMTX"
-  fi
+# shellcheck source=scripts/lib/release-download.sh
+source "${repo_root}/scripts/lib/release-download.sh"
+
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+  local run_rc=0
+  "$@" || run_rc=$?
+  RUN_STATUS="${run_rc}"
 }
 
 resolve_release() {
@@ -64,22 +64,28 @@ resolve_release() {
 
 download_mediamtx() {
   resolve_release
-  local install_dir archive actual_sha
+  local install_dir archive
   install_dir="${cache_dir}/v${MEDIAMTX_VERSION}/${mediamtx_asset%.tar.gz}"
   mediamtx_binary="${install_dir}/mediamtx"
   if [[ -x "${mediamtx_binary}" ]]; then
     return
   fi
 
-  command -v curl >/dev/null 2>&1 || fail "curl is required to download MediaMTX; set AUTOMOBILE_MEDIAMTX_BINARY instead"
+  command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 \
+    || fail "curl or wget is required to download MediaMTX; set AUTOMOBILE_MEDIAMTX_BINARY instead"
   command -v tar >/dev/null 2>&1 || fail "tar is required to extract MediaMTX; set AUTOMOBILE_MEDIAMTX_BINARY instead"
   mkdir -p "${install_dir}"
-  archive="$(mktemp "${cache_dir}/.${mediamtx_asset}.XXXXXX")"
+  archive="${cache_dir}/.${mediamtx_asset}.$$"
   trap 'rm -f "${archive}"' RETURN
-  curl --fail --location --retry 3 --output "${archive}" \
-    "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/${mediamtx_asset}"
-  actual_sha="$(sha256_of "${archive}")"
-  [[ "${actual_sha}" == "${mediamtx_sha256}" ]] || fail "downloaded MediaMTX checksum mismatch (wanted ${mediamtx_sha256}, got ${actual_sha})"
+  # Reuses a cached archive whose SHA-256 matches the pin, else downloads with a
+  # bounded backoff (UPSTREAM-DOWNLOAD-FAILURE marker on a GitHub outage) and
+  # verifies the checksum before extracting or caching it (#17641).
+  run_capture_status release_fetch_pinned \
+    "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/${mediamtx_asset}" \
+    "${mediamtx_sha256}" "${archive}" "mediamtx/${MEDIAMTX_VERSION}"
+  if [[ "${RUN_STATUS}" -ne 0 ]]; then
+    fail "could not fetch a MediaMTX ${MEDIAMTX_VERSION} archive matching the pinned checksum ${mediamtx_sha256}"
+  fi
   tar -xzf "${archive}" -C "${install_dir}"
   [[ -x "${mediamtx_binary}" ]] || fail "MediaMTX archive did not contain an executable at ${mediamtx_binary}"
 }

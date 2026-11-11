@@ -26,9 +26,11 @@ web page in a browser and reloads it on each `show` and landed `patch`.
 
 The web page's CSP allows only its own runtime script and no network, so the page is never
 modified. The reload script lives in the shell, whose CSP pins that script's hash and allows
-`connect-src 'self'` and `frame-src 'self'`. On `reload` the shell reads the variant picked in the
-same-origin iframe and reloads the iframe with it. `generation` counts changes: a `ready` after an
-EventSource reconnect with a different generation means a change was missed, and the shell reloads.
+`connect-src 'self'` and `frame-src 'self'`. The shell renders the iframe without `src` and loads
+it on the first `ready` (or on a stream error before one), so the page is requested only after the
+stream is subscribed and a change between the two cannot go unseen. On `reload` the shell reads the variant picked in the
+same-origin iframe and reloads the iframe with it. `generation` counts changes: a later `ready` with a
+different generation means a change was missed, and the shell reloads.
 
 A page for `P` gets `reload` when the changed id is `P`, is in `P`'s variant group now, or was at
 the previous change, so a variant that leaves the group still reloads its pages once.

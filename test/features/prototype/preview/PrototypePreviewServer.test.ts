@@ -169,7 +169,7 @@ describe("PrototypePreviewServer requests", () => {
     expect(page.body).toBe("<page a b pixel-9>");
     const shell = http.request("/p/a", LOCAL);
     await shell.done();
-    expect(shell.body).toContain('src="/p/a/page"');
+    expect(shell.body).toContain('data-page="/p/a/page"');
   });
 
   test("refuses other hosts unless remote, and methods other than GET", async () => {

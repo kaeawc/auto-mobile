@@ -70,7 +70,7 @@ describe("PrototypePreviewServer over loopback", () => {
 
     const shell = await fetch(pageUrl);
     expect(shell.status).toBe(200);
-    expect(await shell.text()).toContain('src="/p/demo/page"');
+    expect(await shell.text()).toContain('data-page="/p/demo/page"');
     const first = await fetch(`${pageUrl}/page`);
     expect(await first.text()).toContain('data-revision="1"');
 

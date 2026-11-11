@@ -74,8 +74,10 @@ export function prototypePreviewPath(id: string): string {
 }
 
 /**
- * Reloads the iframe on each `reload` event, keeping the variant picked in the page, and after a
- * reconnect whose `ready` generation shows a change was missed while disconnected.
+ * Loads the iframe on the first `ready`, so the page is requested only once the stream is
+ * subscribed and no change can land unseen between the two; a stream that fails before `ready`
+ * still loads it. Then reloads the iframe on each `reload` event, keeping the variant picked in the
+ * page, and after any `ready` whose generation shows a change was missed.
  */
 export const PROTOTYPE_PREVIEW_SHELL_SCRIPT = [
   "(() => {",
@@ -83,7 +85,13 @@ export const PROTOTYPE_PREVIEW_SHELL_SCRIPT = [
   'const status = document.querySelector("[data-preview-status]");',
   "const events = new EventSource(document.body.dataset.events);",
   "let generation;",
+  "let loaded = false;",
   "const reload = () => {",
+  "if (!loaded) {",
+  "loaded = true;",
+  "frame.src = frame.dataset.page;",
+  "return;",
+  "}",
   'const picked = frame.contentDocument?.querySelector("[data-control=variant]")?.value;',
   'const next = new URL(frame.getAttribute("src"), location.href);',
   'if (picked) next.searchParams.set("variant", picked);',
@@ -92,7 +100,7 @@ export const PROTOTYPE_PREVIEW_SHELL_SCRIPT = [
   "};",
   'events.addEventListener("ready", (event) => {',
   "const seen = JSON.parse(event.data).generation;",
-  "const missed = generation !== undefined && seen !== generation;",
+  "const missed = !loaded || seen !== generation;",
   "generation = seen;",
   'status.textContent = "Live";',
   "if (missed) reload();",
@@ -103,6 +111,7 @@ export const PROTOTYPE_PREVIEW_SHELL_SCRIPT = [
   "});",
   "events.onerror = () => {",
   'status.textContent = "Reconnecting";',
+  "if (!loaded) reload();",
   "};",
   "})();",
 ].join("\n");
@@ -195,7 +204,7 @@ function shellPage(query: PrototypePreviewPageQuery): PrototypePreviewResponse {
     attrs: {
       "data-preview": "",
       title: query.id,
-      src: `${base}/page${params ? `?${params}` : ""}`,
+      "data-page": `${base}/page${params ? `?${params}` : ""}`,
     },
   });
   const page = htmlDocument(`${query.id} preview`, [header, frame], {

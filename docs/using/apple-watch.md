@@ -140,7 +140,8 @@ Every other tool refuses a watch before doing anything, with:
 - `tapAt` takes absolute coordinates in points, including for widgets when the Smart Stack is open.
   Tapping a widget with `tapOn` or `tapAt` opens its host app, so the normal tools work afterwards.
   While the Smart Stack is open, `observe` returns `hierarchyUnavailable` and no hierarchy fields.
-  On the plain watch face without the Smart Stack, both tap tools are unchanged.
+  With the host app not in the foreground and no Smart Stack open, `tapAt` taps the watch face
+  at the given point coordinates, reaching complications; `tapOn` still needs the host app foreground.
 - `swipeOn` swipes in a direction. With `lookFor` it swipes until an exact `text` or `elementId`
   is on screen, up to `maxSwipes` (default 10, maximum 100). Each `lookFor` step is a short, slow drag (about
   one row on a list) so consecutive reads overlap and nearby targets are not skipped. Coordinates

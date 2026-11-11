@@ -374,6 +374,12 @@ export const observeDiffSchema = z
       .describe(
         "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
       ),
+    surface: z
+      .enum(["tile", "watchface", "launcher", "app"])
+      .optional()
+      .describe(
+        "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+      ),
     added: z
       .array(observeDiffNodeSchema)
       .optional()

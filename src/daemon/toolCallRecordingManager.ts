@@ -1,5 +1,6 @@
 import * as yaml from "js-yaml";
 import { Plan } from "../models";
+import type { PlanTopLevelPlatform } from "../models/Plan";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
@@ -22,6 +23,10 @@ export interface ToolCallRecordingStopResult {
   stoppedAt: string;
   /** One entry per call that was skipped or recorded in a weakened form; empty when none. */
   warnings: string[];
+  /** The platform written at the top of the plan, when every recorded call targeted it. */
+  platform?: PlanTopLevelPlatform;
+  /** Why the plan has no top-level platform; absent when `platform` is set. */
+  platformNote?: string;
 }
 
 export interface ToolCallRecordingStatus {
@@ -110,6 +115,42 @@ const formatPlanName = (planName?: string, timer: Timer = defaultTimer): string 
   return `mcp-recorded-plan-${timestamp}`;
 };
 
+const PLAN_TOP_LEVEL_PLATFORMS: ReadonlySet<string> = new Set(["android", "ios", "tvos"]);
+
+function isPlanTopLevelPlatform(value: string): value is PlanTopLevelPlatform {
+  return PLAN_TOP_LEVEL_PLATFORMS.has(value);
+}
+
+/**
+ * The platform a recorded plan declares: the one every recorded call targeted, so the plan
+ * runs as exported (#17938). Mixed or unknown platforms leave it out, with the reason.
+ */
+export function resolveRecordedPlanPlatform(
+  stepPlatforms: readonly (string | undefined)[],
+): { platform: PlanTopLevelPlatform } | { platformNote: string } {
+  const unknownCount = stepPlatforms.filter((platform) => platform === undefined).length;
+  const distinct = [...new Set(stepPlatforms.filter((p): p is string => p !== undefined))];
+  const omitted = "The plan has no top-level platform";
+  const remedy = "add platform to the plan, or pass platform to executePlan";
+  if (unknownCount > 0) {
+    return {
+      platformNote: `${omitted}: ${unknownCount} of ${stepPlatforms.length} recorded call(s) had no known platform; ${remedy}.`,
+    };
+  }
+  if (distinct.length > 1) {
+    return {
+      platformNote: `${omitted}: the recorded calls targeted more than one platform (${distinct.join(", ")}); ${remedy}.`,
+    };
+  }
+  const [only] = distinct;
+  if (only === undefined || !isPlanTopLevelPlatform(only)) {
+    return {
+      platformNote: `${omitted}: ${only ?? "no platform"} is not a plan platform (android, ios or tvos); ${remedy}.`,
+    };
+  }
+  return { platform: only };
+}
+
 export function stopToolCallRecording({
   connectionId,
   planName,
@@ -127,7 +168,7 @@ export function stopToolCallRecording({
   }
 
   try {
-    const { steps, warnings } = session.recorder.stopWithWarnings();
+    const { steps, warnings, stepPlatforms } = session.recorder.stopWithWarnings();
     const stoppedAt = timer.now();
     const resolvedName = formatPlanName(planName, timer);
 
@@ -142,8 +183,10 @@ export function stopToolCallRecording({
       );
     }
 
+    const platformResolution = resolveRecordedPlanPlatform(stepPlatforms);
     const plan: Plan = {
       name: resolvedName,
+      ...("platform" in platformResolution && { platform: platformResolution.platform }),
       steps,
       // Release portion only — recorded plans are schema-validated (`^\d+\.\d+\.\d+$`)
       // before migration, so a dev build's `+g<sha>` stamp would make them unusable.
@@ -179,6 +222,7 @@ export function stopToolCallRecording({
       startedAt: new Date(session.startedAt).toISOString(),
       stoppedAt: new Date(stoppedAt).toISOString(),
       warnings,
+      ...platformResolution,
     };
   } finally {
     activeSessions.delete(connectionKey);

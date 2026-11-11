@@ -201,17 +201,34 @@ export function stripInternalParams(args: Record<string, unknown>): Record<strin
 }
 
 /**
+ * The recorded call's args with `platform` set to the device the call resolved, so a recording
+ * knows each call's platform even when the caller passed only `deviceId` (#17938).
+ */
+export function withResolvedPlatform(
+  args: Record<string, unknown>,
+  device: { platform: string } | undefined,
+): Record<string, unknown> {
+  if (!device || typeof args !== "object" || args === null) {
+    return args;
+  }
+  return { ...args, platform: device.platform };
+}
+
+/**
  * Records successful MCP tool calls as PlanStep entries.
  * Designed to be wired into ToolRegistry's wrappedHandler success path.
  */
 export class ToolCallRecorder {
   private steps: PlanStep[] = [];
   private warnings: string[] = [];
+  /** The `platform` each recorded step's call targeted, index-aligned with `steps`; undefined when unknown. */
+  private stepPlatforms: (string | undefined)[] = [];
   private recording = false;
 
   start(): void {
     this.steps = [];
     this.warnings = [];
+    this.stepPlatforms = [];
     this.recording = true;
     logger.info("[ToolCallRecorder] Recording started");
   }
@@ -223,13 +240,23 @@ export class ToolCallRecorder {
   /**
    * Stop recording and return the steps with a warning per call that was skipped
    * or recorded in a weakened form, so the caller can tell the user what a
-   * replay of the plan will not do.
+   * replay of the plan will not do. `stepPlatforms` holds the platform each step's call
+   * targeted (undefined when the call named none), index-aligned with `steps`.
    */
-  stopWithWarnings(): { steps: PlanStep[]; warnings: string[] } {
+  stopWithWarnings(): {
+    steps: PlanStep[];
+    warnings: string[];
+    stepPlatforms: (string | undefined)[];
+  } {
     this.recording = false;
-    const result = { steps: [...this.steps], warnings: [...this.warnings] };
+    const result = {
+      steps: [...this.steps],
+      warnings: [...this.warnings],
+      stepPlatforms: [...this.stepPlatforms],
+    };
     this.steps = [];
     this.warnings = [];
+    this.stepPlatforms = [];
     logger.info(
       `[ToolCallRecorder] Recording stopped with ${result.steps.length} steps and ${result.warnings.length} warnings`,
     );
@@ -294,6 +321,8 @@ export class ToolCallRecorder {
     } else {
       this.steps.push({ tool: toolName, params: recordedParams });
     }
+    // `platform` is a routing param, stripped from the step; the plan declares it once (#17938).
+    this.stepPlatforms.push(typeof args.platform === "string" ? args.platform : undefined);
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
   }
 

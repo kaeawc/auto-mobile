@@ -56,6 +56,16 @@ const recordToolCallsResultSchema = z.object({
     .describe(
       "action=end only, present when non-empty: calls that were skipped (host-file sourcePath, oversized param) or recorded in a weakened form (resetKeychain with confirm:false), each with the reason",
     ),
+  platform: z
+    .enum(["android", "ios", "tvos"])
+    .optional()
+    .describe("action=end only: the platform written at the top of the plan"),
+  platformNote: z
+    .string()
+    .optional()
+    .describe(
+      "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",
+    ),
   error: z.string().optional(),
 });
 
@@ -113,6 +123,8 @@ const recordToolCallsTool = async (params: {
       stepCount: result.stepCount,
       durationMs: result.durationMs,
       ...(result.warnings.length > 0 && { warnings: result.warnings }),
+      ...(result.platform && { platform: result.platform }),
+      ...(result.platformNote && { platformNote: result.platformNote }),
     });
   } catch (error) {
     logger.error(`[recordToolCalls] Failed: ${errorMessage(error)}`);

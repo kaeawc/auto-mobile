@@ -255,7 +255,15 @@ describe("XR panel-space tap routing", () => {
         isTalkBackEnabled: false,
         options: { action: "tap", resolvedHierarchy: tree },
       });
-      if (["captured-no-selector", "unique-row", "text-frame", "nearest-ancestor"].includes(mode)) {
+      if (
+        [
+          "captured-no-selector",
+          "missing-class",
+          "unique-row",
+          "text-frame",
+          "nearest-ancestor",
+        ].includes(mode)
+      ) {
         await result;
         expect(service.getNodeActionHistory()).toMatchObject([
           {
@@ -270,7 +278,7 @@ describe("XR panel-space tap routing", () => {
                 }
               : {}),
             selector:
-              mode === "captured-no-selector"
+              mode === "captured-no-selector" || mode === "missing-class"
                 ? undefined
                 : mode === "nearest-ancestor"
                   ? { uniqueId: "settings-connected-frame" }
@@ -400,6 +408,71 @@ describe("XR panel-space tap routing", () => {
       labelText: undefined,
       labelContentDesc: "Connections",
     });
+  });
+
+  // The extractor maps View, FrameLayout, ScrollView and TextView to a null class (#17853).
+  function genericClassRow(tree: ViewHierarchyResult) {
+    const { row } = settingsTarget(tree);
+    delete row.source.class;
+    Reflect.deleteProperty(row.source, "className");
+    return row;
+  }
+
+  test("a generic-class FrameLayout row with text clicks without a class hint", async () => {
+    const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+    const row = genericClassRow(tree);
+    row.source.text = "Connected devices row";
+    const current = new SearchableHierarchy()
+      .project(tree)
+      .find((entry) => entry.source === row.source)!;
+    const { tap, service, adb } = setup();
+    await tap.executeAndroidTap("tap", point, 0, {
+      element: { ...current.properties, bounds: current.bounds! },
+      isTalkBackEnabled: false,
+      options: { action: "tap", resolvedHierarchy: tree },
+    });
+    const [request] = service.getNodeActionHistory();
+    expect(request).toMatchObject({ selector: undefined, expectedBounds: current.bounds });
+    expect(request!.identityHints).toEqual({ text: "Connected devices row" });
+    expect(service.getTapHistory()).toHaveLength(0);
+    expect(adb.getAllCommands()).toHaveLength(0);
+  });
+
+  test("a generic-class View row with only a label descendant clicks by its label", async () => {
+    const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+    genericClassRow(tree);
+    const current = settingsTarget(tree);
+    const { tap, service } = setup();
+    await tap.executeAndroidTap("tap", point, 0, {
+      element: { ...current.label.properties, bounds: current.label.bounds! },
+      isTalkBackEnabled: false,
+      options: { action: "tap", resolvedHierarchy: tree },
+    });
+    const [request] = service.getNodeActionHistory();
+    expect(request).toMatchObject({ selector: undefined, expectedBounds: current.row.bounds });
+    expect(request!.identityHints).toEqual({ labelText: "Connected devices" });
+    expect(service.getTapHistory()).toHaveLength(0);
+  });
+
+  test("a generic-class node with no identity hints still refuses", async () => {
+    const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+    const row = genericClassRow(tree);
+    delete row.source.text;
+    delete row.source["content-desc"];
+    const current = new SearchableHierarchy()
+      .project(tree)
+      .find((entry) => entry.source === row.source)!;
+    const { tap, service, adb } = setup();
+    await expect(
+      tap.executeAndroidTap("tap", point, 0, {
+        element: { ...current.properties, bounds: current.bounds! },
+        isTalkBackEnabled: false,
+        options: { action: "tap", resolvedHierarchy: tree },
+      }),
+    ).rejects.toThrow(/XR panel coordinate space.*tapAt/);
+    expect(service.getNodeActionHistory()).toHaveLength(0);
+    expect(service.getTapHistory()).toHaveLength(0);
+    expect(adb.getAllCommands()).toHaveLength(0);
   });
 
   test("a runner requiring a selector preserves XR coordinate guidance", async () => {

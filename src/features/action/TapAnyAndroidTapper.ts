@@ -20,6 +20,7 @@ import {
   ActionableError,
   BootedDevice,
   Element,
+  type ElementContainerSelector,
   ObserveResult,
   type Point,
   TapAnyElementOptions,
@@ -66,6 +67,8 @@ export interface CapturedTapTarget {
   observationScreenSize?: ObserveResult["screenSize"];
   observationDisplay?: ScreenSizeForOffscreenCheckOptions["display"];
   scoped?: boolean;
+  /** The request's `container`; an XR node click never promotes past it. */
+  container?: ElementContainerSelector;
   talkBackState?: boolean | null;
   /** The request's `layer`; with none, the tap point must avoid AutoMobile's prototype windows. */
   layer?: HierarchyLayer;
@@ -91,6 +94,11 @@ export interface TapAnyAndroidTapperDependencies {
   talkBackDriverFactory: TalkBackNavigationDriverFactory;
   /** The shared XR predicate; XR panel bounds are not screen coordinates. */
   isAndroidXr(signal?: AbortSignal): Promise<boolean>;
+  /** Resolves the request's container in a hierarchy, as tapAny's selection does. */
+  resolveContainer(
+    hierarchy: ViewHierarchyResult,
+    container: ElementContainerSelector,
+  ): Element | undefined;
   beforeTap(): void;
   refreshViewHierarchy: RefreshViewHierarchy;
   findClickableElement(
@@ -145,7 +153,13 @@ export class TapAnyAndroidTapper {
         action,
         element,
         signal,
-        options: { displayFence: fence, resolvedHierarchy: capture.hierarchy },
+        options: {
+          displayFence: fence,
+          resolvedHierarchy: capture.hierarchy,
+          container: target.container,
+        },
+        resolveContainer: (tree) =>
+          target.container ? this.deps.resolveContainer(tree, target.container) : undefined,
       });
       return;
     }

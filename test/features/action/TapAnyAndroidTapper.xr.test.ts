@@ -39,7 +39,15 @@ const point = {
   y: (launcher.bounds!.top + launcher.bounds!.bottom) / 2,
 };
 
-function setup(xr: boolean) {
+// Verbatim Settings panel windows; its "Connected devices" label has a clickable row ancestor.
+const settingsCapture: Pick<ViewHierarchyResult, "windows"> = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "../../fixtures/android-xr/observe-settings-panel-children.json"),
+    "utf8",
+  ),
+);
+
+function setup(xr: boolean, resolveContainer: () => Element | undefined = () => undefined) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const adb = new FakeAdbClient();
@@ -66,6 +74,7 @@ function setup(xr: boolean) {
         device: { deviceId: "fake-xr", platform: "android" },
         signal,
       }),
+    resolveContainer,
     beforeTap: () => {},
     refreshViewHierarchy: async () => {
       refreshes++;
@@ -127,4 +136,45 @@ describe("tapAny on Android XR (#17811)", () => {
     expect(refreshes()).toBeGreaterThan(0);
     expect(service.getTapHistory()).toHaveLength(2);
   });
+
+  for (const scope of ["outside-container", "inside-container"] as const) {
+    test(`a container-scoped XR click never promotes past the container: ${scope}`, async () => {
+      const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+      const nodes = new SearchableHierarchy().project(tree);
+      const label = nodes.find((entry) => entry.properties.text === "Connected devices")!;
+      const frame = nodes[label.parentIndex!];
+      const row = nodes[frame.parentIndex!];
+      // The captured row has no stable native identity; give a copy one (never the fixture).
+      Object.assign(row.source, { "unique-id": "settings-connected-row" });
+      const scoped = new SearchableHierarchy().project(tree);
+      const at = (entry: (typeof scoped)[number]) => ({
+        ...entry.properties,
+        bounds: entry.bounds!,
+      });
+      const container =
+        scope === "outside-container"
+          ? at(scoped[nodes.indexOf(frame)])
+          : at(scoped[row.parentIndex!]);
+      const { tapper, service } = setup(true, () => container);
+      const result = tapper.executeAndroidTap("tap", point, 0, {
+        target: {
+          element: at(scoped[nodes.indexOf(label)]),
+          talkBackState: false,
+          scoped: true,
+          container: { elementId: "scope" },
+          capture: identifyObservedHierarchy("android", tree, "fresh", { timer: new FakeTimer() }),
+        },
+      });
+      if (scope === "outside-container") {
+        await expect(result).rejects.toThrow(/XR panel coordinate space/);
+        expect(service.getNodeActionHistory()).toHaveLength(0);
+      } else {
+        await result;
+        expect(service.getNodeActionHistory()).toMatchObject([
+          { action: "click", selector: { uniqueId: "settings-connected-row" } },
+        ]);
+      }
+      expect(service.getTapHistory()).toHaveLength(0);
+    });
+  }
 });

@@ -223,8 +223,8 @@ export function parseUnifiedCompact(text: string): GetLogsLine[] {
 /** The resolved read window shared by the per-platform `getLogs` paths. */
 interface GetLogsWindow {
   sinceSeconds: number;
-  /** Re-derives an anchored look-back right before the read, after any awaited probes. */
-  refreshSinceSeconds?: () => number;
+  /** The look-back to read with, re-derived from an anchored `since` after any awaited probes. */
+  readSinceSeconds: () => number;
   maxLines: number;
   minPriority: LogcatPriority;
 }
@@ -251,7 +251,14 @@ export class GetLogs {
     const refresh = refreshSinceSeconds ? { refreshSinceSeconds } : {};
     if (device.platform !== "android") {
       // Every Apple simulator reads its unified log; none falls through to logcat.
-      const window = { platform: device.platform, sinceSeconds, maxLines, minPriority, ...refresh };
+      const readSinceSeconds = refreshSinceSeconds ?? (() => sinceSeconds);
+      const window = {
+        platform: device.platform,
+        sinceSeconds,
+        readSinceSeconds,
+        maxLines,
+        minPriority,
+      };
       return this.ios(request, window, warnings, signal);
     }
     const result = await this.deps.android().read(
@@ -286,7 +293,7 @@ export class GetLogs {
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
-    const { platform, sinceSeconds, refreshSinceSeconds, maxLines, minPriority } = window;
+    const { platform, sinceSeconds, readSinceSeconds, maxLines, minPriority } = window;
     const label = PLATFORM_LABELS[platform];
     if (!request.appId) {
       throw new ActionableError(
@@ -306,7 +313,7 @@ export class GetLogs {
     const processName = await resolveProcessName(source, request.appId, warnings, signal);
     const collected = await source.collect(
       request.appId,
-      refreshSinceSeconds?.() ?? sinceSeconds,
+      readSinceSeconds(),
       unifiedLogLevel(minPriority),
       { signal, processName },
     );

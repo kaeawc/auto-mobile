@@ -35,7 +35,7 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
       stopDesktopHeadUnit: async () => {},
     };
     const applier = new DefaultAndroidAutoProjectionApplier(environment, runner);
-    const report = await applier.apply(device, { apkDirectory: "/apks" });
+    const report = await applier.apply(device, { apkDirectory: path.resolve("/apks") });
     expect(report).toEqual({
       steps: [{ step: "desktop-head-unit", status: "applied" }],
       desktopHeadUnit: { running: true },

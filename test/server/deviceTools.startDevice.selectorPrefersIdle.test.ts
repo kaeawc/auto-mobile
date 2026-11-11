@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { toolJson } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -70,6 +71,7 @@ describe("selector startDevice among held and idle matching devices", () => {
     DaemonState.getInstance().initialize(sessionManager, pool);
     const readinessDeviceIds: string[] = [];
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       deviceManagerFactory: () => deviceUtils,

@@ -91,6 +91,8 @@ lands.
 
 - `observe` reports `isScreenRound` on a watch: `true` on a round display, `false` on a square one,
   absent when it cannot be read.
+- On a watch, `observe` also reports `surface`: `tile`, `watchface`, `launcher` or `app`; it is absent
+  when the surface cannot be identified, including the notification tray.
 - `pressButton` `back` behaves like the Wear OS swipe-from-the-left-edge gesture: it closes the
   current screen, and repeated presses return to the watch face. `home` from inside an app returns
   to the watch face; from the watch face it opens the app list, which is the platform's own
@@ -145,10 +147,13 @@ flagged as below).
 - `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
   card, scrolling the stream when the action sits below the screen edge. If that text is not a
   single clickable target there, it fails rather than guessing and collapses the card; retry with
-  an explicit `tapActionLabel`. Set `notification.replyText` to a non-empty string to reply inline:
+  an explicit `tapActionLabel`. Set `notification.replyText` to a single word with no whitespace to
+  reply inline (multi-word text is rejected before anything is typed):
   this defaults the action label to **Keyboard input**, types the text, commits it with the
-  keyboard's **Space** key so Gboard appends one trailing space to the reply, and taps **Send**
-  before restoring the stream. An explicit `tapActionLabel` overrides the default.
+  keyboard's **Space** key so Gboard appends one trailing space to the reply, verifies the typed
+  text before tapping **Send**, and restores the stream. If the text does not land, it retries a
+  few times, then fails with an error without sending. An explicit `tapActionLabel` overrides the
+  default.
   If the keyboard, Space key or Send button is unavailable, re-observe and retry.
 - `dismiss` swipes the card sideways, taps the X button when the swipe only reveals it (Wear OS
   7), and reports `dismissal_unconfirmed` unless the removal is

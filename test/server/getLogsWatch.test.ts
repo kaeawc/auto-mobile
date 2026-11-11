@@ -137,20 +137,20 @@ describe("getLogs on an Apple Watch simulator (#17547)", () => {
 
   test("a platform without a log path never falls through to logcat", async () => {
     const simctl = new ReplayingSimctl(WATCH_LOG);
-    const tv: BootedDevice = { ...WATCH, name: "Apple TV", platform: "tvos" };
+    const tv: BootedDevice = { ...WATCH, name: "Apple Vision Pro", platform: "visionos" };
     await expect(watchGetLogs(simctl, new FakeTimer()).execute(tv, { appId: "a" })).rejects.toThrow(
-      new ActionableError("getLogs does not support platform tvos."),
+      new ActionableError("getLogs does not support platform visionos."),
     );
     expect(simctl.argv).toEqual([]);
   });
 
-  test("the tool schema and platform gate admit a watch but still refuse tvOS and visionOS", () => {
+  test("the tool schema and platform gate admit a watch but still refuse visionOS", () => {
     expect(getLogsTool.schema.safeParse({ platform: "watchos", appId: "a" }).success).toBe(true);
     expect(() => assertToolSupportsDevicePlatform("getLogs", WATCH)).not.toThrow();
     expect(() =>
       assertRequestedPlatformSupported("getLogs", { platform: "watchos" }),
     ).not.toThrow();
-    for (const platform of ["tvos", "visionos"] as const) {
+    for (const platform of ["visionos"] as const) {
       expect(() => assertRequestedPlatformSupported("getLogs", { platform })).toThrow(
         ActionableError,
       );

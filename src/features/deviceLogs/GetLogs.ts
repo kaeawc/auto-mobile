@@ -1,4 +1,5 @@
 import type { BootedDevice } from "../../models";
+import { PLATFORM_LABELS } from "../../models/Platform";
 import { ActionableError } from "../../models/ActionableError";
 import { AndroidLogReader } from "./AndroidLogReader";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -35,7 +36,7 @@ export interface GetLogsRequest {
   maxLines?: number;
 }
 
-/** A returned line; iOS and watchOS unified-log lines carry only a timestamp and the text. */
+/** A returned line; iOS, watchOS and tvOS unified-log lines carry only a timestamp and the text. */
 export type GetLogsLine = Partial<Omit<LogLine, "message" | "timestamp">> & {
   timestamp: string;
   message: string;
@@ -206,7 +207,7 @@ export class GetLogs {
     );
     const maxLines = Math.min(request.maxLines ?? GET_LOGS_DEFAULT_MAX_LINES, GET_LOGS_MAX_LINES);
     const minPriority = request.minPriority ?? "V";
-    if (device.platform === "ios" || device.platform === "watchos") {
+    if (device.platform === "ios" || device.platform === "watchos" || device.platform === "tvos") {
       const window = { platform: device.platform, sinceSeconds, maxLines, minPriority };
       return this.ios(request, window, warnings, signal);
     }
@@ -241,12 +242,12 @@ export class GetLogs {
 
   private async ios(
     request: GetLogsRequest,
-    window: GetLogsWindow & { platform: "ios" | "watchos" },
+    window: GetLogsWindow & { platform: "ios" | "watchos" | "tvos" },
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
     const { platform, sinceSeconds, maxLines, minPriority } = window;
-    const label = platform === "watchos" ? "watchOS" : "iOS";
+    const label = PLATFORM_LABELS[platform];
     if (!request.appId) {
       throw new ActionableError(
         `getLogs on ${label} needs appId: the unified log is read per app subsystem.`,

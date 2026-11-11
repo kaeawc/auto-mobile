@@ -133,6 +133,12 @@ export const MEDIA_ENV = {
     default: "unset",
     doc: "Absolute path to a locally built carplay-power-helper executable.",
   },
+  CARPLAY_PROJECTION_PROBE_PATH: {
+    name: "AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH",
+    kind: "path",
+    default: "unset",
+    doc: "Absolute path to a locally built carplay-projection-probe executable.",
+  },
   ACTION_OBSERVATION_SKIP_SCREENSHOT: {
     name: "AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT",
     kind: "string",

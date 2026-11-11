@@ -54,10 +54,12 @@ export interface DesktopHeadUnitStopOptions {
 export interface AndroidAutoProjectionApplier {
   /** Throws an actionable error naming every missing host input (APK directory, DHU, config). */
   resolveInputs(options: ProvisionAndroidAutoOptions): Promise<AndroidAutoProvisionInputs>;
+  /** `deadlineMs` (on the daemon timer's clock) caps the wait for adb to report the phone online. */
   apply(
     device: BootedDevice,
     options: ProvisionAndroidAutoOptions,
     signal?: AbortSignal,
+    deadlineMs?: number,
   ): Promise<AndroidAutoProvisionReport>;
   /** Throws an actionable error naming a missing DHU binary or config. */
   resolveHeadUnitInputs(options: StartDeviceAndroidAutoOptions): Promise<DesktopHeadUnitInputs>;
@@ -69,14 +71,16 @@ export interface AndroidAutoProjectionApplier {
     device: BootedDevice,
     options: StartDeviceAndroidAutoOptions,
     signal?: AbortSignal,
+    deadlineMs?: number,
   ): Promise<AndroidAutoProvisionReport>;
   /**
    * Stops the DHU this daemon spawned for `deviceId` (bounded; never rejects) and forgets it.
    * DHUs this daemon did not spawn are never touched. `deviceStopped` means the emulator itself
    * is going away, so its host port redirect is forgotten too. `releaseRedirect` means the
    * emulator keeps running but its session ended, so the redirect this daemon added is removed.
+   * Returns true when an owned DHU stopped, false when absent or stopping failed.
    */
-  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<void>;
+  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<boolean>;
 }
 
 /** The projection run, narrowed to the calls the applier makes. */
@@ -99,6 +103,7 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
     device: BootedDevice,
     options: ProvisionAndroidAutoOptions,
     signal?: AbortSignal,
+    deadlineMs?: number,
   ): Promise<AndroidAutoProvisionReport> {
     const inputs = await this.resolveInputs(options);
     const result = await this.provisioner.provision({
@@ -107,6 +112,7 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
       dhu: inputs.dhu,
       acceptAndroidAutoTerms: inputs.acceptAndroidAutoTerms,
       signal,
+      deadlineMs,
     });
     return report(result);
   }
@@ -119,6 +125,7 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
     device: BootedDevice,
     options: StartDeviceAndroidAutoOptions,
     signal?: AbortSignal,
+    deadlineMs?: number,
   ): Promise<AndroidAutoProvisionReport> {
     const inputs = await this.resolveHeadUnitInputs(options);
     const result = await this.provisioner.provision({
@@ -127,11 +134,12 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
       dhu: inputs.dhu,
       acceptAndroidAutoTerms: inputs.acceptAndroidAutoTerms,
       signal,
+      deadlineMs,
     });
     return report(result);
   }
 
-  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<void> {
+  stopDesktopHeadUnit(deviceId: string, options?: DesktopHeadUnitStopOptions): Promise<boolean> {
     return this.provisioner.stopDesktopHeadUnit(deviceId, options);
   }
 }

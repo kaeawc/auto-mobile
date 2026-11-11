@@ -10,7 +10,13 @@ import {
 import { prepareWatchSystemTray, openWatchSystemTray } from "./helpers/watchOpening";
 import { readActiveNotificationKeysForApp } from "./helpers/listing";
 import { restoreWatchStream, unrestoredDismissal } from "./helpers/watchRestore";
-import { MAX_SETTLE_READS, POLL_MS, watchReply, watchTapLabel } from "./helpers/watchReply";
+import {
+  assertSingleWordReply,
+  MAX_SETTLE_READS,
+  POLL_MS,
+  watchReply,
+  watchTapLabel,
+} from "./helpers/watchReply";
 import { watchAwaySurface } from "./helpers/watchFace";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import { getSystemTrayDependencies, resolveUniqueTrayAppLabel } from "./helpers/dependencies";
@@ -770,9 +776,12 @@ export class WatchSystemTray {
     observation: ObserveResult,
     scope: WatchScope,
   ): Promise<SystemTrayOutcome> {
+    const replyText = args.notification?.replyText;
+    if (replyText !== undefined) {
+      assertSingleWordReply(replyText);
+    }
     await this.tap(card.element, observation);
     this.expandedByUs = true;
-    const replyText = args.notification?.replyText;
     const text = watchTapLabel(args.notification ?? {}, card);
     // The card expands over a few hundred ms and its actions only appear once it has, so re-read
     // until the labelled target shows up (bounded).

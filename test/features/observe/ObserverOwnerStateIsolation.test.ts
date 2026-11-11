@@ -375,6 +375,8 @@ test.each(["active", "all"])(
         /^shell "dumpsys window displays"$/,
         /^shell "dumpsys window windows"$/,
         /^shell "screencap (?:-d \d+ )?-p \| base64"$/,
+        // Read-only XR feature probe for a device with no classified form factor (#17908).
+        /^shell pm has-feature android\.software\.xr\.api\.spatial$/,
       ];
       expect(commands.length).toBeGreaterThan(0);
       expect(

@@ -190,6 +190,10 @@ internal object DaemonSocketPaths {
   /** Control socket, honouring overrides and `AUTOMOBILE_AUX_SOCKET_DIR` like the daemon. */
   fun socketPath(): String = DaemonStatePaths.resolve(DaemonStateFile.SOCKET, ::getUserId)
 
+  /** Whether `AUTOMOBILE_DAEMON_SOCKET_PATH` (or its legacy name) chose [socketPath] (#17953). */
+  fun socketPathOverridden(envProvider: (String) -> String? = System::getenv): Boolean =
+    DaemonStatePaths.hasOverride(DaemonStateFile.SOCKET, envProvider)
+
   /**
    * Lock file every runner JVM of this user takes around its daemon check-and-restart, so parallel
    * forks decide one at a time (#10170). Mirrors [socketPath] (per-uid, /tmp).

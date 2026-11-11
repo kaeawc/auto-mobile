@@ -8,7 +8,12 @@ import {
   listDevicesEntrySchema,
   type DeviceDescription,
   type DeviceDescriptionInput,
+  withLiveVehicleCapabilities,
 } from "../../src/daemon/deviceDescription";
+import { AndroidDeviceTraitsReader } from "../../src/utils/android-cmdline-tools/deviceTraits";
+import { createExecResult } from "../../src/utils/execResult";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../fakes/FakeTimer";
 import type { DeviceInfo, FormFactor } from "../../src/models";
 import { formFactorFrom } from "../../src/models/formFactor";
 import type { StableConfiguredDeviceImage } from "../../src/utils/configuredDeviceInventory";
@@ -1080,4 +1085,122 @@ describe("automotive vehicle capabilities", () => {
       }),
     ).toThrow();
   });
+});
+
+describe("live vehicle traits on booted descriptions (#16775)", () => {
+  const supported = { motion: "supported", nightMode: "supported" } as const;
+  const playRefused = { motion: "unsupported", nightMode: "supported" } as const;
+  const untaggedCar = {
+    name: "car",
+    platform: "android",
+    deviceId: "emulator-5554",
+    formFactor: "automotive",
+  } as const;
+  const playImage: DeviceInfo = {
+    name: "car play",
+    platform: "android",
+    isRunning: false,
+    runtimeId: "system-images;android-34;android-automotive-playstore;x86_64",
+  };
+
+  /** Captured getprop answers from an automotive emulator, keyed by prop. */
+  function carGetprop(buildType: string, debuggable: string): FakeAdbExecutor {
+    const props: Record<string, string> = {
+      "ro.kernel.qemu": "1",
+      "ro.product.model": "sdk_gcar_x86_64",
+      "ro.build.version.sdk": "34",
+      "ro.product.cpu.abi": "x86_64",
+      "ro.product.manufacturer": "Google",
+      "ro.product.brand": "Android",
+      "ro.build.characteristics": "nosdcard,automotive",
+      "ro.build.type": buildType,
+      "ro.debuggable": debuggable,
+    };
+    const adb = new FakeAdbExecutor();
+    for (const [prop, value] of Object.entries(props)) {
+      adb.setCommandResponse(`getprop ${prop}`, createExecResult(`${value}\n`, ""));
+    }
+    return adb;
+  }
+
+  test("a booted car emulator with no image tag reports live motion support", () => {
+    const tagOnly = describeDevice({ kind: "booted", device: untaggedCar });
+    expect(tagOnly.vehicle?.motion).toBe("unknown");
+
+    const live = describeDevice({ kind: "booted", device: untaggedCar, vehicle: supported });
+    expect(live.vehicle).toEqual(supported);
+    expect(listDevicesEntrySchema.safeParse(live).success).toBe(true);
+  });
+
+  test("live traits override the tag-derived value", () => {
+    const description = describeDevice({
+      kind: "booted",
+      device: untaggedCar,
+      discovery: playImage,
+      vehicle: supported,
+    });
+    expect(description.vehicle).toEqual(supported);
+  });
+
+  test("a provisioned booted car takes live traits; a provisioned image does not", () => {
+    const provisioned: Extract<DeviceDescriptionInput, { kind: "provisioned" }>["provisioned"] = {
+      created: false,
+      device: { ...playImage, deviceId: "emulator-5554" },
+      resolvedSpec: {
+        runtime: "system-images;android-34;android-automotive-playstore;x86_64",
+        deviceType: "automotive_1024p_landscape",
+        displayCutout: "unknown",
+      },
+    };
+    const booted = describeDevice({
+      kind: "provisioned",
+      provisioned,
+      booted: untaggedCar,
+      vehicle: supported,
+    });
+    expect(booted.vehicle).toEqual(supported);
+    const image = describeDevice({ kind: "provisioned", provisioned, vehicle: supported });
+    expect(image.vehicle).toEqual(playRefused);
+  });
+
+  test("a non-automotive description ignores live traits", () => {
+    const phone = describeDevice({
+      kind: "booted",
+      device: {
+        name: "Pixel_9",
+        platform: "android",
+        deviceId: "emulator-5556",
+        formFactor: "phone",
+      },
+      vehicle: supported,
+    });
+    expect("vehicle" in phone).toBe(false);
+    expect(withLiveVehicleCapabilities(phone, supported)).toBe(phone);
+  });
+
+  test("withLiveVehicleCapabilities overrides a built automotive description", () => {
+    const built = describeDevice({ kind: "booted", device: untaggedCar, discovery: playImage });
+    expect(built.vehicle).toEqual(playRefused);
+    expect(withLiveVehicleCapabilities(built, supported).vehicle).toEqual(supported);
+    expect(withLiveVehicleCapabilities(built, undefined)).toBe(built);
+  });
+
+  test.each([
+    ["userdebug", "1", supported],
+    ["user", "0", playRefused],
+  ] as const)(
+    "captured %s getprop output flows into the description",
+    async (type, debuggable, expected) => {
+      const traits = await new AndroidDeviceTraitsReader(new FakeTimer()).read(
+        carGetprop(type, debuggable),
+        untaggedCar.deviceId,
+      );
+      const description = describeDevice({
+        kind: "booted",
+        device: untaggedCar,
+        vehicle: traits.vehicle,
+      });
+      expect(description.vehicle).toEqual(expected);
+    },
+  );
 });

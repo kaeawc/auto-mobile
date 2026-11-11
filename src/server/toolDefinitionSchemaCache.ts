@@ -50,7 +50,7 @@ export class ToolDefinitionSchemaCache {
         inputSchema: toAdvertisedJsonSchema(tool.schema, {
           constrainAppIds: true,
           anthropicSubset: true,
-          exposeDeviceId: tool.name === "observe",
+          exposeDeviceId: tool.advertisesDeviceId === true,
         }),
         outputSchemasByRuntimeFlags: new Map(),
       };

@@ -1,3 +1,5 @@
+import { xrTwoPanelBackStack } from "../../helpers/xrHeadset";
+import { observation } from "../../helpers/tapAtCoordinate";
 import {
   createAndroidHierarchyConverter,
   wireHierarchyFrom,
@@ -321,5 +323,15 @@ describe("AutoMobile prototype covers (#10715)", () => {
       windows: [{ type: 1, windowLayer: 0, hierarchy: wide }, prototypeWindow(rect(0, 400))],
     });
     expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
+  });
+});
+
+describe("XR default-pose guard (#17819)", () => {
+  test("read-only hitTest on a two-panel XR back stack reports native coordinates", () => {
+    const xr = { ...observation(2560, 2558), backStack: xrTwoPanelBackStack() };
+    const result = previewHierarchyHitTest({ x: 553, y: 1178 }, xr, "android");
+    // hitTest is not a tapAt mapping: no panel projection, no pose refusal, no pose warning.
+    expect(result.point).toEqual({ x: 553, y: 1178 });
+    expect(JSON.stringify(result)).not.toContain("default pose");
   });
 });

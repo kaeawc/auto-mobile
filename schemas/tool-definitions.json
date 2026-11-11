@@ -28816,7 +28816,7 @@
           "maximum": 10000
         },
         "display": {
-          "description": "Target panel key, role, or active; Android only. Sends the key to that display and checks it for the visual change",
+          "description": "Target panel key, role, or active; Android only. Sends the key to that display and checks it for the visual change. \"headUnit\" sends it to the Android Auto head unit",
           "type": "string"
         },
         "platform": {
@@ -54052,7 +54052,7 @@
       "type": "object",
       "properties": {
         "display": {
-          "description": "Target panel key, role, or active",
+          "description": "Target panel key, role, or active; \"headUnit\" taps the Android Auto head unit at x, y in head-unit pixels",
           "type": "string"
         },
         "snapshotId": {

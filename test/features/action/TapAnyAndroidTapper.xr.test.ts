@@ -7,6 +7,7 @@ import {
 } from "../../../src/features/action/TapAnyAndroidTapper";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { stableNodeSelectorForElement } from "../../../src/features/talkback/TalkBackTapStrategy";
 import type { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
 import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
@@ -173,6 +174,89 @@ describe("tapAny on Android XR (#17811)", () => {
         expect(service.getNodeActionHistory()).toMatchObject([
           { action: "click", selector: { uniqueId: "settings-connected-row" } },
         ]);
+      }
+      expect(service.getTapHistory()).toHaveLength(0);
+    });
+  }
+});
+
+describe("tapAny bounds-only XR node click on Settings rows (#17845)", () => {
+  // The issue's panel-space row: tapOn clicks it by bounds, and tapAny must too.
+  const ROW_BOUNDS = { left: 48, top: 372, right: 696, bottom: 548 };
+
+  function settingsRow() {
+    const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+    const nodes = new SearchableHierarchy().project(tree);
+    const label = nodes.find((entry) => entry.properties.text === "Connected devices")!;
+    const row = nodes[nodes[label.parentIndex!].parentIndex!];
+    return { tree, nodes, row, rowElement: { ...row.properties, bounds: row.bounds! } };
+  }
+
+  function tapRow(
+    tree: ViewHierarchyResult,
+    element: Element,
+    container?: { element: () => Element | undefined },
+  ) {
+    const { tapper, service, adb } = setup(true, container?.element);
+    const result = tapper.executeAndroidTap("tap", point, 0, {
+      target: {
+        element,
+        talkBackState: false,
+        scoped: container !== undefined,
+        container: container ? { elementId: "scope" } : undefined,
+        capture: identifyObservedHierarchy("android", tree, "fresh", { timer: new FakeTimer() }),
+      },
+    });
+    return { result, service, adb };
+  }
+
+  test("a selectorless row unique by bounds sends expectedBounds with no selector", async () => {
+    const { tree, rowElement } = settingsRow();
+    expect(rowElement.bounds).toEqual(ROW_BOUNDS);
+    expect(stableNodeSelectorForElement(rowElement)).toBeUndefined();
+    const { result, service, adb } = tapRow(tree, rowElement);
+    await result;
+    const history = service.getNodeActionHistory();
+    expect(history).toMatchObject([{ action: "click", expectedBounds: ROW_BOUNDS }]);
+    expect(history[0].selector).toBeUndefined();
+    expect(service.getTapHistory()).toHaveLength(0);
+    expect(adb.getAllCommands()).toHaveLength(0);
+  });
+
+  test("refuses when a second captured clickable node has the same bounds", async () => {
+    const { tree, nodes, row, rowElement } = settingsRow();
+    const list = nodes[row.parentIndex!].source;
+    const children = list.node!;
+    const siblings: ViewHierarchyNode[] = Array.isArray(children) ? children : [children];
+    const captured = siblings.find((node) => node === row.source)!;
+    list.node = [...siblings, structuredClone(captured)];
+    const { result, service } = tapRow(tree, rowElement);
+    await expect(result).rejects.toThrow(/XR panel coordinate space/);
+    expect(service.getNodeActionHistory()).toHaveLength(0);
+    expect(service.getTapHistory()).toHaveLength(0);
+  });
+
+  for (const scope of ["row-list", "other-pane"] as const) {
+    test(`a container-scoped bounds-only click stays inside the container: ${scope}`, async () => {
+      const { tree, nodes, row, rowElement } = settingsRow();
+      // The row's own list, or the other Settings pane's scrolling content.
+      const containerEntry =
+        scope === "row-list"
+          ? nodes[row.parentIndex!]
+          : nodes.find(
+              (entry) =>
+                entry.properties["resource-id"] === "com.android.settings:id/content_parent",
+            )!;
+      const containerElement = { ...containerEntry.properties, bounds: containerEntry.bounds! };
+      const { result, service } = tapRow(tree, rowElement, { element: () => containerElement });
+      if (scope === "row-list") {
+        await result;
+        expect(service.getNodeActionHistory()).toMatchObject([
+          { action: "click", expectedBounds: ROW_BOUNDS },
+        ]);
+      } else {
+        await expect(result).rejects.toThrow(/XR panel coordinate space/);
+        expect(service.getNodeActionHistory()).toHaveLength(0);
       }
       expect(service.getTapHistory()).toHaveLength(0);
     });

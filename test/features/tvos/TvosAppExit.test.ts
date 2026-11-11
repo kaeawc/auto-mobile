@@ -1,6 +1,7 @@
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   TvosAppExit,
   TvosAppExitError,
@@ -75,7 +76,7 @@ test.each(["timeout", "disconnect"])(
       crashReport: { exceptionType: "EXC_BREAKPOINT (SIGTRAP)", processId: 80815 },
     });
     expect(String(error)).toContain(`App ${bundleId} exited during request_press_button`);
-    expect(String(error)).toContain("crash report /reports/CrashTv.ips");
+    expect(String(error)).toContain(`crash report ${path.join("/reports", reportPath)}`);
     expect(String(error)).toContain("launchApp");
     expect(f.client.isUsable()).toBe(false);
     expect(f.socket.sent).toHaveLength(1);

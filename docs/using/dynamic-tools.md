@@ -67,6 +67,15 @@ Watch, Apple TV or Apple Vision Pro, both lists leave out tools that refuse that
 platform, so every listed tool can run on the acquired device. A direct
 `tools/call` can still invoke an omitted tool.
 
+On a TV (an Android TV device or an Apple TV), acquiring the device also enables
+`focusNavigate`, since D-pad focus is how a TV is navigated; it then appears in
+`enabledTools` and `tools/list`. A startup `--disable-tool focusNavigate` (or the
+environment equivalent) or an earlier `setToolEnabled` choice for the session
+wins over this. Other tools that are off by default stay off on a TV, as on any
+device, to keep `tools/list` short: `executePlan`, `recordToolCalls`, `getLogs`
+and `provisionDevice` among them. They appear in `gatedTools`; list them with
+`enableTools` at acquisition or with `setToolEnabled`, or call them by name.
+
 If the device is acquired but the capability declaration itself cannot be
 persisted, the response keeps its session handle and adds an `enableToolsError`
 describing what did not land; re-declare those tools with `setToolEnabled`.

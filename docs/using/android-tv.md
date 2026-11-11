@@ -98,7 +98,9 @@ appears in `listDevices` and can be asked for in a device `requires` clause or a
 
 ## Navigating a TV app
 
-TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
+TV apps are driven by focus, not touch. A TV session lists `focusNavigate` in `tools/list` without
+`enableTools`; other tools that are off by default, such as `executePlan`, stay off until you enable
+them (see [Dynamic tools](dynamic-tools.md)). Use `focusNavigate` to move D-pad focus to an element and
 `sendKeys` with `enter` to activate the focused item, or pass `select: true` to `focusNavigate` to
 press `enter` once focus lands; the result's `selected` is `true` only when `enter` was pressed.
 `pressButton` handles back, home and the remote's keys:

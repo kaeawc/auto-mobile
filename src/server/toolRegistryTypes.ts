@@ -128,6 +128,11 @@ export interface ToolRegistrationOptions {
   deviceReadOnlyArgs?: readonly DeviceReadOnlyArgShape[];
   /** Built-in session default before startup or persisted exact-tool overrides. */
   defaultEnabled?: boolean;
+  /**
+   * Listed for a session whose acquired device is a TV even when `defaultEnabled` is false
+   * (#18029): the tool is how a touchless TV is driven. Startup and session choices still win.
+   */
+  defaultEnabledOnTv?: boolean;
   supportsProgress?: boolean;
   /** Loopback closure recovery: connect only, or replay after ambiguous delivery. */
   transportRecovery?: ToolTransportRecovery;
@@ -377,6 +382,8 @@ export interface RegisteredTool extends ToolTraits {
   handler: ToolHandler;
   defaultEnabled: boolean;
   defaultDeclared: boolean;
+  /** See {@link ToolRegistrationOptions.defaultEnabledOnTv}. */
+  defaultEnabledOnTv?: boolean;
   supportsProgress?: boolean;
   transportRecovery?: ToolTransportRecovery;
   requiresDevice?: boolean;

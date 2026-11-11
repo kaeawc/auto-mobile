@@ -58,7 +58,12 @@ afterEach(() => {
 
 function arrange(failure: Error) {
   const runner = new FakeTvosRunnerClient();
-  runner.failure = failure;
+  const hierarchy = runner.hierarchy.bind(runner);
+  runner.hierarchy = (signal) => {
+    // Fail during this read, rather than presenting an already-disconnected runner to recovery.
+    runner.failure = failure;
+    return hierarchy(signal);
+  };
   cleanups.push(tvosRunners.register(appleTv.deviceId, runner));
   const timer = new FakeTimer();
   const screenshots = new RecordingScreenshots();

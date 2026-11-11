@@ -14,6 +14,8 @@ import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelection
 import { findFocusedElement } from "../features/observe/HierarchyFocus";
 import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
 import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
+import { requireTvosRunner } from "../features/tvos/TvosRunnerRecovery";
+import type { TvosRunnerLifecycle } from "../features/tvos/TvosRunnerLifecycle";
 import { captureTvosRunnerScreenshot } from "../features/tvos/TvosScreenshot";
 import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
@@ -81,6 +83,8 @@ export const simctlWatchScreenshotSource: WatchScreenshotSource = {
 export interface WatchObserveDependencies {
   screenshots?: WatchScreenshotSource;
   runner?: WatchRunnerClient;
+  /** Recovers a disconnected lifecycle-owned tvOS runner; defaults to the shared lifecycle. */
+  tvosRunnerLifecycle?: Pick<TvosRunnerLifecycle, "restartOwned">;
   /** Starts or reuses the visionOS window-app runner; defaults to the shared runner lifecycle. */
   visionosRunner?: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>;
   /** The window app each connected visionOS runner was started for; defaults to the shared registry. */
@@ -285,19 +289,20 @@ async function watchHierarchyForObserve(
     });
   }
   if (screenshotOnlyPlatform(device) === "tvos") {
-    return tvosHierarchyForObserve(device, args, signal);
+    return tvosHierarchyForObserve(device, args, signal, dependencies.tvosRunnerLifecycle);
   }
   return appleRunnerHierarchy(device, args, signal, dependencies.runner);
 }
 
 /**
- * The registered tvOS runner's hierarchy. A runner that is stuck, disconnected or fails degrades
- * observe to its screenshot with the reason, as on visionOS, instead of failing the call (#17310).
+ * Recovers a disconnected registered tvOS runner before reading its hierarchy. A failed recovery
+ * or hierarchy read degrades observe to its screenshot with the reason (#17310).
  */
 async function tvosHierarchyForObserve(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
+  lifecycle?: Pick<TvosRunnerLifecycle, "restartOwned">,
 ): Promise<HierarchyOutcome> {
   const displayKey = watchDisplay(device).ref.key;
   const runner = tvosRunners.get(device.deviceId);
@@ -306,7 +311,8 @@ async function tvosHierarchyForObserve(
     return {};
   }
   try {
-    return { hierarchy: normalizeTvosHierarchy(await runner.hierarchy(signal)) };
+    const usableRunner = await requireTvosRunner(device.deviceId, signal, lifecycle);
+    return { hierarchy: normalizeTvosHierarchy(await usableRunner.hierarchy(signal)) };
   } catch (error) {
     if (signal?.aborted) {
       throw error;
@@ -487,8 +493,8 @@ function watchObservationPayload(
 }
 
 /**
- * The tvOS runner's screenshot while it answers; simctl's once the runner failed this observe, so
- * a stuck runner cannot also stall the screenshot-only fallback.
+ * Re-reads the registry after hierarchy recovery to use the replacement tvOS runner's screenshot.
+ * Uses simctl once the runner failed this observe so it cannot stall the screenshot-only fallback.
  */
 export function defaultWatchScreenshotSource(
   device: BootedDevice,

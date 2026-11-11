@@ -186,4 +186,33 @@ describe("HeadUnitInteraction", () => {
     await expect(interaction.run(["tap 1 1"], controller.signal)).rejects.toThrow();
     expect(session.commands).toEqual([]);
   });
+
+  test("a failed template read is no evidence: it neither shows a change nor settles idle", async () => {
+    const failed = fixtureProjectedTemplates(2);
+    failed.projected[0] = { ...failed.projected[0], sessions: [], error: "main_thread_timeout" };
+    const { interaction } = setup([MENU], [failed]);
+    const result = await interaction.run(["tap 640 200"]);
+    expect(result.effect).toEqual({ basis: "no template data" });
+    expect(result.idle).toEqual({ basis: "none", stable: false, waitedMs: 3_000 });
+    expect(result.after).toBeUndefined();
+  });
+
+  test("a loading active tab is not idle", async () => {
+    const tabs = (loading: boolean) => {
+      const templates = fixtureProjectedTemplates(2);
+      const top = templates.projected[0].sessions[0].screens[1];
+      // The captured ListTemplate has no tabContent, so it serves as both the bar and the tab.
+      const outer = top.template!;
+      top.template = {
+        ...outer,
+        type: "TabTemplate",
+        tabContent: { ...outer, type: "ListTemplate", ...(loading ? { loading: true } : {}) },
+      };
+      return templates;
+    };
+    const { interaction } = setup([MENU], [tabs(true), tabs(true), tabs(false), tabs(false)]);
+    const result = await interaction.run(["tap 640 200"]);
+    expect(result.idle.waitedMs).toBe(1_000);
+    expect(result.after?.[0].loading).toBeUndefined();
+  });
 });

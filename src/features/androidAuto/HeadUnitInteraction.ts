@@ -155,7 +155,8 @@ export function headUnitScreens(templates: CarAppProjectedTemplates): HeadUnitSc
           ...(template ? { templateType: template.type } : {}),
           ...(template?.title !== undefined ? { title: template.title } : {}),
           depth: session.screens.length,
-          ...(template?.loading ? { loading: true as const } : {}),
+          // A TabTemplate's bar can be loaded while its active tab's content still loads.
+          ...(template?.loading || template?.tabContent?.loading ? { loading: true as const } : {}),
         },
       ];
     }),
@@ -276,6 +277,13 @@ export class HeadUnitInteraction {
   private async readScreens(): Promise<HeadUnitScreen[] | undefined> {
     try {
       const templates = await this.templates.read();
+      const failed = templates?.projected.find((app) => app.error !== undefined);
+      if (failed) {
+        // The SDK answers a failed stack read (main_thread_timeout) with an error and no sessions:
+        // that is no evidence of the screen, not an empty one.
+        logger.debug(`[AndroidAuto] ${failed.packageName} template read failed: ${failed.error}`);
+        return undefined;
+      }
       return templates ? headUnitScreens(templates) : undefined;
     } catch (error) {
       logger.warn(`[AndroidAuto] head unit template read failed: ${errorMessage(error)}`, error);

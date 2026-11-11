@@ -1,6 +1,6 @@
-import { z } from "zod/v4";
 import type { StartDeviceAndroidAutoOptions } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { getDeviceToolsDependencies } from "../features/deviceLifecycle/deviceLifecycleCore";
+import { readBootedSessionIdentity } from "../daemon/deviceDescription";
 import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -9,20 +9,6 @@ import {
   type StructuredToolResponse,
 } from "../utils/toolUtils";
 import { startDeviceAndroidAutoHeadUnit } from "./provisioning/provisioningAndroidAuto";
-
-/** The ready phone a startDevice response names: its serial and bound session. */
-const readyAndroidPhoneSchema = z
-  .object({
-    name: z.string(),
-    platform: z.literal("android"),
-    runtime: z
-      .object({
-        deviceId: z.string(),
-        session: z.object({ sessionUuid: z.string().nullable() }).passthrough().nullable(),
-      })
-      .passthrough(),
-  })
-  .passthrough();
 
 /**
  * startDevice's `androidAuto.headUnit` (#17840): once the phone is ready and its session bound,
@@ -39,13 +25,8 @@ export async function withRequestedHeadUnit(
     return ready;
   }
   const payload = getStructuredPayload(ready);
-  const phone = readyAndroidPhoneSchema.parse(payload);
-  const device = {
-    deviceId: phone.runtime.deviceId,
-    platform: "android" as const,
-    name: phone.name,
-  };
-  const session = phone.runtime.session?.sessionUuid ?? "none";
+  const { device, sessionId } = readBootedSessionIdentity(payload);
+  const session = sessionId ?? "none";
   try {
     const androidAuto = await startDeviceAndroidAutoHeadUnit(
       options,

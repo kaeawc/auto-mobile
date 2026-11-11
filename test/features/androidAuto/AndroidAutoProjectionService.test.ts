@@ -111,18 +111,17 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
         headUnit: { dhuConfig: "/configs/hu.ini" },
         acceptAndroidAutoTerms: true,
       });
-      expect(report.desktopHeadUnit).toEqual({
-        running: true,
-        configPath: path.resolve("/configs/hu.ini"),
-      });
       expect(requests).toHaveLength(1);
+      // The caller's absolute path is kept as given (a drive-relative one too, on Windows).
+      const configPath = requests[0]?.dhu.configPath;
+      expect(configPath?.replaceAll("\\", "/").endsWith("/configs/hu.ini")).toBe(true);
+      expect(report.desktopHeadUnit).toEqual({ running: true, configPath });
       expect(requests[0]).toMatchObject({
         deviceId: "emulator-5554",
         androidAutoApks: [],
         acceptAndroidAutoTerms: true,
         dhu: {
           binaryPath: path.join("/sdk", "extras", "google", "auto", "desktop-head-unit"),
-          configPath: path.resolve("/configs/hu.ini"),
         },
       });
     });

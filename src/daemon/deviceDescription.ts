@@ -321,6 +321,32 @@ export function projectProvisionedDevice(description: DeviceDescription): Provis
   return description;
 }
 
+/** The serial and bound session a booted device description names, read from a tool payload. */
+const bootedSessionIdentitySchema = z
+  .object({
+    name: z.string(),
+    platform: z.enum(["android", "ios"]),
+    runtime: z
+      .object({
+        deviceId: z.string(),
+        session: z.object({ sessionUuid: z.string().nullable() }).passthrough().nullable(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+/** Reads a booted Android/iOS device and its session from a startDevice-style payload. */
+export function readBootedSessionIdentity(payload: unknown): {
+  device: BootedDevice;
+  sessionId: string | null;
+} {
+  const parsed = bootedSessionIdentitySchema.parse(payload);
+  return {
+    device: { deviceId: parsed.runtime.deviceId, platform: parsed.platform, name: parsed.name },
+    sessionId: parsed.runtime.session?.sessionUuid ?? null,
+  };
+}
+
 export function projectBootedDevice(description: DeviceDescription): BootedDeviceDescription {
   return description;
 }

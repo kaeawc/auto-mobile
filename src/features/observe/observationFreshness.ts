@@ -355,6 +355,23 @@ function incompleteCaptureLead(reason: CtrlProxyIncompleteReason | undefined): s
   return "it could not read the focused application window (no root node)";
 }
 
+const READABLE_ELSEWHERE_LEADS: Partial<Record<CtrlProxyIncompleteReason, string>> = {
+  discarded_windows:
+    "every window it extracted was discarded as zero-area or entirely offscreen, even though another window's content was readable",
+  extraction_error:
+    "extraction threw before the focused application's window could be assembled, even though another window's content was readable",
+};
+
+function readableElsewhereLead(reason: CtrlProxyIncompleteReason | undefined): string {
+  if (reason === "window_read_skipped" || reason === "window_list_skipped") {
+    return incompleteCaptureLead(reason);
+  }
+  return (
+    (reason && READABLE_ELSEWHERE_LEADS[reason]) ||
+    "it could not read the focused application's root window, even though another window's content was readable"
+  );
+}
+
 function resolveIdentityMismatch(
   inputs: FreshnessInputs,
   ageMs: number | undefined,
@@ -408,14 +425,7 @@ function resolveIdentityMismatch(
   // application (issue #6151).
   if (inputs.incompleteCapture) {
     const { sdkInt, reason, accessibilityTool } = inputs.incompleteCapture;
-    const lead =
-      reason === "window_read_skipped" || reason === "window_list_skipped"
-        ? incompleteCaptureLead(reason)
-        : reason === "discarded_windows"
-          ? "every window it extracted was discarded as zero-area or entirely offscreen, even though another window's content was readable"
-          : reason === "extraction_error"
-            ? "extraction threw before the focused application's window could be assembled, even though another window's content was readable"
-            : "it could not read the focused application's root window, even though another window's content was readable";
+    const lead = readableElsewhereLead(reason);
     return {
       requestedAfter,
       actualTimestamp,

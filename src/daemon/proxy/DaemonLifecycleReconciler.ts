@@ -77,7 +77,7 @@ export interface DaemonLifecycleReconcilerDeps {
   readonly buildIdentity: BuildIdentity;
   /** Version a daemon spawned from this client's entry script would report now; undefined when it cannot be probed. */
   readonly readCheckoutVersion?: () => Promise<string | null>;
-  /** When this checkout's uncommitted tracked edits were last written (epoch ms); undefined or null when unknown. */
+  /** When any tracked file of this checkout was last written (epoch ms); undefined or null when unknown. */
   readonly readCheckoutModifiedAt?: () => Promise<number | null>;
   invalidateCache(): void;
   assertDaemonLifecycleUnfenced(): void;
@@ -426,8 +426,9 @@ export class DaemonLifecycleReconciler {
    * equals this client's `+g<sha>.dirty.<hash>`, and every one-shot `--cli`
    * process would restart an up-to-date daemon (#17991). When the daemon runs this
    * checkout's build at the same commit, reports no working-tree hash, and its
-   * process started after the last uncommitted edit was written, it already loaded
-   * those edits: reuse it. Any unknown input keeps the restart.
+   * process started after every tracked file was last written (edits and reverts
+   * alike), it already loaded the current tree: reuse it. Any unknown input keeps
+   * the restart.
    */
   private async daemonLoadedCurrentEdits(
     status: DaemonStatus,

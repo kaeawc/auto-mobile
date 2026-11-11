@@ -243,10 +243,10 @@ const getResolver = (): ReturnType<typeof createMcpVersionResolver> =>
 export const probeCheckoutMcpServerVersion = (): Promise<string> =>
   createMcpVersionResolver(defaultResolverDeps()).resolveSettled();
 
-/** When this checkout's uncommitted tracked edits were last written; null when clean or unknown. */
+/** When any tracked file of this checkout was last written; null when unknown. */
 export const probeCheckoutModifiedAt = async (): Promise<number | null> => {
   const client = testOverrides.gitMetadataClient ?? defaultGitMetadataClient;
-  return (await client.readDirtyModifiedAt?.(moduleDir())) ?? null;
+  return (await client.readTrackedModifiedAt?.(moduleDir())) ?? null;
 };
 
 export const getMcpServerVersion = (): string => getResolver().current();

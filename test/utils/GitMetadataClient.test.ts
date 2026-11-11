@@ -22,8 +22,13 @@ const fixture = (
   responses: Record<string, string | null> = {},
   env: NodeJS.ProcessEnv = {},
 ) => {
-  const calls: Array<{ command: string; args: readonly string[]; cwd: string; timeoutMs: number }> =
-    [];
+  const calls: Array<{
+    command: string;
+    args: readonly string[];
+    cwd: string;
+    timeoutMs: number;
+    maxBufferBytes?: number;
+  }> = [];
   const run: GitCommandRunner = (command, args, options) => {
     calls.push({ command, args, ...options });
     if (args[0] === "rev-parse") {
@@ -429,8 +434,7 @@ describe("DefaultGitMetadataClient", () => {
     );
   });
 
-  describe("readDirtyModifiedAt (#17991)", () => {
-    const NAMES = ["diff", "HEAD", "--name-only", "--no-renames", "-z"];
+  describe("readTrackedModifiedAt (#17991)", () => {
     const timedRepo = (times: Record<string, number>) =>
       new FakeGitMetadataReader(
         {
@@ -441,42 +445,57 @@ describe("DefaultGitMetadataClient", () => {
         times,
       );
 
-    test("returns the latest write time among the tracked changed paths", async () => {
+    test("returns the latest write time among every tracked path", async () => {
       const { client, calls } = fixture(
         timedRepo({ [`${ROOT}/src/a.ts`]: 100, [`${ROOT}/src/b.ts`]: 300 }),
-        { diff: "src/a.ts\0src/b.ts\0" },
+        { "ls-files": "src/a.ts\0src/b.ts\0" },
       );
-      expect(await client.readDirtyModifiedAt(ROOT)).toBe(300);
-      expect(calls.filter(({ args }) => args[0] === "diff").map(({ args }) => args)).toEqual([
-        NAMES,
+      expect(await client.readTrackedModifiedAt(ROOT)).toBe(300);
+      expect(calls.filter(({ args }) => args[0] === "ls-files")).toEqual([
+        {
+          command: "git",
+          args: ["ls-files", "-z", "--full-name", "--", ":/"],
+          cwd: ROOT,
+          timeoutMs: 2_000,
+          maxBufferBytes: 64 * 1024 * 1024,
+        },
       ]);
+    });
+
+    test("counts a clean file written later, such as an edit reverted to HEAD", async () => {
+      // `src/b.ts` is no longer dirty, but its newer write time must still show.
+      const { client } = fixture(
+        timedRepo({ [`${ROOT}/src/dirty.ts`]: 100, [`${ROOT}/src/b.ts`]: 900 }),
+        { "ls-files": "src/dirty.ts\0src/b.ts\0" },
+      );
+      expect(await client.readTrackedModifiedAt(ROOT)).toBe(900);
     });
 
     test("uses the parent directory's time for a deleted path", async () => {
       const { client } = fixture(timedRepo({ [`${ROOT}/src`]: 700, [`${ROOT}/src/a.ts`]: 100 }), {
-        diff: "src/a.ts\0src/gone.ts\0",
+        "ls-files": "src/a.ts\0src/gone.ts\0",
       });
-      expect(await client.readDirtyModifiedAt(ROOT)).toBe(700);
+      expect(await client.readTrackedModifiedAt(ROOT)).toBe(700);
     });
 
-    test("is unknown when a changed path and its directory are unreadable", async () => {
+    test("is unknown when a path and its directory are unreadable", async () => {
       const { client } = fixture(timedRepo({ [`${ROOT}/src/a.ts`]: 100 }), {
-        diff: "src/a.ts\0missing/b.ts\0",
+        "ls-files": "src/a.ts\0missing/b.ts\0",
       });
-      expect(await client.readDirtyModifiedAt(ROOT)).toBeNull();
+      expect(await client.readTrackedModifiedAt(ROOT)).toBeNull();
     });
 
-    test("is null for a clean tree and when the diff probe fails", async () => {
-      const clean = fixture(timedRepo({}), { diff: "" });
-      expect(await clean.client.readDirtyModifiedAt(ROOT)).toBeNull();
-      const failed = fixture(timedRepo({}), { diff: null });
-      expect(await failed.client.readDirtyModifiedAt(ROOT)).toBeNull();
+    test("is unknown when the listing fails or is empty", async () => {
+      const failed = fixture(timedRepo({}), { "ls-files": null });
+      expect(await failed.client.readTrackedModifiedAt(ROOT)).toBeNull();
+      const empty = fixture(timedRepo({}), { "ls-files": "" });
+      expect(await empty.client.readTrackedModifiedAt(ROOT)).toBeNull();
     });
 
     test("is unknown outside a repository", async () => {
       const { client, calls } = fixture(new FakeGitMetadataReader({}, {}));
-      expect(await client.readDirtyModifiedAt("/elsewhere")).toBeNull();
-      expect(calls.filter(({ args }) => args[0] === "diff")).toEqual([]);
+      expect(await client.readTrackedModifiedAt("/elsewhere")).toBeNull();
+      expect(calls.filter(({ args }) => args[0] === "ls-files")).toEqual([]);
     });
   });
 });

@@ -20,6 +20,8 @@ export interface GitVersionInfo {
 export interface GitCommandOptions {
   cwd: string;
   timeoutMs: number;
+  /** Stdout cap for a probe whose output scales with the tree; defaults to execFile's 1 MiB. */
+  maxBufferBytes?: number;
 }
 
 /** Injectable synchronous argv boundary for git metadata probes. */
@@ -74,8 +76,8 @@ interface GitLocation {
 
 export interface GitMetadataClient {
   readDirtyState(cwd: string): Promise<GitDirtyState | null>;
-  /** Latest modification time (epoch ms) of tracked uncommitted changes; null when clean or unknown. */
-  readDirtyModifiedAt?(cwd: string): Promise<number | null>;
+  /** Latest write time (epoch ms) of any tracked path; null when unknown. */
+  readTrackedModifiedAt?(cwd: string): Promise<number | null>;
   readVersion(
     cwd: string,
     readPackageName: (directory: string) => string | null,
@@ -84,6 +86,8 @@ export interface GitMetadataClient {
 
 const PACKAGE_NAME = "@kaeawc/auto-mobile";
 const GIT_TIMEOUT_MS = 2_000;
+/** This repository's tracked-path listing is ~1.2 MiB; leave room for growth. */
+const TRACKED_LISTING_MAX_BYTES = 64 * 1024 * 1024;
 
 const defaultRunner: GitCommandRunner = (_command, args, { cwd, timeoutMs }) => {
   let result: ReturnType<typeof spawnSync> | null = null;
@@ -104,13 +108,23 @@ const defaultRunner: GitCommandRunner = (_command, args, { cwd, timeoutMs }) => 
   return (typeof result.stdout === "string" ? result.stdout : result.stdout.toString()).trim();
 };
 
-const defaultAsyncRunner: GitAsyncCommandRunner = async (command, args, { cwd, timeoutMs }) => {
+const defaultAsyncRunner: GitAsyncCommandRunner = async (
+  command,
+  args,
+  { cwd, timeoutMs, maxBufferBytes },
+) => {
   try {
     return await new Promise<string | null>((resolve) => {
       execFile(
         command,
         args,
-        { cwd, encoding: "utf8", timeout: timeoutMs, killSignal: "SIGTERM" },
+        {
+          cwd,
+          encoding: "utf8",
+          timeout: timeoutMs,
+          killSignal: "SIGTERM",
+          ...(maxBufferBytes === undefined ? {} : { maxBuffer: maxBufferBytes }),
+        },
         (error, stdout) => resolve(error ? null : stdout.trim()),
       );
     });
@@ -182,22 +196,27 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
   }
 
   /**
-   * When the checkout's uncommitted tracked edits were last written. A daemon
-   * process started after this instant loaded those edits, whatever its own
-   * best-effort dirty stamp says (#17991). A deleted path uses its parent
-   * directory's time; any unreadable path makes the answer unknown.
+   * When any tracked file of the checkout was last written. A daemon process
+   * started after this instant loaded the working tree as it is now, whatever
+   * its own best-effort dirty stamp says (#17991). Every tracked path counts,
+   * not only the dirty ones, so an edit reverted to HEAD after the daemon
+   * started still shows. A deleted path uses its parent directory's time; any
+   * unreadable path or a failed listing makes the answer unknown.
    */
-  async readDirtyModifiedAt(cwd: string): Promise<number | null> {
+  async readTrackedModifiedAt(cwd: string): Promise<number | null> {
     const toplevel = this.locate(cwd)?.toplevel;
     if (!toplevel || !this.fs.modifiedAtMs) {
       return null;
     }
-    const names = await this.runAsync(
-      "git",
-      ["diff", "HEAD", "--name-only", "--no-renames", "-z"],
-      { cwd, timeoutMs: GIT_TIMEOUT_MS },
-    );
-    const paths = names?.split("\0").filter((name) => name.length > 0) ?? [];
+    const names = await this.runAsync("git", ["ls-files", "-z", "--full-name", "--", ":/"], {
+      cwd,
+      timeoutMs: GIT_TIMEOUT_MS,
+      maxBufferBytes: TRACKED_LISTING_MAX_BYTES,
+    });
+    if (names === null) {
+      return null;
+    }
+    const paths = names.split("\0").filter((name) => name.length > 0);
     let latest: number | null = null;
     for (const name of paths) {
       const absolute = join(toplevel, name);

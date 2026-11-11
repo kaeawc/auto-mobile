@@ -31,6 +31,8 @@ export interface PlanStep {
    * and fails (or, when `optional`, skips) the step on the first that does not hold (#16817).
    */
   expectations?: unknown[];
+  /** Case-sensitive literal checks on the returned payload, without another tool call. */
+  expect?: { contains?: string; notContains?: string };
 }
 
 export interface PlanDeviceDefinition {

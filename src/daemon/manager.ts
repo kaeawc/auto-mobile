@@ -6,6 +6,7 @@ import { fileSystemExtractionCleaner, type ExtractionCleaner } from "./extractio
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultDaemonExitRecordFileSystem } from "./daemonExitRecord";
 import { getCurrentBuildIdentity } from "./wire/buildIdentity";
+import { probeCheckoutMcpServerVersion } from "../utils/mcpVersion";
 import { existsSync, openSync, closeSync } from "node:fs";
 import { logger, resolveAutomobileLogSink } from "../utils/logger";
 import {
@@ -193,6 +194,7 @@ export class DaemonManager implements DaemonManagerLike {
     launchWorkingDirectory: resolveStableDaemonWorkingDirectory,
     currentBuildId: () => getCurrentBuildIdentity().buildId,
     nextLaunchNonce: () => defaultIdGenerator.next(),
+    probeLaunchCheckoutVersion: probeCheckoutMcpServerVersion,
   };
 
   /**

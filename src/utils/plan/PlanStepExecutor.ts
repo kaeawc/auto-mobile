@@ -1,3 +1,4 @@
+import { stepResultAssertionError } from "./stepResultAssertion";
 import { classifyToolResult } from "../toolEnvelopePayload";
 import { waitForTimeoutDiagnostics, waitForTimeoutError } from "./waitForTimeout";
 import { unsupportedToolResultError } from "./unsupportedToolResult";
@@ -57,6 +58,7 @@ export interface PlanStepTools<TTool extends PlanStepTool> {
       tapAtPlanContext?: TapAtPlanContext;
       /** The lock namespace a barrier or criticalSection step scopes its lock under (#15663). */
       planLockNamespace?: string;
+      planStartMs?: number;
     },
   ): Promise<unknown>;
 }
@@ -76,6 +78,7 @@ export interface StepExecutionContext {
   sessionUuid?: string;
   signal?: AbortSignal;
   captureObserveSteps?: NonNullable<PlanExecutionOptions["captureObserveSteps"]>;
+  planStartMs?: number;
   logPrefix: string;
   debugLog?: boolean;
 }
@@ -626,6 +629,7 @@ export class DefaultPlanStepExecutor<
     return this.tools.callInternal(tool, parsedParams, {
       signal: context.signal,
       forPlan: true,
+      planStartMs: context.planStartMs,
       sessionUuid: context.sessionUuid,
       ...(planLockNamespace ? { planLockNamespace } : {}),
       ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),
@@ -809,10 +813,25 @@ export class DefaultPlanStepExecutor<
     }
     const warnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
 
+    const toolPayload = completedStepPayload(response, step.tool);
+    if (step.expect !== undefined) {
+      const error = stepResultAssertionError(step.tool, step.expect, toolPayload);
+      if (error) {
+        if (this.shouldSkipReturnedFailure(step, context)) {
+          return skippedOptionalResult(step, error);
+        }
+        return {
+          status: "failed",
+          error,
+          details: { ...details, error },
+          ...(warnings ? { warnings } : {}),
+        };
+      }
+    }
     return this.checkExpectations(step, context, {
       status: "completed",
       details,
-      toolPayload: completedStepPayload(response, step.tool),
+      toolPayload,
       ...(warnings ? { warnings } : {}),
     });
   }

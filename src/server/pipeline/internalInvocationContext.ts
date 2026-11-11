@@ -1,6 +1,5 @@
 import {
   getToolSelectionContext,
-  type RequestDeadline,
   type ToolSelectionContext,
 } from "../../features/toolSelection/toolSelectionContext";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
@@ -8,14 +7,17 @@ import type { InternalToolCallOptions, InternalToolInvocationContext } from "../
 import { withoutPlanSuppliedDeadlineParams } from "./advertisedSchema";
 
 /**
- * Inside a plan every internal call runs under the request's deadline, as plan steps always have;
- * anything else gets only the deadline its caller passes (#15663).
+ * A plan's nested calls inherit its run start and request deadline. Outside a plan, deadlines
+ * are explicit (#15663); the run anchor is absent.
  */
-function internalCallRequestDeadline(
+function internalCallExecutionContext(
   context: ToolSelectionContext | undefined,
   options: InternalToolCallOptions,
-): RequestDeadline | undefined {
-  return context?.planRequest ? context.requestDeadline : options.requestDeadline;
+): Pick<InternalToolInvocationContext, "requestDeadline" | "planStartMs"> {
+  return {
+    requestDeadline: context?.planRequest ? context.requestDeadline : options.requestDeadline,
+    planStartMs: options.planStartMs ?? context?.planStartMs,
+  };
 }
 
 /**
@@ -42,7 +44,7 @@ export function internalToolInvocationContext(
     args: sessionUuid && args.sessionUuid !== sessionUuid ? { ...args, sessionUuid } : args,
     tapAtPlanContext: options.tapAtPlanContext,
     planLockNamespace: options.planLockNamespace,
-    requestDeadline: internalCallRequestDeadline(context, options),
+    ...internalCallExecutionContext(context, options),
     autolockMcpSessionId: undefined,
     oneShotCli: undefined,
     acceptanceDiscoveryOrder: undefined,

@@ -14,6 +14,32 @@ private final class FakeTVUptimeClock: TVUptimeClock {
 }
 
 final class TVCommandPolicyTests: XCTestCase {
+    func testRemoteHoldAllowsTapAndConvertsMillisecondsToSeconds() throws {
+        XCTAssertNil(try TVRemoteHold.seconds(durationMs: nil))
+        XCTAssertEqual(try TVRemoteHold.seconds(durationMs: 100), 0.1)
+        XCTAssertEqual(try TVRemoteHold.seconds(durationMs: 1500), 1.5)
+        XCTAssertEqual(try TVRemoteHold.seconds(durationMs: 10000), 10)
+    }
+
+    func testRemoteHoldRejectsDurationsOutsideBounds() {
+        for duration in [99, 10001] {
+            XCTAssertThrowsError(try TVRemoteHold.seconds(durationMs: duration)) { error in
+                guard case let CommandError.invalidParameter(parameter, _) = error else {
+                    return XCTFail("Expected invalidParameter, got \(error)")
+                }
+                XCTAssertEqual(parameter, "durationMs")
+            }
+        }
+    }
+
+    func testRunnerAdvertisesRemoteHoldFeature() {
+        XCTAssertEqual(TVCommandPolicy.supportedFeatures, ["press_button_hold"])
+    }
+
+    func testPlayPauseIsARemoteButton() {
+        XCTAssertEqual(TVRemoteButton(rawValue: "playPause"), .playPause)
+    }
+
     func testSwitchLikeElementsExposeKnownBooleanValues() {
         // XCUIElement.ElementType: radioButton = 10, checkBox = 12, switch = 40.
         for elementType in [10, 12, 40] {
@@ -693,7 +719,7 @@ final class TVCommandPolicyTests: XCTestCase {
         XCTAssertEqual(event["supportedCommands"] as? [String], [
             "request_hierarchy", "request_press_button", "request_append_text", "request_screenshot",
         ])
-        XCTAssertEqual(event["supportedFeatures"] as? [String], [])
+        XCTAssertEqual(event["supportedFeatures"] as? [String], ["press_button_hold"])
     }
 
     func testHostStaysTargetWhileFrontmost() {

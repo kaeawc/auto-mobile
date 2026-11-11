@@ -158,8 +158,11 @@ basis. Orphan directories belonging to simulators already deleted are not swept.
 Independently of the lean profile, `AUTOMOBILE_IOS_SUPPRESS_APSD_LOG=1` (or `true`, trimmed and
 case-insensitive) opts in to suppressing `com.apple.apsd` logs for newly created simulators before
 first boot. It defaults to `false` and writes nothing when off. AutoMobile writes a dictionary plist
-at `~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Library/Preferences/Logging/Subsystems/com.apple.apsd.plist`
-with `DEFAULT-OPTIONS.Level.Enable` and `DEFAULT-OPTIONS.Level.Persist` both set to the string `off`.
+at `<device set>/<UDID>/data/Library/Preferences/Logging/Subsystems/com.apple.apsd.plist`, where the
+device set is `CORESIMULATOR_DEVICE_SET_PATH` when set and `~/Library/Developer/CoreSimulator/Devices`
+otherwise, with `DEFAULT-OPTIONS.Level.Enable` and `DEFAULT-OPTIONS.Level.Persist` both set to the
+string `off`. The setting is part of the clone template identity, so a template built with it on is
+never cloned for a flag-off request.
 The setting persists across reboots; write failures warn and provisioning continues independently of
 label application. This hides apsd debug logs needed for push-flow debugging; remote push itself is
 unaffected because only logging changes, with no launchd job disabled. Measure any CPU effect by

@@ -7,6 +7,7 @@ import {
   resolvePrebootLabels,
   resolveDefaultPrebootProfile,
   resolveApsdLogSuppressionEnabled,
+  apsdLogSuppressionConfig,
   simulatorHostStateDir,
   simulatorDisabledDbPath,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorPrebootProfile";
@@ -552,4 +553,20 @@ test("default and all profiles exclude calendar; default is safe in both phases"
     resources: { widgets: "enabled", healthServices: "disabled" },
   });
   expect(result.resources).toEqual(["wallpaperRendering", "liveActivities", "healthServices"]);
+});
+
+test("apsd suppression writes into the configured custom device set", async () => {
+  const config = apsdLogSuppressionConfig(() => true, {
+    CORESIMULATOR_DEVICE_SET_PATH: "/custom/device-set",
+  });
+  expect(config.devicesDir()).toBe("/custom/device-set");
+  const host = new FakeSimulatorHostState();
+  const result = await new SimulatorPrebootProfile(host, () => "none", undefined, config).apply(
+    UDID,
+    {},
+  );
+  expect(result.apsdLogSuppression).toEqual({
+    applied: true,
+    path: `/custom/device-set/${UDID}/data/Library/Preferences/Logging/Subsystems/com.apple.apsd.plist`,
+  });
 });

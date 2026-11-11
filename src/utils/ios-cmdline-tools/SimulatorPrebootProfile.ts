@@ -15,6 +15,7 @@ import { iosDeviceResourceCatalog } from "../iosDeviceResourceCatalog";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 import { isIosSimulatorUdid } from "./iosDeviceType";
+import { resolveDeviceSetRoot } from "./SimulatorTccSqliteClient";
 import {
   NodeSimulatorHostState,
   isMissingSimulatorHostState,
@@ -90,6 +91,19 @@ export function resolveApsdLogSuppressionEnabled(env: NodeJS.ProcessEnv): boolea
   return value === "1" || value === "true";
 }
 
+export interface ApsdLogSuppressionConfig {
+  enabled: () => boolean;
+  devicesDir: () => string;
+}
+
+/** Suppression writes into the same device set simulator creation uses (CORESIMULATOR_DEVICE_SET_PATH). */
+export function apsdLogSuppressionConfig(
+  enabled: () => boolean = () => resolveApsdLogSuppressionEnabled(process.env),
+  env: NodeJS.ProcessEnv = process.env,
+): ApsdLogSuppressionConfig {
+  return { enabled, devicesDir: () => resolveDeviceSetRoot(homedir(), env) };
+}
+
 export const simulatorHostStateDir = (udid: string): string =>
   `/private/var/tmp/com.apple.CoreSimulator.SimDevice.${udid.toUpperCase()}`;
 export const simulatorDisabledDbPath = (udid: string): string =>
@@ -111,10 +125,7 @@ export class SimulatorPrebootProfile {
     private readonly defaultProfile: () => PrebootLeanProfileName = () =>
       resolveDefaultPrebootProfile(process.env),
     private readonly hazards: readonly IosDeviceResourceHazard[] = iosDeviceResourceHazards,
-    private readonly apsdLog: { enabled: () => boolean; devicesDir: () => string } = {
-      enabled: () => resolveApsdLogSuppressionEnabled(process.env),
-      devicesDir: () => join(homedir(), "Library/Developer/CoreSimulator/Devices"),
-    },
+    private readonly apsdLog: ApsdLogSuppressionConfig = apsdLogSuppressionConfig(),
   ) {}
   async apply(
     udid: string,

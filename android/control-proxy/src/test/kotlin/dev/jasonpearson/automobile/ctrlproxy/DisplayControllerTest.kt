@@ -38,6 +38,8 @@ class DisplayControllerTest {
 
     override fun frameworkDimenPx(name: String) = dimens[name] ?: 0
 
+    override fun isXrSpatialDevice() = false
+
     override fun densityDpi(): Int = densityFailure?.let { throw it } ?: density
   }
 

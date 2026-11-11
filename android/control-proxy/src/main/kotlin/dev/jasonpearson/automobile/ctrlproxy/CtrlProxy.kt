@@ -772,6 +772,8 @@ class CtrlProxy : AccessibilityService() {
             return if (id > 0) resources.getDimensionPixelSize(id) else 0
           }
 
+          override fun isXrSpatialDevice() = packageManager.hasSystemFeature(XR_SPATIAL_FEATURE)
+
           override fun densityDpi() = resources.displayMetrics.densityDpi
         },
     )

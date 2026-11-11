@@ -65,6 +65,7 @@ class FakeCarAppAdb implements CarAppAdb {
   foreground: ForegroundApp | null | Error = { packageName: "com.example.car", userId: 0 };
   /** When set, `content call` waits on it, so tests can overlap reads. */
   gate: Promise<void> | undefined;
+  foregroundGate: Promise<void> | undefined;
   constructor(private reply: () => string) {}
   setReply(reply: () => string): void {
     this.reply = reply;
@@ -76,6 +77,7 @@ class FakeCarAppAdb implements CarAppAdb {
   }
   async getForegroundApp(): Promise<ForegroundApp | null> {
     this.foregroundLookups += 1;
+    await this.foregroundGate;
     if (this.foreground instanceof Error) {
       throw this.foreground;
     }
@@ -242,6 +244,88 @@ describe("CarAppTemplateReader (#16751)", () => {
     expect(await reader.resolve(android, observation("com.example.car", 10))).toBeDefined();
     expect(adb.commands).toHaveLength(2);
     expect(reader.quietEntryCount).toBe(0);
+  });
+
+  test("a pre-install absent read cannot restore quiet state after forgetPackage", async () => {
+    const { adb, reader } = setup(() => "Unknown authority");
+    const gate = Promise.withResolvers<void>();
+    adb.gate = gate.promise;
+    const pending = reader.resolve(android, observation("com.example.car", 0));
+    expect(adb.commands).toHaveLength(1);
+
+    reader.forgetPackage(android.deviceId, "com.example.car");
+    gate.resolve();
+    expect(await pending).toBeUndefined();
+    expect(reader.quietEntryCount).toBe(0);
+
+    adb.gate = undefined;
+    adb.setReply(() => bundle(enabledDocument));
+    expect(await reader.resolve(android, observation("com.example.car"))).toBeDefined();
+    expect(adb.commands).toHaveLength(2);
+    expect(adb.foregroundLookups).toBe(1);
+  });
+
+  test("post-install reads share only their generation, even after the old read settles", async () => {
+    const { adb, reader } = setup(() => "Unknown authority");
+    const oldGate = Promise.withResolvers<void>();
+    adb.gate = oldGate.promise;
+    const oldRead = reader.resolve(android, observation("com.example.car", 0));
+    reader.forgetPackage(android.deviceId);
+
+    const newGate = Promise.withResolvers<void>();
+    adb.gate = newGate.promise;
+    const newRead = reader.resolve(android, observation("com.example.car", 0));
+    expect(adb.commands).toHaveLength(2);
+    oldGate.resolve();
+    expect(await oldRead).toBeUndefined();
+    expect(reader.quietEntryCount).toBe(0);
+
+    const sharedRead = reader.resolve(android, observation("com.example.car", 0));
+    expect(adb.commands).toHaveLength(2);
+    adb.setReply(() => bundle(enabledDocument));
+    newGate.resolve();
+    const block = await newRead;
+    expect(block).toBeDefined();
+    expect(await sharedRead).toBe(block);
+    expect(reader.quietEntryCount).toBe(0);
+  });
+
+  test("a pre-install enabled read cannot clear newer quiet state", async () => {
+    const { adb, reader } = setup(() => "Unknown authority");
+    const gate = Promise.withResolvers<void>();
+    adb.gate = gate.promise;
+    const oldRead = reader.resolve(android, observation("com.example.car", 0));
+    reader.forgetPackage(android.deviceId, "com.example.car");
+
+    adb.gate = undefined;
+    expect(await reader.resolve(android, observation("com.example.car", 0))).toBeUndefined();
+    expect(reader.quietEntryCount).toBe(2);
+    adb.setReply(() => bundle(enabledDocument));
+    gate.resolve();
+    expect(await oldRead).toBeDefined();
+    expect(reader.quietEntryCount).toBe(2);
+    expect(await reader.resolve(android, observation("com.example.car"))).toBeUndefined();
+    expect(adb.commands).toHaveLength(2);
+    expect(adb.foregroundLookups).toBe(0);
+  });
+
+  test("a pre-install failed user lookup cannot restore quiet state after forgetPackage", async () => {
+    const { adb, reader } = setup(() => bundle(enabledDocument));
+    const gate = Promise.withResolvers<void>();
+    adb.foregroundGate = gate.promise;
+    adb.foreground = null;
+    const pending = reader.resolve(android, observation("com.example.car"));
+    expect(adb.foregroundLookups).toBe(1);
+    reader.forgetPackage(android.deviceId, "com.example.car");
+    gate.resolve();
+    expect(await pending).toBeUndefined();
+    expect(reader.quietEntryCount).toBe(0);
+
+    adb.foregroundGate = undefined;
+    adb.foreground = { packageName: "com.example.car", userId: 0 };
+    expect(await reader.resolve(android, observation("com.example.car"))).toBeDefined();
+    expect(adb.foregroundLookups).toBe(2);
+    expect(adb.commands).toHaveLength(1);
   });
 
   test("an absent route stays quiet without an install even if the route becomes enabled", async () => {

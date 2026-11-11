@@ -107,6 +107,8 @@ export class CarAppTemplateReader {
   /** The Android user each device's package was last read as; the hint for skipping a lookup. */
   private readonly lastUser = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<PackageRead>>();
+  /** Install invalidation fences reads that are still pending on this device. */
+  private readonly generations = new Map<string, number>();
   /** Per device: the last successful services dump, parsed, or the dump still running. */
   /**
    * Per device: the services snapshot the last projected templates read used, the observation it
@@ -134,6 +136,7 @@ export class CarAppTemplateReader {
 
   /** An install may change the route for every Android user; no package means any app changed. */
   forgetPackage(deviceId: string, packageName?: string): void {
+    this.generations.set(deviceId, (this.generations.get(deviceId) ?? 0) + 1);
     const devicePrefix = `${deviceId}\u0000`;
     // Quiet keys are device + package + user, so the trailing separator matches every user
     // without also matching another package that happens to start with this package's name.
@@ -175,14 +178,15 @@ export class CarAppTemplateReader {
     return read.kind === "block" ? read.block : undefined;
   };
 
-  /** Overlapping reads of one device, user and package share one promise. */
+  /** Overlapping reads of one device, user, package and generation share one promise. */
   private shared(
     device: BootedDevice,
     packageName: string,
     userId: number | undefined,
     start: () => Promise<PackageRead>,
   ): Promise<PackageRead> {
-    const key = `${device.deviceId}\u0000${userId ?? ""}\u0000${packageName}`;
+    const generation = this.generations.get(device.deviceId) ?? 0;
+    const key = `${device.deviceId}\u0000${userId ?? ""}\u0000${packageName}\u0000${generation}`;
     const pending = this.inFlight.get(key);
     if (pending) {
       return pending;
@@ -370,22 +374,30 @@ export class CarAppTemplateReader {
         ? { kind: "failed" }
         : { kind: "none" };
     }
+    const generation = this.generations.get(device.deviceId) ?? 0;
     const answer = await this.read(device, packageName, userId);
+    const current = generation === (this.generations.get(device.deviceId) ?? 0);
     if (answer.kind !== "document" || !answer.document.enabled) {
-      this.quiet(key, quietIntervalMs(answer));
-      this.lastUser.set(appKey, userId);
-      if (answer.kind === "failed") {
-        this.failedReads.add(key);
-        return this.answeredEnabled.has(key) ? { kind: "failed" } : { kind: "none" };
+      if (current) {
+        this.quiet(key, quietIntervalMs(answer));
+        this.lastUser.set(appKey, userId);
+        if (answer.kind === "failed") {
+          this.failedReads.add(key);
+        } else {
+          // The route is gone or disabled now, so a later failure is no longer a known app's.
+          this.answeredEnabled.delete(key);
+        }
       }
-      // The route is gone or disabled now, so a later failure is no longer a known app's.
-      this.answeredEnabled.delete(key);
-      return { kind: "none" };
+      return answer.kind === "failed" && this.answeredEnabled.has(key)
+        ? { kind: "failed" }
+        : { kind: "none" };
     }
-    this.quietUntil.delete(key);
-    this.failedReads.delete(key);
-    this.lastUser.delete(appKey);
-    this.answeredEnabled.add(key);
+    if (current) {
+      this.quietUntil.delete(key);
+      this.failedReads.delete(key);
+      this.lastUser.delete(appKey);
+      this.answeredEnabled.add(key);
+    }
     const { document } = answer;
     return {
       kind: "block",
@@ -416,8 +428,9 @@ export class CarAppTemplateReader {
     ) {
       return undefined;
     }
+    const generation = this.generations.get(device.deviceId) ?? 0;
     const userId = await this.foregroundUser(device, packageName);
-    if (userId === undefined) {
+    if (userId === undefined && generation === (this.generations.get(device.deviceId) ?? 0)) {
       this.quiet(quietKey(appKey, UNKNOWN_USER), CAR_APP_ROUTE_FAILED_RETRY_MS);
     }
     return userId;

@@ -292,12 +292,13 @@
         }
 
         private func routeAuthorizedRequest(_ request: String, connection: NWConnection, requestData: Data) {
-            guard requireApplicationActive(connection) else { return }
-
-            // Preserve identity authorization first, then the foreground gate, then routing.
-            // Unknown, wrong-method, and malformed requests retain the existing gate responses.
             let requestLine = request.components(separatedBy: "\r\n")[0]
-            switch Self.route(forRequestLine: requestLine) {
+            let match = Self.route(forRequestLine: requestLine)
+            // CarPlay may remain active while the phone app is backgrounded.
+            if SdkRouteTable.requiresApplicationActive(for: match) {
+                guard requireApplicationActive(connection) else { return }
+            }
+            switch match {
             case let .matched(route):
                 dispatch(route, connection: connection, requestData: requestData)
             case .notFound:
@@ -415,6 +416,18 @@
                 return SdkRouteResponse(statusCode: 500, body: Data("{\"error\":\"encode_failed\"}".utf8))
             }
             return SdkRouteResponse(statusCode: 200, body: data)
+        }
+
+        func handleCarPlayTemplates(_ connection: NWConnection) {
+            DispatchQueue.main.async {
+                let document = CarPlayTemplateRegistry.shared.snapshot()
+                let body = (try? JSONEncoder().encode(document)) ??
+                    Data(
+                        "{\"schemaVersion\":1,\"enabled\":false,\"connected\":false,\"templates\":[],\"truncated\":false,\"error\":\"encode_failed\"}"
+                            .utf8
+                    )
+                self.sendResponse(connection, statusCode: 200, body: body)
+            }
         }
 
         func handleHealth(_ connection: NWConnection) {

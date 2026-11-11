@@ -3,6 +3,7 @@
   "ignorePatterns": [
     "test/fixtures/xr-headset/*.json",
     "test/fixtures/xr/systemui-hidden-chrome.json",
+    "test/fixtures/ios-carplay/*.json",
     "test/fixtures/simctl/pairs/**",
     "test/fixtures/android-avdmanager/*.txt",
     "test/fixtures/visionos-settings/*.json",

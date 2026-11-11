@@ -8,10 +8,15 @@ import {
   startToolCallRecording,
   stopToolCallRecording,
   getToolCallRecordingStatus,
+  TOOL_CALL_RECORDING_CONNECTION_SCOPE_EXPLANATION,
 } from "../daemon/toolCallRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { featureFlagDisabledMessage } from "../features/featureFlags/featureFlagDisabledMessage";
-import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelectionContext";
+import {
+  currentAutolockMcpSessionId,
+  currentOneShotCli,
+} from "../features/toolSelection/toolSelectionContext";
+import { ActionableError } from "../models/ActionableError";
 
 // ============================================================================
 // Tool Call Recording — "recordToolCalls" tool
@@ -91,6 +96,13 @@ const recordingStatusResponse = (connectionId: RecordingConnectionId) => {
 };
 
 const recordingBeginResponse = (connectionId: RecordingConnectionId, planName?: string) => {
+  if (currentOneShotCli()) {
+    throw new ActionableError(
+      "A one-shot CLI call cannot hold a recording because its MCP connection closes after the call. " +
+        "Record through a persistent MCP connection (the proxy / daemon MCP session). " +
+        TOOL_CALL_RECORDING_CONNECTION_SCOPE_EXPLANATION,
+    );
+  }
   const result = startToolCallRecording({ connectionId, planName });
   return createStructuredToolResponse({
     success: true,

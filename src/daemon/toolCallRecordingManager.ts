@@ -50,6 +50,10 @@ export interface ToolCallRecordingOptions {
   timer?: Timer;
 }
 
+export const TOOL_CALL_RECORDING_CONNECTION_SCOPE_EXPLANATION =
+  "Recordings are scoped to the MCP connection that began them, so a separate " +
+  "connection (such as a one-shot CLI call) cannot end another connection's recording.";
+
 // A symbol keeps anonymous callers together without colliding with a transport id.
 const DEFAULT_CONNECTION_KEY = Symbol("anonymous MCP connection");
 const activeSessions = new Map<string | symbol, ToolCallRecordingSession>();
@@ -173,8 +177,7 @@ export function stopToolCallRecording({
     throw new Error(
       "No active tool call recording on this MCP connection. " +
         'Call recordToolCalls with action: "begin" first. ' +
-        "Recordings are scoped to the MCP connection that began them, so a separate " +
-        "connection (such as a one-shot CLI call) cannot end another connection's recording.",
+        TOOL_CALL_RECORDING_CONNECTION_SCOPE_EXPLANATION,
     );
   }
   // A planName given to end wins; otherwise the one given to begin names the plan (#17950).

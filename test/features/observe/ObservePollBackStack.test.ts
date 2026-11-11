@@ -26,6 +26,7 @@ function createHarness(
     changing?: boolean;
     multiDisplay?: boolean;
     disagreement?: boolean;
+    automotiveBlocker?: boolean;
     hierarchyCapture?: HierarchyCapture;
   } = {},
 ) {
@@ -75,6 +76,26 @@ function createHarness(
       },
     };
   };
+  if (options.automotiveBlocker) {
+    const capture = hierarchy.collect.bind(hierarchy);
+    hierarchy.collect = async (result, ...rest): Promise<void> => {
+      await capture(result, ...rest);
+      result.automotive = { blocked: false };
+    };
+    state.refreshAutomotiveForegroundActivity = async (result): Promise<void> => {
+      const blocked =
+        result.backStack?.currentActivity?.name === "com.android.car.ActivityBlockingActivity";
+      result.automotive = { blocked };
+    };
+    const collect = state.collectBackStack.bind(state);
+    state.collectBackStack = async (result, ...rest): Promise<void> => {
+      await collect(result, ...rest);
+      result.backStack!.currentActivity = {
+        name: "com.android.car.ActivityBlockingActivity",
+        taskId: 1,
+      };
+    };
+  }
   const device: BootedDevice = {
     deviceId: "deferred-stack-device",
     name: "Test",
@@ -176,6 +197,15 @@ describe("real settle pipeline deferred back stack (#6598)", () => {
     expect(h.order).toEqual(["hierarchy", "hierarchy", "hierarchy", "backStack"]);
     // The capped final sleep puts the deferred read at the budget, after the last hierarchy.
     expect(result.observation.backStack?.capturedAt).toBe(21);
+  });
+
+  test("refreshes automotive blocked state once the terminal stack is attached", async () => {
+    const h = createHarness({ automotiveBlocker: true });
+    const result = await new RealSettleObserve(h.screen, h.timer).execute({
+      stableReads: 3,
+      pollMs: 10,
+    });
+    expect(result.observation.automotive?.blocked).toBe(true);
   });
 
   test("iOS keeps three hierarchy captures and identical fields without a backStack key", async () => {

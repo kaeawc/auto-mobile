@@ -9,6 +9,7 @@ import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/Perfo
 import { appendObserveError } from "../ObserveError";
 import { isFocusedSystemUiSurface } from "../Window";
 import { detectCarAppHostRenderedUi } from "../automotive/carAppHostRenderedUi";
+import { detectDrivingRestrictionBlock } from "../automotive/drivingRestrictionBlock";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { Window } from "../interfaces/Window";
 import type { BackStack } from "../interfaces/BackStack";
@@ -62,7 +63,7 @@ export class DeviceStateCollector {
 
   /**
    * Re-derive the foreground activity's DO status and `blocked` for the current
-   * `activeWindow`, keeping the sampled driving and UX-restriction state. Call it
+   * `activeWindow` and back stack, keeping the sampled driving and UX-restriction state. Call it
    * after any step that changes the attributed activity.
    */
   async refreshAutomotiveForegroundActivity(
@@ -73,18 +74,10 @@ export class DeviceStateCollector {
     if (!automotive) {
       return;
     }
-    const { appId, activityName } = result.activeWindow ?? {};
-    let distractionOptimized: boolean | undefined;
-    if (appId && activityName) {
-      const activities = parseDoActivities(
-        await this.readAutomotive(["cmd", "car_service", "get-do-activities", appId], signal),
-        appId,
-      );
-      const fullName = activityName.replace(/^\./, `${appId}.`);
-      distractionOptimized = activities?.has(fullName);
-    }
+    const distractionOptimized = await this.readForegroundDistractionOptimized(result, signal);
     const { drivingState, uxRestrictions } = automotive;
     const hostRenderedUi = detectCarAppHostRenderedUi(result);
+    const block = detectDrivingRestrictionBlock(result.backStack);
     result.automotive = {
       ...(drivingState !== undefined ? { drivingState } : {}),
       ...(uxRestrictions ? { uxRestrictions } : {}),
@@ -92,9 +85,28 @@ export class DeviceStateCollector {
         ? { foregroundActivity: { distractionOptimized } }
         : {}),
       blocked:
-        uxRestrictions?.requiresDistractionOptimization === true && distractionOptimized === false,
+        block !== undefined ||
+        (uxRestrictions?.requiresDistractionOptimization === true &&
+          distractionOptimized === false),
+      ...block,
       ...(hostRenderedUi ? { hostRenderedUi } : {}),
     };
+  }
+
+  /** Whether the active window's activity is distraction optimized; `undefined` when unknown. */
+  private async readForegroundDistractionOptimized(
+    result: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<boolean | undefined> {
+    const { appId, activityName } = result.activeWindow ?? {};
+    if (!appId || !activityName) {
+      return undefined;
+    }
+    const activities = parseDoActivities(
+      await this.readAutomotive(["cmd", "car_service", "get-do-activities", appId], signal),
+      appId,
+    );
+    return activities?.has(activityName.replace(/^\./, `${appId}.`));
   }
 
   private async readAutomotive(args: string[], signal?: AbortSignal): Promise<string> {

@@ -4,6 +4,7 @@ import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerAppTools } from "../../src/server/appTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { focusNavigateTool } from "../../src/server/focusNavigateTool";
+import { registerGlassesInputTools } from "../../src/server/glassesInputTool";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -22,6 +23,7 @@ describe("recordsNavigation trait (formerly NAVIGATION_RELEVANT_TOOLS)", () => {
     registerAppTools();
     registerObserveTools();
     focusNavigateTool.register();
+    registerGlassesInputTools();
   });
 
   test("is declared by exactly the UI-interaction tools that may cause navigation", () => {
@@ -29,6 +31,7 @@ describe("recordsNavigation trait (formerly NAVIGATION_RELEVANT_TOOLS)", () => {
     expect(navigationRecordingTools()).toEqual([
       "dragAndDrop",
       "focusNavigate",
+      "glassesInput",
       "pinchOn",
       "pressButton",
       "sendKeys",

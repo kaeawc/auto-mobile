@@ -14,6 +14,8 @@ import type { ElementQuery } from "../../models/ElementQuery";
  * named intent constant, not to ad hoc flags at each call site.
  */
 export interface ElementSelectionOptions {
+  /** Prefer complete sibling rows, then top/left/capture order; internal XR tapAny opt-in. */
+  readingOrder?: boolean;
   container?: ElementContainerSelector | null;
   partialMatch?: boolean;
   caseSensitive?: boolean;

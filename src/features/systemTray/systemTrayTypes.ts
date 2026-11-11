@@ -7,6 +7,7 @@ export interface SystemTrayNotificationArgs {
   body?: string;
   appId?: string;
   tapActionLabel?: string;
+  replyText?: string;
   /**
    * Reads the content `appId` posted through `postNotification`, filled in by
    * systemTray on iOS and never taken from tool input: the only evidence that

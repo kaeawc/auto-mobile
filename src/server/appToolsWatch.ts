@@ -5,10 +5,16 @@ import { UninstallApp } from "../features/action/UninstallApp";
 import type { InstallAppCall } from "../features/action/InstallAppTypes";
 import type { UninstallAppCall } from "../features/action/UninstallApp";
 import { WatchAppManager } from "../features/action/watch/WatchAppManager";
+import { PACKAGE_NOT_INSTALLED_ERROR } from "../features/action/LaunchPackageRemovedError";
+import {
+  VISIONOS_RUNNER_HOST_BUNDLE_ID,
+  restartVisionosRunnerForMissingHost,
+} from "../features/visionos/VisionosRunnerLifecycle";
 import {
   ActionableError,
   type BootedDevice,
   type InstallAppResult,
+  type LaunchAppResult,
   type TerminateAppResult,
 } from "../models";
 import { NON_IOS_APPLE_PLATFORM_LABELS, type Platform } from "../models/Platform";
@@ -30,6 +36,9 @@ export type WatchRunnerRetarget = (
   bundleId: string,
   signal?: AbortSignal,
 ) => Promise<string | undefined>;
+
+/** Restarts the visionOS runner when launchApp finds its host app missing; true means launch again. */
+export type VisionosHostAppRecovery = (deviceId: string, signal?: AbortSignal) => Promise<boolean>;
 
 const defaultWatchAppManager: WatchAppManagerFactory = (device) => new WatchAppManager(device);
 
@@ -68,6 +77,7 @@ export function createPlatformLaunchApp(
   device: BootedDevice,
   watchApps: WatchAppManagerFactory = defaultWatchAppManager,
   retarget: WatchRunnerRetarget = async () => undefined,
+  recoverVisionosHost: VisionosHostAppRecovery = restartVisionosRunnerForMissingHost,
 ): LaunchAppExecutor {
   if (!isSimctlAppPlatform(device.platform)) {
     return new LaunchApp(device);
@@ -75,7 +85,14 @@ export function createPlatformLaunchApp(
   const manager = watchApps(device);
   return {
     execute: async (appId, call) => {
-      const result = await manager.launch(appId, call);
+      let result = await manager.launch(appId, call);
+      if (
+        isMissingVisionosRunnerHost(device, appId, result) &&
+        (await recoverVisionosHost(device.deviceId, call?.signal))
+      ) {
+        // The restarted runner reinstalled its host app (#17382); launch it once more.
+        result = await manager.launch(appId, call);
+      }
       if (result.success && device.platform === "watchos") {
         const reason = await retarget(device.deviceId, appId, call?.signal);
         if (reason !== undefined) {
@@ -88,6 +105,20 @@ export function createPlatformLaunchApp(
       return result.success ? { ...result, verificationSkipped: "platform" } : result;
     },
   };
+}
+
+/** launchApp of the visionOS runner's own host app reported it as not installed. */
+function isMissingVisionosRunnerHost(
+  device: BootedDevice,
+  appId: string,
+  result: LaunchAppResult,
+): boolean {
+  return (
+    device.platform === "visionos" &&
+    appId === VISIONOS_RUNNER_HOST_BUNDLE_ID &&
+    !result.success &&
+    result.error === PACKAGE_NOT_INSTALLED_ERROR
+  );
 }
 
 /** terminateApp's executor: a watch, Apple TV or Vision Pro goes to simctl, every other device keeps TerminateApp. */

@@ -1,0 +1,1 @@
+Row: 0 _id=1, address=+15551230001, body=Your code is 123456, date=1760000000000, read=0

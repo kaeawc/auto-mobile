@@ -13,10 +13,12 @@ export function provisionDeviceDependencyOverrides(
   | "provisionAndroidIdentityBackoff"
   | "manufacturerProfileApplier"
   | "androidAutoProjection"
+  | "avdColdBootMarkers"
   | "holdAcquiringSession"
 > {
   return {
     holdAcquiringSession: deps.holdAcquiringSession ?? currentDeps.holdAcquiringSession,
+    avdColdBootMarkers: deps.avdColdBootMarkers ?? currentDeps.avdColdBootMarkers,
     androidAutoProjection: deps.androidAutoProjection ?? currentDeps.androidAutoProjection,
     manufacturerProfileApplier:
       deps.manufacturerProfileApplier ?? currentDeps.manufacturerProfileApplier,

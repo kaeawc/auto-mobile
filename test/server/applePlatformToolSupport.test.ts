@@ -152,6 +152,21 @@ describe("assertToolSupportsDevicePlatform", () => {
     }
   });
 
+  test("admits tvOS diagnostics while visionOS stays refused", () => {
+    for (const tool of ["getLogs", "crashApp"]) {
+      for (const device of [appleTv, iphone, { ...iphone, platform: "android" as const }]) {
+        expect(() => assertToolSupportsDevicePlatform(tool, device)).not.toThrow();
+        expect(() =>
+          assertRequestedPlatformSupported(tool, { platform: device.platform }),
+        ).not.toThrow();
+      }
+      expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(ActionableError);
+      expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).toThrow(
+        ActionableError,
+      );
+    }
+  });
+
   test("never rejects an Android or iOS device", () => {
     expect(() => assertToolSupportsDevicePlatform("tapOn", iphone)).not.toThrow();
     expect(() =>

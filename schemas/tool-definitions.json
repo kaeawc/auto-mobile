@@ -2616,7 +2616,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "tvos"]
         },
         "appId": {
           "type": "string"
@@ -4283,6 +4283,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -6852,6 +6857,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -9129,13 +9139,13 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Stop active recording and export a YAML plan.",
+    "description": "Stop the active recordDeviceGestures or recordToolCalls recording and export a YAML plan.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "recordingId": {
-          "description": "recordDeviceGestures recordingId; defaults to the active recording. For recordToolCalls plans use recordToolCalls action=end",
+          "description": "recordDeviceGestures recordingId; defaults to the active recording. Omit it to end this connection's recordToolCalls recording",
           "type": "string"
         },
         "planName": {
@@ -9181,6 +9191,13 @@
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
+        },
+        "warnings": {
+          "description": "recordToolCalls recordings only, present when non-empty: calls skipped or recorded in a weakened form",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "error": {
           "type": "string"
@@ -9627,6 +9644,7 @@
               "rotaryScroll",
               "rotate",
               "rotateCrown",
+              "seedContent",
               "selectAllText",
               "sendBroadcast",
               "sendKeys",
@@ -9794,6 +9812,7 @@
               "rotaryScroll",
               "rotate",
               "rotateCrown",
+              "seedContent",
               "selectAllText",
               "sendBroadcast",
               "sendKeys",
@@ -11213,7 +11232,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS and Apple Watch Simulator unified log by app subsystem and process. Bounded output.",
+    "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS, Apple Watch and Apple TV Simulator unified log by app subsystem and process. Bounded output.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -12914,6 +12933,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -16330,6 +16354,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -21356,6 +21385,11 @@
               "enum": ["exact", "contains", "regex"],
               "description": "How to match waitFor.text; does not affect contentDescription"
             },
+            "textSource": {
+              "type": "string",
+              "enum": ["displayed"],
+              "description": "displayed: match text only against the element's shown text or value"
+            },
             "activeWindow": {
               "type": "object",
               "additionalProperties": false,
@@ -23295,6 +23329,11 @@
         "isScreenRound": {
           "description": "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
           "type": "boolean"
+        },
+        "surface": {
+          "description": "Wear OS watch devices only: the captured foreground surface. Omitted when it cannot be identified, including the notification tray.",
+          "type": "string",
+          "enum": ["tile", "watchface", "launcher", "app"]
         },
         "hierarchyUnavailable": {
           "description": "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen.",
@@ -25517,6 +25556,11 @@
               "enum": ["exact", "contains", "regex"],
               "description": "How to match waitFor.text; does not affect contentDescription"
             },
+            "textSource": {
+              "type": "string",
+              "enum": ["displayed"],
+              "description": "displayed: match text only against the element's shown text or value"
+            },
             "activeWindow": {
               "type": "object",
               "additionalProperties": false,
@@ -26658,6 +26702,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -29109,6 +29158,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -33597,6 +33651,7 @@
               "rotaryScroll",
               "rotate",
               "rotateCrown",
+              "seedContent",
               "selectAllText",
               "sendBroadcast",
               "sendKeys",
@@ -34890,6 +34945,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -37167,7 +37227,7 @@
       "destructiveHint": false,
       "openWorldHint": false
     },
-    "description": "Record MCP tool calls to a YAML plan: action begin, end (returns the plan), or status.",
+    "description": "Record MCP tool calls to a YAML plan: action begin, end (returns the plan; exportPlan also ends it), or status.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -37178,7 +37238,7 @@
           "enum": ["begin", "end", "status"]
         },
         "planName": {
-          "description": "Plan name for action=end",
+          "description": "Plan name: on begin, the exported plan's name; on end, overrides the begin name",
           "type": "string"
         },
         "sessionUuid": {
@@ -37233,6 +37293,15 @@
           "items": {
             "type": "string"
           }
+        },
+        "platform": {
+          "description": "action=end only: the platform written at the top of the plan",
+          "type": "string",
+          "enum": ["android", "ios", "tvos"]
+        },
+        "platformNote": {
+          "description": "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",
+          "type": "string"
         },
         "error": {
           "type": "string"
@@ -38097,6 +38166,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -39770,6 +39844,238 @@
     }
   },
   {
+    "name": "seedContent",
+    "title": "Seed System Content",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Seed Android contacts, calendar events, call history and SMS inbox, tagged automobile.<namespace>. reset removes only this namespace before inserts (supplied kinds, or all kinds if no arrays). Contacts/calendar/SMS require the debug content-seeder APK and grant its SMS role and runtime permissions. Dates are ISO 8601 with timezone; all-day events use UTC midnight and exclusive end. Data persists until reset; contact photos are unsupported. iOS is unsupported.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,32}$"
+        },
+        "reset": {
+          "description": "Remove namespace rows before inserting. With arrays, reset those kinds; without arrays, reset all four kinds.",
+          "type": "boolean"
+        },
+        "contacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "phones": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "emails": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+          }
+        },
+        "calendarEvents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "start": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$"
+              },
+              "allDay": {
+                "type": "boolean"
+              },
+              "location": {
+                "type": "string",
+                "minLength": 1
+              },
+              "calendar": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["title", "start", "end"],
+            "additionalProperties": false
+          }
+        },
+        "callLog": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "number": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "enum": ["incoming", "outgoing", "missed"]
+              },
+              "date": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$"
+              },
+              "durationSec": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
+              }
+            },
+            "required": ["number", "type", "date"],
+            "additionalProperties": false
+          }
+        },
+        "smsInbox": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string",
+                "minLength": 1
+              },
+              "body": {
+                "type": "string",
+                "minLength": 1
+              },
+              "date": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$"
+              },
+              "read": {
+                "type": "boolean"
+              }
+            },
+            "required": ["address", "body", "date"],
+            "additionalProperties": false
+          }
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["namespace"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "inserted": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "removed": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["namespace", "inserted", "removed"],
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "contacts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "calendarEvents": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "callLog": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "smsInbox": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["contacts", "calendarEvents", "callLog", "smsInbox"],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  {
     "name": "selectAllText",
     "title": "Select All Text",
     "annotations": {
@@ -40042,6 +40348,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -46298,6 +46609,7 @@
             "rotaryScroll",
             "rotate",
             "rotateCrown",
+            "seedContent",
             "selectAllText",
             "sendBroadcast",
             "sendKeys",
@@ -46427,6 +46739,7 @@
               "rotaryScroll",
               "rotate",
               "rotateCrown",
+              "seedContent",
               "selectAllText",
               "sendBroadcast",
               "sendKeys",
@@ -46990,6 +47303,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -48862,6 +49180,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
@@ -52143,6 +52466,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -54961,6 +55289,11 @@
                   "type": "string",
                   "const": "settled_capture_adopted"
                 },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
+                },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
@@ -56966,6 +57299,11 @@
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
                   "const": "settled_capture_adopted"
+                },
+                "surface": {
+                  "description": "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+                  "type": "string",
+                  "enum": ["tile", "watchface", "launcher", "app"]
                 },
                 "added": {
                   "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",

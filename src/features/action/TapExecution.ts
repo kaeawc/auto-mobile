@@ -56,6 +56,7 @@ import { TapTargetResolver } from "./TapTargetResolver";
 import { TapGestureDispatcher } from "./TapGestureDispatcher";
 import { appendNoChangeWarning, mismatchWarnings } from "./tapActivationTargetWarnings";
 import { type TapOnFocusOutcome } from "./TapSemanticLinks";
+import { settleUnconfirmedXrClick } from "./xrPanelNodeClick";
 
 function appendDisabledElementWarning(
   strategy: TapStrategy,
@@ -158,6 +159,8 @@ interface TapExecutionState {
   settlePostTapEffect?: boolean;
   /** The match a TalkBack tap claimed to activate; warn if nothing changed (#17667, #17677). */
   screenReaderActivation?: { matched?: Element };
+  /** Why CtrlProxy left an XR node click unconfirmed; decided from the post-tap effect (#17983). */
+  unconfirmedXrClick?: string;
 }
 interface TapHierarchyState {
   observeResult: ObserveResult;
@@ -324,6 +327,7 @@ export class TapExecution {
     if (effectDerived && (requestedAction !== "focus" || result.focusVerified !== true)) {
       appendNoChangeWarning(result, state.screenReaderActivation);
     }
+    settleUnconfirmedXrClick(result, state.unconfirmedXrClick);
 
     if (state.effectiveAction === "longPress") {
       const metadata = this.host.detectLongPressMetadata(
@@ -875,6 +879,7 @@ export class TapExecution {
               onTalkBackActivation: () => {
                 state.screenReaderActivation = { matched: target.finalSelection.matchedElement };
               },
+              onUnconfirmedClick: (reason) => Object.assign(state, { unconfirmedXrClick: reason }),
             },
             isTalkBackEnabled: target.isAccessibilityServiceEnabled,
           },

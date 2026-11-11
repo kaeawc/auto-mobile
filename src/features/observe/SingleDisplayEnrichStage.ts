@@ -17,6 +17,7 @@ import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import { SafeAreaAuditor } from "./audits/SafeAreaAuditor";
+import { wearSurfaceKind } from "../wear/wearSurfaceKind";
 import type { ScreenRoundReader } from "../wear/screenRound";
 
 /** Stages 3 and 5 of one single-display observation: derive elements, start screenshots, run audits and predictions, then attach timings and protect the screenshot. */
@@ -70,6 +71,12 @@ export class SingleDisplayEnrichStage {
   /** Stage 3: derive elements, start screenshots, and run audits and predictions. */
   async enrichSingleDisplay(run: SingleDisplayRun): Promise<void> {
     this.enrichSingleDisplayElements({ result: run.result });
+    if (this.d.device().formFactor === "watch") {
+      const surface = wearSurfaceKind(run.result);
+      if (surface !== undefined) {
+        run.result.surface = surface;
+      }
+    }
     await this.attachScreenRound(run);
     await this.startSingleDisplayScreenshot(run);
     await this.runSingleDisplayAudits(run);

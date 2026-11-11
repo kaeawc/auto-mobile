@@ -98,7 +98,13 @@ function textWaitFor(
   if (fields.text !== undefined) {
     return `${type} takes the expected value in \`text\`, not \`selector.text\``;
   }
-  return { ...fields, text, textMatch: type === "textEquals" ? "exact" : "contains" };
+  // Compare what the element shows, not its content description (#16875).
+  return {
+    ...fields,
+    text,
+    textMatch: type === "textEquals" ? "exact" : "contains",
+    textSource: "displayed",
+  };
 }
 
 function waitForFor(

@@ -4,7 +4,13 @@ import { ActionableError } from "../../models/ActionableError";
 import { AndroidLogReader } from "./AndroidLogReader";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { compileGrep, type LogcatBuffer, type LogcatPriority, type LogLine } from "./logcatQuery";
+import {
+  compileGrep,
+  LOGCAT_PRIORITIES,
+  type LogcatBuffer,
+  type LogcatPriority,
+  type LogLine,
+} from "./logcatQuery";
 
 /** Default and largest look-back windows, in seconds (the resource's one-hour cap). */
 export const GET_LOGS_DEFAULT_SECONDS = 300;
@@ -138,6 +144,34 @@ function unifiedLogLevel(priority: LogcatPriority): UnifiedLogLevel {
   return priority === "I" ? "info" : "default";
 }
 
+/**
+ * The `minPriority` each compact-style type column ranks as (#17963): `Db` debug, `In` info,
+ * `Df` default, `E` error, `Fa` fault, `A` activity. The unified log has no warning level, so
+ * `W` admits `Df` and up; activity and any unrecognized column rank as `Df`.
+ */
+export const UNIFIED_TYPE_PRIORITY: Readonly<Record<string, LogcatPriority>> = {
+  Db: "D",
+  In: "I",
+  Df: "W",
+  A: "W",
+  E: "E",
+  Fa: "F",
+};
+
+/** The priority a parsed compact line ranks as, from its leading type column. */
+export function unifiedLinePriority(message: string): LogcatPriority {
+  const type = /^(\S+)\s/.exec(message)?.[1] ?? "";
+  return Object.hasOwn(UNIFIED_TYPE_PRIORITY, type) ? UNIFIED_TYPE_PRIORITY[type]! : "W";
+}
+
+/** Whether a compact line ranks at or above `minPriority`. */
+export function meetsUnifiedPriority(message: string, minPriority: LogcatPriority): boolean {
+  return (
+    LOGCAT_PRIORITIES.indexOf(unifiedLinePriority(message)) >=
+    LOGCAT_PRIORITIES.indexOf(minPriority)
+  );
+}
+
 // 2026-10-21 08:15:30.123 Df MyApp[123:4567] [com.example:net] message
 const COMPACT = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\s+(.*)$/;
 
@@ -241,8 +275,11 @@ export class GetLogs {
         "The unified log window exceeded the byte bound; only the newest lines were read.",
       );
     }
+    // `log show --level` is only a floor (default/info/debug), so error and fault are ranked here.
     const lines = parseUnifiedCompact(collected.text).filter(
-      (line) => grep === undefined || grep.test(line.message),
+      (line) =>
+        meetsUnifiedPriority(line.message, minPriority) &&
+        (grep === undefined || grep.test(line.message)),
     );
     const bounded = boundLines(lines, maxLines);
     return {

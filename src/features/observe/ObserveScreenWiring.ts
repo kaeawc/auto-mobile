@@ -1,3 +1,4 @@
+import type { AndroidXrDisplaySize } from "./android/AndroidXrDisplaySize";
 import type { BootedDevice, ObserveResult } from "../../models";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -36,6 +37,7 @@ import { createDeviceHierarchyCapture } from "./DeviceHierarchyCapture";
 import { RealSettleObserve } from "./SettleObserve";
 
 interface ObserveScreenWiringSources {
+  xrDisplaySize?: AndroidXrDisplaySize;
   device: BootedDevice;
   adb: () => AdbExecutor;
   adbFactory: () => AdbClientFactory;
@@ -158,6 +160,7 @@ export function createObserveScreenWiring(sources: ObserveScreenWiringSources) {
     },
     createReconciler() {
       return new DefaultActiveWindowAttributionReconciler({
+        xrDisplaySize: sources.xrDisplaySize,
         viewHierarchy: identity.viewHierarchy,
         deviceStateCollector: identity.deviceStateCollector,
         device: identity.device,

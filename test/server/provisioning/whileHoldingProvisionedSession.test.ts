@@ -1,4 +1,9 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import {
+  getDeviceToolsDependencies,
+  resetDeviceToolsDependencies,
+  setDeviceToolsDependencies,
+} from "../../../src/features/deviceLifecycle/deviceLifecycleCore";
 import { whileHoldingProvisionedSession } from "../../../src/server/provisioning/provisioningSession";
 
 /** Records each hold and release, so a test can see what the steps ran under. */
@@ -16,6 +21,23 @@ function fakeHold() {
 }
 
 describe("whileHoldingProvisionedSession (#17885)", () => {
+  afterEach(() => {
+    resetDeviceToolsDependencies();
+  });
+
+  it("a hold injected through setDeviceToolsDependencies reaches provisioning", async () => {
+    const { events, deps } = fakeHold();
+    setDeviceToolsDependencies(deps);
+    await whileHoldingProvisionedSession(
+      getDeviceToolsDependencies(),
+      { sessionUuid: "minted", deadlineMs: 90_000 },
+      async () => {
+        events.push("steps");
+      },
+    );
+    expect(events).toEqual(["hold:minted@90000", "steps", "release:minted"]);
+  });
+
   it("runs the post-bind steps under a hold on the minted session, then releases it", async () => {
     const { events, deps } = fakeHold();
     const result = await whileHoldingProvisionedSession(

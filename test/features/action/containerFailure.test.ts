@@ -90,6 +90,7 @@ function scroll(resolution: ElementResolution = empty) {
   const adb = new FakeAdbExecutor();
   const talkBack = new FakeTalkBackSwipeExecutor();
   const action = new ScrollUntilVisible({
+    androidXr: async () => false,
     device,
     resolver: { resolve: () => resolution },
     geometry: new DefaultElementGeometry(),

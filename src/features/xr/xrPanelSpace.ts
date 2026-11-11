@@ -1,13 +1,16 @@
 import type {
   BackStackInfo,
-  BootedDevice,
   ElementBounds,
   ObserveResult,
   SwipeOnOptions,
   TaskInfo,
 } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
-import { hasXrSystemUi } from "../../utils/android-cmdline-tools/androidXrDevice";
+import {
+  type AndroidXrDetector,
+  type AndroidXrEvidence,
+  isAndroidXr,
+} from "../../utils/android-cmdline-tools/androidXrDevice";
 
 // Measured on the API 34 google-xr headset AVD (#17799/#17800): default-pose,
 // home-space panels render at 61/64 around (shotWidth/2, 0.552*shotHeight).
@@ -20,12 +23,11 @@ export type XrPanel = TaskInfo & { packageName: string; bounds: ElementBounds };
 
 /**
  * Undefined means non-XR; a null panel means XR without an app panel. `androidXr` is the answer
- * of the shared `isAndroidXr` predicate; callers with no device handle (swipes) omit it and the
- * back stack's XR System UI decides, the same fallback the predicate uses.
+ * of the shared `isAndroidXr` predicate; the back stack only supplies the panel geometry.
  */
 export function detectXrPanel(
   backStack: BackStackInfo | undefined,
-  androidXr: boolean = hasXrSystemUi(backStack),
+  androidXr: boolean,
 ): { panel: XrPanel | null } | undefined {
   if (!androidXr) {
     return undefined;
@@ -81,7 +83,7 @@ function nonDefaultPoseReason(
 export function xrDefaultPoseWarning(
   // Undefined when the interaction ran without a pre-dispatch observation: nothing to check.
   observation: Pick<ObserveResult, "backStack" | "screenSize" | "screenshotImageSize"> | undefined,
-  androidXr?: boolean,
+  androidXr: boolean,
 ): string | undefined {
   const xr = detectXrPanel(observation?.backStack, androidXr);
   if (!xr || !observation?.backStack) {
@@ -111,12 +113,12 @@ export async function withXrPoseWarning<
   A extends unknown[],
   T extends { warning?: string },
 >(
-  platform: BootedDevice["platform"],
+  androidXr: ObservedAndroidXr,
   dispatch: (observation: O, ...rest: A) => Promise<T>,
   observation: O,
   ...rest: A
 ): Promise<T> {
-  const xrWarning = platform === "android" ? xrDefaultPoseWarning(observation) : undefined;
+  const xrWarning = await xrPoseWarning(observation, androidXr);
   const result = await dispatch(observation, ...rest);
   return xrWarning ? { ...result, warning: appendWarning(result.warning, xrWarning) } : result;
 }
@@ -180,13 +182,10 @@ export function screenshotPointToPanelPoint(
 /** Display-space bounds for direction-based screen swipes; never start on XR system UI. */
 export function xrSwipeBounds(
   backStack: BackStackInfo | undefined,
+  androidXr: boolean,
   fromEdge?: SwipeOnOptions["fromEdge"],
-  platform: BootedDevice["platform"] = "android",
 ): ElementBounds | undefined {
-  if (platform !== "android") {
-    return undefined;
-  }
-  const xr = detectXrPanel(backStack);
+  const xr = detectXrPanel(backStack, androidXr);
   if (!xr) {
     return undefined;
   }
@@ -201,4 +200,53 @@ export function xrSwipeBounds(
     );
   }
   return xr.panel.bounds;
+}
+
+/**
+ * {@link xrDefaultPoseWarning} with the shared XR predicate's answer for `observation`. Without a
+ * back stack there is no pose to check, so the predicate is not asked.
+ */
+export async function xrPoseWarning(
+  // Undefined when the interaction ran without a pre-dispatch observation.
+  observation: Pick<ObserveResult, "backStack" | "screenSize" | "screenshotImageSize"> | undefined,
+  androidXr: ObservedAndroidXr,
+): Promise<string | undefined> {
+  return observation?.backStack
+    ? xrDefaultPoseWarning(observation, await androidXr(observation))
+    : undefined;
+}
+
+/** Screen-swipe bounds: {@link xrSwipeBounds} on Android XR (per the shared predicate), else `screen`. */
+export async function xrScreenSwipeBounds(
+  observation: Pick<ObserveResult, "backStack">,
+  androidXr: ObservedAndroidXr,
+  screen: ElementBounds,
+  fromEdge?: SwipeOnOptions["fromEdge"],
+): Promise<ElementBounds> {
+  return xrSwipeBounds(observation.backStack, await androidXr(observation), fromEdge) ?? screen;
+}
+
+/** The shared `isAndroidXr` answer for one observation's swipe, given its back stack. */
+export type ObservedAndroidXr = (
+  observation: Pick<ObserveResult, "backStack">,
+  signal?: AbortSignal,
+) => Promise<boolean>;
+
+/**
+ * Asks `isAndroidXr` once per observation, so a swipe's pose check and panel bounds share one
+ * answer (and one probe when the feature read fails). Off Android it answers false unprobed.
+ */
+export function observedAndroidXr(
+  evidence: () => Pick<AndroidXrEvidence, "device" | "adb">,
+  detector?: AndroidXrDetector,
+): ObservedAndroidXr {
+  const answers = new WeakMap<object, Promise<boolean>>();
+  return (observation, signal) => {
+    let answer = answers.get(observation);
+    if (!answer) {
+      answer = isAndroidXr({ ...evidence(), backStack: observation.backStack, signal }, detector);
+      answers.set(observation, answer);
+    }
+    return answer;
+  };
 }

@@ -46,7 +46,7 @@ interface ScrollSearchOperations {
   screenBoundsContainer(options: {
     observation: ObserveResult;
     includeSystemInsets?: boolean;
-  }): Element;
+  }): Promise<Element>;
   resolveLookForOptions(
     options: SwipeOnResolvedOptions,
     containerElement: Element,
@@ -268,12 +268,12 @@ export class ScrollSearchSession {
     }
 
     // Find the scrollable container
-    this.containerElement = await this.perf.track("findContainer", () =>
+    this.containerElement = await this.perf.track("findContainer", async () =>
       this.host.findScrollableContainer(
         this.request.options,
         this.lastObservation,
         this.request.strategy
-          ? this.host.screenBoundsContainer({
+          ? await this.host.screenBoundsContainer({
               observation: this.lastObservation,
               includeSystemInsets: this.request.options.includeSystemInsets,
             })

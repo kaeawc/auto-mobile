@@ -68,6 +68,7 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
     geometry,
     timer,
     adb,
+    androidXr: async () => false,
     observeScreen: screen,
     accessibilityDetector: detector,
     accessibilityService: new FakeScrollAccessibilityService(),

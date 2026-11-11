@@ -119,6 +119,7 @@ function makeScrollUntilVisible({
   };
 
   return new ScrollUntilVisible({
+    androidXr: async () => false,
     device,
     resolver: resolver ?? scrollResolver,
     geometry: geometry ?? fakeGeometry,
@@ -729,6 +730,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     };
 
     const suv = new ScrollUntilVisible({
+      androidXr: async () => false,
       device: DEVICE,
       resolver: fakeResolver,
       geometry: fakeGeometry,

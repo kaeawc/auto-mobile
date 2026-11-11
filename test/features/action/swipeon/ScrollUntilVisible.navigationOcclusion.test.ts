@@ -36,6 +36,7 @@ function harness(hierarchies: ViewHierarchyResult[], platform: "ios" | "android"
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(current);
   const scroll = new ScrollUntilVisible({
+    androidXr: async () => false,
     device: { name: "synthetic", deviceId: "synthetic", platform },
     geometry: new DefaultElementGeometry(),
     observeScreen,

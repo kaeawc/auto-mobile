@@ -151,7 +151,7 @@ function tapAtCoordinateFrame(
   // guard; hitTest, hoverAt, dragPath, multiTouch and swipeAt resolve native pixels (#17819).
   const xr =
     platform === "android" && toolName === "tapAt" && options.pointSpace !== "native"
-      ? detectXrPanel(observation.backStack, options.androidXr)
+      ? detectXrPanel(observation.backStack, options.androidXr ?? false)
       : undefined;
   const screenSize = xr ? xrScreenshotSize(observation) : observation.screenSize;
   const image = xr ? xrScreenshotPoint(options.image, observation, screenSize) : options.image;

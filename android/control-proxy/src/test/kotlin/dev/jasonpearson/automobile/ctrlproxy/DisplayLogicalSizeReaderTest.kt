@@ -74,7 +74,8 @@ class DisplayLogicalSizeReaderTest {
     assertEquals(Point(2560, 2558), reader.read(display(0)))
     windowManagers.width = 1920
     windowManagers.height = 1080
-    assertEquals(Point(2560, 2558), reader.read(display(0)))
+    // The cached window manager still reports the current bounds, e.g. after a size override.
+    assertEquals(Point(1920, 1080), reader.read(display(0)))
     assertEquals(Point(1920, 1080), reader.read(display(3)))
 
     assertEquals(listOf(0, 3), windowManagers.created)

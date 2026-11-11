@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  isAccessibilityUntrackedDisplay,
   logicalDisplayIdForPanel,
   panelKeyForUniqueId,
   virtualDisplayKey,
@@ -39,6 +40,7 @@ describe("parseDumpsysLogicalDisplays", () => {
         type: "INTERNAL",
         sizePx: { width: 400, height: 600 },
         hasDisplayInfo: true,
+        isPrivate: true,
       },
       {
         logicalId: "3",
@@ -46,6 +48,8 @@ describe("parseDumpsysLogicalDisplays", () => {
         type: "VIRTUAL",
         sizePx: { width: 400, height: 500 },
         hasDisplayInfo: true,
+        isPrivate: true,
+        ownerPackage: "com.android.car.cluster.osdouble",
       },
       {
         logicalId: "4",
@@ -53,6 +57,8 @@ describe("parseDumpsysLogicalDisplays", () => {
         type: "VIRTUAL",
         sizePx: { width: 1280, height: 720 },
         hasDisplayInfo: true,
+        isPrivate: true,
+        ownerPackage: "com.android.emulator.multidisplay",
       },
     ]);
   });
@@ -518,5 +524,27 @@ describe("virtual display keys (#16462)", () => {
       ].join("\n"),
     );
     expect(logicalDisplayIdForPanel(infos, "virtual:com.example.app:Presentation")).toBe(5);
+  });
+});
+
+describe("isAccessibilityUntrackedDisplay", () => {
+  test("marks only the captured private virtual displays as untracked by accessibility", () => {
+    const untracked = parseDumpsysLogicalDisplays(aaosDumpsysDisplay)
+      .filter(isAccessibilityUntrackedDisplay)
+      .map((info) => info.logicalId);
+    // Display 2 is a private built-in panel, which accessibility tracks (Display[2] on device).
+    expect(untracked).toEqual(["3", "4"]);
+  });
+
+  test("a public virtual display (emulator -multidisplay flag 1) stays tracked", () => {
+    const publicLine = aaosDumpsysDisplay
+      .split("\n")
+      .find((line) => line.includes("mBaseDisplayInfo") && line.includes("displayId 4,"))
+      ?.replace("FLAG_PRIVATE, ", "");
+    const [info] = parseAndroidDisplayInfos(`Display id 4: ${publicLine?.trim()}`);
+    expect(info?.type).toBe("VIRTUAL");
+    expect(info?.isPrivate).toBeUndefined();
+    expect(info?.ownerPackage).toBe("com.android.emulator.multidisplay");
+    expect(info && isAccessibilityUntrackedDisplay(info)).toBe(false);
   });
 });

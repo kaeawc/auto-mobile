@@ -7,6 +7,7 @@ import {
   readEnvEnum,
   readEnvList,
   readEnvNumber,
+  readEnvRaw,
   type EnvVarSpec,
 } from "../../src/config/env";
 import { readEnvInt } from "../../src/utils/envNumbers";
@@ -29,6 +30,16 @@ const LIST: EnvVarSpec = { name: "T_LIST", kind: "list", default: "", doc: "x" }
 const silent = { warn: () => {} };
 
 describe("typed env readers", () => {
+  test("CarPlay helper and projection probe paths are registered without defaults", () => {
+    for (const spec of [ENV.CARPLAY_POWER_HELPER_PATH, ENV.CARPLAY_PROJECTION_PROBE_PATH]) {
+      expect(ENV_REGISTRY).toContain(spec);
+      expect(spec.kind).toBe("path");
+      expect(spec.default).toBe("unset");
+      expect(readEnvRaw(spec, {})).toBeUndefined();
+      expect(readEnvRaw(spec, { [spec.name]: "/helper with spaces" })).toBe("/helper with spaces");
+    }
+  });
+
   test.each([
     ["1", true],
     [" TRUE ", true],

@@ -40,6 +40,28 @@ class FakeCrashCommandRunner implements SimulatorCrashCommandRunner {
 }
 
 describe("IosCrashBackend", () => {
+  test.each(["ios", "tvos"] as const)(
+    "%s resolver dispatches SIGABRT in the platform's launchctl domain",
+    async (platform) => {
+      const runner = new FakeCrashCommandRunner();
+      const backend = resolveIosCrashBackend(simulatorUdid, { simctl: runner, platform });
+
+      await backend.killProcess({ serviceLabel, uid: 501, timeoutMs: 5_000 });
+
+      expect(runner.calls[0].args).toEqual([
+        "spawn",
+        simulatorUdid,
+        "launchctl",
+        "kill",
+        "SIGABRT",
+        `${platform === "tvos" ? "system" : "user/501"}/${serviceLabel}`,
+      ]);
+      if (platform === "tvos") {
+        expect(runner.calls[0].args.some((arg) => arg.startsWith("user/"))).toBe(false);
+      }
+    },
+  );
+
   test("simulator lists processes with exact argv, timeout and signal", async () => {
     const runner = new FakeCrashCommandRunner();
     const backend = new SimulatorIosCrashBackend(simulatorUdid, runner);

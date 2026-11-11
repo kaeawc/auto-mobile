@@ -1,3 +1,4 @@
+import { FileAvdColdBootMarkerStore, type AvdColdBootMarkerStore } from "./AvdColdBootMarkerStore";
 import {
   DefaultNetsimInstanceLauncher,
   type NetsimInstanceLauncher,
@@ -341,6 +342,7 @@ export interface AndroidEmulatorClientOptions {
   inventory?: AndroidDeviceInventoryScanner;
   launcher?: EmulatorLauncher;
   netsimInstanceLauncher?: NetsimInstanceLauncher;
+  avdColdBootMarkers?: AvdColdBootMarkerStore;
   readinessPoller?: EmulatorReadinessPoller;
   /** Resolves the `emulator` binary path (for testing; defaults to filesystem/shell detection) */
   emulatorPathLocator?: () => Promise<string>;
@@ -380,6 +382,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
   private readonly netsimInstanceLauncher: NetsimInstanceLauncher;
+  private readonly avdColdBootMarkers: AvdColdBootMarkerStore;
   private emulatorPath: string;
   private readonly emulatorPathLocator: () => Promise<string>;
   private timer: Timer;
@@ -455,6 +458,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       });
     this.adbFactory = adbFactory;
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
+    this.avdColdBootMarkers = options.avdColdBootMarkers ?? new FileAvdColdBootMarkerStore();
     this.platform = platform;
     this.hostArchitecture = hostArchitecture;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
@@ -562,6 +566,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       timer: () => this.timer,
       emulatorPath: () => this.emulatorPath,
       spawnFn: () => this.spawnFn,
+      avdColdBootMarkers: () => this.avdColdBootMarkers,
       netsimInstanceLauncher: () => this.netsimInstanceLauncher,
       platform: () => this.platform,
       avdConfigReader: () => this.avdConfigReader,

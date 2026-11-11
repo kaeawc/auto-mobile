@@ -97,7 +97,8 @@ describe("exportPlan tool", () => {
     expect(payload.error).toBe(error);
     expect(payload.planContent).toBe(partialResult.planContent);
     expect(outputSchema.parse(payload)).toEqual(payload);
-    expect(outputSchema.parse({ ...payload, warnings: ["x"] })).not.toHaveProperty("warnings");
+    // A gesture recording reports partial capture in `error`; `warnings` is recordToolCalls-only.
+    expect(payload).not.toHaveProperty("warnings");
   });
 
   test("getevent failure uses the existing export error field", async () => {

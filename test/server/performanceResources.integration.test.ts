@@ -132,7 +132,7 @@ describe("performanceData", () => {
         t.uriTemplate.startsWith("automobile:performance-results"),
       );
       expect(queryTemplates.map((template) => template.uriTemplate)).toEqual([
-        "automobile:performance-results{?startTime,endTime,limit,offset,deviceId}",
+        "automobile:performance-results{?startTime,endTime,limit,offset,deviceId,deviceSessionUuid}",
       ]);
     });
   });

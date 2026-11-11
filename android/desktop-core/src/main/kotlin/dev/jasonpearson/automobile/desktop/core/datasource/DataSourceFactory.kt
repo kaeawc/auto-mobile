@@ -52,11 +52,13 @@ interface DataSourceFactory {
    * @param mode The data source mode (Fake or Real)
    * @param clientProvider Optional override client provider (e.g. for process-specific connections)
    * @param deviceId The device to scope audit-history reads to (null = all devices)
+   * @param deviceSessionUuid The device epoch to scope audit-history reads to (null = every epoch)
    */
   fun createPerformanceDataSource(
     mode: DataSourceMode,
     clientProvider: (() -> AutoMobileClient)? = null,
     deviceId: String? = null,
+    deviceSessionUuid: String? = null,
   ): PerformanceDataSource
 
   /**
@@ -165,10 +167,12 @@ class DefaultDataSourceFactory(private val client: AutoMobileClient) : DataSourc
     mode: DataSourceMode,
     clientProvider: (() -> AutoMobileClient)?,
     deviceId: String?,
+    deviceSessionUuid: String?,
   ): PerformanceDataSource {
     return when (mode) {
       DataSourceMode.Fake -> FakePerformanceDataSource()
-      DataSourceMode.Real -> RealPerformanceDataSource(resolveProvider(clientProvider), deviceId)
+      DataSourceMode.Real ->
+        RealPerformanceDataSource(resolveProvider(clientProvider), deviceId, deviceSessionUuid)
     }
   }
 

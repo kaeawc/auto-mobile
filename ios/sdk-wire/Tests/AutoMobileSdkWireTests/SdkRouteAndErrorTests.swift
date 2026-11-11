@@ -4,7 +4,7 @@ import XCTest
 
 final class SdkRouteAndErrorTests: XCTestCase {
     func testRoutesAreUniqueAbsolutePathsWithAMethodEach() {
-        XCTAssertEqual(SdkRoute.allCases.count, 23)
+        XCTAssertEqual(SdkRoute.allCases.count, 24)
         XCTAssertEqual(Set(SdkRoute.allCases.map(\.path)).count, SdkRoute.allCases.count)
         for route in SdkRoute.allCases {
             XCTAssertTrue(route.path.hasPrefix("/"), route.path)
@@ -16,11 +16,13 @@ final class SdkRouteAndErrorTests: XCTestCase {
     func testOnlyTheReadRoutesAreGets() {
         XCTAssertEqual(
             Set(SdkRoute.allCases.filter { $0.method == "GET" }),
-            [.cachedHierarchy, .freshHierarchy, .health]
+            [.cachedHierarchy, .freshHierarchy, .health, .carPlayTemplates]
         )
     }
 
     func testThePathsTheRunnerDialsAreTheOnesTheSdkServes() {
+        XCTAssertEqual(SdkRoute.carPlayTemplates.path, "/carplay/templates")
+        XCTAssertEqual(SdkRoute.carPlayTemplates.method, "GET")
         XCTAssertEqual(SdkRoute.freshHierarchy.path, "/hierarchy/fresh")
         XCTAssertEqual(SdkRoute.networkFaultRules.path, "/network/fault-rules")
         XCTAssertEqual(SdkRoute.accessibilityFocus.path, "/accessibility/focus")

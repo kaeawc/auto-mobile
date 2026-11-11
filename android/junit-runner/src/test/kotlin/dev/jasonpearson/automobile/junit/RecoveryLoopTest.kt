@@ -32,6 +32,8 @@ class RecoveryLoopTest {
         deviceChecker = RecoveryFakeDeviceChecker(),
         daemon = fakeDaemonClient,
         heartbeat = RecoveryFakeHeartbeat(),
+        // Empty environment: the host's ANDROID_SERIAL must not leak into auto-mode requests.
+        environment = { null },
       )
     // Force CI mode off so recovery tests can exercise the recovery path
     // even when running in CI (where CI env var is set)

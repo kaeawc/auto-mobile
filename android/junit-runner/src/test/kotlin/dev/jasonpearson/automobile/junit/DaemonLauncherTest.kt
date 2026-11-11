@@ -34,7 +34,10 @@ class DaemonLauncherTest {
     override val forceRestartRequested: Boolean = true,
     override val runnerStartedAtMs: Long? = 500,
     override val clientIdentity: DaemonClientIdentity = DaemonClientIdentity(version = "1.0.0"),
+    override val userManagedSocket: Boolean = false,
   ) : DaemonLaunchEnvironment {
+    override val socketPath: String = "/private/d.sock"
+
     var lockedCalls = 0
     var inLock = false
     val decisionsOutsideLock = mutableListOf<String>()
@@ -180,6 +183,91 @@ class DaemonLauncherTest {
     DaemonLauncher.ensureRunning(FakeEnvironment(daemon, runnerStartedAtMs = 500))
 
     assertEquals(listOf(true), daemon.launches)
+  }
+
+  @Test
+  fun `version skew without a forced restart fails naming both versions and keeps the daemon`() {
+    val daemon = FakeDaemon(record = DaemonPidRecord(version = "0.0.92", startedAtMs = 100))
+    val env =
+      FakeEnvironment(
+        daemon,
+        forceRestartRequested = false,
+        clientIdentity = DaemonClientIdentity(version = "0.0.67"),
+      )
+
+    try {
+      DaemonLauncher.ensureRunning(env)
+      fail("expected DaemonUnavailableException")
+    } catch (e: DaemonUnavailableException) {
+      val message = e.message.orEmpty()
+      assertTrue(message, message.contains("daemon version 0.0.92"))
+      assertTrue(message, message.contains("runner version 0.0.67"))
+      assertTrue(message, message.contains("/private/d.sock"))
+    }
+    assertEquals(emptyList<Boolean>(), daemon.launches)
+  }
+
+  @Test
+  fun `a user-managed daemon is reused even when a forced restart is requested`() {
+    val daemon = FakeDaemon(record = DaemonPidRecord(version = "1.0.0", startedAtMs = 100))
+    val env =
+      FakeEnvironment(
+        daemon,
+        forceRestartRequested = true,
+        runnerStartedAtMs = 500,
+        userManagedSocket = true,
+      )
+
+    DaemonLauncher.ensureRunning(env)
+
+    assertEquals(emptyList<Boolean>(), daemon.launches)
+  }
+
+  @Test
+  fun `a user-managed daemon of another version is never replaced`() {
+    val daemon = FakeDaemon(record = DaemonPidRecord(version = "0.0.92", startedAtMs = 100))
+    val env =
+      FakeEnvironment(
+        daemon,
+        forceRestartRequested = true,
+        clientIdentity = DaemonClientIdentity(version = "0.0.67"),
+        userManagedSocket = true,
+      )
+
+    try {
+      DaemonLauncher.ensureRunning(env)
+      fail("expected DaemonUnavailableException")
+    } catch (e: DaemonUnavailableException) {
+      val message = e.message.orEmpty()
+      assertTrue(message, message.contains("AUTOMOBILE_DAEMON_SOCKET_PATH"))
+      assertTrue(message, message.contains("0.0.92"))
+      assertTrue(message, message.contains("0.0.67"))
+    }
+    assertEquals(emptyList<Boolean>(), daemon.launches)
+  }
+
+  @Test
+  fun `a user-managed socket with no daemon serving it is started, not restarted`() {
+    val daemon = FakeDaemon(available = false)
+
+    DaemonLauncher.ensureRunning(FakeEnvironment(daemon, userManagedSocket = true))
+
+    assertEquals(listOf(false), daemon.launches)
+  }
+
+  @Test
+  fun `socket path override is detected from either env name`() {
+    assertTrue(
+      DaemonSocketPaths.socketPathOverridden { name ->
+        "/x/d.sock".takeIf { name == "AUTOMOBILE_DAEMON_SOCKET_PATH" }
+      },
+    )
+    assertTrue(
+      DaemonSocketPaths.socketPathOverridden { name ->
+        "/x/d.sock".takeIf { name == "AUTO_MOBILE_DAEMON_SOCKET_PATH" }
+      },
+    )
+    assertFalse(DaemonSocketPaths.socketPathOverridden { name -> " ".takeIf { name.isNotEmpty() } })
   }
 
   @Test

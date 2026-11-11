@@ -107,9 +107,41 @@ describe("VirtualPrototypeDevice (#17974)", () => {
       ops: [{ op: "replace", path: "/state/count", value: 3 }],
     });
     expect(stale.success).toBe(false);
-    expect(stale.conflict).toEqual({ revision: 3, state: { count: 7, label: "a" } });
+    expect(stale.conflict).toEqual({ revision: 3, state: { count: 7 } });
     const inspected = await virtual.requestInspectPrototypes();
     expect(inspected.prototypes?.[0].state).toEqual({ count: 7, label: "a" });
+  });
+
+  test("a second host patch of a key from the same baseRevision conflicts", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(spec("one"));
+    const replace = (value: number, baseRevision: number) =>
+      virtual.requestPatchPrototype({
+        id: "one",
+        baseRevision,
+        ops: [{ op: "replace", path: "/state/count", value }],
+      });
+    expect(await replace(2, 1)).toMatchObject({ success: true, revision: 2 });
+    expect((await replace(3, 1)).conflict).toEqual({ revision: 2, state: { count: 2 } });
+    const other = await virtual.requestPatchPrototype({
+      id: "one",
+      baseRevision: 1,
+      ops: [{ op: "replace", path: "/state/label", value: "b" }],
+    });
+    expect(other).toMatchObject({ success: true, revision: 3 });
+    expect((await replace(4, 3)).success).toBe(true);
+  });
+
+  test("a /state patch needs a baseRevision no newer than the device's", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(spec("one"));
+    const ops = [{ op: "replace" as const, path: "/state/count", value: 2 }];
+    expect((await virtual.requestPatchPrototype({ id: "one", ops })).error).toContain(
+      "baseRevision is required",
+    );
+    expect(
+      (await virtual.requestPatchPrototype({ id: "one", baseRevision: 9, ops })).error,
+    ).toContain("newer than the device revision 1");
   });
 
   test("an invalid patch or an unknown id is answered with an error", async () => {
@@ -121,6 +153,7 @@ describe("VirtualPrototypeDevice (#17974)", () => {
     await virtual.requestShowPrototype(spec("one"));
     const invalid = await virtual.requestPatchPrototype({
       id: "one",
+      baseRevision: 1,
       ops: [{ op: "replace", path: "/state/missing", value: 1 }],
     });
     expect(invalid).toMatchObject({ success: false, delivery: "answered" });

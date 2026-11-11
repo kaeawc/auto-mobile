@@ -10,6 +10,7 @@ import type {
 import type { Timer } from "../../../utils/SystemTimer";
 import type { AndroidPrototypeClient } from "../androidPrototypeTransport";
 import { applyPrototypePatch } from "../prototypePatch";
+import { prototypeDataPointerTokens } from "../prototypeData";
 import type { PrototypePatchReply, PrototypePatchRequest } from "../prototypePatchWire";
 import { collectPrototypeAssetReferences } from "../prototypeAssetReferences";
 import type { PrototypeAssetUpload } from "../prototypeAssets";
@@ -24,8 +25,11 @@ interface ShownPrototype {
   pages: Record<string, number>;
   lastSequence: number;
   revision: number;
-  /** Highest revision a device-side state change produced; a stale `/state` patch conflicts. */
-  stateRevision: number;
+  /**
+   * The revision that last wrote each state key, as CtrlProxy keeps it: a `/state` patch from a
+   * `baseRevision` older than a key it touches conflicts, whoever wrote the key.
+   */
+  stateRevisions: Map<string, number>;
 }
 
 /** What a renderer reports when the user acts on a shown prototype. */
@@ -43,6 +47,67 @@ const SAVED_REFUSAL: PrototypeResult = {
   success: false,
   error: "The headless virtual device has no saved prototypes.",
 };
+
+/** The state keys a patch's `/state/<key>` ops address. */
+function patchedStateKeys(patch: PrototypePatchRequest): string[] {
+  const keys = patch.ops.flatMap((op) =>
+    op.op !== "replaceNode" && op.path.startsWith("/state/")
+      ? [prototypeDataPointerTokens(op.path.slice("/state".length))[0]]
+      : [],
+  );
+  return [...new Set(keys)].filter((key) => key !== undefined);
+}
+
+/** Stamps every key whose value differs between the two states with `revision`. */
+function stampChangedKeys(
+  revisions: Map<string, number>,
+  before: PrototypeState,
+  after: PrototypeState,
+  revision: number,
+): void {
+  new Set([...Object.keys(before), ...Object.keys(after)]).forEach((key) => {
+    if (before[key] !== after[key]) {
+      revisions.set(key, revision);
+    }
+  });
+}
+
+/** The refusal CtrlProxy answers a `/state` patch with before applying it, if any. */
+function stateGuardReply(
+  entry: ShownPrototype,
+  patch: PrototypePatchRequest,
+): PrototypePatchReply | undefined {
+  const keys = patchedStateKeys(patch);
+  if (keys.length === 0) {
+    return undefined;
+  }
+  const { baseRevision } = patch;
+  if (baseRevision === undefined || baseRevision > entry.revision) {
+    return {
+      success: false,
+      delivery: "answered",
+      revision: entry.revision,
+      error:
+        baseRevision === undefined
+          ? "baseRevision is required when a patch has /state ops"
+          : `baseRevision ${baseRevision} is newer than the device revision ${entry.revision}`,
+    };
+  }
+  const stale = keys.filter((key) => (entry.stateRevisions.get(key) ?? 0) > baseRevision);
+  if (stale.length === 0) {
+    return undefined;
+  }
+  const state = Object.fromEntries(
+    stale.filter((key) => key in entry.state).map((key) => [key, entry.state[key]]),
+  );
+  return {
+    success: false,
+    delivery: "answered",
+    error: "conflict",
+    revision: entry.revision,
+    conflict: { revision: entry.revision, state },
+  };
+}
 
 const asState = (value: unknown): PrototypeState =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -83,14 +148,17 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
     }
     const inPlace = previous !== undefined && overrides.reset !== true;
     const copy: Record<string, unknown> = { ...structuredClone(spec) };
+    const state = asState(copy.state);
+    const revision = (previous?.revision ?? 0) + 1;
     this.shown.set(spec.id, {
       spec: copy,
-      state: asState(copy.state),
+      state,
       pages: inPlace ? { ...previous.pages } : {},
       // Sequences never rewind for an id, as on hardware.
       lastSequence: previous?.lastSequence ?? 0,
-      revision: (previous?.revision ?? 0) + 1,
-      stateRevision: previous?.stateRevision ?? 0,
+      revision,
+      // A show writes every declared key, as CtrlProxy stamps them with the show's revision.
+      stateRevisions: new Map(Object.keys(state).map((key) => [key, revision])),
     });
     const missing = this.missingAssets(copy);
     return {
@@ -119,21 +187,9 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
         error: `No prototype with id ${patch.id} is shown on the virtual device.`,
       };
     }
-    const touchesState = patch.ops.some(
-      (op) => op.op !== "replaceNode" && op.path.startsWith("/state"),
-    );
-    if (
-      touchesState &&
-      patch.baseRevision !== undefined &&
-      patch.baseRevision < entry.stateRevision
-    ) {
-      return {
-        success: false,
-        delivery: "answered",
-        error: "conflict",
-        revision: entry.revision,
-        conflict: { revision: entry.revision, state: { ...entry.state } },
-      };
+    const refused = stateGuardReply(entry, patch);
+    if (refused) {
+      return refused;
     }
     const current = { ...entry.spec, state: entry.state };
     const applied = applyPrototypePatch(current, patch.ops);
@@ -144,9 +200,11 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
         error: `Invalid patch at ${applied.error.path}: ${applied.error.message}`,
       };
     }
-    entry.spec = applied.spec;
-    entry.state = asState(applied.spec.state);
+    const state = asState(applied.spec.state);
     entry.revision += 1;
+    stampChangedKeys(entry.stateRevisions, entry.state, state, entry.revision);
+    entry.spec = applied.spec;
+    entry.state = state;
     return { success: true, delivery: "answered", revision: entry.revision, totalTimeMs: 0 };
   }
 
@@ -217,9 +275,10 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
       return false;
     }
     if (input.state !== undefined) {
-      entry.state = { ...entry.state, ...input.state };
+      const state = { ...entry.state, ...input.state };
       entry.revision += 1;
-      entry.stateRevision = entry.revision;
+      stampChangedKeys(entry.stateRevisions, entry.state, state, entry.revision);
+      entry.state = state;
     }
     if (input.pages !== undefined) {
       entry.pages = { ...entry.pages, ...input.pages };

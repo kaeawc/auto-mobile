@@ -31,8 +31,10 @@ keeps state only:
   `reset` keeps pages; `replaceOthers: false` keeps other ids. Sequences never rewind for an id.
   Referenced image, font and shader asset ids with no upload are returned as `missingAssets`, so
   the host's re-upload path runs as on hardware.
-- `patch` applies ops with `applyPrototypePatch` and raises the revision. A `/state` patch whose
-  `baseRevision` is older than the last device-side state change is answered with `conflict`.
+- `patch` applies ops with `applyPrototypePatch` and raises the revision. As in CtrlProxy, each
+  state key keeps the revision that last wrote it (a show, a patch or an input), and a `/state`
+  patch is refused without a `baseRevision`, with one newer than the device's, or with `conflict`
+  naming the keys it touches that were written after its `baseRevision`.
 - `inspect` reports every shown id with its state, pages, data and last sequence.
 - `dismiss` removes one id or all of them.
 - Saved prototypes are refused.
@@ -65,7 +67,7 @@ default.
 `VirtualPrototypeDevice.dispatch({id, kind, name, payload?, state?, pages?})` is the single entry
 for user input: it merges state and pages, allocates the next sequence and pushes a
 `prototype_event` to the transport's listeners, so the event coordinator buffers it and awaitEvent
-returns it as from hardware. A device-side state change makes a stale `/state` patch conflict. The
+returns it as from hardware. The keys an input changes are stamped with its revision. The
 web page runs its actions in the browser and posts nothing back today; a renderer that reports taps
 and input (the live preview server, #17975) and routing `tapOn`/`inputText` to the virtual device
 call `dispatch`.

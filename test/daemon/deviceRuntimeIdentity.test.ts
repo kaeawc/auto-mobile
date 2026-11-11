@@ -10,6 +10,9 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { holdAcquiringSession } from "../../src/daemon/acquiringSessionHold";
 
 const id = "emulator-5554";
 const observed = (name: string, observedAt: number): BootedDevice => ({
@@ -70,6 +73,7 @@ function harness() {
     },
   };
   return {
+    port,
     identity: new DeviceRuntimeIdentity(port),
     devices,
     manager,
@@ -83,6 +87,37 @@ function harness() {
 }
 
 describe("DeviceRuntimeIdentity", () => {
+  test("quarantine spares the holder's provisioning hold; retirement aborts it (#17896)", async () => {
+    const h = harness();
+    const tracker = new ExecutionTracker(h.timer, new FakeIdGenerator());
+    h.port.cancelDeviceSessionExecutions = (sessionId, reason, options) =>
+      tracker.cancelDeviceSessionExecutions(sessionId, reason, options);
+    const device = pooled();
+    h.devices.set(id, device);
+    const hold = holdAcquiringSession(tracker, undefined, {
+      toolName: "provisionDevice",
+      sessionUuid: "session-1",
+      deadlineMs: h.timer.now() + 60_000,
+    });
+    const otherWork = tracker.startExecution("tapOn", undefined, "session-1");
+
+    await h.identity.reconcileDiscoveryObservation([observed("Other", 20)], "test");
+
+    expect(device.identityUnresolved).toBe(true);
+    expect(otherWork.abortController.signal.aborted).toBe(true);
+    expect(hold.signal.aborted).toBe(false);
+
+    // A deferred quarantine cancel runs at retirement: the device is really gone.
+    h.port.isReservedForShutdown = () => true;
+    device.identityUnresolved = undefined;
+    await h.identity.reconcileDiscoveryObservation([observed("Other", 30)], "test");
+    expect(h.identity.hasDeferredQuarantineCancellation(device)).toBe(true);
+    await h.identity.cancelRetiredDeviceExecutions(device);
+
+    expect(hold.signal.aborted).toBe(true);
+    hold.release();
+  });
+
   test("twenty foreign placeholders never change quarantine or identity evidence", async () => {
     const h = harness();
     const device = { ...pooled(), id: "emulator-5610" };

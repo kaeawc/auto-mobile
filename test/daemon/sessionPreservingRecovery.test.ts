@@ -10,6 +10,9 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
+import { holdAcquiringSession } from "../../src/daemon/acquiringSessionHold";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableContinuityDevice =
@@ -108,6 +111,25 @@ async function harness(platform: "android" | "ios" = "android") {
 afterEach(() => mock.restore());
 
 describe("SessionPreservingRecoveryRunner", () => {
+  test("a recovery that keeps the session does not abort its provisioning hold (#17896)", async () => {
+    const h = await harness();
+    const tracker = new ExecutionTracker(h.timer, new FakeIdGenerator());
+    h.port.cancelDeviceSessionExecutions = (id, reason, options) =>
+      tracker.cancelDeviceSessionExecutions(id, reason, options);
+    const hold = holdAcquiringSession(tracker, undefined, {
+      toolName: "provisionDevice",
+      sessionUuid: "session",
+      deadlineMs: h.timer.now() + 60_000,
+    });
+    const otherWork = tracker.startExecution("tapOn", undefined, "session");
+
+    expect(await h.run()).toBe("recovered");
+
+    expect(otherWork.abortController.signal.aborted).toBe(true);
+    expect(hold.signal.aborted).toBe(false);
+    hold.release();
+  });
+
   test.each(["new-owner", "same-owner-new-assignment"])(
     "failed recovery preserves a %s device",
     async (scenario) => {

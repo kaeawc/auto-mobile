@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
+import android.view.Surface
 import android.view.WindowManager
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
@@ -13,9 +14,19 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 
-// A display's real size can differ from the service window's metrics, including on API 30+.
-@Suppress("DEPRECATION")
-private fun readRealDisplaySize(display: Display, size: Point) = display.getRealSize(size)
+internal fun interface DisplayPhysicalSizeReader {
+  /** Returns null when the physical mode is unavailable or has non-positive dimensions. */
+  fun read(display: Display): Point?
+}
+
+private object DefaultDisplayPhysicalSizeReader : DisplayPhysicalSizeReader {
+  override fun read(display: Display): Point? {
+    val mode = display.mode ?: return null
+    val width = mode.physicalWidth
+    val height = mode.physicalHeight
+    return if (width > 0 && height > 0) Point(width, height) else null
+  }
+}
 
 // Window metrics are unavailable below API 30; preserve the default-display metrics lookup.
 @Suppress("DEPRECATION")
@@ -32,7 +43,11 @@ private fun readLegacyDisplayRotation(windowManager: WindowManager): Int? =
  * needs the live service context comes through [Host]. None of these reads touch the clock, so the
  * controller takes no time provider.
  */
-internal class DisplayController(private val host: Host) {
+internal class DisplayController(
+  private val host: Host,
+  private val physicalSizeReader: DisplayPhysicalSizeReader = DefaultDisplayPhysicalSizeReader,
+  private val logicalSizeReader: DisplayLogicalSizeReader = DisplayLogicalSizeReader { null },
+) {
   /** Service-side operations the controller cannot perform without the service context. */
   interface Host {
     fun displayManager(): DisplayManager?
@@ -45,11 +60,37 @@ internal class DisplayController(private val host: Host) {
     /** The service resources' pixel size of a framework `dimen`, or 0 when it is not defined. */
     fun frameworkDimenPx(name: String): Int
 
+    fun isXrSpatialDevice(): Boolean
+
     fun densityDpi(): Int
   }
 
   companion object {
     private const val TAG = "CtrlProxy"
+  }
+
+  // A display's real size can differ from the service window's metrics, including on API 30+.
+  @Suppress("DEPRECATION")
+  private fun readRealDisplaySize(display: Display, size: Point, isXrSpatialDevice: Boolean) {
+    if (isXrSpatialDevice) {
+      // XR process configuration can constrain getRealSize to the IME window's max bounds.
+      val logicalSize = logicalSizeReader.read(display)
+      if (logicalSize != null && logicalSize.x > 0 && logicalSize.y > 0) {
+        size.set(logicalSize.x, logicalSize.y)
+        return
+      }
+      val physicalSize = physicalSizeReader.read(display)
+      if (physicalSize != null && physicalSize.x > 0 && physicalSize.y > 0) {
+        val rotation = display.rotation
+        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+          size.set(physicalSize.y, physicalSize.x)
+        } else {
+          size.set(physicalSize.x, physicalSize.y)
+        }
+        return
+      }
+    }
+    display.getRealSize(size)
   }
 
   /**
@@ -63,7 +104,7 @@ internal class DisplayController(private val host: Host) {
         val display = host.displayManager()?.getDisplay(displayId)
         if (display != null) {
           val size = Point()
-          readRealDisplaySize(display, size)
+          readRealDisplaySize(display, size, host.isXrSpatialDevice())
           return ScreenDimensions(size.x, size.y)
         }
         if (displayId != Display.DEFAULT_DISPLAY) return null

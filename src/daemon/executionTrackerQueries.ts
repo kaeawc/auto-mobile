@@ -80,6 +80,12 @@ export interface ActiveExecution {
   sessionlessDeviceUse?: Set<string>;
   sessionlessControlUse?: Set<string>;
   sessionlessReadReadiness?: Map<string, Set<AbortController>>;
+  /**
+   * Work that a recovery keeping its session must leave running (#17896): the provisioning hold
+   * (`holdAcquiringSession`). A cancel or drain with {@link ExecutionCancellationOptions.sessionPreserving}
+   * skips it, so a short device drop does not abort it; real session or device loss still does.
+   */
+  survivesSessionPreservingRecovery?: boolean;
 }
 
 /**
@@ -138,6 +144,12 @@ export interface ExecutionCancellationOptions {
    * while plan-time loss names its owner (base) and the captured invocation ids.
    */
   includeExecutionIds?: readonly string[];
+  /**
+   * The cancel is part of a recovery that keeps the session (session-preserving recovery, an adb
+   * server reset, a discovery quarantine): executions marked
+   * {@link ActiveExecution.survivesSessionPreservingRecovery} are left running (#17896).
+   */
+  sessionPreserving?: boolean;
 }
 
 export type ExecutionCancellationReason = string | Error;
@@ -157,6 +169,18 @@ export interface ActiveExecutionQuery {
    * session, it is not use of it and never counts as its owner's liveness.
    */
   excludeReads?: boolean;
+  /** Same exemption as {@link ExecutionCancellationOptions.sessionPreserving}: a drain skips it. */
+  sessionPreserving?: boolean;
+}
+
+/** Whether a session-preserving cancel or drain leaves this execution alone (#17896). */
+export function isSparedBySessionPreservingRecovery(
+  execution: ActiveExecution | undefined,
+  options: { sessionPreserving?: boolean } | undefined,
+): boolean {
+  return (
+    options?.sessionPreserving === true && execution?.survivesSessionPreservingRecovery === true
+  );
 }
 
 /** A call that only watches: an inventory read or a device read (#10964, #11107). */
@@ -204,7 +228,10 @@ export function isExcludedByQuery(
   if (query === undefined) {
     return false;
   }
-  if (executionId === query.excludeExecutionId) {
+  if (
+    executionId === query.excludeExecutionId ||
+    isSparedBySessionPreservingRecovery(execution, query)
+  ) {
     return true;
   }
   if (
@@ -232,7 +259,8 @@ export function isUnfilteredQuery(query: ActiveExecutionQuery | undefined): bool
     query.excludeExecutionId === undefined &&
     query.onlyToolName === undefined &&
     query.onlySessionUuid === undefined &&
-    !query.excludeReads
+    !query.excludeReads &&
+    !query.sessionPreserving
   );
 }
 

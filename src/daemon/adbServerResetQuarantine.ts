@@ -53,7 +53,11 @@ export interface AdbServerResetQuarantinePoolPort {
     lastAdbState: "absent",
   ): Promise<string | undefined>;
   cancelDeviceExecutions(deviceId: string, reason: string): Promise<number>;
-  cancelDeviceSessionExecutions(sessionId: string, reason: string): Promise<number>;
+  cancelDeviceSessionExecutions(
+    sessionId: string,
+    reason: string,
+    options?: { sessionPreserving?: boolean },
+  ): Promise<number>;
   completeEmulatorLossRecovery(
     incidentId: string,
     outcome: "exhausted" | "not-attempted",
@@ -208,9 +212,11 @@ export class AdbServerResetQuarantine {
           ),
         ),
         ...sessionTargets.map(({ sessionId, deviceId, incidentId }) =>
+          // The reset keeps the session, so a provisioning hold on it runs on (#17896).
           this.pool.cancelDeviceSessionExecutions(
             sessionId,
             deviceLossCancellationReason(deviceId, incidentId),
+            { sessionPreserving: true },
           ),
         ),
       ]);

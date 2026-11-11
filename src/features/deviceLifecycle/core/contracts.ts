@@ -2,7 +2,11 @@ import { type FormFactor, type DeviceMatchCriteria } from "../../../models/Devic
 import { type ExactDeviceSpecification } from "../../../devices/exactDeviceProvisioning";
 import { type DeviceResourceConfiguration } from "../../../models/DeviceResourceConfiguration";
 import { BootedDevice, Platform } from "../../../models";
-import type { ProvisionAndroidAutoOptions, ProvisionDeviceProfile } from "./schemas";
+import type {
+  ProvisionAndroidAutoOptions,
+  ProvisionDeviceProfile,
+  StartDeviceAndroidAutoOptions,
+} from "./schemas";
 
 // Export interfaces for type safety
 export interface StartDeviceArgs {
@@ -22,6 +26,8 @@ export interface StartDeviceArgs {
   timeoutMs?: number;
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
+  /** Android only: start a headless DHU for an already provisioned phone once it is ready (#17840). */
+  androidAuto?: StartDeviceAndroidAutoOptions;
   /** Request-local owner admitted before boot; never mint a replacement if recovery fails. */
   __restartResumeSessionUuid?: string;
   /** Routing snapshot carried across acquisition schema parsing. */

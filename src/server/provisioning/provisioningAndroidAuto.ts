@@ -7,10 +7,13 @@ import {
   type AndroidAutoProvisionReport,
 } from "../../features/androidAuto/AndroidAutoProjectionService";
 import {
+  runOperationWithinDeadline,
   runProvisionDeviceWithinDeadline,
   type DeviceToolsDependencies,
   type ProvisionDeviceArgs,
+  type StartDeviceAndroidAutoOptions,
 } from "../../features/deviceLifecycle/deviceLifecycleCore";
+import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { ProvisionSettlementState } from "./provisioningTypes";
@@ -69,26 +72,87 @@ export async function applyProvisionAndroidAuto(
     return undefined;
   }
   signal.throwIfAborted();
-  const applier = androidAutoApplier(deps);
-  // Set only once this run's own DHU connected: a failed rerun must not stop a DHU an earlier
-  // provision started and this run merely reused (the provisioner already stops one it applied
-  // and then failed on).
+  return await runOwnedProjection(androidAutoApplier(deps), device, {
+    run: async (applier, operationSignal) => await applier.apply(device, options, operationSignal),
+    within: async (operation, onPendingSettlement) =>
+      await runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, signal, {
+        phase: "setting up Android Auto projection",
+        operation,
+        onPendingSettlement,
+      }),
+    onOwnDesktopHeadUnit: () => {
+      if (settlementState) {
+        settlementState.androidAutoDevice = device;
+      }
+    },
+  });
+}
+
+/**
+ * startDevice's `androidAuto.headUnit` (#17840): start the DHU for the ready, session-bound
+ * phone emulator through the same applier provisionDevice uses, bounded by the start's deadline
+ * and abort signal. A run that outlives them and then connects its own DHU stops that DHU.
+ */
+export async function startDeviceAndroidAutoHeadUnit(
+  options: StartDeviceAndroidAutoOptions,
+  deps: Pick<DeviceToolsDependencies, "androidAutoProjection" | "timer">,
+  device: BootedDevice,
+  { signal, totalDeadlineMs }: { signal: AbortSignal | undefined; totalDeadlineMs: number },
+): Promise<AndroidAutoProvisionReport> {
+  return await runOwnedProjection(androidAutoApplier(deps), device, {
+    run: async (applier, operationSignal) =>
+      await applier.startHeadUnit(device, options, operationSignal),
+    within: async (operation, onOrphan) =>
+      await runOperationWithinDeadline(deps.timer, totalDeadlineMs, signal, {
+        operation,
+        onOrphan,
+        timeoutError: () =>
+          new ActionableError(
+            `startDevice timed out starting the Android Auto head unit for ${device.deviceId}. The phone is ready and its session stays bound; raise timeoutMs and call startDevice again.`,
+          ),
+      }),
+  });
+}
+
+type ProjectionRun = (
+  applier: AndroidAutoProjectionApplier,
+  signal: AbortSignal,
+) => Promise<AndroidAutoProvisionReport>;
+
+/**
+ * One projection run within the caller's deadline. Ownership of the DHU is recorded only once
+ * this run's own DHU connected: a failed rerun must not stop a DHU an earlier run started and
+ * this one merely reused (the provisioner already stops one it applied and then failed on).
+ */
+async function runOwnedProjection(
+  applier: AndroidAutoProjectionApplier,
+  device: BootedDevice,
+  {
+    run,
+    within,
+    onOwnDesktopHeadUnit,
+  }: {
+    run: ProjectionRun;
+    within: (
+      operation: (signal: AbortSignal) => Promise<AndroidAutoProvisionReport>,
+      onPendingSettlement: (settlement: Promise<unknown>) => void,
+    ) => Promise<AndroidAutoProvisionReport>;
+    onOwnDesktopHeadUnit?: () => void;
+  },
+): Promise<AndroidAutoProvisionReport> {
   let ownsDesktopHeadUnit = false;
-  return await runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, signal, {
-    phase: "setting up Android Auto projection",
-    operation: async (operationSignal) => {
-      const report = await applier.apply(device, options, operationSignal);
+  return await within(
+    async (operationSignal) => {
+      const report = await run(applier, operationSignal);
       if (startedDesktopHeadUnit(report)) {
         ownsDesktopHeadUnit = true;
-        if (settlementState) {
-          settlementState.androidAutoDevice = device;
-        }
+        onOwnDesktopHeadUnit?.();
       }
       return report;
     },
     // A run that outlives the deadline may still connect its own DHU; stop it once the run
     // settles. A run that rejects already stopped any DHU it applied, and a reused one stays.
-    onPendingSettlement: (settlement) => {
+    (settlement) => {
       void settlement.then(
         async () => {
           if (ownsDesktopHeadUnit) {
@@ -96,14 +160,14 @@ export async function applyProvisionAndroidAuto(
           }
         },
         (error: unknown) => {
-          // The provision already failed on the deadline; this late rejection has no caller.
+          // The request already failed on the deadline; this late rejection has no caller.
           logger.debug(
             `[AndroidAuto] late projection run for ${device.deviceId} failed: ${errorMessage(error)}`,
           );
         },
       );
     },
-  });
+  );
 }
 
 function startedDesktopHeadUnit(report: AndroidAutoProvisionReport): boolean {

@@ -780,7 +780,8 @@ export class DeviceRuntimeIdentity {
     pooled: PooledDevice,
     options: DiscoveryReconcileOptions,
   ): Promise<void> {
-    await this.cancelPooledDeviceExecutions(pooled, options, holderOf(pooled));
+    // Quarantine keeps the session, so its provisioning hold runs on; retirement does not (#17896).
+    await this.cancelPooledDeviceExecutions(pooled, options, holderOf(pooled), true);
   }
 
   /** A confirmed shutdown retires serial-bound work even without quarantine. */
@@ -799,6 +800,7 @@ export class DeviceRuntimeIdentity {
     pooled: PooledDevice,
     options: Pick<DiscoveryReconcileOptions, "excludeExecutionId">,
     sessionId: PooledDevice["sessionId"],
+    sessionPreserving = false,
   ): Promise<void> {
     const cancellationOptions = {
       excludeExecutionId: options.excludeExecutionId ?? this.pool.getAmbientExecutionId?.(),
@@ -815,7 +817,7 @@ export class DeviceRuntimeIdentity {
         ? this.pool.cancelDeviceSessionExecutions(
             sessionId,
             deviceLossCancellationReason(pooled.id),
-            cancellationOptions,
+            { ...cancellationOptions, sessionPreserving },
           )
         : Promise.resolve(0),
     ]);

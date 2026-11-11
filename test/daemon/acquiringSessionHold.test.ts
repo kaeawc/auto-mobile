@@ -138,6 +138,74 @@ describe("holdAcquiringSession (#17885)", () => {
     release();
   });
 
+  it("a session-preserving recovery's cancel and drain leave the hold running (#17896)", async () => {
+    await mint("provisioned");
+    const { signal, release } = holdAcquiringSession(tracker, sessionManager, {
+      toolName: "provisionDevice",
+      sessionUuid: "provisioned",
+      deadlineMs: timer.now() + PROVISION_BUDGET_MS,
+    });
+    const otherWork = tracker.startExecution("tapOn", undefined, "provisioned");
+    const preserving = { sessionPreserving: true };
+
+    const cancelled = await tracker.cancelDeviceSessionExecutions(
+      "provisioned",
+      "device lost",
+      preserving,
+    );
+    tracker.endExecution(otherWork.id);
+
+    expect(cancelled).toBe(1);
+    expect(otherWork.abortController.signal.aborted).toBe(true);
+    expect(signal.aborted).toBe(false);
+    // The recovery's drain does not wait out its budget on the hold it spared.
+    expect(tracker.hasActiveDeviceSessionExecutions("provisioned", preserving)).toBe(false);
+    expect(await tracker.waitForDeviceSessionExecutionsToEnd("provisioned", 0, preserving)).toBe(
+      true,
+    );
+    expect(tracker.hasActiveDeviceSessionExecutions("provisioned")).toBe(true);
+    release();
+  });
+
+  it("real device loss still aborts the hold after a session-preserving recovery", async () => {
+    await mint("provisioned");
+    const { signal, release } = holdAcquiringSession(tracker, sessionManager, {
+      toolName: "provisionDevice",
+      sessionUuid: "provisioned",
+      deadlineMs: timer.now() + PROVISION_BUDGET_MS,
+    });
+    await tracker.cancelDeviceSessionExecutions("provisioned", "adb reset", {
+      sessionPreserving: true,
+    });
+    expect(signal.aborted).toBe(false);
+
+    await tracker.cancelDeviceSessionExecutions("provisioned", "device retired");
+
+    expect(signal.aborted).toBe(true);
+    release();
+  });
+
+  it("a session abandoned after a recovery that kept its hold is still reaped", async () => {
+    await mint("provisioned");
+    const { release } = holdAcquiringSession(tracker, sessionManager, {
+      toolName: "provisionDevice",
+      sessionUuid: "provisioned",
+      deadlineMs: timer.now() + PROVISION_BUDGET_MS,
+    });
+    await tracker.cancelDeviceSessionExecutions("provisioned", "device lost", {
+      sessionPreserving: true,
+    });
+    await runFor(PROVISION_STEPS_MS);
+    release();
+    expect(reaped).toEqual([]);
+
+    await runFor(
+      DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+    );
+
+    expect(reaped).toEqual([{ sessionId: "provisioned", reason: "missing-first-heartbeat" }]);
+  });
+
   it("a run that wedges past its deadline stops holding the session", async () => {
     await mint("wedged");
     holdAcquiringSession(tracker, sessionManager, {

@@ -401,7 +401,28 @@ describe("AndroidAutoProjectionProvisioner", () => {
       provisioner.provision(request()),
     ]);
     expect(launcher.launches).toBe(1);
-    expect(second).toBe(first);
+    expect(second.session).toBe(first.session);
+    // Only the call that ran the launch owns the DHU; the joiner never stops it on its own timeout.
+    expect(first.steps.find((step) => step.step === "desktop-head-unit")?.status).toBe("applied");
+    expect(second.steps.find((step) => step.step === "desktop-head-unit")).toEqual({
+      step: "desktop-head-unit",
+      status: "already-done",
+      detail: "joined the run in progress",
+    });
+  });
+
+  test("a reused DHU reports the config it was launched with, not the latest request's", async () => {
+    const { launcher, provisioner } = setup();
+    const first = await provisioner.provision(request());
+    const second = await provisioner.provision(
+      request({ dhu: { binaryPath: "desktop-head-unit", configPath: "config/default_1080p.ini" } }),
+    );
+    expect(launcher.launches).toBe(1);
+    expect(first.configPath).toBe("config/default_720p.ini");
+    expect(second.configPath).toBe("config/default_720p.ini");
+    expect(second.steps.find((step) => step.step === "desktop-head-unit")?.detail).toBe(
+      "reused the running DHU, started with config/default_720p.ini; killDevice stops it so one can start with config/default_1080p.ini",
+    );
   });
 
   test("refuses another device while a run is in flight", async () => {

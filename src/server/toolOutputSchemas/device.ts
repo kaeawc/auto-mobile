@@ -43,6 +43,25 @@ const watchStartDeviceReadinessSchema = z.object({
   elapsedMs: z.number().nonnegative(),
 });
 
+/** startDevice's `androidAuto.headUnit` result: the projection steps and the head unit it runs (#17840). */
+const startDeviceAndroidAutoOutputSchema = z
+  .object({
+    steps: z.array(
+      z
+        .object({
+          step: z.string(),
+          status: z.enum(["already-done", "applied", "skipped"]),
+          detail: z.string().optional(),
+        })
+        .passthrough(),
+    ),
+    desktopHeadUnit: z
+      .object({ running: z.boolean(), configPath: z.string() })
+      .passthrough()
+      .describe("The headless DHU this daemon runs for the phone, and the config it started with."),
+  })
+  .passthrough();
+
 /** Shared acquisition description plus startDevice's successful structured result. */
 export const startDeviceOutputSchema = z
   .object({
@@ -56,6 +75,7 @@ export const startDeviceOutputSchema = z
     acquisition: z.enum(["already-booted", "cold-boot"]).optional(),
     readiness: z.union([startDeviceReadinessSchema, watchStartDeviceReadinessSchema]).optional(),
     disabledResources: disabledResourcesSchema.optional(),
+    androidAuto: startDeviceAndroidAutoOutputSchema.optional(),
     // PerformanceTracker emits nested arrays/records rather than a flat numeric map.
     timing: z.unknown().optional(),
   })

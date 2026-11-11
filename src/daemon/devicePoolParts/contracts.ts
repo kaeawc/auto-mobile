@@ -272,6 +272,8 @@ export interface DeviceSessionExecutionCanceller {
     reason: string,
     options?: {
       excludeExecutionId?: string;
+      /** Spare work marked to survive a recovery that keeps the session (#17896). */
+      sessionPreserving?: boolean;
     },
   ): Promise<number>;
 }

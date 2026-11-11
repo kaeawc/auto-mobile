@@ -42,9 +42,13 @@ export interface PlanDeviceDefinition {
 
 export type PlanDevice = string | PlanDeviceDefinition;
 
+/** Platforms a plan's top-level `platform` hint accepts (test-plan schema enum). */
+export type PlanTopLevelPlatform = "android" | "ios" | "tvos";
+
 export interface Plan {
   name: string;
   description?: string;
+  platform?: PlanTopLevelPlatform;
   devices?: PlanDevice[];
   steps: PlanStep[];
   mcpVersion?: string;

@@ -40,14 +40,10 @@ internal class McpDaemonFeatureOperations(private val owner: () -> McpDaemonClie
   }
 
   override fun listPerformanceAuditResults(
-    startTime: String?,
-    endTime: String?,
-    limit: Int?,
-    offset: Int?,
-    deviceId: String?,
+    query: PerformanceAuditQuery,
   ): PerformanceAuditHistoryResult {
     with(owner()) {
-      val uri = buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId)
+      val uri = query.toResourceUri()
       val contents = readResource(uri)
       return decodePerformanceAuditResource(json, contents)
     }

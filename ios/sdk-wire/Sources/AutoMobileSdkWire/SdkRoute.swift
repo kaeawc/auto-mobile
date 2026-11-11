@@ -4,6 +4,7 @@
 public enum SdkRoute: String, CaseIterable, Sendable {
     case cachedHierarchy = "/hierarchy"
     case freshHierarchy = "/hierarchy/fresh"
+    case carPlayTemplates = "/carplay/templates"
     case health = "/health"
     case networkMock = "/network/mock"
     case networkErrorSimulation = "/network/error-simulation"
@@ -31,7 +32,7 @@ public enum SdkRoute: String, CaseIterable, Sendable {
 
     public var method: String {
         switch self {
-        case .cachedHierarchy, .freshHierarchy, .health: return "GET"
+        case .cachedHierarchy, .freshHierarchy, .health, .carPlayTemplates: return "GET"
         default: return "POST"
         }
     }

@@ -83,9 +83,9 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "journaled",
   ),
   ...tools(
-    ["sendSms", "phoneCall", "sqlQuery", "resetAppLogs", "rotate"],
+    ["seedContent", "sendSms", "phoneCall", "sqlQuery", "resetAppLogs", "rotate"],
     SESSION_DISPATCH_REASON +
-      " SMS, calls, SQL writes or unclassified queries, log deletion and secondary-display rotation record fallback intents because baseline cleaning cannot restore those effects; read-only SQL records nothing and primary-display rotation remains revertible.",
+      " Seeded provider content, SMS, calls, SQL writes or unclassified queries, log deletion and secondary-display rotation record fallback intents because baseline cleaning cannot restore those effects; read-only SQL records nothing and primary-display rotation remains revertible.",
     "journaled",
     { fallback: true },
   ),

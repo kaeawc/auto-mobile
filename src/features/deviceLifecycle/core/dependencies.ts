@@ -1,3 +1,4 @@
+import type { AvdColdBootMarkerStore } from "../../../utils/android-cmdline-tools/AvdColdBootMarkerStore";
 import type { SimulatorPairService } from "../../../utils/ios-cmdline-tools/SimulatorPairs";
 import type { AndroidAutoProjectionApplier } from "../../androidAuto/AndroidAutoProjectionService";
 import type { AppleVisionSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorProvisioner";
@@ -171,6 +172,7 @@ export interface DeviceToolsDependencies {
    * which drives adb, `uiautomator dump` and the host Desktop Head Unit.
    */
   androidAutoProjection?: AndroidAutoProjectionApplier;
+  avdColdBootMarkers?: AvdColdBootMarkerStore;
   /**
    * Keeps the session provisionDevice minted from the missing-first-heartbeat reap while its
    * post-bind steps run (#17885); defaults to an execution on the process-wide tracker whose

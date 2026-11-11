@@ -169,6 +169,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "setNotificationPolicy",
   "setPosture",
   "setPreference",
+  "seedContent",
   "setSensor",
   "setUIState",
   "shake",

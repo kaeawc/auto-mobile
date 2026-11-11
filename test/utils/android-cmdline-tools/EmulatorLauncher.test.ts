@@ -1,3 +1,4 @@
+import { FakeAvdColdBootMarkerStore } from "../../fakes/FakeAvdColdBootMarkerStore";
 import { FakeNetsimInstanceLauncher } from "../../fakes/FakeNetsimInstanceLauncher";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test } from "bun:test";
@@ -128,6 +129,7 @@ function startupHarness(
     checkArchitectureCompatibility: async () => ({ compatible: true, hostArch: "arm64" }),
     emulatorAudioArguments: () => [],
     netsimInstanceLauncher: () => netsim,
+    avdColdBootMarkers: () => new FakeAvdColdBootMarkerStore(),
     throwIfLaunchCancelled,
     releaseReservationIfLaunchCancelled: () => {},
     emulatorPath: () => "fake-emulator",
@@ -875,3 +877,105 @@ test("private netsimd starts only after boot admission, immediately before emula
     }
   }
 });
+
+for (const marked of [true, false]) {
+  test(`quickboot marker=${marked} controls launch args and is consumed only after spawn`, async () => {
+    const markers = new FakeAvdColdBootMarkerStore();
+    if (marked) {
+      await markers.mark("Pixel_9");
+    }
+    let args: readonly string[] = [];
+    const h = startupHarness(
+      undefined,
+      (spawnArgs) => {
+        args = spawnArgs;
+        expect(markers.marked.has("Pixel_9")).toBe(marked);
+      },
+      undefined,
+      { avdColdBootMarkers: () => markers },
+    );
+    const { launch } = await launchStartup(h);
+    expect(args.includes("-no-snapshot-load")).toBe(marked);
+    expect(markers.marked.has("Pixel_9")).toBe(marked);
+    h.child.emit("spawn");
+    await drainUntil(() => !markers.marked.has("Pixel_9"), { description: "marker consumed" });
+    h.child.stdout.emit("data", Buffer.from("Detected GPU type"));
+    await launch;
+    expect(markers.calls.includes("remove:Pixel_9")).toBe(marked);
+  });
+}
+
+for (const failure of ["throw", "error-event"] as const) {
+  test(`failed spawn retains quickboot marker: ${failure}`, async () => {
+    const markers = new FakeAvdColdBootMarkerStore();
+    await markers.mark("Pixel_9");
+    const h = startupHarness(
+      undefined,
+      () => {
+        if (failure === "throw") {
+          throw new Error("spawn refused");
+        }
+      },
+      undefined,
+      { avdColdBootMarkers: () => markers },
+    );
+    const launch = h.launcher.startEmulatorProcess("Pixel_9");
+    if (failure === "error-event") {
+      await drainUntil(() => h.child.listenerCount("error") > 0, { description: "error listener" });
+      h.child.emit("error", new Error("spawn refused"));
+    }
+    await expect(launch).rejects.toThrow("spawn refused");
+    expect(markers.marked.has("Pixel_9")).toBe(true);
+    expect(markers.calls).not.toContain("remove:Pixel_9");
+  });
+}
+
+for (const flag of [
+  "-no-snapshot-load",
+  "-no-snapshot",
+  "-wipe-data",
+  "-snapshot",
+  "-snapshot=clean",
+  "-snapshot-load",
+]) {
+  test(`quickboot marker respects existing snapshot argument ${flag}`, async () => {
+    const markers = new FakeAvdColdBootMarkerStore();
+    await markers.mark("Pixel_9");
+    let args: readonly string[] = [];
+    const h = startupHarness(
+      undefined,
+      (spawnArgs) => {
+        args = spawnArgs;
+      },
+      undefined,
+      { avdColdBootMarkers: () => markers },
+    );
+    const launch = h.launcher.startEmulatorProcess("Pixel_9", { requestedExtraArgs: [flag] });
+    await drainUntil(() => h.child.stdout.listenerCount("data") > 0, {
+      description: "startup listeners",
+    });
+    expect(args.filter((arg) => arg === "-no-snapshot-load")).toHaveLength(
+      flag === "-no-snapshot-load" ? 1 : 0,
+    );
+    h.child.emit("spawn");
+    h.child.stdout.emit("data", Buffer.from("Detected GPU type"));
+    await launch;
+    expect(markers.marked.has("Pixel_9")).toBe(false);
+  });
+}
+
+for (const failure of ["read", "remove"] as const) {
+  test(`marker ${failure} failure does not fail emulator launch`, async () => {
+    const markers = new FakeAvdColdBootMarkerStore();
+    await markers.mark("Pixel_9");
+    markers.failure = failure;
+    const h = startupHarness(undefined, undefined, undefined, {
+      avdColdBootMarkers: () => markers,
+    });
+    const { launch } = await launchStartup(h);
+    h.child.emit("spawn");
+    h.child.stdout.emit("data", Buffer.from("Detected GPU type"));
+    expect((await launch).outcome).toBe("launched");
+    expect(markers.marked.has("Pixel_9")).toBe(true);
+  });
+}

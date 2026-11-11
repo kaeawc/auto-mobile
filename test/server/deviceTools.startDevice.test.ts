@@ -23,6 +23,12 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
+import type {
+  EmulatorProcessIdentity,
+  EmulatorProcessStopper,
+} from "../../src/utils/android-cmdline-tools/EmulatorProcessStop";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { setDebugPerfEnabled } from "../../src/utils/PerformanceTracker";
@@ -103,6 +109,22 @@ const autolockEnv = new Proxy<Record<string, string | undefined>>(
   },
 );
 
+class AcquisitionProcessStopper extends FakeEmulatorProcessStopper {
+  failure?: Error;
+  pending = false;
+
+  override async identify(
+    ...args: Parameters<EmulatorProcessStopper["identify"]>
+  ): Promise<EmulatorProcessIdentity> {
+    const identity = await super.identify(...args);
+    if (this.failure) {
+      throw this.failure;
+    }
+    // Deliberately ignore cancellation to prove the caller bounds even a stuck implementation.
+    return this.pending ? new Promise<never>(() => {}) : identity;
+  }
+}
+
 class FakeExitChildProcess extends FakeChildProcess {
   constructor() {
     super();
@@ -135,6 +157,7 @@ describe("startDevice handler", () => {
   let fakeMatcher: FakeDeviceMatcher;
   let daemonSessionManager: SessionManager | undefined;
   let bootTimer: FakeTimer;
+  let processStopper: AcquisitionProcessStopper;
   let restoreAutolockEnv: (() => void) | undefined;
 
   const setup = () => {
@@ -143,6 +166,7 @@ describe("startDevice handler", () => {
     fakeMatcher = new FakeDeviceMatcher();
     daemonSessionManager = undefined;
     bootTimer = new FakeTimer();
+    processStopper = new AcquisitionProcessStopper();
 
     setDeviceToolsDependencies({
       env: autolockEnv,
@@ -163,6 +187,7 @@ describe("startDevice handler", () => {
       syncInstalledAppResourceRegistry: async () => false,
       ensureCtrlProxyReady: async () => {},
       timer: bootTimer,
+      androidEmulatorProcessStopper: processStopper,
     });
     setDeviceManager(fakeDeviceUtils);
 
@@ -326,7 +351,7 @@ describe("startDevice handler", () => {
           desktopHeadUnit: { running: true, configPath: "/hu.ini" },
         };
       },
-      stopDesktopHeadUnit: async () => {},
+      stopDesktopHeadUnit: async () => false,
     };
     setDeviceToolsDependencies({ androidAutoProjection: applier });
     return started;
@@ -385,7 +410,7 @@ describe("startDevice handler", () => {
         signal?.throwIfAborted();
         throw new Error("the run ignored the lost device");
       },
-      stopDesktopHeadUnit: async () => {},
+      stopDesktopHeadUnit: async () => false,
     };
     setDeviceToolsDependencies({
       androidAutoProjection: applier,
@@ -632,6 +657,127 @@ describe("startDevice handler", () => {
     expect(result.runtime.session.sessionUuid).toBeDefined();
     expect(typeof result.runtime.session.sessionUuid).toBe("string");
   });
+
+  async function callGetAndroid() {
+    const result = await withWireConnection({ avdName: androidDevice.name }, (args) =>
+      ToolRegistry.getTool("getAndroid")!.handler(args),
+    );
+    return startResultSchema.parse(toolJson(result));
+  }
+
+  it.each(["getAndroid", "startDevice"] as const)(
+    "%s returns the host pid for an already-booted Android emulator",
+    async (toolName) => {
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      fakeMatcher.setBootedResult(androidDevice);
+      processStopper.identity = {
+        kind: "match",
+        pid: 39314,
+        avdName: androidDevice.name,
+        port: 5554,
+        command: "qemu",
+      };
+
+      const result =
+        toolName === "getAndroid"
+          ? await callGetAndroid()
+          : await callStartDevice({ platform: "android" });
+
+      expect(result.acquisition).toBe("already-booted");
+      expect(result.processId).toBe(39314);
+      expect(result.isReady).toBe(true);
+      expect(processStopper.identifyCalls).toHaveLength(1);
+      expect(processStopper.identifyCalls[0][0]).toEqual({
+        serial: androidDevice.deviceId,
+        avdName: androidDevice.name,
+      });
+      expect(processStopper.stopCalls).toEqual([]);
+      expect(bootTimer.getSleepHistory()).toEqual([]);
+    },
+  );
+
+  it.each([
+    { kind: "absent" },
+    { kind: "unreadable", detail: "permission denied" },
+    {
+      kind: "ambiguous",
+      candidates: [
+        { pid: 39314, command: "qemu" },
+        { pid: 39315, command: "qemu" },
+      ],
+    },
+    { kind: "mismatch", pid: 39314, runningAvdName: "other-avd", port: 5554, command: "qemu" },
+  ] satisfies EmulatorProcessIdentity[])(
+    "getAndroid succeeds with a null pid when process identity is $kind",
+    async (identity) => {
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      fakeMatcher.setBootedResult(androidDevice);
+      processStopper.identity = identity;
+
+      const result = await callGetAndroid();
+
+      expect(result.processId).toBeNull();
+      expect(result.isReady).toBe(true);
+      expect(processStopper.identifyCalls).toHaveLength(1);
+      expect(processStopper.stopCalls).toEqual([]);
+      expect(bootTimer.getSleepHistory()).toEqual([]);
+    },
+  );
+
+  it("getAndroid succeeds with a null pid when process identification throws", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    processStopper.failure = new Error("process table failed");
+
+    const result = await callGetAndroid();
+
+    expect(result.processId).toBeNull();
+    expect(result.isReady).toBe(true);
+    expect(processStopper.identifyCalls).toHaveLength(1);
+    expect(processStopper.stopCalls).toEqual([]);
+    expect(bootTimer.getSleepHistory()).toEqual([]);
+  });
+
+  it("getAndroid succeeds with a null pid when process identification ignores its timeout", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    processStopper.pending = true;
+
+    const acquisition = callGetAndroid();
+    await drainUntil(() => processStopper.identifyCalls.length === 1, {
+      description: "bounded process identification",
+    });
+    const options = processStopper.identifyCalls[0][1];
+    expect(options.deadlineMs - bootTimer.now()).toBe(5_000);
+    bootTimer.advanceTime(5_000);
+    const result = await acquisition;
+
+    expect(result.processId).toBeNull();
+    expect(result.isReady).toBe(true);
+    expect(options.signal?.aborted).toBe(true);
+    expect(processStopper.stopCalls).toEqual([]);
+    expect(bootTimer.getSleepHistory()).toEqual([]);
+    expect(bootTimer.getPendingTimeouts()).toEqual([]);
+  });
+
+  it.each(["android", "ios"] as const)(
+    "%s physical or simulator acquisition does not inspect emulator processes",
+    async (platform) => {
+      const device =
+        platform === "android"
+          ? { ...androidDevice, deviceId: "physical-device", name: "Pixel handset" }
+          : iosDevice;
+      fakeDeviceUtils.setBootedDevices(platform, [device]);
+      fakeMatcher.setBootedResult(device);
+
+      const result = await callStartDevice({ platform });
+
+      expect(result.isReady).toBe(true);
+      expect(result.processId).toBeNull();
+      expect(processStopper.identifyCalls).toEqual([]);
+      expect(processStopper.stopCalls).toEqual([]);
+    },
+  );
 
   it("returns the configured Android image link that listDevices reports", async () => {
     const provenance = {
@@ -1173,6 +1319,9 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
     expect(daemonSessionManager.getSession(result.runtime.session.sessionUuid)).not.toBeNull();
+    expect(result.acquisition).toBe("cold-boot");
+    expect(result.processId).toBe(childProcess.pid);
+    expect(processStopper.identifyCalls).toEqual([]);
 
     childProcess.emit("exit", 1, null);
     childProcess.emit("close", 1, null);
@@ -1622,6 +1771,15 @@ describe("startDevice handler", () => {
     });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    const replacementProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
+    processStopper.identity = {
+      kind: "match",
+      pid: 39314,
+      avdName: pooledAnrDevice.name,
+      port: 5554,
+      command: "qemu",
+    };
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
@@ -1644,6 +1802,8 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.runtime.session.sessionUuid).toBe("owner-session");
+    expect(result.processId).toBe(replacementProcess.pid);
+    expect(result.processId).not.toBe(39314);
     expect(daemonSessionManager.getDeviceReadiness("owner-session")).toBe("automationReady");
   });
 

@@ -63,6 +63,12 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "AUX_SOCKET_DIR isolates the socket; remove this competing override.",
   },
   { name: "AUTOMOBILE_CTRL_PROXY_APK_PATH", kind: "input", reason: "Read-only APK artifact." },
+  { name: "AUTOMOBILE_CONTENT_SEEDER_APK_PATH", kind: "input", reason: "Read-only APK artifact." },
+  {
+    name: "AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH",
+    kind: "input",
+    reason: "Read-only simulator probe executable.",
+  },
   {
     name: "AUTOMOBILE_CARPLAY_POWER_HELPER_PATH",
     kind: "input",

@@ -199,6 +199,7 @@ const CLASSIFICATION: Classification = {
     "setNotificationPolicy",
     "setPosture",
     "setPreference",
+    "seedContent",
     "setSensor",
     "setUIState",
     "shake",

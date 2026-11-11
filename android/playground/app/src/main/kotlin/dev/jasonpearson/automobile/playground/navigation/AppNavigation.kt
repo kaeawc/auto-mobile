@@ -226,6 +226,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
         settingsNavigationEntry(navigationState)
         demoFlowNavigationEntries(navigationState)
         demoScenarioNavigationEntries(navigationState)
+        demoListNavigationEntries(navigationState)
       },
   )
 }

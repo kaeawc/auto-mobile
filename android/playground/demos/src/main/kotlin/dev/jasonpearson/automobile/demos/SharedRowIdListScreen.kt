@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -57,9 +58,10 @@ fun SharedRowIdListScreen(onNavigateBack: () -> Unit) {
       AndroidView(
         modifier = Modifier.fillMaxSize().padding(paddingValues),
         factory = { context ->
-          LayoutInflater.from(context)
-            .inflate(R.layout.screen_shared_row_id_list, null, false)
-            .apply { bindSharedRowIdList() }
+          FrameLayout(context).apply {
+            LayoutInflater.from(context).inflate(R.layout.screen_shared_row_id_list, this, true)
+            bindSharedRowIdList()
+          }
         },
       )
     }

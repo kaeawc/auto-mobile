@@ -203,7 +203,8 @@ export class AdbServerResetQuarantine {
       }
       await this.settleAbandonedAdbResetIncidents(cohort, sessionTargets);
       // Issue both scopes before awaiting drains; idle serials also carry sessionless work.
-      // Reset recovery retains its existing semantics: cancel every affected execution.
+      // Cancel every affected execution except a held session's provisioning hold: the reset
+      // keeps the session, so that hold runs on (#17896).
       await Promise.all([
         ...cohort.map((device) =>
           this.pool.cancelDeviceExecutions(
@@ -212,7 +213,6 @@ export class AdbServerResetQuarantine {
           ),
         ),
         ...sessionTargets.map(({ sessionId, deviceId, incidentId }) =>
-          // The reset keeps the session, so a provisioning hold on it runs on (#17896).
           this.pool.cancelDeviceSessionExecutions(
             sessionId,
             deviceLossCancellationReason(deviceId, incidentId),

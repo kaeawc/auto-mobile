@@ -13,6 +13,7 @@ import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCle
 import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
 import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
 import { registerPortReverseSessionCleanup } from "./portReverseSessionCleanup";
+import { registerAndroidAutoSessionCleanup } from "./androidAutoSessionCleanup";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -140,6 +141,7 @@ export function wireSessionLifecycle(
   registerKeyboardProfileSessionCleanup(sessionManager);
   registerDeviceConditionSessionCleanup(sessionManager);
   registerPortReverseSessionCleanup(sessionManager);
+  registerAndroidAutoSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);
   registerPowerSessionCleanup(sessionManager);

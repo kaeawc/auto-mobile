@@ -1,0 +1,130 @@
+{
+  "focusNavigateFromNoFocus": {
+    "success": false,
+    "status": "stuck",
+    "steps": 4,
+    "path": [
+      {
+        "descendantLabel": "Settings",
+        "bounds": {
+          "left": 64,
+          "top": 56,
+          "right": 234,
+          "bottom": 152
+        }
+      },
+      {
+        "descendantLabel": "Trending card 1",
+        "bounds": {
+          "left": 64,
+          "top": 214,
+          "right": 464,
+          "bottom": 434
+        }
+      },
+      {
+        "bounds": {
+          "left": 64,
+          "top": 504,
+          "right": 464,
+          "bottom": 724
+        }
+      },
+      {
+        "descendantLabel": "Documentaries card 1",
+        "bounds": {
+          "left": 64,
+          "top": 794,
+          "right": 464,
+          "bottom": 1014
+        }
+      }
+    ],
+    "focusedElement": {
+      "descendantLabel": "Documentaries card 1",
+      "bounds": {
+        "left": 64,
+        "top": 794,
+        "right": 464,
+        "bottom": 1014
+      }
+    },
+    "message": "Focus did not move after 1 press; the target was not focused. Observe before retrying.",
+    "selected": false
+  },
+  "focusNavigateFromTrendingCard1": {
+    "success": false,
+    "status": "stuck",
+    "steps": 3,
+    "path": [
+      {
+        "descendantLabel": "Trending card 1",
+        "bounds": {
+          "left": 64,
+          "top": 214,
+          "right": 464,
+          "bottom": 434
+        }
+      },
+      {
+        "bounds": {
+          "left": 64,
+          "top": 504,
+          "right": 464,
+          "bottom": 724
+        }
+      },
+      {
+        "descendantLabel": "Documentaries card 1",
+        "bounds": {
+          "left": 64,
+          "top": 794,
+          "right": 464,
+          "bottom": 1014
+        }
+      }
+    ],
+    "focusedElement": {
+      "descendantLabel": "Documentaries card 1",
+      "bounds": {
+        "left": 64,
+        "top": 794,
+        "right": 464,
+        "bottom": 1014
+      }
+    },
+    "message": "Focus did not move after 1 press; the target was not focused. Observe before retrying.",
+    "selected": false
+  },
+  "tapOnFromNoFocus": {
+    "success": false,
+    "action": "tap",
+    "inputMethod": "dpad",
+    "focusNavigation": {
+      "status": "stuck",
+      "steps": 1,
+      "path": [
+        {
+          "descendantLabel": "Documentaries card 1",
+          "bounds": {
+            "left": 64,
+            "top": 794,
+            "right": 464,
+            "bottom": 1014
+          }
+        }
+      ],
+      "focusedElement": {
+        "descendantLabel": "Documentaries card 1",
+        "bounds": {
+          "left": 64,
+          "top": 794,
+          "right": 464,
+          "bottom": 1014
+        }
+      }
+    },
+    "message": "No touchscreen, and D-pad focus did not reach text=\"Trending card 8\" (stuck): Focus did not move after 1 press; the target was not focused. Observe before retrying.",
+    "error": "No touchscreen, and D-pad focus did not reach text=\"Trending card 8\" (stuck): Focus did not move after 1 press; the target was not focused. Observe before retrying."
+  }
+}

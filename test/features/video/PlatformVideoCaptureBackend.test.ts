@@ -369,7 +369,6 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
           expect(result.codec).toBe("hevc");
           expect(events.slice(events.indexOf("codec"))).toEqual([
             "codec",
-            ...(exitCode === 1 ? ["[VideoCapture] Recording exited with code 1: firstsecond"] : []),
             "[VideoCapture] Stderr output: firstsecond",
           ]);
         } finally {

@@ -190,6 +190,7 @@ class CtrlProxyMessageHandler(
               labelContentDesc = request.identityLabelContentDesc,
             )
             .takeUnless { it == NodeIdentityHints() },
+          request.allowInvisible,
         )
       is RequestActivateAccessibilityLink ->
         actions.requestActivateAccessibilityLink(

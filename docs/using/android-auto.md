@@ -105,8 +105,12 @@ default values, the same as `default.ini`: 800x480 at 160 dpi and 30 fps.
   `otherDisplays` (for example `TemplateCarFragment`, `Dashboard` and `GhFacetBar`) and may report the
   projection display as the active one, with a warning that it has no accessible content. The projected
   UI is not in the accessibility tree; `observe`, `tapOn` and other tools act only on the phone screen.
-- While projecting, the phone's foreground app is Android Auto, not your app, so `observe` does not
-  include your app's `carAppTemplates` block.
+- While projecting, the phone's foreground app is Android Auto, not your app. If your app enabled the
+  AutoMobile template route, `observe` reads it from every app Android Auto has bound and returns
+  `carAppTemplates.projected[]`, one entry per app (`packageName`, `sessions`, `error`), with
+  `projectedBy` naming Android Auto. Android Auto does not report which bound app the head unit shows,
+  so with several apps bound, check each entry's top screen rather than assuming the first is visible.
+  The entries are what the app built, not what the head unit rendered.
 - The first `observe` on a fresh emulator installs AutoMobile's on-device service. If the DHU is
   connected through `adb forward`, a dropped adb connection at that point ends the projection; use the
   emulator redirect.

@@ -35,7 +35,7 @@ override fun onGetTemplate(): Template =
   `<applicationId>.automobile.carapptemplates`). Read-only; every entry point enforces
   `DebugInspectorAccess` (shell, root, own uid, CtrlProxy).
 - **Host reader** (`CarAppTemplateReader`). Runs `adb shell content call --user <u> --method snapshot`
-  for the foreground package, validates the document, and turns an enabled one into the
+  for the foreground package (or, during Android Auto projection, each bound car app; see below), validates the document, and turns an enabled one into the
   `carAppTemplates` block on the served `observe` copy, never on the cached observation. The user is
   the observation's when it carries one, otherwise the foreground lookup's; a lookup naming another
   package skips the read instead of falling back to user 0, so a secondary or work-profile app is
@@ -74,11 +74,17 @@ first-record order, so it can change after `disable()` and `enable()`.
   recording stays off until the app calls `enable`.
 - The block describes templates the app returned, never what the host rendered or hid (driving
   restrictions, list limits, host-side truncation). The `note` field says so on every block.
-- The reader asks only the package in `activeWindow.appId`. During Android Auto projection that is
-  `com.google.android.projection.gearhead` (its `GhostActivity`), so a projected app's route is never
-  asked, although the app keeps recording and its route answers a direct `content call` with the
-  top screen the head unit shows. The projected app is the one whose `CarAppService` Android Auto
-  binds (`dumpsys activity services` lists it with client `com.google.android.projection.gearhead`).
+- During Android Auto projection the foreground package is `com.google.android.projection.gearhead`
+  (its `GhostActivity`), not the projected app, while the projected app keeps recording. When the
+  foreground is gearhead, the reader runs `dumpsys activity services` (about 40 ms and 360 KB on API
+  36, under the same 1.5 s deadline) and takes each ServiceRecord whose intent action is
+  `androidx.car.app.CarAppService` and whose binding client is a gearhead process, excluding
+  gearhead's own services. Each app is read as the user in its ServiceRecord, with no foreground
+  lookup, through the same per-package path, so quiet entries, deadlines and shared in-flight reads
+  apply unchanged. The block then has `projectedBy`, `projectedNote` and `projected[]` (package,
+  sessions, error) instead of a top-level `packageName`. Android Auto does not say which bound app is
+  on the head unit (#17827), so every enabled app is listed by package name and none is marked
+  visible. A failed dump, or no bound app answering enabled, leaves the payload unchanged.
 
 ## Host-rendered marker
 

@@ -1,0 +1,73 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{3f2a1b7 u0 com.google.android.projection.gearhead/com.google.android.projection.gearhead.apphost.TemplateNavigationService}
+    intent={act=androidx.car.app.CarAppService cmp=com.google.android.projection.gearhead/.apphost.TemplateNavigationService}
+    packageName=com.google.android.projection.gearhead
+    processName=com.google.android.projection.gearhead:car
+    baseDir=/data/app/~~HOST_PATH==/com.google.android.projection.gearhead-HOST_PATH==/base.apk
+    dataDir=/data/user/0/com.google.android.projection.gearhead
+    app=ProcessRecord{8c1d2e4 5120:com.google.android.projection.gearhead:car/u0a171}
+    createTime=-6m12s310ms startingBgTimeout=--
+    lastActivity=-6m12s305ms restartTime=-6m12s305ms createdFromFg=true
+    Bindings:
+    * IntentBindRecord{5b9e0a1 CREATE}:
+      intent={act=androidx.car.app.CarAppService cmp=com.google.android.projection.gearhead/.apphost.TemplateNavigationService}
+      binder=android.os.BinderProxy@2d7f3c8
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{9a40b15 ProcessRecord{8c1d2e4 5120:com.google.android.projection.gearhead:car/u0a171}}
+        Per-process Connections:
+          ConnectionRecord{c6e7f20 u0 CR com.google.android.projection.gearhead/.apphost.TemplateNavigationService:@1f0e9d2}
+    All Connections:
+      ConnectionRecord{c6e7f20 u0 CR com.google.android.projection.gearhead/.apphost.TemplateNavigationService:@1f0e9d2}
+
+  * ServiceRecord{7e61c09 u0 dev.jasonpearson.automobile.automotivefixture/.car.FixtureCarAppService}
+    intent={act=androidx.car.app.CarAppService cmp=dev.jasonpearson.automobile.automotivefixture/.car.FixtureCarAppService}
+    packageName=dev.jasonpearson.automobile.automotivefixture
+    processName=dev.jasonpearson.automobile.automotivefixture
+    baseDir=/data/app/~~HOST_PATH==/dev.jasonpearson.automobile.automotivefixture-HOST_PATH==/base.apk
+    dataDir=/data/user/0/dev.jasonpearson.automobile.automotivefixture
+    app=ProcessRecord{4a2b6d3 6311:dev.jasonpearson.automobile.automotivefixture/u0a212}
+    createTime=-2m41s88ms startingBgTimeout=--
+    lastActivity=-2m41s80ms restartTime=-2m41s80ms createdFromFg=true
+    Bindings:
+    * IntentBindRecord{0d8e5f6 CREATE}:
+      intent={act=androidx.car.app.CarAppService cmp=dev.jasonpearson.automobile.automotivefixture/.car.FixtureCarAppService}
+      binder=android.os.BinderProxy@61a2c7e
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{e13f9b2 ProcessRecord{8c1d2e4 5120:com.google.android.projection.gearhead:car/u0a171}}
+        Per-process Connections:
+          ConnectionRecord{b74d0e1 u0 CR dev.jasonpearson.automobile.automotivefixture/.car.FixtureCarAppService:@5c3a1f8}
+    All Connections:
+      ConnectionRecord{b74d0e1 u0 CR dev.jasonpearson.automobile.automotivefixture/.car.FixtureCarAppService:@5c3a1f8}
+
+  * ServiceRecord{1c5f8a2 u0 com.example.media/.PlaybackService}
+    intent={act=android.media.browse.MediaBrowserService cmp=com.example.media/.PlaybackService}
+    packageName=com.example.media
+    processName=com.example.media
+    app=ProcessRecord{2e9b7c1 7002:com.example.media/u0a230}
+    Bindings:
+    * IntentBindRecord{6f0a3d4 CREATE}:
+      intent={act=android.media.browse.MediaBrowserService cmp=com.example.media/.PlaybackService}
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{3a8c2e5 ProcessRecord{8c1d2e4 5120:com.google.android.projection.gearhead:car/u0a171}}
+        Per-process Connections:
+          ConnectionRecord{7d1e4f9 u0 CR com.example.media/.PlaybackService:@0b6c9a3}
+
+  * ServiceRecord{5d0e3b8 u0 com.example.unbound/.car.UnboundCarAppService}
+    intent={act=androidx.car.app.CarAppService cmp=com.example.unbound/.car.UnboundCarAppService}
+    packageName=com.example.unbound
+    processName=com.example.unbound
+    app=ProcessRecord{6b2f1a9 7310:com.example.unbound/u0a231}
+    Bindings:
+    * IntentBindRecord{8e4c0d7 CREATE}:
+      intent={act=androidx.car.app.CarAppService cmp=com.example.unbound/.car.UnboundCarAppService}
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{2c7a9e3 ProcessRecord{9f3b8d1 7400:com.example.tester/u0a240}}
+        Per-process Connections:
+          ConnectionRecord{4e8b1c6 u0 CR com.example.unbound/.car.UnboundCarAppService:@3d9a7e2}
+
+  Connection bindings to services:
+  * ConnectionRecord{b74d0e1 u0 CR dev.jasonpearson.automobile.automotivefixture/.car.FixtureCarAppService:@5c3a1f8}
+    binding=AppBindRecord{e13f9b2 dev.jasonpearson.automobile.automotivefixture/.car.FixtureCarAppService:com.google.android.projection.gearhead:car}
+    activity=null
+    conn=android.os.BinderProxy@5c3a1f8 flags=0x1

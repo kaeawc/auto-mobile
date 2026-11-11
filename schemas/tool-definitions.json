@@ -23316,261 +23316,49 @@
           }
         },
         "carAppTemplates": {
-          "description": "Android apps that integrate the AutoMobile SDK and enabled its Car App Library template route: each ScreenManager stack (root first) with the last template every screen returned from onGetTemplate. This is what the app built, not what the car host rendered.",
-          "type": "object",
-          "properties": {
-            "packageName": {
-              "type": "string"
-            },
-            "source": {
-              "type": "string",
-              "const": "sdk"
-            },
-            "note": {
-              "type": "string"
-            },
-            "sessions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "screens": {
-                    "description": "Root screen first, top screen last.",
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "screenClass": {
-                          "type": "string"
-                        },
-                        "top": {
-                          "type": "boolean"
-                        },
-                        "marker": {
-                          "type": "string"
-                        },
-                        "template": {
-                          "description": "Absent when the app has not recorded a template for this screen.",
+          "description": "Android apps that integrate the AutoMobile SDK and enabled its Car App Library template route: each ScreenManager stack (root first) with the last template every screen returned from onGetTemplate. This is what the app built, not what the car host rendered. While Android Auto projects, projected[] lists each app it bound whose route answered; Android Auto does not say which of them the head unit shows.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "packageName": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "const": "sdk"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "sessions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "screens": {
+                        "description": "Root screen first, top screen last.",
+                        "type": "array",
+                        "items": {
                           "type": "object",
                           "properties": {
                             "id": {
                               "type": "string"
                             },
-                            "type": {
+                            "screenClass": {
                               "type": "string"
                             },
-                            "title": {
-                              "type": "string"
-                            },
-                            "loading": {
+                            "top": {
                               "type": "boolean"
                             },
-                            "message": {
+                            "marker": {
                               "type": "string"
                             },
-                            "searchHint": {
-                              "type": "string"
-                            },
-                            "initialSearchText": {
-                              "type": "string"
-                            },
-                            "headerActions": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "type": {
-                                    "type": "string"
-                                  },
-                                  "title": {
-                                    "type": "string"
-                                  },
-                                  "hasIcon": {
-                                    "type": "boolean"
-                                  },
-                                  "enabled": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": ["id", "type", "hasIcon", "enabled"],
-                                "additionalProperties": {}
-                              }
-                            },
-                            "items": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "kind": {
-                                    "type": "string"
-                                  },
-                                  "title": {
-                                    "type": "string"
-                                  },
-                                  "section": {
-                                    "type": "string"
-                                  },
-                                  "texts": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "hasImage": {
-                                    "type": "boolean"
-                                  },
-                                  "toggle": {
-                                    "description": "Checked state; absent when the row has no toggle.",
-                                    "type": "boolean"
-                                  },
-                                  "browsable": {
-                                    "type": "boolean"
-                                  },
-                                  "enabled": {
-                                    "type": "boolean"
-                                  },
-                                  "actions": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "id": {
-                                          "type": "string"
-                                        },
-                                        "type": {
-                                          "type": "string"
-                                        },
-                                        "title": {
-                                          "type": "string"
-                                        },
-                                        "hasIcon": {
-                                          "type": "boolean"
-                                        },
-                                        "enabled": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      "required": ["id", "type", "hasIcon", "enabled"],
-                                      "additionalProperties": {}
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "kind",
-                                  "texts",
-                                  "hasImage",
-                                  "browsable",
-                                  "enabled",
-                                  "actions"
-                                ],
-                                "additionalProperties": {}
-                              }
-                            },
-                            "actions": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "type": {
-                                    "type": "string"
-                                  },
-                                  "title": {
-                                    "type": "string"
-                                  },
-                                  "hasIcon": {
-                                    "type": "boolean"
-                                  },
-                                  "enabled": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": ["id", "type", "hasIcon", "enabled"],
-                                "additionalProperties": {}
-                              }
-                            },
-                            "actionStrips": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "role": {
-                                    "type": "string"
-                                  },
-                                  "actions": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "id": {
-                                          "type": "string"
-                                        },
-                                        "type": {
-                                          "type": "string"
-                                        },
-                                        "title": {
-                                          "type": "string"
-                                        },
-                                        "hasIcon": {
-                                          "type": "boolean"
-                                        },
-                                        "enabled": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      "required": ["id", "type", "hasIcon", "enabled"],
-                                      "additionalProperties": {}
-                                    }
-                                  }
-                                },
-                                "required": ["id", "role", "actions"],
-                                "additionalProperties": {}
-                              }
-                            },
-                            "tabs": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "contentId": {
-                                    "type": "string"
-                                  },
-                                  "title": {
-                                    "type": "string"
-                                  },
-                                  "hasIcon": {
-                                    "type": "boolean"
-                                  },
-                                  "active": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": ["id", "contentId", "hasIcon", "active"],
-                                "additionalProperties": {}
-                              }
-                            },
-                            "tabContent": {
+                            "template": {
+                              "description": "Absent when the app has not recorded a template for this screen.",
                               "type": "object",
                               "properties": {
                                 "id": {
@@ -23783,6 +23571,232 @@
                                     "required": ["id", "contentId", "hasIcon", "active"],
                                     "additionalProperties": {}
                                   }
+                                },
+                                "tabContent": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "type": {
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "loading": {
+                                      "type": "boolean"
+                                    },
+                                    "message": {
+                                      "type": "string"
+                                    },
+                                    "searchHint": {
+                                      "type": "string"
+                                    },
+                                    "initialSearchText": {
+                                      "type": "string"
+                                    },
+                                    "headerActions": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string"
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "hasIcon": {
+                                            "type": "boolean"
+                                          },
+                                          "enabled": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": ["id", "type", "hasIcon", "enabled"],
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "items": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "kind": {
+                                            "type": "string"
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "section": {
+                                            "type": "string"
+                                          },
+                                          "texts": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "hasImage": {
+                                            "type": "boolean"
+                                          },
+                                          "toggle": {
+                                            "description": "Checked state; absent when the row has no toggle.",
+                                            "type": "boolean"
+                                          },
+                                          "browsable": {
+                                            "type": "boolean"
+                                          },
+                                          "enabled": {
+                                            "type": "boolean"
+                                          },
+                                          "actions": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "type": {
+                                                  "type": "string"
+                                                },
+                                                "title": {
+                                                  "type": "string"
+                                                },
+                                                "hasIcon": {
+                                                  "type": "boolean"
+                                                },
+                                                "enabled": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "required": ["id", "type", "hasIcon", "enabled"],
+                                              "additionalProperties": {}
+                                            }
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "kind",
+                                          "texts",
+                                          "hasImage",
+                                          "browsable",
+                                          "enabled",
+                                          "actions"
+                                        ],
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "actions": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string"
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "hasIcon": {
+                                            "type": "boolean"
+                                          },
+                                          "enabled": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": ["id", "type", "hasIcon", "enabled"],
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "actionStrips": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "role": {
+                                            "type": "string"
+                                          },
+                                          "actions": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "type": {
+                                                  "type": "string"
+                                                },
+                                                "title": {
+                                                  "type": "string"
+                                                },
+                                                "hasIcon": {
+                                                  "type": "boolean"
+                                                },
+                                                "enabled": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "required": ["id", "type", "hasIcon", "enabled"],
+                                              "additionalProperties": {}
+                                            }
+                                          }
+                                        },
+                                        "required": ["id", "role", "actions"],
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "tabs": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "contentId": {
+                                            "type": "string"
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "hasIcon": {
+                                            "type": "boolean"
+                                          },
+                                          "active": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": ["id", "contentId", "hasIcon", "active"],
+                                        "additionalProperties": {}
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "type",
+                                    "headerActions",
+                                    "items",
+                                    "actions",
+                                    "actionStrips",
+                                    "tabs"
+                                  ],
+                                  "additionalProperties": {}
                                 }
                               },
                               "required": [
@@ -23797,33 +23811,560 @@
                               "additionalProperties": {}
                             }
                           },
-                          "required": [
-                            "id",
-                            "type",
-                            "headerActions",
-                            "items",
-                            "actions",
-                            "actionStrips",
-                            "tabs"
-                          ],
+                          "required": ["id", "screenClass", "top"],
+                          "additionalProperties": {}
+                        }
+                      }
+                    },
+                    "required": ["id", "screens"],
+                    "additionalProperties": {}
+                  }
+                },
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": ["packageName", "source", "note", "sessions"],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "const": "sdk"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "projectedBy": {
+                  "description": "The projecting host package (Android Auto).",
+                  "type": "string"
+                },
+                "projectedNote": {
+                  "type": "string"
+                },
+                "projected": {
+                  "description": "Bound apps whose route answered enabled, ordered by package name.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "packageName": {
+                        "type": "string"
+                      },
+                      "sessions": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "screens": {
+                              "description": "Root screen first, top screen last.",
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "screenClass": {
+                                    "type": "string"
+                                  },
+                                  "top": {
+                                    "type": "boolean"
+                                  },
+                                  "marker": {
+                                    "type": "string"
+                                  },
+                                  "template": {
+                                    "description": "Absent when the app has not recorded a template for this screen.",
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "loading": {
+                                        "type": "boolean"
+                                      },
+                                      "message": {
+                                        "type": "string"
+                                      },
+                                      "searchHint": {
+                                        "type": "string"
+                                      },
+                                      "initialSearchText": {
+                                        "type": "string"
+                                      },
+                                      "headerActions": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "type": {
+                                              "type": "string"
+                                            },
+                                            "title": {
+                                              "type": "string"
+                                            },
+                                            "hasIcon": {
+                                              "type": "boolean"
+                                            },
+                                            "enabled": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": ["id", "type", "hasIcon", "enabled"],
+                                          "additionalProperties": {}
+                                        }
+                                      },
+                                      "items": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "kind": {
+                                              "type": "string"
+                                            },
+                                            "title": {
+                                              "type": "string"
+                                            },
+                                            "section": {
+                                              "type": "string"
+                                            },
+                                            "texts": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "hasImage": {
+                                              "type": "boolean"
+                                            },
+                                            "toggle": {
+                                              "description": "Checked state; absent when the row has no toggle.",
+                                              "type": "boolean"
+                                            },
+                                            "browsable": {
+                                              "type": "boolean"
+                                            },
+                                            "enabled": {
+                                              "type": "boolean"
+                                            },
+                                            "actions": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "type": {
+                                                    "type": "string"
+                                                  },
+                                                  "title": {
+                                                    "type": "string"
+                                                  },
+                                                  "hasIcon": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "enabled": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                "required": ["id", "type", "hasIcon", "enabled"],
+                                                "additionalProperties": {}
+                                              }
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "kind",
+                                            "texts",
+                                            "hasImage",
+                                            "browsable",
+                                            "enabled",
+                                            "actions"
+                                          ],
+                                          "additionalProperties": {}
+                                        }
+                                      },
+                                      "actions": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "type": {
+                                              "type": "string"
+                                            },
+                                            "title": {
+                                              "type": "string"
+                                            },
+                                            "hasIcon": {
+                                              "type": "boolean"
+                                            },
+                                            "enabled": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": ["id", "type", "hasIcon", "enabled"],
+                                          "additionalProperties": {}
+                                        }
+                                      },
+                                      "actionStrips": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "role": {
+                                              "type": "string"
+                                            },
+                                            "actions": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "type": {
+                                                    "type": "string"
+                                                  },
+                                                  "title": {
+                                                    "type": "string"
+                                                  },
+                                                  "hasIcon": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "enabled": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                "required": ["id", "type", "hasIcon", "enabled"],
+                                                "additionalProperties": {}
+                                              }
+                                            }
+                                          },
+                                          "required": ["id", "role", "actions"],
+                                          "additionalProperties": {}
+                                        }
+                                      },
+                                      "tabs": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "contentId": {
+                                              "type": "string"
+                                            },
+                                            "title": {
+                                              "type": "string"
+                                            },
+                                            "hasIcon": {
+                                              "type": "boolean"
+                                            },
+                                            "active": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": ["id", "contentId", "hasIcon", "active"],
+                                          "additionalProperties": {}
+                                        }
+                                      },
+                                      "tabContent": {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string"
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "loading": {
+                                            "type": "boolean"
+                                          },
+                                          "message": {
+                                            "type": "string"
+                                          },
+                                          "searchHint": {
+                                            "type": "string"
+                                          },
+                                          "initialSearchText": {
+                                            "type": "string"
+                                          },
+                                          "headerActions": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "type": {
+                                                  "type": "string"
+                                                },
+                                                "title": {
+                                                  "type": "string"
+                                                },
+                                                "hasIcon": {
+                                                  "type": "boolean"
+                                                },
+                                                "enabled": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "required": ["id", "type", "hasIcon", "enabled"],
+                                              "additionalProperties": {}
+                                            }
+                                          },
+                                          "items": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "kind": {
+                                                  "type": "string"
+                                                },
+                                                "title": {
+                                                  "type": "string"
+                                                },
+                                                "section": {
+                                                  "type": "string"
+                                                },
+                                                "texts": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "hasImage": {
+                                                  "type": "boolean"
+                                                },
+                                                "toggle": {
+                                                  "description": "Checked state; absent when the row has no toggle.",
+                                                  "type": "boolean"
+                                                },
+                                                "browsable": {
+                                                  "type": "boolean"
+                                                },
+                                                "enabled": {
+                                                  "type": "boolean"
+                                                },
+                                                "actions": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "id": {
+                                                        "type": "string"
+                                                      },
+                                                      "type": {
+                                                        "type": "string"
+                                                      },
+                                                      "title": {
+                                                        "type": "string"
+                                                      },
+                                                      "hasIcon": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "enabled": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "id",
+                                                      "type",
+                                                      "hasIcon",
+                                                      "enabled"
+                                                    ],
+                                                    "additionalProperties": {}
+                                                  }
+                                                }
+                                              },
+                                              "required": [
+                                                "id",
+                                                "kind",
+                                                "texts",
+                                                "hasImage",
+                                                "browsable",
+                                                "enabled",
+                                                "actions"
+                                              ],
+                                              "additionalProperties": {}
+                                            }
+                                          },
+                                          "actions": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "type": {
+                                                  "type": "string"
+                                                },
+                                                "title": {
+                                                  "type": "string"
+                                                },
+                                                "hasIcon": {
+                                                  "type": "boolean"
+                                                },
+                                                "enabled": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "required": ["id", "type", "hasIcon", "enabled"],
+                                              "additionalProperties": {}
+                                            }
+                                          },
+                                          "actionStrips": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "role": {
+                                                  "type": "string"
+                                                },
+                                                "actions": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "id": {
+                                                        "type": "string"
+                                                      },
+                                                      "type": {
+                                                        "type": "string"
+                                                      },
+                                                      "title": {
+                                                        "type": "string"
+                                                      },
+                                                      "hasIcon": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "enabled": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "id",
+                                                      "type",
+                                                      "hasIcon",
+                                                      "enabled"
+                                                    ],
+                                                    "additionalProperties": {}
+                                                  }
+                                                }
+                                              },
+                                              "required": ["id", "role", "actions"],
+                                              "additionalProperties": {}
+                                            }
+                                          },
+                                          "tabs": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "contentId": {
+                                                  "type": "string"
+                                                },
+                                                "title": {
+                                                  "type": "string"
+                                                },
+                                                "hasIcon": {
+                                                  "type": "boolean"
+                                                },
+                                                "active": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "required": ["id", "contentId", "hasIcon", "active"],
+                                              "additionalProperties": {}
+                                            }
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "type",
+                                          "headerActions",
+                                          "items",
+                                          "actions",
+                                          "actionStrips",
+                                          "tabs"
+                                        ],
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "type",
+                                      "headerActions",
+                                      "items",
+                                      "actions",
+                                      "actionStrips",
+                                      "tabs"
+                                    ],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "required": ["id", "screenClass", "top"],
+                                "additionalProperties": {}
+                              }
+                            }
+                          },
+                          "required": ["id", "screens"],
                           "additionalProperties": {}
                         }
                       },
-                      "required": ["id", "screenClass", "top"],
-                      "additionalProperties": {}
-                    }
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["packageName", "sessions"],
+                    "additionalProperties": {}
                   }
-                },
-                "required": ["id", "screens"],
-                "additionalProperties": {}
-              }
-            },
-            "error": {
-              "type": "string"
+                }
+              },
+              "required": ["source", "note", "projectedBy", "projectedNote", "projected"],
+              "additionalProperties": {}
             }
-          },
-          "required": ["packageName", "source", "note", "sessions"],
-          "additionalProperties": {}
+          ]
         },
         "layoutWarnings": {
           "type": "object",

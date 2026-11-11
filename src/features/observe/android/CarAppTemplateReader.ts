@@ -1,21 +1,27 @@
 import type { BootedDevice, ObserveResult } from "../../../models";
 import {
+  ANDROID_AUTO_PACKAGE,
+  CAR_APP_PROJECTED_NOTE,
   CAR_APP_TEMPLATES_NOTE,
   carAppTemplateDocumentSchema,
+  type CarAppForegroundTemplates,
   type CarAppTemplateDocument,
   type CarAppTemplates,
 } from "../../../models/CarAppTemplates";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../../utils/androidPackageName";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { shellQuote } from "../../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import { parseProjectedCarApps, type ProjectedCarApp } from "./projectedCarApps";
 
 /**
- * Resolves the optional `carAppTemplates` block for an observation (#16751), or undefined when the
- * foreground app does not answer the SDK route with an enabled snapshot.
+ * Resolves the optional `carAppTemplates` block for an observation (#16751), or undefined when no
+ * app answers the SDK route with an enabled snapshot. While Android Auto is the foreground app, the
+ * apps it has bound are asked instead (#17826).
  */
 export type CarAppTemplatesResolver = (
   device: BootedDevice,
@@ -53,13 +59,15 @@ export function parseCarAppTemplateCallOutput(output: string): unknown {
  * Reads the snapshot with `adb shell content call` as the foreground app's Android user. A package
  * that has no route, or whose route answered disabled, is remembered per device, user and package
  * so ordinary observations pay for at most one call per package per TTL; a failed read is retried
- * after a short interval. Overlapping observations of the same app share one read.
+ * after a short interval. Overlapping observations of the same app share one read. While Android
+ * Auto projects, its foreground package is not the projected app, so the bound `CarAppService`
+ * apps from `dumpsys activity services` are each read through the same per-package path.
  */
 export class CarAppTemplateReader {
   private readonly quietUntil = new Map<string, number>();
   /** The Android user each device's package was last read as; the hint for skipping a lookup. */
   private readonly lastUser = new Map<string, number>();
-  private readonly inFlight = new Map<string, Promise<CarAppTemplates | undefined>>();
+  private readonly inFlight = new Map<string, Promise<CarAppForegroundTemplates | undefined>>();
 
   constructor(
     private readonly adbFor: (device: BootedDevice) => CarAppAdb,
@@ -80,28 +88,112 @@ export class CarAppTemplateReader {
     ) {
       return undefined;
     }
-    const key = `${device.deviceId}\u0000${result.userId ?? ""}\u0000${packageName}`;
+    if (packageName === ANDROID_AUTO_PACKAGE) {
+      return this.resolveProjected(device);
+    }
+    return this.shared(device, packageName, result.userId, () =>
+      this.resolveFor(device, packageName, result.userId),
+    );
+  };
+
+  /** Overlapping reads of one device, user and package share one promise. */
+  private shared(
+    device: BootedDevice,
+    packageName: string,
+    userId: number | undefined,
+    start: () => Promise<CarAppForegroundTemplates | undefined>,
+  ): Promise<CarAppForegroundTemplates | undefined> {
+    const key = `${device.deviceId}\u0000${userId ?? ""}\u0000${packageName}`;
     const pending = this.inFlight.get(key);
     if (pending) {
       return pending;
     }
-    const read = this.resolveFor(device, packageName, result.userId).finally(() => {
+    const read = start().finally(() => {
       this.inFlight.delete(key);
     });
     this.inFlight.set(key, read);
     return read;
-  };
+  }
+
+  /**
+   * Every app Android Auto has bound, read as the user its service runs as. Undefined when none
+   * answers enabled, so the payload is unchanged.
+   */
+  private async resolveProjected(device: BootedDevice): Promise<CarAppTemplates | undefined> {
+    const apps = await this.projectedApps(device);
+    const blocks = await Promise.all(
+      apps.map((app) =>
+        this.shared(device, app.packageName, app.userId, () =>
+          this.readKnownUser(device, app.packageName, app.userId),
+        ),
+      ),
+    );
+    const projected = blocks.flatMap((block) =>
+      block
+        ? [
+            {
+              packageName: block.packageName,
+              sessions: block.sessions,
+              ...(block.error ? { error: block.error } : {}),
+            },
+          ]
+        : [],
+    );
+    if (projected.length === 0) {
+      return undefined;
+    }
+    return {
+      source: "sdk",
+      note: CAR_APP_TEMPLATES_NOTE,
+      projectedBy: ANDROID_AUTO_PACKAGE,
+      projectedNote: CAR_APP_PROJECTED_NOTE,
+      projected,
+    };
+  }
+
+  private async projectedApps(device: BootedDevice): Promise<ProjectedCarApp[]> {
+    try {
+      const result = await raceWithDeadline(
+        () =>
+          this.adbFor(device).executeCommand("shell dumpsys activity services", {
+            timeoutMs: CAR_APP_TEMPLATES_TIMEOUT_MS,
+            maxBuffer: DUMPSYS_MAX_BUFFER,
+          }),
+        {
+          timer: this.timer,
+          timeoutMs: CAR_APP_TEMPLATES_TIMEOUT_MS,
+          unref: true,
+          label: "bound car app services during Android Auto projection",
+        },
+      );
+      return parseProjectedCarApps(result.stdout);
+    } catch (error) {
+      // The block is optional; an unreadable services dump just omits it for this observation.
+      logger.debug(`car app services dump failed during projection: ${errorMessage(error)}`);
+      return [];
+    }
+  }
 
   private async resolveFor(
     device: BootedDevice,
     packageName: string,
     observedUserId: number | undefined,
-  ): Promise<CarAppTemplates | undefined> {
+  ): Promise<CarAppForegroundTemplates | undefined> {
     const appKey = `${device.deviceId}\u0000${packageName}`;
     const userId = observedUserId ?? (await this.lookUpUser(device, packageName, appKey));
     if (userId === undefined) {
       return undefined;
     }
+    return this.readKnownUser(device, packageName, userId);
+  }
+
+  /** Reads one package as one user, honouring and updating its quiet entry. */
+  private async readKnownUser(
+    device: BootedDevice,
+    packageName: string,
+    userId: number,
+  ): Promise<CarAppForegroundTemplates | undefined> {
+    const appKey = `${device.deviceId}\u0000${packageName}`;
     const key = quietKey(appKey, userId);
     if (this.isQuiet(key)) {
       return undefined;

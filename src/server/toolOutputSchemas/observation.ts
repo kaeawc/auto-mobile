@@ -534,7 +534,9 @@ export const observeResultSchema = z
       .describe(
         "Android apps that integrate the AutoMobile SDK and enabled its Car App Library template route: " +
           "each ScreenManager stack (root first) with the last template every screen returned from onGetTemplate. " +
-          "This is what the app built, not what the car host rendered.",
+          "This is what the app built, not what the car host rendered. " +
+          "While Android Auto projects, projected[] lists each app it bound whose route answered; " +
+          "Android Auto does not say which of them the head unit shows.",
       ),
     layoutWarnings: z
       .object({

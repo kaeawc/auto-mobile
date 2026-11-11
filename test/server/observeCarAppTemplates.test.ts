@@ -2,8 +2,12 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { observeToolScreen } from "../helpers/observeToolScreen";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult } from "../../src/models";
-import type { CarAppTemplates } from "../../src/models/CarAppTemplates";
-import { CAR_APP_TEMPLATES_NOTE } from "../../src/models/CarAppTemplates";
+import type { CarAppForegroundTemplates, CarAppTemplates } from "../../src/models/CarAppTemplates";
+import {
+  ANDROID_AUTO_PACKAGE,
+  CAR_APP_PROJECTED_NOTE,
+  CAR_APP_TEMPLATES_NOTE,
+} from "../../src/models/CarAppTemplates";
 import type { CarAppTemplatesResolver } from "../../src/features/observe/android/CarAppTemplateReader";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { observeResultSchema } from "../../src/server/toolOutputSchemas";
@@ -17,7 +21,7 @@ isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "AAOS", platform: "android" };
 
-const block: CarAppTemplates = {
+const block: CarAppForegroundTemplates = {
   packageName: "com.example.car",
   source: "sdk",
   note: CAR_APP_TEMPLATES_NOTE,
@@ -113,6 +117,21 @@ describe("observe carAppTemplates (#16751)", () => {
     expect(JSON.stringify(without.raw)).not.toContain("carAppTemplates");
   });
 
+  test("a projection block (#17826) passes the served output schema unchanged", async () => {
+    const projected: CarAppTemplates = {
+      source: "sdk",
+      note: CAR_APP_TEMPLATES_NOTE,
+      projectedBy: ANDROID_AUTO_PACKAGE,
+      projectedNote: CAR_APP_PROJECTED_NOTE,
+      projected: [{ packageName: block.packageName, sessions: block.sessions }],
+    };
+    const { payload } = await observe(
+      async () => projected,
+      observationOf(capturedTwoWindowHierarchy()),
+    );
+    expect(payload.carAppTemplates).toEqual(projected);
+  });
+
   test("the advertised observe schema inlines carAppTemplates with no dangling $ref", () => {
     const observeTool = toolDefinitions.find((tool) => tool.name === "observe");
     const advertised = JSON.stringify(
@@ -121,6 +140,7 @@ describe("observe carAppTemplates (#16751)", () => {
     );
     expect(advertised).toContain('"screens"');
     expect(advertised).toContain('"tabContent"');
+    expect(advertised).toContain('"projected"');
     expect(advertised).not.toContain("$ref");
   });
 });

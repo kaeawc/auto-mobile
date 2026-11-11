@@ -1,0 +1,14 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{3f2a1b7 u0 com.google.android.projection.gearhead/com.google.android.projection.gearhead.apphost.TemplateNavigationService}
+    intent={act=androidx.car.app.CarAppService cmp=com.google.android.projection.gearhead/.apphost.TemplateNavigationService}
+    packageName=com.google.android.projection.gearhead
+    processName=com.google.android.projection.gearhead:car
+    app=ProcessRecord{8c1d2e4 5120:com.google.android.projection.gearhead:car/u0a171}
+    Bindings:
+    * IntentBindRecord{5b9e0a1 CREATE}:
+      intent={act=androidx.car.app.CarAppService cmp=com.google.android.projection.gearhead/.apphost.TemplateNavigationService}
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{9a40b15 ProcessRecord{8c1d2e4 5120:com.google.android.projection.gearhead:car/u0a171}}
+        Per-process Connections:
+          ConnectionRecord{c6e7f20 u0 CR com.google.android.projection.gearhead/.apphost.TemplateNavigationService:@1f0e9d2}

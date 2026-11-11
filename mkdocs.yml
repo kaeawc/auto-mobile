@@ -139,6 +139,7 @@ nav:
       - "Session execution logs": using/session-logs.md
       - "Storage capabilities": using/storage-capabilities.md
       - "Keystore test state": using/keystore-test-state.md
+      - "Seed content": using/seed-content.md
       - "Keystore metadata": using/keystore-metadata.md
       - "SDK capabilities": using/sdk-capabilities.md
       - "Hackathon demo kit": using/hackathon.md
@@ -265,6 +266,7 @@ nav:
       - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
       - "Device-condition attestation ceiling": design-docs/plat/android/device-condition-attestation-ceiling.md
       - "Keystore StrongBox-unavailable fault": design-docs/plat/android/keystore-strongbox-fault.md
+      - "Content seeding": design-docs/plat/android/content-seeding.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
       - "Pressure, hover and stylus input": design-docs/plat/pressure-hover-stylus-input.md
   - "Contributing": contributing.md

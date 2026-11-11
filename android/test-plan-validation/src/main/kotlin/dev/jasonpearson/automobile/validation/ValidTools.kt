@@ -76,6 +76,7 @@ object ValidTools {
         "recordToolCalls",
         "removeKeyValue",
         "rotate",
+        "seedContent",
         "selectAllText",
         "sendBroadcast",
         "backgroundWork",

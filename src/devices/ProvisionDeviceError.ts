@@ -85,6 +85,11 @@ export interface ProvisionDeviceErrorDiagnostics {
   binding?: { scopeKey: string; declaredBinding: number | null; stableId: string };
   /** OEM capabilities a manufacturer profile cannot emulate (`requires_real_device`, #14058). */
   capabilities?: Array<{ id: string; note: string }>;
+  /**
+   * The failing step changed nothing on the device (an Android Auto phone adb never reported
+   * online), so a rollback that also fails reports this error, not `cleanup_failed`.
+   */
+  failedStepChangedNothing?: true;
   /** Boot-capacity refusal details (`capacity_exhausted`, #11236). */
   capacity?: ProvisionDeviceCapacityDetails;
 }

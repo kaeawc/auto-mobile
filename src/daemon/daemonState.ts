@@ -12,6 +12,7 @@ import {
   registerDeviceIncarnationListener,
   setDeviceIncarnationBumper,
   setDeviceIncarnationResolver,
+  setDeviceSessionUuidResolver,
 } from "../utils/deviceIncarnation";
 
 export interface DaemonStateLike {
@@ -100,6 +101,9 @@ export class DaemonState implements DaemonStateLike {
     // read it without importing the daemon. Publish it here, where the live
     // pool is known.
     setDeviceIncarnationResolver((deviceId) => devicePool.getDeviceIncarnation(deviceId));
+    setDeviceSessionUuidResolver(
+      (deviceId) => deviceSessionRegistry.getByDeviceId(deviceId)?.deviceSessionUuid ?? null,
+    );
     this.unregisterSessionReadinessListener?.();
     this.unregisterSessionReadinessListener = registerDeviceIncarnationListener({
       name: "session-readiness",
@@ -232,6 +236,7 @@ export class DaemonState implements DaemonStateLike {
     // could hold state across the reset. Clearing it restores the no-daemon
     // answer ("no epoch information") until the next initialize.
     setDeviceIncarnationResolver(undefined);
+    setDeviceSessionUuidResolver(undefined);
     setDeviceIncarnationBumper(undefined);
   }
 }

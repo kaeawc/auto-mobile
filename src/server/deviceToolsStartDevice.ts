@@ -53,6 +53,10 @@ import { ProgressCallback } from "./toolRegistry";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
+import {
+  resolveAcquiredProcessId,
+  sourceImageForAcquiredBoot,
+} from "./deviceToolsAcquisitionMetadata";
 import { isWatchStartRequest, startWatchDevice } from "./deviceToolsWatchOs";
 import {
   DevicePreparationBudgets,
@@ -200,23 +204,7 @@ const bootAndPrepareDevice = async (
   );
   const mappingOptions = { signal, totalDeadlineMs: budgets.automationDeadlineMs };
   await validatePooledDeviceMapping(state.boot.device, requestedIdentity, mappingOptions);
-  // A warm AVD has no cold-boot source image, but its explicit getAndroid
-  // identifier is still the stable identity needed for later recovery.
-  preparation.sourceImage =
-    state.boot.sourceImage ??
-    (budgets.androidAvdName
-      ? {
-          name: budgets.androidAvdName,
-          platform: "android" as const,
-          isRunning: true,
-          source: "local" as const,
-        }
-      : undefined);
-  preparation.sourceImage = androidSourceImageWithBootedMetadata(
-    state.boot.device,
-    preparation.sourceImage,
-    initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
-  );
+  preparation.sourceImage = sourceImageForAcquiredBoot(state.boot, budgets.androidAvdName);
   await reserveBootReadiness(args, budgets, deps, { daemonState: deps.daemonState, ...options });
 
   // A new incarnation must not inherit a prior intentional-shutdown marker
@@ -244,6 +232,13 @@ const bootAndPrepareDevice = async (
   const acquisitionReadinessKey = deviceReadinessLockKey(
     state.boot.device.platform,
     state.boot.device.deviceId,
+  );
+  const bootAtProcessLookup = state.boot;
+  const acquiredProcessId = resolveAcquiredProcessId(
+    bootAtProcessLookup,
+    preparation.sourceImage?.name ?? bootAtProcessLookup.device.name,
+    deps,
+    { deadlineMs: budgets.automationDeadlineMs, signal },
   );
   const sessionId = await trackDeviceAcquisitionReadiness(acquisitionReadinessKey, async () => {
     setAcquisitionStage(budgets, "preparing the automation runner");
@@ -294,7 +289,8 @@ const bootAndPrepareDevice = async (
       elapsedMs: deps.timer.now() - readinessStartedAtMs,
       recovered: preparation.recovered,
     },
-    processId: state.boot.processId,
+    // Runner recovery can replace the emulator while the read-only lookup is in flight.
+    processId: state.boot === bootAtProcessLookup ? await acquiredProcessId : state.boot.processId,
     sourceImage: preparation.sourceImage,
     configuredImage: configuredImageForAcquiredDevice(state.boot.device, preparation.sourceImage),
   });

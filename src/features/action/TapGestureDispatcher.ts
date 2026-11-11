@@ -84,6 +84,8 @@ export type ResolvedAndroidTapOptions = DisplayFenceOption & {
    * the gesture was dispatched, so the caller checks the screen changed (#17667, #17677).
    */
   onTalkBackActivation?: () => void;
+  /** An XR node click CtrlProxy received but never answered; the caller checks its effect (#17983). */
+  onUnconfirmedClick?: (reason: string) => void;
   onResolvedElement?: (
     element: Element,
     selection?: ElementSelectionResult,

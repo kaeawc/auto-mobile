@@ -10,6 +10,10 @@ import {
 import { ActionableError, type BootedDevice } from "../models";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import {
+  currentDeviceSessionUuid,
+  type DeviceSessionUuidResolver,
+} from "../utils/deviceIncarnation";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defineDeviceTool } from "./defineTool";
 import { measureStartupResultSchema } from "./measureStartupToolOutputSchemas";
@@ -54,12 +58,15 @@ export interface MeasureStartupDependencies {
   createShell: (device: BootedDevice) => StartupDeviceShell;
   timer: Timer;
   repository: Pick<PerformanceAuditRepository, "recordAudit">;
+  /** The device epoch the run is stamped with, so history can be scoped per boot. */
+  resolveDeviceSessionUuid: DeviceSessionUuidResolver;
 }
 
 const defaultDependencies = (): MeasureStartupDependencies => ({
   createShell: (device) => defaultAdbClientFactory.create(device),
   timer: defaultTimer,
   repository: new PerformanceAuditRepository(),
+  resolveDeviceSessionUuid: currentDeviceSessionUuid,
 });
 
 /** Store a run in `automobile:performance-results`: p50s in the startup columns, the rest as diagnostics. */
@@ -67,7 +74,11 @@ async function recordStartupResult(
   repository: MeasureStartupDependencies["repository"],
   device: BootedDevice,
   result: MeasureStartupResult,
-  { timer, sessionUuid }: { timer: Timer; sessionUuid?: string },
+  {
+    timer,
+    sessionUuid,
+    deviceSessionUuid,
+  }: { timer: Timer; sessionUuid?: string; deviceSessionUuid: string | null },
 ): Promise<void> {
   const timestamp = new Date(timer.now()).toISOString();
   await repository.recordAudit({
@@ -91,6 +102,7 @@ async function recordStartupResult(
       timeToInteractiveMs: result.ttfd?.p50 ?? null,
     },
     diagnostics: JSON.stringify({ kind: "startup", ...result }),
+    deviceSessionUuid,
   });
 }
 
@@ -105,6 +117,9 @@ export const createMeasureStartupHandler =
     if (device.platform !== "android") {
       throw new ActionableError("measureStartup is only supported on Android.");
     }
+    // The epoch that produces the samples, read before the launches: a removal or
+    // reincarnation during the settle delays must not re-attribute this run.
+    const deviceSessionUuid = deps.resolveDeviceSessionUuid(device.deviceId);
     const measurement = new AndroidStartupMeasurement(deps.createShell(device), deps.timer);
     const result = await measurement.measure(
       {
@@ -121,6 +136,7 @@ export const createMeasureStartupHandler =
     await recordStartupResult(deps.repository, device, result, {
       timer: deps.timer,
       sessionUuid: args.sessionUuid,
+      deviceSessionUuid,
     });
     const ttfd = result.ttfd ? `, TTFD p50 ${result.ttfd.p50} ms` : "";
     return createStructuredToolResponse({

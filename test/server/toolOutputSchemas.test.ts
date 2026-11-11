@@ -32,6 +32,20 @@ import {
   viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
 
+test("observe advertises and validates optional Wear surface kinds", () => {
+  for (const surface of ["tile", "watchface", "launcher", "app"] as const) {
+    expect(observeResultSchema.parse({ surface }).surface).toBe(surface);
+  }
+  expect(observeResultSchema.parse({})).not.toHaveProperty("surface");
+  expect(observeResultSchema.safeParse({ surface: "tray" }).success).toBe(false);
+  const observe = generatedDefinitions.find((definition) => definition.name === "observe")!;
+  expect(observe.outputSchema?.properties.surface).toMatchObject({
+    type: "string",
+    enum: ["tile", "watchface", "launcher", "app"],
+  });
+  expect(observe.outputSchema?.required ?? []).not.toContain("surface");
+});
+
 test("freshness schema accepts bounded machine-readable unavailability", () => {
   const fields = {
     isFresh: false,

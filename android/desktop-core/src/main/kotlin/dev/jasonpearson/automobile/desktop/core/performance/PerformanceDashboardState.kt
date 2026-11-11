@@ -128,6 +128,7 @@ internal fun LoadPerformanceRunEffect(
             options.dataSourceMode,
             options.clientProvider,
             options.deviceId,
+            options.deviceSessionUuid,
           )
         when (val result = source.getPerformanceRun()) {
           is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {

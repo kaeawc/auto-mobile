@@ -233,7 +233,8 @@ on `pressButton` is Android only.
 
 On an emulator, create the extra display as public: the last field of `-multidisplay` must be `1`, for
 example `-multidisplay 1,1280,720,160,1`. Android accessibility does not track a private virtual display
-(`0`), so it has no view hierarchy and `observe` refuses it.
+(`0`), so it has no view hierarchy and `observe` refuses it with an error that names the display as
+private and gives its logical display id. Retrying does not help; recreate the display as public.
 
 ## Not supported
 

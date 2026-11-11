@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { DefaultGitMetadataClient, type GitCommandRunner } from "../../src/utils/GitMetadataClient";
 import { FakeGitMetadataReader } from "../fakes/FakeFileSystem";
 
@@ -509,6 +511,26 @@ describe("DefaultGitMetadataClient", () => {
       expect(await failed.client.readTrackedModifiedAt(ROOT)).toBeNull();
       const empty = fixture(timedRepo({}), { "ls-files": "", diff: "" });
       expect(await empty.client.readTrackedModifiedAt(ROOT)).toBeNull();
+    });
+
+    test("counts a file renamed into place with an older mtime", async () => {
+      // `mv backup.ts a.ts` keeps the backup's old mtime, but rename always bumps ctime.
+      const root = mkdtempSync(join(tmpdir(), "git-meta-ctime-"));
+      try {
+        mkdirSync(join(root, ".git"));
+        writeFileSync(join(root, "a.ts"), "export {};\n");
+        utimesSync(join(root, "a.ts"), 1_000, 1_000);
+        const before = Date.now() - 60_000;
+        const client = new DefaultGitMetadataClient(
+          () => null,
+          undefined,
+          async (_command, args) => (args[0] === "ls-files" ? "a.ts\0" : ""),
+          {},
+        );
+        expect(await client.readTrackedModifiedAt(root)).toBeGreaterThan(before);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
 
     test("is unknown outside a repository", async () => {

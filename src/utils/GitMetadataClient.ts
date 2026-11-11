@@ -42,7 +42,10 @@ export type GitAsyncCommandRunner = (
 export interface GitMetadataReader {
   kind(path: string): "file" | "directory" | null;
   readFile(path: string): string | null;
-  /** Last modification time in epoch ms; null when the path is absent. */
+  /**
+   * Last change time in epoch ms (the later of mtime and ctime, so a rename or
+   * an mtime-preserving copy still counts); null when the path is absent.
+   */
   modifiedAtMs?(path: string): number | null;
 }
 
@@ -63,7 +66,9 @@ const defaultReader: GitMetadataReader = {
     }
   },
   modifiedAtMs(path) {
-    return statSync(path, { throwIfNoEntry: false })?.mtimeMs ?? null;
+    const stat = statSync(path, { throwIfNoEntry: false });
+    // User space can set mtime back (rename of an old file, `cp -p`, `touch -d`) but not ctime.
+    return stat ? Math.max(stat.mtimeMs, stat.ctimeMs) : null;
   },
 };
 

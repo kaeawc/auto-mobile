@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { withoutHiddenXrChrome } from "../../../src/features/action/xrHiddenChrome";
+import {
+  isApprovedHiddenSystemUiClick,
+  withoutHiddenXrChrome,
+} from "../../../src/features/action/xrHiddenChrome";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import type { ObserveResult } from "../../../src/models";
@@ -21,6 +24,35 @@ const capture: ObserveResult = JSON.parse(
     "utf8",
   ),
 );
+
+/** An app window beside the captured System UI: one clickable Button with a unique resource ID. */
+function withAppButton(visibleToUser: boolean): ObserveResult {
+  const observation = structuredClone(capture);
+  const hierarchy = observation.viewHierarchy!;
+  const id = visibleToUser ? "com.example.app:id/buy" : "com.example.app:id/covered_buy";
+  hierarchy.windows = [
+    ...(hierarchy.windows ?? []),
+    {
+      id: 77,
+      type: 1,
+      packageName: "com.example.app",
+      bounds: [0, 0, 2900, 1900],
+      hierarchy: {
+        windowId: 77,
+        actions: ["click"],
+        "resource-id": id,
+        "view-id": id,
+        "visible-to-user": visibleToUser,
+        clickable: "true",
+        class: "android.widget.Button",
+        className: "android.widget.Button",
+        text: "Buy",
+        bounds: [100, 100, 200, 150],
+      },
+    } as never,
+  ];
+  return observation;
+}
 
 function setup(observation = structuredClone(capture)) {
   const hierarchy = observation.viewHierarchy!;
@@ -130,6 +162,62 @@ describe("XR home-space hidden launcher controls", () => {
     expect(service.getNodeActionHistory()).toEqual([]);
     expect(service.getTapHistory()).toEqual([]);
     expect(adb.getAllCommands().some((command) => command.includes("input"))).toBe(false);
+  });
+
+  test("a hidden app node with a unique ID never asks CtrlProxy to skip its visibility check", async () => {
+    const { tap, service, adb, hierarchy } = setup(withAppButton(false));
+    const entry = new SearchableHierarchy()
+      .project(hierarchy)
+      .find((node) => node.nativeId === "com.example.app:id/covered_buy")!;
+    expect(entry.properties["visible-to-user"]).toBe(false);
+    expect(isApprovedHiddenSystemUiClick(hierarchy, entry.source)).toBe(false);
+    // CtrlProxy refuses a node that is not visible to the user without allowInvisible.
+    service.setActionResult({
+      success: false,
+      action: "click",
+      totalTimeMs: 1,
+      error: "Node is not visible to the user",
+    });
+    const result = await tap.execute({
+      action: "tap",
+      elementId: "com.example.app:id/covered_buy",
+      searchUntil: { duration: 100 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not tappable screen coordinates");
+    expect(service.getNodeActionHistory()).toHaveLength(1);
+    expect(service.getNodeActionHistory()[0]).toMatchObject({
+      action: "click",
+      selector: { resourceId: "com.example.app:id/covered_buy" },
+    });
+    expect(service.getNodeActionHistory()[0]).not.toHaveProperty("allowInvisible");
+    expect(service.getTapHistory()).toEqual([]);
+    expect(adb.getAllCommands().some((command) => command.includes("input"))).toBe(false);
+  });
+
+  test("a visible node click does not set allowInvisible", async () => {
+    const { tap, service, hierarchy } = setup(withAppButton(true));
+    const entry = new SearchableHierarchy()
+      .project(hierarchy)
+      .find((node) => node.nativeId === "com.example.app:id/buy")!;
+    expect(isApprovedHiddenSystemUiClick(hierarchy, entry.source)).toBe(false);
+    const result = await tap.execute({ action: "tap", elementId: "com.example.app:id/buy" });
+    expect(result.success).toBe(true);
+    expect(service.getNodeActionHistory()).toHaveLength(1);
+    expect(service.getNodeActionHistory()[0]).toMatchObject({
+      selector: { resourceId: "com.example.app:id/buy" },
+    });
+    expect(service.getNodeActionHistory()[0]).not.toHaveProperty("allowInvisible");
+  });
+
+  test("the gate approves only the verified hidden System UI click target", () => {
+    const { hierarchy } = setup();
+    const entries = new SearchableHierarchy().project(hierarchy);
+    const approved = entries
+      .filter((entry) => isApprovedHiddenSystemUiClick(hierarchy, entry.source))
+      .map((entry) => entry.nativeId);
+    expect(approved).toContain("com.android.systemui:id/launcher_button");
+    expect(approved).not.toContain("com.android.systemui:id/launcher_icon");
   });
 
   test("tapAny's projection still excludes hidden clickable controls", () => {

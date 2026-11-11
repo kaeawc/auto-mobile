@@ -27,28 +27,71 @@ export function withoutHiddenXrChrome(hierarchy: ViewHierarchyResult): {
   return projectWithoutHiddenXrChrome(hierarchy);
 }
 
+/**
+ * Whether the hidden-chrome gate approves `node` of `hierarchy` as a hidden System UI node-click
+ * target: hidden XR chrome (visible-to-user false, systemui) that tapOn may select because its
+ * stable selector is unique. Only such a node may ask CtrlProxy to click a node that is not
+ * visible to the user; any other hidden node (a covered app control included) keeps CtrlProxy's
+ * visibility refusal. The click re-asks against its own hierarchy because pre-tap re-selection
+ * can replace the selected element after the gate ran.
+ */
+export function isApprovedHiddenSystemUiClick(
+  hierarchy: ViewHierarchyResult,
+  node: ViewHierarchyNode,
+): boolean {
+  return projectWithoutHiddenXrChrome(
+    hierarchy,
+    hiddenNodeClickTargets(hierarchy),
+  ).approvedClickNodes.has(node);
+}
+
+interface ChromeProjection {
+  hierarchy: ViewHierarchyResult;
+  hiddenNodes: ReadonlySet<ViewHierarchyNode>;
+  /** Projected nodes kept only because they are verified hidden System UI click targets. */
+  approvedClickNodes: ReadonlySet<ViewHierarchyNode>;
+}
+
 function projectWithoutHiddenXrChrome(
   hierarchy: ViewHierarchyResult,
   nodeClickTargets: ReadonlySet<ViewHierarchyNode> = new Set(),
-) {
-  const hiddenNodes = new Set<ViewHierarchyNode>();
+): ChromeProjection {
+  const sets: ProjectionSets = {
+    hiddenNodes: new Set(),
+    approvedClickNodes: new Set(),
+    nodeClickTargets,
+  };
   const raw = getRawViewHierarchy(hierarchy);
-  const projected = projectTree(hierarchy, hiddenNodes, nodeClickTargets);
-  const projectedRaw =
-    raw && raw !== hierarchy ? projectTree(raw, hiddenNodes, nodeClickTargets) : undefined;
+  const projected = projectTree(hierarchy, sets);
+  const projectedRaw = raw && raw !== hierarchy ? projectTree(raw, sets) : undefined;
+  const { hiddenNodes, approvedClickNodes } = sets;
   if (hiddenNodes.size === 0) {
-    return { hierarchy, hiddenNodes };
+    return { hierarchy, hiddenNodes, approvedClickNodes };
   }
   if (projectedRaw) {
     attachRawViewHierarchy(projected, projectedRaw);
   }
-  return { hierarchy: projected, hiddenNodes };
+  return { hierarchy: projected, hiddenNodes, approvedClickNodes };
+}
+
+interface ProjectionSets {
+  hiddenNodes: Set<ViewHierarchyNode>;
+  approvedClickNodes: Set<ViewHierarchyNode>;
+  nodeClickTargets: ReadonlySet<ViewHierarchyNode>;
+}
+
+function isHiddenSystemUiNode(attrs: Record<string, unknown>, owner: boolean): boolean {
+  return (
+    attrs["visible-to-user"] === false &&
+    (owner ||
+      (typeof attrs["resource-id"] === "string" &&
+        attrs["resource-id"].startsWith("com.android.systemui")))
+  );
 }
 
 function projectTree(
   hierarchy: ViewHierarchyResult,
-  hiddenNodes: Set<ViewHierarchyNode>,
-  nodeClickTargets: ReadonlySet<ViewHierarchyNode>,
+  { hiddenNodes, approvedClickNodes, nodeClickTargets }: ProjectionSets,
 ): ViewHierarchyResult {
   const hiddenBefore = hiddenNodes.size;
   const systemWindows = new Set(
@@ -65,23 +108,22 @@ function projectTree(
     const owner =
       systemWindow || (typeof attrs.windowId === "number" && systemWindows.has(attrs.windowId));
     const children = childrenOf(node).flatMap((child) => filter(child, owner));
-    if (
-      attrs["visible-to-user"] === false &&
-      !nodeClickTargets.has(node) &&
-      (owner ||
-        (typeof attrs["resource-id"] === "string" &&
-          attrs["resource-id"].startsWith("com.android.systemui")))
-    ) {
+    const hiddenSystemUi = isHiddenSystemUiNode(attrs, owner);
+    if (hiddenSystemUi && !nodeClickTargets.has(node)) {
       hiddenNodes.add(node);
       return children;
     }
     const originalChildren = childrenOf(node);
-    return [
+    const kept =
       children.length === originalChildren.length &&
       children.every((child, index) => child === originalChildren[index])
         ? node
-        : { ...node, node: children },
-    ];
+        : { ...node, node: children };
+    if (hiddenSystemUi) {
+      approvedClickNodes.add(node);
+      approvedClickNodes.add(kept);
+    }
+    return [kept];
   }
   const roots = hierarchy.hierarchy.node ? filter(hierarchy.hierarchy.node) : [];
   const windows = hierarchy.windows?.map((window) => ({

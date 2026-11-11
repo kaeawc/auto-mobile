@@ -20,6 +20,7 @@ import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import type { DisplayFenceOption } from "./BaseVisualChange";
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { findTapTargetNode } from "./tapTargetSupport";
+import { isApprovedHiddenSystemUiClick } from "./xrHiddenChrome";
 import type { AndroidActionRequestOptions } from "../observe/android/AndroidActionDispatcher";
 import type { A11yActionResult } from "../observe/android/types";
 
@@ -173,7 +174,11 @@ function xrNodeClickSelector(
     if (selector) {
       return {
         ...selector,
-        ...(selector.selector && element["visible-to-user"] === false
+        // Only the hidden-chrome gate's approved System UI targets may bypass CtrlProxy's
+        // visibility check; a hidden or covered app node keeps the refusal.
+        ...(selector.selector &&
+        element["visible-to-user"] === false &&
+        isApprovedHiddenSystemUiTarget(entries, element, hierarchy)
           ? { allowInvisible: true }
           : {}),
       };
@@ -182,6 +187,16 @@ function xrNodeClickSelector(
   }
 
   return xrAncestorClickSelector(element, entries, uniqueSelector, scope);
+}
+
+/** The hidden-chrome gate's approval, asked about the click-time node in the click's own capture. */
+function isApprovedHiddenSystemUiTarget(
+  entries: readonly SearchableEntry[],
+  element: Element,
+  hierarchy: ViewHierarchyResult,
+): boolean {
+  const target = findTapTargetNode(entries, element);
+  return target !== undefined && isApprovedHiddenSystemUiClick(hierarchy, target.source);
 }
 
 /** A label container may identify its owning row, while unrelated targets stay scoped. */

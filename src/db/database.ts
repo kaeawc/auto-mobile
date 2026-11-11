@@ -53,6 +53,8 @@ export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 /**
  * bun:sqlite waits synchronously: keep app waits short and let the dialect's async
  * retry cover DEFAULT_RETRY_TOTAL_WAIT_MS while yielding between attempts (#11858).
+ * An attempt that fails BUSY faster is paced to this wait, so the cap below cannot
+ * run out before that budget (#17902).
  */
 export const SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS = 250;
 export const APP_CONNECTION_MAX_RETRY_ATTEMPTS =
@@ -505,7 +507,10 @@ function createApplicationDatabase(dbPath: string): Kysely<DatabaseSchema> {
       return openConfiguredSqliteDatabase(dbPath, SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS);
     },
     beforeQuery: waitForMigrationsBeforeQuery,
-    retry: { maxAttempts: APP_CONNECTION_MAX_RETRY_ATTEMPTS },
+    retry: {
+      maxAttempts: APP_CONNECTION_MAX_RETRY_ATTEMPTS,
+      minAttemptMs: SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS,
+    },
     optimizeIntervalMs: DEFAULT_OPTIMIZE_INTERVAL_MS,
   });
   const driver = sqliteDialect.createDriver();

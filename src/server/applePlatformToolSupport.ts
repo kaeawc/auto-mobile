@@ -15,6 +15,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   Record<NonIosApplePlatform, ReadonlySet<string>>
 > = {
   watchos: new Set<string>([
+    // Steps replay through this same gate, so a plan runs only watch-supported tools (#18051).
+    "executePlan",
     "sendKeys",
     "postNotification",
     "rotateCrown",

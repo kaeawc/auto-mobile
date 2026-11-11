@@ -131,6 +131,7 @@ const PLAN_TOP_LEVEL_PLATFORMS: ReadonlySet<string> = new Set([
   "ios",
   "tvos",
   "visionos",
+  "watchos",
 ]);
 
 function isPlanTopLevelPlatform(value: string): value is PlanTopLevelPlatform {
@@ -161,7 +162,7 @@ export function resolveRecordedPlanPlatform(
   const [only] = distinct;
   if (only === undefined || !isPlanTopLevelPlatform(only)) {
     return {
-      platformNote: `${omitted}: ${only ?? "no platform"} is not a plan platform (android, ios, tvos or visionos); ${remedy}.`,
+      platformNote: `${omitted}: ${only ?? "no platform"} is not a plan platform (android, ios, tvos, visionos or watchos); ${remedy}.`,
     };
   }
   return { platform: only };

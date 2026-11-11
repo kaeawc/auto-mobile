@@ -95,10 +95,10 @@ export {
 } from "./planExecutionRecords";
 
 /** Platforms a plan runs on: Android, iOS, tvOS, and visionOS (platform-allowlisted steps only). */
-type PlanPlatform = AndroidOrIosPlatform | "tvos" | "visionos";
+type PlanPlatform = AndroidOrIosPlatform | "tvos" | "visionos" | "watchos";
 
 function requirePlanPlatform(platform: BootedDevice["platform"]): PlanPlatform {
-  return platform === "tvos" || platform === "visionos"
+  return platform === "tvos" || platform === "visionos" || platform === "watchos"
     ? platform
     : requireAndroidOrIosPlatform(platform, "executePlan");
 }
@@ -666,8 +666,8 @@ export class PlanExecutionOrchestrator {
    * a failing recording must never abort plan execution.
    */
   private async startVideoRecording(plan: Plan): Promise<VideoState> {
-    // visionOS has no video recorder; its plan still replays the allowlisted tools.
-    if (this.platform === "visionos") {
+    // visionOS and watchOS have no plan video recorder; its plan still replays the allowlisted tools.
+    if (this.platform === "visionos" || this.platform === "watchos") {
       return {};
     }
     const videoOutputPrefix = `test-${plan.name}-${this.timer.now()}`;

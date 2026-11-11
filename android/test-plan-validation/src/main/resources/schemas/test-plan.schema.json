@@ -18,7 +18,7 @@
     },
     "platform": {
       "type": "string",
-      "enum": ["android", "ios", "tvos"],
+      "enum": ["android", "ios", "tvos", "visionos", "watchos"],
       "description": "Optional platform hint for plan execution"
     },
     "devices": {
@@ -149,7 +149,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"],
+          "enum": ["android", "ios", "tvos", "visionos", "watchos"],
           "description": "Target platform for this device"
         },
         "simulatorType": {

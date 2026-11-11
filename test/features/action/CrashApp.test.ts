@@ -545,7 +545,7 @@ describe("CrashApp (iOS)", () => {
     ).toBeDefined();
   });
 
-  test.each(["ios", "tvos"] as const)(
+  test.each(["ios", "tvos", "watchos"] as const)(
     "signals and confirms the exact %s simulator app process",
     async (platform) => {
       const processList = [
@@ -590,9 +590,9 @@ describe("CrashApp (iOS)", () => {
         "launchctl",
         "kill",
         "SIGABRT",
-        `${platform === "tvos" ? "system" : "user/501"}/UIKitApplication:com.example.app[bbbb][rb-legacy]`,
+        `${platform === "ios" ? "user/501" : "system"}/UIKitApplication:com.example.app[bbbb][rb-legacy]`,
       ]);
-      if (platform === "tvos") {
+      if (platform !== "ios") {
         expect(commands.calls.flat().some((arg) => arg.startsWith("user/"))).toBe(false);
       }
       expect(commands.calls.flat()).not.toContain("terminate");

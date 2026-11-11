@@ -16,6 +16,7 @@ import {
 } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import { DeviceBootExecution } from "./DeviceBootExecution";
+import { deviceNotFoundError, findOtherAppleSimulatorPlatform } from "./deviceNotFoundError";
 import {
   defaultDisplayInventoryProvider,
   hydrateRequiredDisplayInventories,
@@ -254,13 +255,12 @@ export class DeviceBootService {
         (request.platform === "android" && device.name === request.deviceId),
     );
     if (!image) {
-      throw new ActionableError(
-        `Device '${request.deviceId}' not found. Available booted: ${booted.map((device) => device.deviceId).join(", ") || "none"}. ` +
-          `Available images: ${images.map((device) => device.name).join(", ") || "none"}.` +
-          (request.platform === "ios"
-            ? ' To create a simulator, enable provisionDevice (enableTools) and call it with device {"platform":"ios","name":"<name>","spec":{"runtime":"<runtime identifier>","deviceType":"<device type identifier>","displayCutout":"any"}}; remove it with deleteDevice.'
-            : ""),
+      const otherPlatform = await this.execution.runPhase(
+        context,
+        "checking simulator platform",
+        (signal) => findOtherAppleSimulatorPlatform(deviceManager, request, signal),
       );
+      throw deviceNotFoundError(request, booted, images, otherPlatform);
     }
     if (hasExplicitConstraints && !matchesDeviceCriteria(image, criteria)) {
       throw new ActionableError(

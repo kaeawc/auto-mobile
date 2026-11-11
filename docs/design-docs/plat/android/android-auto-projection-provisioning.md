@@ -43,8 +43,11 @@ under a hold (`holdAcquiringSession`): one execution registered on that session,
 heartbeat monitor's unsettled-execution veto honours up to the provision deadline. The hold ends
 before rollback and restarts the pre-first-heartbeat grace from its release (moving only
 `lastHeartbeat`), so the caller gets the full grace for its first heartbeat and an unclaimed session
-is still reaped as `missing-first-heartbeat` once it ends. The hold's execution aborts when the
-daemon cancels the session's work (a lost device), and the projection runs under that signal too.
+is still reaped as `missing-first-heartbeat` once it ends. The hold's execution aborts on real
+session or device loss (a released session, a retired device), and both post-bind steps run under
+that signal. Recoveries that keep the session (session-preserving recovery, an adb server reset, a
+discovery quarantine) cancel with `sessionPreserving` and leave the hold running, as before the
+signal existed, so a short device drop does not fail the provision.
 It is bounded by the provision's total deadline as well as its abort signal; a request without
 `androidAuto` never reaches it, so its abort handling is unchanged. Once the run has connected its
 own DHU (`desktop-head-unit` reported `applied`), a later provision failure stops that DHU before

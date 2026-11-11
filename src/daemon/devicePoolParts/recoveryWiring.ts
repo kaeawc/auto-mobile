@@ -165,8 +165,8 @@ export class DevicePoolRecoveryWiring {
         this.callbacks.rebootDisconnectedAndroidDevice(device, incidentId, options),
       getRecoveryPolicy: () => this.callbacks.getRecoveryPolicy(),
       deviceSessionContinuityEnabled: () => this.state.deviceSessionContinuityEnabled,
-      cancelDeviceSessionExecutions: (id, reason) =>
-        this.state.cancelDeviceSessionExecutions(id, reason),
+      cancelDeviceSessionExecutions: (id, reason, options) =>
+        this.state.cancelDeviceSessionExecutions(id, reason, options),
       refreshReleasedRecoverySettlementAfterAwait: (record, incidentId) =>
         this.state.recoveryCoordinator.refreshReleasedRecoverySettlementAfterAwait(
           record,
@@ -390,8 +390,8 @@ export class DevicePoolRecoveryWiring {
         cancelDeviceExecutions: (id, reason) =>
           this.state.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(id, reason) ??
           Promise.resolve(0),
-        cancelDeviceSessionExecutions: (id, reason) =>
-          this.state.cancelDeviceSessionExecutions(id, reason),
+        cancelDeviceSessionExecutions: (id, reason, options) =>
+          this.state.cancelDeviceSessionExecutions(id, reason, options),
         completeEmulatorLossRecovery: (id, outcome) =>
           this.callbacks.completeEmulatorLossRecovery(id, outcome),
         settleEmulatorLossIncident: (id) => this.callbacks.settleEmulatorLossIncident(id),

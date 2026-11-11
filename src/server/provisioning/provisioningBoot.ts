@@ -334,14 +334,16 @@ async function applyProvisionPostBindSteps(
     deps,
     { sessionUuid: boundSessionId, deadlineMs: totalDeadlineMs },
     async (holdSignal) => {
+      // Real session or device loss aborts the hold (a recovery that keeps the session does
+      // not, #17896): each step stops now, not at the deadline.
+      const stepSignal = combineAbortSignals(signal, holdSignal)!;
       // Applied to the bound session's ready device, so its release restores it (#14058).
       const manufacturerProfile = await applyProvisionDeviceProfile(args, deps, device, {
         boundSessionId,
-        signal,
+        signal: stepSignal,
       });
       const androidAuto = await applyProvisionAndroidAuto(args, deps, device, {
-        // A device lost mid-projection aborts the hold: stop now, not at the deadline.
-        signal: combineAbortSignals(signal, holdSignal)!,
+        signal: stepSignal,
         totalDeadlineMs,
         settlementState,
       });

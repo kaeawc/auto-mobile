@@ -28,6 +28,6 @@ export interface DeviceRuntimeIdentityPoolPort {
   cancelDeviceSessionExecutions(
     sessionId: string,
     reason: ReturnType<typeof deviceLossCancellationReason>,
-    options: { excludeExecutionId?: string },
+    options: { excludeExecutionId?: string; sessionPreserving?: boolean },
   ): Promise<number>;
 }

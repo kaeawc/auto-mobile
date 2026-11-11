@@ -796,6 +796,40 @@ describe("provisionDevice handler", () => {
       expect(JSON.stringify(payload)).toContain("device lost during projection");
     });
 
+    test("the manufacturer profile also runs under the hold's signal (#17896)", async () => {
+      const applier = new RecordingAndroidAutoApplier();
+      createdAndroid(applier);
+      const deviceLost = new AbortController();
+      let profileSignal: AbortSignal | undefined;
+      setDeviceToolsDependencies({
+        holdAcquiringSession: () => ({ signal: deviceLost.signal, release: () => {} }),
+        manufacturerProfileApplier: {
+          apply: async (_device, _profile, _sessionId, signal) => {
+            profileSignal = signal;
+            deviceLost.abort(new ActionableError("device lost during profile"));
+            signal?.throwIfAborted();
+            throw new Error("the profile must stop on the hold's abort");
+          },
+        },
+      });
+      const args = androidAutoArgs();
+
+      const payload = JSON.parse(
+        await provisionResponseText({
+          ...args,
+          device: {
+            ...args.device,
+            spec: { ...args.device.spec, deviceProfile: { manufacturerProfile: "samsung-oneui" } },
+          },
+        }),
+      );
+
+      expect(profileSignal?.aborted).toBe(true);
+      expect(payload.success).toBe(false);
+      expect(JSON.stringify(payload)).toContain("device lost during profile");
+      expect(applier.events).not.toContain("apply:emulator-5554");
+    });
+
     /** The real applier and provisioner, with fakes only for the phone, its UI and the DHU. */
     function realProjectionStack(events: string[]) {
       const ui = new FakeUi();

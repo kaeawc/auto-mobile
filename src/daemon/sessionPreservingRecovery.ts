@@ -46,7 +46,11 @@ export interface SessionPreservingRecoveryPoolPort {
   ): Promise<boolean>;
   getRecoveryPolicy(): Pick<DeviceRecoveryPolicy, "onLoss">;
   deviceSessionContinuityEnabled(): boolean;
-  cancelDeviceSessionExecutions(sessionId: string, reason: string): Promise<number>;
+  cancelDeviceSessionExecutions(
+    sessionId: string,
+    reason: string,
+    options?: { sessionPreserving?: boolean },
+  ): Promise<number>;
   refreshReleasedRecoverySettlementAfterAwait: DeviceRecoveryCoordinator["refreshReleasedRecoverySettlementAfterAwait"];
   finalizeReleasedRecoveryAfterAwait: DeviceRecoveryCoordinator["finalizeReleasedRecoveryAfterAwait"];
   finalizeRecoveryRecord: DeviceRecoveryCoordinator["finalizeRecoveryRecord"];
@@ -145,9 +149,11 @@ export class SessionPreservingRecoveryRunner {
     this.captureAndroidSessionRecoveryMetadata(device, sessionId);
     let complete = false;
     try {
+      // The recovery keeps the session, so a provisioning hold on it runs on (#17896).
       await this.pool.cancelDeviceSessionExecutions(
         sessionId,
         deviceLossCancellationReason(device.id, incidentId),
+        { sessionPreserving: true },
       );
       await this.pool.refreshReleasedRecoverySettlementAfterAwait(record, incidentId);
       if (await this.pool.finalizeReleasedRecoveryAfterAwait(record, incidentId)) {

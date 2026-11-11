@@ -23,6 +23,7 @@ import {
   isReadExecution,
   executionDeadlineMs,
   isExcludedByQuery,
+  isSparedBySessionPreservingRecovery,
   isUnfilteredQuery,
   DaemonRestartAdmission,
   ActiveProvisionDeviceQuery,
@@ -708,6 +709,7 @@ export class ExecutionTracker {
     for (const execution of this.executions.values()) {
       if (
         execution.id !== options.excludeExecutionId &&
+        !isSparedBySessionPreservingRecovery(execution, options) &&
         (options.onlyToolName === undefined || execution.toolName === options.onlyToolName) &&
         // Tool-scoped loss cancels only work already bound to this device. A
         // session rebind (no tool filter) still fences unresolved calls too.
@@ -1037,6 +1039,7 @@ export class ExecutionTracker {
       }
       if (
         execution.id === options.excludeExecutionId ||
+        isSparedBySessionPreservingRecovery(execution, options) ||
         (options.onlyToolName !== undefined && execution.toolName !== options.onlyToolName) ||
         !this.isInCancellationScope(execution, options)
       ) {

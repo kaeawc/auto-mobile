@@ -629,7 +629,11 @@ for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
           sessionId: "holder",
           reason: "device-disconnected:emulator-5554",
           name: "AVD-A",
-          options: { excludeExecutionId: executionId },
+          // Monitor quarantine keeps the session; the device-restart release does not (#17896).
+          options: {
+            excludeExecutionId: executionId,
+            ...(path === "monitor" ? { sessionPreserving: true } : {}),
+          },
         },
       ]);
       expect(h.pool.getDevice(original.deviceId)?.name).toBe("AVD-B");
@@ -979,7 +983,11 @@ for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
           sessionId: "holder",
           reason: "device-disconnected:emulator-5554",
           name: "AVD-A",
-          options: { excludeExecutionId: "settling-execution" },
+          // Monitor quarantine keeps the session; the device-restart release does not (#17896).
+          options: {
+            excludeExecutionId: "settling-execution",
+            ...(path === "monitor" ? { sessionPreserving: true } : {}),
+          },
         },
       ]);
       expect(h.pool.getDevice(original.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });

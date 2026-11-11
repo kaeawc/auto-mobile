@@ -1,5 +1,6 @@
 import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { holdAcquiringSession } from "../../src/daemon/acquiringSessionHold";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { describe, expect, test } from "bun:test";
 import { Mutex } from "async-mutex";
@@ -39,7 +40,11 @@ function harness(session?: Session) {
   const settled: string[] = [];
   const removed: string[] = [];
   const mutex = new Mutex();
-  let cancel = async (_sessionId: string, _reason: string): Promise<number> => 0;
+  let cancel = async (
+    _sessionId: string,
+    _reason: string,
+    _options?: { sessionPreserving?: boolean },
+  ): Promise<number> => 0;
   let cancelDevice = async (_deviceId: string, _reason: string): Promise<number> => 0;
   const coordinator = {
     finalizeRecoveryRecord: (id: string, expected?: AndroidRecoveryRecord) => {
@@ -105,7 +110,7 @@ function harness(session?: Session) {
     },
     recordEmulatorLossIncident: async () => "incident-1",
     cancelDeviceExecutions: (id, reason) => cancelDevice(id, reason),
-    cancelDeviceSessionExecutions: (id, reason) => cancel(id, reason),
+    cancelDeviceSessionExecutions: (id, reason, options) => cancel(id, reason, options),
     completeEmulatorLossRecovery: async (id, outcome) => {
       completed.push([id, outcome]);
     },
@@ -148,6 +153,32 @@ function reservation(timer: FakeTimer): AdbServerResetRecoveryReservation {
 }
 
 describe("AdbServerResetQuarantine", () => {
+  test("a reset that keeps the session does not abort its provisioning hold (#17896)", async () => {
+    const session = {
+      sessionId: "session-1",
+      assignedDevice: "emulator-5554",
+      platform: "android",
+    } as Session;
+    const h = harness(session);
+    const tracker = new ExecutionTracker(h.timer, new FakeIdGenerator());
+    h.devices.set("emulator-5554", device(session.sessionId));
+    const hold = holdAcquiringSession(tracker, undefined, {
+      toolName: "provisionDevice",
+      sessionUuid: session.sessionId,
+      deadlineMs: h.timer.now() + 60_000,
+    });
+    const otherWork = tracker.startExecution("tapOn", undefined, session.sessionId);
+    h.setCancel((id, reason, options) =>
+      tracker.cancelDeviceSessionExecutions(id, reason, options),
+    );
+
+    await h.quarantine.detachAdbServerResetCohort([h.devices.get("emulator-5554")!]);
+
+    expect(otherWork.abortController.signal.aborted).toBe(true);
+    expect(hold.signal.aborted).toBe(false);
+    hold.release();
+  });
+
   test.each([false, true])(
     "reset cancels serial-bound work, including idle cohort members (session=%s)",
     async (withSession) => {

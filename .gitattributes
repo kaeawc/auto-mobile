@@ -1,6 +1,7 @@
 test/fixtures/visionos-settings/*.json text eol=lf
 test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/xr-headset/*.json text eol=lf
+test/fixtures/xr/systemui-hidden-chrome.json text eol=lf
 test/fixtures/android-aaos-cluster-screen-size/*.txt text eol=lf
 test/fixtures/android-aaos-cluster-screen-size/*.json text eol=lf
 test/fixtures/android-netsim/*.ini text eol=lf

@@ -1,0 +1,249 @@
+{
+  "windows": [
+    {
+      "id": 16,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 21,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        2400,
+        2400
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 16,
+        "actions": [
+          "focus",
+          "select",
+          "clear_selection",
+          "click",
+          "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/home_screen",
+        "visible-to-user": false,
+        "view-id": "com.android.systemui:id/home_screen",
+        "class": "android.view.ViewGroup",
+        "className": "android.view.ViewGroup",
+        "clickable": "true",
+        "focusable": "true",
+        "occlusionState": "partial",
+        "occludedBy": "android.widget.LinearLayout",
+        "occludedByViewId": "s2-e463212d84da9d12-5",
+        "bounds": [
+          0,
+          0,
+          2400,
+          2400
+        ],
+        "node": [
+          {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/home_screen_date_time",
+            "visible-to-user": false,
+            "view-id": "com.android.systemui:id/home_screen_date_time",
+            "class": "android.widget.LinearLayout",
+            "className": "android.widget.LinearLayout",
+            "occlusionState": "partial",
+            "occludedBy": "unlabeled view",
+            "occludedByViewId": "s2-4db7e53c05260faf",
+            "bounds": [
+              883,
+              0,
+              1518,
+              283
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+              ],
+              "text": "8:52\u202fPM",
+              "resource-id": "com.android.systemui:id/home_screen_clock",
+              "visible-to-user": false,
+              "view-id": "com.android.systemui:id/home_screen_clock",
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "occludedByViewId": "s2-4db7e53c05260faf",
+              "bounds": [
+                883,
+                0,
+                1518,
+                229
+              ]
+            }
+          },
+          {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/home_screen_button_layout",
+            "visible-to-user": false,
+            "view-id": "com.android.systemui:id/home_screen_button_layout",
+            "class": "android.view.ViewGroup",
+            "className": "android.view.ViewGroup",
+            "bounds": [
+              904,
+              1813,
+              1496,
+              2109
+            ],
+            "node": [
+              {
+                "actions": [
+                  "focus",
+                  "select",
+                  "clear_selection",
+                  "click",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                ],
+                "content-desc": "Open Launcher Panel",
+                "resource-id": "com.android.systemui:id/home_screen_launcher_button",
+                "visible-to-user": false,
+                "view-id": "com.android.systemui:id/home_screen_launcher_button",
+                "class": "android.widget.ImageButton",
+                "className": "android.widget.ImageButton",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": [
+                  964,
+                  1873,
+                  1140,
+                  2049
+                ]
+              },
+              {
+                "actions": [
+                  "focus",
+                  "select",
+                  "clear_selection",
+                  "click",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                ],
+                "content-desc": "Environment",
+                "resource-id": "com.android.systemui:id/home_screen_env_button",
+                "visible-to-user": false,
+                "view-id": "com.android.systemui:id/home_screen_env_button",
+                "class": "android.widget.ImageButton",
+                "className": "android.widget.ImageButton",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": [
+                  1260,
+                  1873,
+                  1436,
+                  2049
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "displayId": 0,
+      "type": 3,
+      "windowLayer": 5,
+      "isActive": false,
+      "isFocused": false,
+      "bounds": [
+        0,
+        0,
+        3522,
+        2030
+      ],
+      "packageName": "com.android.systemui",
+      "hierarchy": {
+        "windowId": 10,
+        "actions": [
+          "focus",
+          "select",
+          "clear_selection",
+          "accessibility_focus",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity",
+          "set_selection",
+          "click"
+        ],
+        "content-desc": "Recents",
+        "visible-to-user": false,
+        "view-id": "s2-d2de3ae627999391",
+        "class": "android.view.ViewGroup",
+        "className": "android.view.ViewGroup",
+        "clickable": "true",
+        "focusable": "true",
+        "occlusionState": "partial",
+        "occludedBy": "Launcher",
+        "occludedByViewId": "s2-f69021943d4baad0",
+        "bounds": [
+          0,
+          0,
+          3522,
+          2030
+        ]
+      }
+    }
+  ],
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: Element not found with provided text 'Back' (0 view hierarchy changes over 17 requests within 1519ms)\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: Element not found with provided text 'Back'\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":1519,\"requestCount\":17,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: Element not found with provided text 'Close' (0 view hierarchy changes over 19 requests within 1517ms)\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: Element not found with provided text 'Close'\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":1517,\"requestCount\":19,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":0,\"requestCount\":0,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: Element not found with provided text 'Home' (0 view hierarchy changes over 19 requests within 1518ms)\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: Element not found with provided text 'Home'\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":1518,\"requestCount\":19,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":1,\"requestCount\":0,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: Element not found with provided text 'Back' (0 view hierarchy changes over 18 requests within 1545ms)\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: Element not found with provided text 'Back'\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":1545,\"requestCount\":18,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: Element not found with provided text 'Close' (0 view hierarchy changes over 16 requests within 1528ms)\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: Element not found with provided text 'Close'\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":1528,\"requestCount\":16,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":0,\"requestCount\":0,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: Element not found with provided text 'Home' (0 view hierarchy changes over 14 requests within 1522ms)\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: Element not found with provided text 'Home'\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":1522,\"requestCount\":14,\"changeCount\":0}}"
+    },
+    {
+      "type": "text",
+      "text": "{\"message\":\"Failed to tap: Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.\",\"success\":false,\"action\":\"tap\",\"error\":\"Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.\",\"element\":{\"bounds\":{\"left\":0,\"top\":0,\"right\":0,\"bottom\":0}},\"searchUntil\":{\"durationMs\":1,\"requestCount\":0,\"changeCount\":0}}"
+    }
+  ]
+}

@@ -2,6 +2,7 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
     "test/fixtures/xr-headset/*.json",
+    "test/fixtures/xr/systemui-hidden-chrome.json",
     "test/fixtures/simctl/pairs/**",
     "test/fixtures/android-avdmanager/*.txt",
     "test/fixtures/visionos-settings/*.json",

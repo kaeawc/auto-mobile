@@ -1,3 +1,4 @@
+import { withoutHiddenXrChrome, selectWithoutHiddenXrChrome } from "./xrHiddenChrome";
 import type { TapOnCall } from "./ActionCall";
 import {
   exactTextMissMessage,
@@ -82,6 +83,23 @@ const SEARCH_UNTIL_MIN_MS = 100;
 const SEARCH_UNTIL_MAX_MS = 12000;
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
+interface TapSearchResult {
+  selection: ElementSelectionResult;
+  viewHierarchy: ViewHierarchyResult;
+  containerFound: boolean;
+  stats: SearchUntilStats;
+  /**
+   * True when `viewHierarchy` is a genuine live device re-capture taken during
+   * this search (the caller's initial hierarchy did not already contain the
+   * target), distinct from the common case where the element was found in the
+   * hierarchy the caller already had with no device round-trip. Drives
+   * whether {@link replaceObservationHierarchy} also realigns freshness
+   * (issue #6284).
+   */
+  refreshedFromDevice: boolean;
+  visibilityError?: TapTargetUnavailableError;
+}
+
 /** Capabilities used by this phase; dependency readers observe replacements made by tests. */
 export interface TapTargetResolverHost {
   readonly accessibilityService: () => TapOnCtrlProxy;
@@ -101,6 +119,7 @@ export interface TapTargetResolverHost {
   hashViewHierarchy: TapTargetResolver["hashViewHierarchy"];
   readonly hierarchyCapture: () => HierarchyCapture;
   invisibleMatchFailure: TapTargetResolver["invisibleMatchFailure"];
+  isAndroidXr: (signal?: AbortSignal) => Promise<boolean>;
   isClickableElement: TapTargetResolver["isClickableElement"];
   isElementTapTargetOffScreen: TapPointPlanner["isElementTapTargetOffScreen"];
   isLongClickableElement: TapTargetResolver["isLongClickableElement"];
@@ -546,10 +565,41 @@ export class TapTargetResolver {
     );
   }
 
+  private xrChromeSearch(signal?: AbortSignal) {
+    let xr: boolean | undefined = this.host.device().platform === "android" ? undefined : false;
+    return {
+      get enabled() {
+        return xr ?? false;
+      },
+      detect: async (hierarchy: ViewHierarchyResult) => {
+        // Keep ordinary app/phone lookups on their existing I/O path. Ask the shared
+        // predicate only for hidden System UI candidates, once per search.
+        if (xr === undefined && withoutHiddenXrChrome(hierarchy).hiddenNodes.size > 0) {
+          xr = await this.host.isAndroidXr(signal);
+        }
+      },
+    };
+  }
+
+  private async refreshForChromeSearch(
+    context: Parameters<TapTargetResolver["tapVerificationRefresh"]>[0],
+    remainingTimeMs: number,
+    detect: (hierarchy: ViewHierarchyResult) => Promise<void>,
+  ): Promise<ViewHierarchyResult | null> {
+    const refreshed = await this.host.tapVerificationRefresh(context)(remainingTimeMs);
+    if (refreshed) {
+      await detect(refreshed);
+    }
+    return refreshed;
+  }
+
   private findElementForSearch(
     options: TapVerificationOptions,
     hierarchy: ViewHierarchyResult,
-  ): ReturnType<TapOnElement["findElementInHierarchy"]> {
+    xr = false,
+  ): ReturnType<TapOnElement["findElementInHierarchy"]> & {
+    visibilityError?: TapTargetUnavailableError;
+  } {
     if (this.isPrototypeWindowPending(options, hierarchy)) {
       // A successful show can precede the window's first accessibility capture.
       return {
@@ -557,34 +607,26 @@ export class TapTargetResolver {
         containerFound: false,
       };
     }
-    return this.host.findElementInHierarchy(options, hierarchy);
+    if (!xr) {
+      return this.host.findElementInHierarchy(options, hierarchy);
+    }
+    return selectWithoutHiddenXrChrome(options, hierarchy, (opts, tree) =>
+      this.host.findElementInHierarchy(opts, tree),
+    );
   }
 
   async searchForElement(
     options: TapVerificationOptions,
     observeResult: ObserveResult,
     signal?: AbortSignal,
-  ): Promise<{
-    selection: ElementSelectionResult;
-    viewHierarchy: ViewHierarchyResult;
-    containerFound: boolean;
-    stats: SearchUntilStats;
-    /**
-     * True when `viewHierarchy` is a genuine live device re-capture taken during
-     * this search (the caller's initial hierarchy did not already contain the
-     * target), distinct from the common case where the element was found in the
-     * hierarchy the caller already had with no device round-trip. Drives
-     * whether {@link replaceObservationHierarchy} also realigns freshness
-     * (issue #6284).
-     */
-    refreshedFromDevice: boolean;
-    visibilityError?: TapTargetUnavailableError;
-  }> {
+  ): Promise<TapSearchResult> {
     const viewHierarchy = observeResult.viewHierarchy;
     if (!viewHierarchy) {
       throw new ActionableError("Unable to get view hierarchy, cannot tap on element");
     }
 
+    const xr = this.xrChromeSearch(signal);
+    await xr.detect(viewHierarchy);
     const searchDurationMs = this.host.getSearchUntilDuration(options);
     const startTime = this.host.timer().now();
     let requestCount = 0;
@@ -601,7 +643,9 @@ export class TapTargetResolver {
     const initialSearch = this.findElementForSearch(
       this.host.withObservationScreenSize(options, observeResult),
       latestViewHierarchy,
+      xr.enabled,
     );
+    visibilityError = initialSearch.visibilityError;
     let selection = initialSearch.selection;
     const invisibleError = () =>
       this.host.invisibleMatchFailure(selection, options, latestViewHierarchy, {
@@ -645,11 +689,15 @@ export class TapTargetResolver {
         discardLateResult: false,
         signal,
         fetch: (remainingTimeMs) =>
-          this.host.tapVerificationRefresh({
-            refresh: options.verification?.refresh,
-            screenSize: latestScreenSize,
-            signal,
-          })(remainingTimeMs),
+          this.refreshForChromeSearch(
+            {
+              refresh: options.verification?.refresh,
+              screenSize: latestScreenSize,
+              signal,
+            },
+            remainingTimeMs,
+            xr.detect,
+          ),
         accept: (refreshedHierarchy) => {
           latestScreenSize = this.host.getScreenSizeFromHierarchy(refreshedHierarchy, {
             observationScreenSize: latestScreenSize,
@@ -658,9 +706,6 @@ export class TapTargetResolver {
           latestViewHierarchy = refreshedHierarchy;
           const hash = this.host.hashViewHierarchy(refreshedHierarchy);
           if (hash && hash !== lastHash) {
-            changeCount += 1;
-            lastHash = hash;
-          } else if (hash && !lastHash) {
             changeCount += 1;
             lastHash = hash;
           }
@@ -674,7 +719,9 @@ export class TapTargetResolver {
               },
             },
             refreshedHierarchy,
+            xr.enabled,
           );
+          visibilityError = searchResult.visibilityError ?? visibilityError;
           selection = searchResult.selection;
           element = selection.element;
           containerFoundEver = containerFoundEver || searchResult.containerFound;

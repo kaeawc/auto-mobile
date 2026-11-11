@@ -26,6 +26,10 @@
             return .matched(route)
         }
 
+        static func requiresApplicationActive(for match: RouteMatch) -> Bool {
+            match != .matched(.carPlayTemplates)
+        }
+
         /// Descriptors retain the existing body-reading and queue boundaries.
         enum Handler: Sendable {
             case simple(@Sendable (SdkHierarchyServer, NWConnection) -> Void)
@@ -43,6 +47,7 @@
         static let entries: [Entry] = [
             Entry(route: .freshHierarchy, handler: .simple { $0.handleFreshHierarchy($1) }),
             Entry(route: .cachedHierarchy, handler: .simple { $0.handleCachedHierarchy($1) }),
+            Entry(route: .carPlayTemplates, handler: .simple { $0.handleCarPlayTemplates($1) }),
             Entry(route: .health, handler: .simple { $0.handleHealth($1) }),
             Entry(route: .networkMock, handler: .body { $0.handleNetworkMock($1, initialData: $2) }),
             Entry(

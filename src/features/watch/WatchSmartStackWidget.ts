@@ -2,7 +2,12 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../models/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { readSmartStackWidgetCells, type SmartStackWidgetCellReading } from "./WatchSmartStack";
+import {
+  parseWatchClockFaceDump,
+  readSmartStackEditTap,
+  readSmartStackWidgetCells,
+  type SmartStackWidgetCellReading,
+} from "./WatchSmartStack";
 import type { WatchCommand, WatchRunnerClient } from "./WatchRunnerClient";
 
 export interface WatchSmartStackWidgetOptions {
@@ -21,6 +26,21 @@ export interface WatchSmartStackWidgetResult {
   headerAttempts: number;
   verificationAttempts: number;
   reason: string;
+}
+
+export const GALLERY_SCROLL_SETTLE_MS = 1500;
+
+function hasEditableSmartStack(dump: string): boolean {
+  try {
+    return (
+      parseWatchClockFaceDump(dump, { timestamp: 0 }).smartStack.header !== undefined &&
+      readSmartStackEditTap(dump) !== undefined
+    );
+  } catch (error) {
+    // A dump without a window frame mid-transition has no Edit button.
+    logger.debug(`Smart Stack edit availability check skipped: ${errorMessage(error)}`);
+    return false;
+  }
 }
 
 /** XCUI debugDescription is text; match only a cell identifier with exact name fields. */
@@ -147,9 +167,9 @@ function createWidgetActions(
     }
     signal?.throwIfAborted();
   };
-  const gesture = async (command: WatchCommand) => {
+  const gesture = async (command: WatchCommand, delayMs = 250) => {
     await request(command);
-    await settle();
+    await settle(delayMs);
   };
   const poll = async (
     phase: "headerAttempts" | "verificationAttempts",
@@ -178,30 +198,62 @@ function createWidgetActions(
 
 type WidgetActions = ReturnType<typeof createWidgetActions>;
 
-/** Returns the dump that showed the header: the stack as it was before this attempt's edit. */
-async function openSmartStack({ gesture, poll }: WidgetActions): Promise<string | undefined> {
-  // Home can be swallowed or toggle the face and app grid; verify each home/swipe round.
-  for (let round = 0; round < 3; round++) {
-    await gesture({ type: "home" });
+interface EditableStack {
+  dump: string;
+  editTap: { x: number; y: number };
+}
+
+async function findEditableStackAfterSwipe({
+  gesture,
+  poll,
+}: WidgetActions): Promise<EditableStack | undefined> {
+  let header = await poll("headerAttempts", hasEditableSmartStack, 2);
+  if (header !== undefined) {
+    const editTap = readSmartStackEditTap(header);
+    if (editTap) {
+      return { dump: header, editTap };
+    }
+  }
+  for (let extraSwipe = 0; extraSwipe < 3; extraSwipe++) {
     await gesture({ type: "face", op: "swipe", direction: "up" });
-    const header = await poll(
-      "headerAttempts",
-      (dump) => dump.includes("identifier: 'Smart Stack Header'"),
-      4,
-    );
+    header = await poll("headerAttempts", hasEditableSmartStack, 2);
     if (header !== undefined) {
-      return header;
+      const editTap = readSmartStackEditTap(header);
+      if (editTap) {
+        return { dump: header, editTap };
+      }
     }
   }
   return undefined;
 }
 
-async function selectGalleryWidget({ gesture }: WidgetActions, galleryStepsFromBottom: number) {
-  await gesture({ type: "face", op: "tap", x: 0.5, y: 0.92 });
+/** Returns the dump that showed the header: the stack as it was before this attempt's edit. */
+async function openSmartStack(actions: WidgetActions): Promise<EditableStack | undefined> {
+  // Home can be swallowed or toggle the face and app grid; verify each home/swipe round.
+  for (let round = 0; round < 3; round++) {
+    await actions.gesture({ type: "home" });
+    await actions.gesture({ type: "face", op: "swipe", direction: "up" });
+    const editableStack = await findEditableStackAfterSwipe(actions);
+    if (editableStack !== undefined) {
+      return editableStack;
+    }
+  }
+  return undefined;
+}
+
+async function selectGalleryWidget(
+  { gesture }: WidgetActions,
+  galleryStepsFromBottom: number,
+  editTap: { x: number; y: number },
+) {
+  await gesture({ type: "face", op: "tap", ...editTap });
   await gesture({ type: "face", op: "tap", x: 0.5, y: 0.44 });
-  await gesture({ type: "face", op: "swipe", direction: "up" });
+  await gesture({ type: "face", op: "swipe", direction: "up" }, GALLERY_SCROLL_SETTLE_MS);
   for (let step = 0; step < galleryStepsFromBottom; step++) {
-    await gesture({ type: "face", op: "drag", fromX: 0.5, fromY: 0.5, toX: 0.5, toY: 0.6 });
+    await gesture(
+      { type: "face", op: "drag", fromX: 0.5, fromY: 0.5, toX: 0.5, toY: 0.6 },
+      GALLERY_SCROLL_SETTLE_MS,
+    );
   }
   await gesture({ type: "face", op: "tap", x: 0.5, y: 0.65 });
   await gesture({ type: "face", op: "tap", x: 0.5, y: 0.5 });
@@ -236,19 +288,19 @@ export async function addWatchSmartStackWidget(
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       signal?.throwIfAborted();
       result.attempts++;
-      const baselineDump = await openSmartStack(actions);
-      if (baselineDump === undefined) {
+      const editableStack = await openSmartStack(actions);
+      if (editableStack === undefined) {
         return {
           ...result,
           reason:
-            "Smart Stack header did not appear after 3 home/swipe rounds; start from the watch face and retry.",
+            "Smart Stack header and Edit button did not appear after 3 home/swipe rounds; start from the watch face and retry.",
         };
       }
-      await selectGalleryWidget(actions, galleryStepsFromBottom);
+      await selectGalleryWidget(actions, galleryStepsFromBottom, editableStack.editTap);
       result.success =
         (await actions.poll(
           "verificationAttempts",
-          (dump) => verifySmartStackWidget(dump, baselineDump, appName, widgetName),
+          (dump) => verifySmartStackWidget(dump, editableStack.dump, appName, widgetName),
           10,
         )) !== undefined;
       if (result.success) {

@@ -45,6 +45,42 @@ export function isApprovedHiddenSystemUiClick(
   ).approvedClickNodes.has(node);
 }
 
+/** Words of a resource-id leaf or label, minus generic widget words that match every control. */
+function selectorWords(value: string): Set<string> {
+  const generic = new Set(["button", "icon", "view", "id", "com", "android", "systemui"]);
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 1 && !generic.has(word)),
+  );
+}
+
+/**
+ * Labels of the other approved hidden System UI click targets whose label shares a word with
+ * `targetId`, which a caller can select by text instead of `target` (`launcher_button` names
+ * "Open Launcher Panel"). Empty when no related labeled control exists.
+ */
+export function labeledHiddenSystemUiAlternatives(
+  hierarchy: ViewHierarchyResult,
+  target: ViewHierarchyNode,
+  targetId: string,
+): string[] {
+  const capture = resolveViewHierarchyForSearch(hierarchy) ?? hierarchy;
+  const { approvedClickNodes } = projectWithoutHiddenXrChrome(
+    capture,
+    hiddenNodeClickTargets(capture),
+  );
+  const wanted = selectorWords(targetId.split("/").pop() ?? targetId);
+  const labels = new SearchableHierarchy()
+    .project(capture)
+    .filter((entry) => entry.source !== target && approvedClickNodes.has(entry.source))
+    .map((entry) => entry.properties.text || entry.properties["content-desc"] || "")
+    // Only the visible label is compared: shared id prefixes (`home_screen_`) relate nothing.
+    .filter((label) => label !== "" && [...selectorWords(label)].some((word) => wanted.has(word)));
+  return [...new Set(labels)];
+}
+
 interface ChromeProjection {
   hierarchy: ViewHierarchyResult;
   hiddenNodes: ReadonlySet<ViewHierarchyNode>;

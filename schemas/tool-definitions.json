@@ -2579,8 +2579,9 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2616,7 +2617,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos"]
         },
         "appId": {
           "type": "string"
@@ -6081,7 +6082,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6243,7 +6244,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -37389,7 +37390,7 @@
         "platform": {
           "description": "action=end only: the platform written at the top of the plan",
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos", "watchos"]
         },
         "platformNote": {
           "description": "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",

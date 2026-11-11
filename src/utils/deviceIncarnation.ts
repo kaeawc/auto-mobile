@@ -123,3 +123,25 @@ export function deviceIncarnationToken(deviceId: string): string | undefined {
   const incarnation = resolver?.(deviceId) ?? directModeIncarnations.get(deviceId);
   return incarnation === undefined ? undefined : String(incarnation);
 }
+
+/** The live `deviceSessionUuid` for a serial/UDID, or `null` when no epoch is live. */
+export type DeviceSessionUuidResolver = (deviceId: string) => string | null;
+
+let deviceSessionUuidResolver: DeviceSessionUuidResolver | undefined;
+
+/**
+ * Register (or, with `undefined`, clear) the daemon's device-epoch lookup, so
+ * feature code can stamp what it records with the epoch (#17030) without
+ * importing the daemon. Same lifecycle as {@link setDeviceIncarnationResolver}.
+ */
+export function setDeviceSessionUuidResolver(next: DeviceSessionUuidResolver | undefined): void {
+  deviceSessionUuidResolver = next;
+}
+
+/**
+ * The live `deviceSessionUuid` for `deviceId`, or `null` outside a daemon or
+ * when the device has no live epoch.
+ */
+export function currentDeviceSessionUuid(deviceId: string): string | null {
+  return deviceSessionUuidResolver?.(deviceId) ?? null;
+}

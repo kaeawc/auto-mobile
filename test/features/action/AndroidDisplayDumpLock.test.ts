@@ -6,7 +6,7 @@ import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 
-const xml = `<?xml version="1.0"?><hierarchy rotation="0"><node package="com.test" class="Button" text="Row" bounds="[0,0][100,100]"/></hierarchy>`;
+const xml = `<?xml version="1.0"?><hierarchy rotation="0"><node package="com.test" class="Button" text="Row" bounds="[0,0][1080,720]"/></hierarchy>`;
 
 /** Holds every dump open until released, recording when each dump-and-read starts and ends. */
 class GatedDumpAdb extends FakeAdbClient {
@@ -31,7 +31,10 @@ function setup(ids: string[] = ["a", "b"]) {
   const adb = new GatedDumpAdb();
   adb.setCommandResult(
     "shell dumpsys display",
-    `  Display id 2: DisplayInfo{"Overlay", real 1080 x 720, uniqueId "overlay:1"}`,
+    [
+      `  Display id 0: DisplayInfo{"Built-in", real 1080 x 2400, uniqueId "local:1"}`,
+      `  Display id 2: DisplayInfo{"Overlay", real 1080 x 720, uniqueId "overlay:1"}`,
+    ].join("\n"),
   );
   for (const id of ids) {
     adb.setCommandResult(`shell cat /data/local/tmp/automobile-hierarchy-${id}.xml`, xml);

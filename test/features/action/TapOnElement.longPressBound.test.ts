@@ -38,7 +38,7 @@ function harness() {
     },
   };
   const action = new TapOnElement(
-    { name: "test-device", platform: "android", deviceId: "long-press-bound" },
+    { name: "test-device", platform: "android", deviceId: "long-press-bound", formFactor: "phone" },
     adb,
     {
       xrDetector: new FakeAndroidXrDetector(),

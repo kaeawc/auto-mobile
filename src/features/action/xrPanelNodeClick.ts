@@ -1,4 +1,10 @@
-import { ActionableError, type Element, type ViewHierarchyResult } from "../../models";
+import {
+  ActionableError,
+  type Element,
+  type TapOnElementResult,
+  type ViewHierarchyResult,
+} from "../../models";
+import { logger } from "../../utils/logger";
 import { boundsNearlyEqual } from "../../utils/bounds";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { StaleDisplayError } from "../observe/StaleDisplayError";
@@ -15,6 +21,7 @@ import type { DisplayFenceOption } from "./BaseVisualChange";
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { findTapTargetNode } from "./tapTargetSupport";
 import type { AndroidActionRequestOptions } from "../observe/android/AndroidActionDispatcher";
+import type { A11yActionResult } from "../observe/android/types";
 
 type VerifiedNodeTarget = {
   selector?: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
@@ -28,6 +35,12 @@ type XrNodeClickOptions = DisplayFenceOption & {
   onTalkBackActivation?: () => void;
   /** Set for container-scoped selections; ancestor activation never leaves it. */
   container?: unknown;
+  /**
+   * Receives the reason when CtrlProxy was sent the click but no reply arrived (a late or lost
+   * `action_result`, #17983). The click may have landed, so the caller decides from its post-click
+   * observation via {@link settleUnconfirmedXrClick}. Without it the click fails as unconfirmed.
+   */
+  onUnconfirmedClick?: (reason: string) => void;
 };
 
 /** Resolves the requested container in the click's hierarchy. */
@@ -37,6 +50,42 @@ export function xrCoordinateError(): ActionableError {
   return new ActionableError(
     "The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.",
   );
+}
+
+/** A click CtrlProxy received but never answered: it may have landed, so it is not a refusal. */
+export function xrUnconfirmedClickError(reason: string): ActionableError {
+  return new ActionableError(
+    `The accessibility node click was sent to CtrlProxy but its result was not confirmed (${reason}), and the screen did not visibly change. The click may still have landed. Do not retry automatically: observe the screen first.`,
+  );
+}
+
+/** Sent to the runner without any reply, including a reply that outlived the client timeout. */
+function isUnconfirmedDispatch(result: A11yActionResult): boolean {
+  return result.dispatched === true && result.acknowledged === false;
+}
+
+/**
+ * Decide an unconfirmed XR node click from the fresh post-click observation: a changed screen means
+ * the click landed (success, with a warning); otherwise it fails as unconfirmed, never as the panel
+ * coordinate refusal that invites a second tap.
+ */
+export function settleUnconfirmedXrClick(
+  result: Pick<TapOnElementResult, "success" | "error" | "effect" | "warnings">,
+  reason: string | undefined,
+): void {
+  if (reason === undefined || !result.success) {
+    return;
+  }
+  if (result.effect?.screenChanged === true) {
+    result.warnings = [
+      ...(result.warnings ?? []),
+      `CtrlProxy did not confirm the accessibility node click (${reason}), but the screen changed after it (${result.effect.basis}), so the click is reported as landed.`,
+    ];
+    return;
+  }
+  result.success = false;
+  result.error = xrUnconfirmedClickError(reason).message;
+  delete result.warnings;
 }
 
 /**
@@ -277,21 +326,42 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
     options ?? {},
     options && resolveContainer && ((hierarchy) => resolveContainer(hierarchy, options)),
   );
+  const result = await dispatchXrNodeClick(accessibilityService, {
+    target: { selector, expectedBounds, identityHints },
+    signal,
+    displayFence: options?.displayFence,
+  });
+  settleXrNodeClickReply(result, options);
+}
+
+/** Send the verified click; any failure before CtrlProxy replies is the coordinate refusal. */
+async function dispatchXrNodeClick(
+  accessibilityService: () => Pick<
+    TapOnCtrlProxy,
+    "supportsNodeActionSelectors" | "requestNodeAction"
+  >,
+  {
+    target: { selector, expectedBounds, identityHints },
+    signal,
+    displayFence,
+  }: {
+    target: VerifiedNodeTarget;
+    signal?: AbortSignal;
+    displayFence?: DisplayFenceOption["displayFence"];
+  },
+): Promise<A11yActionResult> {
   try {
     if (!(await accessibilityService().supportsNodeActionSelectors(undefined, signal, true))) {
       throw xrCoordinateError();
     }
     throwIfAborted(signal);
-    options?.displayFence?.assertCurrent();
+    displayFence?.assertCurrent();
     const result = await accessibilityService().requestNodeAction("click", selector, {
       signal,
       ...verification,
     });
     throwIfAborted(signal);
-    if (!result.success) {
-      throw xrCoordinateError();
-    }
-    options?.onTalkBackActivation?.();
+    return result;
   } catch (error) {
     throwIfAborted(signal);
     if (error instanceof StaleDisplayError) {
@@ -299,4 +369,23 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
     }
     throw new ActionableError(xrCoordinateError().message, { cause: error });
   }
+}
+
+/** A confirmed click succeeds, an unanswered one is unconfirmed, and a refusal is the coordinate error. */
+function settleXrNodeClickReply(result: A11yActionResult, options?: XrNodeClickOptions): void {
+  if (result.success) {
+    options?.onTalkBackActivation?.();
+    return;
+  }
+  if (isUnconfirmedDispatch(result)) {
+    const reason = result.error || "no reply from CtrlProxy";
+    logger.warn(`[XrNodeClick] Click was dispatched but not confirmed: ${reason}`);
+    if (options?.onUnconfirmedClick) {
+      options.onUnconfirmedClick(reason);
+      return;
+    }
+    throw xrUnconfirmedClickError(reason);
+  }
+  // CtrlProxy answered and refused (identity/bounds mismatch, ACTION_CLICK false): nothing landed.
+  throw xrCoordinateError();
 }

@@ -97,6 +97,9 @@ function opaqueDataToolMutations(
   name: string,
   args: Record<string, unknown>,
 ): ToolMutation[] | undefined {
+  if (["phoneCall", "sendSms", "seedContent"].includes(name)) {
+    return [{ kind: "opaque", key: opaqueIntentKey(name) }];
+  }
   switch (name) {
     case "sqlQuery":
       if (isCoreDataRead(args)) {
@@ -112,9 +115,6 @@ function opaqueDataToolMutations(
       // in-session clearMockNetwork push leaves nothing owned to push/mark at release;
       // the gap map is in memory and keyed by session only. Keep this non-fallback.
       return [{ kind: "opaque", key: "network-mocks" }];
-    case "phoneCall":
-    case "sendSms":
-      return [{ kind: "opaque", key: opaqueIntentKey(name) }];
     case "resetAppLogs":
       return Array.isArray(args.paths)
         ? args.paths.map((path) => ({

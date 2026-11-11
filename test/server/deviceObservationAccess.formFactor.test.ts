@@ -220,7 +220,11 @@ test.each(["missing", "throws", "unknown"] as const)(
     expect(device).not.toHaveProperty("formFactor");
     const { result, commands } = await observe(device);
     expect(result).not.toHaveProperty("isScreenRound");
-    expect(commands).toEqual(["shell dumpsys activity activities"]);
+    // An unclassified device is asked once whether it is an XR headset (#17908).
+    expect(commands).toEqual([
+      "shell pm has-feature android.software.xr.api.spatial",
+      "shell dumpsys activity activities",
+    ]);
   },
 );
 

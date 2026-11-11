@@ -46,6 +46,22 @@ const createTapOnElement = (platform: "android" | "ios" = "android"): TapOnEleme
 };
 
 describe("TapOnElement selectedElement metadata", () => {
+  // #17939: the tappable count drives iOS's reported match count; Android keeps its total.
+  test.each([
+    ["ios", 1],
+    ["android", undefined],
+  ] as const)("%s metadata carries tappableMatches=%p", (platform, expected) => {
+    const metadata = metadataOf(createTapOnElement(platform), {
+      element: ResultFaker.element({ text: "Add" }),
+      indexInMatches: 0,
+      totalMatches: 2,
+      tappableMatches: 1,
+      strategy: "first",
+    });
+    expect(metadata.totalMatches).toBe(2);
+    expect(metadata.tappableMatches).toBe(expected);
+  });
+
   test("rejects a semantic-link owner whose resource ID is shared by another row", () => {
     const tapOnElement = createTapOnElement();
     const owner = ResultFaker.element({

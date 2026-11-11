@@ -91,6 +91,8 @@ lands.
 
 - `observe` reports `isScreenRound` on a watch: `true` on a round display, `false` on a square one,
   absent when it cannot be read.
+- On a watch, `observe` also reports `surface`: `tile`, `watchface`, `launcher` or `app`; it is absent
+  when the surface cannot be identified, including the notification tray.
 - `pressButton` `back` behaves like the Wear OS swipe-from-the-left-edge gesture: it closes the
   current screen, and repeated presses return to the watch face. `home` from inside an app returns
   to the watch face; from the watch face it opens the app list, which is the platform's own

@@ -141,7 +141,10 @@ Every other tool refuses a watch before doing anything, with:
   Tapping a widget with `tapOn` or `tapAt` opens its host app, so the normal tools work afterwards.
   While the Smart Stack is open, `observe` returns `hierarchyUnavailable` and no hierarchy fields.
   With the host app not in the foreground and no Smart Stack open, `tapAt` taps the watch face
-  at the given point coordinates, reaching complications; `tapOn` still needs the host app foreground.
+  at the given point coordinates; `tapOn` still needs the host app foreground. Whether such a tap
+  opens a complication has not been checked on a device, so `observe` afterwards to confirm the
+  result. A point outside the watch screen fails with `tap is outside the watch screen`; take the
+  coordinates from `observe`, within `screenSize`.
 - `swipeOn` swipes in a direction. With `lookFor` it swipes until an exact `text` or `elementId`
   is on screen, up to `maxSwipes` (default 10, maximum 100). Each `lookFor` step is a short, slow drag (about
   one row on a list) so consecutive reads overlap and nearby targets are not skipped. Coordinates
@@ -154,8 +157,18 @@ Every other tool refuses a watch before doing anything, with:
   control: on a 0–10 control with step 1 and medium sensitivity, `0.25` moves about 3 steps, `0.5`
   about 7, and `1` reaches the end. To reach an intermediate value, use fractional deltas and
   `observe` between turns. A turn smaller than one step of the focused control (for example `0.1`
-  on that control) may not register and fails like a rotation at the limit; when `delta` is
-  between -1 and 1 the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
+  on that control) may not register. When a rotation changes nothing, the error says which case
+  applies:
+  - The focused control's value stayed the same: the error quotes that value (`value stayed "10"`).
+    Either the turn was too small to reach the next step or the control is at its limit. It is at
+    its limit only when the value is already at the end the turn heads toward (for example
+    `"10"` after a positive `delta` on a 0–10 control); otherwise, including `"0"` after a
+    positive `delta`, retry with a larger `delta` in the same direction.
+  - No focused control exposes a readable value: no view may hold crown focus, or the scrolled content
+    is at its limit. Tap the control first. When `delta` is between -1 and 1, the error also says
+    the turn may be too small.
+
+  It is not listed by default; enable it with `setToolEnabled` (see
   [Dynamic Tools](dynamic-tools.md)). When the same focused control has a readable accessible value
   before and after a rotation, that value must change for success. Otherwise, any screen hierarchy
   change counts as success. When no focused value is readable, an unrelated update, such as a status

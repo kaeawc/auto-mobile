@@ -31,7 +31,10 @@ import type {
 import { hitTestSchema } from "./tapSchemas";
 import {
   dpadTapOnHoldMs,
+  dpadTapOnRefusal,
   dpadTapOnTarget,
+  dpadTapOnTouchOnlyParts,
+  usesNativeLinkActivation,
   type DpadTapOnResult,
 } from "../../features/action/DpadTapOn";
 import { defaultTapOnDpadFallbackFactory } from "./tapOnDpadFallback";
@@ -90,6 +93,25 @@ function selectedElementLabel(
   );
 }
 
+/**
+ * The reported match count. When the selection reports fewer tappable targets than raw
+ * matches (an iOS non-tappable context label, or a row and its own switch), only the tappable
+ * ones count; `index` still addresses the full candidate list, so it names that total (#17939).
+ */
+function matchCountDetail(selectedElement: TapOnSelectedElement): string {
+  const total = selectedElement.totalMatches;
+  const tappable = selectedElement.tappableMatches;
+  const count = tappable !== undefined && tappable > 0 && tappable < total ? tappable : total;
+  const noun = count === 1 ? "match" : "matches";
+  if (count <= 1) {
+    return `${count} ${noun}`;
+  }
+  // For an ambiguous selector, name which occurrence was tapped so index 0 vs 2
+  // (or a random pick) among identical rows is distinguishable.
+  const of = count < total ? ` of ${total} candidates` : "";
+  return `${count} ${noun} (index ${selectedElement.indexInMatches}${of})`;
+}
+
 function buildTapOnResultDetails(
   selectedElement: TapOnSelectedElement | undefined,
   searchSummary: string | undefined,
@@ -113,11 +135,7 @@ function buildTapOnResultDetails(
       identity.push(`text=${JSON.stringify(label)}`);
     }
     details.push(`matched ${identity.length > 0 ? identity.join(" ") : "element"}`);
-    const count = selectedElement.totalMatches;
-    // For an ambiguous selector, name which occurrence was tapped so index 0 vs 2
-    // (or a random pick) among identical rows is distinguishable.
-    const index = count > 1 ? ` (index ${selectedElement.indexInMatches})` : "";
-    details.push(`${count} ${count === 1 ? "match" : "matches"}${index}`);
+    details.push(matchCountDetail(selectedElement));
   }
   // Append the activated semantic link whenever present, additively: an
   // owner-scoped subtext tap resolves BOTH an owner (selectedElement) and the
@@ -272,8 +290,9 @@ function resolveTapOnAction(
 
 /**
  * On an Android device that declares no touchscreen (Android TV), tapOn moves D-pad focus to the
- * match and presses enter (#16733). Undefined leaves the touch path in charge: another platform, a
- * device with (or of unknown) touchscreen, or a request only a touch tap can serve.
+ * match and presses enter (#16733), or refuses a request only a touch tap can serve, since that tap
+ * would be a silent no-op (#17913). Undefined leaves the touch path in charge: another platform, a
+ * device with (or of unknown) touchscreen, or a semantic-link activation, which injects no touch.
  */
 async function tapOnByDpad(
   device: BootedDevice,
@@ -289,13 +308,17 @@ async function tapOnByDpad(
     deps.tapOnDpadFallbackFactory ??
     (deps.tapOnElementFactory ? undefined : defaultTapOnDpadFallbackFactory);
   const request = { ...args, action };
-  const target = factory ? dpadTapOnTarget(request) : undefined;
-  if (!factory || !target) {
+  // A semantic link is activated by the accessibility service, not a touch, so it needs no D-pad.
+  if (!factory || usesNativeLinkActivation(request)) {
     return undefined;
   }
   const fallback = factory(device);
   if ((await fallback.hasTouchscreen(signal)) !== false) {
     return undefined;
+  }
+  const target = dpadTapOnTarget(request);
+  if (!target) {
+    throw new ActionableError(dpadTapOnRefusal(dpadTapOnTouchOnlyParts(request)));
   }
   return await fallback.tap(target, signal, dpadTapOnHoldMs(request));
 }

@@ -244,6 +244,26 @@ test("SpatialPanel refusal uses the current task package when activeWindow is ab
   );
 });
 
+test.each([false, true])("current task bounds decide SpatialPanel refusal: embedded=%s", (embedded) => {
+  const observation = spatialPanelObservation();
+  const backStack = observation.backStack!;
+  const current = backStack.tasks.find((task) => task.id === backStack.currentTaskId)!;
+  const panelBounds = { left: 0, top: 0, right: 3000, bottom: 3000 };
+  const hostBounds = structuredClone(current.bounds);
+  backStack.tasks = [
+    { ...current, id: current.id + 1, bounds: embedded ? panelBounds : hostBounds },
+    { ...current, bounds: embedded ? hostBounds : panelBounds },
+  ];
+
+  if (embedded) {
+    expect(() => assertXrDisplayInputSupported(observation, true)).toThrow(
+      "XR spatial-panel input injection is unsupported",
+    );
+  } else {
+    expect(() => assertXrDisplayInputSupported(observation, true)).not.toThrow();
+  }
+});
+
 test("SpatialPanel evidence does not depend on whether a task-aligned host has content", () => {
   const observation = spatialPanelObservation();
   const windows = observation.viewHierarchy!.windows!;

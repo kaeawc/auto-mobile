@@ -25,9 +25,12 @@ function assertDisplayInputSupported(
   }
   const hierarchy = resolveViewHierarchyForSearch(observation.viewHierarchy);
   const packageName = xrForegroundApp(observation);
-  const task = observation.backStack?.tasks.find(
-    (candidate) => candidate.packageName === packageName,
-  );
+  const task =
+    observation.backStack?.tasks.find(
+      (candidate) =>
+        candidate.id === observation.backStack?.currentTaskId &&
+        candidate.packageName === packageName,
+    ) ?? observation.backStack?.tasks.find((candidate) => candidate.packageName === packageName);
   const taskBounds = parseBounds(task?.bounds);
   if (!packageName || packageName.startsWith("com.android.systemui") || !taskBounds) {
     return;

@@ -5,7 +5,7 @@ export function xrForegroundApp(
   observation: Pick<ObserveResult, "activeWindow" | "backStack">,
 ): string | undefined {
   return (
-    observation.activeWindow?.appId ??
+    observation.activeWindow?.appId ||
     observation.backStack?.tasks.find((task) => task.id === observation.backStack?.currentTaskId)
       ?.packageName
   );

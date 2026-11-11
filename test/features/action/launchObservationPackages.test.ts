@@ -7,6 +7,24 @@ import {
 } from "../../../src/features/action/launchObservationPackages";
 
 describe("getLaunchObservationPackageNames", () => {
+  test.each([false, true])("XR SystemUI remains a competing package when focused=%s", (focused) => {
+    const observation = {
+      activeWindow: { appId: "com.expected" },
+      viewHierarchy: {
+        packageName: "com.android.systemui",
+        windows: [
+          { id: 1, type: 1, packageName: "com.android.systemui.xrhomeenv" },
+          { id: 2, type: 1, packageName: "com.expected" },
+          { id: 3, type: 4, packageName: "com.android.systemui.dialog", isFocused: focused },
+        ],
+      },
+    } as ObserveResult;
+
+    expect(getLaunchObservationPackageNames(observation)).toEqual(
+      focused ? ["com.expected", "com.android.systemui"] : ["com.expected"],
+    );
+  });
+
   test("collects unique primary packages and ignores the fallback when they exist", () => {
     const observation = {
       activeWindow: { appId: "com.expected" },

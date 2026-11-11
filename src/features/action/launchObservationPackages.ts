@@ -25,6 +25,10 @@ function launchHierarchyPackage(observation: ObserveResult): string | undefined 
   if (
     packageName?.startsWith("com.android.systemui") &&
     activePackage &&
+    !windows?.some(
+      (window) =>
+        window.isFocused === true && window.packageName?.startsWith("com.android.systemui"),
+    ) &&
     windows?.some(
       (window) => window.type === 1 && window.packageName === "com.android.systemui.xrhomeenv",
     ) &&

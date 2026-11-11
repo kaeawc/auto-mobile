@@ -111,19 +111,62 @@ export const carAppTemplateDocumentSchema = z
 export const CAR_APP_TEMPLATES_NOTE =
   "Templates the app returned from onGetTemplate, not a reading of what the car host rendered.";
 
-/** The `observe` block. */
-export const carAppTemplatesSchema = z
-  .object({
-    packageName: z.string(),
-    source: z.literal("sdk"),
-    note: z.string(),
-    sessions: z.array(carAppSessionSchema()),
-    error: z.string().optional(),
-  })
-  .passthrough();
+/** The foreground app's block: the app answering the route is the one on screen. */
+export const carAppForegroundTemplatesSchema = () =>
+  z
+    .object({
+      packageName: z.string(),
+      source: z.literal("sdk"),
+      note: z.string(),
+      sessions: z.array(carAppSessionSchema()),
+      error: z.string().optional(),
+    })
+    .passthrough();
+
+/** Android Auto's phone package; it is the foreground app while a phone projects (#17826). */
+export const ANDROID_AUTO_PACKAGE = "com.google.android.projection.gearhead";
+
+export const CAR_APP_PROJECTED_NOTE =
+  "Android Auto does not report which bound app the head unit shows, so every bound app whose route " +
+  "answered is listed, ordered by package name; none is known to be the visible one.";
+
+/** One projected app's stacks inside the projection block. */
+const carAppProjectedAppSchema = () =>
+  z
+    .object({
+      packageName: z.string(),
+      sessions: z.array(carAppSessionSchema()),
+      error: z.string().optional(),
+    })
+    .passthrough();
+
+/**
+ * The block while Android Auto projects (#17826): the apps Android Auto has bound a service of
+ * that answer the route, each read through its own route, because the foreground package is Android Auto itself.
+ */
+export const carAppProjectedTemplatesSchema = () =>
+  z
+    .object({
+      source: z.literal("sdk"),
+      note: z.string(),
+      projectedBy: z.string().describe("The projecting host package (Android Auto)."),
+      projectedNote: z.string(),
+      projected: z
+        .array(carAppProjectedAppSchema())
+        .describe("Bound apps whose route answered enabled, ordered by package name."),
+    })
+    .passthrough();
+
+/** The `observe` block: the foreground app's, or the projected apps' during Android Auto. */
+export const carAppTemplatesSchema = z.union([
+  carAppForegroundTemplatesSchema(),
+  carAppProjectedTemplatesSchema(),
+]);
 
 export type CarAppTemplateDocument = z.infer<typeof carAppTemplateDocumentSchema>;
-export type CarAppTemplates = z.infer<typeof carAppTemplatesSchema>;
+export type CarAppForegroundTemplates = z.infer<ReturnType<typeof carAppForegroundTemplatesSchema>>;
+export type CarAppProjectedTemplates = z.infer<ReturnType<typeof carAppProjectedTemplatesSchema>>;
+export type CarAppTemplates = CarAppForegroundTemplates | CarAppProjectedTemplates;
 
 /**
  * `observe.automotive.hostRenderedUi` (#17499): the foreground screen belongs to the Car App Library.

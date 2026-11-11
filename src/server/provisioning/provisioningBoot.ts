@@ -45,9 +45,14 @@ import {
 import {
   type ProvisionBootOptions,
   type ProvisionBootResult,
+  type ProvisionSettlementState,
   type ProvisioningContext,
 } from "./provisioningTypes";
-import { admitRestartReservedProvision, bindProvisionedDeviceSession } from "./provisioningSession";
+import {
+  admitRestartReservedProvision,
+  bindProvisionedDeviceSession,
+  whileHoldingProvisionedSession,
+} from "./provisioningSession";
 import { applyProvisionDeviceProfile, provisionableDeviceSpec } from "./provisioningDeviceProfile";
 import {
   applyProvisionDeviceResources,
@@ -301,6 +306,49 @@ async function reserveReadinessWithinDeadline(
   });
 }
 
+/**
+ * The steps that run on the bound session's device before provisionDevice returns. The client
+ * cannot heartbeat that session before the call hands it back, so they run under a hold on it
+ * (#17885).
+ */
+async function applyProvisionPostBindSteps(
+  args: InternalProvisionDeviceArgs,
+  deps: DeviceToolsDependencies,
+  device: BootedDevice,
+  {
+    boundSessionId,
+    signal,
+    totalDeadlineMs,
+    settlementState,
+  }: {
+    boundSessionId: string;
+    signal: AbortSignal;
+    totalDeadlineMs: number;
+    settlementState: ProvisionSettlementState;
+  },
+): Promise<{
+  manufacturerProfile: Record<string, unknown> | undefined;
+  androidAuto: AndroidAutoProvisionReport | undefined;
+}> {
+  return await whileHoldingProvisionedSession(
+    deps,
+    { sessionUuid: boundSessionId, deadlineMs: totalDeadlineMs },
+    async () => {
+      // Applied to the bound session's ready device, so its release restores it (#14058).
+      const manufacturerProfile = await applyProvisionDeviceProfile(args, deps, device, {
+        boundSessionId,
+        signal,
+      });
+      const androidAuto = await applyProvisionAndroidAuto(args, deps, device, {
+        signal,
+        totalDeadlineMs,
+        settlementState,
+      });
+      return { manufacturerProfile, androidAuto };
+    },
+  );
+}
+
 export async function bootExactProvisionedDevice(
   ctx: ProvisioningContext,
   args: InternalProvisionDeviceArgs,
@@ -417,15 +465,12 @@ export async function bootExactProvisionedDevice(
             settlementState,
           },
         });
-        // Applied to the bound session's ready device, so its release restores it (#14058).
-        manufacturerProfile = await applyProvisionDeviceProfile(args, deps, boot!.device, {
-          boundSessionId: bound,
-          signal: operationSignal,
-        });
-        androidAuto = await applyProvisionAndroidAuto(args, deps, boot!.device, {
-          ...mappingOptions,
-          settlementState,
-        });
+        ({ manufacturerProfile, androidAuto } = await applyProvisionPostBindSteps(
+          args,
+          deps,
+          boot!.device,
+          { boundSessionId: bound, ...mappingOptions, settlementState },
+        ));
         return bound;
       },
     );

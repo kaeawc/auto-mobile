@@ -38,6 +38,10 @@ A flow that needs a signed-in device uses an AVD snapshot that a person signed i
 `unsupported` error naming every missing path, because the run could only fail after a long boot.
 The projection runs after the session is bound (beside the manufacturer profile), inside the
 provision's try block, so its failure rolls back a created emulator like any other post-boot step.
+The caller cannot heartbeat the bound session before the call returns, so both post-bind steps run
+under a hold (`holdAcquiringSession`): one execution registered on that session, which the
+heartbeat monitor's unsettled-execution veto honours up to the provision deadline. The hold ends
+before rollback, so an unclaimed session is still reaped as `missing-first-heartbeat`.
 It is bounded by the provision's total deadline as well as its abort signal; a request without
 `androidAuto` never reaches it, so its abort handling is unchanged. Once the run has connected its
 own DHU (`desktop-head-unit` reported `applied`), a later provision failure stops that DHU before
@@ -65,6 +69,9 @@ changes nothing when it already holds, so a rerun on a provisioned phone reports
 - **Notification access** is granted before the DHU connects, because the DHU's preflight poll does not
   notice a grant made after it timed out.
 - **Developer mode** reads as on when Android Auto's overflow menu lists **Developer settings**.
+  Enabling it taps the **Version** row ten times. Android Auto 18.1 relabels that row to
+  **Version and permission info** after the first tap, so each tap matches any known label of the
+  row and the count carries across the relabel.
 - **Head unit server** reads as on when port 5277 is listening on the phone. The server binds some
   time after **Start head unit server** is tapped, so the provisioner re-checks on a bounded backoff
   (250 ms doubling to 2 s, five re-checks) before reporting it as not listening.

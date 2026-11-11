@@ -4,6 +4,7 @@ import {
   OVERFLOW_MENU_LABEL,
   parseScreenNodes,
 } from "../../../src/features/androidAuto/AdbAndroidAutoScreenDriver";
+import { DEFAULT_ANDROID_AUTO_UI_LABELS } from "../../../src/features/androidAuto/AndroidAutoSettingsUi";
 import { uiautomatorDumpLock } from "../../../src/features/action/uiautomatorDumpLock";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { ExecResult } from "../../../src/models";
@@ -96,6 +97,33 @@ describe("AdbAndroidAutoScreenDriver", () => {
     const { driver, actions } = setup([screen(VERSION_ROW)]);
     await driver.tapText("Version");
     expect(actions()).toEqual(["input tap 540 1850"]);
+  });
+
+  test("follows the Version row through its 18.1 relabel, tapping the same row each time (#17884)", async () => {
+    // Captured on Android Auto 18.1.664404-release (mt0093c): the row reads "Version" until the
+    // first tap, then "Version and permission info" above a Packages list.
+    const before = node({ text: "Version", bounds: "[42,2254][188,2319]" });
+    const after =
+      node({ text: "Version and permission info", bounds: "[42,2254][700,2319]" }) +
+      node({ text: "Packages", bounds: "[42,2340][300,2400]" });
+    const labels = DEFAULT_ANDROID_AUTO_UI_LABELS.version;
+    const { driver, actions } = setup([screen(before), screen(after), screen(after)]);
+    await driver.tapText(labels);
+    await driver.tapText(labels);
+    await driver.tapText(labels);
+    expect(actions()).toEqual(["input tap 115 2287", "input tap 371 2287", "input tap 371 2287"]);
+  });
+
+  test("the exact label alone still misses the relabelled row, naming every variant tried", async () => {
+    const after = node({ text: "Version and permission info", bounds: "[42,2254][700,2319]" });
+    const exact = setup([screen(after), screen(after)]);
+    await expect(exact.driver.tapText("Version")).rejects.toThrow(
+      '"Version" is not on the phone screen after 2 reads',
+    );
+    const none = setup([screen(), screen()]);
+    await expect(none.driver.tapText(DEFAULT_ANDROID_AUTO_UI_LABELS.version)).rejects.toThrow(
+      '"Version" or "Version and permission info" is not on the phone screen after 2 reads',
+    );
   });
 
   test("opens the overflow menu by its content description", async () => {

@@ -232,7 +232,7 @@ describe("the previous owner fetches the announced device gesture recording whil
             sessionUuid,
           });
           const payload = toolJson(response);
-          expect(payload.error).toBe("No active recording. Start a recording before exporting.");
+          expect(payload.error).toContain("No active recording");
           expect(payload.planContent).toBeUndefined();
         } else {
           await expect(

@@ -34,7 +34,12 @@ const recordToolCallsSchema = addSessionUuidToSchema(
         .describe(
           "begin starts recording this connection's tool calls; end stops and returns the YAML plan; status reports state",
         ),
-      planName: z.string().optional().describe("Plan name for action=end"),
+      planName: z
+        .string()
+        .optional()
+        .describe(
+          "Plan name: on begin, the exported plan's name; on end, overrides the begin name",
+        ),
     })
     .strict(),
 );
@@ -91,12 +96,13 @@ const recordToolCallsTool = async (params: {
 
   try {
     if (params.action === "begin") {
-      const result = startToolCallRecording({ connectionId });
+      const result = startToolCallRecording({ connectionId, planName: params.planName });
       return createStructuredToolResponse({
         success: true,
         action: "begin",
         recording: result.recording,
         startedAt: result.startedAt,
+        ...(result.planName && { planName: result.planName }),
         ...(result.alreadyActive && {
           alreadyActive: true,
           currentStepCount: result.currentStepCount,
@@ -131,7 +137,7 @@ export const registerToolCallRecordingTools = () => {
   // tool call recording — begin/end gated by "tool-call-recording" feature flag; status always available.
   ToolRegistry.register(
     "recordToolCalls",
-    "Record MCP tool calls to a YAML plan: action begin, end (returns the plan), or status.",
+    "Record MCP tool calls to a YAML plan: action begin, end (returns the plan; exportPlan also ends it), or status.",
     recordToolCallsSchema,
     {
       handler: recordToolCallsTool,

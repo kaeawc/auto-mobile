@@ -185,13 +185,13 @@ export async function stopProvisionedAndroidAuto(
   deps: Pick<DeviceToolsDependencies, "androidAutoProjection">,
   device: BootedDevice,
   { deviceStopped = false }: { deviceStopped?: boolean } = {},
-): Promise<void> {
+): Promise<boolean> {
   if (device.platform !== "android") {
-    return;
+    return false;
   }
   const applier = deps.androidAutoProjection ?? existingDefaultAndroidAutoProjectionApplier();
   try {
-    await applier?.stopDesktopHeadUnit(device.deviceId, { deviceStopped });
+    return (await applier?.stopDesktopHeadUnit(device.deviceId, { deviceStopped })) ?? false;
   } catch (error) {
     // The contract says it never rejects; a broken fake or applier must not mask the caller's outcome.
     logger.warn(
@@ -199,4 +199,5 @@ export async function stopProvisionedAndroidAuto(
       error,
     );
   }
+  return false;
 }

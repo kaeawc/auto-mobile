@@ -713,6 +713,7 @@ describe("provisionDevice handler", () => {
       }
       async stopDesktopHeadUnit(deviceId: string) {
         this.events.push(`stop:${deviceId}`);
+        return false;
       }
       async resolveHeadUnitInputs(): Promise<never> {
         throw new Error("not used by provisionDevice");

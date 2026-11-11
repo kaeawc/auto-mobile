@@ -111,7 +111,8 @@ or release the device. The errors are the ones in the `provisionDevice` table ab
 | The Android Auto head unit is missing a DHU   | The message names the missing path. Install the DHU with `sdkmanager "extras;google;auto"`, or pass `androidAuto.headUnit.dhuPath`. |
 | Timed out starting the Android Auto head unit | Raise `timeoutMs` and call `startDevice` again. A DHU that connects after the timeout is stopped.                                   |
 
-`killDevice` on the phone stops its DHU. AutoMobile only ever stops a DHU it started itself.
+`killDevice` on the phone stops its DHU. The first `startDevice` after killing a projected phone is a
+cold boot (about 60 seconds). AutoMobile only ever stops a DHU it started itself.
 
 ## Setting up projection by hand
 

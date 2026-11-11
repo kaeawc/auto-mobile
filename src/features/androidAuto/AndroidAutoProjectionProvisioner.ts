@@ -224,41 +224,45 @@ export class AndroidAutoProjectionProvisioner {
    * SIGTERM-then-SIGKILL stop, and forgets it so a later emulator that reuses the serial starts
    * its own. Does nothing when this provisioner never spawned one for `deviceId`. Never rejects:
    * a DHU that will not exit stays tracked (it still holds host port 5277) but is never reused.
+   * Returns true only after an owned DHU stopped successfully.
    * `deviceStopped` also forgets the host port redirect, which ended with that emulator.
    */
   async stopDesktopHeadUnit(
     deviceId: string,
     { deviceStopped = false }: { deviceStopped?: boolean } = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (deviceStopped && this.redirectOwner === deviceId) {
       this.redirectOwner = null;
     }
     const session = this.sessions.get(deviceId);
     if (session) {
-      await this.stopTrackedSession(
+      return await this.stopTrackedSession(
         deviceId,
         session,
         deviceStopped ? "stopped device" : "failed provisioning",
       );
     }
+    return false;
   }
 
   private async stopTrackedSession(
     deviceId: string,
     session: DesktopHeadUnitSession,
     context: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await session.stop();
       if (this.sessions.get(deviceId) === session) {
         this.sessions.delete(deviceId);
       }
+      return true;
     } catch (stopError) {
       this.retired.add(session);
       logger.warn(
         `[AndroidAuto] ${context} ${deviceId} could not stop its Desktop Head Unit; it stays tracked: ${errorMessage(stopError)}`,
         stopError,
       );
+      return false;
     }
   }
 

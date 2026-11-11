@@ -32,7 +32,10 @@ function setup() {
     createShell: () => adb,
     timer,
     repository: { recordAudit: async (record) => void records.push(record) },
-    resolveDeviceSessionUuid: (deviceId) => (deviceId === "emulator-5554" ? "epoch-1" : null),
+    // The device's epoch retires once the launches have run, as when it is
+    // removed during a settle delay: the run keeps the epoch that produced it.
+    resolveDeviceSessionUuid: (deviceId) =>
+      deviceId === "emulator-5554" && adb.getExecutedCommands().length === 0 ? "epoch-1" : null,
   });
   return { handler, records };
 }

@@ -117,6 +117,9 @@ export const createMeasureStartupHandler =
     if (device.platform !== "android") {
       throw new ActionableError("measureStartup is only supported on Android.");
     }
+    // The epoch that produces the samples, read before the launches: a removal or
+    // reincarnation during the settle delays must not re-attribute this run.
+    const deviceSessionUuid = deps.resolveDeviceSessionUuid(device.deviceId);
     const measurement = new AndroidStartupMeasurement(deps.createShell(device), deps.timer);
     const result = await measurement.measure(
       {
@@ -133,7 +136,7 @@ export const createMeasureStartupHandler =
     await recordStartupResult(deps.repository, device, result, {
       timer: deps.timer,
       sessionUuid: args.sessionUuid,
-      deviceSessionUuid: deps.resolveDeviceSessionUuid(device.deviceId),
+      deviceSessionUuid,
     });
     const ttfd = result.ttfd ? `, TTFD p50 ${result.ttfd.p50} ms` : "";
     return createStructuredToolResponse({

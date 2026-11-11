@@ -904,6 +904,10 @@ export class PerformanceAudit {
     } = options;
     logger.info(`[PerformanceAudit] Running audit for ${packageName}`);
 
+    // The epoch the metrics are collected on, read before collection so a
+    // reincarnation mid-audit cannot re-attribute this run (#17030).
+    const deviceSessionUuid = currentDeviceSessionUuid(this.device.deviceId);
+
     // Get device capabilities
     const deviceCapabilities = await this.capabilitiesDetector.getCapabilities();
 
@@ -943,7 +947,7 @@ export class PerformanceAudit {
         touchLatencyMs: metrics.touchLatencyMs,
       },
       diagnostics,
-      deviceSessionUuid: currentDeviceSessionUuid(this.device.deviceId),
+      deviceSessionUuid,
     });
 
     return {

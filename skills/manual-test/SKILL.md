@@ -344,7 +344,8 @@ tool's `success`.
 Every round adds these Android lanes on top of the phone lanes. They count
 against the 2 Android budget: run them on one of the two Android slots in turn
 (shut the first down through `killDevice` before booting the next), never as
-extra concurrent emulators. Each lane starts from a freshly created AVD you own,
+extra concurrent emulators. Acquire and release the slot with `device-slot.sh`
+for each lane. Each lane starts from a freshly created AVD you own,
 pinned to an explicit non-5554 console port. Record per lane the image, the
 `adb -s <id> emu avd name` correlation and the observed fields below; a lane
 whose image is not installed is reported SKIPPED with the `sdkmanager` line, not
@@ -354,8 +355,9 @@ silently dropped. AutoMobile never downloads images.
 (x86_64 on Intel hosts), profile `xr_headset_device`, created with
 `startDevice { platform: "android", formFactor: "xr-headset", createIfMissing: true }`.
 
-- Install the CtrlProxy debug APK built at the pinned SHA (see Phase 1), never the
-  released APK: the released APK reports Settings rows as hidden on this image, so a
+- Install the CtrlProxy debug APK built at the pinned SHA (see Phase 1) by setting
+  `AUTOMOBILE_CTRL_PROXY_APK_PATH` to it on the private daemon, never the
+  released APK (the daemon reinstalls the released one otherwise): the released APK reports Settings rows as hidden on this image, so a
   Settings sweep on it is a false FAIL.
 - Do not use `medium_phone` or any phone AVD as an XR stand-in: it gives misleading
   results for panel size, density and input.
@@ -367,8 +369,8 @@ silently dropped. AutoMobile never downloads images.
 
 **Glasses (every round where an image is installed).** Image
 `system-images;android-36;ai-glasses;arm64-v8a`, profile `ai_glasses_device`,
-`formFactor: "xr-glasses"`. Boot it next to the headset's slot only after the
-headset is down. The pairing flow with a phone emulator is tracked separately;
+`formFactor: "xr-glasses"`. Boot it in the same Android slot, after the headset
+is down. The pairing flow with a phone emulator is tracked separately;
 until it lands, exercise the glasses standalone.
 
 - Checklist: lifecycle as above; install and launch; `observe` returns a
@@ -520,17 +522,18 @@ subprocesses, fewer round trips and less waiting — not just correctness.
    `android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk`.
 4. **iOS runner — rebuild if any `ios/control-proxy/**` changed:**
    `scripts/ios/ctrl-proxy-build-for-testing.sh` → `/tmp/automobile-ctrl-proxy/Build/Products`.
+5. **Playground SDK app — only if testing SDK features.** Use the **standard**
+   Gradle output `android/playground/app/build/outputs/apk/debug/app-debug.apk`.
+   Do NOT use `android/build/grit/**` or `android/build/gojvm/**` variants — they
+   are incomplete (missing `androidx.startup` resources) and crash on launch with
+   `NoClassDefFoundError: androidx.startup.R$string`.
 
 **Build once per SHA.** Build the CtrlProxy debug APK and the iOS runner a single
-time, before any device lane starts, into one shared read-only scratch directory
+time, before any device lane starts, into one shared scratch directory
 keyed by the pinned SHA (set a private `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`
 under it for the runner). Every lane installs from that directory; a lane never
-rebuilds, and none writes to it after the build. Boots are staggered through
-`boot-gate`, not started together. 5. **Playground SDK app — only if testing SDK features.** Use the **standard**
-Gradle output `android/playground/app/build/outputs/apk/debug/app-debug.apk`.
-Do NOT use `android/build/grit/**` or `android/build/gojvm/**` variants — they
-are incomplete (missing `androidx.startup` resources) and crash on launch with
-`NoClassDefFoundError: androidx.startup.R$string`.
+rebuilds, and none writes to it after the build (by convention; nothing enforces
+it). Boots are staggered through `boot-gate`, not started together.
 
 ## Phase 2 — Restart the daemon with the right flags
 

@@ -159,6 +159,12 @@ active. The result includes `Current Driving State`: driving must remain MOVING 
 parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/night override and checks
 the effective UI night mode. A state that cannot be confirmed returns `unsupported`.
 
+While driving, `launchApp` of an activity that is not distraction optimized fails right away with an
+error containing `blocked_by_driving_restrictions`, the activity's name and the car's blocking activity
+(`com.android.systemui.car.activity.ActivityBlockingActivity`). Park with
+`{ "deviceCondition": { "vehicle": { "motion": "parked" } } }` and launch again, or launch an activity
+declared `distractionOptimized`.
+
 When you `unset`, call `reset`, release the session or the lease expires, motion returns to the values
 before the first change and night mode returns to automatic sensor control without preserving a prior
 manual override. Motion reset can take about ten seconds while the last speed events expire. Phones,

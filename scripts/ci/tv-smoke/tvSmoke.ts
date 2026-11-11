@@ -23,9 +23,9 @@ export const TV_FIXTURE = {
   featuredRow: "Featured",
   moviesRow: "Movies",
   showsRow: "Shows",
-  focusTarget: "Featured 06",
-  focusTargetStatus: "Focused: Featured 06",
-  selectedStatus: "Selected Featured 06",
+  focusTarget: "Movies 03",
+  focusTargetStatus: "Focused: Movies 03",
+  selectedDetail: "Detail for Movies 03",
 } as const;
 
 const START_TIMEOUT_MS = 600_000;
@@ -175,8 +175,8 @@ export function buildTvSmokePlan(options: TvSmokePlanOptions = {}): SmokeStep[] 
     ),
     observeStep(
       "observe-selected-card",
-      `the fixture reports ${TV_FIXTURE.selectedStatus}`,
-      expectText(appId, TV_FIXTURE.selectedStatus),
+      `the detail screen shows ${TV_FIXTURE.selectedDetail}`,
+      expectText(appId, TV_FIXTURE.selectedDetail),
     ),
     step("back", "pressButton", { button: "back" }, "back is delivered"),
     step("home", "pressButton", { button: "home" }, "home is delivered"),

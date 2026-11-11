@@ -268,7 +268,8 @@ fullscreen, because the goldens draw the root and theme without the window's pla
 `webIosParityCases.ts` reuses the Android parity specs and content-only transforms, with a
 reasoned skip list for content-sized floating captures and host chrome. The standalone viewer
 recorder, `bash scripts/ios/prototype-record-goldens.sh <simulator-udid>`, requires an already
-booted iPhone 16 and the app built by `scripts/ios/prototype-viewer-build.sh`. It installs a fresh
+booted iPhone 16 on iOS 27.0 (24A434), the golden runtime, so re-records stay comparable, and the
+app built by `scripts/ios/prototype-viewer-build.sh`. It installs a fresh
 viewer per case, loads the emitted spec through `Documents/prototype/`, and sets light or dark
 appearance before launch. It launches the viewer with `--automobile-prototype-recording`, which
 turns all motion off as `motion: "none"` does (indeterminate progress draws one fixed frame, and

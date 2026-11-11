@@ -4,7 +4,11 @@ import { DeviceLockState } from "./DeviceLockState";
 import { ScreenSize } from "./ScreenSize";
 import { SystemInsets } from "./SystemInsets";
 import { ActiveWindowInfo } from "./ActiveWindowInfo";
-import { ViewHierarchyResult, type HierarchyUnavailableReason } from "./ViewHierarchyResult";
+import {
+  ViewHierarchyResult,
+  type CtrlProxyIncompleteReason,
+  type HierarchyUnavailableReason,
+} from "./ViewHierarchyResult";
 import type { TimingData } from "./TimingData";
 import { GfxMetrics } from "./GfxMetrics";
 import { PerfSnapshot } from "./PerfSnapshot";
@@ -368,6 +372,19 @@ export type ObserveResult = {
   windowTruncations?: Array<{ windowId: number; package?: string; reasons: string[] }>;
 
   /**
+   * CtrlProxy's incomplete-capture flag, lifted from `viewHierarchy` on skeleton/diff
+   * output so dropping the tree does not drop it (#17817). Present only when the
+   * capture was reported incomplete — e.g. a guarded window read was skipped, so a
+   * shade, IME or dialog root may be missing even when the app window was read.
+   */
+  captureIncomplete?: {
+    ctrlProxyIncomplete: true;
+    reason?: CtrlProxyIncompleteReason;
+    skippedWindowReads?: number;
+    skippedWindowIds?: number[];
+  };
+
+  /**
    * Interactable Skeleton Projection (issue #4388): a flat, actionable-only
    * summary emitted in place of `viewHierarchy` / `elements`. The `"skeleton"`
    * projection is now the default; it is absent only when a caller opts out with
@@ -692,6 +709,7 @@ export type DisplayObservation = Pick<ObserveResult, "display" | "screenSize"> &
     | "keyboard"
     | "truncationReasons"
     | "windowTruncations"
+    | "captureIncomplete"
     | "screenshotPath"
     | "screenshotExpiresAt"
     | "observeScope"

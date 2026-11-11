@@ -11,6 +11,7 @@ import { watchRunners } from "../watch/WatchRunnerRegistry";
 import { holderOf } from "../../daemon/deviceBinding";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
+import { isSkippedWindowReadReason } from "../../models/ViewHierarchyResult";
 import { requireAndroidOrIosPlatform } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -351,7 +352,9 @@ async function normalizeSyncedHierarchy(options: {
   }
   let hierarchy = normalizeSyncedAndroidHierarchy(syncClient, synced, timer);
   // UIAutomator supplementation writes a dump and can interfere with an owner action.
-  if (request.observerMode || !hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
+  // A skipped guarded read (#17817) was already bounded on-device, and quarantine
+  // skips that window again, so neither a retry nor a dump would recover it.
+  if (request.observerMode || !needsIncompleteRecovery(hierarchy) || timer.now() >= deadline) {
     return hierarchy;
   }
   // A window transition can briefly withhold roots. Give the answering service one
@@ -388,7 +391,7 @@ async function normalizeSyncedHierarchy(options: {
       logger.warn("[HierarchyCapture] Incomplete CtrlProxy hierarchy retry failed", error);
     }
   }
-  if (!hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
+  if (!needsIncompleteRecovery(hierarchy) || timer.now() >= deadline) {
     return hierarchy;
   }
   const supplemented = await supplementAndroidHierarchy(
@@ -404,6 +407,14 @@ async function normalizeSyncedHierarchy(options: {
   );
   recordAcquisitionTimestamp(supplemented, hierarchy.updatedAt);
   return supplemented;
+}
+
+/** Whether an incomplete capture is worth a retry and a uiautomator dump. */
+function needsIncompleteRecovery(hierarchy: ViewHierarchyResult): boolean {
+  return (
+    hierarchy.ctrlProxyIncomplete === true &&
+    !isSkippedWindowReadReason(hierarchy.ctrlProxyIncompleteReason)
+  );
 }
 
 /** The display a refused selected-display read may dump with `uiautomator dump --display`. */

@@ -132,6 +132,7 @@ export class ObservationDisplayRenderer {
         "keyboard",
         "truncationReasons",
         "windowTruncations",
+        "captureIncomplete",
         "screenshotPath",
         "screenshotExpiresAt",
         "observeScope",

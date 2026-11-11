@@ -27,6 +27,7 @@ import {
   elementSchema,
   viewHierarchyResultSchema,
   windowTruncationsSchema,
+  captureIncompleteSchema,
   skeletonElementSchema,
   observeElementsSchema,
 } from "./elements";
@@ -137,6 +138,7 @@ export const observationSummarySchema = z
           "cap trims only rendered `viewHierarchy` and is not lifted here.",
       ),
     windowTruncations: windowTruncationsSchema,
+    captureIncomplete: captureIncompleteSchema,
     settled: z
       .boolean()
       .optional()
@@ -343,6 +345,7 @@ export const observeDiffSchema = z
           "omit rows.",
       ),
     windowTruncations: windowTruncationsSchema,
+    captureIncomplete: captureIncompleteSchema,
     settled: z
       .boolean()
       .optional()
@@ -418,6 +421,7 @@ export const displayObservationSchema = z.object({
   keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
   truncationReasons: z.array(z.string()).optional(),
   windowTruncations: windowTruncationsSchema,
+  captureIncomplete: captureIncompleteSchema,
   screenshotPath: z.string().optional(),
   screenshotExpiresAt: z.number().optional(),
   observeScope: observeScopeMetadataSchema.optional(),
@@ -556,6 +560,7 @@ export const observeResultSchema = z
           "than that the current `skeleton`/`context` omit rows (issue #6933).",
       ),
     windowTruncations: windowTruncationsSchema,
+    captureIncomplete: captureIncompleteSchema,
     skeleton: z.array(skeletonElementSchema).optional(),
     context: z
       .array(skeletonElementSchema)

@@ -1592,6 +1592,34 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("a skipped overlay window read retracts freshness even when the focused app is readable (#17817)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      ctrlProxyIncomplete: true,
+      ctrlProxyIncompleteReason: "window_read_skipped",
+      skippedWindowReads: 1,
+      skippedWindowIds: [67],
+      sdkInt: 34,
+    });
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
+
+    const result = await makeScreen(viewHierarchy, fakeAdb).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("the focused application window was read");
+    expect(result.freshness?.warning).not.toContain("no root node");
+  });
+
   test("a transient app transition is not flagged: the confirming read settles onto the observed app", async () => {
     // The parallel foreground sample lags the newer captured hierarchy during an
     // A→B transition: sample1 = the old app, observed hierarchy = the new app.

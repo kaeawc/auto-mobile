@@ -33,6 +33,9 @@ constructor(
   val ctrlProxyIncomplete: Boolean? = null,
   /** Cause of an incomplete capture; omitted for complete captures and older services. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val ctrlProxyIncompleteReason: String? = null,
+  /** Distinct skipped roots plus one for a skipped listing; listing has no window ID. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val skippedWindowReads: Int? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val skippedWindowIds: List<Int>? = null,
   val error: String? = null, // For error cases like locked screen
   val screenWidth: Int? = null,
   val screenHeight: Int? = null,

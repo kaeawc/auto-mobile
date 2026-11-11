@@ -1,4 +1,5 @@
 import type { CtrlProxyIncompleteReason, ObserveResult } from "../../models";
+import { isSkippedWindowReadReason } from "../../models/ViewHierarchyResult";
 import { isStatusBarOnlyHierarchy } from "./WindowIdentityFreshness";
 import {
   SYSTEM_UI_WINDOW_PACKAGES,
@@ -169,6 +170,7 @@ export function describeIncompleteCapture(
       sdkInt: number | undefined;
       reason: CtrlProxyIncompleteReason | undefined;
       accessibilityTool: boolean | undefined;
+      foregroundRead?: true;
     }
   | undefined {
   if (hierarchy?.ctrlProxyIncomplete !== true) {
@@ -178,7 +180,13 @@ export function describeIncompleteCapture(
     return undefined;
   }
   const observed = hierarchy.packageName;
-  if (foreground !== undefined && observed !== undefined && observed === foreground) {
+  const reason = hierarchy.ctrlProxyIncompleteReason;
+  const foregroundRead =
+    foreground !== undefined && observed !== undefined && observed === foreground;
+  // A skipped guarded read (#17817) names a window OTHER than the one read, so a
+  // readable foreground app does not account for it: a shade, IME or dialog root
+  // over the app may be missing, and that must still reach the verdict.
+  if (foregroundRead && !isSkippedWindowReadReason(reason)) {
     return undefined;
   }
   // `ctrlProxyIncompleteReason` names the actual cause so the freshness warning can
@@ -186,8 +194,9 @@ export function describeIncompleteCapture(
   // freshness layer treats an absent reason as the historical `null_root` default.
   return {
     sdkInt: hierarchy.sdkInt,
-    reason: hierarchy.ctrlProxyIncompleteReason,
+    reason,
     accessibilityTool: hierarchy.accessibilityTool,
+    ...(foregroundRead ? { foregroundRead: true as const } : {}),
   };
 }
 

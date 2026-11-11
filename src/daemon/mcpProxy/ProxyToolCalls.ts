@@ -3,6 +3,7 @@ import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { getRemovedToolHint } from "../../utils/removedTools";
+import { formatUnknownToolMessage } from "../../utils/unknownToolMessage";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -436,7 +437,7 @@ export class ProxyToolCalls {
         return Object.assign(new Error(daemonRejection), { code: DAEMON_TOOL_UNAVAILABLE_CODE });
       }
       const hint = getRemovedToolHint(name);
-      return new Error(`Unknown tool "${name}".${hint ? ` ${hint}` : ""}`);
+      return new Error(hint ? `Unknown tool "${name}". ${hint}` : this.unknownToolMessage(name));
     }
     return new DaemonToolUnavailableError({
       toolName: name,
@@ -450,6 +451,25 @@ export class ProxyToolCalls {
       daemonRejection,
       gated: daemonGated,
     });
+  }
+
+  /** Says the tool does not exist and points at close registered names or an observe field. */
+  private unknownToolMessage(name: string): string {
+    const definitions = [
+      ...(this.runtime.discovery.tools ?? []),
+      ...this.runtime.staticToolDefinitionsProvider(),
+    ];
+    const observeProperties = definitions.find((definition) => definition.name === "observe")
+      ?.outputSchema?.properties;
+    const observeFields =
+      observeProperties !== null && typeof observeProperties === "object"
+        ? Object.keys(observeProperties)
+        : [];
+    return formatUnknownToolMessage(
+      name,
+      definitions.map((definition) => definition.name),
+      observeFields,
+    );
   }
 
   frontendRegistersTool(name: string): boolean {

@@ -299,3 +299,112 @@ test("a higher-layer dialog from another package wins over the Settings search b
     select(true, undefined, { ...tree, windows: capture.viewHierarchy.windows! })?.bounds,
   ).toEqual(searchBar);
 });
+
+test.each([
+  ["beside Settings", { left: 800, top: 48, right: 1800, bottom: 1328 }, false],
+  ["over Settings", { left: 0, top: 48, right: 744, bottom: 1328 }, true],
+] as const)("another app's panel %s wins only when it overlaps", (_name, bounds, wins) => {
+  const searchBar = { left: 48, top: 60, right: 568, bottom: 164 };
+  const app = capture.viewHierarchy.windows!.find((window) => window.id === 38)!;
+  const control = {
+    ...settingsControl("Chrome", 600),
+    "resource-id": "com.android.chrome:id/url_bar",
+  };
+  const panel = {
+    ...app,
+    id: 92,
+    windowLayer: 1,
+    packageName: "com.android.chrome",
+    bounds,
+    hierarchy: control,
+  };
+  const tree = {
+    ...capture.viewHierarchy,
+    hierarchy: {},
+    windows: [panel, ...capture.viewHierarchy.windows!],
+  };
+  const selected = select(true, undefined, tree);
+  if (wins) {
+    expect(selected?.["resource-id"]).toBe(control["resource-id"]);
+  } else {
+    expect(selected?.bounds).toEqual(searchBar);
+  }
+});
+
+test.each([
+  ["IME", 2, false],
+  ["application", 1, true],
+] as const)("a package-less %s window ranks as a foreign window", (_name, type, wins) => {
+  const searchBar = { left: 48, top: 60, right: 568, bottom: 164 };
+  const app = capture.viewHierarchy.windows!.find((window) => window.id === 38)!;
+  const key = { ...settingsControl("q", 600), "resource-id": "" };
+  const window = { ...app, id: 93, type, windowLayer: 1, hierarchy: key };
+  delete window.packageName;
+  const tree = {
+    ...capture.viewHierarchy,
+    hierarchy: {},
+    windows: [window, ...capture.viewHierarchy.windows!],
+  };
+  const selected = select(true, undefined, tree);
+  if (wins) {
+    expect(selected?.text).toBe("q");
+  } else {
+    expect(selected?.bounds).toEqual(searchBar);
+  }
+});
+
+test("XR leaf fallback may promote to a nested selector's outer container when it is the row", () => {
+  const tree = linkedCapture(100, 300);
+  const selected = select(true, { text: "Header", container: { text: "fragment_root" } }, tree);
+  expect(selected?.text).toBe("fragment_root");
+  expect(selected?.bounds).toEqual({ left: 0, top: 300, right: 744, bottom: 400 });
+});
+
+test("tapAny asks the XR verdict for a capture without hidden SystemUI chrome", async () => {
+  const ime: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/android-xr/observe-settings-search-ime-up-screensize-17881.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const detector = new FakeAndroidXrDetector(true);
+  const taps: number[] = [];
+  const action = new TapAnyElement(
+    { name: "fake", platform: "android", deviceId: "fake-xr-no-chrome" },
+    new FakeAdbClient(),
+    {
+      timer,
+      xrDetector: detector,
+      elementSelector: selector,
+      accessibilityDetector: new FakeAccessibilityDetector(),
+      // The fake tapper never routes, so every detector query comes from selection.
+      androidTapper: {
+        executeAndroidTap: async (_action, { x }) => {
+          taps.push(x);
+        },
+        retryAndroidTapIfNoChange: async () => {},
+      },
+    },
+  );
+  action.observedInteraction = runBlockWith(() =>
+    recordObservationRead(
+      buildObserveResult({
+        viewHierarchy: ime.viewHierarchy,
+        screenSize: { width: 2560, height: 2558 },
+        updatedAt: 0,
+        systemInsets: { top: 0, left: 0, right: 0, bottom: 0 },
+      }),
+    ),
+  );
+  action.testHooks.setRefreshViewHierarchy(async () => null);
+  const result = await action.execute({ action: "tap" });
+  expect(result.success).toBe(true);
+  expect(result.element?.["content-desc"]).toBe("Navigate up");
+  expect(taps).toHaveLength(1);
+  expect(detector.queries).toEqual(["fake-xr-no-chrome"]);
+});

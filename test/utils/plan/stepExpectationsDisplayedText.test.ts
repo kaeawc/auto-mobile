@@ -215,3 +215,70 @@ describe("textEquals / textContains expectations compare the displayed text (#16
     ).toBe(false);
   });
 });
+
+// Displayed exact matching is case-sensitive, like `for: "textEquals"` (#17944).
+describe("displayed-text exact matching is case-sensitive (#17944)", () => {
+  test.each(selectors)("textEquals by %s fails on a case-only difference", (_, selector) => {
+    expect(holds({ type: "textEquals", selector, text: "Ready" }, counter("ready"))).toBe(false);
+    expect(holds({ type: "textEquals", selector, text: "READY" }, counter("Ready"))).toBe(false);
+    expect(holds({ type: "textEquals", selector, text: "Ready" }, counter("Ready"))).toBe(true);
+  });
+
+  test("textEquals without a selector fails on a case-only difference", () => {
+    expect(holds({ type: "textEquals", text: "Ready" }, counter("ready"))).toBe(false);
+  });
+
+  test("textEquals still folds smart quotes", () => {
+    expect(holds({ type: "textEquals", text: "It's on" }, counter("It’s on"))).toBe(true);
+    expect(holds({ type: "textEquals", text: "it's on" }, counter("It’s on"))).toBe(false);
+  });
+
+  test("textContains still ignores case", () => {
+    expect(holds({ type: "textContains", text: "rea" }, counter("Ready now"))).toBe(true);
+  });
+});
+
+// A content description must not pick the implicit exact tier and hide a displayed contains match.
+describe("an implicit displayed-text wait falls back to contains", () => {
+  function twoNodes(): ViewHierarchyResult {
+    const node = (text: string, top: number, contentDescription?: string) => ({
+      $: {
+        class: "android.widget.TextView",
+        text,
+        ...(contentDescription === undefined ? {} : { "content-desc": contentDescription }),
+        bounds: { left: 20, top, right: 220, bottom: top + 60 },
+      },
+    });
+    return {
+      hierarchy: {
+        node: {
+          $: { bounds: { left: 0, top: 0, right: 400, bottom: 800 } },
+          node: [node("Ready now", 100), node("Wrong", 200, "Ready")],
+        },
+      },
+      screenWidth: 400,
+      screenHeight: 800,
+    };
+  }
+
+  test("a description-only exact match does not hide the displayed contains match", () => {
+    const hierarchy = twoNodes();
+    const result = evaluateWaitForObservation(
+      new ElementResolver(),
+      waitForSchema.parse({ text: "Ready", textSource: "displayed" }),
+      createObserveResultForTest({
+        screenSize,
+        viewHierarchy: hierarchy,
+        elements: new ObserveElementsBuilder().build(hierarchy, "android"),
+      }),
+      {
+        devicePlatform: "android",
+        displayInventory: "single",
+        modes: new Map<string, MatchMode>(),
+        iosMultiPanel: false,
+      },
+    );
+    expect(result.matched).toBe(true);
+    expect(result.awaitedElement?.text).toBe("Ready now");
+  });
+});

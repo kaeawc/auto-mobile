@@ -36,7 +36,7 @@ export interface GetLogsRequest {
   maxLines?: number;
 }
 
-/** A returned line; iOS, watchOS and tvOS unified-log lines carry only a timestamp and the text. */
+/** A returned line; Apple unified-log lines carry only a timestamp and the text. */
 export type GetLogsLine = Partial<Omit<LogLine, "message" | "timestamp">> & {
   timestamp: string;
   message: string;
@@ -207,13 +207,10 @@ export class GetLogs {
     );
     const maxLines = Math.min(request.maxLines ?? GET_LOGS_DEFAULT_MAX_LINES, GET_LOGS_MAX_LINES);
     const minPriority = request.minPriority ?? "V";
-    if (device.platform === "ios" || device.platform === "watchos" || device.platform === "tvos") {
+    if (device.platform !== "android") {
+      // Every Apple simulator reads its unified log; none falls through to logcat.
       const window = { platform: device.platform, sinceSeconds, maxLines, minPriority };
       return this.ios(request, window, warnings, signal);
-    }
-    if (device.platform !== "android") {
-      // A platform without a log path never falls through to logcat (docs/decisions/watchos-platform.md).
-      throw new ActionableError(`getLogs does not support platform ${device.platform}.`);
     }
     const result = await this.deps.android().read(
       {
@@ -242,7 +239,7 @@ export class GetLogs {
 
   private async ios(
     request: GetLogsRequest,
-    window: GetLogsWindow & { platform: "ios" | "watchos" | "tvos" },
+    window: GetLogsWindow & { platform: Exclude<BootedDevice["platform"], "android"> },
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {

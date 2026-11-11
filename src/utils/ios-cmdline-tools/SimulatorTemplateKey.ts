@@ -6,6 +6,8 @@ export interface SimulatorTemplateKey {
   xcodeBuild: string;
   deviceType: string;
   profile: PrebootLeanProfileName;
+  /** Present only when the template carries the apsd level-off plist, so flag-off clones never inherit it. */
+  apsdLogSuppressed?: true;
 }
 export const TEMPLATE_CLONE_DEFAULT_ENABLED = false;
 export function resolveTemplateCloneEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -21,7 +23,15 @@ export function resolveTemplateCloneEnabled(env: NodeJS.ProcessEnv): boolean {
 export function templateKeyHash(key: SimulatorTemplateKey): string {
   return createHash("sha256")
     .update(
-      JSON.stringify([key.runtime, key.runtimeBuild, key.xcodeBuild, key.deviceType, key.profile]),
+      JSON.stringify([
+        key.runtime,
+        key.runtimeBuild,
+        key.xcodeBuild,
+        key.deviceType,
+        key.profile,
+        // Appended only when set, so existing unsuppressed templates keep their names.
+        ...(key.apsdLogSuppressed ? ["apsdLogSuppressed"] : []),
+      ]),
     )
     .digest("hex")
     .slice(0, 8);

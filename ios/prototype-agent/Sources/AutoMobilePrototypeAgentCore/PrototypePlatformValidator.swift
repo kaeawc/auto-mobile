@@ -519,6 +519,9 @@ enum PrototypePlatformValidator {
 
     // MARK: call
 
+    /// `settings.open` pages iOS can open; the contract's other pages are Android only (#16520).
+    static let iosSettingsPages: Set<String> = ["app", "notifications"]
+
     private static func validateCall(
         _ action: [String: JSONValue], path: String, declared: Declared, state: [String: JSONValue],
         userGesture: Bool
@@ -578,6 +581,12 @@ enum PrototypePlatformValidator {
         try PrototypeMedia.call(action, path: path, players: declared.players)
         try PrototypeCameraPreview.call(action, path: path, previews: declared.previews)
         try PrototypeWebView.call(action, path: path, webViews: declared.webViews)
+        if call == "settings.open", case let .object(form)? = args["page"],
+           case let .string(page)? = form["value"], !iosSettingsPages.contains(page)
+        {
+            // The iOS agent only opens these pages (#16616); the host refuses the others at the same path.
+            throw fail(path, "settings.open page \"\(page)\" is Android only; on iOS use \"app\" or \"notifications\"")
+        }
         if call == "permissions.request" {
             try requestedPermissions(args, path: path, declared: declared.permissions)
         }

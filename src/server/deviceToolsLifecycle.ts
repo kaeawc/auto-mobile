@@ -1,6 +1,6 @@
 import { deleteAppleVisionDevice } from "./deviceToolsAppleVisionDelete";
 import { deleteAppleTvDevice } from "./deviceToolsAppleTvDelete";
-import { flushPendingImeRestoreBeforeTool } from "./pipeline/deviceCallDispatch";
+import { flushPendingImeRestoreBeforeDeviceEnd } from "./pipeline/deviceCallDispatch";
 import { pendingImeRestores } from "../features/action/sendkeys/PendingImeRestore";
 import type { DeleteDeviceOptions } from "../features/deviceLifecycle/teardown/teardownContracts";
 import type { RestartStopIdentity } from "../daemon/devicePool";
@@ -798,7 +798,8 @@ async function stopDevice(
   const stopIdentity = await assertKillDeviceCaller(args, deps, deadlineMs, requestAbortSignal);
   if (args.device.platform === "android") {
     // Only an admitted caller restores the target's keyboard; a refused one leaves it pending (#16579).
-    await flushPendingImeRestoreBeforeTool(
+    // Best effort: a failed restore must not stop the kill (#17879).
+    await flushPendingImeRestoreBeforeDeviceEnd(
       args.device.deviceId,
       deps.pendingImeRestores ?? pendingImeRestores,
     );

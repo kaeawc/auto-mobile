@@ -3,7 +3,11 @@ import { pendingImeRestores } from "../../src/features/action/sendkeys/PendingIm
 import { FakeLogger } from "../fakes/FakeLogger";
 import { expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { sessionDisplayPinnedHandler } from "../../src/server/pipeline/deviceCallDispatch";
+import {
+  flushPendingImeRestoreBeforeDeviceEnd,
+  flushPendingImeRestoreBeforeTool,
+  sessionDisplayPinnedHandler,
+} from "../../src/server/pipeline/deviceCallDispatch";
 import { createKeyboardHandler } from "../../src/server/interactionToolHandlers";
 import { withInstalledImeRestore } from "../../src/server/keyboardInstalledImeRestore";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -135,4 +139,27 @@ test("an iOS keyboard IME action leaves Android restoration pending", async () =
   expect(result).toBeDefined();
   expect(registry.flushes).toEqual([]);
   expect(events).toEqual([]);
+});
+
+// A device-ending tool continues past a failed restore; a keyboard-acting tool still refuses (#17879).
+test("a device-ending flush logs a rejected restore at warn and continues", async () => {
+  const registry = new FakePendingImeRestoreRegistry();
+  registry.error = new Error("ime list timed out");
+  const log = new FakeLogger();
+  await flushPendingImeRestoreBeforeDeviceEnd(device.deviceId, registry, log);
+  expect(registry.flushes).toEqual([device.deviceId]);
+  const warnings = log.messages.filter((m) => m.level === "warn");
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0].message).toContain(device.deviceId);
+  expect(warnings[0].message).toContain("ime list timed out");
+});
+
+test("a keyboard-acting flush still throws an ActionableError for a rejected restore", async () => {
+  const registry = new FakePendingImeRestoreRegistry();
+  registry.error = new Error("ime list timed out");
+  const failure = await flushPendingImeRestoreBeforeTool(device.deviceId, registry).catch(
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(ActionableError);
+  expect(String(failure)).toContain("ime list timed out");
 });

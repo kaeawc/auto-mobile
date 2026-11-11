@@ -9,6 +9,7 @@ import type { AndroidAutoPhone } from "./AndroidAutoPhone";
 import type { AndroidAutoSettingsUi } from "./AndroidAutoSettingsUi";
 import type { AndroidAutoSignerCheck } from "./AndroidAutoSignerCheck";
 import type {
+  DesktopHeadUnitConsole,
   DesktopHeadUnitLauncher,
   DesktopHeadUnitSession,
   DhuLaunchOutcome,
@@ -82,6 +83,10 @@ export interface AndroidAutoProjectionProvisionerDeps {
   serverBindBackoff?: BackoffPolicy;
   /** Re-checks after the first one before the head unit server counts as not listening. */
   serverBindAttempts?: number;
+  /** Delay before each re-check that adb reports the phone as `device` rather than `offline`. */
+  adbOnlineBackoff?: BackoffPolicy;
+  /** Total delay between adb state checks before an offline phone fails the run. */
+  adbOnlineBudgetMs?: number;
 }
 
 /** 250, 500, 1000, 2000, 2000 ms: about 5.75 s for the server to bind before the step fails. */
@@ -90,6 +95,14 @@ export const DEFAULT_SERVER_BIND_BACKOFF = exponentialBackoff({
   maxDelayMs: 2_000,
 });
 export const DEFAULT_SERVER_BIND_ATTEMPTS = 5;
+
+/** 500 ms doubling to 4 s between checks, for up to 60 s of waiting in all (#17904). */
+export const DEFAULT_ADB_ONLINE_BACKOFF = exponentialBackoff({
+  initialDelayMs: 500,
+  maxDelayMs: 4_000,
+});
+export const DEFAULT_ADB_ONLINE_BUDGET_MS = 60_000;
+const ADB_ONLINE_STATE = "device";
 
 type Probe = (signal?: AbortSignal) => Promise<boolean>;
 
@@ -141,12 +154,33 @@ export class AndroidAutoProjectionProvisioner {
     return run;
   }
 
+  /**
+   * The console of the healthy DHU this provisioner runs for `deviceId`, for head-unit input
+   * (#17842). Undefined while that device is still being provisioned, when it has no DHU, or when
+   * its DHU is unhealthy or retired. The caller only writes commands: it never starts or stops
+   * the DHU, which stays owned here.
+   */
+  desktopHeadUnitConsole(deviceId: string): DesktopHeadUnitConsole | undefined {
+    if (this.inFlight?.deviceId === deviceId) {
+      return undefined;
+    }
+    const session = this.reusableSession(deviceId);
+    return session
+      ? {
+          sendCommand: (command) => session.sendCommand(command),
+          isRunning: () => session.isRunning(),
+        }
+      : undefined;
+  }
+
   private async runProvisioning(
     request: AndroidAutoProjectionRequest,
   ): Promise<AndroidAutoProjectionResult> {
     const device = this.deps.forDevice(request.deviceId);
     const { phone, ui } = device;
     const signal = request.signal;
+    // A just-booted emulator can still read `offline` to adb; every step below needs `device`.
+    await this.waitForAdbOnline(phone, request.deviceId, signal);
     const steps: AndroidAutoProvisioningStep[] = [await this.installAndroidAuto(device, request)];
     steps.push(
       await ensure(
@@ -321,6 +355,37 @@ export class AndroidAutoProjectionProvisioner {
       );
     }
     return { step: "head-unit-server", status: "applied" };
+  }
+
+  /**
+   * Polls `adb get-state` on a bounded backoff until the phone is `device`. Runs before any
+   * step, so a phone that stays offline fails having changed nothing. The request's signal (the
+   * provision deadline) still cuts the wait short.
+   */
+  private async waitForAdbOnline(
+    phone: AndroidAutoPhone,
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const backoff = this.deps.adbOnlineBackoff ?? DEFAULT_ADB_ONLINE_BACKOFF;
+    const budgetMs = this.deps.adbOnlineBudgetMs ?? DEFAULT_ADB_ONLINE_BUDGET_MS;
+    let waitedMs = 0;
+    for (let attempt = 1; ; attempt++) {
+      signal?.throwIfAborted();
+      const state = await phone.adbState(signal);
+      if (state === ADB_ONLINE_STATE) {
+        return;
+      }
+      const delayMs = Math.min(backoff.delayForAttempt(attempt), budgetMs - waitedMs);
+      if (delayMs <= 0) {
+        throw new ActionableError(
+          `adb still reports ${deviceId} as not ready (${state}) after ${Math.round(waitedMs / 1000)} s, so Android Auto provisioning changed nothing on it. Wait until \`adb -s ${deviceId} get-state\` prints device (restart adb with \`adb kill-server\` if it stays offline), then retry.`,
+        );
+      }
+      logger.debug(`[AndroidAuto] ${deviceId} adb state is ${state}; re-checking in ${delayMs} ms`);
+      await this.deps.timer.sleep(delayMs);
+      waitedMs += delayMs;
+    }
   }
 
   /** The server binds tcp:5277 some time after the menu tap, so poll on a bounded backoff. */

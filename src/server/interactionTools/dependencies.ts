@@ -27,6 +27,7 @@ import type { PendingImeRestoreRegistry } from "../../features/action/sendkeys/P
 import type { KeyboardProfileRestoreRegistry } from "../../features/utility/KeyboardProfileRestore";
 import type { SessionKeyboardProfileHost } from "../sessionKeyboardProfile";
 import type { ProgressCallback } from "../toolRegistry";
+import type { HeadUnitInteractionFactory } from "./headUnitHandlers";
 
 export interface SendKeysRunnerCommandSource {
   getSupportedCommands(): Promise<string[] | null>;
@@ -72,6 +73,8 @@ export interface InteractionToolDependencies {
   dragAndDropFactory?: (device: BootedDevice) => DragAndDropLike;
   selectAllTextFactory?: (device: BootedDevice) => SelectAllTextLike;
   pressButtonFactory?: (device: BootedDevice) => PressButtonLike;
+  /** tapAt and pressButton with display "headUnit" (#17842): the daemon's DHU and projected templates. */
+  headUnitInteractionFactory?: HeadUnitInteractionFactory;
   rotateFactory?: (device: BootedDevice, options?: RotateOptions) => RotateLike;
   setPostureFactory?: (device: BootedDevice) => SetPostureLike;
   keyboardFactory?: (device: BootedDevice) => Pick<Keyboard, "execute">;

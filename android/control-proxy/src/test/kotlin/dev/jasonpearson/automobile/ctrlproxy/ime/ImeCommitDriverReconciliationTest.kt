@@ -9,6 +9,72 @@ import org.junit.Test
 
 internal class ImeCommitDriverReconciliationTest : ImeCommitDriverFixtures() {
   @Test
+  fun `transformed trailing punctuation after restart succeeds without resend`() {
+    for ((text, delta) in
+      listOf("ok..." to "ok…", "hello\"" to "hello”", "hi :)" to "hi 🙂", "a--" to "a—")) {
+      assertEquals(
+        text,
+        ImeCommitDriver.Reconciliation.Succeed(delta),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(true, true, "", delta, text.map { it.toString() }),
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `formatting extras confirm captured phone prefixes and complete delta`() {
+    val units = "5125550142".map { it.toString() }
+    for ((delta, count) in listOf(" 512-5" to 4, " 512-555-0" to 7, " 512-555-0142" to 10)) {
+      assertEquals(
+        if (count == 10) ImeCommitDriver.Reconciliation.Succeed(delta)
+        else ImeCommitDriver.Reconciliation.Resume(count),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(true, true, "+1", "+1" + delta, units),
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `formatting confirmation accepts trailing separators and keeps exact editing units`() {
+    assertEquals(
+      ImeCommitDriver.Reconciliation.Resume(4),
+      ImeCommitDriver.reconcileDecision(
+        ImeReconciliationState(true, true, "+1", "+1 512-5 - ", "5125550142".map { it.toString() }),
+      ),
+    )
+    // An exact formatting unit remains confirmed rather than being skipped by the fallback.
+    assertEquals(
+      ImeCommitDriver.Reconciliation.Resume(1),
+      ImeCommitDriver.reconcileDecision(
+        ImeReconciliationState(true, true, "", " ", listOf(" ", "5")),
+      ),
+    )
+    assertEquals(
+      ImeCommitDriver.Reconciliation.Resume(1),
+      ImeCommitDriver.reconcileDecision(
+        ImeReconciliationState(true, true, "", " e\u0301-", listOf("e\u0301", "5")),
+      ),
+    )
+  }
+
+  @Test
+  fun `formatting confirmation rejects extra letters numbers and combining marks`() {
+    val units = "5125550142".map { it.toString() }
+    // Boundary perturbations, not additional device captures.
+    for (extra in listOf("a", "9", "\u0301", "\u2160", "\u00b2", "𝟡")) {
+      val delta = " 512-5" + extra
+      assertEquals(
+        ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", delta),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(false, false, "+1", "+1" + delta, units),
+        ),
+      )
+    }
+  }
+
+  @Test
   fun `pure reconciliation distinguishes phase restart and visible prefix`() {
     val units = listOf("a", "b")
     for (postDispatch in listOf(false, true)) {

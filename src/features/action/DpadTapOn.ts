@@ -120,6 +120,16 @@ export function dpadTapOnTarget(request: DpadTapOnRequest): FocusNavigateTarget 
 }
 
 /**
+ * Whether `request` activates a semantic link (`selector.accessibilityLink` or owner-scoped
+ * `subtext`). The accessibility service invokes the span's click handler itself, so no touch is
+ * injected and the request works the same on a device without a touchscreen. tapOn's own
+ * validation keeps these requests to a plain tap with no touch-only option.
+ */
+export function usesNativeLinkActivation(request: DpadTapOnRequest): boolean {
+  return request.selector.accessibilityLink !== undefined || request.subtext !== undefined;
+}
+
+/**
  * Why a tapOn cannot run on a device without a touchscreen, and the D-pad form that can. A touch
  * tap there is a silent no-op (#17913), so the caller must refuse rather than inject one.
  */

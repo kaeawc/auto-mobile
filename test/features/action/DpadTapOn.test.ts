@@ -5,6 +5,7 @@ import {
   dpadTapOnRefusal,
   dpadTapOnTarget,
   dpadTapOnTouchOnlyParts,
+  usesNativeLinkActivation,
   type DpadSelectHolder,
   type DpadTapOnNavigator,
   type DpadTapOnRequest,
@@ -116,6 +117,14 @@ describe("dpadTapOnTouchOnlyParts (#17913)", () => {
     expect(dpadTapOnTouchOnlyParts({ selector: {} })).toEqual([
       "a selector without text or elementId",
     ]);
+  });
+
+  test("a semantic link activates natively, a plain selector does not", () => {
+    expect(usesNativeLinkActivation({ selector: { accessibilityLink: "Terms" } })).toBe(true);
+    expect(
+      usesNativeLinkActivation({ selector: { text: "Legal" }, subtext: { text: "Terms" } }),
+    ).toBe(true);
+    expect(usesNativeLinkActivation({ selector: { text: "Legal" } })).toBe(false);
   });
 
   test("the refusal names the parts and the D-pad alternative", () => {

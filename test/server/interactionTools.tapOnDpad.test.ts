@@ -138,6 +138,21 @@ describe("tapOn keeps touching when", () => {
 
 describe("tapOn on a device without a touchscreen refuses a touch-only request (#17913)", () => {
   test.each([
+    ["selector.accessibilityLink", { selector: { accessibilityLink: "Terms" } }],
+    [
+      "owner-scoped subtext",
+      { selector: { elementId: "app:id/legal" }, subtext: { text: "Terms" } },
+    ],
+  ] as const)("still activates a semantic link natively: %s", async (_label, raw) => {
+    const { deps, fallback, touchTaps } = harness(false);
+    const response = await tapOnHandler(tv, args(raw), { deps });
+    expect(fallback.probes).toBe(0);
+    expect(fallback.taps).toEqual([]);
+    expect(touchTaps).toHaveLength(1);
+    expect(response.isError).toBeUndefined();
+  });
+
+  test.each([
     [{ selector: { text: "Play" }, sibling: true }, "sibling"],
     [{ selector: { text: "Remove" }, exactText: true }, "exactText"],
     [{ selector: { text: "Movies" }, index: 1 }, "index"],
@@ -147,6 +162,7 @@ describe("tapOn on a device without a touchscreen refuses a touch-only request (
     [{ selector: { text: "Movies" }, selectionStrategy: "random" }, 'selectionStrategy: "random"'],
     [{ selector: { text: "Movies" }, action: "doubleTap" }, 'action: "doubleTap"'],
     [{ selector: { testTag: "row" } }, "selector.testTag"],
+    [{ selector: { text: "Movies" }, layer: "app" }, "layer"],
     [{ selector: { textAny: ["Movies", "Shows"] } }, "selector.textAny"],
   ] as const)("%j names %s and the D-pad form", async (raw, option) => {
     const { deps, fallback, touchTaps } = harness(false);

@@ -1,4 +1,5 @@
 import type { BootedDevice, ObserveResult } from "../../models";
+import { displayInventoryOutcome } from "../../models/DeviceInfo";
 import { ActionableError } from "../../models/ActionableError";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -253,13 +254,22 @@ export interface TargetDisplayCall extends ActionCall {
   transitions?: DisplayTransitionReader;
 }
 
+/** A display-targeted action's prepared panel, read and fence. */
+export interface PreparedTargetDisplay {
+  observation: ObserveResult;
+  displayId?: number;
+  /** Selector for the action's follow-up observe reads; see {@link followUpDisplaySelector}. */
+  followUpDisplay: string;
+  assertCurrent: () => void;
+}
+
 /** Resolve explicit action targeting against the caller's last visible panel. */
 export async function prepareTargetDisplayAction(
   device: BootedDevice,
   display: string,
   observe: Pick<ObserveScreen, "execute">,
   { adb, ...call }: TargetDisplayCall & { adb: AdbCommandRunner },
-): Promise<{ observation: ObserveResult; displayId?: number; assertCurrent: () => void }> {
+): Promise<PreparedTargetDisplay> {
   const {
     lastRenderedObservation = sessionRenderedObservation,
     signal,
@@ -302,8 +312,25 @@ export async function prepareTargetDisplayAction(
   return {
     observation,
     displayId,
+    followUpDisplay: followUpDisplaySelector(device, display, panel.key),
     assertCurrent,
   };
+}
+
+/**
+ * The selector an action's follow-up reads pass to observe. They pin the prepared panel's key so
+ * `active` is not re-resolved, except when `active` fell back on an unreadable inventory: that
+ * fallback key is not a selector the caller chose, so re-checking it as explicit would reject the
+ * read (#16741). `active` re-resolves to the same sole fallback panel.
+ */
+export function followUpDisplaySelector(
+  device: Pick<BootedDevice, typeof displayInventoryOutcome>,
+  display: string,
+  panelKey: string,
+): string {
+  return display === "active" && device[displayInventoryOutcome]?.kind === "unreadable"
+    ? "active"
+    : panelKey;
 }
 
 /** Search and retry captures must stay on the prepared Android panel. */

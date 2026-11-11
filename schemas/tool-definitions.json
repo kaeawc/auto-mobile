@@ -23299,8 +23299,16 @@
               "additionalProperties": false
             },
             "blocked": {
-              "description": "True when DO is required and the known foreground activity is not distraction optimized.",
+              "description": "True when DO is required and the known foreground activity is not distraction optimized, or when the car's driving-restriction blocking activity is in front.",
               "type": "boolean"
+            },
+            "blockedBy": {
+              "description": "The car's blocking activity in front (com.android.systemui.car.activity.ActivityBlockingActivity); absent when no blocking activity is in front.",
+              "type": "string"
+            },
+            "blockedActivity": {
+              "description": "The activity the blocking activity covers; absent when the back stack does not list it.",
+              "type": "string"
             },
             "hostRenderedUi": {
               "description": "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views. With hostPackage, template nodes from that host were seen; without it, only the foreground activity is CarAppActivity, which also covers the library's own connection-error screen. Absence means neither signal was seen (for example an incomplete capture), not proof that the screen is app-drawn.",

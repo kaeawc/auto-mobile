@@ -100,7 +100,10 @@ On automotive devices, `observe.automotive` reports `drivingState` (`parked`, `i
 `uxRestrictions.requiresDistractionOptimization`, the numeric `uxRestrictions.activeRestrictions`
 bitmask for the observed display, and `foregroundActivity.distractionOptimized` when the foreground
 activity and its DO status are known. `blocked` is true when distraction optimization is required and
-the known foreground activity is not distraction optimized. Unavailable service reads omit the affected
+the known foreground activity is not distraction optimized, or when the car's blocking screen ("You can’t
+use this feature while driving") is in front. In the second case `blockedBy` names the blocking activity
+(`com.android.systemui.car.activity.ActivityBlockingActivity`) and `blockedActivity` names the activity
+it covers, for example `com.example.SettingsActivity`. Unavailable service reads omit the affected
 fields; `blocked: false` alone does not establish that the app is usable. Other device types omit the
 entire `automotive` block.
 

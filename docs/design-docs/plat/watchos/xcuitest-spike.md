@@ -23,7 +23,8 @@ A successful gesture alone does not establish widget presence. The script drives
 the runner WebSocket and makes no daemon tool call, so with `--session-uuid` it
 holds that one-shot CLI session: like a `--cli` invocation, it claims the
 session's liveness under its own owner token and declares a `cli` idle window that covers the
-run so far plus twice the base window, refreshes it every quarter window, and
+session's idle age (read from `daemon/sessionInfo`'s `lastUsedAt`, so a session an earlier hold
+kept is not cut short) plus twice the base window, refreshes it every quarter window, and
 leaves the session at least the base window after the run (one-hour daemon cap).
 
 ## Capability boundary

@@ -10,6 +10,7 @@ import {
 import { sessionIdleDeadline } from "../../../src/daemon/sessionClocks";
 import { SessionHeartbeatMonitor } from "../../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../../src/daemon/sessionManager";
+import { handleSessionInfo } from "../../../src/daemon/daemonRequestHandlers";
 import {
   CLI_SESSION_LIVENESS_POLICY,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
@@ -31,6 +32,10 @@ class FakeCliSession implements CliIdleWindowDeclarer {
   failNext = false;
 
   constructor(readonly lastUsedAt: number) {}
+
+  async lastControlCallAt(): Promise<number> {
+    return this.lastUsedAt;
+  }
 
   async declareIdleWindow(idleTimeoutMs: number): Promise<void> {
     if (this.failNext) {
@@ -95,6 +100,31 @@ describe("withCliSessionIdleHold", () => {
     expect(expired).toBe(true);
   });
 
+  test("a second held run on the same session never moves its deadline backward", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_000_000);
+    const session = new FakeCliSession(timer.now() - 90_000);
+    const runMs = 6 * 60_000;
+    const options = { baseIdleTimeoutMs: IDLE_MS };
+
+    const first = withCliSessionIdleHold(session, timer, () => timer.sleep(runMs), options);
+    await drain();
+    await drain();
+    expect(await runFor(timer, session, runMs)).toBe(false);
+    await first;
+    const deadlineAfterFirst = session.deadline();
+
+    // No control call between the runs: the session is now far older than one fixed window.
+    const second = withCliSessionIdleHold(session, timer, () => timer.sleep(runMs), options);
+    await drain();
+    await drain();
+    expect(session.deadline()).toBeGreaterThanOrEqual(deadlineAfterFirst);
+    expect(await runFor(timer, session, runMs)).toBe(false);
+    await second;
+
+    expect(session.deadline() - timer.now()).toBeGreaterThanOrEqual(IDLE_MS);
+  });
+
   test("a failed refresh is retried on the next tick", async () => {
     const timer = new FakeTimer();
     const session = new FakeCliSession(timer.now());
@@ -102,6 +132,8 @@ describe("withCliSessionIdleHold", () => {
       baseIdleTimeoutMs: IDLE_MS,
       refreshIntervalMs: 30_000,
     });
+    await drain();
+    await drain();
     await drain();
     session.failNext = true;
     const expired = await runFor(timer, session, 60_000);
@@ -161,7 +193,16 @@ describe("daemonCliIdleWindowDeclarer through the real heartbeat handler", () =>
     const handler = daemonHeartbeatHandler(manager);
     return {
       connect: async () => {},
-      callDaemonMethod: (method, params) => handler(method, params),
+      callDaemonMethod: async (method, params) => {
+        if (method !== "daemon/sessionInfo") {
+          return handler(method, params);
+        }
+        const response = await handleSessionInfo(
+          { id: method, type: "daemon_request", method, params },
+          { getSessionManager: () => manager },
+        );
+        return response.success ? response.result : undefined;
+      },
     };
   }
 
@@ -204,6 +245,40 @@ describe("daemonCliIdleWindowDeclarer through the real heartbeat handler", () =>
     const session = manager.getSession("watch");
     expect(session?.livenessPolicy).toBe("cli-idle");
     expect(sessionIdleDeadline(session!) - timer.now()).toBeGreaterThanOrEqual(IDLE_MS);
+  });
+
+  test("a second held run with no control call in between keeps the session", async () => {
+    const timer = new FakeTimer();
+    const manager = await cliOwnedSession(timer);
+    await timer.advanceTimeAsync(90_000, drain);
+    const declarer = daemonCliIdleWindowDeclarer(realClient(manager), "watch", "widget-script");
+    const options = { baseIdleTimeoutMs: IDLE_MS };
+
+    const firstRun = timer.sleep(6 * 60_000);
+    const first = withCliSessionIdleHold(declarer, timer, () => firstRun, options);
+    expect(await runWithMonitor(timer, manager, 6 * 60_000)).toEqual([]);
+    await first;
+
+    const secondRun = timer.sleep(6 * 60_000);
+    const second = withCliSessionIdleHold(declarer, timer, () => secondRun, options);
+    const released = await runWithMonitor(timer, manager, 6 * 60_000);
+    await second;
+
+    expect(released).toEqual([]);
+    const session = manager.getSession("watch");
+    expect(sessionIdleDeadline(session!) - timer.now()).toBeGreaterThanOrEqual(IDLE_MS);
+  });
+
+  test("a session that reports no last use fails the hold", async () => {
+    const client: IdleWindowDaemonClient = {
+      connect: async () => {},
+      callDaemonMethod: async () => ({ sessionId: "watch" }),
+    };
+    const declarer = daemonCliIdleWindowDeclarer(client, "watch", "widget-script");
+
+    await expect(declarer.lastControlCallAt()).rejects.toThrow(
+      "did not report when it was last used",
+    );
   });
 
   test("without the hold the same run loses the session to the idle window", async () => {

@@ -33,6 +33,27 @@ class NodeLookupTest {
   }
 
   @Test
+  fun `all-match lookup retains active and other window hits and skips the listed active copy`() {
+    val active = root("dup")
+    val other = root("dup")
+    val miss = root("miss")
+    val listedActive = window(active, active = true)
+    val found =
+      findNodesAcrossWindows(
+        listOf(window(other), listedActive, window(miss), window(null)),
+        { active },
+      ) { node ->
+        if (node.viewIdResourceName == "dup") listOf(node) else emptyList()
+      }
+
+    assertEquals(listOf(active, other), found)
+    verify(exactly = 0) { active.recycle() }
+    verify(exactly = 0) { other.recycle() }
+    verify(exactly = 1) { miss.recycle() }
+    verify(exactly = 0) { listedActive.root }
+  }
+
+  @Test
   fun `finds a node that only a non-active window contains`() {
     val activeRoot = root("left")
     val otherRoot = root("right")

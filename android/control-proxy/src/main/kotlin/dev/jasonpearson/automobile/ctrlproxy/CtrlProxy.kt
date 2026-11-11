@@ -137,6 +137,7 @@ class CtrlProxy : AccessibilityService() {
 
   companion object {
     private const val TAG = "CtrlProxy"
+    private const val XR_SPATIAL_FEATURE = "android.software.xr.api.spatial"
 
     // File name for app-scoped storage
 
@@ -361,13 +362,19 @@ class CtrlProxy : AccessibilityService() {
   private val recompositionStore = RecompositionStore()
   private val frameMetricsStore = FrameMetricsStore()
   internal val workStats = CtrlProxyWorkStats()
-  internal val viewHierarchyExtractor =
+  internal val viewHierarchyExtractor: ViewHierarchyExtractor by lazy {
+    createViewHierarchyExtractor()
+  }
+
+  private fun createViewHierarchyExtractor() =
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
       // Read once when this service instance starts, not on each hierarchy capture. On from API 30;
       // the debug property overrides it (#13956).
       pruneBaselineWrappers = readBaselineWrapperPruningEnabled(),
+      // XR panel and environment window layers do not describe visual occlusion.
+      crossWindowOcclusionSupported = !packageManager.hasSystemFeature(XR_SPATIAL_FEATURE),
       prototypeHiddenReason = { displayId, captured ->
         if (::prototypeController.isInitialized)
           prototypeController.hiddenReason(displayId, captured)
@@ -390,6 +397,7 @@ class CtrlProxy : AccessibilityService() {
         else null
       },
     )
+
   private val jsonCompact = Json {
     prettyPrint = false
     encodeDefaults = true
@@ -907,6 +915,10 @@ class CtrlProxy : AccessibilityService() {
           override fun findNodeInDisplayWindows(
             find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
           ) = this@CtrlProxy.findNodeInDisplayWindows(find)
+
+          override fun findNodesInDisplayWindows(
+            find: (AccessibilityNodeInfo) -> List<AccessibilityNodeInfo>,
+          ) = findNodesAcrossWindows(displayWindowsOrEmpty(), { rootInActiveWindow }, find)
 
           override fun screenDimensions(displayId: Int) =
             displayController.getScreenDimensions(displayId)

@@ -34,6 +34,7 @@ export interface AndroidActivateAccessibilityLinkRequest {
 /** Node targeting and cancellation for {@link AndroidActionDispatcher.requestAction}. */
 export interface AndroidActionRequestOptions {
   selector?: AccessibilityNodeSelector;
+  expectedBounds?: { left: number; top: number; right: number; bottom: number };
   signal?: AbortSignal;
 }
 
@@ -81,12 +82,25 @@ export class AndroidActionDispatcher {
       ...options
     }: AndroidActionRequestOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
-    const { selector, signal } = options;
+    const { selector, signal, expectedBounds } = options;
     return this.dispatchActionRequest(
       action,
       (requestId) =>
         serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
+          ctrlProxyRequests.requestAction({
+            requestId,
+            action,
+            resourceId,
+            selector,
+            ...(expectedBounds
+              ? {
+                  boundsLeft: expectedBounds.left,
+                  boundsTop: expectedBounds.top,
+                  boundsRight: expectedBounds.right,
+                  boundsBottom: expectedBounds.bottom,
+                }
+              : {}),
+          }),
         ),
       timeoutMs,
       { perf, signal },
@@ -320,14 +334,21 @@ export class AndroidActionDispatcher {
       timeoutMs = 5000,
       perf = new NoOpPerformanceTracker(),
       signal,
-    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
+      expectedBounds,
+    }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
-    return this.requestAction(action, selector.resourceId, timeoutMs, { perf, selector, signal });
+    return this.requestAction(action, selector.resourceId, timeoutMs, {
+      perf,
+      selector,
+      signal,
+      expectedBounds,
+    });
   }
 
   async supportsNodeActionSelectors(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    requireBounds = false,
   ): Promise<boolean> {
     const combinedSignal = combineWithAmbientAbort(signal);
     const connected = await this.context.awaitActionWork(
@@ -343,7 +364,8 @@ export class AndroidActionDispatcher {
     return (
       connected &&
       this.context.supportedCommands !== null &&
-      this.context.isCommandSupported("node_selector_actions")
+      this.context.isCommandSupported("node_selector_actions") &&
+      (!requireBounds || this.context.isCommandSupported("node_selector_bounds_v1"))
     );
   }
 

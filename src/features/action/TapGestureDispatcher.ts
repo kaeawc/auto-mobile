@@ -1,3 +1,4 @@
+import { executeXrNodeClick, xrCoordinateError } from "./xrPanelNodeClick";
 import { pointInTapBounds } from "./tapTargetSupport";
 import { TapElementFinder } from "./tapElementFinder";
 import { tapViaVoiceOver, withVoiceOverTimeoutContext } from "./tapIosVoiceOver";
@@ -162,6 +163,16 @@ export class TapGestureDispatcher {
       isTalkBackEnabled?: boolean;
     } & { element: Element },
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    if (this.host.device().formFactor === "xr-headset") {
+      await executeXrNodeClick(() => this.host.accessibilityService(), {
+        action,
+        element,
+        signal,
+        options,
+        resolveContainer: (tree, opts) => this.host.finder().resolveContainerElement(tree, opts),
+      });
+      return undefined;
+    }
     const { x, y } = point;
     const { displayFence: fence, resolvedHierarchy, onActivationWarning } = options ?? {};
     // Check if TalkBack is enabled (not just any accessibility service)
@@ -312,6 +323,9 @@ export class TapGestureDispatcher {
       fenceOptions?: ResolvedAndroidTapOptions,
     ]
   ): Promise<void> {
+    if (this.host.device().formFactor === "xr-headset") {
+      throw xrCoordinateError();
+    }
     const fence = fenceOptions.displayFence;
     if (action === "tap") {
       if (

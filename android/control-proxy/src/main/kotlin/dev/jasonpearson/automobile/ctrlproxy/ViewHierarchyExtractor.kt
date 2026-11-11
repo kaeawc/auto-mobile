@@ -58,6 +58,7 @@ internal constructor(
     },
   private val pruneBaselineWrappers: Boolean = false,
   private val windowReadGuard: WindowReadGuard = QuarantiningWindowReadGuard(),
+  private val crossWindowOcclusionSupported: Boolean = true,
 ) {
 
   private fun <T> readWindow(
@@ -2120,7 +2121,8 @@ internal constructor(
     disableAllFiltering: Boolean,
     occlusionEnabled: Boolean,
     windowCount: Int,
-  ): Boolean = !disableAllFiltering && occlusionEnabled && windowCount > 1
+  ): Boolean =
+    crossWindowOcclusionSupported && !disableAllFiltering && occlusionEnabled && windowCount > 1
 
   private val occlusionCalculator = OcclusionCalculator(stats, GeneratedViewId::fromPath)
 

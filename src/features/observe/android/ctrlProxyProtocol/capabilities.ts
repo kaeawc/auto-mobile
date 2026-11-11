@@ -299,6 +299,7 @@ export const GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE_CAPABILITY =
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
+  "node_selector_bounds_v1",
   SEMANTIC_NODE_ACTIONS_CAPABILITY,
   GLOBAL_ACTION_POWER_DIALOG_CAPABILITY,
   GLOBAL_ACTION_QUICK_SETTINGS_CAPABILITY,

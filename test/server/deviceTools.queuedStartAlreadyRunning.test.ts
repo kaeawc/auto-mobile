@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { describe, expect } from "bun:test";
 import { warmedTests } from "../helpers/warmedTests";
 import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
@@ -105,6 +106,7 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
     const idGenerator = new CountingIdGenerator("queued-start");
     const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       deviceManagerFactory: () => devices,
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),

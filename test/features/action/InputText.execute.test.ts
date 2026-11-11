@@ -37,6 +37,7 @@ describe("InputText.execute", () => {
     deviceId: "test-device",
     platform: "android",
     name: "Test Device",
+    formFactor: "phone",
   };
   const iosDevice: BootedDevice = {
     deviceId: "ios-test-device",

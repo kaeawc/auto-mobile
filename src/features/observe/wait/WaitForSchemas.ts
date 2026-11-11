@@ -151,6 +151,7 @@ const waitForTextAnySchema = z
     contentDescription: z.never().optional(),
     matchType: z.never().optional(),
     textMatch: z.never().optional(),
+    textSource: z.never().optional(),
     ...waitForCommonShape,
   })
   .strict()
@@ -184,11 +185,23 @@ const waitForElementBaseSchema = z
       .enum(["exact", "contains", "regex"])
       .optional()
       .describe("How to match waitFor.text; does not affect contentDescription"),
+    textSource: z
+      .enum(["displayed"])
+      .optional()
+      .describe(
+        "displayed: match waitFor.text only against the text the element shows (its text, or an editable field's value), not its content description or accessibility label",
+      ),
     ...waitForCommonShape,
   })
   .strict()
   .superRefine((value, ctx) => {
     validateWaitForTimeoutAliases(value, ctx);
+    if (value.textSource !== undefined && value.text === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "textSource requires text",
+      });
+    }
     if (
       value.selectionStrategy !== undefined &&
       !hasElementPredicate(value) &&
@@ -280,6 +293,7 @@ const waitForConditionDslSchema = z
     contentDescription: z.never().optional(),
     matchType: z.never().optional(),
     textMatch: z.never().optional(),
+    textSource: z.never().optional(),
     activeWindow: z.never().optional(),
     absent: z.never().optional(),
     posture: z.never().optional(),
@@ -387,6 +401,11 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
       type: "string",
       enum: ["exact", "contains", "regex"],
       description: "How to match waitFor.text; does not affect contentDescription",
+    },
+    textSource: {
+      type: "string",
+      enum: ["displayed"],
+      description: "displayed: match text only against the element's shown text or value",
     },
     activeWindow: {
       type: "object",

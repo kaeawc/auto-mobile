@@ -31,6 +31,19 @@ export interface AndroidXrDisplaySizeDeps {
   readDisplaySize?: () => Promise<{ width: number; height: number }>;
 }
 
+/**
+ * Whether the feature probe is worth asking: an XR form factor, or one not yet classified (a
+ * physical headset, #17908). A known phone, tablet or other form factor is never probed.
+ */
+function mayBeXrFormFactor(formFactor: BootedDevice["formFactor"]): boolean {
+  return (
+    formFactor === undefined ||
+    formFactor === "unknown" ||
+    formFactor === "xr-headset" ||
+    formFactor === "xr-glasses"
+  );
+}
+
 /** Default-display XR geometry shared by initial collection and synchronous recapture application. */
 export class CachedAndroidXrDisplaySize implements AndroidXrDisplaySize {
   private readonly displaySizes = new Map<string, { width: number; height: number }>();
@@ -76,11 +89,10 @@ export class CachedAndroidXrDisplaySize implements AndroidXrDisplaySize {
 
   private isXr(result: Pick<ObserveResult, "backStack">, signal?: AbortSignal): Promise<boolean> {
     const device = this.deps.device();
-    const xrFormFactor = device.formFactor === "xr-headset" || device.formFactor === "xr-glasses";
     return isAndroidXr(
       {
         device,
-        adb: xrFormFactor ? this.deps.adb?.() : undefined,
+        adb: mayBeXrFormFactor(device.formFactor) ? this.deps.adb?.() : undefined,
         backStack: result.backStack,
         signal,
       },

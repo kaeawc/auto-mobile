@@ -16,6 +16,60 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(offset.dy, 0.625)
     }
 
+    func testTapPointSubtractsClockfaceOrigin() throws {
+        let frame = CGRect(x: 10, y: 20, width: 200, height: 250)
+        let offset = try watchTapNormalizedOffset(x: 110, y: 145, frame: frame)
+        XCTAssertEqual(offset.dx, 0.5)
+        XCTAssertEqual(offset.dy, 0.5)
+        let corner = try watchTapNormalizedOffset(x: 210, y: 270, frame: frame)
+        XCTAssertEqual(corner, CGVector(dx: 1, dy: 1))
+        for (x, y) in [(9.0, 100.0), (100.0, 19.0), (211.0, 100.0), (100.0, 271.0)] {
+            XCTAssertThrowsError(try watchTapNormalizedOffset(x: x, y: y, frame: frame)) { error in
+                guard case WatchCommandError.invalidRequest("tap is outside the watch screen") = error else {
+                    return XCTFail("Expected invalidRequest, got \(error)")
+                }
+            }
+        }
+    }
+
+    func testTapRouteUsesClockfaceWhenAppIsNotForegroundAndNoAlert() throws {
+        var frameReads = 0
+        let route = try watchTapRoute(x: 93, y: 140, hasAlerts: false, appForeground: false) {
+            frameReads += 1
+            return CGRect(x: 0, y: 0, width: 186, height: 224)
+        }
+        XCTAssertEqual(route, .clockface(CGVector(dx: 0.5, dy: 0.625)))
+        XCTAssertEqual(frameReads, 1)
+    }
+
+    func testTapRouteRejectsOffScreenPointOnClockface() {
+        XCTAssertThrowsError(try watchTapRoute(x: 300, y: 10, hasAlerts: false, appForeground: false) {
+            CGRect(x: 0, y: 0, width: 186, height: 224)
+        }) { error in
+            guard case WatchCommandError.invalidRequest("tap is outside the watch screen") = error else {
+                return XCTFail("Expected invalidRequest, got \(error)")
+            }
+        }
+    }
+
+    func testTapRouteKeepsAppAndAlertPathsWithoutReadingClockface() throws {
+        let cases: [(hasAlerts: Bool, appForeground: Bool, expected: WatchTapRoute)] = [
+            (false, true, .app), (true, true, .systemAlert), (true, false, .systemAlert),
+        ]
+        for testCase in cases {
+            var frameReads = 0
+            // Off-screen for the clockface, so a wrong clockface route would throw.
+            let route = try watchTapRoute(
+                x: 500, y: 500, hasAlerts: testCase.hasAlerts, appForeground: testCase.appForeground
+            ) {
+                frameReads += 1
+                return CGRect(x: 0, y: 0, width: 186, height: 224)
+            }
+            XCTAssertEqual(route, testCase.expected)
+            XCTAssertEqual(frameReads, 0)
+        }
+    }
+
     func testTapPointAcceptsScreenBoundaries() throws {
         let frame = CGRect(x: 0, y: 0, width: 200, height: 250)
         for (x, y) in [(0.0, 0.0), (200.0, 0.0), (0.0, 250.0), (200.0, 250.0)] {
@@ -564,16 +618,26 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertFalse(response.success)
         XCTAssertEqual(response.requestId, "c")
         XCTAssertEqual(response.errorCode, "command_failed")
-        XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
-        XCTAssertTrue(response.error?.hasSuffix(
-            "Tap the control that should respond to the Digital Crown, then retry rotateCrown."
-        ) == true)
+        XCTAssertEqual(response.error, watchCrownUnchangedMessage(focused: crownValue("0")))
+        XCTAssertTrue(response.error?.contains(#"The focused control's value stayed "0""#) == true)
         XCTAssertEqual(source.rotations, 2)
         XCTAssertEqual(source.taps, 1)
         XCTAssertEqual(source.events, [
             "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0", "tap",
             "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0",
         ])
+    }
+
+    func testCrownUnchangedMessageSeparatesStuckValueFromMissingFocus() {
+        let stuck = watchCrownUnchangedMessage(focused: crownValue("10"))
+        XCTAssertTrue(stuck.hasPrefix("rotateCrown changed nothing"))
+        XCTAssertTrue(stuck.contains(#"value stayed "10""#))
+        XCTAssertTrue(stuck.contains("too small to reach its next step"))
+        XCTAssertFalse(stuck.contains("crown focus"))
+        let unfocused = watchCrownUnchangedMessage(focused: nil)
+        XCTAssertTrue(unfocused.hasPrefix("rotateCrown changed nothing"))
+        XCTAssertTrue(unfocused.contains("No focused control exposes a readable value"))
+        XCTAssertFalse(unfocused.contains("value stayed"))
     }
 
     func testWarmCrownValueChangeSucceedsWithoutWake() {
@@ -786,6 +850,7 @@ final class WatchCommandHandlerTests: XCTestCase {
             let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
             XCTAssertFalse(response.success)
             XCTAssertEqual(response.errorCode, "command_failed")
+            XCTAssertEqual(response.error, watchCrownUnchangedMessage(focused: nil))
             XCTAssertEqual(source.rotations, 1)
             XCTAssertEqual(source.appliedDelta, 2)
             XCTAssertEqual(source.taps, 1)

@@ -73,7 +73,7 @@ export function buildScaler(ranges: AxisRanges): CoordScaler {
 
 /**
  * Parse the effective display size from `adb shell wm size` output (override wins).
- * Returns { width, height } in physical pixels (before rotation).
+ * Returns { width, height } in logical display pixels (before rotation).
  */
 export async function queryDisplaySize(
   adb: AdbExecutor,

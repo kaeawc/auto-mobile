@@ -294,7 +294,7 @@ export class RealObserveScreen implements ObserveScreen {
       device: () => this.device,
       adb: () => this.adb,
       xrDetector: defaultAndroidXrDetector,
-      readDisplaySize: () => queryDisplaySize(this.adb),
+      readDisplaySize: () => queryDisplaySize(this.adb, { timeoutMs: 1000 }),
       hierarchyCollector: () => this.hierarchyCollector,
     }));
     const wiring = createObserveScreenWiring({

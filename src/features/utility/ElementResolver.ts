@@ -340,6 +340,7 @@ export class ElementResolver {
           bounds !== undefined &&
           result.candidates.some(
             (other) =>
+              other.windowRank === node.windowRank &&
               other.parentIndex === node.parentIndex &&
               other.bounds !== undefined &&
               other.bounds.right - other.bounds.left === bounds.right - bounds.left &&
@@ -347,13 +348,17 @@ export class ElementResolver {
           )
         );
       };
-      result.candidates.sort(
-        (a, b) =>
+      result.candidates.sort((a, b) => {
+        const left = a.bounds ?? { top: Infinity, left: Infinity };
+        const right = b.bounds ?? { top: Infinity, left: Infinity };
+        return (
+          (actionTarget(a) ?? a).windowRank - (actionTarget(b) ?? b).windowRank ||
           Number(partial(a)) - Number(partial(b)) ||
-          (a.bounds?.top ?? Infinity) - (b.bounds?.top ?? Infinity) ||
-          (a.bounds?.left ?? Infinity) - (b.bounds?.left ?? Infinity) ||
-          a.index - b.index,
-      );
+          left.top - right.top ||
+          left.left - right.left ||
+          a.index - b.index
+        );
+      });
       return;
     }
     const rawTextMatch = new Set(

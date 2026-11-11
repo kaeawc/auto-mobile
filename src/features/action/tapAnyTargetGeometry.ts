@@ -1,5 +1,6 @@
+import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { withoutHiddenXrChrome } from "./xrHiddenChrome";
-import { SearchableHierarchy } from "../utility/SearchableNode";
+import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { promoteClickableAncestor } from "../utility/ElementResolverNodes";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -153,14 +154,49 @@ function xrContainerOwner(
   const source = container && getHierarchyNodeSource(container);
   const nodes = new SearchableHierarchy().project(viewHierarchy);
   const node = nodes.find((entry) => entry.source === source);
-  const owner =
-    node &&
-    promoteClickableAncestor(node, nodes, {
-      action: options.action === "longPress" ? "long-press" : "tap",
-      viewport,
-    });
+  if (!node?.bounds || nodes.some((entry) => entry.parentIndex === node.index)) {
+    return null;
+  }
+  const area = boundsArea(node.bounds);
+  if (area <= 0) {
+    return null;
+  }
+  const owner = promoteClickableAncestor(
+    node,
+    nodes,
+    { action: options.action === "longPress" ? "long-press" : "tap", viewport },
+    xrContainerScope(node, nodes, area),
+  );
   if (owner) {
     return new DefaultElementParser().parseNodeBounds(owner.source);
   }
   return null;
+}
+
+/** Promotion's inclusive boundary: three ancestors, small bounds, and no full-window root. */
+function xrContainerScope(
+  node: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+  area: number,
+): SearchableEntry {
+  const root = nodes.findLast(
+    (entry) =>
+      entry.index <= node.index &&
+      entry.rootGroup === node.rootGroup &&
+      entry.parentIndex === undefined,
+  );
+  const rootBounds = root?.bounds;
+  let scope = node;
+  for (let level = 0; level < 3 && scope.parentIndex !== undefined; level++) {
+    const parent = nodes[scope.parentIndex];
+    if (parent === root || !parent.bounds || boundsArea(parent.bounds) > 4 * area) {
+      break;
+    }
+    const overlap = rootBounds ? intersectBounds(parent.bounds, rootBounds) : null;
+    if (overlap && rootBounds && boundsEqual(overlap, rootBounds)) {
+      break;
+    }
+    scope = parent;
+  }
+  return scope;
 }

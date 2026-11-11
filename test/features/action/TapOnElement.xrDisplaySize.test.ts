@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { CachedAndroidXrDisplaySize } from "../../../src/features/observe/android/AndroidXrDisplaySize";
 import { DisplayTransitionTracker } from "../../../src/features/observe/DisplayTransition";
@@ -121,4 +123,26 @@ test("XR search corrects the hierarchy-derived comparison size before polling", 
   expect(h.adb.getAllCommands()).toEqual(["shell wm size"]);
   expect(h.xrDetector.queries).toEqual([h.device.deviceId]);
   expect(h.timer.getSleepHistory()).toEqual([50]);
+});
+
+test("RealObserveScreen bounds its XR wm size read to one second without retries", async () => {
+  const adb = new FakeAdbClient();
+  adb.setCommandResult("shell pm has-feature android.software.xr.api.spatial", "true");
+  adb.setCommandResult("shell wm size", "Physical size: 2560x2558");
+  const screen = new RealObserveScreen(
+    {
+      platform: "android",
+      deviceId: "fake-xr-timeout-bound",
+      name: "fake",
+      formFactor: "xr-headset",
+    },
+    new FakeAdbClientFactory(adb),
+    {},
+    { timer: new FakeTimer() },
+  );
+  await screen.xrDisplaySize.prime({}, structuredClone(fixture.viewHierarchy));
+  expect(adb.getCommandCalls().find((call) => call.command === "shell wm size")).toMatchObject({
+    timeoutMs: 1000,
+    noRetry: true,
+  });
 });

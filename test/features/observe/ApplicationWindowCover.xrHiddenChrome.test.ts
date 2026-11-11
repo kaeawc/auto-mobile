@@ -131,6 +131,7 @@ test("XR fallback avoids an own prototype without subtracting foreign panel rect
       ? {
           ...window,
           packageName: CTRL_PROXY_PACKAGE,
+          type: 4,
           prototypePlacement: "floating" as const,
           bounds: { left: 0, top: 0, right: 384, bottom: 128 },
         }
@@ -204,4 +205,70 @@ test("the verbatim Settings hierarchy leaves Storage and Search tappable and uno
     expect(row).toBeDefined();
     expect(row).not.toHaveProperty("occluded");
   }
+});
+
+test.each(["com.android.settings", "com.google.android.permissioncontroller"])(
+  "XR application dialog from %s covers a row for taps and observe",
+  (packageName) => {
+    const capture = structuredClone(captured.viewHierarchy);
+    capture.hierarchy = {};
+    const app = capture.windows!.find((window) => window.id === 38)!;
+    const dialog = structuredClone(app);
+    dialog.id = 90;
+    dialog.windowLayer = 100;
+    dialog.packageName = packageName;
+    const parser = new DefaultElementParser();
+    const root = parser.extractWindowRootNodes({ hierarchy: {}, windows: [dialog] })[0];
+    Object.assign(root, {
+      node: [],
+      text: "Dialog",
+      "resource-id": `${packageName}:id/dialog`,
+      "visible-to-user": true,
+    });
+    dialog.hierarchy = { node: [root] };
+    capture.windows = [capture.windows!.find((window) => window.id === 1)!, dialog, app];
+    const full = identifyObservedHierarchy("android", capture, "cached-ok", {
+      timer: new FakeTimer(),
+    }).hierarchy;
+    const entry = new SearchableHierarchy()
+      .project({ hierarchy: {}, windows: [app] })
+      .find((node) => node.bounds?.left === 48 && node.bounds.top === 1076)!;
+    const target = parser.parseNodeBounds(entry.source)!;
+    expect(
+      applicationWindowSafeTapPoint(full, target, target.bounds, {
+        point: { x: 372, y: 1164 },
+      }),
+    ).toMatchObject({ point: null, coveredByKind: "window" });
+    expect(isFullyCoveredByApplicationWindow(full, target, target.bounds)).toBe(true);
+    const elements = new DefaultObserveElementCollector().collect(full, "android")!;
+    const projection = projectSkeleton(elements, { width: 2560, height: 2558 }, full);
+    expect(
+      [...projection.skeleton, ...projection.context].some(
+        (row) => row.label === "Storage" && row.occluded,
+      ),
+    ).toBe(true);
+  },
+);
+
+test("phone hidden application windows do not take touches", () => {
+  const capture = structuredClone(captured.viewHierarchy);
+  capture.hierarchy = {};
+  const app = capture.windows!.find((window) => window.id === 38)!;
+  const hidden = structuredClone(app);
+  hidden.id = 90;
+  hidden.windowLayer = 100;
+  new DefaultElementParser().traverseNode(hidden.hierarchy!, (node) => {
+    Object.assign(node, { "visible-to-user": false });
+  });
+  capture.windows = [hidden, app];
+  const full = identifyObservedHierarchy("android", capture, "cached-ok", {
+    timer: new FakeTimer(),
+  }).hierarchy;
+  const entry = new SearchableHierarchy()
+    .project({ hierarchy: {}, windows: [app] })
+    .find((node) => node.bounds?.left === 48 && node.bounds.top === 1076)!;
+  const target = new DefaultElementParser().parseNodeBounds(entry.source)!;
+  const point = { x: 372, y: 1164 };
+  expect(applicationWindowSafeTapPoint(full, target, target.bounds, { point })).toEqual({ point });
+  expect(isFullyCoveredByApplicationWindow(full, target, target.bounds)).toBe(false);
 });

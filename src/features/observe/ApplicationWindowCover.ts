@@ -164,7 +164,7 @@ function safeTapPoint(query: SafeTapPointQuery): SafeTapPointResult {
  * `owner`'s window holds `point`, and every such window's bounds.
  */
 function windowCoverAt(
-  { hierarchy, target, point, ownWindows, index: { entries, types } }: SafeTapPointQuery,
+  { hierarchy, target, point, ownWindows, index: { entries, types, windows } }: SafeTapPointQuery,
   owner: SearchableEntry,
 ): {
   hit?: { coveredBy: string; coveredByKind: "window" };
@@ -176,9 +176,17 @@ function windowCoverAt(
     return { covers: () => [] };
   }
   const prototypeCovers = ownPrototypeCoversAbove(hierarchy, entries, owner, ownWindows);
-  // XR windows have independent panel coordinates: another app or SystemUI panel's
-  // node rectangles cannot establish either a hit or an exposed fallback region here.
-  const windowEntries = isAndroidXrCapture(hierarchy) ? [] : entries;
+  // XR SystemUI home/caption panels use independent coordinates. Application dialogs,
+  // including other packages' permission prompts, still cover controls behind them.
+  const windowEntries = isAndroidXrCapture(hierarchy)
+    ? entries.filter((entry) => {
+        const position = windows.get(entry.source);
+        return !(
+          position !== undefined &&
+          hierarchy.windows?.[position]?.packageName?.startsWith("com.android.systemui")
+        );
+      })
+    : entries;
   const covers = () => [
     ...windowEntries
       .filter(

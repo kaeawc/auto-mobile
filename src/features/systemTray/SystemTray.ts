@@ -330,6 +330,7 @@ export class SystemTray {
         await captureSystemTrayTerminalEvidence(this.device, watch.observation, signal);
         return watch.outcome;
       }
+      this.rejectPhoneReply(args.notification);
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
       switch (args.action) {
         case "open":
@@ -357,6 +358,12 @@ export class SystemTray {
       if (this.restoreFailedClearAll) {
         await this.restoreFailedClearAll();
       }
+    }
+  }
+
+  private rejectPhoneReply(notification: SystemTrayNotificationArgs = {}): void {
+    if (notification.replyText !== undefined) {
+      throw new ActionableError("replyText is only supported on watches");
     }
   }
 

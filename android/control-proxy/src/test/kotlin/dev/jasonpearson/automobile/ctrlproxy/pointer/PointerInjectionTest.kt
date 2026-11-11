@@ -334,6 +334,63 @@ class PointerInjectionExecutorTest {
   }
 
   @Test
+  fun `a sink that throws mid-stroke still closes the pointer with a cancel`() {
+    val delivered = mutableListOf<PointerAction>()
+    var calls = 0
+    val result =
+      PointerInjectionExecutor(
+          { event, _ ->
+            if (++calls == 3) throw IllegalStateException("UiAutomation not connected")
+            delivered += event.action
+            true
+          },
+          {},
+          { 0L },
+        )
+        .run(stroke(PointerWaypoint(0f, 0f), PointerWaypoint(10f, 0f, durationMs = 64)))
+    assertFalse(result.success)
+    assertEquals(2, result.injected)
+    assertTrue(
+      result.error!!.contains("injecting MOVE at 32 ms failed: UiAutomation not connected"),
+    )
+    assertEquals(listOf(PointerAction.DOWN, PointerAction.MOVE, PointerAction.CANCEL), delivered)
+  }
+
+  @Test
+  fun `a first event that throws is closed too, since it may have been delivered`() {
+    val delivered = mutableListOf<PointerAction>()
+    var calls = 0
+    val result =
+      PointerInjectionExecutor(
+          { event, _ ->
+            if (++calls == 1) throw SecurityException("denied")
+            delivered += event.action
+            true
+          },
+          {},
+          { 0L },
+        )
+        .run(hover(PointerWaypoint(0f, 0f)))
+    assertFalse(result.success)
+    assertEquals(0, result.injected)
+    assertEquals(listOf(PointerAction.HOVER_EXIT), delivered)
+  }
+
+  @Test
+  fun `a close that throws is reported, not raised`() {
+    var calls = 0
+    val result =
+      PointerInjectionExecutor(
+          { _, _ -> if (++calls == 1) true else throw IllegalStateException("gone") },
+          {},
+          { 0L },
+        )
+        .run(hover(PointerWaypoint(0f, 0f), PointerWaypoint(5f, 5f, durationMs = 10)))
+    assertFalse(result.success)
+    assertTrue(result.error!!.contains("could not be closed"))
+  }
+
+  @Test
   fun `a close that is also refused is reported`() {
     var calls = 0
     val result =

@@ -1,0 +1,107 @@
+{
+  "connected" : true,
+  "enabled" : true,
+  "schemaVersion" : 1,
+  "templates" : [
+    {
+      "id" : "stack\/0",
+      "tabs" : [
+        {
+          "id" : "stack\/0\/tabs\/0",
+          "selected" : true,
+          "template" : {
+            "id" : "stack\/0\/tabs\/0\/template",
+            "sections" : [
+              {
+                "header" : "Nearby",
+                "id" : "stack\/0\/tabs\/0\/template\/sections\/0",
+                "items" : [
+                  {
+                    "detailText" : "Available",
+                    "enabled" : true,
+                    "hasImage" : false,
+                    "id" : "stack\/0\/tabs\/0\/template\/sections\/0\/items\/0",
+                    "text" : "North charger",
+                    "type" : "item"
+                  }
+                ],
+                "type" : "section"
+              },
+              {
+                "header" : "Favorites",
+                "id" : "stack\/0\/tabs\/0\/template\/sections\/1",
+                "items" : [
+                  {
+                    "detailText" : "Available",
+                    "enabled" : true,
+                    "hasImage" : false,
+                    "id" : "stack\/0\/tabs\/0\/template\/sections\/1\/items\/0",
+                    "text" : "Home charger",
+                    "type" : "item"
+                  }
+                ],
+                "type" : "section"
+              }
+            ],
+            "title" : "Chargers",
+            "type" : "list"
+          },
+          "title" : "Chargers",
+          "type" : "tab"
+        },
+        {
+          "id" : "stack\/0\/tabs\/1",
+          "selected" : false,
+          "template" : {
+            "buttons" : [
+              {
+                "enabled" : true,
+                "id" : "stack\/0\/tabs\/1\/template\/buttons\/0",
+                "titleVariants" : [
+                  "Start"
+                ],
+                "type" : "button"
+              },
+              {
+                "enabled" : true,
+                "id" : "stack\/0\/tabs\/1\/template\/buttons\/1",
+                "titleVariants" : [
+                  "Status"
+                ],
+                "type" : "button"
+              }
+            ],
+            "id" : "stack\/0\/tabs\/1\/template",
+            "title" : "Charging",
+            "type" : "grid"
+          },
+          "title" : "Charging",
+          "type" : "tab"
+        }
+      ],
+      "type" : "tabBar"
+    },
+    {
+      "id" : "stack\/1",
+      "sections" : [
+        {
+          "id" : "stack\/1\/sections\/0",
+          "items" : [
+            {
+              "detailText" : "Two ports",
+              "enabled" : true,
+              "hasImage" : false,
+              "id" : "stack\/1\/sections\/0\/items\/0",
+              "text" : "Ready to charge",
+              "type" : "item"
+            }
+          ],
+          "type" : "section"
+        }
+      ],
+      "title" : "Charger details",
+      "type" : "list"
+    }
+  ],
+  "truncated" : false
+}

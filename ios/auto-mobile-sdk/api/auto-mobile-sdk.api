@@ -74,6 +74,10 @@ public final class BreadcrumbTrail: BreadcrumbTracking, Sendable
   public static func loadFromDisk(directory: URL? = nil) -> [Breadcrumb]?
   public static func clearDisk(directory: URL? = nil)
 
+// CarPlay/CarPlayTemplateRegistry.swift
+  @MainActor public func registerCarPlay(interfaceController: CPInterfaceController)
+  @MainActor public func unregisterCarPlay()
+
 // Context/SdkContext.swift
 public struct SdkContextSnapshot: Codable, Sendable, Equatable
   public let sessionId: String?
@@ -1201,6 +1205,7 @@ public struct SdkGestureInfo: Codable, Sendable
 public enum SdkRoute: String, CaseIterable, Sendable
   case cachedHierarchy = "/hierarchy"
   case freshHierarchy = "/hierarchy/fresh"
+  case carPlayTemplates = "/carplay/templates"
   case health = "/health"
   case networkMock = "/network/mock"
   case networkErrorSimulation = "/network/error-simulation"

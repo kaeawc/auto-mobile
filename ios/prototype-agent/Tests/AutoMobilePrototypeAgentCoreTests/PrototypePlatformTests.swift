@@ -132,6 +132,20 @@ final class PrototypePlatformTests: XCTestCase {
         }
     }
 
+    func testAndroidOnlySettingsPageIsRefusedAtTheHostPath() throws {
+        let directory = PrototypeSpecFixtures.directory.appendingPathComponent("platform-window-controls")
+        let wifi = try Data(contentsOf: directory.appendingPathComponent("settings-open-wifi.json"))
+        XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: wifi)) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(
+                context.debugDescription,
+                "root.children[1].onTap[0]: settings.open page \"wifi\" is Android only; on iOS use \"app\" or \"notifications\""
+            )
+        }
+        let portable = try Data(contentsOf: directory.appendingPathComponent("settings-open-portable.json"))
+        XCTAssertNoThrow(try JSONDecoder().decode(PrototypeSpec.self, from: portable))
+    }
+
     func testStrictValidatorRejectsUnknownRepeatPlatformArgument() throws {
         let file = PrototypeSpecFixtures.directory.appendingPathComponent("invalid/platform-repeat-unknown-item.json")
         let raw = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file))

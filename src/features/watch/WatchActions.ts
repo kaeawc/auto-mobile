@@ -47,15 +47,19 @@ export interface WatchCrownOptions {
 export const CROWN_REQUEST_TIMEOUT_MS = 30_000;
 
 const CROWN_UNCHANGED_PREFIX = "rotateCrown changed nothing";
+// The runner names the stuck value and the turn size itself when the focused control is readable.
+const CROWN_STUCK_VALUE_MARKER = "The focused control's value stayed";
 
 /**
- * The runner cannot tell a turn too small to cross one step of the focused control from a control
- * at its limit or no crown focus. For a sub-revolution delta, name the size as a possible cause.
+ * When the focused control exposes a value, the runner reports that value and both causes (too
+ * small a turn, or the limit). Otherwise it cannot tell a turn too small to cross one step from a
+ * scroll limit or no crown focus, so for a sub-revolution delta name the size as a possible cause.
  */
 export function crownUnchangedHint(error: unknown, delta: number): unknown {
   if (
     !(error instanceof WatchRunnerError) ||
     !error.message.startsWith(CROWN_UNCHANGED_PREFIX) ||
+    error.message.includes(CROWN_STUCK_VALUE_MARKER) ||
     Math.abs(delta) >= 1
   ) {
     return error;

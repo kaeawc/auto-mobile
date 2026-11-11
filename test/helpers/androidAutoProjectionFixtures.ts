@@ -1,5 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  ANDROID_AUTO_PACKAGE,
+  CAR_APP_PROJECTED_NOTE,
+  CAR_APP_TEMPLATES_NOTE,
+  carAppTemplateDocumentSchema,
+  type CarAppProjectedTemplates,
+} from "../../src/models/CarAppTemplates";
 
 /**
  * Android Auto projection fixtures (#17826), captured verbatim on 2026-11-10 from a
@@ -41,3 +48,36 @@ export function fixtureListSnapshot(): unknown {
 export function contentCallBundle(document: unknown): string {
   return `Result: Bundle[{result=${JSON.stringify(document)}}]`;
 }
+
+/**
+ * The captured fixture's snapshot as observe's projected block, so head-unit tests read the live
+ * capture. `depth` keeps that many screens from the root: 1 is the fixture's TemplateMenuScreen
+ * before the List template row was opened, 2 (the capture) has ListScreen on top.
+ */
+export function fixtureProjectedTemplates(depth = 2): CarAppProjectedTemplates {
+  const document = carAppTemplateDocumentSchema.parse(fixtureListSnapshot());
+  return {
+    source: "sdk",
+    note: CAR_APP_TEMPLATES_NOTE,
+    projectedBy: ANDROID_AUTO_PACKAGE,
+    projectedNote: CAR_APP_PROJECTED_NOTE,
+    projected: [
+      {
+        packageName: FIXTURE_CAR_APP_PACKAGE,
+        sessions: document.sessions.map((session) => {
+          const screens = session.screens.slice(0, depth);
+          return {
+            ...session,
+            screens: screens.map((screen, index) => ({
+              ...screen,
+              top: index === screens.length - 1,
+            })),
+          };
+        }),
+      },
+    ],
+  };
+}
+
+/** The automotive fixture app the captures were taken with. */
+export const FIXTURE_CAR_APP_PACKAGE = "dev.jasonpearson.automobile.automotivefixture";

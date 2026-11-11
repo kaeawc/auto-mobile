@@ -211,4 +211,20 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
     });
     expect(adb.commands).not.toContain(DUMP);
   });
+
+  test("readProjected reads the bound apps for a head-unit action and keeps observe's snapshot", async () => {
+    const { adb, reader } = setup("one");
+    adb.routes.set(FIXTURE_APP, fixtureListBundle());
+    await reader.resolve(phone, projecting);
+
+    const block = await reader.readProjected(phone);
+
+    expect(block?.projected).toEqual([
+      { packageName: FIXTURE_APP, sessions: fixtureDocument.sessions },
+    ]);
+    expect(await reader.resolveAndroidAuto(phone, projecting)).toMatchObject({
+      apps: [{ packageName: FIXTURE_APP }],
+    });
+    expect(await reader.readProjected({ ...phone, platform: "ios" })).toBeUndefined();
+  });
 });

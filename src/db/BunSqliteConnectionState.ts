@@ -95,6 +95,17 @@ export interface BunSqliteRetryConfig {
   random?: Random;
   /** Total wait budget per statement; retries stop once it is spent (#10134, #11079). */
   totalWaitMs?: number;
+  /**
+   * The connection's `busy_timeout`. `maxAttempts` is sized as if every attempt
+   * waits this long, but SQLite can return BUSY without invoking the busy
+   * handler (#17902), so a faster failure waits out the remainder asynchronously
+   * before the next attempt. The deadline, not the attempt cap, then ends retries.
+   */
+  minAttemptMs?: number;
+}
+
+function resolveMinAttemptMs(retry: BunSqliteRetryConfig | undefined): number {
+  return Math.max(0, retry?.minAttemptMs ?? 0);
 }
 
 // One parked operation in the FIFO admission queue (#6699). `kind` decides the
@@ -134,6 +145,7 @@ export class BunSqliteConnectionState {
   readonly #timer: Timer;
   readonly #retryTotalWaitMs: number;
   readonly #random: Random;
+  readonly #minAttemptMs: number;
   #optimizeTimer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -150,6 +162,7 @@ export class BunSqliteConnectionState {
     this.#timer = retry?.timer ?? defaultTimer;
     this.#retryTotalWaitMs = retry?.totalWaitMs ?? DEFAULT_RETRY_TOTAL_WAIT_MS;
     this.#random = retry?.random ?? defaultRandom;
+    this.#minAttemptMs = resolveMinAttemptMs(retry);
 
     this.#startPeriodicOptimize(optimizeIntervalMs);
   }
@@ -251,10 +264,15 @@ export class BunSqliteConnectionState {
       // partially-applied statement inside another lease's transaction is never
       // re-executed. See #shouldRetry.
       for (let attempt = 1; ; attempt++) {
+        const attemptStartMs = this.#timer.now();
         try {
           return await this.#executeOnce<R>(sql, parameters);
         } catch (error) {
-          const delayMs = this.#prepareRetry(error, attempt, sql, { isBegin, retryDeadlineMs });
+          const delayMs = this.#prepareRetry(error, attempt, sql, {
+            isBegin,
+            retryDeadlineMs,
+            attemptStartMs,
+          });
           await this.#timer.sleep(delayMs);
         }
       }
@@ -268,12 +286,19 @@ export class BunSqliteConnectionState {
     error: unknown,
     attempt: number,
     sql: string,
-    { isBegin, retryDeadlineMs }: { isBegin: boolean; retryDeadlineMs: number },
+    {
+      isBegin,
+      retryDeadlineMs,
+      attemptStartMs,
+    }: { isBegin: boolean; retryDeadlineMs: number; attemptStartMs: number },
   ): number {
     if (!this.#shouldRetry(error, attempt, isBegin, retryDeadlineMs)) {
       throw error;
     }
-    const delayMs = this.#retryDelayMs(attempt);
+    const nowMs = this.#timer.now();
+    // Pace a fast BUSY up to one busy_timeout, but never past the deadline.
+    const paceMs = Math.min(attemptStartMs + this.#minAttemptMs, retryDeadlineMs) - nowMs;
+    const delayMs = Math.max(this.#retryDelayMs(attempt), Math.ceil(paceMs));
     const message =
       `SQLite busy/locked (attempt ${attempt}/${this.#maxRetryAttempts}); ` +
       `retrying in ${delayMs}ms: ${sql}`;

@@ -80,7 +80,8 @@ interface ProjectionSets {
   nodeClickTargets: ReadonlySet<ViewHierarchyNode>;
 }
 
-function isHiddenSystemUiNode(attrs: Record<string, unknown>, owner: boolean): boolean {
+function isHiddenSystemUiNode(node: ViewHierarchyNode, owner: boolean): boolean {
+  const attrs = nodeAttributes(node);
   return (
     attrs["visible-to-user"] === false &&
     (owner ||
@@ -108,7 +109,7 @@ function projectTree(
     const owner =
       systemWindow || (typeof attrs.windowId === "number" && systemWindows.has(attrs.windowId));
     const children = childrenOf(node).flatMap((child) => filter(child, owner));
-    const hiddenSystemUi = isHiddenSystemUiNode(attrs, owner);
+    const hiddenSystemUi = isHiddenSystemUiNode(node, owner);
     if (hiddenSystemUi && !nodeClickTargets.has(node)) {
       hiddenNodes.add(node);
       return children;

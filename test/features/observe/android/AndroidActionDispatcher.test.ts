@@ -123,6 +123,44 @@ describe("AndroidActionDispatcher", () => {
     }
   });
 
+  test("serializes a bounds-only click without selector or resource id", async () => {
+    const sent: string[] = [];
+    const { dispatcher } = harness({ connected: true, sent });
+    expect(
+      (
+        await dispatcher.requestNodeAction("click", undefined, {
+          expectedBounds: { left: 48, top: 372, right: 696, bottom: 548 },
+        })
+      ).success,
+    ).toBe(true);
+    expect(sent).toHaveLength(1);
+    const message = JSON.parse(sent[0]!);
+    expect(message).toMatchObject({
+      type: "request_action",
+      action: "click",
+      boundsLeft: 48,
+      boundsTop: 372,
+      boundsRight: 696,
+      boundsBottom: 548,
+    });
+    expect(message).not.toHaveProperty("selector");
+    expect(message).not.toHaveProperty("resourceId");
+  });
+
+  test("selector omission is allowed only for a bounds-verified click", async () => {
+    const sent: string[] = [];
+    const { dispatcher } = harness({ connected: true, sent });
+    await expect(dispatcher.requestNodeAction("click", undefined)).rejects.toThrow(
+      "A resource-id or stable node selector is required",
+    );
+    await expect(
+      dispatcher.requestNodeAction("long_click", undefined, {
+        expectedBounds: { left: 48, top: 372, right: 696, bottom: 548 },
+      }),
+    ).rejects.toThrow("A resource-id or stable node selector is required");
+    expect(sent).toHaveLength(0);
+  });
+
   test("an unattributed focused-click rejection settles every pending click", async () => {
     const { dispatcher, requestManager, pendingFocusedInputClickIds } = harness();
     const pending = requestManager.register<{ success: boolean; error?: string }>(

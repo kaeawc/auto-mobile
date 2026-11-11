@@ -4,6 +4,7 @@
  * `AndroidCtrlProxyClient` (#11846). Behaviour is unchanged; the client exposes the live state and
  * connection primitives this module needs through {@link AndroidActionDispatcherContext}.
  */
+import { ActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import {
@@ -329,7 +330,7 @@ export class AndroidActionDispatcher {
 
   async requestNodeAction(
     action: string,
-    selector: AccessibilityNodeSelector,
+    selector: AccessibilityNodeSelector | undefined,
     {
       timeoutMs = 5000,
       perf = new NoOpPerformanceTracker(),
@@ -337,7 +338,12 @@ export class AndroidActionDispatcher {
       expectedBounds,
     }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
-    return this.requestAction(action, selector.resourceId, timeoutMs, {
+    if (!selector && (action !== "click" || !expectedBounds)) {
+      throw new ActionableError(
+        "A resource-id or stable node selector is required for accessibility actions",
+      );
+    }
+    return this.requestAction(action, selector?.resourceId, timeoutMs, {
       perf,
       selector,
       signal,

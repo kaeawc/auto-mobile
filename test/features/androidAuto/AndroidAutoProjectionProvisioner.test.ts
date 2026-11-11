@@ -8,6 +8,8 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import type { DhuLaunchOutcome } from "../../../src/features/androidAuto/DesktopHeadUnit";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { ADB_ONLINE_DEADLINE_RESERVE_MS } from "../../../src/features/androidAuto/AndroidAutoProjectionProvisioner";
+import { AndroidAutoPhoneOfflineError } from "../../../src/features/androidAuto/AndroidAutoPhoneOfflineError";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 import {
   FakeLauncher,
@@ -20,13 +22,16 @@ function setup(
   outcomes: DhuLaunchOutcome[] = [],
   signerCheck?: AndroidAutoSignerCheck,
   portHeldElsewhere = false,
+  { autoAdvance = true }: { autoAdvance?: boolean } = {},
 ) {
   const ui = new FakeUi();
   const phone = new FakePhone(ui);
   const verified: string[][] = [];
   const launcher = new FakeLauncher(outcomes);
   const timer = new FakeTimer();
-  timer.enableAutoAdvance();
+  if (autoAdvance) {
+    timer.enableAutoAdvance();
+  }
   const signers: AndroidAutoSignerCheck = signerCheck ?? {
     verify: async (paths) => {
       verified.push([...paths]);
@@ -145,6 +150,52 @@ describe("AndroidAutoProjectionProvisioner", () => {
       "provision deadline",
     );
     expect(phone.adbStateChecks).toBe(3);
+    expect(phone.changes).toEqual([]);
+  });
+
+  test("the offline wait ends before the provision deadline with the actionable error", async () => {
+    const { phone, ui, timer, provisioner } = setup();
+    phone.adbStates = ["offline"];
+    // 20 s left: well under the 60 s wait budget.
+    const deadlineMs = timer.now() + 20_000;
+    const failure = provisioner.provision(request({ deadlineMs }));
+    await expect(failure).rejects.toBeInstanceOf(AndroidAutoPhoneOfflineError);
+    await expect(failure).rejects.toThrow(
+      "adb still reports emulator-5554 as not ready (offline) after 14 s, when the provision deadline left no more time",
+    );
+    await expect(failure).rejects.toThrow("with a larger timeoutMs");
+    // 500 + 1000 + 2000 + 4000 + 4000, then the 2.5 s left before the reserved final check.
+    expect(timer.getSleepHistory()).toEqual([500, 1_000, 2_000, 4_000, 4_000, 2_500]);
+    expect(timer.now()).toBe(deadlineMs - ADB_ONLINE_DEADLINE_RESERVE_MS);
+    expect(phone.changes).toEqual([]);
+    expect(ui.changes).toEqual([]);
+  });
+
+  test("a deadline too close for another check fails after the first offline reading", async () => {
+    const { phone, timer, provisioner } = setup();
+    phone.adbStates = ["offline"];
+    const failure = provisioner.provision(
+      request({ deadlineMs: timer.now() + ADB_ONLINE_DEADLINE_RESERVE_MS }),
+    );
+    await expect(failure).rejects.toBeInstanceOf(AndroidAutoPhoneOfflineError);
+    expect(phone.adbStateChecks).toBe(1);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("an abort during a re-check delay ends the wait without waiting it out", async () => {
+    const { phone, timer, provisioner } = setup([], undefined, false, { autoAdvance: false });
+    phone.adbStates = ["offline"];
+    const controller = new AbortController();
+    const failure = provisioner.provision(request({ signal: controller.signal }));
+    for (let turn = 0; turn < 20 && timer.getPendingTimeoutCount() === 0; turn++) {
+      await Promise.resolve();
+    }
+    expect(timer.getPendingTimeouts()).toEqual([500]);
+    controller.abort(new Error("provision deadline"));
+    await expect(failure).rejects.toThrow("provision deadline");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.now()).toBe(0);
+    expect(phone.adbStateChecks).toBe(1);
     expect(phone.changes).toEqual([]);
   });
 
@@ -496,7 +547,9 @@ describe("AndroidAutoProjectionProvisioner", () => {
     const { phone, launcher, provisioner } = setup([{ status: "connected", session: first }]);
     await provisioner.provision(request());
 
-    await provisioner.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true });
+    expect(await provisioner.stopDesktopHeadUnit("emulator-5554", { deviceStopped: true })).toBe(
+      true,
+    );
     expect(stops).toBe(1);
     // The emulator and its redirect are gone; a new emulator takes the same serial.
     phone.redirected = false;
@@ -605,7 +658,9 @@ describe("AndroidAutoProjectionProvisioner", () => {
     };
     const { provisioner } = setup([{ status: "connected", session: first }]);
     await provisioner.provision(request());
-    await provisioner.stopDesktopHeadUnit("emulator-5556", { deviceStopped: true });
+    expect(await provisioner.stopDesktopHeadUnit("emulator-5556", { deviceStopped: true })).toBe(
+      false,
+    );
     expect(stops).toBe(0);
     expect(first.isRunning()).toBe(true);
   });
@@ -623,7 +678,7 @@ describe("AndroidAutoProjectionProvisioner", () => {
     };
     const { phone, launcher, provisioner } = setup([{ status: "connected", session: stuck }]);
     await provisioner.provision(request());
-    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    expect(await provisioner.stopDesktopHeadUnit("emulator-5554")).toBe(false);
     // Still alive, so another device is refused...
     phone.redirected = false;
     await expect(provisioner.provision(request({ deviceId: "emulator-5556" }))).rejects.toThrow(

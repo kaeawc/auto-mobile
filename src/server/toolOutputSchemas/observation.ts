@@ -374,6 +374,12 @@ export const observeDiffSchema = z
       .describe(
         "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
       ),
+    surface: z
+      .enum(["tile", "watchface", "launcher", "app"])
+      .optional()
+      .describe(
+        "Same name/meaning as a full observation's `surface`, copied from the post-action observation (Wear OS watch devices only).",
+      ),
     added: z
       .array(observeDiffNodeSchema)
       .optional()
@@ -504,6 +510,12 @@ export const observeResultSchema = z
       .optional()
       .describe(
         "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
+      ),
+    surface: z
+      .enum(["tile", "watchface", "launcher", "app"])
+      .optional()
+      .describe(
+        "Wear OS watch devices only: the captured foreground surface. Omitted when it cannot be identified, including the notification tray.",
       ),
     hierarchyUnavailable: z
       .object({

@@ -1,0 +1,891 @@
+{
+  "tapOnStorage": {
+    "ok": false,
+    "ms": 7237,
+    "isError": true,
+    "payload": {
+      "message": "Failed to tap: Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.",
+      "success": false,
+      "action": "tap",
+      "error": "Failed to perform tap on element: The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.",
+      "element": {
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        }
+      },
+      "searchUntil": {
+        "durationMs": 4,
+        "requestCount": 0,
+        "changeCount": 0
+      }
+    }
+  },
+  "observeBefore": {
+    "activeWindow": {
+      "appId": "com.android.settings",
+      "activityName": "com.android.settings.homepage.SettingsHomepageActivity",
+      "layoutSeqSum": 0
+    },
+    "screenSize": {
+      "width": 2560,
+      "height": 2558,
+      "units": "physical-pixels"
+    },
+    "skeleton": [
+      {
+        "label": "Search",
+        "bounds": [
+          48,
+          60,
+          568,
+          164
+        ],
+        "elementId": "com.android.settings:id/search_action_bar_two_pane"
+      },
+      {
+        "label": "Network & internet",
+        "bounds": [
+          48,
+          196,
+          696,
+          372
+        ],
+        "elementId": "s2-2af87c3887f372cd~327902e1"
+      },
+      {
+        "label": "Connected devices",
+        "bounds": [
+          48,
+          372,
+          696,
+          548
+        ],
+        "elementId": "s2-2af87c3887f372cd~07b16976"
+      },
+      {
+        "label": "Apps",
+        "bounds": [
+          48,
+          548,
+          696,
+          724
+        ],
+        "elementId": "s2-2af87c3887f372cd~bfcaf55f"
+      },
+      {
+        "label": "Notifications",
+        "bounds": [
+          48,
+          724,
+          696,
+          900
+        ],
+        "elementId": "s2-2af87c3887f372cd~21c292ab"
+      },
+      {
+        "label": "Battery",
+        "bounds": [
+          48,
+          900,
+          696,
+          1076
+        ],
+        "elementId": "s2-2af87c3887f372cd~4541b53b"
+      },
+      {
+        "label": "Storage",
+        "bounds": [
+          48,
+          1076,
+          696,
+          1252
+        ],
+        "elementId": "s2-2af87c3887f372cd~3327cfee"
+      },
+      {
+        "label": "Sound",
+        "bounds": [
+          48,
+          1252,
+          696,
+          1328
+        ],
+        "elementId": "s2-39ad435123b44bf5"
+      },
+      {
+        "label": "Internet",
+        "bounds": [
+          744,
+          406,
+          2048,
+          562
+        ],
+        "elementId": "s2-5c5185b0afbbea91~5d6b95d7"
+      },
+      {
+        "label": "Calls & SMS",
+        "bounds": [
+          744,
+          562,
+          2048,
+          718
+        ],
+        "elementId": "s2-5c5185b0afbbea91~e80b7587"
+      },
+      {
+        "label": "Airplane mode",
+        "bounds": [
+          744,
+          718,
+          2048,
+          836
+        ],
+        "elementId": "s2-bfee7e27721a5f4b"
+      },
+      {
+        "label": "Airplane mode",
+        "bounds": [
+          1904,
+          729,
+          2016,
+          825
+        ],
+        "elementId": "android:id/switch_widget"
+      },
+      {
+        "label": "Hotspot & tethering",
+        "bounds": [
+          744,
+          836,
+          2048,
+          992
+        ],
+        "elementId": "s2-5c5185b0afbbea91~62623137"
+      },
+      {
+        "label": "Data Saver",
+        "bounds": [
+          744,
+          992,
+          2048,
+          1148
+        ],
+        "elementId": "s2-5c5185b0afbbea91~d1d1127d"
+      },
+      {
+        "label": "VPN",
+        "bounds": [
+          744,
+          1148,
+          2048,
+          1304
+        ],
+        "elementId": "s2-9d2b0563dfcdc35a"
+      },
+      {
+        "label": null,
+        "bounds": [
+          744,
+          1304,
+          2048,
+          1328
+        ],
+        "elementId": "s2-e463212d84da9d12-1"
+      },
+      {
+        "label": "Settings",
+        "bounds": [
+          16,
+          16,
+          112,
+          112
+        ],
+        "elementId": "com.android.systemui:id/caption_application_icon"
+      },
+      {
+        "label": "Minimize the current window",
+        "bounds": [
+          144,
+          16,
+          240,
+          112
+        ],
+        "elementId": "com.android.systemui:id/minimize_window"
+      },
+      {
+        "label": "Close",
+        "bounds": [
+          272,
+          16,
+          368,
+          112
+        ],
+        "elementId": "com.android.systemui:id/close_window"
+      },
+      {
+        "label": "Cancel",
+        "bounds": [
+          44,
+          20,
+          148,
+          124
+        ],
+        "elementId": "com.android.systemui:id/pt_window_cancel_button"
+      },
+      {
+        "label": "Confirm",
+        "bounds": [
+          164,
+          20,
+          268,
+          124
+        ],
+        "elementId": "com.android.systemui:id/pt_window_confirm_button"
+      },
+      {
+        "label": "Unbind Controllers",
+        "bounds": [
+          50,
+          230,
+          910,
+          386
+        ],
+        "elementId": "com.android.systemui:id/input_recovery_menu_unbind_controllers"
+      },
+      {
+        "label": "Bind Left Controller",
+        "bounds": [
+          50,
+          766,
+          910,
+          922
+        ],
+        "elementId": "com.android.systemui:id/input_recovery_menu_bind_left_controller"
+      },
+      {
+        "label": "Bind Right Controller",
+        "bounds": [
+          50,
+          1302,
+          910,
+          1458
+        ],
+        "elementId": "com.android.systemui:id/input_recovery_menu_bind_right_controller"
+      },
+      {
+        "label": "Recents",
+        "bounds": [
+          0,
+          0,
+          3522,
+          2030
+        ],
+        "elementId": "s2-c77b9387c969e33f"
+      },
+      {
+        "label": "Clear all",
+        "bounds": [
+          1656,
+          1284,
+          1866,
+          1396
+        ],
+        "elementId": "com.android.systemui:id/overview_clear_all"
+      },
+      {
+        "label": null,
+        "bounds": [
+          0,
+          146,
+          236,
+          646
+        ],
+        "elementId": "com.android.systemui:id/back_button"
+      },
+      {
+        "label": null,
+        "bounds": [
+          240,
+          146,
+          560,
+          646
+        ],
+        "elementId": "com.android.systemui:id/launcher_button"
+      },
+      {
+        "label": null,
+        "bounds": [
+          564,
+          146,
+          800,
+          646
+        ],
+        "elementId": "com.android.systemui:id/recents_button"
+      },
+      {
+        "label": "Launcher",
+        "bounds": [
+          73,
+          48,
+          2828,
+          1853
+        ],
+        "elementId": "s2-526e27b21d036999"
+      },
+      {
+        "label": "Notifications",
+        "bounds": [
+          0,
+          0,
+          3072,
+          1416
+        ],
+        "elementId": "s2-5f026aa426f9af02"
+      },
+      {
+        "label": null,
+        "bounds": [
+          0,
+          0,
+          496,
+          680
+        ],
+        "elementId": "s2-e463212d84da9d12-2"
+      },
+      {
+        "label": "Internet,AndroidWifi",
+        "bounds": [
+          36,
+          69,
+          492,
+          229
+        ],
+        "elementId": "s2-393c435e39ee43f6"
+      },
+      {
+        "label": null,
+        "bounds": [
+          84,
+          127,
+          148,
+          170
+        ],
+        "elementId": "com.android.systemui:id/tile_icon"
+      },
+      {
+        "label": "Bluetooth.",
+        "bounds": [
+          508,
+          69,
+          964,
+          229
+        ],
+        "elementId": "s2-1dc73be178931775"
+      },
+      {
+        "label": null,
+        "bounds": [
+          556,
+          127,
+          620,
+          170
+        ],
+        "elementId": "com.android.systemui:id/tile_icon"
+      },
+      {
+        "label": "Environment",
+        "bounds": [
+          292,
+          277,
+          484,
+          491
+        ],
+        "elementId": "s2-8c5dc43a6a4ac37f"
+      },
+      {
+        "label": "Passthrough Window",
+        "bounds": [
+          516,
+          277,
+          708,
+          517
+        ],
+        "elementId": "s2-cf9470ca5e833f68"
+      },
+      {
+        "label": "Mic access",
+        "bounds": [
+          740,
+          277,
+          932,
+          491
+        ],
+        "elementId": "s2-a945b5488c67c86d"
+      },
+      {
+        "label": "Screen record, Start",
+        "bounds": [
+          68,
+          533,
+          260,
+          747
+        ],
+        "elementId": "s2-29146e93d052c8fd"
+      },
+      {
+        "label": "Recenter",
+        "bounds": [
+          292,
+          533,
+          484,
+          747
+        ],
+        "elementId": "s2-5555982f7e9facec"
+      },
+      {
+        "label": "Dark theme",
+        "bounds": [
+          516,
+          533,
+          708,
+          747
+        ],
+        "elementId": "s2-b184af86568d489b"
+      },
+      {
+        "label": "Do Not Disturb.",
+        "bounds": [
+          740,
+          533,
+          932,
+          747
+        ],
+        "elementId": "s2-7d5bc7c51e44d6a3"
+      },
+      {
+        "label": "Expand Quick Settings",
+        "bounds": [
+          478,
+          817,
+          522,
+          853
+        ],
+        "elementId": "com.android.systemui:id/quick_quick_settings_expand_button"
+      },
+      {
+        "label": "Power menu",
+        "bounds": [
+          252,
+          1057,
+          396,
+          1201
+        ],
+        "elementId": "com.android.systemui:id/quick_settings_power_button"
+      },
+      {
+        "label": "Open settings.",
+        "bounds": [
+          428,
+          1057,
+          572,
+          1201
+        ],
+        "elementId": "com.android.systemui:id/quick_settings_settings_app_button"
+      },
+      {
+        "label": "Environment",
+        "bounds": [
+          604,
+          1057,
+          748,
+          1201
+        ],
+        "elementId": "com.android.systemui:id/quick_settings_home_environment_button"
+      },
+      {
+        "label": "Close",
+        "bounds": [
+          0,
+          0,
+          128,
+          128
+        ],
+        "elementId": "com.android.systemui:id/quick_search_close_button"
+      },
+      {
+        "label": "Back",
+        "bounds": [
+          16,
+          0,
+          176,
+          96
+        ],
+        "elementId": "com.android.systemui:id/back"
+      },
+      {
+        "label": "Recents",
+        "bounds": [
+          304,
+          0,
+          464,
+          96
+        ],
+        "elementId": "com.android.systemui:id/recent_apps"
+      },
+      {
+        "label": "Home",
+        "bounds": [
+          160,
+          0,
+          320,
+          96
+        ],
+        "elementId": "com.android.systemui:id/home"
+      },
+      {
+        "label": "Magnifier settings",
+        "bounds": [
+          34,
+          2,
+          130,
+          98
+        ],
+        "elementId": "com.android.systemui:id/button_settings"
+      },
+      {
+        "label": "Close magnifier",
+        "bounds": [
+          130,
+          2,
+          226,
+          98
+        ],
+        "elementId": "com.android.systemui:id/button_close"
+      },
+      {
+        "label": "1X",
+        "bounds": [
+          48,
+          137,
+          144,
+          233
+        ],
+        "elementId": "com.android.systemui:id/magnification_small_button"
+      },
+      {
+        "label": "2X",
+        "bounds": [
+          180,
+          137,
+          276,
+          233
+        ],
+        "elementId": "com.android.systemui:id/magnification_medium_button"
+      },
+      {
+        "label": "3X",
+        "bounds": [
+          312,
+          137,
+          408,
+          233
+        ],
+        "elementId": "com.android.systemui:id/magnification_large_button"
+      },
+      {
+        "label": "Full",
+        "bounds": [
+          444,
+          137,
+          540,
+          233
+        ],
+        "elementId": "com.android.systemui:id/magnification_extra_large_button"
+      },
+      {
+        "label": "Zoom out",
+        "bounds": [
+          48,
+          358,
+          144,
+          454
+        ],
+        "elementId": "com.android.systemui:id/icon_start_frame"
+      },
+      {
+        "label": "Zoom in",
+        "bounds": [
+          456,
+          358,
+          552,
+          454
+        ],
+        "elementId": "com.android.systemui:id/icon_end_frame"
+      },
+      {
+        "label": "Close",
+        "bounds": [
+          48,
+          494,
+          552,
+          594
+        ],
+        "elementId": "com.android.systemui:id/magnification_done_button"
+      },
+      {
+        "label": "Start",
+        "bounds": [
+          155,
+          40,
+          375,
+          136
+        ],
+        "elementId": "com.android.systemui:id/activate_button"
+      },
+      {
+        "label": "Select",
+        "bounds": [
+          390,
+          40,
+          610,
+          136
+        ],
+        "elementId": "com.android.systemui:id/gesture_button"
+      },
+      {
+        "label": "More",
+        "bounds": [
+          625,
+          40,
+          845,
+          136
+        ],
+        "elementId": "com.android.systemui:id/global_button"
+      },
+      {
+        "label": null,
+        "bounds": [
+          448,
+          176,
+          552,
+          280
+        ],
+        "elementId": "com.android.systemui:id/dwell_collapse_button"
+      },
+      {
+        "label": "10:48\u202fAM",
+        "bounds": [
+          0,
+          0,
+          2400,
+          2400
+        ],
+        "elementId": "com.android.systemui:id/home_screen"
+      },
+      {
+        "label": "Open Launcher Panel",
+        "bounds": [
+          964,
+          1873,
+          1140,
+          2049
+        ],
+        "elementId": "com.android.systemui:id/home_screen_launcher_button"
+      },
+      {
+        "label": "Environment",
+        "bounds": [
+          1260,
+          1873,
+          1436,
+          2049
+        ],
+        "elementId": "com.android.systemui:id/home_screen_env_button"
+      },
+      {
+        "label": "Cancel",
+        "bounds": [
+          480,
+          1210,
+          649,
+          1306
+        ],
+        "elementId": "com.android.systemui:id/button1"
+      },
+      {
+        "label": "Confirm",
+        "bounds": [
+          665,
+          1210,
+          848,
+          1306
+        ],
+        "elementId": "com.android.systemui:id/button2"
+      },
+      {
+        "label": null,
+        "bounds": [
+          516,
+          1187,
+          616,
+          1283
+        ],
+        "elementId": "com.android.systemui:id/button1"
+      },
+      {
+        "label": null,
+        "bounds": [
+          632,
+          1187,
+          732,
+          1283
+        ],
+        "elementId": "com.android.systemui:id/button3"
+      },
+      {
+        "label": null,
+        "bounds": [
+          748,
+          1187,
+          848,
+          1283
+        ],
+        "elementId": "com.android.systemui:id/button2"
+      },
+      {
+        "label": "Adjust",
+        "bounds": [
+          132,
+          1210,
+          295,
+          1306
+        ],
+        "elementId": "com.android.systemui:id/button1"
+      },
+      {
+        "label": "Cancel",
+        "bounds": [
+          311,
+          1210,
+          480,
+          1306
+        ],
+        "elementId": "com.android.systemui:id/button3"
+      },
+      {
+        "label": "Create new boundary",
+        "bounds": [
+          496,
+          1210,
+          848,
+          1306
+        ],
+        "elementId": "com.android.systemui:id/button2"
+      },
+      {
+        "label": "OK",
+        "bounds": [
+          729,
+          1210,
+          848,
+          1306
+        ],
+        "elementId": "com.android.systemui:id/button2"
+      },
+      {
+        "label": null,
+        "bounds": [
+          0,
+          176,
+          744,
+          1328
+        ],
+        "elementId": "com.android.settings:id/main_content_scrollable_container"
+      },
+      {
+        "label": null,
+        "bounds": [
+          744,
+          48,
+          2048,
+          1328
+        ],
+        "elementId": "com.android.settings:id/content_parent"
+      },
+      {
+        "label": "Launcher",
+        "bounds": [
+          73,
+          48,
+          2828,
+          1625
+        ],
+        "elementId": "com.android.systemui:id/launcher_item_viewpager"
+      },
+      {
+        "label": "Launcher",
+        "bounds": [
+          73,
+          48,
+          2828,
+          1625
+        ],
+        "elementId": "s2-0225a69aaf9e3180"
+      },
+      {
+        "label": "Quick Settings",
+        "bounds": [
+          36,
+          245,
+          964,
+          789
+        ],
+        "elementId": "com.android.systemui:id/qs_pager"
+      },
+      {
+        "label": "Quick Settings",
+        "bounds": [
+          52,
+          277,
+          948,
+          789
+        ],
+        "elementId": "s2-8e04602c6d58ac7d"
+      },
+      {
+        "label": "Boundary position, Unavailable",
+        "bounds": [
+          68,
+          277,
+          260,
+          517
+        ],
+        "elementId": "s2-60c7c486e0598d30"
+      }
+    ]
+  },
+  "ctrlProxyLogcat": [
+    "--------- beginning of main",
+    "11-11 10:48:38.871  4584  4727 D CtrlProxy: extractHierarchyNow (disableAllFiltering: false)",
+    "11-11 10:48:38.930  4584  4727 D CtrlProxy: Extracting from 39 windows (disableAllFiltering: false, occlusionEnabled: true)",
+    "11-11 10:48:39.167  4584  4727 D CtrlProxy: Broadcasted hierarchy update to 1 clients (sync=true)",
+    "11-11 10:48:39.333  4584  5145 D CtrlProxy: extractHierarchyNow (disableAllFiltering: false)",
+    "11-11 10:48:39.466  4584  5145 D CtrlProxy: Extracting from 39 windows (disableAllFiltering: false, occlusionEnabled: true)",
+    "11-11 10:48:39.779  4584  5145 D CtrlProxy: Broadcasted hierarchy update to 1 clients (sync=true)",
+    "11-11 10:48:39.933  4584  4725 D CtrlProxy: extractHierarchyNow (disableAllFiltering: false)",
+    "11-11 10:48:40.083  4584  4725 D CtrlProxy: Extracting from 39 windows (disableAllFiltering: false, occlusionEnabled: true)",
+    "11-11 10:48:40.418  4584  4725 D CtrlProxy: Broadcasted hierarchy update to 1 clients (sync=true)",
+    "11-11 10:48:40.538  4584  4726 D CtrlProxy: performAction: action='click', target='resource-id: null'",
+    "11-11 10:48:41.153  4584  4726 D CtrlProxy: Action completed: success=true",
+    "11-11 10:48:41.994  4584  4726 D CtrlProxy: Extracting from 39 windows (disableAllFiltering: false, occlusionEnabled: true)"
+  ],
+  "observeAfter": {
+    "activeWindow": {
+      "appId": "com.android.settings",
+      "activityName": "com.android.settings.SubSettings"
+    }
+  }
+}

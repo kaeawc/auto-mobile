@@ -31,7 +31,10 @@ import type {
 import { hitTestSchema } from "./tapSchemas";
 import {
   dpadTapOnHoldMs,
+  dpadTapOnRefusal,
   dpadTapOnTarget,
+  dpadTapOnTouchOnlyParts,
+  usesNativeLinkActivation,
   type DpadTapOnResult,
 } from "../../features/action/DpadTapOn";
 import { defaultTapOnDpadFallbackFactory } from "./tapOnDpadFallback";
@@ -272,8 +275,9 @@ function resolveTapOnAction(
 
 /**
  * On an Android device that declares no touchscreen (Android TV), tapOn moves D-pad focus to the
- * match and presses enter (#16733). Undefined leaves the touch path in charge: another platform, a
- * device with (or of unknown) touchscreen, or a request only a touch tap can serve.
+ * match and presses enter (#16733), or refuses a request only a touch tap can serve, since that tap
+ * would be a silent no-op (#17913). Undefined leaves the touch path in charge: another platform, a
+ * device with (or of unknown) touchscreen, or a semantic-link activation, which injects no touch.
  */
 async function tapOnByDpad(
   device: BootedDevice,
@@ -289,13 +293,17 @@ async function tapOnByDpad(
     deps.tapOnDpadFallbackFactory ??
     (deps.tapOnElementFactory ? undefined : defaultTapOnDpadFallbackFactory);
   const request = { ...args, action };
-  const target = factory ? dpadTapOnTarget(request) : undefined;
-  if (!factory || !target) {
+  // A semantic link is activated by the accessibility service, not a touch, so it needs no D-pad.
+  if (!factory || usesNativeLinkActivation(request)) {
     return undefined;
   }
   const fallback = factory(device);
   if ((await fallback.hasTouchscreen(signal)) !== false) {
     return undefined;
+  }
+  const target = dpadTapOnTarget(request);
+  if (!target) {
+    throw new ActionableError(dpadTapOnRefusal(dpadTapOnTouchOnlyParts(request)));
   }
   return await fallback.tap(target, signal, dpadTapOnHoldMs(request));
 }

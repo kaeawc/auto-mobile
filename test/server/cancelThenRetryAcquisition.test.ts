@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
@@ -130,6 +131,7 @@ async function buildRig() {
   const idGenerator = new CountingIdGenerator("cancel-retry");
   const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
   setDeviceToolsDependencies({
+    androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
     env,
     deviceManagerFactory: () => devices,
     deviceMatcherFactory: () => new DefaultDeviceMatcher(),

@@ -1,4 +1,4 @@
-import type { ExecResult } from "../../models";
+import type { BootedDevice, ExecResult } from "../../models";
 import { resolveIosDeviceKind } from "./IosDeviceKind";
 import { PhysicalIosCrashBackend } from "./PhysicalIosCrashBackend";
 export { PhysicalIosCrashBackend } from "./PhysicalIosCrashBackend";
@@ -28,6 +28,7 @@ export interface IosCrashBackend {
 
 export interface IosCrashBackendDeps {
   simctl: SimulatorCrashCommandRunner;
+  platform?: BootedDevice["platform"];
 }
 
 export class SimulatorIosCrashBackend implements IosCrashBackend {
@@ -36,6 +37,7 @@ export class SimulatorIosCrashBackend implements IosCrashBackend {
   constructor(
     private readonly deviceId: string,
     private readonly simctl: SimulatorCrashCommandRunner,
+    private readonly launchctlDomain: "user" | "system" = "user",
   ) {}
 
   listProcesses(options: IosCrashCommandOptions): Promise<ExecResult> {
@@ -54,7 +56,9 @@ export class SimulatorIosCrashBackend implements IosCrashBackend {
         "launchctl",
         "kill",
         options.signalName ?? "SIGABRT",
-        `user/${options.uid}/${options.serviceLabel}`,
+        this.launchctlDomain === "system"
+          ? `system/${options.serviceLabel}`
+          : `user/${options.uid}/${options.serviceLabel}`,
       ],
       options.timeoutMs,
       options.signal,
@@ -88,6 +92,10 @@ export function resolveIosCrashBackend(
   deps: IosCrashBackendDeps,
 ): IosCrashBackend {
   return resolveIosDeviceKind({ deviceId }) === "simulator"
-    ? new SimulatorIosCrashBackend(deviceId, deps.simctl)
+    ? new SimulatorIosCrashBackend(
+        deviceId,
+        deps.simctl,
+        deps.platform === "tvos" ? "system" : "user",
+      )
     : new PhysicalIosCrashBackend();
 }

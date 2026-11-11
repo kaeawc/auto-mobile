@@ -1,7 +1,11 @@
+import { FakeAvdColdBootMarkerStore } from "../fakes/FakeAvdColdBootMarkerStore";
 import { describe, expect, test } from "bun:test";
 import type { AndroidAutoProjectionApplier } from "../../src/features/androidAuto/AndroidAutoProjectionService";
 import type { ShutdownDeadlineContext } from "../../src/features/deviceLifecycle/deviceLifecycleCore";
-import { trackAndroidAutoStopAfterKill } from "../../src/server/deviceToolsShutdownAndroidAuto";
+import {
+  stopAndroidAutoBeforeShutdown,
+  trackAndroidAutoStopAfterKill,
+} from "../../src/server/deviceToolsShutdownAndroidAuto";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const flush = async () => {
@@ -33,6 +37,7 @@ function setup() {
       await new Promise<void>((resolve) => {
         settleStop = resolve;
       });
+      return false;
     },
   };
   const retained: Array<{ operation: Promise<unknown>; releaseAfterFailure?: boolean }> = [];
@@ -52,6 +57,8 @@ function setup() {
   });
   return {
     tracker,
+    context,
+    applier,
     retained,
     timer,
     settle: () => settleStop(),
@@ -123,4 +130,45 @@ describe("trackAndroidAutoStopAfterKill", () => {
     );
     expect(released).toBe(true);
   });
+});
+
+for (const stopped of [true, false]) {
+  test(`pre-kill shutdown records the AVD only when DHU stopped=${stopped}`, async () => {
+    const { context, applier, timer } = setup();
+    const markers = new FakeAvdColdBootMarkerStore();
+    applier.stopDesktopHeadUnit = async () => stopped;
+    // The shutdown caller cannot dispatch its console kill until this operation settles.
+    await stopAndroidAutoBeforeShutdown(context, {
+      timer,
+      androidAutoProjection: applier,
+      avdColdBootMarkers: markers,
+    });
+    expect(markers.calls).toEqual(stopped ? ["write:Pixel"] : []);
+    expect(await markers.isMarked("Pixel")).toBe(stopped);
+  });
+}
+
+test("pre-kill shutdown marks the confirmed AVD rather than an unknown entry name", async () => {
+  const { context, applier, timer } = setup();
+  applier.stopDesktopHeadUnit = async () => true;
+  const markers = new FakeAvdColdBootMarkerStore();
+  await stopAndroidAutoBeforeShutdown(
+    { ...context, device: { ...context.device, name: "Unknown (emulator-5554)" } },
+    { timer, androidAutoProjection: applier, avdColdBootMarkers: markers },
+    "Pixel",
+  );
+  expect(markers.calls).toEqual(["write:Pixel"]);
+});
+
+test("marker write failure does not fail pre-kill shutdown", async () => {
+  const { context, applier, timer } = setup();
+  applier.stopDesktopHeadUnit = async () => true;
+  const markers = new FakeAvdColdBootMarkerStore();
+  markers.failure = "write";
+  await stopAndroidAutoBeforeShutdown(context, {
+    timer,
+    androidAutoProjection: applier,
+    avdColdBootMarkers: markers,
+  });
+  expect(markers.calls).toEqual(["write:Pixel"]);
 });

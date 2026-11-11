@@ -206,3 +206,7 @@ AutoMobileSDK.shared.initialize(configuration: config)
 
 - ``DateProvider``
 - ``SystemDateProvider``
+
+### CarPlay
+
+On platforms supporting CarPlay, call `AutoMobileSDK.shared.registerCarPlay(interfaceController:)` on the main actor when the template scene connects, and `unregisterCarPlay()` when it disconnects. Registration weakly holds the controller and opts in to debug-only `GET /carplay/templates`. The route snapshots public template properties on the main thread even while the phone app is backgrounded. It exposes no images or interaction API. Before registration, enabled and connected are false; unregister clears connected while preserving enabled. Release builds do not register a controller or serve this route.

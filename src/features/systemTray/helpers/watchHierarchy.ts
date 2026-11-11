@@ -428,3 +428,58 @@ function uniqueTarget(root: ViewHierarchyNode, text: string): Element | undefine
   );
   return result.totalMatches === 1 ? (result.element ?? undefined) : undefined;
 }
+
+/** Gboard's remote-input field, rather than an arbitrary editable notification node. */
+export function watchReplyInput(hierarchy?: ViewHierarchyResult): boolean {
+  const nodes = hierarchy ? getHierarchyRoots(hierarchy).flatMap(watchNodes) : [];
+  const hasId = (suffix: string) =>
+    nodes.some((node) =>
+      (toSearchable(getNodeProperties(node) ?? {}).nativeId ?? "").endsWith(`:id/${suffix}`),
+    );
+  return hasId("wear_remote_input") && hasId("extract_edit_text");
+}
+
+/** The IME action is Close keyboard until composing text has been committed. */
+export function watchReplySend(hierarchy?: ViewHierarchyResult): Element | undefined {
+  if (!hierarchy || !watchReplyInput(hierarchy)) {
+    return undefined;
+  }
+  const targets = getHierarchyRoots(hierarchy)
+    .flatMap(watchNodes)
+    .filter((node) => {
+      const props = getNodeProperties(node) ?? {};
+      const searchable = toSearchable(props);
+      return (
+        (searchable.nativeId ?? "").endsWith(":id/key_pos_ime_action") &&
+        searchable.textSources["content-desc"] === "Send" &&
+        isClickableElementProperties(props)
+      );
+    });
+  // CtrlProxy includes the same IME window in both hierarchy and windows; require one location.
+  const parser = new DefaultElementParser();
+  const elements = targets.flatMap((node) => parser.parseNodeBounds(node) ?? []);
+  const locations = new Map(elements.map((element) => [JSON.stringify(element.bounds), element]));
+  return locations.size === 1 ? [...locations.values()][0] : undefined;
+}
+
+/** Gboard's soft Space commits remote-input text through the input connection. */
+export function watchReplySpace(hierarchy?: ViewHierarchyResult): Element | undefined {
+  if (!hierarchy || !watchReplyInput(hierarchy)) {
+    return undefined;
+  }
+  const targets = getHierarchyRoots(hierarchy)
+    .flatMap(watchNodes)
+    .filter((node) => {
+      const props = getNodeProperties(node) ?? {};
+      const searchable = toSearchable(props);
+      return (
+        (searchable.nativeId ?? "").endsWith(":id/key_pos_space") &&
+        isClickableElementProperties(props)
+      );
+    });
+  // CtrlProxy includes the same IME window in both hierarchy and windows; require one location.
+  const parser = new DefaultElementParser();
+  const elements = targets.flatMap((node) => parser.parseNodeBounds(node) ?? []);
+  const locations = new Map(elements.map((element) => [JSON.stringify(element.bounds), element]));
+  return locations.size === 1 ? [...locations.values()][0] : undefined;
+}

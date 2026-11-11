@@ -10,6 +10,7 @@ import {
 } from "../../../../src/features/action/pointer/instrumentationDispatch";
 import type { PointerRequest } from "../../../../src/features/action/pointer/PointerInjector";
 import { createExecResult } from "../../../../src/utils/execResult";
+import { getAbortSignal, runWithAbortSignal } from "../../../../src/utils/AbortContext";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { flushMicrotasks } from "../../../helpers/shutdownStageHarness";
 
@@ -38,13 +39,12 @@ class GatedAdbExecutor extends FakeAdbExecutor {
   private gated = false;
 
   override async executeCommand(command: string, options?: AdbExecuteOptions) {
-    const response = super.executeCommand(command, options);
     if (command.includes("am instrument") && !this.gated) {
       this.gated = true;
       this.started.resolve();
       await this.release.promise;
     }
-    return response;
+    return super.executeCommand(command, options);
   }
 }
 
@@ -278,11 +278,12 @@ describe("createInstrumentationDispatch", () => {
     const dispatch = createInstrumentationDispatch(adb, DEVICE)(hover);
     await expect(dispatch).rejects.toThrow("may have partially run");
     await expect(dispatch).rejects.toThrow(`CtrlProxy's accessibility service ${note}`);
-    expect(adb.getExecutedCommands()).toHaveLength(2);
+    expect(adb.getExecutedCommands()).toHaveLength(3);
     expect(adb.getCommandCalls()[1]).toMatchObject({
       command: "shell settings get secure enabled_accessibility_services",
       timeoutMs: 5000,
     });
+    expect(adb.getExecutedCommands()[2]).toBe("shell input stylus motionevent CANCEL 10 20");
   });
 
   test("an unreadable accessibility setting preserves the crash error without a state note", async () => {
@@ -370,4 +371,161 @@ describe("createInstrumentationDispatch", () => {
       expect(adb.getExecutedCommands()).toHaveLength(command === "am instrument" ? 1 : 2);
     },
   );
+
+  test("the logged crash line from #16028 closes the open pointer before rethrowing", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "am instrument",
+      result(["INSTRUMENTATION_RESULT: shortMsg=Process crashed.", "INSTRUMENTATION_CODE: 0"]),
+    );
+    adb.setCommandResponse("settings get", createExecResult("null", ""));
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
+      "crashed before reporting a result",
+    );
+    expect(adb.getExecutedCommands()).toEqual([
+      pointerInstrumentationCommand(hover),
+      "shell settings get secure enabled_accessibility_services",
+      "shell input stylus motionevent CANCEL 10 20",
+    ]);
+  });
+
+  test("a timed-out or killed adb call cancels the pointer and keeps its own error", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("am instrument", new Error("Command timed out after 15000ms"));
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
+      "Command timed out after 15000ms",
+    );
+    expect(adb.getExecutedCommands()).toEqual([
+      pointerInstrumentationCommand(hover),
+      "shell input stylus motionevent CANCEL 10 20",
+    ]);
+  });
+
+  test("a caller abort mid-run still cancels, without the aborted signal", async () => {
+    const adb = new GatedAdbExecutor();
+    const controller = new AbortController();
+    adb.setCommandError("am instrument", new Error("Operation cancelled"));
+    const dispatch = createInstrumentationDispatch(adb, DEVICE)(hover, controller.signal);
+    await adb.started.promise;
+    controller.abort();
+    adb.release.resolve();
+    await expect(dispatch).rejects.toThrow("Operation cancelled");
+    const cancel = adb.getCommandCalls()[1];
+    expect(cancel.command).toBe("shell input stylus motionevent CANCEL 10 20");
+    expect(cancel.signal).toBeUndefined();
+    expect(cancel.timeoutMs).toBe(5000);
+  });
+
+  test("a failed abandon CANCEL preserves the run's error", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("am instrument", new Error("device offline"));
+    adb.setCommandError("motionevent CANCEL", new Error("CANCEL unavailable"));
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
+      "device offline",
+    );
+  });
+
+  test("a not-sent failure sends no CANCEL", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "am instrument",
+      result(["INSTRUMENTATION_FAILED: Unable to find instrumentation"]),
+    );
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
+      "No input was sent",
+    );
+    expect(adb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
+  });
+
+  test("a partial run whose own close was refused gets a host CANCEL", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "am instrument",
+      refusal(
+        3,
+        "the system refused MOVE at 48 ms; the pointer could not be closed, so it may still be down or hovering",
+      ),
+    );
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
+      "after 3 events",
+    );
+    expect(adb.getExecutedCommands()).toEqual([
+      pointerInstrumentationCommand(hover),
+      "shell input stylus motionevent CANCEL 10 20",
+    ]);
+  });
+
+  test("a queued run starts only after the abandoned run's CANCEL", async () => {
+    const firstAdb = new GatedAdbExecutor();
+    const secondAdb = new FakeAdbExecutor();
+    firstAdb.setCommandError("am instrument", new Error("Command timed out"));
+    secondAdb.setCommandResponse("am instrument", success);
+    const order: string[] = [];
+    const first = createInstrumentationDispatch(
+      firstAdb,
+      "serial-abandon",
+    )(hover).catch((error: Error) => order.push(`first:${error.message}`));
+    await firstAdb.started.promise;
+    const second = createInstrumentationDispatch(
+      secondAdb,
+      "serial-abandon",
+    )(hover).then(() => order.push("second"));
+    firstAdb.release.resolve();
+    await Promise.all([first, second]);
+    expect(firstAdb.getExecutedCommands()).toEqual([
+      pointerInstrumentationCommand(hover),
+      "shell input stylus motionevent CANCEL 10 20",
+    ]);
+    expect(order).toEqual(["first:Command timed out", "second"]);
+  });
+
+  test("the abandon CANCEL ignores an aborted ambient request signal", async () => {
+    // AdbClient resolves an omitted signal from the ambient request context.
+    const ambient: Array<AbortSignal | undefined> = [];
+    class AmbientRecordingAdb extends GatedAdbExecutor {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
+        if (command.includes("motionevent CANCEL")) {
+          ambient.push(getAbortSignal());
+        }
+        return super.executeCommand(command, options);
+      }
+    }
+    const adb = new AmbientRecordingAdb();
+    adb.setCommandError("am instrument", new Error("Operation cancelled"));
+    const controller = new AbortController();
+    const dispatch = runWithAbortSignal(controller.signal, () =>
+      createInstrumentationDispatch(adb, DEVICE)(hover, controller.signal),
+    );
+    await adb.started.promise;
+    controller.abort();
+    adb.release.resolve();
+    await expect(dispatch).rejects.toThrow("Operation cancelled");
+    expect(ambient).toEqual([undefined]);
+  });
+
+  test("the failed-close CANCEL ignores an aborted ambient request signal", async () => {
+    const ambient: Array<AbortSignal | undefined> = [];
+    class AmbientRecordingAdb extends FakeAdbExecutor {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
+        if (command.includes("motionevent CANCEL")) {
+          ambient.push(getAbortSignal());
+        }
+        return super.executeCommand(command, options);
+      }
+    }
+    const adb = new AmbientRecordingAdb();
+    adb.setCommandResponse(
+      "am instrument",
+      refusal(3, "the system refused MOVE at 48 ms; the pointer could not be closed"),
+    );
+    const controller = new AbortController();
+    controller.abort();
+    // The run itself has no explicit signal; only the request's ambient one is aborted.
+    await expect(
+      runWithAbortSignal(controller.signal, () =>
+        createInstrumentationDispatch(adb, DEVICE)(hover),
+      ),
+    ).rejects.toThrow("after 3 events");
+    expect(ambient).toEqual([undefined]);
+  });
 });

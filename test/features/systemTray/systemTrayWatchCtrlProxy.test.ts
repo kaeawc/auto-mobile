@@ -10,11 +10,16 @@ import {
 } from "../../../src/features/systemTray/systemTrayHelpers";
 import {
   watchAlert,
+  watchNodes,
   watchExpandedTarget,
   watchHasExpandedCard,
   watchNotifications,
   watchStreamScroll,
 } from "../../../src/features/systemTray/helpers/watchHierarchy";
+import {
+  getHierarchyRoots,
+  getNodeProperties,
+} from "../../../src/features/systemTray/notificationHints";
 import { observeResultFromFixture } from "../../helpers/observeFixture";
 import fullAlertCapture from "../../fixtures/wear/systemtray/ctrlproxy-alert-full.json";
 import shyAlertCapture from "../../fixtures/wear/systemtray/ctrlproxy-alert-shy-over-launcher.json";
@@ -33,6 +38,10 @@ import clippedBCapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-s
 import endACapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-stream-end-a.json";
 import endBCapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-stream-end-b.json";
 import expandedCapture from "../../fixtures/wear/systemtray/ctrlproxy-card-expanded.json";
+import replyCardCapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-stream-reply-card.json";
+import replyInputCapture from "../../fixtures/wear/systemtray/ctrlproxy-card-expanded-reply-input.json";
+import replyKeyboardCapture from "../../fixtures/wear/systemtray/ctrlproxy-reply-keyboard.json";
+import replyTypedCapture from "../../fixtures/wear/systemtray/ctrlproxy-reply-keyboard-typed.json";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -74,6 +83,15 @@ const closed: ObserveResult = {
   ...top,
   viewHierarchy: { hierarchy: { node: { $: { bounds: "[0,0][454,454]" } } } },
 };
+
+const replyCard = capture(replyCardCapture, "reply-card");
+const replyInput = capture(replyInputCapture, "reply-input");
+const replyKeyboard = capture(replyKeyboardCapture, "reply-keyboard");
+const replyTyped = capture(replyTypedCapture, "reply-typed");
+const TAP_REPLY_CARD = "shell input tap 192 176";
+const TAP_KEYBOARD = "shell input tap 289 332";
+const TAP_SEND = "shell input tap 318 111";
+const TAP_SPACE = "shell input tap 192 339";
 
 const FIXTURE_APP = "dev.jasonpearson.automobile.wearfixture";
 const BACK = "shell input keyevent 4";
@@ -521,6 +539,156 @@ describe("Wear OS 7 stream actions", () => {
         incompleteReason: "rewind",
       });
     });
+  });
+
+  test.each([
+    { replyText: "hi", textCommands: ["shell input text 'hi'"] },
+    { replyText: "it's a reply", textCommands: ["shell input text 'it'\\''s%sa%sreply'"] },
+    { replyText: "50%sale", textCommands: ["shell input text '50%'", "shell input text 'sale'"] },
+  ])("replies inline with escaped text: $replyText", async ({ replyText, textCommands }) => {
+    const { tray, adb, timer } = setup((commands) => {
+      if (commands.includes(TAP_SEND) || commands.includes(BACK)) {
+        return replyCard;
+      }
+      if (commands.includes(TAP_SPACE)) {
+        return replyTyped;
+      }
+      if (commands.includes(TAP_KEYBOARD)) {
+        return replyKeyboard;
+      }
+      return commands.includes(TAP_REPLY_CARD) ? replyInput : replyCard;
+    });
+    const result = await tray.execute({
+      action: "tap",
+      notification: { title: "Fixture alert", replyText },
+    });
+    expect(result.payload.message).toBe("Replied to watch notification");
+    expect(
+      adb
+        .getExecutedCommands()
+        .filter((command) => command.startsWith("shell input") && command !== BACK),
+    ).toEqual([TAP_REPLY_CARD, TAP_KEYBOARD, ...textCommands, TAP_SPACE, TAP_SEND]);
+    expect(adb.getExecutedCommands()).not.toContain("shell input keyevent 62");
+    expect(timer.getSleepHistory()).toContain(250);
+  });
+
+  test("waits for the soft Space key to redraw after typing", async () => {
+    let typedReads = 0;
+    const { tray, adb } = setup((commands) => {
+      if (commands.includes(TAP_SEND) || commands.includes(BACK)) {
+        return replyCard;
+      }
+      if (commands.some((command) => command.startsWith("shell input text"))) {
+        return typedReads++ === 0 ? replyInput : replyTyped;
+      }
+      if (commands.includes(TAP_KEYBOARD)) {
+        return replyKeyboard;
+      }
+      return commands.includes(TAP_REPLY_CARD) ? replyInput : replyCard;
+    });
+    const result = await tray.execute({
+      action: "tap",
+      notification: { title: "Fixture alert", replyText: "hi" },
+    });
+    expect(result.isError).toBe(false);
+    expect(result.payload.message).toBe("Replied to watch notification");
+    expect(adb.getExecutedCommands()).toContain(TAP_SPACE);
+    expect(adb.getExecutedCommands()).toContain(TAP_SEND);
+  });
+
+  test("does not type when the reply keyboard never appears", async () => {
+    const { tray, adb } = setup((commands) =>
+      commands.includes(BACK)
+        ? replyCard
+        : commands.includes(TAP_REPLY_CARD)
+          ? replyInput
+          : replyCard,
+    );
+    await expect(
+      tray.execute({ action: "tap", notification: { title: "Fixture alert", replyText: "hi" } }),
+    ).rejects.toThrow(ActionableError);
+    expect(
+      adb.getExecutedCommands().some((command) => command.startsWith("shell input text")),
+    ).toBe(false);
+  });
+
+  test("does not send when the soft Space key is missing after typing", async () => {
+    // Alter only the in-memory observation; the real capture stays unchanged.
+    const withoutSpace = structuredClone(replyTyped);
+    const nodes = withoutSpace.viewHierarchy
+      ? getHierarchyRoots(withoutSpace.viewHierarchy).flatMap(watchNodes)
+      : [];
+    for (const node of nodes) {
+      const props = getNodeProperties(node);
+      if (props?.["resource-id"] === "com.google.android.inputmethod.latin:id/key_pos_space") {
+        props["resource-id"] = "com.google.android.inputmethod.latin:id/missing_space";
+      }
+    }
+    const { tray, adb } = setup((commands) => {
+      if (commands.includes(BACK)) {
+        return replyCard;
+      }
+      if (commands.some((command) => command.startsWith("shell input text"))) {
+        // Send is present, but must never be tapped without committing through soft Space.
+        return withoutSpace;
+      }
+      if (commands.includes(TAP_KEYBOARD)) {
+        return replyKeyboard;
+      }
+      return commands.includes(TAP_REPLY_CARD) ? replyInput : replyCard;
+    });
+    const pending = tray.execute({
+      action: "tap",
+      notification: { title: "Fixture alert", replyText: "hi" },
+    });
+    await expect(pending).rejects.toBeInstanceOf(ActionableError);
+    await expect(pending).rejects.toThrow("Space key did not appear. Re-observe");
+    expect(adb.getExecutedCommands()).toContain("shell input text 'hi'");
+    expect(adb.getExecutedCommands()).not.toContain(TAP_SPACE);
+    expect(adb.getExecutedCommands()).not.toContain("shell input keyevent 62");
+    expect(adb.getExecutedCommands()).not.toContain(TAP_SEND);
+  });
+
+  test("does not tap Close keyboard when Send never appears", async () => {
+    const { tray, adb } = setup((commands) => {
+      if (commands.includes(BACK)) {
+        return replyCard;
+      }
+      if (commands.includes(TAP_KEYBOARD)) {
+        return replyKeyboard;
+      }
+      return commands.includes(TAP_REPLY_CARD) ? replyInput : replyCard;
+    });
+    await expect(
+      tray.execute({ action: "tap", notification: { title: "Fixture alert", replyText: "hi" } }),
+    ).rejects.toThrow("Send button did not appear. Re-observe");
+    expect(adb.getExecutedCommands()).toContain(TAP_SPACE);
+    expect(adb.getExecutedCommands()).not.toContain(TAP_SEND);
+  });
+
+  test("an explicit reply action label overrides Keyboard input", async () => {
+    const { tray, adb } = setup((commands) =>
+      commands.includes(TAP_CARD) ? expanded : withFixtureCard,
+    );
+    await expect(
+      tray.execute({
+        action: "tap",
+        notification: { title: "Fixture alert", tapActionLabel: "Archive", replyText: "hi" },
+      }),
+    ).rejects.toThrow("reply keyboard did not appear");
+    expect(adb.getExecutedCommands()).toContain(TAP_ARCHIVE);
+    expect(adb.getExecutedCommands()).not.toContain(TAP_KEYBOARD);
+  });
+
+  test("phone rejects replyText before any device commands", async () => {
+    const { adb } = setup(() => replyCard);
+    await expect(
+      new SystemTray({ ...watch, formFactor: "phone" }).execute({
+        action: "tap",
+        notification: { title: "Fixture alert", replyText: "hi" },
+      }),
+    ).rejects.toThrow("replyText is only supported on watches");
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   test("tap with an action label taps the action inside the expanded card", async () => {

@@ -275,7 +275,9 @@ export interface AndroidDisplayParseOptions {
 /**
  * Role of each physical record. On a handheld, two differently sized built-in panels are a
  * foldable's inner and cover panels. On a car they are the center display and the instrument
- * cluster: the first largest built-in panel keeps `inner`, every other built-in one is `cluster`.
+ * cluster: the first largest built-in panel is the center display, which is not a fold panel and so
+ * takes the same non-foldable `unknown` role as a phone's built-in panel; every other built-in one is
+ * `cluster`.
  */
 function physicalPanelRoles(
   records: readonly AndroidDisplayRecord[],
@@ -292,7 +294,7 @@ function physicalPanelRoles(
       return "external";
     }
     if (automotive && internal.length > 1) {
-      return record === primary ? "inner" : "cluster";
+      return record === primary ? "unknown" : "cluster";
     }
     if (internal.length > 1 && largest > smallest) {
       return area(record) === largest ? "inner" : area(record) === smallest ? "cover" : "unknown";

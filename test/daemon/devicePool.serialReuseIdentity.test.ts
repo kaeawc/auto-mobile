@@ -37,6 +37,23 @@ const original: BootedDevice = {
 const replacement = { ...original, name: "AVD-B", observedAt: 10 };
 const placeholder = { ...original, name: "Unknown (emulator-5554)", observedAt: 5 };
 
+/**
+ * The holder cancels a serial-reuse handoff runs before publishing B. Monitor quarantine keeps
+ * the session (#17896), so its cancel spares the provisioning hold; the device-restart release
+ * then ends the session and cancels and drains the hold too, before B is published (#17901).
+ */
+function holderCancels(path: string, excludeExecutionId: string | undefined) {
+  const cancel = (options: { excludeExecutionId?: string; sessionPreserving?: boolean }) => ({
+    sessionId: "holder",
+    reason: "device-disconnected:emulator-5554",
+    name: "AVD-A",
+    options,
+  });
+  return path === "monitor"
+    ? [cancel({ excludeExecutionId, sessionPreserving: true }), cancel({ excludeExecutionId })]
+    : [cancel({ excludeExecutionId })];
+}
+
 async function setup(
   device: BootedDevice = original,
   knownAvd = false,
@@ -591,7 +608,7 @@ for (const pin of [
 }
 
 for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
-  warmedTest(`${path}: cancels holder executions once before publishing B`, async () => {
+  warmedTest(`${path}: cancels and drains holder executions before publishing B`, async () => {
     const executionId = path === "monitor" ? undefined : "settling-execution";
     const calls: Array<{
       sessionId: string;
@@ -624,18 +641,7 @@ for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
       } else {
         await h.pool.settlePooledRuntimeIdentity(original.deviceId);
       }
-      expect(calls).toEqual([
-        {
-          sessionId: "holder",
-          reason: "device-disconnected:emulator-5554",
-          name: "AVD-A",
-          // Monitor quarantine keeps the session; the device-restart release does not (#17896).
-          options: {
-            excludeExecutionId: executionId,
-            ...(path === "monitor" ? { sessionPreserving: true } : {}),
-          },
-        },
-      ]);
+      expect(calls).toEqual(holderCancels(path, executionId));
       expect(h.pool.getDevice(original.deviceId)?.name).toBe("AVD-B");
     } finally {
       h.pool.releaseDeviceClaimsForShutdown();
@@ -644,6 +650,46 @@ for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
     }
   });
 }
+
+warmedTest(
+  "monitor: a same-serial replacement waits for the provisioning hold to drain",
+  async () => {
+    // The quarantine's session-preserving cancel spares the hold; the replacement's drain does not.
+    const drain = Promise.withResolvers<number>();
+    let draining = false;
+    const h = await setup(original, true, async (_sessionId, _reason, options) => {
+      if (options?.sessionPreserving) {
+        return 0;
+      }
+      draining = true;
+      return await drain.promise;
+    });
+    try {
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "holder",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
+      h.manager.bootedDevices = [replacement];
+      const reconcile = h.pool.reconcileDiscoveryObservation([replacement], "disconnect-monitor", {
+        settleMembership: true,
+      });
+      await drainUntil(() => draining, { description: "provisioning hold drain" });
+      await drainMicrotasks(20);
+      expect(h.pool.getDevice(original.deviceId)?.name).toBe("AVD-A");
+      expect(h.sessions.getSession("holder")).not.toBeNull();
+      drain.resolve(1);
+      await reconcile;
+      expect(h.pool.getDevice(original.deviceId)?.name).toBe("AVD-B");
+      expect(h.sessions.getSession("holder")).toBeNull();
+    } finally {
+      drain.resolve(0);
+      h.pool.releaseDeviceClaimsForShutdown();
+      h.sessions.stopCleanupTimer();
+      h.timer.reset();
+    }
+  },
+);
 
 warmedTest("newer A confirmation during cancellation aborts handoff before reserving", async () => {
   const gate = Promise.withResolvers<number>();
@@ -978,18 +1024,7 @@ for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
       } else {
         expect(await h.pool.settlePooledRuntimeIdentity(original.deviceId)).toBe("replaced");
       }
-      expect(calls).toEqual([
-        {
-          sessionId: "holder",
-          reason: "device-disconnected:emulator-5554",
-          name: "AVD-A",
-          // Monitor quarantine keeps the session; the device-restart release does not (#17896).
-          options: {
-            excludeExecutionId: "settling-execution",
-            ...(path === "monitor" ? { sessionPreserving: true } : {}),
-          },
-        },
-      ]);
+      expect(calls).toEqual(holderCancels(path, "settling-execution"));
       expect(h.pool.getDevice(original.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });
       expect(await h.incidents.list()).toHaveLength(1);
     } finally {

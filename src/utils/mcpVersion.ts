@@ -115,6 +115,10 @@ export const releaseVersion = (version: string): string => version.split("+")[0]
 export const withoutDirtyStamp = (version: string): string =>
   version.replace(/(\+g[\da-f]+)\.dirty(?:\.[\da-f]+)?$/i, "$1");
 
+/** Whether a version carries a working-tree content hash (`+g<sha>.dirty.<hash>`). */
+export const hasWorkingTreeHash = (version: string): boolean =>
+  /\+g[\da-f]+\.dirty\.[\da-f]+$/i.test(version);
+
 /**
  * Stamp a git short SHA (and dirty marker) onto a base version as semver build
  * metadata. Release builds (no git info) are returned unchanged.
@@ -238,6 +242,12 @@ const getResolver = (): ReturnType<typeof createMcpVersionResolver> =>
 /** Probe the version a process started from this checkout right now would report. */
 export const probeCheckoutMcpServerVersion = (): Promise<string> =>
   createMcpVersionResolver(defaultResolverDeps()).resolveSettled();
+
+/** When this checkout's uncommitted tracked edits were last written; null when clean or unknown. */
+export const probeCheckoutModifiedAt = async (): Promise<number | null> => {
+  const client = testOverrides.gitMetadataClient ?? defaultGitMetadataClient;
+  return (await client.readDirtyModifiedAt?.(moduleDir())) ?? null;
+};
 
 export const getMcpServerVersion = (): string => getResolver().current();
 

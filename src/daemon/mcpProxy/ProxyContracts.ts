@@ -195,6 +195,8 @@ export interface DaemonMcpProxyConfig {
   clientVersion?: string;
   /** Version a daemon started from this checkout would report now; null when unknown. */
   readCheckoutVersion?: () => Promise<string | null>;
+  /** When this checkout's uncommitted tracked edits were last written (epoch ms); null when unknown. */
+  readCheckoutModifiedAt?: () => Promise<number | null>;
   /** Existing device-pool session bound before the first discovery request. */
   initialSessionUuid?: string;
   /**

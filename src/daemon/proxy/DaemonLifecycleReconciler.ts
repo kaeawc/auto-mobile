@@ -22,7 +22,7 @@ import {
   type BuildIdentity,
 } from "../wire/buildIdentity";
 import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
-import { releaseVersion, withoutDirtyStamp } from "../../utils/mcpVersion";
+import { hasWorkingTreeHash, releaseVersion, withoutDirtyStamp } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";
 import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
 import {
@@ -77,6 +77,8 @@ export interface DaemonLifecycleReconcilerDeps {
   readonly buildIdentity: BuildIdentity;
   /** Version a daemon spawned from this client's entry script would report now; undefined when it cannot be probed. */
   readonly readCheckoutVersion?: () => Promise<string | null>;
+  /** When this checkout's uncommitted tracked edits were last written (epoch ms); undefined or null when unknown. */
+  readonly readCheckoutModifiedAt?: () => Promise<number | null>;
   invalidateCache(): void;
   assertDaemonLifecycleUnfenced(): void;
 
@@ -411,11 +413,52 @@ export class DaemonLifecycleReconciler {
       runningVersion === this.checkoutVersion
         ? this.checkoutVersion
         : await this.probeCheckoutVersion();
-    if (checkoutVersion !== runningVersion) {
-      return "restart";
+    if (checkoutVersion === runningVersion) {
+      this.acceptCheckoutVersion(status, runningVersion);
+      return "accept";
     }
-    this.acceptCheckoutVersion(status, runningVersion);
-    return "accept";
+    return (await this.daemonLoadedCurrentEdits(status, runningVersion)) ? "accept" : "restart";
+  }
+
+  /**
+   * A daemon's dirty stamp is a best-effort git probe: under load it can time
+   * out and report only `+g<sha>` (or `.dirty` with no hash), so its version never
+   * equals this client's `+g<sha>.dirty.<hash>`, and every one-shot `--cli`
+   * process would restart an up-to-date daemon (#17991). When the daemon runs this
+   * checkout's build at the same commit, reports no working-tree hash, and its
+   * process started after the last uncommitted edit was written, it already loaded
+   * those edits: reuse it. Any unknown input keeps the restart.
+   */
+  private async daemonLoadedCurrentEdits(
+    status: DaemonStatus,
+    runningVersion: string,
+  ): Promise<boolean> {
+    const clientVersion = this.deps.clientVersion;
+    const daemonStartedAt = status.processStartedAt ?? status.startedAt;
+    if (
+      daemonStartedAt === undefined ||
+      !this.deps.readCheckoutModifiedAt ||
+      hasWorkingTreeHash(runningVersion) ||
+      !hasWorkingTreeHash(clientVersion) ||
+      withoutDirtyStamp(runningVersion) !== withoutDirtyStamp(clientVersion)
+    ) {
+      return false;
+    }
+    let editedAt: number | null;
+    try {
+      editedAt = await this.deps.readCheckoutModifiedAt();
+    } catch (error) {
+      logger.warn("[DaemonMcpProxy] Checkout edit-time probe failed; restarting daemon", error);
+      return false;
+    }
+    if (editedAt === null || editedAt >= daemonStartedAt) {
+      return false;
+    }
+    logger.info(
+      `[DaemonMcpProxy] Reusing daemon ${runningVersion} for MCP client ${clientVersion}: ` +
+        `it started after this checkout's last edit (${editedAt} < ${daemonStartedAt})`,
+    );
+    return true;
   }
 
   private async probeCheckoutVersion(): Promise<string | undefined> {

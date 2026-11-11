@@ -428,4 +428,55 @@ describe("DefaultGitMetadataClient", () => {
       },
     );
   });
+
+  describe("readDirtyModifiedAt (#17991)", () => {
+    const NAMES = ["diff", "HEAD", "--name-only", "--no-renames", "-z"];
+    const timedRepo = (times: Record<string, number>) =>
+      new FakeGitMetadataReader(
+        {
+          [`${ROOT}/.git`]: null,
+          [`${ROOT}/.git/HEAD`]: "ref: refs/heads/main\n",
+          [`${ROOT}/.git/refs/heads/main`]: `${SHA}\n`,
+        },
+        times,
+      );
+
+    test("returns the latest write time among the tracked changed paths", async () => {
+      const { client, calls } = fixture(
+        timedRepo({ [`${ROOT}/src/a.ts`]: 100, [`${ROOT}/src/b.ts`]: 300 }),
+        { diff: "src/a.ts\0src/b.ts\0" },
+      );
+      expect(await client.readDirtyModifiedAt(ROOT)).toBe(300);
+      expect(calls.filter(({ args }) => args[0] === "diff").map(({ args }) => args)).toEqual([
+        NAMES,
+      ]);
+    });
+
+    test("uses the parent directory's time for a deleted path", async () => {
+      const { client } = fixture(timedRepo({ [`${ROOT}/src`]: 700, [`${ROOT}/src/a.ts`]: 100 }), {
+        diff: "src/a.ts\0src/gone.ts\0",
+      });
+      expect(await client.readDirtyModifiedAt(ROOT)).toBe(700);
+    });
+
+    test("is unknown when a changed path and its directory are unreadable", async () => {
+      const { client } = fixture(timedRepo({ [`${ROOT}/src/a.ts`]: 100 }), {
+        diff: "src/a.ts\0missing/b.ts\0",
+      });
+      expect(await client.readDirtyModifiedAt(ROOT)).toBeNull();
+    });
+
+    test("is null for a clean tree and when the diff probe fails", async () => {
+      const clean = fixture(timedRepo({}), { diff: "" });
+      expect(await clean.client.readDirtyModifiedAt(ROOT)).toBeNull();
+      const failed = fixture(timedRepo({}), { diff: null });
+      expect(await failed.client.readDirtyModifiedAt(ROOT)).toBeNull();
+    });
+
+    test("is unknown outside a repository", async () => {
+      const { client, calls } = fixture(new FakeGitMetadataReader({}, {}));
+      expect(await client.readDirtyModifiedAt("/elsewhere")).toBeNull();
+      expect(calls.filter(({ args }) => args[0] === "diff")).toEqual([]);
+    });
+  });
 });

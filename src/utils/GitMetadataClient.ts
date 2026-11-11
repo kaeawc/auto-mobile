@@ -40,6 +40,8 @@ export type GitAsyncCommandRunner = (
 export interface GitMetadataReader {
   kind(path: string): "file" | "directory" | null;
   readFile(path: string): string | null;
+  /** Last modification time in epoch ms; null when the path is absent. */
+  modifiedAtMs?(path: string): number | null;
 }
 
 const defaultReader: GitMetadataReader = {
@@ -58,6 +60,9 @@ const defaultReader: GitMetadataReader = {
       throw error;
     }
   },
+  modifiedAtMs(path) {
+    return statSync(path, { throwIfNoEntry: false })?.mtimeMs ?? null;
+  },
 };
 
 interface GitLocation {
@@ -69,6 +74,8 @@ interface GitLocation {
 
 export interface GitMetadataClient {
   readDirtyState(cwd: string): Promise<GitDirtyState | null>;
+  /** Latest modification time (epoch ms) of tracked uncommitted changes; null when clean or unknown. */
+  readDirtyModifiedAt?(cwd: string): Promise<number | null>;
   readVersion(
     cwd: string,
     readPackageName: (directory: string) => string | null,
@@ -172,6 +179,35 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
       }
     }
     return { dirty, dirtyHash };
+  }
+
+  /**
+   * When the checkout's uncommitted tracked edits were last written. A daemon
+   * process started after this instant loaded those edits, whatever its own
+   * best-effort dirty stamp says (#17991). A deleted path uses its parent
+   * directory's time; any unreadable path makes the answer unknown.
+   */
+  async readDirtyModifiedAt(cwd: string): Promise<number | null> {
+    const toplevel = this.locate(cwd)?.toplevel;
+    if (!toplevel || !this.fs.modifiedAtMs) {
+      return null;
+    }
+    const names = await this.runAsync(
+      "git",
+      ["diff", "HEAD", "--name-only", "--no-renames", "-z"],
+      { cwd, timeoutMs: GIT_TIMEOUT_MS },
+    );
+    const paths = names?.split("\0").filter((name) => name.length > 0) ?? [];
+    let latest: number | null = null;
+    for (const name of paths) {
+      const absolute = join(toplevel, name);
+      const modifiedAt = this.fs.modifiedAtMs(absolute) ?? this.fs.modifiedAtMs(dirname(absolute));
+      if (modifiedAt === null) {
+        return null;
+      }
+      latest = Math.max(latest ?? modifiedAt, modifiedAt);
+    }
+    return latest;
   }
 
   /**

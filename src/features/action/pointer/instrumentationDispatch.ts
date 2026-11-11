@@ -130,6 +130,54 @@ async function unreportedFailure(output: string, adb: AdbExecutor): Promise<Acti
   );
 }
 
+/** The runner's note when its own CANCEL or HOVER_EXIT was refused after a partial run. */
+const UNCLOSED_POINTER = /could not be closed/i;
+const POINTER_CANCEL_TIMEOUT_MS = 5000;
+
+/**
+ * Best-effort stylus CANCEL at the request's first point. Injection through `UiAutomation` is on
+ * virtual device -1, and the dispatcher keeps its pointer down until a CANCEL or UP arrives, so a
+ * killed or abandoned run would refuse every later HOVER_ENTER or DOWN (#16028).
+ */
+async function sendPointerCancel(
+  adb: AdbExecutor,
+  request: PointerRequest,
+  reason: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const point = request.points[0];
+  try {
+    await adb.executeCommand(
+      `shell input stylus motionevent CANCEL ${Math.round(point.x)} ${Math.round(point.y)}`,
+      { timeoutMs: POINTER_CANCEL_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+    );
+  } catch (error) {
+    // Safe to continue: the caller reports the run's own outcome, and a later refusal retries CANCEL.
+    logger.warn(`Could not cancel ${reason}: ${errorMessage(error)}`, error);
+  }
+}
+
+/**
+ * Runs one instrumentation and, when it ends without a report (killed, crashed, timed out or
+ * aborted by the caller), closes any pointer it left down before rethrowing. The CANCEL runs
+ * without the caller's signal: an aborted gesture is exactly the one whose pointer is still open,
+ * and the lock is still held so a queued run cannot start on top of it.
+ */
+async function runClosingOnAbandon(
+  run: () => Promise<PointerInstrumentationResult>,
+  adb: AdbExecutor,
+  request: PointerRequest,
+): Promise<PointerInstrumentationResult> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!(error instanceof PointerNotSentError)) {
+      await sendPointerCancel(adb, request, "an abandoned pointer run");
+    }
+    throw error;
+  }
+}
+
 /**
  * The instrumentation route's transport: `am instrument` with the request, then the reported result.
  * A refusal the instrumentation itself reports (`success=false`) means nothing past the reported
@@ -154,21 +202,16 @@ export function createInstrumentationDispatch(adb: AdbExecutor, deviceId: string
         }
         return reported;
       };
-      let reported = await run();
+      let reported = await runClosingOnAbandon(run, adb, request);
       if (!reported.success && reported.injected === 0 && /refused/i.test(reported.error ?? "")) {
         throwIfAborted(signal);
-        const point = request.points[0];
-        try {
-          await adb.executeCommand(
-            `shell input stylus motionevent CANCEL ${Math.round(point.x)} ${Math.round(point.y)}`,
-            { timeoutMs: 5000, signal },
-          );
-        } catch (error) {
-          // Safe to continue: the retry reports the real outcome even if CANCEL failed.
-          logger.warn(`Could not cancel refused pointer input: ${errorMessage(error)}`, error);
-        }
+        await sendPointerCancel(adb, request, "refused pointer input", signal);
         throwIfAborted(signal);
-        reported = await run();
+        reported = await runClosingOnAbandon(run, adb, request);
+      }
+      if (!reported.success && UNCLOSED_POINTER.test(reported.error ?? "")) {
+        // The runner could not close its own pointer; close it before the lock admits the next run.
+        await sendPointerCancel(adb, request, "an unclosed pointer");
       }
       if (!reported.success) {
         throw new ActionableError(

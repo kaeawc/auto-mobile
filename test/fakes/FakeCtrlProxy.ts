@@ -6,6 +6,7 @@ import type {
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type {
   AndroidAccessibilityActionRequest,
+  AndroidActionRequestOptions,
   AndroidActivateAccessibilityLinkRequest,
 } from "../../src/features/observe/android/AndroidActionDispatcher";
 import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
@@ -71,6 +72,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     action: string;
     selector: AccessibilityNodeSelector | undefined;
     expectedBounds?: { left: number; top: number; right: number; bottom: number };
+    identityHints?: AndroidActionRequestOptions["identityHints"];
     timeoutMs: number;
     perf?: PerformanceTracker;
     signal?: AbortSignal;
@@ -84,6 +86,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.nodeActionHistory.map((entry) => ({
       ...entry,
       selector: entry.selector ? { ...entry.selector } : undefined,
+      ...(entry.identityHints ? { identityHints: { ...entry.identityHints } } : {}),
     }));
   }
 
@@ -1203,12 +1206,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       signal,
       expectedBounds,
-    }: {
-      timeoutMs?: number;
-      perf?: PerformanceTracker;
-      signal?: AbortSignal;
-      expectedBounds?: { left: number; top: number; right: number; bottom: number };
-    } = {},
+      identityHints,
+    }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestNodeAction");
     this.checkFailure("requestNodeAction");
@@ -1219,6 +1218,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       signal,
       ...(expectedBounds ? { expectedBounds } : {}),
+      ...(identityHints ? { identityHints: { ...identityHints } } : {}),
     });
     return (
       this.actionResult ?? {

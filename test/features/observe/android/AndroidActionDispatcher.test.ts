@@ -121,6 +121,15 @@ describe("AndroidActionDispatcher", () => {
     for (const key of ["boundsLeft", "boundsTop", "boundsRight", "boundsBottom"]) {
       expect(legacy).not.toHaveProperty(key);
     }
+    for (const key of [
+      "identityClassName",
+      "identityText",
+      "identityContentDesc",
+      "identityLabelText",
+      "identityLabelContentDesc",
+    ]) {
+      expect(legacy).not.toHaveProperty(key);
+    }
   });
 
   test("serializes a bounds-only click without selector or resource id", async () => {
@@ -130,6 +139,13 @@ describe("AndroidActionDispatcher", () => {
       (
         await dispatcher.requestNodeAction("click", undefined, {
           expectedBounds: { left: 48, top: 372, right: 696, bottom: 548 },
+          identityHints: {
+            className: "android.widget.LinearLayout",
+            text: "",
+            contentDesc: "",
+            labelText: "Connected devices",
+            labelContentDesc: "Connections",
+          },
         })
       ).success,
     ).toBe(true);
@@ -142,6 +158,11 @@ describe("AndroidActionDispatcher", () => {
       boundsTop: 372,
       boundsRight: 696,
       boundsBottom: 548,
+      identityClassName: "android.widget.LinearLayout",
+      identityText: "",
+      identityContentDesc: "",
+      identityLabelText: "Connected devices",
+      identityLabelContentDesc: "Connections",
     });
     expect(message).not.toHaveProperty("selector");
     expect(message).not.toHaveProperty("resourceId");

@@ -14,10 +14,12 @@ import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import type { DisplayFenceOption } from "./BaseVisualChange";
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { findTapTargetNode } from "./tapTargetSupport";
+import type { AndroidActionRequestOptions } from "../observe/android/AndroidActionDispatcher";
 
 type VerifiedNodeTarget = {
   selector?: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
   expectedBounds: Element["bounds"];
+  identityHints?: AndroidActionRequestOptions["identityHints"];
 };
 
 type XrNodeClickOptions = DisplayFenceOption & {
@@ -34,6 +36,28 @@ export function xrCoordinateError(): ActionableError {
   return new ActionableError(
     "The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.",
   );
+}
+
+/** Only captured node fields identify the click; a tapped descendant can supply its label. */
+function xrNodeIdentityHints(
+  captured: Element,
+  label?: Element,
+): AndroidActionRequestOptions["identityHints"] {
+  const className = captured.class ?? captured.className;
+  if (typeof className !== "string" || !className) {
+    return undefined;
+  }
+  return {
+    className,
+    text: captured.text || undefined,
+    contentDesc: captured["content-desc"] || undefined,
+    ...(!captured.text && !captured["content-desc"]
+      ? {
+          labelText: label?.text || undefined,
+          labelContentDesc: label?.["content-desc"] || undefined,
+        }
+      : {}),
+  };
 }
 
 function xrNodeClickSelector(
@@ -59,7 +83,7 @@ function xrNodeClickSelector(
   const containerIndex = containerEntry ? entries.indexOf(containerEntry) : -1;
   const scope = { scoped, containerIndex };
   // Native selectors are global across windows, including for an ancestor click.
-  const uniqueSelector = (candidate: Element) => {
+  const uniqueSelector = (candidate: Element, label?: Element) => {
     const selector = stableNodeSelectorForElement(candidate);
     if (!selector) {
       const matches = entries.filter(
@@ -70,10 +94,20 @@ function xrNodeClickSelector(
       );
       // CtrlProxy resolves a bounds-only click across every window, so the one node at those
       // bounds must also sit strictly inside a requested container.
-      return new Set(matches.map((entry) => entry.source)).size === 1 &&
-        isInsideScope(entries, matches[0], scope)
-        ? { expectedBounds: candidate.bounds }
-        : undefined;
+      if (
+        new Set(matches.map((entry) => entry.source)).size !== 1 ||
+        !isInsideScope(entries, matches[0], scope)
+      ) {
+        return undefined;
+      }
+      const identityHints = xrNodeIdentityHints(matches[0].properties, label);
+      if (!identityHints) {
+        return undefined;
+      }
+      return {
+        expectedBounds: candidate.bounds,
+        identityHints,
+      };
     }
     const matches = entries.filter((entry) =>
       matchesCtrlProxyNodeSelector(entry.properties, selector),
@@ -139,7 +173,7 @@ function ancestorsWithinScope(
 function xrAncestorClickSelector(
   element: Element,
   entries: readonly SearchableEntry[],
-  uniqueSelector: (candidate: Element) => VerifiedNodeTarget | undefined,
+  uniqueSelector: (candidate: Element, label?: Element) => VerifiedNodeTarget | undefined,
   scope: { scoped: boolean; containerIndex: number },
 ): VerifiedNodeTarget {
   // Bind the label to one captured source before following actual parent links.
@@ -171,7 +205,10 @@ function xrAncestorClickSelector(
     ) {
       continue;
     }
-    const selector = uniqueSelector({ ...ancestor.properties, bounds });
+    const selector = uniqueSelector(
+      { ...ancestor.properties, bounds },
+      { ...targets[0].properties, bounds: element.bounds },
+    );
     if (selector) {
       return selector;
     }
@@ -199,7 +236,7 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
   },
 ): Promise<void> {
   throwIfAborted(signal);
-  const { selector, expectedBounds } = xrNodeClickSelector(
+  const { selector, expectedBounds, identityHints } = xrNodeClickSelector(
     action,
     element,
     options ?? {},
@@ -214,6 +251,7 @@ export async function executeXrNodeClick<O extends XrNodeClickOptions>(
     const result = await accessibilityService().requestNodeAction("click", selector, {
       signal,
       expectedBounds,
+      identityHints,
     });
     throwIfAborted(signal);
     if (!result.success) {

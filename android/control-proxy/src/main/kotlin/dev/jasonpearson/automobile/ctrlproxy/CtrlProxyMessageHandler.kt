@@ -182,6 +182,14 @@ class CtrlProxyMessageHandler(
               request.boundsBottom,
             )
           } else null,
+          NodeIdentityHints(
+              className = request.identityClassName,
+              text = request.identityText,
+              contentDesc = request.identityContentDesc,
+              labelText = request.identityLabelText,
+              labelContentDesc = request.identityLabelContentDesc,
+            )
+            .takeUnless { it == NodeIdentityHints() },
         )
       is RequestActivateAccessibilityLink ->
         actions.requestActivateAccessibilityLink(

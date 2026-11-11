@@ -242,6 +242,7 @@ internal class CtrlProxyActionRouter(private val service: CtrlProxy) : CtrlProxy
     selector: NodeSelector?,
     arguments: NodeActionArguments,
     expectedBounds: NodeExpectedBounds?,
+    identityHints: NodeIdentityHints?,
   ) =
     service.nodeActionController.performNodeAction(
       requestId,
@@ -250,6 +251,7 @@ internal class CtrlProxyActionRouter(private val service: CtrlProxy) : CtrlProxy
       selector,
       arguments,
       expectedBounds,
+      identityHints,
     )
 
   override suspend fun requestActivateAccessibilityLink(

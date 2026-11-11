@@ -98,6 +98,8 @@ describe("XR panel-space tap routing", () => {
     "bounds-unsupported",
     "node_bounds_mismatch",
     "node_bounds_ambiguous",
+    "node_identity_mismatch",
+    "thrown-identity-mismatch",
     "rejected",
     "xml",
     "doubleTap",
@@ -110,7 +112,11 @@ describe("XR panel-space tap routing", () => {
       if (mode === "bounds-unsupported") {
         service.setSupportsNodeBoundsVerification(false);
       }
-      if (mode === "node_bounds_mismatch" || mode === "node_bounds_ambiguous") {
+      if (
+        mode === "node_bounds_mismatch" ||
+        mode === "node_bounds_ambiguous" ||
+        mode === "node_identity_mismatch"
+      ) {
         service.setActionResult({
           success: false,
           action: "click",
@@ -126,6 +132,12 @@ describe("XR panel-space tap routing", () => {
       }
       if (mode === "transport") {
         service.setFailureMode("requestNodeAction", new Error("Disconnected"));
+      }
+      if (mode === "thrown-identity-mismatch") {
+        service.setFailureMode(
+          "requestNodeAction",
+          new Error("request failed: node_identity_mismatch: row changed"),
+        );
       }
       const target =
         mode === "unadvertised"
@@ -182,6 +194,7 @@ describe("XR panel-space tap routing", () => {
 
   for (const mode of [
     "captured-no-selector",
+    "missing-class",
     "duplicate-bounds",
     "unique-row",
     "text-frame",
@@ -199,8 +212,12 @@ describe("XR panel-space tap routing", () => {
       expect(row.properties.actions).toContain("click");
       expect(row.properties.clickable).toBe("true");
       // Keep the captured identity absent for bounds-only cases.
-      if (mode !== "captured-no-selector" && mode !== "duplicate-bounds") {
+      if (!["captured-no-selector", "duplicate-bounds", "missing-class"].includes(mode)) {
         Object.assign(row.source, { "unique-id": "settings-connected-row" });
+      }
+      if (mode === "missing-class") {
+        delete row.source.class;
+        Reflect.deleteProperty(row.source, "className");
       }
       if (mode === "no-clickable-ancestor") {
         row.source.actions = [];
@@ -244,6 +261,14 @@ describe("XR panel-space tap routing", () => {
           {
             action: "click",
             expectedBounds: mode === "nearest-ancestor" ? current.frame.bounds : current.row.bounds,
+            ...(mode === "captured-no-selector"
+              ? {
+                  identityHints: {
+                    className: current.row.properties.class,
+                    labelText: "Connected devices",
+                  },
+                }
+              : {}),
             selector:
               mode === "captured-no-selector"
                 ? undefined
@@ -286,6 +311,10 @@ describe("XR panel-space tap routing", () => {
             action: "click",
             expectedBounds: current.row.bounds,
             selector: undefined,
+            identityHints: {
+              className: current.row.properties.class,
+              labelText: "Connected devices",
+            },
           },
         ]);
       } else {
@@ -330,6 +359,48 @@ describe("XR panel-space tap routing", () => {
       ]);
     });
   }
+
+  test("bounds-only clicks send the captured node's own text and description", async () => {
+    const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+    const { label, row } = settingsTarget(tree);
+    row.source.text = "Connected devices";
+    row.source["content-desc"] = "Connections";
+    // The clicked ancestor's own identity takes precedence over the tapped label.
+    const { tap, service } = setup();
+    await tap.executeAndroidTap("tap", point, 0, {
+      element: { ...label.properties, bounds: label.bounds! },
+      isTalkBackEnabled: false,
+      options: { action: "tap", resolvedHierarchy: tree },
+    });
+    expect(service.getNodeActionHistory()[0]!.identityHints).toEqual({
+      className: row.properties.class,
+      text: "Connected devices",
+      contentDesc: "Connections",
+    });
+  });
+
+  test("a description-only label is sent for a textless clickable ancestor", async () => {
+    const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+    const { label, row } = settingsTarget(tree);
+    delete label.source.text;
+    label.source["content-desc"] = "Connections";
+    const currentLabel = new SearchableHierarchy()
+      .project(tree)
+      .find((entry) => entry.source === label.source)!;
+    const { tap, service } = setup();
+    await tap.executeAndroidTap("tap", point, 0, {
+      element: { ...currentLabel.properties, bounds: currentLabel.bounds! },
+      isTalkBackEnabled: false,
+      options: { action: "tap", resolvedHierarchy: tree },
+    });
+    expect(service.getNodeActionHistory()[0]!.identityHints).toEqual({
+      className: row.properties.class,
+      text: undefined,
+      contentDesc: undefined,
+      labelText: undefined,
+      labelContentDesc: "Connections",
+    });
+  });
 
   test("a runner requiring a selector preserves XR coordinate guidance", async () => {
     const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };

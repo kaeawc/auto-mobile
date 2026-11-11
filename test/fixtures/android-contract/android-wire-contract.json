@@ -612,6 +612,36 @@
           "hasDefault": true
         },
         {
+          "name": "identityClassName",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "identityText",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "identityContentDesc",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "identityLabelText",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "identityLabelContentDesc",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
           "name": "customAction",
           "type": "string",
           "nullable": true,

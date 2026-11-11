@@ -192,6 +192,11 @@ export const ctrlProxyRequests = {
     boundsTop?: number;
     boundsRight?: number;
     boundsBottom?: number;
+    identityClassName?: string;
+    identityText?: string;
+    identityContentDesc?: string;
+    identityLabelText?: string;
+    identityLabelContentDesc?: string;
     customAction?: string;
     progress?: number;
   }): RequestActionMessage {
@@ -205,6 +210,19 @@ export const ctrlProxyRequests = {
       ...(args.boundsTop !== undefined ? { boundsTop: args.boundsTop } : {}),
       ...(args.boundsRight !== undefined ? { boundsRight: args.boundsRight } : {}),
       ...(args.boundsBottom !== undefined ? { boundsBottom: args.boundsBottom } : {}),
+      ...(args.identityClassName !== undefined
+        ? { identityClassName: args.identityClassName }
+        : {}),
+      ...(args.identityText !== undefined ? { identityText: args.identityText } : {}),
+      ...(args.identityContentDesc !== undefined
+        ? { identityContentDesc: args.identityContentDesc }
+        : {}),
+      ...(args.identityLabelText !== undefined
+        ? { identityLabelText: args.identityLabelText }
+        : {}),
+      ...(args.identityLabelContentDesc !== undefined
+        ? { identityLabelContentDesc: args.identityLabelContentDesc }
+        : {}),
       ...(args.customAction !== undefined ? { customAction: args.customAction } : {}),
       ...(args.progress !== undefined ? { progress: args.progress } : {}),
     };

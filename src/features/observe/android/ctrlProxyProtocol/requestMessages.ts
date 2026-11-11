@@ -276,6 +276,11 @@ export interface RequestActionMessage {
   boundsTop?: number;
   boundsRight?: number;
   boundsBottom?: number;
+  identityClassName?: string;
+  identityText?: string;
+  identityContentDesc?: string;
+  identityLabelText?: string;
+  identityLabelContentDesc?: string;
   type: "request_action";
   requestId: string;
   action: string;

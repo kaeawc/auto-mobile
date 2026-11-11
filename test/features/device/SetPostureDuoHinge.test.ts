@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SetPosture } from "../../../src/features/device/SetPosture";
 import { InMemoryIosRequestedHingeAngleStore } from "../../../src/features/device/DuoHingeLayout";
+import {
+  IOS_POSTURE_POLL_INTERVAL_MS,
+  IOS_POSTURE_TIMEOUT_MS,
+} from "../../../src/features/device/postureCommands";
 import { DisplayTransitionTracker } from "../../../src/features/observe/DisplayTransition";
 import type { DisplayTransitionSink } from "../../../src/features/observe/DisplayTransition";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
@@ -262,12 +266,74 @@ describe("setPosture hingeAngle on iPhone Duo compares the hinge with the layout
     });
   });
 
-  test("90 from 0 on the cover layout is the captured healthy state", async () => {
+  test("0 -> 90 polls past cover observations and settles half_opened on inner", async () => {
     const h = harness();
     await h.hinge(0, "cover");
+    const before = h.observeCount();
+    const sleepsBefore = h.timer.getSleepCallCount();
+    const startedAt = h.timer.now();
+    const result = await h.hingeDelayed(90, "inner", 3);
+    expect(result).toMatchObject({ hingeAngle: 90, posture: "half_opened" });
+    expect(result).not.toHaveProperty("warnings");
+    expect(h.observeCount() - before).toBe(4);
+    expect(h.timer.getSleepHistory().slice(sleepsBefore)).toEqual(
+      Array(3).fill(IOS_POSTURE_POLL_INTERVAL_MS),
+    );
+    expect(h.timer.now() - startedAt).toBe(3 * IOS_POSTURE_POLL_INTERVAL_MS);
+    expect(await h.current()).toMatchObject({
+      posture: "half_opened",
+      activePanel: { role: "inner" },
+      requestedHingeAngle: 90,
+    });
+  });
+
+  test("90 with cover still active warns after the bounded timeout", async () => {
+    const h = harness();
+    await h.hinge(0, "cover");
+    const startedAt = h.timer.now();
+    const sleepsBefore = h.timer.getSleepCallCount();
     const result = await h.hinge(90, "cover");
     expect(result).toMatchObject({ hingeAngle: 90, posture: "closed" });
+    expect(h.timer.now() - startedAt).toBe(IOS_POSTURE_TIMEOUT_MS);
+    expect(h.timer.getSleepHistory().slice(sleepsBefore)).toEqual(
+      Array(IOS_POSTURE_TIMEOUT_MS / IOS_POSTURE_POLL_INTERVAL_MS).fill(
+        IOS_POSTURE_POLL_INTERVAL_MS,
+      ),
+    );
+    expect(result.warnings).toEqual([
+      expect.stringContaining("requested 90 degrees, but the cover panel is still active"),
+    ]);
+    expect(result.warnings?.[0]).toContain("hingeAngle 180, then the target angle again");
+    expect(await h.current()).toMatchObject({
+      posture: "closed",
+      activePanel: { role: "cover" },
+      requestedHingeAngle: 90,
+    });
+  });
+
+  test("90 -> 0 settles closed on cover", async () => {
+    const h = harness();
+    await h.hinge(90, "inner");
+    const result = await h.hingeDelayed(0, "cover", 1);
+    expect(result).toMatchObject({ hingeAngle: 0, posture: "closed" });
     expect(result).not.toHaveProperty("warnings");
+    expect(await h.current()).toMatchObject({
+      posture: "closed",
+      activePanel: { role: "cover" },
+      requestedHingeAngle: 0,
+    });
+  });
+
+  test("45 on cover allows either panel and does not poll", async () => {
+    const h = harness();
+    await h.hinge(0, "cover");
+    const before = h.observeCount();
+    const sleepsBefore = h.timer.getSleepCallCount();
+    const result = await h.hinge(45, "cover");
+    expect(result).toMatchObject({ hingeAngle: 45, posture: "closed" });
+    expect(result).not.toHaveProperty("warnings");
+    expect(h.observeCount() - before).toBe(1);
+    expect(h.timer.getSleepHistory().slice(sleepsBefore)).toEqual([]);
   });
 
   test("an undeterminable panel stays unknown with a reason and no layout warning", async () => {

@@ -38,8 +38,10 @@ describe("iPhone Duo hinge/layout assessment (#17726)", () => {
     expect(rows.every((row) => (row.panel === "cover") === (row.status === 1))).toBe(true);
   });
 
-  test("no captured consistent pair warns", () => {
-    expect(rows.filter((row) => iosHingeLayoutWarning(row.target, row.panel))).toEqual([]);
+  test("the captured cover read at 90 needs settling; other captured pairs do not warn", () => {
+    expect(rows.filter((row) => iosHingeLayoutWarning(row.target, row.panel))).toEqual([
+      { target: 90, panel: "cover", status: 1 },
+    ]);
   });
 
   test("captured pairs map to the UIHinge status the app saw", () => {
@@ -56,8 +58,11 @@ describe("iPhone Duo hinge/layout assessment (#17726)", () => {
     expect(warning).toContain("hingeAngle 180, then the target angle again");
   });
 
-  test("90 degrees on the cover panel is the captured healthy state", () => {
-    expect(iosHingeLayoutWarning(90, "cover")).toBeUndefined();
+  test("cover is plausible below 90 degrees and warns at 90 or above", () => {
+    expect(iosHingeLayoutWarning(89.5, "cover")).toBeUndefined();
+    expect(iosHingeLayoutWarning(90, "cover")).toContain(
+      "requested 90 degrees, but the cover panel is still active",
+    );
     expect(iosHingeLayoutWarning(91, "cover")).toBeDefined();
   });
 
@@ -92,7 +97,8 @@ describe("iPhone Duo hinge/layout assessment (#17726)", () => {
   test("the panel to wait for agrees with the layout warning thresholds", () => {
     expect(iosHingeExpectedPanelRole(0)).toBe("cover");
     expect(iosHingeExpectedPanelRole(45)).toBeUndefined();
-    expect(iosHingeExpectedPanelRole(90)).toBeUndefined();
+    expect(iosHingeExpectedPanelRole(89.5)).toBeUndefined();
+    expect(iosHingeExpectedPanelRole(90)).toBe("inner");
     expect(iosHingeExpectedPanelRole(91)).toBe("inner");
     for (const angle of [0, 45, 90, 120, 180]) {
       const expected = iosHingeExpectedPanelRole(angle);

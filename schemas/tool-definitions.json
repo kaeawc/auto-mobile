@@ -52007,6 +52007,11 @@
               "description": "Action button label to tap (for 'tap' action)",
               "type": "string"
             },
+            "replyText": {
+              "description": "Inline reply text on watches (tap only; defaults tapActionLabel to Keyboard input)",
+              "type": "string",
+              "minLength": 1
+            },
             "packageId": {
               "type": "string"
             },

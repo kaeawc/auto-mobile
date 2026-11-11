@@ -71,6 +71,7 @@ object WearFixtureCatalog {
   const val ONGOING_NOTIFICATION_ID = 1602
   const val ALERT_TITLE = "Fixture alert"
   const val ALERT_TEXT = "Two actions follow"
+  const val REPLY_INPUT_KEY = "reply_text"
   const val ONGOING_TITLE = "Fixture run"
   const val ONGOING_STATUS = "Fixture run in progress"
 

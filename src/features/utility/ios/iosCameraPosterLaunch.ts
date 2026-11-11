@@ -36,9 +36,16 @@ export async function prepareCameraPosterLaunch(
       dylib,
     ),
     // The library renders a QR itself with a quiet zone; a host PNG would be aspect-filled and
-    // cropped at the edges, which breaks decoding.
+    // cropped at the edges, which breaks decoding. The other mode's variable is set empty so an
+    // inherited host value cannot win: the library prefers any nonempty image path over a QR.
     ...(poster.kind === "qr"
-      ? { [SIMCTL_CHILD_AM_CAMERA_POSTER_QR]: poster.text }
-      : { [SIMCTL_CHILD_AM_CAMERA_POSTER_PATH]: poster.path }),
+      ? {
+          [SIMCTL_CHILD_AM_CAMERA_POSTER_QR]: poster.text,
+          [SIMCTL_CHILD_AM_CAMERA_POSTER_PATH]: "",
+        }
+      : {
+          [SIMCTL_CHILD_AM_CAMERA_POSTER_PATH]: poster.path,
+          [SIMCTL_CHILD_AM_CAMERA_POSTER_QR]: "",
+        }),
   };
 }

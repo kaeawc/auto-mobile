@@ -33,8 +33,11 @@ test.each([
     expect(await prepareCameraPosterLaunch(device, { registry, provider, hostEnv: {} })).toEqual({
       SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: "/camera/libAMCameraPoster.dylib",
       ...(kind === "image"
-        ? { SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/fixture/poster.png" }
-        : { SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "fixture" }),
+        ? {
+            SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/fixture/poster.png",
+            SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "",
+          }
+        : { SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "fixture", SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "" }),
     });
   },
 );
@@ -54,4 +57,31 @@ test("existing DYLD entries do not duplicate the poster dylib", async () => {
     hostEnv: { SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: provider.path },
   });
   expect(env?.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES).toBe(provider.path);
+});
+
+test("each poster mode clears the other mode's variable inherited from the host", async () => {
+  const registry = new FakeIosCameraPosterRegistry();
+  const provider = new FakeIosCameraPosterDylibProvider();
+  const device = {
+    platform: "ios",
+    deviceId: "11111111-2222-3333-4444-555555555555",
+    name: "Fixture",
+  } as const;
+  const hostEnv = {
+    SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/stale/poster.png",
+    SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "stale",
+  };
+  registry.set(device.deviceId, { kind: "qr", text: "fresh", path: "/generated-qr.png" });
+  const qrEnv = await prepareCameraPosterLaunch(device, { registry, provider, hostEnv });
+  // simctl receives these entries layered over the inherited host environment.
+  expect({ ...hostEnv, ...qrEnv }).toMatchObject({
+    SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "fresh",
+    SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "",
+  });
+  registry.set(device.deviceId, { kind: "image", path: "/fresh.png" });
+  const imageEnv = await prepareCameraPosterLaunch(device, { registry, provider, hostEnv });
+  expect({ ...hostEnv, ...imageEnv }).toMatchObject({
+    SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/fresh.png",
+    SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "",
+  });
 });

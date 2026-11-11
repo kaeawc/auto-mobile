@@ -700,6 +700,7 @@ jobs:
               # The shared bodies of the WebRTC jobs (#11872).
               - '.github/actions/ci-android-device-whep/**'
               - '.github/actions/ci-webrtc-publisher-integration/**'
+              - 'scripts/ci/ensure-ffmpeg.sh'
 
       # Run the WebRTC integration jobs when the streaming surface is touched, OR
       # when a human explicitly opts in by labelling the PR `webrtc` or mentioning

@@ -151,7 +151,7 @@ export const pressButtonInput = z.object({
     .string()
     .optional()
     .describe(
-      "Target panel key, role, or active; Android only. Sends the key to that display and checks it for the visual change",
+      'Target panel key, role, or active; Android only. Sends the key to that display and checks it for the visual change. "headUnit" sends it to the Android Auto head unit',
     ),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on

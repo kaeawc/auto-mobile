@@ -45,6 +45,9 @@ export interface DesktopHeadUnitSession {
   stop(): Promise<void>;
 }
 
+/** The part of a DHU session an action may use: write console commands, never start or stop it. */
+export type DesktopHeadUnitConsole = Pick<DesktopHeadUnitSession, "sendCommand" | "isRunning">;
+
 export interface DhuLaunchOptions {
   binaryPath: string;
   configPath: string;

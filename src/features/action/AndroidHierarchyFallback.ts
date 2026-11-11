@@ -327,30 +327,24 @@ function fitsDisplay(
   });
 }
 
+type DisplaySize = { width: number; height: number };
+
 /**
- * The display-service record of one logical display. `dumpsys display` prints its records in the
- * Logical Displays section (`mBaseDisplayInfo=DisplayInfo{...}`); the `Display id <n>:` form that
- * `cmd display get-displays` prints is read too.
+ * The current display-service records: `dumpsys display` prints them in its Logical Displays
+ * section; the `Display id <n>:` rows `cmd display get-displays` prints are read too.
  */
-function findAndroidDisplayInfo(
-  dumpsysDisplay: string,
-  displayId: number,
-): AndroidDisplayInfo | undefined {
-  const matches = (info: AndroidDisplayInfo) => info.logicalId === String(displayId);
-  return (
-    parseDumpsysLogicalDisplays(dumpsysDisplay).find(matches) ??
-    parseAndroidDisplayInfos(dumpsysDisplay).find(matches)
-  );
+function currentDisplayInfos(dumpsysDisplay: string): AndroidDisplayInfo[] {
+  const logical = parseDumpsysLogicalDisplays(dumpsysDisplay, { current: true });
+  return logical.length ? logical : parseAndroidDisplayInfos(dumpsysDisplay);
 }
 
-async function readDisplaySize(
+/** The requested display's current size, and the default display's for the identity check. */
+async function readDisplayGeometry(
   displayId: number,
   execute: ReturnType<typeof boundedDumpExecutor>,
-): Promise<{ width: number; height: number }> {
-  const info = findAndroidDisplayInfo(
-    (await execute(["shell", "dumpsys", "display"])).stdout,
-    displayId,
-  );
+): Promise<{ size: DisplaySize; defaultSize?: DisplaySize }> {
+  const infos = currentDisplayInfos((await execute(["shell", "dumpsys", "display"])).stdout);
+  const info = infos.find((entry) => entry.logicalId === String(displayId));
   if (info && isAccessibilityUntrackedDisplay(info)) {
     // UIAutomator reads through accessibility too: on a private virtual display it dumps the
     // default display's content, so do not run it.
@@ -363,7 +357,38 @@ async function readDisplaySize(
   if (!size || size.width <= 0 || size.height <= 0) {
     throw new ActionableError(`Display ${displayId} has no readable size in dumpsys display`);
   }
-  return size;
+  return { size, defaultSize: infos.find((entry) => entry.logicalId === "0")?.sizePx };
+}
+
+/**
+ * Why a dump cannot be shown to come from the requested display, or undefined when it can. Some
+ * releases ignore `--display` and dump the default display, so fitting inside the display is not
+ * enough: a top-level window must span the display exactly, and the display must differ in size
+ * from the default display, whose content would otherwise pass the same check.
+ */
+function dumpIdentityRefusal(
+  nodes: readonly ViewHierarchyNode[],
+  displayId: number,
+  { size, defaultSize }: { size: DisplaySize; defaultSize?: DisplaySize },
+): string | undefined {
+  const dimensions = `${size.width}x${size.height}`;
+  if (!fitsDisplay(nodes, size)) {
+    return `UIAutomator dump does not fit display ${displayId} (${dimensions}); this Android release likely ignores --display`;
+  }
+  const spans = nodes.some(
+    ({ bounds }) =>
+      bounds?.left === 0 &&
+      bounds.top === 0 &&
+      bounds.right === size.width &&
+      bounds.bottom === size.height,
+  );
+  if (!spans) {
+    return `UIAutomator dump has no window spanning display ${displayId} (${dimensions}), so it cannot be shown to come from that display`;
+  }
+  if (!defaultSize || (defaultSize.width === size.width && defaultSize.height === size.height)) {
+    return `Display ${displayId} (${dimensions}) cannot be told apart from the default display by size, so a UIAutomator dump cannot be shown to come from it`;
+  }
+  return undefined;
 }
 
 /** Read an untracked non-default display without borrowing the default display's foreground app. */
@@ -376,9 +401,8 @@ export async function readAndroidDisplayHierarchy(
   const path = dumpPath(deps.idGenerator);
   const execute = boundedDumpExecutor(deps, { deadline, signal });
   try {
-    // Some releases ignore `--display` and dump the default display; the display's real size
-    // is what lets the dump be rejected instead of being labelled as this display.
-    const size = await readDisplaySize(displayId, execute);
+    const geometry = await readDisplayGeometry(displayId, execute);
+    const { size } = geometry;
     const result = await withDumpLock(deps, { deadline, signal }, async () => {
       await execute(["shell", "uiautomator", "dump", "--display", String(displayId), path]);
       return execute(["shell", "cat", path]);
@@ -391,10 +415,9 @@ export async function readAndroidDisplayHierarchy(
     if (!nodes.length || deps.timer.now() >= deadline) {
       throw new ActionableError(`UIAutomator returned no hierarchy for display ${displayId}`);
     }
-    if (!fitsDisplay(nodes, size)) {
-      throw new ActionableError(
-        `UIAutomator dump does not fit display ${displayId} (${size.width}x${size.height}); this Android release likely ignores --display`,
-      );
+    const refusal = dumpIdentityRefusal(nodes, displayId, geometry);
+    if (refusal) {
+      throw new ActionableError(refusal);
     }
     const packageName = soleXmlPackage(nodes);
     return {

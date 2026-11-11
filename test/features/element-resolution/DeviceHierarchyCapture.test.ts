@@ -529,7 +529,7 @@ const overlayXml = readFileSync(
 );
 
 const overlayDumpsys = (size = "1080 x 720") =>
-  `Display Devices: size=2\n  Display id 2: DisplayInfo{"Overlay #1", displayId 2, type OVERLAY, uniqueId "overlay:1", real ${size}, rotation 0}`;
+  `Display Devices: size=2\n  Display id 0: DisplayInfo{"Built-in Screen", displayId 0, type INTERNAL, uniqueId "local:1", real 1080 x 2400, rotation 0}\n  Display id 2: DisplayInfo{"Overlay #1", displayId 2, type OVERLAY, uniqueId "overlay:1", real ${size}, rotation 0}`;
 
 function overlayCapture(
   observerMode: boolean,
@@ -740,6 +740,10 @@ test("a public virtual display is sized from the dumpsys Logical Displays sectio
     "shell dumpsys display",
     aaosDumpsysDisplay.replace(/(displayId 4, displayGroupId 0, )FLAG_PRIVATE, /g, "$1"),
   );
+  adb.setCommandResult(
+    "shell cat /data/local/tmp/automobile-hierarchy-overlay.xml",
+    overlayXml.replaceAll("[0,0][1080,720]", "[0,0][1280,720]"),
+  );
   const result = await read();
   expect(result.hierarchy.displayId).toBe(4);
   expect(result.hierarchy.sources).toEqual(["uiautomator"]);
@@ -748,4 +752,54 @@ test("a public virtual display is sized from the dumpsys Logical Displays sectio
   expect(adb.getCommandCalls()[1]?.command).toBe(
     "shell uiautomator dump --display 4 /data/local/tmp/automobile-hierarchy-overlay.xml",
   );
+});
+
+/** The captured AAOS dump with display 4 made public, so the UIAutomator fallback may read it. */
+const publicDisplay4Dumpsys = (dump = aaosDumpsysDisplay) =>
+  dump.replace(/(displayId 4, displayGroupId 0, )FLAG_PRIVATE, /g, "$1");
+
+test("a dump with no window spanning the display is not labelled as that display", async () => {
+  const { read, adb } = overlayCapture(false, 4, display4Refusal);
+  adb.setCommandResult("shell dumpsys display", publicDisplay4Dumpsys());
+  // The fixture's 1080x720 window fits inside the 1280x720 display but does not span it, as a
+  // default-display dump from a release that ignores --display could.
+  await expect(read()).rejects.toThrow(display4Refusal);
+  expect(adb.getCommandCalls().some((call) => call.command.includes("uiautomator dump"))).toBe(
+    true,
+  );
+});
+
+test("a display the default display's size cannot identify its dump", async () => {
+  const { read, adb } = overlayCapture(false, 4, display4Refusal);
+  // Derived: display 0 resized to display 4's 1280x720, so a spanning window proves nothing.
+  adb.setCommandResult(
+    "shell dumpsys display",
+    publicDisplay4Dumpsys().replaceAll("real 1024 x 768", "real 1280 x 720"),
+  );
+  adb.setCommandResult(
+    "shell cat /data/local/tmp/automobile-hierarchy-overlay.xml",
+    overlayXml.replaceAll("[0,0][1080,720]", "[0,0][1280,720]"),
+  );
+  await expect(read()).rejects.toThrow(display4Refusal);
+});
+
+test("a rotated display is sized from its current (override) record", async () => {
+  const { read, adb } = overlayCapture(false, 4, display4Refusal);
+  // Derived: display 4 rotated to portrait. Only mOverrideDisplayInfo carries the rotated size.
+  const rotated = publicDisplay4Dumpsys()
+    .split("\n")
+    .map((line) =>
+      line.includes("mOverrideDisplayInfo") && line.includes("displayId 4,")
+        ? line.replace("real 1280 x 720", "real 720 x 1280")
+        : line,
+    )
+    .join("\n");
+  adb.setCommandResult("shell dumpsys display", rotated);
+  adb.setCommandResult(
+    "shell cat /data/local/tmp/automobile-hierarchy-overlay.xml",
+    `<?xml version="1.0"?><hierarchy rotation="1"><node package="com.android.car.settings" class="android.widget.FrameLayout" bounds="[0,0][720,1280]"><node package="com.android.car.settings" class="android.widget.TextView" text="Bluetooth" bounds="[0,100][720,200]"/></node></hierarchy>`,
+  );
+  const result = await read();
+  expect(result.hierarchy.screenWidth).toBe(720);
+  expect(result.hierarchy.screenHeight).toBe(1280);
 });

@@ -287,4 +287,81 @@ describe("DeviceShutdownService", () => {
       expect(h.log.at("warn")[0]?.args).toEqual([lateError]);
     });
   });
+  test("one retained operation settling never releases while another is still pending", async () => {
+    await withoutUnhandledRejections(async () => {
+      const retirement = deferred();
+      const dhuStop = deferred();
+      const h = harness();
+      h.workflow.execute = async (_reservation, retain) => {
+        h.events.push("execute");
+        retain(retirement.promise);
+        retain(dhuStop.promise, true);
+        throw new Error("shutdown failed");
+      };
+      expect(await h.service.shutdown(h.workflow)).toBe("failure result");
+      dhuStop.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(h.events).toEqual(["prepare", "execute", "failure"]);
+      retirement.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(h.events).toEqual(["prepare", "execute", "failure", "release"]);
+    });
+  });
+
+  test("a succeeding ownership hold waits for a running barrier before releasing", async () => {
+    await withoutUnhandledRejections(async () => {
+      const retirement = deferred();
+      const dhuStop = deferred();
+      const h = harness();
+      h.workflow.execute = async (_reservation, retain) => {
+        h.events.push("execute");
+        retain(retirement.promise);
+        retain(dhuStop.promise, true);
+        return "success";
+      };
+      expect(await h.service.shutdown(h.workflow)).toBe("success");
+      retirement.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(h.events).toEqual(["prepare", "execute"]);
+      dhuStop.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(h.events).toEqual(["prepare", "execute", "release"]);
+    });
+  });
+
+  test("a retained failure without releaseAfterFailure keeps the reservation after the others settle", async () => {
+    await withoutUnhandledRejections(async () => {
+      const retirement = deferred();
+      const dhuStop = deferred();
+      const h = harness();
+      h.workflow.execute = async (_reservation, retain) => {
+        h.events.push("execute");
+        retain(retirement.promise);
+        retain(dhuStop.promise, true);
+        return "success";
+      };
+      expect(await h.service.shutdown(h.workflow)).toBe("success");
+      retirement.reject(new Error("late retirement failed"));
+      dhuStop.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(h.events).toEqual(["prepare", "execute"]);
+      expect(h.log.at("warn")).toHaveLength(1);
+    });
+  });
+
+  test("an operation settling before execute returns releases only once execute returns", async () => {
+    const h = harness();
+    const executeDone = deferred();
+    h.workflow.execute = async (_reservation, retain) => {
+      h.events.push("execute");
+      retain(Promise.resolve());
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      h.events.push("execute done");
+      executeDone.resolve();
+      return "success";
+    };
+    expect(await h.service.shutdown(h.workflow)).toBe("success");
+    await executeDone.promise;
+    expect(h.events).toEqual(["prepare", "execute", "execute done", "release"]);
+  });
 });

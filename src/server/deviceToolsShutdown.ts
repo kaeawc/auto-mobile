@@ -874,6 +874,7 @@ export async function shutdownDevice(
           shutdownReservation ? undefined : devicePool,
           device.deviceId,
         );
+        let androidAutoStop: ReturnType<typeof trackAndroidAutoStopAfterKill> | undefined;
         try {
           const releaseShutdownReservation = async (): Promise<void> => {
             try {
@@ -901,7 +902,7 @@ export async function shutdownDevice(
             requestAbortSignal,
             retainReservationUntil: retainShutdownUntil,
           };
-          const androidAutoStop = trackAndroidAutoStopAfterKill(shutdownContext, dependencies);
+          androidAutoStop = trackAndroidAutoStopAfterKill(shutdownContext, dependencies);
           const { killTarget, stopIdentity, androidObserverState } = await preparePlatformShutdown(
             { dependencies, context, options, devicePool, shutdownContext, perf },
             fence.clear,
@@ -988,6 +989,10 @@ export async function shutdownDevice(
             timing: perf.getTimings(),
             alreadyStoppedMessage,
           };
+        } catch (error) {
+          // A DHU stop still running past its wait keeps the serial reserved until it settles.
+          androidAutoStop?.retainAfterFailure();
+          throw error;
         } finally {
           fence.settle();
         }

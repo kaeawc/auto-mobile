@@ -49,7 +49,9 @@ rollback; a run that outlives the deadline is stopped once it resolves that way.
 or that reused a DHU an earlier provision started, leaves the existing DHU running: the provisioner
 already stops a DHU it applied and then failed on. `killDevice` of that emulator stops its DHU within
 the shutdown deadline and forgets its host port redirect only once the kill succeeds, since a failed
-kill leaves the emulator and its redirect in place. Only DHUs in this daemon's session map are stopped. A stopped session
+kill leaves the emulator and its redirect in place. A post-kill stop that outlives the deadline keeps
+the serial's shutdown reservation until it settles, whether the rest of the shutdown succeeds or
+fails, so a replacement never boots under it. Only DHUs in this daemon's session map are stopped. A stopped session
 is forgotten, so a later emulator that reuses the serial launches its own DHU; one whose stop fails
 stays tracked for the single-projection check but is never reused as `already-done`.
 The applier is a process-wide singleton: the provisioner it wraps is what tracks which DHU holds host

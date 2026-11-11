@@ -54,6 +54,123 @@ class PrototypeSensitiveSinkRulesTest {
       }
 
   @Test
+  fun taintedStateReachesRequestBindingsAndText() {
+    val action = """{"type":"setState","key":"u","value":{"platform":"/auth/userId"}}"""
+    for ((query, suffix) in listOf("""{"state":"u"}""" to ".state", """"{u}"""" to "")) {
+      assertEquals(
+        listOf(
+          PrototypeSpecError(
+            "root.onTap[1].query.q$suffix",
+            "Sensitive value cannot be bound into a request",
+          ),
+        ),
+        sinkErrors(stateSpec(action, query)),
+      )
+    }
+  }
+
+  @Test
+  fun clearingAfterSensitiveCopyDoesNotErasePossibleTaint() {
+    val actions =
+      """
+      {"type":"setState","key":"u","value":{"platform":"/auth/userId"}},
+      {"type":"setState","key":"u","value":""},
+      {"type":"setData","path":"/data/leak","value":{"state":"u"}}
+      """
+        .trimIndent()
+    assertEquals(
+      listOf(
+        PrototypeSpecError(
+          "root.onTap[3].query.q",
+          "Sensitive value cannot be bound into a request",
+        ),
+      ),
+      sinkErrors(stateSpec(actions, """{"data":"/leak"}""")),
+    )
+    assertEquals(
+      emptyList<PrototypeSpecError>(),
+      sinkErrors(stateSpec("""{"type":"setState","key":"u","value":""}""", """{"state":"u"}""")),
+    )
+  }
+
+  @Test
+  fun stateTextPlatformPlaceholderReachesStorage() {
+    val spec =
+      stateSpec(
+        """{"type":"setState","key":"u","value":"User {platform:/auth/userId}"}""",
+        """"clean"""",
+      )
+    val stored = buildJsonObject {
+      Json.parseToJsonElement(spec).jsonObject.forEach { (key, value) -> put(key, value) }
+      putJsonObject("storage") {
+        put("version", 1)
+        putJsonArray("keys") { add("state:u") }
+      }
+    }
+    assertEquals(
+      listOf(PrototypeSpecError("storage.keys[0]", "Sensitive value cannot be persisted")),
+      sinkErrors(stored.toString()),
+    )
+  }
+
+  @Test
+  fun stateTemplatesMatchLiteralPrefixesAndChargeBudget() {
+    val budget = PrototypeSensitiveSinkIndex.Budget(20)
+    val index = PrototypeStateTaintIndex(listOf("pick_{index}", "literal"), budget::visit)
+    assertTrue(index.key("pick_99"))
+    assertTrue(index.key("pick_{row.id}"))
+    assertFalse(index.key("other"))
+    assertTrue(index.text("send {pick_99}"))
+    assertTrue(index.text("send {literal}"))
+    assertFalse(index.text("send {literalSuffix}"))
+    assertTrue(budget.checks > 0)
+    val exhausted =
+      PrototypeStateTaintIndex(listOf("u"), PrototypeSensitiveSinkIndex.Budget(0)::visit)
+    assertFalse(exhausted.key("u"))
+    assertFalse(exhausted.text("{u}"))
+  }
+
+  @Test
+  fun stateCopyPropagationSpendsTheCheckCap() {
+    val context = PrototypeStateChecks.Context()
+    val spec =
+      stateSpec(
+        """
+        {"type":"setState","key":"u","value":{"platform":"/auth/userId"}},
+        {"type":"setData","path":"/data/leak","value":{"state":"u"}}
+        """
+          .trimIndent(),
+        """{"data":"/leak"}""",
+      )
+    assertTrue(PrototypeSpecInput.validateInput(spec, context) !is PrototypeSpecValidation.Failure)
+    fun propagate(cap: Long) =
+      PrototypeCopyTaint.propagate(
+        emptyList(),
+        listOf("/auth/userId"),
+        context,
+        PrototypeSensitiveSinkIndex.Companion::overlaps,
+        maxChecks = cap,
+      )
+    assertNull(propagate(1))
+    assertEquals(PrototypeCopyTaint.Taints(listOf("/leak"), listOf("u")), propagate(2))
+  }
+
+  private fun stateSpec(actions: String, query: String): String =
+    """
+    {
+      "id":"sensitive-flow",
+      "window":{"placement":{"type":"fullscreen"}},
+      "requires":{"platform":["auth"]},
+      "state":{"u":""},
+      "root":{"type":"button","label":"Copy","onTap":[
+        $actions,
+        {"type":"request","url":"https://example.com/submit","via":"device","query":{"q":$query}}
+      ]}
+    }
+  """
+      .trimIndent()
+
+  @Test
   fun manyTaintsAndUnrelatedBindingsCostBoundedOverlapChecks() {
     val taints = 3000
     val unrelated = 5000

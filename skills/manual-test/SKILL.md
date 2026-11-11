@@ -341,12 +341,15 @@ tool's `success`.
 
 ## Form-factor lanes: XR headset, glasses, Android TV
 
-Every round adds these Android lanes on top of the phone lanes. They count
-against the 2 Android budget: run them on one of the two Android slots in turn
-(shut the first down through `killDevice` before booting the next), never as
-extra concurrent emulators. Acquire and release the slot with `device-slot.sh`
-for each lane. Each lane starts from a freshly created AVD you own,
-pinned to an explicit non-5554 console port. Record per lane the image, the
+Every round adds these Android lanes on top of the phone lanes. Broker clients
+refuse `startDevice` and `killDevice`, so run the lanes in a separate plain
+batch (`private-daemon.ts init --batch-dir B2` without `--broker-batch`, its own
+`--base-port`), not through the broker batch. They count against the 2 Android
+budget: run them one at a time, never as extra
+concurrent emulators. Each lane starts from a freshly created AVD you own, named
+explicitly (`avdName`) and pinned to an explicit non-5554 console port; release it
+with `killDevice` on the plain batch before booting the next lane, and stop
+leftovers with `shutdown-devices --device <serial>`. Record per lane the image, the
 `adb -s <id> emu avd name` correlation and the observed fields below; a lane
 whose image is not installed is reported SKIPPED with the `sdkmanager` line, not
 silently dropped. AutoMobile never downloads images.
@@ -532,8 +535,9 @@ subprocesses, fewer round trips and less waiting — not just correctness.
 time, before any device lane starts, into one shared scratch directory
 keyed by the pinned SHA (set a private `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`
 under it for the runner). Every lane installs from that directory; a lane never
-rebuilds, and none writes to it after the build (by convention; nothing enforces
-it). Boots are staggered through `boot-gate`, not started together.
+rebuilds, and none writes build products to it after the build (by convention;
+nothing enforces it). Keep it writable: each iOS runner launch writes a
+per-device `automobile-runner-<deviceId>.xctestrun` beside the built xctestrun. Boots are staggered through `boot-gate`, not started together.
 
 ## Phase 2 — Restart the daemon with the right flags
 

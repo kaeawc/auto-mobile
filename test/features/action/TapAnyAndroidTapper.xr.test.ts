@@ -61,14 +61,11 @@ function setup(xr: boolean) {
       },
     },
     isAndroidXr: (signal) =>
-      new FakeAndroidXrDetector(xr).isAndroidXr(
+      new FakeAndroidXrDetector(xr).isAndroidXr({
         adb,
-        {
-          deviceId: "fake-xr",
-          platform: "android",
-        },
+        device: { deviceId: "fake-xr", platform: "android" },
         signal,
-      ),
+      }),
     beforeTap: () => {},
     refreshViewHierarchy: async () => {
       refreshes++;

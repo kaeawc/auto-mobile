@@ -186,7 +186,11 @@ export class ExploreElementActions {
           () =>
             new TapAtCoordinate(this.context.device, this.context.adb, {
               timer: this.context.timer,
-            }).execute({ ...coordinates!, action: "tap" }, { progress, signal }),
+            }).execute(
+              // Element centres are hierarchy coordinates, not XR screenshot pixels.
+              { ...coordinates!, action: "tap", pointSpace: "native" },
+              { progress, signal },
+            ),
         );
     return result.success;
   }

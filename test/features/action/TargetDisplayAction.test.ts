@@ -731,6 +731,7 @@ describe("explicit action display", () => {
       timer: autoTimer(),
       androidClient: client,
       iosClient: client,
+      xrDetector: new FakeAndroidXrDetector(false),
     });
     setFakeTapAtWindow(action);
     action.observeScreen = observe;

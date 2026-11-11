@@ -355,9 +355,31 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
     )
     assertEquals(
       "requestAction" to
-        listOf<Any?>("a1", "long_click", "com.app:id/x", null, NodeActionArguments()),
+        listOf<Any?>("a1", "long_click", "com.app:id/x", null, NodeActionArguments(), null),
       lastCall,
     )
+  }
+
+  @Test
+  fun `dispatches complete and partial expected bounds without dropping verification`() = runTest {
+    for (bottom in listOf(120, null)) {
+      val bottomField = bottom?.let { ",\"boundsBottom\":$it" } ?: ""
+      dispatch(
+        """{"type":"request_action","requestId":"b1","action":"click","resourceId":"com.app:id/x","boundsLeft":10,"boundsTop":20,"boundsRight":110$bottomField}""",
+      )
+      assertEquals(
+        "requestAction" to
+          listOf<Any?>(
+            "b1",
+            "click",
+            "com.app:id/x",
+            null,
+            NodeActionArguments(),
+            NodeExpectedBounds(10, 20, 110, bottom),
+          ),
+        lastCall,
+      )
+    }
   }
 
   @Test
@@ -373,6 +395,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
           "com.app:id/row",
           null,
           NodeActionArguments(customAction = "Archive"),
+          null,
         ),
       lastCall,
     )
@@ -387,6 +410,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
           "com.app:id/slider",
           null,
           NodeActionArguments(progress = 0.75f),
+          null,
         ),
       lastCall,
     )
@@ -409,6 +433,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
             collectionColumn = 0,
           ),
           NodeActionArguments(),
+          null,
         ),
       lastCall,
     )

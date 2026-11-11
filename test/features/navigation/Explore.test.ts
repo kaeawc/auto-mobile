@@ -48,6 +48,8 @@ import type { ElementParser } from "../../../src/utils/interfaces/ElementParser"
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
+import { createTapAt, observation as tapAtObservation } from "../../helpers/tapAtCoordinate";
+import { xrBackStack } from "../../helpers/xrHeadset";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { SwipeOnElement } from "../../../src/features/action/SwipeOnElement";
 import {
@@ -1690,7 +1692,10 @@ describe("Explore", () => {
             createMockObservation(),
           ),
         ).toBe(true);
-        expect(tap).toHaveBeenCalledWith({ x: 50, y: 25, action: "tap" }, { signal: undefined });
+        expect(tap).toHaveBeenCalledWith(
+          { x: 50, y: 25, action: "tap", pointSpace: "native" },
+          { signal: undefined },
+        );
         expect(calls).toEqual([]);
       } finally {
         tap.mockRestore();
@@ -2047,6 +2052,41 @@ describe("Explore", () => {
       expect(args).toEqual({ x: 50, y: 25, action: "tap" });
       expect(tapAtSchema.safeParse(args).success).toBe(true);
       expect(await historySize()).toBe(1);
+    });
+
+    test("an XR coordinate-only tap dispatches the native element centre without panel mapping", async () => {
+      let sent: Parameters<TapAtCoordinate["execute"]>[0] | undefined;
+      const tap = spyOn(TapAtCoordinate.prototype, "execute").mockImplementation(
+        async (options) => {
+          sent = options;
+          return tapAtResult();
+        },
+      );
+      try {
+        await perform()(
+          createMockElement({
+            text: "",
+            "resource-id": "",
+            class: "",
+            bounds: { left: 212, top: 412, right: 312, bottom: 472 },
+          }),
+          createMockObservation(),
+        );
+      } finally {
+        tap.mockRestore();
+      }
+      expect(sent).toMatchObject({ x: 262, y: 442, pointSpace: "native" });
+      expect(recorded().args).toEqual({ x: 262, y: 442, action: "tap" });
+
+      const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
+      fake.observeScreen.setObserveResult({
+        ...tapAtObservation(2560, 2558),
+        backStack: xrBackStack(),
+      });
+      const result = await fake.tapAt.execute(sent!);
+      expect(result.success).toBe(true);
+      expect(result.xrPanel).toBeUndefined();
+      expect(fake.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
     });
 
     test("an element with no tap target records nothing", async () => {

@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.graphics.Rect
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ClickableSpan
@@ -9,6 +10,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ActionResult
+import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.mockk.every
 import io.mockk.mockk
@@ -48,6 +50,7 @@ class NodeActionControllerTest {
   private class FakeHost(private val scope: CoroutineScope) : NodeActionController.Host {
     var node: AccessibilityNodeInfo? = null
     var root: AccessibilityNodeInfo? = null
+    var windowRoots: List<AccessibilityNodeInfo>? = null
     var view: View? = null
     val events = mutableListOf<String>()
     val results = mutableListOf<Result>()
@@ -66,8 +69,12 @@ class NodeActionControllerTest {
       find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
     ): AccessibilityNodeInfo? {
       failLookup?.let { throw it }
-      return node
+      return windowRoots?.firstNotNullOfOrNull(find) ?: node
     }
+
+    override fun findNodesInDisplayWindows(
+      find: (AccessibilityNodeInfo) -> List<AccessibilityNodeInfo>,
+    ): List<AccessibilityNodeInfo> = windowRoots.orEmpty().flatMap(find)
 
     override fun screenDimensions(displayId: Int): ScreenDimensions? = null
 
@@ -123,6 +130,114 @@ class NodeActionControllerTest {
         actions.map { AccessibilityNodeInfo.AccessibilityAction(it, null) }
       every { node.performAction(any()) } returns true
     }
+
+  private val expectedBounds = NodeExpectedBounds(10, 20, 110, 120)
+  private val selector = NodeSelector(resourceId = "app:id/button")
+
+  private fun boundsNode(visible: Boolean = true, left: Int = 10): AccessibilityNodeInfo =
+    node(actions = listOf(AccessibilityNodeInfo.ACTION_CLICK)).also { target ->
+      every { target.viewIdResourceName } returns "app:id/button"
+      every { target.extras } returns null
+      every { target.isVisibleToUser } returns visible
+      every { target.getBoundsInScreen(any()) } answers
+        {
+          firstArg<Rect>().set(left, 20, 110, 120)
+        }
+    }
+
+  private fun tree(vararg children: AccessibilityNodeInfo): AccessibilityNodeInfo =
+    node().also { root ->
+      every { root.childCount } returns children.size
+      every { root.getChild(any()) } answers { children[firstArg()] }
+    }
+
+  @Test
+  fun `verified click skips an earlier invisible duplicate and clicks the visible bounds match`() =
+    runTest {
+      val (controller, host) = setup()
+      val hidden = boundsNode(visible = false)
+      val visible = boundsNode()
+      host.windowRoots = listOf(tree(hidden, visible))
+
+      controller.performNodeAction(
+        "bounds",
+        "click",
+        null,
+        selector,
+        expectedBounds = expectedBounds,
+      )
+
+      assertTrue(host.results.single().success)
+      verify(exactly = 0) { hidden.performAction(any()) }
+      verify(exactly = 1) { visible.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+      verify(exactly = 1) { hidden.recycle() }
+      verify(exactly = 1) { visible.recycle() }
+    }
+
+  @Test
+  fun `bounds mismatch refuses without performing an action`() = runTest {
+    val (controller, host) = setup()
+    val target = boundsNode(left = 99)
+    host.windowRoots = listOf(tree(target))
+
+    controller.performNodeAction("bounds", "click", null, selector, expectedBounds = expectedBounds)
+
+    assertFalse(host.results.single().success)
+    assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
+    verify(exactly = 0) { target.performAction(any()) }
+    verify(exactly = 1) { target.recycle() }
+    assertFalse("publish" in host.events)
+  }
+
+  @Test
+  fun `identical visible bounds across windows refuse as ambiguous`() = runTest {
+    val (controller, host) = setup()
+    val first = boundsNode()
+    val second = boundsNode()
+    host.windowRoots = listOf(tree(first), tree(second))
+
+    controller.performNodeAction("bounds", "click", null, selector, expectedBounds = expectedBounds)
+
+    assertFalse(host.results.single().success)
+    assertTrue(host.results.single().error?.startsWith("node_bounds_ambiguous:") == true)
+    verify(exactly = 0) { first.performAction(any()) }
+    verify(exactly = 0) { second.performAction(any()) }
+    verify(exactly = 1) { first.recycle() }
+    verify(exactly = 1) { second.recycle() }
+  }
+
+  @Test
+  fun `partial bounds refuse without performing an action`() = runTest {
+    val (controller, host) = setup()
+    val target = boundsNode()
+    host.windowRoots = listOf(tree(target))
+
+    controller.performNodeAction(
+      "partial",
+      "click",
+      null,
+      selector,
+      expectedBounds = NodeExpectedBounds(10, null, 110, 120),
+    )
+
+    assertFalse(host.results.single().success)
+    assertTrue(host.results.single().error?.startsWith("node_bounds_mismatch:") == true)
+    verify(exactly = 0) { target.performAction(any()) }
+  }
+
+  @Test
+  fun `omitting expected bounds preserves first selector match even when invisible`() = runTest {
+    val (controller, host) = setup()
+    val hidden = boundsNode(visible = false)
+    val visible = boundsNode()
+    host.windowRoots = listOf(tree(hidden, visible))
+
+    controller.performNodeAction("legacy", "click", null, selector)
+
+    assertTrue(host.results.single().success)
+    verify(exactly = 1) { hidden.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+    verify(exactly = 0) { visible.performAction(any()) }
+  }
 
   @Test
   fun `the action result is one timestamped envelope with no perf timing in tests`() = runTest {

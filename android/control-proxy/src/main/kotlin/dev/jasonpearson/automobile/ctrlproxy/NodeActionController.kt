@@ -36,6 +36,11 @@ internal class NodeActionController(
       find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
     ): AccessibilityNodeInfo?
 
+    /** Returns owned matches across every window searched by first-match lookup. */
+    fun findNodesInDisplayWindows(
+      find: (AccessibilityNodeInfo) -> List<AccessibilityNodeInfo>,
+    ): List<AccessibilityNodeInfo>
+
     fun screenDimensions(displayId: Int): ScreenDimensions?
 
     /** A [View] tied to the service context, used to invoke a ClickableSpan. */
@@ -259,12 +264,14 @@ internal class NodeActionController(
    * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
    * IDs, and collection coordinates.
    */
+  @Suppress("LongParameterList") // Wire request fields pass through unchanged.
   suspend fun performNodeAction(
     requestId: String?,
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
     arguments: NodeActionArguments = NodeActionArguments(),
+    expectedBounds: NodeExpectedBounds? = null,
   ) {
     host.forgetRememberedInsert()
     val startTime = timeProvider.currentTimeMillis()
@@ -273,7 +280,7 @@ internal class NodeActionController(
     Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
     perfProvider.serial("performAction")
 
-    NodeActionOperation(requestId, action, startTime, arguments)
+    NodeActionOperation(requestId, action, startTime, arguments, expectedBounds)
       .run(
         NodeActionTarget(effectiveSelector, resourceId, targetDescription),
       )
@@ -284,6 +291,7 @@ internal class NodeActionController(
     private val action: String,
     private val startTime: Long,
     private val arguments: NodeActionArguments,
+    private val expectedBounds: NodeExpectedBounds?,
   ) {
     suspend fun run(target: NodeActionTarget) {
       try {
@@ -309,7 +317,16 @@ internal class NodeActionController(
       }
 
       perfProvider.startOperation("findNode")
-      val targetNode = findActionNode(target.selector, target.resourceId)
+      val targetNode =
+        if (expectedBounds != null) {
+          val selector = target.selector ?: NodeSelector(resourceId = target.resourceId)
+          selectNodeWithBounds(
+            host.findNodesInDisplayWindows { findNodesBySelector(it, selector) },
+            expectedBounds,
+          )
+        } else {
+          findActionNode(target.selector, target.resourceId)
+        }
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
@@ -322,10 +339,12 @@ internal class NodeActionController(
 
       perfProvider.startOperation("executeAction")
       val (alreadySatisfied, actionError, success) =
-        executeNodeAction(action, targetNode, arguments)
-      perfProvider.endOperation("executeAction")
-
-      targetNode.recycle()
+        try {
+          executeNodeAction(action, targetNode, arguments)
+        } finally {
+          targetNode.recycle()
+          perfProvider.endOperation("executeAction")
+        }
       perfProvider.end()
 
       Log.d(TAG, "Action completed: success=$success")

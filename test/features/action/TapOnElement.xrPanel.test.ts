@@ -85,6 +85,7 @@ describe("XR panel-space tap routing", () => {
       {
         action: "click",
         selector: { resourceId: "com.android.systemui:id/home_screen_launcher_button" },
+        expectedBounds: element.bounds,
       },
     ]);
     expect(service.getTapHistory()).toHaveLength(0);
@@ -94,6 +95,9 @@ describe("XR panel-space tap routing", () => {
 
   for (const mode of [
     "unsupported",
+    "bounds-unsupported",
+    "node_bounds_mismatch",
+    "node_bounds_ambiguous",
     "rejected",
     "missing-selector",
     "xml",
@@ -104,6 +108,17 @@ describe("XR panel-space tap routing", () => {
   ] as const) {
     test(`refuses unsafe XR fallback: ${mode}`, async () => {
       const { execute, service, adb } = setup();
+      if (mode === "bounds-unsupported") {
+        service.setSupportsNodeBoundsVerification(false);
+      }
+      if (mode === "node_bounds_mismatch" || mode === "node_bounds_ambiguous") {
+        service.setActionResult({
+          success: false,
+          action: "click",
+          totalTimeMs: 1,
+          error: `${mode}: selector verification refused`,
+        });
+      }
       if (mode === "unsupported") {
         service.setSupportsNodeActionSelectors(false);
       }
@@ -124,6 +139,9 @@ describe("XR panel-space tap routing", () => {
       await expect(
         execute(target, mode === "doubleTap" ? "doubleTap" : "tap", mode === "talkback"),
       ).rejects.toThrow(/XR panel coordinate space.*not tappable screen coordinates.*tapAt/);
+      if (mode === "bounds-unsupported") {
+        expect(service.getNodeActionHistory()).toHaveLength(0);
+      }
       expect(service.getTapHistory()).toHaveLength(0);
       expect(adb.getAllCommands()).toHaveLength(0);
     });
@@ -228,6 +246,7 @@ describe("XR panel-space tap routing", () => {
         expect(service.getNodeActionHistory()).toMatchObject([
           {
             action: "click",
+            expectedBounds: mode === "nearest-ancestor" ? current.frame.bounds : current.row.bounds,
             selector:
               mode === "nearest-ancestor"
                 ? { uniqueId: "settings-connected-frame" }
@@ -239,6 +258,43 @@ describe("XR panel-space tap routing", () => {
         if (mode !== "rejected-ancestor") {
           expect(service.getNodeActionHistory()).toHaveLength(0);
         }
+      }
+      expect(service.getTapHistory()).toHaveLength(0);
+      expect(adb.getAllCommands()).toHaveLength(0);
+    });
+  }
+
+  for (const mode of ["owner-outside-container", "owner-inside-container"] as const) {
+    test(`container-scoped Settings ancestor click: ${mode}`, async () => {
+      const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+      const { nodes, label, frame, row } = settingsTarget(tree);
+      Object.assign(row.source, { "unique-id": "settings-connected-row" });
+      // Scope to the label's own frame (its only clickable owner, the row, is outside
+      // it) or to the list that contains the row. Unique ids keep the scope unambiguous.
+      const elementId = `com.android.settings:id/${mode}`;
+      const scope = mode === "owner-outside-container" ? frame : nodes[row.parentIndex!];
+      Object.assign(scope.source, { "resource-id": elementId });
+      const current = settingsTarget(tree);
+      const { tap, service, adb } = setup();
+      const result = tap.executeAndroidTap("tap", point, 0, {
+        element: { ...current.label.properties, bounds: label.bounds! },
+        isTalkBackEnabled: false,
+        options: { action: "tap", resolvedHierarchy: tree, container: { elementId } },
+      });
+      if (mode === "owner-inside-container") {
+        await result;
+        expect(service.getNodeActionHistory()).toMatchObject([
+          {
+            action: "click",
+            expectedBounds: current.row.bounds,
+            selector: { uniqueId: "settings-connected-row" },
+          },
+        ]);
+      } else {
+        await expect(result).rejects.toThrow(
+          /XR panel coordinate space.*not tappable screen coordinates.*tapAt/,
+        );
+        expect(service.getNodeActionHistory()).toHaveLength(0);
       }
       expect(service.getTapHistory()).toHaveLength(0);
       expect(adb.getAllCommands()).toHaveLength(0);

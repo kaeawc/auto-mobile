@@ -1,3 +1,4 @@
+import { appendWarning, xrDefaultPoseWarning, xrSwipeBounds } from "../../xr/xrPanelSpace";
 import type { SwipeOnCtrlProxy } from "./types";
 import { freshSwipeHierarchy } from "./freshSwipeHierarchy";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./androidSearchDrag";
@@ -390,6 +391,7 @@ export class SwipeOnAndroidDisplay {
     decision: AutoTargetDecision;
     observation: ObserveResult;
   }): Pick<SwipeOnResult, "x1" | "y1" | "x2" | "y2" | "targetType" | "warning"> {
+    const xrWarning = xrDefaultPoseWarning(observation);
     if (decision.element && observation.viewHierarchy) {
       const coordinates = this.ctx().resolveContainerSwipeCoordinates(
         { ...options, direction: options.direction! },
@@ -403,20 +405,23 @@ export class SwipeOnAndroidDisplay {
         x2: coordinates.endX,
         y2: coordinates.endY,
         targetType: "element",
-        warning: coordinates.warning,
+        warning: appendWarning(coordinates.warning, xrWarning),
       };
     }
     const bounds = this.selectedDisplayContainerBounds(options, observation);
     if (options.container && !bounds) {
       throw new ActionableError("Swipe container not found on selected display");
     }
+    // Container swipes never use XR panel bounds, so only screen swipes can refuse fromEdge.
+    const panelBounds = bounds ? undefined : xrSwipeBounds(observation.backStack, options.fromEdge);
     return {
       ...displaySwipeCoordinates(
         options,
         observation,
-        this.resolveDisplaySwipeBounds(options, observation, bounds),
+        panelBounds ?? this.resolveDisplaySwipeBounds(options, observation, bounds),
       ),
       targetType: bounds ? "element" : "screen",
+      ...(xrWarning ? { warning: xrWarning } : {}),
     };
   }
 

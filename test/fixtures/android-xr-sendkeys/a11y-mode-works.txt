@@ -1,0 +1,273 @@
+$ sendKeys --deviceId emulator-5558 --commands [{"action":"type","text":"wifi","mode":"a11y"}]
+{
+  "_meta": {
+    "automobile/routedSessionUuid": "bf79826d-45d9-4aef-ad46-a0eda4c8d4f8"
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"message\":\"Executed 1 sendKeys command(s)\",\"success\":true,\"completedCommands\":1,\"commands\":[{\"index\":0,\"action\":\"type\",\"textLength\":4,\"operation\":\"insert\",\"requestedMode\":\"a11y\",\"resolvedMode\":\"a11y\",\"success\":true}],\"observation\":{\"observationId\":\"ac131a9f-7ff5-410a-8909-d6fff4a652a2\",\"deviceId\":\"emulator-5558\",\"display\":{\"key\":\"0\",\"role\":\"unknown\",\"posture\":\"unknown\",\"generation\":0},\"updatedAt\":1794345283347,\"screenSize\":{\"width\":2560,\"height\":2558,\"units\":\"physical-pixels\"},\"intentChooserDetected\":false,\"notificationPermissionDetected\":false,\"rotation\":0,\"wakefulness\":\"Awake\",\"wakefulnessSource\":\"hierarchy\",\"activeWindow\":{\"appId\":\"com.android.settings.intelligence\",\"activityName\":\"com.android.settings.intelligence.search.SearchActivity\",\"layoutSeqSum\":1095},\"freshness\":{\"requestedAfter\":1794345282582,\"actualTimestamp\":1794345283347,\"ageMs\":66,\"verified\":true,\"isFresh\":true},\"screenshotCapturedAt\":\"2026-11-10T21:14:43.677Z\",\"settled\":false,\"screenshotHierarchyLagMs\":139,\"skeleton\":[{\"bounds\":[0,0,3522,2030],\"affordances\":[\"tap\"],\"elementId\":\"s2-d2de3ae627999391\",\"label\":\"Recents\"},{\"bounds\":[73,48,2828,1853],\"affordances\":[\"tap\"],\"elementId\":\"s2-f69021943d4baad0\",\"label\":\"Launcher\"},{\"bounds\":[0,0,3072,1416],\"affordances\":[\"tap\"],\"elementId\":\"s2-51320023ce5e9c24\",\"label\":\"Notifications\"},{\"bounds\":[0,0,2400,2400],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/home_screen\",\"label\":\"3:14 PM\"},{\"bounds\":[964,1873,1140,2049],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/home_screen_launcher_button\",\"label\":\"Open Launcher Panel\"},{\"bounds\":[1260,1873,1436,2049],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/home_screen_env_button\",\"label\":\"Environment\"},{\"bounds\":[729,1210,848,1306],\"affordances\":[\"tap\"],\"elementId\":\"com.android.systemui:id/button2\",\"label\":\"OK\"},{\"bounds\":[760,1108,1800,1571],\"affordances\":[\"input\"],\"elementId\":\"<ime>\",\"label\":\"Keyboard (com.google.android.inputmethod.latin)\"}],\"keyboard\":{\"visible\":true,\"package\":\"com.google.android.inputmethod.latin\"},\"context\":[{\"bounds\":[0,0,496,680],\"affordances\":[],\"occluded\":true,\"elementId\":\"s2-e463212d84da9d12-2\"},{\"bounds\":[0,0,1000,1700],\"affordances\":[],\"elementId\":\"com.android.systemui:id/quick_settings_root_frame\",\"label\":\"Quick Settings\"},{\"bounds\":[0,0,2,2],\"affordances\":[],\"elementId\":\"com.android.systemui:id/accessibility_announcement\",\"label\":\"Recentered\"},{\"bounds\":[64,950,856,1015],\"affordances\":[],\"elementId\":\"com.android.systemui:id/alertTitle\",\"label\":\"Unable to detect surroundings\"},{\"bounds\":[64,1063,856,1146],\"affordances\":[],\"elementId\":\"com.android.systemui:id/message\",\"label\":\"Make sure you're in a well-lit area and the headset cameras are uncovered\"},{\"bounds\":[90,0,136,48],\"affordances\":[],\"elementId\":\"s2-5f42272ca1db0b1c\",\"label\":\"Google Play Protect notification:\"},{\"bounds\":[136,0,182,48],\"affordances\":[],\"elementId\":\"s2-59c2c43e07860ca2\",\"label\":\"Android System notification:\"},{\"bounds\":[16,0,2504,48],\"affordances\":[],\"elementId\":\"com.android.systemui:status-bar-summary\",\"label\":\"Status bar: 3:14, Wifi signal full., Battery charging, 100 percent.\"}],\"observationScreenshotResourceUri\":\"automobile:observation/emulator-5558/ac131a9f-7ff5-410a-8909-d6fff4a652a2/screenshot\"},\"observationDiff\":{\"mode\":\"full\",\"reason\":\"disabled\",\"hint\":\"Set --actions-diff-observe to receive diffs.\"}}"
+    }
+  ],
+  "structuredContent": {
+    "message": "Executed 1 sendKeys command(s)",
+    "success": true,
+    "completedCommands": 1,
+    "commands": [
+      {
+        "index": 0,
+        "action": "type",
+        "textLength": 4,
+        "operation": "insert",
+        "requestedMode": "a11y",
+        "resolvedMode": "a11y",
+        "success": true
+      }
+    ],
+    "observation": {
+      "observationId": "ac131a9f-7ff5-410a-8909-d6fff4a652a2",
+      "deviceId": "emulator-5558",
+      "display": {
+        "key": "0",
+        "role": "unknown",
+        "posture": "unknown",
+        "generation": 0
+      },
+      "updatedAt": 1794345283347,
+      "screenSize": {
+        "width": 2560,
+        "height": 2558,
+        "units": "physical-pixels"
+      },
+      "intentChooserDetected": false,
+      "notificationPermissionDetected": false,
+      "rotation": 0,
+      "wakefulness": "Awake",
+      "wakefulnessSource": "hierarchy",
+      "activeWindow": {
+        "appId": "com.android.settings.intelligence",
+        "activityName": "com.android.settings.intelligence.search.SearchActivity",
+        "layoutSeqSum": 1095
+      },
+      "freshness": {
+        "requestedAfter": 1794345282582,
+        "actualTimestamp": 1794345283347,
+        "ageMs": 66,
+        "verified": true,
+        "isFresh": true
+      },
+      "screenshotCapturedAt": "2026-11-10T21:14:43.677Z",
+      "settled": false,
+      "screenshotHierarchyLagMs": 139,
+      "skeleton": [
+        {
+          "bounds": [
+            0,
+            0,
+            3522,
+            2030
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-d2de3ae627999391",
+          "label": "Recents"
+        },
+        {
+          "bounds": [
+            73,
+            48,
+            2828,
+            1853
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-f69021943d4baad0",
+          "label": "Launcher"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            3072,
+            1416
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-51320023ce5e9c24",
+          "label": "Notifications"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            2400,
+            2400
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "com.android.systemui:id/home_screen",
+          "label": "3:14 PM"
+        },
+        {
+          "bounds": [
+            964,
+            1873,
+            1140,
+            2049
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "com.android.systemui:id/home_screen_launcher_button",
+          "label": "Open Launcher Panel"
+        },
+        {
+          "bounds": [
+            1260,
+            1873,
+            1436,
+            2049
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "com.android.systemui:id/home_screen_env_button",
+          "label": "Environment"
+        },
+        {
+          "bounds": [
+            729,
+            1210,
+            848,
+            1306
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "com.android.systemui:id/button2",
+          "label": "OK"
+        },
+        {
+          "bounds": [
+            760,
+            1108,
+            1800,
+            1571
+          ],
+          "affordances": [
+            "input"
+          ],
+          "elementId": "<ime>",
+          "label": "Keyboard (com.google.android.inputmethod.latin)"
+        }
+      ],
+      "keyboard": {
+        "visible": true,
+        "package": "com.google.android.inputmethod.latin"
+      },
+      "context": [
+        {
+          "bounds": [
+            0,
+            0,
+            496,
+            680
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-e463212d84da9d12-2"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            1000,
+            1700
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/quick_settings_root_frame",
+          "label": "Quick Settings"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            2,
+            2
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/accessibility_announcement",
+          "label": "Recentered"
+        },
+        {
+          "bounds": [
+            64,
+            950,
+            856,
+            1015
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/alertTitle",
+          "label": "Unable to detect surroundings"
+        },
+        {
+          "bounds": [
+            64,
+            1063,
+            856,
+            1146
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/message",
+          "label": "Make sure you're in a well-lit area and the headset cameras are uncovered"
+        },
+        {
+          "bounds": [
+            90,
+            0,
+            136,
+            48
+          ],
+          "affordances": [],
+          "elementId": "s2-5f42272ca1db0b1c",
+          "label": "Google Play Protect notification:"
+        },
+        {
+          "bounds": [
+            136,
+            0,
+            182,
+            48
+          ],
+          "affordances": [],
+          "elementId": "s2-59c2c43e07860ca2",
+          "label": "Android System notification:"
+        },
+        {
+          "bounds": [
+            16,
+            0,
+            2504,
+            48
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:status-bar-summary",
+          "label": "Status bar: 3:14, Wifi signal full., Battery charging, 100 percent."
+        }
+      ],
+      "observationScreenshotResourceUri": "automobile:observation/emulator-5558/ac131a9f-7ff5-410a-8909-d6fff4a652a2/screenshot"
+    },
+    "observationDiff": {
+      "mode": "full",
+      "reason": "disabled",
+      "hint": "Set --actions-diff-observe to receive diffs."
+    }
+  },
+  "success": true
+}
+[exit 0]
+

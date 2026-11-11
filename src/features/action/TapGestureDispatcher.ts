@@ -168,6 +168,7 @@ export class TapGestureDispatcher {
         element,
         signal,
         options,
+        resolveContainer: (tree, opts) => this.host.finder().resolveContainerElement(tree, opts),
       });
       return undefined;
     }

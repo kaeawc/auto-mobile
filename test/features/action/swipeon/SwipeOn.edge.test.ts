@@ -1,3 +1,4 @@
+import { xrBackStack } from "../../../helpers/xrHeadset";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon";
 import type { ObserveResult } from "../../../../src/models";
@@ -67,5 +68,90 @@ describe("SwipeOn fromEdge (#12537)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("must be");
     expect(gesture.getSwipeCalls()).toEqual([]);
+  });
+  test("XR screen swipes stay inside the captured panel", async () => {
+    observe.setObserveResult({
+      ...observation(),
+      screenSize: { width: 2560, height: 2558 },
+      backStack: xrBackStack("swipe-up"),
+    });
+    const result = await createSwipeOn().execute({ direction: "up", autoTarget: false });
+    expect(result.success).toBe(true);
+    const call = gesture.getSwipeCalls()[0];
+    for (const x of [call.x1, call.x2]) {
+      expect(x).toBeWithin(0, 2048);
+    }
+    for (const y of [call.y1, call.y2]) {
+      expect(y).toBeWithin(48, 1328);
+    }
+    expect(result.warning).toContain("assume the app panel is in its default pose");
+  });
+
+  test("XR swipes refuse before dispatch when two app panels are open", async () => {
+    const backStack = xrBackStack("swipe-up");
+    const settings = backStack.tasks.find((task) => task.id === 6)!;
+    backStack.tasks.push({ ...settings, id: 7, packageName: "com.example.second" });
+    observe.setObserveResult({
+      ...observation(),
+      screenSize: { width: 2560, height: 2558 },
+      backStack,
+    });
+    const result = await createSwipeOn().execute({ direction: "up", autoTarget: false });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("2 app panels are open");
+    expect(result.error).toContain("Close the other app panels");
+    expect(gesture.getSwipeCalls()).toHaveLength(0);
+  });
+
+  test("XR lookFor refuses before dispatch when two app panels are open", async () => {
+    const backStack = xrBackStack("swipe-up");
+    const settings = backStack.tasks.find((task) => task.id === 6)!;
+    backStack.tasks.push({ ...settings, id: 7, packageName: "com.example.second" });
+    observe.setObserveResult({
+      ...observation(),
+      screenSize: { width: 2560, height: 2558 },
+      backStack,
+    });
+    const result = await createSwipeOn().execute({
+      direction: "up",
+      autoTarget: false,
+      lookFor: { text: "Missing", maxTime: 1000 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("2 app panels are open");
+    expect(gesture.getSwipeCalls()).toHaveLength(0);
+  });
+
+  test("XR system UI only refuses swipes", async () => {
+    const backStack = xrBackStack("swipe-up");
+    backStack.tasks = backStack.tasks.filter((task) => task.packageName !== "com.android.settings");
+    observe.setObserveResult({ ...observation(), backStack });
+    const result = await createSwipeOn().execute({ direction: "up", autoTarget: false });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("dismiss XR home-space panels");
+    expect(gesture.getSwipeCalls()).toHaveLength(0);
+  });
+
+  test("XR edge swipes refuse before dispatch", async () => {
+    observe.setObserveResult({
+      ...observation(),
+      screenSize: { width: 2560, height: 2558 },
+      backStack: xrBackStack(),
+    });
+    const result = await createSwipeOn().execute({
+      direction: "right",
+      fromEdge: "left",
+      autoTarget: false,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("edge gestures");
+    expect(gesture.getSwipeCalls()).toHaveLength(0);
+  });
+  test("non-XR default swipe keeps full-screen coordinates", async () => {
+    observe.setObserveResult({ ...observation(), screenSize: { width: 2560, height: 2558 } });
+    const result = await createSwipeOn().execute({ direction: "up", autoTarget: false });
+    expect(result.success).toBe(true);
+    expect(gesture.getSwipeCalls()[0]).toMatchObject({ x1: 1280, y1: 2302, x2: 1280, y2: 255 });
+    expect(result.warning ?? "").not.toContain("default pose");
   });
 });

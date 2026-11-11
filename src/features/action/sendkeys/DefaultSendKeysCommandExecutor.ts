@@ -24,7 +24,7 @@ import { readImeEditorState } from "./ImeEditorState";
 import type { AndroidModeTyper } from "./AndroidModeTyper";
 import { A11yTyper } from "./A11yTyper";
 import { EventOnlyTyper } from "./EventOnlyTyper";
-import { PasswordRouting } from "./PasswordRouting";
+import { PasswordRouting, noteAutoA11yFallback } from "./PasswordRouting";
 import { createSendKeysTextClient } from "./CtrlProxyTextClient";
 import {
   caughtErrorCodeFields,
@@ -67,6 +67,11 @@ import { imeFailureFields } from "../imeFailureDiagnostics";
 import type { KeyboardProfileId } from "../keyboardProfiles";
 import { AUTO_MOBILE_IME_ID, type ImeSubtypeSnapshot } from "../AndroidImeCatalog";
 import type { KeyEventPlan } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
+import {
+  defaultAndroidXrDetector,
+  isAndroidXr,
+  type AndroidXrDetector,
+} from "../../../utils/android-cmdline-tools/androidXrDevice";
 import type {
   AndroidSendKeysTypingMode,
   ResolvedSendKeysTypingMode,
@@ -96,6 +101,8 @@ export interface SendKeysPlatformDependencies {
     ImeSpanService,
     "imeSpan" | "withImeSpan" | "acquireImeSpan" | "restoreImeSpan"
   >;
+  /** The shared XR predicate; tests inject a fake so no `pm has-feature` probe runs. */
+  xrDetector?: AndroidXrDetector;
 }
 
 export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
@@ -104,6 +111,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly inputKey: SendKeysInputKey;
   private readonly observer: SendKeysObserver;
   private readonly timer: Timer;
+  private readonly xrDetector: AndroidXrDetector;
   private readonly clearVerifier: FocusedTextClearVerifier;
   private readonly passwordRouting: PasswordRouting;
   private readonly iosTyper: IosTyper;
@@ -181,6 +189,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       captureScreenshot: observer.captureScreenshot?.bind(observer),
     };
     this.timer = dependencies.timer ?? defaultTimer;
+    this.xrDetector = dependencies.xrDetector ?? defaultAndroidXrDetector;
     this.iosSdkText = new IosSdkTextRouting({
       router: dependencies.iosSdkTextRouter ?? deviceIosSdkBridgeTextRouter(device),
       webRouter: dependencies.iosSdkWebTextRouter ?? deviceIosSdkWebTextRouter(device),
@@ -314,6 +323,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private createPasswordRouting(): PasswordRouting {
     return new PasswordRouting({
       platform: () => this.device.platform,
+      isAndroidXr: (observation, signal) =>
+        isAndroidXr(
+          { device: this.device, adb: this.adb, backStack: observation.backStack, signal },
+          this.xrDetector,
+        ),
       observer: { execute: (options) => this.observer.execute(options) },
       targetLayer: () => this.targetLayer,
       resolveMode: (requestedMode) => this.resolveMode(requestedMode),
@@ -470,6 +484,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             });
       this.recordCaretState(result);
       redactPasswordTypeResult(result, command.text, routing.passwordField === true);
+      noteAutoA11yFallback(result, routing.imeFallbackKeyboard);
       return {
         ...baseResult,
         success: result.success,

@@ -116,3 +116,18 @@ export function edgeSwipeCoordinates(input: {
       };
   }
 }
+
+/** Adapt edge coordinates to the directional swipe geometry contract. */
+export function screenEdgeSwipe(
+  options: Pick<SwipeOnOptions, "edgeInset" | "at">,
+  edge: NonNullable<SwipeOnOptions["fromEdge"]>,
+  bounds: Element["bounds"],
+): { startX: number; startY: number; endX: number; endY: number } {
+  const { x1, y1, x2, y2 } = edgeSwipeCoordinates({
+    edge,
+    bounds,
+    inset: options.edgeInset,
+    at: options.at,
+  });
+  return { startX: x1, startY: y1, endX: x2, endY: y2 };
+}

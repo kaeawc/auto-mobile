@@ -62,6 +62,7 @@ import { RealWaitForCondition } from "../observe/WaitForCondition";
 import { LongPressMetadataDetector } from "./LongPressMetadataDetector";
 import {
   defaultAndroidXrDetector,
+  isAndroidXr,
   type AndroidXrDetector,
 } from "../../utils/android-cmdline-tools/androidXrDevice";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
@@ -291,7 +292,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     accessibilityService: () => this.accessibilityService,
     adb: () => this.adb,
     device: () => this.device,
-    isAndroidXr: (signal) => this.xrDetector.isAndroidXr(this.adb, this.device, signal),
+    isAndroidXr: (signal) =>
+      isAndroidXr({ device: this.device, adb: this.adb, signal }, this.xrDetector),
     dispatchCoordinateTapOrAdbFallback: (...args) =>
       this.dispatchCoordinateTapOrAdbFallback(...args),
     executeAndroidLongPress: (...args) => this.executeAndroidLongPress(...args),

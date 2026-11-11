@@ -810,7 +810,11 @@ export class SetUIStateFields {
       const tapResult =
         useResolvedControl && !targetId
           ? await this.getTapAt().execute(
-              { ...new DefaultElementGeometry().getElementCenter(element), action: "tap" },
+              {
+                ...new DefaultElementGeometry().getElementCenter(element),
+                action: "tap",
+                pointSpace: "native",
+              },
               { progress, signal },
             )
           : await tapOnElement.execute(

@@ -62,9 +62,15 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   private prototypeRequestHost: PrototypeRequestHost | undefined;
   private prototypeChannelHost: PrototypeChannelHost | undefined;
   private nodeActionSelectorsSupported = true;
+  private nodeBoundsVerificationSupported = true;
+
+  setSupportsNodeBoundsVerification(supported: boolean): void {
+    this.nodeBoundsVerificationSupported = supported;
+  }
   private nodeActionHistory: Array<{
     action: string;
     selector: AccessibilityNodeSelector;
+    expectedBounds?: { left: number; top: number; right: number; bottom: number };
     timeoutMs: number;
     perf?: PerformanceTracker;
     signal?: AbortSignal;
@@ -1193,11 +1199,24 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       timeoutMs = 5000,
       perf,
       signal,
-    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
+      expectedBounds,
+    }: {
+      timeoutMs?: number;
+      perf?: PerformanceTracker;
+      signal?: AbortSignal;
+      expectedBounds?: { left: number; top: number; right: number; bottom: number };
+    } = {},
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestNodeAction");
     this.checkFailure("requestNodeAction");
-    this.nodeActionHistory.push({ action, selector: { ...selector }, timeoutMs, perf, signal });
+    this.nodeActionHistory.push({
+      action,
+      selector: { ...selector },
+      timeoutMs,
+      perf,
+      signal,
+      ...(expectedBounds ? { expectedBounds } : {}),
+    });
     return (
       this.actionResult ?? {
         success: true,
@@ -1211,8 +1230,11 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   async supportsNodeActionSelectors(
     _perf?: PerformanceTracker,
     _signal?: AbortSignal,
+    requireBounds = false,
   ): Promise<boolean> {
-    return this.nodeActionSelectorsSupported;
+    return (
+      this.nodeActionSelectorsSupported && (!requireBounds || this.nodeBoundsVerificationSupported)
+    );
   }
 
   async supportsAccessibilityLinkActivation(): Promise<boolean> {

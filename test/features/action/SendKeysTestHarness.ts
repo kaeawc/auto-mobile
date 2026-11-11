@@ -191,7 +191,10 @@ export function createSendKeysHarness(
   device: BootedDevice,
   observe: SendKeysObserver = observer,
   timer = autoAdvancingTimer(),
-  dependencies: Pick<SendKeysPlatformDependencies, "iosSdkTextRouter" | "iosSdkWebTextRouter"> = {},
+  dependencies: Pick<
+    SendKeysPlatformDependencies,
+    "iosSdkTextRouter" | "iosSdkWebTextRouter" | "xrDetector"
+  > = {},
 ) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [

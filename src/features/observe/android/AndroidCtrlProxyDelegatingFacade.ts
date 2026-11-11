@@ -679,20 +679,23 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       timeoutMs,
       perf,
       signal,
-    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
+      expectedBounds,
+    }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
     return this.getActionDispatcher().requestNodeAction(action, selector, {
       timeoutMs,
       perf,
       signal,
+      expectedBounds,
     });
   }
 
   async supportsNodeActionSelectors(
     perf?: PerformanceTracker,
     signal?: AbortSignal,
+    requireBounds = false,
   ): Promise<boolean> {
-    return this.getActionDispatcher().supportsNodeActionSelectors(perf, signal);
+    return this.getActionDispatcher().supportsNodeActionSelectors(perf, signal, requireBounds);
   }
 
   public async supportsCommand(name: string): Promise<boolean> {

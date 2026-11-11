@@ -8,6 +8,7 @@ import {
 } from "./TapAnyAndroidTapper";
 import {
   defaultAndroidXrDetector,
+  isAndroidXr,
   type AndroidXrDetector,
 } from "../../utils/android-cmdline-tools/androidXrDevice";
 import { TapAnyIosTapper } from "./TapAnyIosTapper";
@@ -272,7 +273,8 @@ export class TapAnyElement extends BaseVisualChange {
         featureFlags: this.featureFlags,
         talkBackStrategy: this.talkBackStrategy,
         talkBackDriverFactory: this.talkBackDriverFactory,
-        isAndroidXr: (signal) => xrDetector.isAndroidXr(this.adb, this.device, signal),
+        isAndroidXr: (signal) =>
+          isAndroidXr({ device: this.device, adb: this.adb, signal }, xrDetector),
         beforeTap: () => this.beforeAndroidTapForTesting?.(),
         refreshViewHierarchy: (timeout, size, signal, forceCapture) =>
           this.refreshViewHierarchy(timeout, size, signal, forceCapture),

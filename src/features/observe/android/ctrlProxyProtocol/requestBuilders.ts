@@ -188,6 +188,10 @@ export const ctrlProxyRequests = {
     action: string;
     resourceId?: string;
     selector?: RequestActionMessage["selector"];
+    boundsLeft?: number;
+    boundsTop?: number;
+    boundsRight?: number;
+    boundsBottom?: number;
     customAction?: string;
     progress?: number;
   }): RequestActionMessage {
@@ -197,6 +201,10 @@ export const ctrlProxyRequests = {
       action: args.action,
       resourceId: args.resourceId,
       selector: args.selector,
+      ...(args.boundsLeft !== undefined ? { boundsLeft: args.boundsLeft } : {}),
+      ...(args.boundsTop !== undefined ? { boundsTop: args.boundsTop } : {}),
+      ...(args.boundsRight !== undefined ? { boundsRight: args.boundsRight } : {}),
+      ...(args.boundsBottom !== undefined ? { boundsBottom: args.boundsBottom } : {}),
       ...(args.customAction !== undefined ? { customAction: args.customAction } : {}),
       ...(args.progress !== undefined ? { progress: args.progress } : {}),
     };

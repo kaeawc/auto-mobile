@@ -916,6 +916,10 @@ class CtrlProxy : AccessibilityService() {
             find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
           ) = this@CtrlProxy.findNodeInDisplayWindows(find)
 
+          override fun findNodesInDisplayWindows(
+            find: (AccessibilityNodeInfo) -> List<AccessibilityNodeInfo>,
+          ) = findNodesAcrossWindows(displayWindowsOrEmpty(), { rootInActiveWindow }, find)
+
           override fun screenDimensions(displayId: Int) =
             displayController.getScreenDimensions(displayId)
 

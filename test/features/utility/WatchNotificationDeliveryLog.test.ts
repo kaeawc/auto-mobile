@@ -49,4 +49,16 @@ describe("watch notification delivery verdict", () => {
     expect(watchNotificationDeliveryVerdict("", bundleId)).toBeNull();
     expect(watchNotificationDeliveryVerdict(capture.split("\n")[0], bundleId)).toBeNull();
   });
+  test("ignores baseline lines while accepting new verdict lines", () => {
+    const baseline = new Set(noLines);
+    expect(watchNotificationDeliveryVerdict(noLines.join("\n"), bundleId, baseline)).toBeNull();
+    expect(watchNotificationDeliveryVerdict(capture, bundleId, baseline)).toBe("YES");
+    expect(
+      watchNotificationDeliveryVerdict(
+        [...noLines, ...yesLines].join("\r\n"),
+        bundleId,
+        new Set(yesLines),
+      ),
+    ).toBe("NO");
+  });
 });

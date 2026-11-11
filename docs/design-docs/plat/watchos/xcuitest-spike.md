@@ -19,7 +19,11 @@ verification allows ten dumps; failed verification retries the whole flow up to
 `retryDelayMs` between attempts (default 20000 ms, integer range 0–120000;
 `--retry-delay-ms`) for gallery indexing after installation. Polls settle
 for 250 ms between dumps. Header failures, errors, and cancellation stop the flow.
-A successful gesture alone does not establish widget presence.
+A successful gesture alone does not establish widget presence. The script drives
+the runner WebSocket and makes no daemon tool call, so with `--session-uuid` it
+holds that one-shot CLI session: it declares a `cli` idle window that covers the
+run so far plus twice the base window, refreshes it every quarter window, and
+leaves the session at least the base window after the run (one-hour daemon cap).
 
 ## Capability boundary
 

@@ -133,7 +133,8 @@ func watchCrownUnchangedMessage(focused: WatchCrownValue?) -> String {
     }
     return "rotateCrown changed nothing verifiable. The focused control's value stayed \"\(focused.value)\": "
         + "the turn was too small to reach its next step, or the control is already at its limit. "
-        + "If the value is not at an end of the control's range, retry rotateCrown with a larger delta."
+        + "It is at its limit only if the value is already at the end this turn heads toward; "
+        + "otherwise retry rotateCrown with a larger delta in the same direction."
 }
 
 /// A stable screen without a focused value can receive a neutral wake before rotation.

@@ -156,8 +156,10 @@ Every other tool refuses a watch before doing anything, with:
   on that control) may not register. When a rotation changes nothing, the error says which case
   applies:
   - The focused control's value stayed the same: the error quotes that value (`value stayed "10"`).
-    Either the turn was too small to reach the next step or the control is at its limit. A value at
-    an end of the control's range means the limit; otherwise retry with a larger `delta`.
+    Either the turn was too small to reach the next step or the control is at its limit. It is at
+    its limit only when the value is already at the end the turn heads toward (for example
+    `"10"` after a positive `delta` on a 0–10 control); otherwise, including `"0"` after a
+    positive `delta`, retry with a larger `delta` in the same direction.
   - No focused control exposes a readable value: no view may hold crown focus, or the scrolled content
     is at its limit. Tap the control first. When `delta` is between -1 and 1, the error also says
     the turn may be too small.

@@ -124,7 +124,7 @@ test("long press is refused by the real handler before hierarchy or input", asyn
 const unchangedCrown =
   "rotateCrown changed nothing verifiable. No focused control exposes a readable value: no view may hold crown focus, or the scrolled content is already at its limit. Tap the control that should respond to the Digital Crown, then retry rotateCrown.";
 const stuckCrown =
-  "rotateCrown changed nothing verifiable. The focused control's value stayed \"0\": the turn was too small to reach its next step, or the control is already at its limit. If the value is not at an end of the control's range, retry rotateCrown with a larger delta.";
+  'rotateCrown changed nothing verifiable. The focused control\'s value stayed "0": the turn was too small to reach its next step, or the control is already at its limit. It is at its limit only if the value is already at the end this turn heads toward; otherwise retry rotateCrown with a larger delta in the same direction.';
 // Runners built before the focused value was reported.
 const legacyUnchangedCrown =
   "rotateCrown changed nothing the accessibility tree shows. Tap the view that should receive the crown, then observe before trying again.";

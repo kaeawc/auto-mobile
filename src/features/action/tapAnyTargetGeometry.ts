@@ -1,3 +1,9 @@
+import { boundsArea } from "../../utils/bounds";
+import { withoutHiddenXrChrome } from "./xrHiddenChrome";
+import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
+import { isWithin, promoteClickableAncestor } from "../utility/ElementResolverNodes";
+import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
+import { DefaultElementParser } from "../utility/ElementParser";
 import { type CapturedTapTarget } from "./TapAnyAndroidTapper";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
@@ -16,7 +22,10 @@ import {
 } from "../utility/ElementGeometry";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { scopeHierarchyForSelector } from "../observe/hierarchyLayer";
-import { ownPrototypeSafeGesturePoint } from "../observe/ApplicationWindowCover";
+import { ownPrototypeSafeGesturePoint, uniqueBySource } from "../observe/ApplicationWindowCover";
+import { ownPrototypeWindows } from "../observe/ownWindowFocus";
+
+const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
 
 export function findTapAnyClickableElement(
   context: {
@@ -27,12 +36,16 @@ export function findTapAnyClickableElement(
     ) => boolean;
     platform: AndroidOrIosPlatform;
     iosMultiPanel: boolean;
+    xr?: boolean;
   },
   options: TapAnyElementOptions,
   viewHierarchy: ViewHierarchyResult,
   sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
 ): { element: Element | null; containerFound: boolean } {
   viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
+  if (context.xr) {
+    viewHierarchy = xrTapAnyHierarchy(viewHierarchy, options);
+  }
   const containerFound = context.isContainerAvailable(viewHierarchy, options.container);
   const screenSizeOptions = {
     ...sizeOptions,
@@ -44,6 +57,7 @@ export function findTapAnyClickableElement(
     viewHierarchy,
     {},
     {
+      readingOrder: context.xr,
       screenSizeOptions,
       container: options.container,
       strategy: options.selectionStrategy,
@@ -51,6 +65,14 @@ export function findTapAnyClickableElement(
       scrollableContainer: options.scrollableContainer,
     },
   );
+  if (context.xr && !selection.element && options.container) {
+    selection.element = xrContainerOwner(
+      context.elementSelector,
+      viewHierarchy,
+      options,
+      effectiveScreenSize,
+    );
+  }
   if (selection.element && !hasVisibleScreenPart(selection.element.bounds, effectiveScreenSize)) {
     return { element: null, containerFound };
   }
@@ -97,4 +119,160 @@ export function resolveTapAnyPoint(
     );
   }
   return safe;
+}
+
+/**
+ * Prefer application windows to SystemUI's separate, window-local caption buttons. Every
+ * application window stays, whatever its package, so window ranking puts a higher-layer dialog
+ * from another package (a permission prompt) ahead of the pane behind it.
+ */
+function xrTapAnyHierarchy(
+  viewHierarchy: ViewHierarchyResult,
+  options: TapAnyElementOptions,
+): ViewHierarchyResult {
+  viewHierarchy = withoutHiddenXrChrome(viewHierarchy).hierarchy;
+  const prototypes = new Set(ownPrototypeWindows(viewHierarchy));
+  const appWindows = viewHierarchy.windows?.filter((window) => {
+    // An unnamed window falls back to the capture's package, as the window contract documents.
+    const packageName = window.packageName ?? viewHierarchy.packageName;
+    return (
+      window.hierarchy !== undefined &&
+      !prototypes.has(window) &&
+      !packageName?.startsWith("com.android.systemui") &&
+      (packageName === viewHierarchy.packageName ||
+        window.type === undefined ||
+        window.type === ACCESSIBILITY_WINDOW_TYPE_APPLICATION)
+    );
+  });
+  if (!options.container && appWindows?.length) {
+    viewHierarchy = {
+      ...viewHierarchy,
+      hierarchy: {
+        node: {
+          node: appWindows.flatMap((window) => (window.hierarchy ? [window.hierarchy] : [])),
+        },
+      },
+      windows: appWindows,
+    };
+  }
+  return viewHierarchy;
+}
+
+function xrContainerOwner(
+  selector: ElementSelector,
+  viewHierarchy: ViewHierarchyResult,
+  options: TapAnyElementOptions,
+  viewport: { width: number; height: number } | undefined,
+): Element | null {
+  const nodes = new SearchableHierarchy().project(viewHierarchy);
+  const node = leafContainerEntry(
+    nodes,
+    resolvedSource(selector, viewHierarchy, options.container),
+  );
+  if (!node) {
+    return null;
+  }
+  // A nested selector's outer container bounds the promotion too: the owner stays inside it.
+  const boundary = resolvedSource(selector, viewHierarchy, options.container!.container);
+  const owner = promoteClickableAncestor(
+    node,
+    nodes,
+    { action: options.action === "longPress" ? "long-press" : "tap", viewport },
+    xrContainerScope(node, nodes, viewport, boundary),
+  );
+  if (!owner || (options.scrollableContainer && !withinScrollingRoot(owner, nodes))) {
+    return null;
+  }
+  return new DefaultElementParser().parseNodeBounds(owner.source);
+}
+
+function resolvedSource(
+  selector: ElementSelector,
+  viewHierarchy: ViewHierarchyResult,
+  container: ElementContainerSelector | undefined,
+): SearchableEntry["source"] | undefined {
+  const element = container && selector.resolveContainer?.(viewHierarchy, container);
+  return element ? getHierarchyNodeSource(element) : undefined;
+}
+
+/** The container's entry when it is a leaf with a positive area, otherwise undefined. */
+function leafContainerEntry(
+  nodes: readonly SearchableEntry[],
+  source: SearchableEntry["source"] | undefined,
+): SearchableEntry | undefined {
+  // Live captures share nodes between the merged roots and each window; resolve the owning
+  // window's copy so the scope is bounded by that window's root, not the merged wrapper.
+  const node = source && uniqueBySource(nodes).find((entry) => entry.source === source);
+  if (
+    !node?.bounds ||
+    boundsArea(node.bounds) <= 0 ||
+    nodes.some((entry) => entry.parentIndex === node.index)
+  ) {
+    return undefined;
+  }
+  return node;
+}
+
+/** `scrollableContainer` admits only owners inside a scrolling root, as the selector does. */
+function withinScrollingRoot(node: SearchableEntry, nodes: readonly SearchableEntry[]): boolean {
+  for (let entry: SearchableEntry | undefined = node; entry;) {
+    if (entry.affordances.includes("scroll")) {
+      return true;
+    }
+    entry = entry.parentIndex === undefined ? undefined : nodes[entry.parentIndex];
+  }
+  return false;
+}
+
+/**
+ * Bound leaf ownership to three ancestors, a quarter window, the enclosing container (when the
+ * selector nests one), and no unrelated controls.
+ */
+function xrContainerScope(
+  node: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+  viewport: { width: number; height: number } | undefined,
+  boundary?: SearchableEntry["source"],
+): SearchableEntry {
+  const root = nodes.findLast(
+    (entry) =>
+      entry.index <= node.index &&
+      entry.rootGroup === node.rootGroup &&
+      entry.parentIndex === undefined,
+  );
+  const rootBounds =
+    root?.bounds ??
+    (viewport && {
+      left: 0,
+      top: 0,
+      right: viewport.width,
+      bottom: viewport.height,
+    });
+  const windowArea = rootBounds ? boundsArea(rootBounds) : 0;
+  const chain = new Set([node.index]);
+  let scope = node;
+  for (let level = 0; level < 3 && scope.parentIndex !== undefined; level++) {
+    const parent = nodes[scope.parentIndex];
+    if (
+      parent === root ||
+      parent.source === boundary ||
+      !parent.bounds ||
+      boundsArea(parent.bounds) > windowArea / 4
+    ) {
+      break;
+    }
+    if (
+      nodes.some(
+        (entry) =>
+          !chain.has(entry.index) &&
+          entry.affordances.some((action) => action === "tap" || action === "toggle") &&
+          isWithin(entry, parent, nodes),
+      )
+    ) {
+      break;
+    }
+    chain.add(parent.index);
+    scope = parent;
+  }
+  return scope;
 }

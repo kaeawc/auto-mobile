@@ -1,3 +1,5 @@
+import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNavigationExecutor";
@@ -29,7 +31,8 @@ function harness() {
   });
   const detector = new FakeAccessibilityDetector();
   detector.setTalkBackEnabled(true);
-  const tap = new TapOnElement(device, null, {
+  const tap = new TapOnElement(device, new FakeAdbClient(), {
+    xrDetector: new FakeAndroidXrDetector(false),
     timer,
     accessibilityDetector: detector,
     talkBackStrategy: new TalkBackTapStrategy({ timer, executor }),

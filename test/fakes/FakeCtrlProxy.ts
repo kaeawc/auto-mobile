@@ -69,7 +69,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
   private nodeActionHistory: Array<{
     action: string;
-    selector: AccessibilityNodeSelector;
+    selector: AccessibilityNodeSelector | undefined;
     expectedBounds?: { left: number; top: number; right: number; bottom: number };
     timeoutMs: number;
     perf?: PerformanceTracker;
@@ -81,7 +81,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   getNodeActionHistory() {
-    return this.nodeActionHistory.map((entry) => ({ ...entry, selector: { ...entry.selector } }));
+    return this.nodeActionHistory.map((entry) => ({
+      ...entry,
+      selector: entry.selector ? { ...entry.selector } : undefined,
+    }));
   }
 
   private readonly supportedCommands = new Set<string>();
@@ -1194,7 +1197,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async requestNodeAction(
     action: string,
-    selector: AccessibilityNodeSelector,
+    selector: AccessibilityNodeSelector | undefined,
     {
       timeoutMs = 5000,
       perf,
@@ -1211,7 +1214,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.checkFailure("requestNodeAction");
     this.nodeActionHistory.push({
       action,
-      selector: { ...selector },
+      selector: selector ? { ...selector } : undefined,
       timeoutMs,
       perf,
       signal,

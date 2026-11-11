@@ -801,6 +801,34 @@ function hasNativeId(acc: SkeletonAccumulator): boolean {
   return acc.target !== undefined && searchableNativeId(acc.target) !== undefined;
 }
 
+/** Unnamed tap-only artwork overflowing multiple screen edges is iOS presentation chrome. */
+function removeIosChromeTaps(
+  accumulators: SkeletonAccumulator[],
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+): void {
+  // A zero-sized fallback is not evidence that artwork extends off screen.
+  if (!viewport || Math.min(viewport.width, viewport.height) <= 0) {
+    return;
+  }
+  for (const acc of accumulators) {
+    if (
+      acc.affordances.size !== 1 ||
+      !acc.affordances.has("tap") ||
+      acc.label !== undefined ||
+      acc.sublabel !== undefined ||
+      hasNativeId(acc) ||
+      acc.testTag !== undefined
+    ) {
+      continue;
+    }
+    const [left, top, right, bottom] = acc.bounds;
+    const overflowingSides = [left < 0, top < 0, right > viewport.width, bottom > viewport.height];
+    if (overflowingSides.filter(Boolean).length >= 2) {
+      acc.affordances.delete("tap");
+    }
+  }
+}
+
 /** Whether `other` is the bare twin to keep in place of bare `row` (later index loses ties). */
 function isPreferredBareTwin(
   row: SkeletonAccumulator,
@@ -856,9 +884,13 @@ export function projectSkeleton(
   androidHierarchy?: ViewHierarchyResult,
   options?: { ios?: boolean; iosHierarchy?: ViewHierarchyResult },
 ): SkeletonProjectionResult {
+  const { ios, iosHierarchy } = options ?? {};
   const ime = detectImeWindow(elements);
   const prototypeSources = ownPrototypeNodeSources(androidHierarchy);
   const accumulators = accumulateByIdentity(elements, ime, prototypeSources);
+  if (ios) {
+    removeIosChromeTaps(accumulators, viewport);
+  }
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
   // #5869) before the keep filter suppresses the now-folded text accumulators.
@@ -875,10 +907,10 @@ export function projectSkeleton(
   markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme), {
     measured: occluder,
     screen: viewport,
-    ios: options?.ios,
+    ios,
   });
-  if (options?.ios) {
-    markIosRowsRefusedByTap(kept, elements, viewport, options.iosHierarchy);
+  if (ios) {
+    markIosRowsRefusedByTap(kept, elements, viewport, iosHierarchy);
   }
   markAppRowsCoveredByApplicationWindow(kept, androidHierarchy, viewport);
   const distinct = dropShadowedRows(kept);

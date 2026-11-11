@@ -2579,8 +2579,9 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2616,7 +2617,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos"]
         },
         "appId": {
           "type": "string"
@@ -6081,7 +6082,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6243,7 +6244,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -23401,8 +23402,16 @@
               "additionalProperties": false
             },
             "blocked": {
-              "description": "True when DO is required and the known foreground activity is not distraction optimized.",
+              "description": "True when DO is required and the known foreground activity is not distraction optimized, or when the car's driving-restriction blocking activity is in front.",
               "type": "boolean"
+            },
+            "blockedBy": {
+              "description": "The car's blocking activity in front (com.android.systemui.car.activity.ActivityBlockingActivity); absent when no blocking activity is in front.",
+              "type": "string"
+            },
+            "blockedActivity": {
+              "description": "The activity the blocking activity covers; absent when the back stack does not list it.",
+              "type": "string"
             },
             "hostRenderedUi": {
               "description": "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views. With hostPackage, template nodes from that host were seen; without it, only the foreground activity is CarAppActivity, which also covers the library's own connection-error screen. Absence means neither signal was seen (for example an incomplete capture), not proof that the screen is app-drawn.",
@@ -37396,7 +37405,7 @@
         "platform": {
           "description": "action=end only: the platform written at the top of the plan",
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos", "watchos"]
         },
         "platformNote": {
           "description": "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",

@@ -20,6 +20,7 @@ import {
 import type { TerminateAppCall } from "../features/action/TerminateApp";
 import { type UninstallAppCall, type UninstallGuardOptions } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
+import type { CarAppTemplateReader } from "../features/observe/android/CarAppTemplateReader";
 import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
 import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
@@ -103,6 +104,7 @@ import {
   type VisionosHostAppRecovery,
 } from "./appToolsWatch";
 import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
+import { carAppTemplateReader } from "./carAppTemplateReader";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
 import { ADVERTISES_DEVICE_ID, PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
@@ -225,6 +227,8 @@ export interface InstallAppExecutor {
 
 export interface InstallAppToolDependencies {
   createInstallApp(device: BootedDevice): InstallAppExecutor;
+  /** Forget SDK route quiet state after an Android install; defaults to the shared reader. */
+  carAppTemplates?: Pick<CarAppTemplateReader, "forgetPackage">;
 }
 
 export interface UninstallAppExecutor {
@@ -626,6 +630,7 @@ const createInstallAppHandler =
   (dependencies: InstallAppToolDependencies) =>
   async (device: BootedDevice, args: InstallAppArgs, _progress?: unknown, signal?: AbortSignal) => {
     let mutationMayHaveHappened = false;
+    let packageName: string | undefined;
     try {
       signal?.throwIfAborted();
       const installApp = dependencies.createInstallApp(device);
@@ -637,6 +642,7 @@ const createInstallAppHandler =
         guard,
         ...(android ? { android } : {}),
       });
+      packageName = result.packageName;
       if (!result.success) {
         throw new ActionableError(
           result.error || `Failed to install app from ${args.artifactPath}`,
@@ -657,6 +663,12 @@ const createInstallAppHandler =
       throw toActionableError(error, `Failed to install app`);
     } finally {
       if (mutationMayHaveHappened) {
+        if (device.platform === "android") {
+          (dependencies.carAppTemplates ?? carAppTemplateReader()).forgetPackage(
+            device.deviceId,
+            packageName,
+          );
+        }
         await refreshInstalledAppResources(device.deviceId);
       }
     }

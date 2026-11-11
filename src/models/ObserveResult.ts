@@ -303,8 +303,15 @@ export type ObserveResult = {
       activeRestrictions: number;
     };
     foregroundActivity?: { distractionOptimized: boolean };
-    /** DO is required and a known foreground activity is not distraction optimized. */
+    /**
+     * DO is required and a known foreground activity is not distraction optimized, or the car's
+     * blocking activity is in front.
+     */
     blocked: boolean;
+    /** The car's blocking activity in front, when that is what blocks. */
+    blockedBy?: string;
+    /** The activity the blocking activity covers, when the back stack lists it. */
+    blockedActivity?: string;
     /**
      * The foreground screen belongs to the Car App Library (#17499); `hostPackage` is present when
      * host-drawn template nodes were seen. Absence is not proof of app-drawn views. Read it with

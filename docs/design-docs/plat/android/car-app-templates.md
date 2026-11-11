@@ -63,7 +63,10 @@ first-record order, so it can change after `disable()` and `enable()`.
 ## Cost and invariants
 
 - An app without the route costs one failed `content call` per device, user and package every five
-  minutes. A route that answers disabled is asked again every thirty seconds. A read that fails
+  minutes. A route that answers disabled is asked again every thirty seconds. A completed Android
+  install attempt clears the package's quiet state and user hint on that device for all users, even
+  on failure; if no package name is available, it clears the device's quiet state and hints. The next
+  observation asks again without waiting for the TTL. A read that fails
   (timeout, adb error, a payload that is not JSON or fails schema validation, the last logged as a
   warning) is retried after five seconds, so a transient failure does not hide an enabled route for
   five minutes. Expired entries are pruned. An enabled route is asked on every `observe`, bounded by

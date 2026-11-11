@@ -51,7 +51,7 @@ run_capture_status() {
 }
 
 # Runs "$@" under a wall-clock timeout of $2 seconds, retrying with exponential
-# backoff. `timeout -k` escalates to SIGKILL after KILL_GRACE_SECONDS so a child
+# backoff. A leading `sudo` is hoisted outside the timeout. `timeout -k` escalates to SIGKILL after KILL_GRACE_SECONDS so a child
 # that ignores SIGTERM cannot linger. Exit 124 (timed out) and any other
 # non-zero exit are both retried. Returns 1 once MAX_ATTEMPTS are exhausted.
 try_with_retry() {
@@ -64,7 +64,15 @@ try_with_retry() {
   while true; do
     log "${description} (attempt ${attempt}/${MAX_ATTEMPTS}, timeout ${limit}s)"
     status=0
-    timeout -k "$KILL_GRACE_SECONDS" "$limit" "$@" || status=$?
+    if [[ "$1" == "sudo" ]]; then
+      # Run timeout under sudo, not around it: timeout cannot signal the root
+      # apt-get through an unprivileged sudo, and an apt-get that outlived its
+      # attempt kept /var/lib/apt/lists/lock, so the retry failed at once
+      # with "Could not get lock" (#17930).
+      sudo timeout -k "$KILL_GRACE_SECONDS" "$limit" "${@:2}" || status=$?
+    else
+      timeout -k "$KILL_GRACE_SECONDS" "$limit" "$@" || status=$?
+    fi
     if [[ "$status" -eq 0 ]]; then
       return 0
     fi

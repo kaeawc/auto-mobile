@@ -15,8 +15,17 @@ export class FakePhone implements AndroidAutoPhone {
   listenerAllowed = false;
   serverListening = false;
   redirected = false;
+  /** Replies to successive `adbState` calls; the last one repeats. */
+  adbStates: string[] = ["device"];
+  adbStateChecks = 0;
 
   constructor(private readonly ui: FakeUi) {}
+
+  async adbState() {
+    const state = this.adbStates[Math.min(this.adbStateChecks, this.adbStates.length - 1)];
+    this.adbStateChecks++;
+    return state ?? "device";
+  }
 
   async isAndroidAutoSideloaded() {
     return this.sideloaded;
@@ -99,7 +108,10 @@ export class FakeSession implements DesktopHeadUnitSession {
   running = true;
   /** The DHU process has not exited; an unhealthy session can still be alive. */
   alive = true;
-  sendCommand() {}
+  readonly commands: string[] = [];
+  sendCommand(command: string) {
+    this.commands.push(command);
+  }
   isRunning() {
     return this.running && this.alive;
   }

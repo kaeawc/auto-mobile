@@ -4,6 +4,8 @@ import {
   emulatorConsoleFailureReason,
   emulatorConsoleReportsFailure,
 } from "../../utils/android-cmdline-tools/emulatorConsoleReply";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import {
   ANDROID_AUTO_NOTIFICATION_LISTENER,
@@ -14,6 +16,12 @@ import {
 
 /** The adb-only phone operations Android Auto projection provisioning needs. */
 export interface AndroidAutoPhone {
+  /**
+   * `adb get-state` for this serial: `device` once adb can run commands on it. Anything else
+   * (`offline` right after boot, `unauthorized`, or the error adb reported) is the reason it
+   * cannot yet; this never rejects except on abort.
+   */
+  adbState(signal?: AbortSignal): Promise<string>;
   /** Whether Android Auto runs from a sideloaded update rather than the image's stub. */
   isAndroidAutoSideloaded(signal?: AbortSignal): Promise<boolean>;
   installSplitApks(apkPaths: readonly string[], signal?: AbortSignal): Promise<void>;
@@ -33,6 +41,7 @@ export interface AndroidAutoPhone {
 export type AndroidAutoPhoneAdb = Pick<AdbExecutor, "execute">;
 
 const QUERY_TIMEOUT_MS = 15_000;
+const STATE_TIMEOUT_MS = 5_000;
 const INSTALL_TIMEOUT_MS = 300_000;
 const YES = "yes";
 
@@ -60,6 +69,22 @@ const SERVER_LISTENING_CHECK = yesNo(
 
 export class AdbAndroidAutoPhone implements AndroidAutoPhone {
   constructor(private readonly adb: AndroidAutoPhoneAdb) {}
+
+  async adbState(signal?: AbortSignal): Promise<string> {
+    try {
+      const result = await this.adb.execute(["get-state"], {
+        timeoutMs: STATE_TIMEOUT_MS,
+        signal,
+        noRetry: true,
+      });
+      return result.stdout.trim() || result.stderr.trim() || "no state reported";
+    } catch (error) {
+      signal?.throwIfAborted();
+      // adb exits non-zero while the emulator is offline; that is the state being polled for.
+      logger.debug(`[AndroidAuto] adb get-state failed: ${errorMessage(error)}`);
+      return errorMessage(error).trim() || "adb get-state failed";
+    }
+  }
 
   isAndroidAutoSideloaded(signal?: AbortSignal): Promise<boolean> {
     return this.query(SIDELOADED_CHECK, "Android Auto install check", signal);

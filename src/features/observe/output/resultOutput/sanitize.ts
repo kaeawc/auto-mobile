@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { markImportedPrototypeContent } from "../../importedPrototypeContent";
 import { parseObserveResultJson } from "../observeResultWire";
 import type { Element } from "../../../../models/Element";
-import type { ObserveResult, SkeletonElement } from "../../../../models/ObserveResult";
+import type { ObserveResult } from "../../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../models/ViewHierarchyResult";
 import { projectSkeleton } from "../SkeletonProjection";
 import { DefaultObserveElementCollector } from "../../ObserveElementCollector";
@@ -12,6 +12,11 @@ import {
   resolveViewHierarchyForSearch,
 } from "../../../utility/viewHierarchySearch";
 import { markOccludedRowsOnFullProjection } from "../FullProjectionOcclusion";
+import {
+  labelFocusedElement,
+  needsDescendantLabel,
+  observedElements,
+} from "../focusedElementLabel";
 import { capLayoutWarnings } from "../../audits/SafeAreaAuditor";
 import {
   captureFidelityTruncationReasons,
@@ -172,6 +177,7 @@ export function sanitizeObserveResult(
   // `obs`'s tree node for node.
   if (cfg.project !== "skeleton") {
     markOccludedRowsForFullProjection(out, obs);
+    labelFullProjectionFocus(out, obs);
   }
 
   if (cfg.trimNodes !== false) {
@@ -244,18 +250,41 @@ export function projectSanitizedObserveSkeleton(
  * strips from `out`. The projection reads but never mutates them, so the "input
  * is never mutated" contract holds; only `out` (the clone) is edited.
  */
-function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
+/** The skeleton projection of `source`, with the flat elements it was projected from. */
+function projectSkeletonRows(source: ObserveResult): Pick<
+  ReturnType<typeof projectSkeleton>,
+  "skeleton" | "context" | "keyboard"
+> & {
+  projected: Element[];
+} {
   const projectionSource = skeletonSourceForProjection(source);
   const elements = projectionSource.elements;
-  const { skeleton, context, keyboard } = elements
-    ? projectSkeleton(
-        elements,
-        source.screenSize,
-        isIosObservation(source) ? undefined : projectionSource.viewHierarchy,
-        { ios: isIosObservation(source), iosHierarchy: projectionSource.viewHierarchy },
-      )
-    : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
+  const projected = observedElements(projectionSource);
+  if (!elements) {
+    return { skeleton: [], context: [], keyboard: undefined, projected };
+  }
+  const rows = projectSkeleton(
+    elements,
+    source.screenSize,
+    isIosObservation(source) ? undefined : projectionSource.viewHierarchy,
+    { ios: isIosObservation(source), iosHierarchy: projectionSource.viewHierarchy },
+  );
+  return { ...rows, projected };
+}
+
+/** project:"full" names a focused card the way its skeleton row would (#18028). */
+function labelFullProjectionFocus(out: ObserveResult, obs: ObserveResult): void {
+  if (needsDescendantLabel(out.focusedElement)) {
+    const { skeleton, projected } = projectSkeletonRows(obs);
+    labelFocusedElement(out, skeleton, projected);
+  }
+}
+
+function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
+  const { skeleton, context, keyboard, projected } = projectSkeletonRows(source);
   out.skeleton = skeleton;
+  // The focused element names its card the way the skeleton row does (#18028).
+  labelFocusedElement(out, skeleton, projected);
   if (keyboard) {
     out.keyboard = keyboard;
   } else {

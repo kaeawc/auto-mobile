@@ -580,6 +580,10 @@
             "content-desc": {
               "type": "string"
             },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+              "type": "string"
+            },
             "occlusionState": {
               "type": "string"
             },
@@ -5704,6 +5708,10 @@
             "content-desc": {
               "type": "string"
             },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+              "type": "string"
+            },
             "occlusionState": {
               "type": "string"
             },
@@ -8929,6 +8937,10 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
               "type": "string"
             },
             "occlusionState": {
@@ -14418,6 +14430,10 @@
             "content-desc": {
               "type": "string"
             },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+              "type": "string"
+            },
             "occlusionState": {
               "type": "string"
             },
@@ -17937,6 +17953,10 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
               "type": "string"
             },
             "occlusionState": {
@@ -22900,6 +22920,10 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
               "type": "string"
             },
             "occlusionState": {
@@ -28241,6 +28265,10 @@
             "content-desc": {
               "type": "string"
             },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+              "type": "string"
+            },
             "occlusionState": {
               "type": "string"
             },
@@ -30657,6 +30685,10 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
               "type": "string"
             },
             "occlusionState": {
@@ -36439,6 +36471,10 @@
             "content-desc": {
               "type": "string"
             },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+              "type": "string"
+            },
             "occlusionState": {
               "type": "string"
             },
@@ -39656,6 +39692,10 @@
             "content-desc": {
               "type": "string"
             },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+              "type": "string"
+            },
             "occlusionState": {
               "type": "string"
             },
@@ -41836,6 +41876,10 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
               "type": "string"
             },
             "occlusionState": {
@@ -48803,6 +48847,10 @@
             "content-desc": {
               "type": "string"
             },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+              "type": "string"
+            },
             "occlusionState": {
               "type": "string"
             },
@@ -50590,6 +50638,10 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
               "type": "string"
             },
             "occlusionState": {
@@ -54172,6 +54224,10 @@
             "content-desc": {
               "type": "string"
             },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
+              "type": "string"
+            },
             "occlusionState": {
               "type": "string"
             },
@@ -56266,6 +56322,10 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
               "type": "string"
             },
             "occlusionState": {
@@ -58800,6 +58860,10 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "descendantLabel": {
+              "description": "focusedElement only, when it has no text or content-desc of its own: its child label, as on its skeleton row.",
               "type": "string"
             },
             "occlusionState": {

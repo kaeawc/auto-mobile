@@ -16,6 +16,60 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(offset.dy, 0.625)
     }
 
+    func testTapPointSubtractsClockfaceOrigin() throws {
+        let frame = CGRect(x: 10, y: 20, width: 200, height: 250)
+        let offset = try watchTapNormalizedOffset(x: 110, y: 145, frame: frame)
+        XCTAssertEqual(offset.dx, 0.5)
+        XCTAssertEqual(offset.dy, 0.5)
+        let corner = try watchTapNormalizedOffset(x: 210, y: 270, frame: frame)
+        XCTAssertEqual(corner, CGVector(dx: 1, dy: 1))
+        for (x, y) in [(9.0, 100.0), (100.0, 19.0), (211.0, 100.0), (100.0, 271.0)] {
+            XCTAssertThrowsError(try watchTapNormalizedOffset(x: x, y: y, frame: frame)) { error in
+                guard case WatchCommandError.invalidRequest("tap is outside the watch screen") = error else {
+                    return XCTFail("Expected invalidRequest, got \(error)")
+                }
+            }
+        }
+    }
+
+    func testTapRouteUsesClockfaceWhenAppIsNotForegroundAndNoAlert() throws {
+        var frameReads = 0
+        let route = try watchTapRoute(x: 93, y: 140, hasAlerts: false, appForeground: false) {
+            frameReads += 1
+            return CGRect(x: 0, y: 0, width: 186, height: 224)
+        }
+        XCTAssertEqual(route, .clockface(CGVector(dx: 0.5, dy: 0.625)))
+        XCTAssertEqual(frameReads, 1)
+    }
+
+    func testTapRouteRejectsOffScreenPointOnClockface() {
+        XCTAssertThrowsError(try watchTapRoute(x: 300, y: 10, hasAlerts: false, appForeground: false) {
+            CGRect(x: 0, y: 0, width: 186, height: 224)
+        }) { error in
+            guard case WatchCommandError.invalidRequest("tap is outside the watch screen") = error else {
+                return XCTFail("Expected invalidRequest, got \(error)")
+            }
+        }
+    }
+
+    func testTapRouteKeepsAppAndAlertPathsWithoutReadingClockface() throws {
+        let cases: [(hasAlerts: Bool, appForeground: Bool, expected: WatchTapRoute)] = [
+            (false, true, .app), (true, true, .systemAlert), (true, false, .systemAlert),
+        ]
+        for testCase in cases {
+            var frameReads = 0
+            // Off-screen for the clockface, so a wrong clockface route would throw.
+            let route = try watchTapRoute(
+                x: 500, y: 500, hasAlerts: testCase.hasAlerts, appForeground: testCase.appForeground
+            ) {
+                frameReads += 1
+                return CGRect(x: 0, y: 0, width: 186, height: 224)
+            }
+            XCTAssertEqual(route, testCase.expected)
+            XCTAssertEqual(frameReads, 0)
+        }
+    }
+
     func testTapPointAcceptsScreenBoundaries() throws {
         let frame = CGRect(x: 0, y: 0, width: 200, height: 250)
         for (x, y) in [(0.0, 0.0), (200.0, 0.0), (0.0, 250.0), (200.0, 250.0)] {

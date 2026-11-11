@@ -14,8 +14,9 @@ import { displayTransitions } from "./DisplayTransition";
 import { isPhysicalPanel, type DisplayPanel } from "../../models/DisplayPanel";
 import {
   assertAllDisplayObserveSupported,
+  assertDisplayInventoryAvailable,
   DisplaySelectionError,
-  resolveTargetDisplay,
+  resolveDeviceTargetDisplay,
 } from "./DisplaySelection";
 
 /** Narrow seam over the owning observer: one single-display read plus result builders. */
@@ -47,6 +48,7 @@ export class AllDisplaysObservation {
     assertAllDisplayObserveSupported(
       requireAndroidOrIosPlatform(this.d.device().platform, "Observing all displays"),
     );
+    assertDisplayInventoryAvailable(this.d.device(), "all");
     // Reuse the existing hierarchy-capture budget; one deadline covers every panel.
     const deadline = this.d.timer().now() + (options?.timeoutMs ?? 15000);
     const active = await this.readAggregatePanel("active", {
@@ -122,7 +124,7 @@ export class AllDisplaysObservation {
     if (panels.some((panel) => panel.key === activeKey)) {
       return activeKey;
     }
-    return resolveTargetDisplay(device.displays, "active", {
+    return resolveDeviceTargetDisplay(device, "active", {
       focusedPanelKey: displayTransitions.observedPanel(device.deviceId)?.key,
     }).key;
   }
@@ -183,7 +185,7 @@ export class AllDisplaysObservation {
         return this.d.createCriticalFallback(error);
       }
       const result = this.d.createBaseResult();
-      const panel = resolveTargetDisplay(this.d.device().displays, display, {
+      const panel = resolveDeviceTargetDisplay(this.d.device(), display, {
         focusedPanelKey: displayTransitions.observedPanel(this.d.device().deviceId)?.key,
       });
       result.display = {

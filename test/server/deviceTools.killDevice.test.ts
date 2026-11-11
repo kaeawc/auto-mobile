@@ -990,6 +990,276 @@ describe("killDevice handler", () => {
     expect(stops).toEqual([{ deviceId: "emulator-5554", deviceStopped: false }]);
   });
 
+  test("a replacement emulator on the recycled serial keeps its DHU and redirect owner", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    manager = new SuccessfulKillDeviceManager();
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    manager.setDeviceImages("android", [image]);
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      deviceSessionRepository,
+    });
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    // One host-wide projection: the DHU this daemon spawned per serial, and who owns tcp:5277.
+    let incarnation = 1;
+    const runningDhus = new Set<number>([1]);
+    let redirectOwner: { deviceId: string; incarnation: number } | null = {
+      deviceId: image.deviceId!,
+      incarnation: 1,
+    };
+    const replacementProjects = () => {
+      if (incarnation === 1) {
+        incarnation = 2;
+        runningDhus.add(2);
+        redirectOwner = { deviceId: image.deviceId!, incarnation: 2 };
+      }
+    };
+    // Ownership retirement is the earliest point a same-serial replacement can be published.
+    const retire = pool.retireDeviceForShutdown.bind(pool);
+    pool.retireDeviceForShutdown = async (...args) => {
+      const retired = await retire(...args);
+      replacementProjects();
+      return retired;
+    };
+    const reserve = pool.reserveDeviceForShutdown.bind(pool);
+    pool.reserveDeviceForShutdown = async (...args) => {
+      const reservation = await reserve(...args);
+      if (!reservation) {
+        throw new Error("Expected a shutdown reservation");
+      }
+      return {
+        ...reservation,
+        release: async () => {
+          await reservation.release();
+          // The serial is free: a replacement boots on it and projects its own DHU.
+          replacementProjects();
+        },
+      };
+    };
+    setDeviceToolsDependencies({
+      timer,
+      deviceManagerFactory: () => manager,
+      stopAndroidObservers: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      notifyResourcesChanged: async () => {},
+      androidAutoProjection: {
+        resolveInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        stopDesktopHeadUnit: async (deviceId, options) => {
+          if (options?.deviceStopped && redirectOwner?.deviceId === deviceId) {
+            redirectOwner = null;
+          }
+          runningDhus.delete(incarnation);
+        },
+      },
+    });
+
+    await ToolRegistry.getTool("killDevice")!.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+    });
+
+    expect(incarnation).toBe(2);
+    expect([...runningDhus]).toEqual([2]);
+    expect(redirectOwner).toEqual({ deviceId: image.deviceId!, incarnation: 2 });
+  });
+
+  test("a post-kill DHU stop that outlives the deadline holds the reservation until it settles", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    manager = new SuccessfulKillDeviceManager();
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    manager.setDeviceImages("android", [image]);
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      deviceSessionRepository,
+    });
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    let settleStop: () => void = () => {};
+    let postKillStopStarted = false;
+    setDeviceToolsDependencies({
+      timer,
+      deviceManagerFactory: () => manager,
+      stopAndroidObservers: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      notifyResourcesChanged: async () => {},
+      androidAutoProjection: {
+        resolveInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        stopDesktopHeadUnit: async (_deviceId, options) => {
+          if (!options?.deviceStopped) {
+            return;
+          }
+          postKillStopStarted = true;
+          await new Promise<void>((resolve) => {
+            settleStop = resolve;
+          });
+        },
+      },
+    });
+
+    const result = ToolRegistry.getTool("killDevice")!.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+    });
+    for (let attempt = 0; attempt < 20 && !postKillStopStarted; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(postKillStopStarted).toBe(true);
+    expect(await pool.isShutdownReservationHeld(image.deviceId!)).toBe(true);
+    timer.advanceTime(60_000);
+    await result.catch(() => undefined);
+    // The kill is over, but the serial stays reserved while the DHU stop still runs.
+    expect(manager.killedDeviceIds).toEqual([image.deviceId!]);
+    expect(await pool.isShutdownReservationHeld(image.deviceId!)).toBe(true);
+
+    settleStop();
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await Promise.resolve();
+    }
+    expect(await pool.isShutdownReservationHeld(image.deviceId!)).toBe(false);
+  });
+
+  test("a post-kill DHU stop that outlives the deadline holds the reservation when retirement then throws", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    manager = new SuccessfulKillDeviceManager();
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    manager.setDeviceImages("android", [image]);
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      deviceSessionRepository,
+    });
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    pool.retireDeviceForShutdown = async () => {
+      throw new Error("ownership retirement failed");
+    };
+    let settleStop: () => void = () => {};
+    let postKillStopStarted = false;
+    const stoppedDeviceIds: string[] = [];
+    setDeviceToolsDependencies({
+      timer,
+      deviceManagerFactory: () => manager,
+      stopAndroidObservers: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      notifyResourcesChanged: async () => {},
+      androidAutoProjection: {
+        resolveInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        stopDesktopHeadUnit: async (deviceId, options) => {
+          stoppedDeviceIds.push(deviceId);
+          if (!options?.deviceStopped) {
+            return;
+          }
+          postKillStopStarted = true;
+          await new Promise<void>((resolve) => {
+            settleStop = resolve;
+          });
+        },
+      },
+    });
+
+    const result = ToolRegistry.getTool("killDevice")!.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+    });
+    for (let attempt = 0; attempt < 20 && !postKillStopStarted; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(postKillStopStarted).toBe(true);
+    timer.advanceTime(60_000);
+    await expect(result).rejects.toThrow("ownership retirement failed");
+    // Retirement failed, but the serial stays reserved while the DHU stop still runs.
+    expect(await pool.isShutdownReservationHeld(image.deviceId!)).toBe(true);
+
+    settleStop();
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await Promise.resolve();
+    }
+    expect(await pool.isShutdownReservationHeld(image.deviceId!)).toBe(false);
+    // Only the DHU this daemon tracks for the killed emulator was asked to stop.
+    expect(new Set(stoppedDeviceIds)).toEqual(new Set([image.deviceId!]));
+  });
+
+  test("a spent deadline on a non-Android device reports the kill step, not the DHU stop", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = { deviceId: "tvos-udid-1", name: "Apple TV", platform: "tvos" };
+    manager = new SuccessfulKillDeviceManager();
+    manager.setBootedDevices("tvos", [device]);
+    const stops: string[] = [];
+    setDeviceToolsDependencies({
+      timer,
+      deviceManagerFactory: () => manager,
+      clearInstalledAppsForDevice: async () => {},
+      notifyResourcesChanged: async () => {},
+      // The last preparation step spends the whole shutdown budget.
+      tvosRunnerLifecycleFactory: () => ({
+        start: async () => {
+          throw new Error("not used by killDevice");
+        },
+        attach: () => {
+          throw new Error("not used by killDevice");
+        },
+        stop: () => {
+          timer.advanceTime(60_000);
+        },
+      }),
+      androidAutoProjection: {
+        resolveInputs: async () => {
+          throw new Error("not used by killDevice");
+        },
+        apply: async () => {
+          throw new Error("not used by killDevice");
+        },
+        stopDesktopHeadUnit: async (deviceId) => {
+          stops.push(deviceId);
+        },
+      },
+    });
+
+    const kill = ToolRegistry.getTool("killDevice")!.handler({ device });
+    await expect(kill).rejects.toThrow("platform shutdown command did not complete");
+    await expect(kill).rejects.not.toThrow("Desktop Head Unit");
+    expect(stops).toEqual([]);
+  });
+
   test("confirmed direct-mode kill keeps IME quarantine without a pool", async () => {
     const device: BootedDevice = {
       deviceId: "ime-direct-kill",

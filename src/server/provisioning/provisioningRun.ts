@@ -163,7 +163,10 @@ async function runProvisionDeviceLifecycle(
   let creationStarted = false;
   const settlementState: ProvisionSettlementState = { bindingSettlements: [] };
   const notifyResourcesChangedBestEffort = () => {
-    void deps.notifyResourcesChanged().catch((error: unknown) => {
+    // A synchronous throw is a notification failure too, never a provision failure.
+    void new Promise<void>((resolve) => {
+      resolve(deps.notifyResourcesChanged());
+    }).catch((error: unknown) => {
       logger.warn(
         `[DeviceTools] Failed to notify resource changes after provisioning ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
         error,

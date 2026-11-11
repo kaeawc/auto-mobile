@@ -13,6 +13,7 @@ import { snapshotRasterGeometry } from "./screenshot/snapshotRasterGeometry";
 import { RASTER_SCALE_TOLERANCE } from "./screenshot/rasterGeometry";
 import { resolveIosObserveRotation } from "./iosObserveRotation";
 import { appendObserveError } from "./ObserveError";
+import { hasUsableHierarchy } from "./ActiveWindowAttribution";
 import {
   observationScreenshotEvidence,
   type ScreenshotEvidenceFiles,
@@ -117,6 +118,8 @@ export class SettledScreenshotCapture {
    * portrait, so it has no rotation evidence. A multi-panel capture is display-oriented, so the
    * screenshot aspect orients the panel geometry and rotation (#17846). Returns false, with an
    * actionable observe error, when neither orientation of the geometry fits the screenshot.
+   * An unavailable read (e.g. `runner_launch_queued`) still carries an error-shaped hierarchy,
+   * which has no rotation authority either, so only a usable hierarchy skips this (#17880).
    */
   private orientHierarchylessPanelToRaster(
     observation: ObserveResult,
@@ -125,7 +128,7 @@ export class SettledScreenshotCapture {
     const { width, height } = observation.screenSize;
     if (
       this.device.platform !== "ios" ||
-      observation.viewHierarchy ||
+      hasUsableHierarchy(observation.viewHierarchy) ||
       (this.device.displays?.panels.length ?? 0) < 2 ||
       ![width, height].every((value) => Number.isFinite(value) && value > 0)
     ) {

@@ -38,6 +38,10 @@ A flow that needs a signed-in device uses an AVD snapshot that a person signed i
 `unsupported` error naming every missing path, because the run could only fail after a long boot.
 The projection runs after the session is bound (beside the manufacturer profile), inside the
 provision's try block, so its failure rolls back a created emulator like any other post-boot step.
+The caller cannot heartbeat the bound session before the call returns, so both post-bind steps run
+under a hold (`holdAcquiringSession`): one execution registered on that session, which the
+heartbeat monitor's unsettled-execution veto honours up to the provision deadline. The hold ends
+before rollback, so an unclaimed session is still reaped as `missing-first-heartbeat`.
 It is bounded by the provision's total deadline as well as its abort signal; a request without
 `androidAuto` never reaches it, so its abort handling is unchanged. Once the run has connected its
 own DHU (`desktop-head-unit` reported `applied`), a later provision failure stops that DHU before
@@ -45,7 +49,9 @@ rollback; a run that outlives the deadline is stopped once it resolves that way.
 or that reused a DHU an earlier provision started, leaves the existing DHU running: the provisioner
 already stops a DHU it applied and then failed on. `killDevice` of that emulator stops its DHU within
 the shutdown deadline and forgets its host port redirect only once the kill succeeds, since a failed
-kill leaves the emulator and its redirect in place. Only DHUs in this daemon's session map are stopped. A stopped session
+kill leaves the emulator and its redirect in place. A post-kill stop that outlives the deadline keeps
+the serial's shutdown reservation until it settles, whether the rest of the shutdown succeeds or
+fails, so a replacement never boots under it. Only DHUs in this daemon's session map are stopped. A stopped session
 is forgotten, so a later emulator that reuses the serial launches its own DHU; one whose stop fails
 stays tracked for the single-projection check but is never reused as `already-done`.
 The applier is a process-wide singleton: the provisioner it wraps is what tracks which DHU holds host
@@ -65,6 +71,9 @@ changes nothing when it already holds, so a rerun on a provisioned phone reports
 - **Notification access** is granted before the DHU connects, because the DHU's preflight poll does not
   notice a grant made after it timed out.
 - **Developer mode** reads as on when Android Auto's overflow menu lists **Developer settings**.
+  Enabling it taps the **Version** row ten times. Android Auto 18.1 relabels that row to
+  **Version and permission info** after the first tap, so each tap matches any known label of the
+  row and the count carries across the relabel.
 - **Head unit server** reads as on when port 5277 is listening on the phone. The server binds some
   time after **Start head unit server** is tapped, so the provisioner re-checks on a bounded backoff
   (250 ms doubling to 2 s, five re-checks) before reporting it as not listening.

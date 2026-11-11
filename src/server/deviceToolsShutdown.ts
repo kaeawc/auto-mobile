@@ -51,7 +51,10 @@ import {
 import { waitForEmulatorShutdownWithEscalation } from "../features/deviceLifecycle/teardown/stuckEmulatorEscalation";
 import { exponentialBackoff } from "../utils/Backoff";
 import { stopWatchRunnerBeforeShutdown } from "../features/deviceLifecycle/teardown/shutdownPreparation";
-import { stopProvisionedAndroidAuto } from "./provisioning/provisioningAndroidAuto";
+import {
+  stopAndroidAutoBeforeShutdown,
+  trackAndroidAutoStopAfterKill,
+} from "./deviceToolsShutdownAndroidAuto";
 import {
   AndroidObserverShutdownState,
   stopIosCtrlProxyBeforeShutdown,
@@ -322,6 +325,8 @@ interface KillProcessAndRetireOwnershipOptions {
     retirement: Promise<void>,
     releaseReservationAfterFailure?: boolean,
   ) => void;
+  /** Runs once the platform stop is confirmed, before a same-ID replacement can be published. */
+  onShutdownConfirmed: () => Promise<void>;
 }
 
 async function confirmIosShutdownAfterTimeout(
@@ -604,6 +609,7 @@ async function killProcessAndRetireOwnership(
 
   if (alreadyStoppedMessage !== undefined) {
     await commitStoppedRestartHold(context, dependencies, commitRestartHoldStop, timeoutMs);
+    await options.onShutdownConfirmed();
     return alreadyStoppedMessage;
   }
 
@@ -626,6 +632,7 @@ async function killProcessAndRetireOwnership(
     perf.endOperation("waitForShutdown");
     shutdownWasConfirmed = true;
     await commitStoppedRestartHold(context, dependencies, commitRestartHoldStop, timeoutMs);
+    await options.onShutdownConfirmed();
 
     perf.startOperation("retireOwnership");
     await retireShutdownOwnership(
@@ -814,20 +821,7 @@ async function preparePlatformShutdown(
       dependencies.daemonState,
     );
     stopWatchRunnerBeforeShutdown(context.device, dependencies);
-    // Only a DHU this daemon spawned for this emulator; it would otherwise outlive it (#17839).
-    // Its host port redirect is forgotten only once the kill succeeds, since a failed kill
-    // leaves the emulator, and its redirect, in place.
-    await runWithinShutdownDeadline(
-      context.device,
-      dependencies.timer,
-      shutdownContext.deadlineMs,
-      {
-        detail: "Desktop Head Unit stop did not complete",
-        requestAbortSignal: shutdownContext.requestAbortSignal,
-        operation: async () => await stopProvisionedAndroidAuto(dependencies, context.device),
-        timeoutMs: shutdownContext.timeoutMs,
-      },
-    );
+    await stopAndroidAutoBeforeShutdown(shutdownContext, dependencies);
     return { ...target, androidObserverState };
   } catch (error) {
     clearFence();
@@ -880,6 +874,7 @@ export async function shutdownDevice(
           shutdownReservation ? undefined : devicePool,
           device.deviceId,
         );
+        let androidAutoStop: ReturnType<typeof trackAndroidAutoStopAfterKill> | undefined;
         try {
           const releaseShutdownReservation = async (): Promise<void> => {
             try {
@@ -907,6 +902,7 @@ export async function shutdownDevice(
             requestAbortSignal,
             retainReservationUntil: retainShutdownUntil,
           };
+          androidAutoStop = trackAndroidAutoStopAfterKill(shutdownContext, dependencies);
           const { killTarget, stopIdentity, androidObserverState } = await preparePlatformShutdown(
             { dependencies, context, options, devicePool, shutdownContext, perf },
             fence.clear,
@@ -936,6 +932,7 @@ export async function shutdownDevice(
                 killTarget,
                 force: pooledAvdIdentity?.force ?? false,
                 processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
+                onShutdownConfirmed: androidAutoStop.onShutdownConfirmed,
               },
             },
           );
@@ -978,7 +975,7 @@ export async function shutdownDevice(
           const retiredIncarnation = getInstalledAppsCacheWriteCoordinator().retireIncarnation(
             device.deviceId,
           );
-          await releaseShutdownReservation();
+          await androidAutoStop.releaseReservation(releaseShutdownReservation, retainShutdownUntil);
           unregisterDirectSessionsForDevice(device.deviceId);
 
           await finishShutdownCleanup(shutdownContext, dependencies, perf, {
@@ -986,14 +983,16 @@ export async function shutdownDevice(
             timeoutMs,
             retiredIncarnation,
           });
-          // The kill succeeded, so the emulator's host port 5277 redirect went with it.
-          await stopProvisionedAndroidAuto(dependencies, device, { deviceStopped: true });
 
           perf.end();
           return {
             timing: perf.getTimings(),
             alreadyStoppedMessage,
           };
+        } catch (error) {
+          // A DHU stop still running past its wait keeps the serial reserved until it settles.
+          androidAutoStop?.retainAfterFailure();
+          throw error;
         } finally {
           fence.settle();
         }

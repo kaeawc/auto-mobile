@@ -12,12 +12,28 @@ export interface AndroidAutoSettingsUi {
   acceptOnboarding(signal?: AbortSignal): Promise<void>;
 }
 
+/** One visible label, or every label a row is known to read as (a row can relabel mid-script). */
+export type ScreenText = string | readonly string[];
+
+/** The labels a {@link ScreenText} matches, in order. */
+export function screenTextVariants(text: ScreenText): readonly string[] {
+  return typeof text === "string" ? [text] : text;
+}
+
+/** A {@link ScreenText} quoted for an error message: `"Version" or "Version and permission info"`. */
+export function describeScreenText(text: ScreenText): string {
+  return screenTextVariants(text)
+    .map((variant) => `"${variant}"`)
+    .join(" or ");
+}
+
 /** Text-level phone screen access (observe + tap), narrowed to what the settings script uses. */
 export interface AndroidAutoScreenDriver {
   isTextVisible(text: string, signal?: AbortSignal): Promise<boolean>;
-  tapText(text: string, signal?: AbortSignal): Promise<void>;
-  /** Scrolls the current list until `text` is on screen; throws when it never appears. */
-  scrollToText(text: string, signal?: AbortSignal): Promise<void>;
+  /** Taps the first node reading any variant of `text`. */
+  tapText(text: ScreenText, signal?: AbortSignal): Promise<void>;
+  /** Scrolls the current list until any variant of `text` is on screen; throws when none appears. */
+  scrollToText(text: ScreenText, signal?: AbortSignal): Promise<void>;
   /** Whether the switch on the row labelled `label` is on. */
   isSwitchOn(label: string, signal?: AbortSignal): Promise<boolean>;
   openOverflowMenu(signal?: AbortSignal): Promise<void>;
@@ -26,7 +42,11 @@ export interface AndroidAutoScreenDriver {
 
 /** Android Auto's English UI labels, as they read on Android Auto 18.1. */
 export interface AndroidAutoUiLabels {
-  version: string;
+  /**
+   * Every label the **Version** row reads as. Android Auto 18.1 relabels it to "Version and
+   * permission info" after the first tap (#17884), so each tap matches any of them.
+   */
+  version: readonly string[];
   developerModeDialog: string;
   developerModeConfirm: string;
   developerSettings: string;
@@ -37,7 +57,7 @@ export interface AndroidAutoUiLabels {
 }
 
 export const DEFAULT_ANDROID_AUTO_UI_LABELS: AndroidAutoUiLabels = {
-  version: "Version",
+  version: ["Version", "Version and permission info"],
   developerModeDialog: "Allow development settings?",
   developerModeConfirm: "OK",
   developerSettings: "Developer settings",
@@ -47,7 +67,7 @@ export const DEFAULT_ANDROID_AUTO_UI_LABELS: AndroidAutoUiLabels = {
   onboardingContinue: "Continue",
 };
 
-/** Taps on **Version** that unlock developer mode. */
+/** Taps on **Version**, counted across its relabels, that unlock developer mode. */
 export const DEVELOPER_MODE_VERSION_TAPS = 10;
 
 /** Drives Android Auto's settings screens by visible text, starting each step from a fresh settings launch. */
@@ -74,7 +94,7 @@ export class ScriptedAndroidAutoSettingsUi implements AndroidAutoSettingsUi {
     }
     if (!(await this.screen.isTextVisible(this.labels.developerModeDialog, signal))) {
       throw new ActionableError(
-        `Android Auto did not show "${this.labels.developerModeDialog}" after ${DEVELOPER_MODE_VERSION_TAPS} taps on ${this.labels.version}.`,
+        `Android Auto did not show "${this.labels.developerModeDialog}" after ${DEVELOPER_MODE_VERSION_TAPS} taps on ${describeScreenText(this.labels.version)}.`,
       );
     }
     await this.screen.tapText(this.labels.developerModeConfirm, signal);

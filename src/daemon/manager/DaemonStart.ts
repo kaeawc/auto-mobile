@@ -11,6 +11,10 @@ import { logger, resolveAutomobileLogSink } from "../../utils/logger";
 import { resolveDaemonInstallSpecifier } from "../../constants/release";
 import { assertUnitTestLogsDirIsolated, ensureSecureLogsDirSync } from "../../utils/tempDir";
 import { ActionableError } from "../../models";
+import { ENV } from "../../config/env";
+import { hasWorkingTreeHash } from "../../utils/mcpVersion";
+
+const DAEMON_LAUNCH_CHECKOUT_VERSION_ENV = ENV.DAEMON_LAUNCH_CHECKOUT_VERSION.name;
 import {
   DAEMON_LAUNCH_LOG_PATH_ENV,
   DAEMON_STARTUP_TIMEOUT_MS,
@@ -432,6 +436,27 @@ export class DaemonStart {
     return false;
   }
 
+  /**
+   * Hand the child this checkout's version, probed now and before the child
+   * loads its modules, so a child whose own dirty-state probe times out still
+   * reports the working-tree hash it was launched on (#18071). Only a key that
+   * carries a hash is passed; an inherited one is never forwarded.
+   */
+  private async stampLaunchCheckoutVersion(childEnv: NodeJS.ProcessEnv): Promise<void> {
+    delete childEnv[DAEMON_LAUNCH_CHECKOUT_VERSION_ENV];
+    let version: string;
+    try {
+      version = await this.host.seams.probeLaunchCheckoutVersion();
+    } catch (error) {
+      // Best effort: without a launch key the child falls back to its own probe.
+      logger.warn("Checkout version probe before daemon launch failed", error);
+      return;
+    }
+    if (hasWorkingTreeHash(version)) {
+      childEnv[DAEMON_LAUNCH_CHECKOUT_VERSION_ENV] = version;
+    }
+  }
+
   /** Phase 2 of {@link startUnlocked}: spawn the daemon, wait for it, and rejoin a racing peer. */
   private async launchDaemon(
     options: DaemonOptions,
@@ -476,6 +501,7 @@ export class DaemonStart {
     // this association instead of letting an unrelated live daemon protect all
     // launch logs in a shared directory.
     childEnv[DAEMON_LAUNCH_LOG_PATH_ENV] = capturesLaunchOutput ? logPath : "";
+    await this.stampLaunchCheckoutVersion(childEnv);
     if (capturesLaunchOutput) {
       assertUnitTestLogsDirIsolated();
       ensureSecureLogsDirSync();

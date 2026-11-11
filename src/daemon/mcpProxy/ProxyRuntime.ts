@@ -1,7 +1,7 @@
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
-import { probeCheckoutModifiedAt, probeCheckoutMcpServerVersion } from "../../utils/mcpVersion";
+import { probeCheckoutMcpServerVersion } from "../../utils/mcpVersion";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { getCurrentBuildIdentity, type BuildIdentity } from "../wire/buildIdentity";
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "../client/client";
@@ -106,8 +106,6 @@ export class ProxyRuntime {
   daemonStatusProbe?: () => Promise<DaemonStatus>;
 
   readCheckoutVersion?: () => Promise<string | null>;
-
-  readCheckoutModifiedAt?: () => Promise<number | null>;
 
   daemonAvailabilityProbe!: (socketPath: string) => Promise<boolean>;
 
@@ -604,12 +602,11 @@ export class ProxyRuntime {
       this.port.createLifecycleReconcilerDeps(),
     );
     this.daemonStatusProbe = this.port.createStatusProbe(config);
-    const probesOwnCheckout =
-      config.clientVersion === undefined && config.buildIdentity === undefined;
     this.readCheckoutVersion =
-      config.readCheckoutVersion ?? (probesOwnCheckout ? probeCheckoutMcpServerVersion : undefined);
-    this.readCheckoutModifiedAt =
-      config.readCheckoutModifiedAt ?? (probesOwnCheckout ? probeCheckoutModifiedAt : undefined);
+      config.readCheckoutVersion ??
+      (config.clientVersion === undefined && config.buildIdentity === undefined
+        ? probeCheckoutMcpServerVersion
+        : undefined);
     this.daemonAvailabilityProbe = daemonAvailabilityProbe(config);
     this.timer = config.timer ?? defaultTimer;
     this.listPoller = new ToolListPoller({

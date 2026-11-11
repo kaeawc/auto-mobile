@@ -29,6 +29,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "listApps",
     "launchApp",
     "terminateApp",
+    // The iOS simulator launchctl SIGABRT path in the watch's system domain (#18052).
+    "crashApp",
     "observe",
     // simctl spawn <udid> log show, as on an iOS simulator (#17547).
     "getLogs",

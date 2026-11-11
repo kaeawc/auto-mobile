@@ -16,7 +16,7 @@ import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { findTapTargetNode } from "./tapTargetSupport";
 
 type VerifiedNodeTarget = {
-  selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
+  selector?: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>;
   expectedBounds: Element["bounds"];
 };
 
@@ -56,7 +56,15 @@ function xrNodeClickSelector(
   const uniqueSelector = (candidate: Element) => {
     const selector = stableNodeSelectorForElement(candidate);
     if (!selector) {
-      return undefined;
+      const matches = entries.filter(
+        (entry) =>
+          entry.bounds &&
+          boundsNearlyEqual(entry.bounds, candidate.bounds, 0) &&
+          hasAccessibilityAction(entry.properties.actions, "click"),
+      );
+      return new Set(matches.map((entry) => entry.source)).size === 1
+        ? { expectedBounds: candidate.bounds }
+        : undefined;
     }
     const matches = entries.filter((entry) =>
       matchesCtrlProxyNodeSelector(entry.properties, selector),

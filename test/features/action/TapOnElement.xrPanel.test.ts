@@ -99,7 +99,6 @@ describe("XR panel-space tap routing", () => {
     "node_bounds_mismatch",
     "node_bounds_ambiguous",
     "rejected",
-    "missing-selector",
     "xml",
     "doubleTap",
     "talkback",
@@ -131,11 +130,9 @@ describe("XR panel-space tap routing", () => {
       const target =
         mode === "unadvertised"
           ? { ...element, actions: [] }
-          : mode === "missing-selector"
-            ? { ...element, "resource-id": undefined }
-            : mode === "xml"
-              ? { ...element, "hierarchy-source": "uiautomator" as const }
-              : element;
+          : mode === "xml"
+            ? { ...element, "hierarchy-source": "uiautomator" as const }
+            : element;
       await expect(
         execute(target, mode === "doubleTap" ? "doubleTap" : "tap", mode === "talkback"),
       ).rejects.toThrow(/XR panel coordinate space.*not tappable screen coordinates.*tapAt/);
@@ -185,6 +182,7 @@ describe("XR panel-space tap routing", () => {
 
   for (const mode of [
     "captured-no-selector",
+    "duplicate-bounds",
     "unique-row",
     "text-frame",
     "no-clickable-ancestor",
@@ -200,9 +198,8 @@ describe("XR panel-space tap routing", () => {
       expect(label.properties.actions).not.toContain("click");
       expect(row.properties.actions).toContain("click");
       expect(row.properties.clickable).toBe("true");
-      // The capture's clickable row has no stable native identity. Positive cases
-      // deliberately add one to a copy; never change the captured fixture.
-      if (mode !== "captured-no-selector") {
+      // Keep the captured identity absent for bounds-only cases.
+      if (mode !== "captured-no-selector" && mode !== "duplicate-bounds") {
         Object.assign(row.source, { "unique-id": "settings-connected-row" });
       }
       if (mode === "no-clickable-ancestor") {
@@ -215,7 +212,7 @@ describe("XR panel-space tap routing", () => {
         Object.assign(frame.source, { "unique-id": "settings-connected-frame" });
         frame.source.actions = ["click"];
       }
-      if (mode === "duplicate-selector") {
+      if (mode === "duplicate-selector" || mode === "duplicate-bounds") {
         tree.windows!.push({
           id: 998,
           hierarchy: { ...structuredClone(row.source), node: undefined },
@@ -241,16 +238,18 @@ describe("XR panel-space tap routing", () => {
         isTalkBackEnabled: false,
         options: { action: "tap", resolvedHierarchy: tree },
       });
-      if (["unique-row", "text-frame", "nearest-ancestor"].includes(mode)) {
+      if (["captured-no-selector", "unique-row", "text-frame", "nearest-ancestor"].includes(mode)) {
         await result;
         expect(service.getNodeActionHistory()).toMatchObject([
           {
             action: "click",
             expectedBounds: mode === "nearest-ancestor" ? current.frame.bounds : current.row.bounds,
             selector:
-              mode === "nearest-ancestor"
-                ? { uniqueId: "settings-connected-frame" }
-                : { uniqueId: "settings-connected-row", collectionRow: 1, collectionColumn: 0 },
+              mode === "captured-no-selector"
+                ? undefined
+                : mode === "nearest-ancestor"
+                  ? { uniqueId: "settings-connected-frame" }
+                  : { uniqueId: "settings-connected-row", collectionRow: 1, collectionColumn: 0 },
           },
         ]);
       } else {
@@ -268,9 +267,8 @@ describe("XR panel-space tap routing", () => {
     test(`container-scoped Settings ancestor click: ${mode}`, async () => {
       const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
       const { nodes, label, frame, row } = settingsTarget(tree);
-      Object.assign(row.source, { "unique-id": "settings-connected-row" });
       // Scope to the label's own frame (its only clickable owner, the row, is outside
-      // it) or to the list that contains the row. Unique ids keep the scope unambiguous.
+      // it) or to the list that contains the row. Resource ids keep the scope unambiguous.
       const elementId = `com.android.settings:id/${mode}`;
       const scope = mode === "owner-outside-container" ? frame : nodes[row.parentIndex!];
       Object.assign(scope.source, { "resource-id": elementId });
@@ -287,7 +285,7 @@ describe("XR panel-space tap routing", () => {
           {
             action: "click",
             expectedBounds: current.row.bounds,
-            selector: { uniqueId: "settings-connected-row" },
+            selector: undefined,
           },
         ]);
       } else {
@@ -300,6 +298,60 @@ describe("XR panel-space tap routing", () => {
       expect(adb.getAllCommands()).toHaveLength(0);
     });
   }
+
+  for (const targetKind of ["row", "switch"] as const) {
+    test(`clicks the captured Settings ${targetKind} by bounds alone`, async () => {
+      const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+      const { nodes, row } = settingsTarget(tree);
+      const target =
+        targetKind === "row"
+          ? row
+          : nodes.find(
+              (entry) =>
+                entry.properties["resource-id"] === "android:id/switch_widget" &&
+                entry.bounds?.left === 1904 &&
+                entry.bounds?.top === 729,
+            )!;
+      const { tap, service } = setup();
+      await tap.executeAndroidTap("tap", point, 0, {
+        element: { ...target.properties, bounds: target.bounds! },
+        isTalkBackEnabled: false,
+        options: { action: "tap", resolvedHierarchy: tree },
+      });
+      expect(service.getNodeActionHistory()).toMatchObject([
+        {
+          action: "click",
+          selector: undefined,
+          expectedBounds:
+            targetKind === "row"
+              ? { left: 48, top: 372, right: 696, bottom: 548 }
+              : { left: 744, top: 718, right: 2048, bottom: 836 },
+        },
+      ]);
+    });
+  }
+
+  test("a runner requiring a selector preserves XR coordinate guidance", async () => {
+    const tree: ViewHierarchyResult = { hierarchy: {}, ...structuredClone(settingsCapture) };
+    const { row } = settingsTarget(tree);
+    const { tap, service } = setup();
+    service.setActionResult({
+      success: false,
+      action: "click",
+      totalTimeMs: 1,
+      error: "A resource-id or stable node selector is required for accessibility actions",
+    });
+    await expect(
+      tap.executeAndroidTap("tap", point, 0, {
+        element: { ...row.properties, bounds: row.bounds! },
+        isTalkBackEnabled: false,
+        options: { action: "tap", resolvedHierarchy: tree },
+      }),
+    ).rejects.toThrow(/XR panel coordinate space.*tapAt/);
+    expect(service.getNodeActionHistory()).toHaveLength(1);
+    expect(service.getNodeActionHistory()[0]!.selector).toBeUndefined();
+    expect(service.getTapHistory()).toHaveLength(0);
+  });
 
   test("guards the direct coordinate dispatch seam on XR too", async () => {
     const { tap, service, adb } = setup();

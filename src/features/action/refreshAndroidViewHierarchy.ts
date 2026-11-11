@@ -1,4 +1,5 @@
 import type { ViewHierarchyResult } from "../../models";
+import { needsIncompleteRecovery } from "../../models/ViewHierarchyResult";
 import type { AndroidCtrlProxy } from "../observe/android";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -35,7 +36,7 @@ export async function refreshAndroidViewHierarchy(
     return null;
   }
 
-  if (rawHierarchy.ctrlProxyIncomplete && fallback) {
+  if (needsIncompleteRecovery(rawHierarchy) && fallback) {
     return supplementAndroidHierarchy(rawHierarchy, fallback, deadline, signal);
   }
 

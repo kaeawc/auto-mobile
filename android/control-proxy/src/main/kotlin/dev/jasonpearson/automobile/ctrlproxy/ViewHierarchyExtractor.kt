@@ -10,6 +10,7 @@ import android.util.SparseArray
 import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import androidx.annotation.RequiresApi
 import androidx.core.util.size
 import dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
@@ -118,6 +119,27 @@ internal constructor(
       listingSkipped = true,
     )
 
+  @RequiresApi(Build.VERSION_CODES.R)
+  private fun activeDisplayId(service: AccessibilityService): Int? =
+    readWindow(
+      DEFAULT_WINDOW_KEY,
+      {
+        service.rootInActiveWindow?.let { root ->
+          try {
+            root.window?.let { window ->
+              try {
+                window.displayId
+              } finally {
+                window.recycle()
+              }
+            }
+          } finally {
+            root.recycle()
+          }
+        }
+      },
+    )
+
   internal fun selectDisplayWindows(
     service: AccessibilityService,
     requestedDisplayId: Int? = null,
@@ -136,7 +158,7 @@ internal constructor(
     val all =
       readWindow(WINDOW_LIST_KEY, { service.windowsOnAllDisplays })
         ?: return emptyDisplayWindows(
-          requestedDisplayId,
+          requestedDisplayId ?: activeDisplayId(service),
         )
     val id = targetDisplayId(all, requestedDisplayId)
     return DisplayWindows(id, windowsForDisplay(all, id))

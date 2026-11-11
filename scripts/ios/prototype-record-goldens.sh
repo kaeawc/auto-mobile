@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Record only on an explicitly supplied, already booted iPhone 16. Never owns its lifecycle.
+# Golden runtime: iPhone 16 on iOS 27.0 (24A434), the newest non-Duo runtime; re-record on it only.
 set -euo pipefail
 
 fail() { printf 'prototype-record-goldens: %s\n' "$*" >&2; exit 2; }

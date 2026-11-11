@@ -18,6 +18,7 @@ setup() {
   mkdir -p "$FAKE_BIN" "$SDK/cmdline-tools/latest/bin"
   export DIAG_LOG="$BATS_TEST_TMPDIR/diagnostics.log"
   export BUN_LOG="$BATS_TEST_TMPDIR/bun.log"
+  export OS_LOG="$BATS_TEST_TMPDIR/os-version.log"
   export SDK_LOG="$BATS_TEST_TMPDIR/sdkmanager.log"
   export AVD_LOG="$BATS_TEST_TMPDIR/avdmanager.log"
   export GRADLE_LOG="$BATS_TEST_TMPDIR/gradle.log"
@@ -29,6 +30,7 @@ STUB
   cat > "$FAKE_BIN/bun" <<'STUB'
 #!/usr/bin/env bash
 printf '%s avd=%s apk=%s\n' "${1##*/}" "${TV_SMOKE_AVD_NAME:-}" "${TV_SMOKE_FIXTURE_APK:-}" >> "$BUN_LOG"
+printf '%s\n' "${TV_SMOKE_OS_VERSION:-}" > "$OS_LOG"
 if [[ -n "${FAKE_SMOKE_SUMMARY:-}" ]]; then : > "$TV_SMOKE_OUT_DIR/summary.md"; fi
 exit "${FAKE_SMOKE_STATUS:-0}"
 STUB
@@ -53,7 +55,7 @@ STUB
   export TV_SMOKE_DIAGNOSTICS_SCRIPT="$BATS_TEST_TMPDIR/diagnostics.sh"
   export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/step-summary.md"
   unset TV_SMOKE_SYSTEM_IMAGE TV_SMOKE_CREATE_VIA TV_SMOKE_FIXTURE_APK \
-    TV_SMOKE_FIXTURE_MODULE TV_SMOKE_SKIP_IMAGE_INSTALL TV_SMOKE_AVD_NAME ANDROID_SDK_ROOT
+    TV_SMOKE_FIXTURE_MODULE TV_SMOKE_SKIP_IMAGE_INSTALL TV_SMOKE_AVD_NAME TV_SMOKE_OS_VERSION ANDROID_SDK_ROOT
   make_fixture_module
 }
 
@@ -75,6 +77,20 @@ STUB
   [[ "$output" == *"must be an android-tv or google-tv system image"* ]]
   [ ! -e "$SDK_LOG" ]
   [[ "$(<"$GITHUB_STEP_SUMMARY")" == *"**Failed** during setup"* ]]
+}
+
+@test "the OS version is derived from the image API level" {
+  TV_SMOKE_SYSTEM_IMAGE="system-images;android-35;android-tv;x86_64" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(<"$OS_LOG")" = "15" ]
+}
+
+@test "an OS version that does not match the image is rejected before installation" {
+  TV_SMOKE_OS_VERSION=16 TV_SMOKE_SYSTEM_IMAGE="system-images;android-35;android-tv;x86_64" \
+    run bash "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"is API 35 (Android 15) but TV_SMOKE_OS_VERSION=16"* ]]
+  [ ! -e "$SDK_LOG" ]
 }
 
 @test "a Google TV ARM image is accepted and installed by default for custom inputs" {

@@ -48,7 +48,7 @@ system_image="${TV_SMOKE_SYSTEM_IMAGE:-system-images;android-36;android-tv;x86_6
 device_profile="${TV_SMOKE_DEVICE_PROFILE:-tv_1080p}"
 avd_name="${TV_SMOKE_AVD_NAME:-automobile-tv-smoke}"
 create_via="${TV_SMOKE_CREATE_VIA:-startDevice}"
-os_version="${TV_SMOKE_OS_VERSION:-16}"
+os_version="${TV_SMOKE_OS_VERSION:-}"
 fixture_module="${TV_SMOKE_FIXTURE_MODULE:-tv-fixture}"
 fixture_apk="${TV_SMOKE_FIXTURE_APK:-}"
 timeout_seconds="${TV_SMOKE_TIMEOUT_SECONDS:-1800}"
@@ -64,6 +64,24 @@ for setting in TV_SMOKE_TIMEOUT_SECONDS:"${timeout_seconds}" \
 done
 if [[ ! "${system_image}" =~ ^system-images\;android-[0-9][0-9.]*(-ext[0-9]+)?\;((android-tv)|(google-tv))\;[a-z0-9_-]+$ ]]; then
   echo "TV_SMOKE_SYSTEM_IMAGE must be an android-tv or google-tv system image: ${system_image}" >&2
+  exit 2
+fi
+# startDevice is pinned to os_version, so it must name the release the image's API level ships
+# as (12 = 31, 12L = 32, then 13 = 33 onward); otherwise the installed image is never used.
+image_api="$(printf '%s' "${system_image}" | cut -d';' -f2 | sed -E 's/^android-([0-9]+).*/\1/')"
+case "${image_api}" in
+  31) image_os_version=12 ;;
+  32) image_os_version=12L ;;
+  *) image_os_version=$((image_api >= 33 ? image_api - 20 : 0)) ;;
+esac
+if [[ "${image_os_version}" == "0" ]]; then
+  echo "TV_SMOKE_SYSTEM_IMAGE must be API 31 or newer: ${system_image}" >&2
+  exit 2
+fi
+if [[ -z "${os_version}" ]]; then
+  os_version="${image_os_version}"
+elif [[ "${os_version}" != "${image_os_version}" ]]; then
+  echo "TV_SMOKE_SYSTEM_IMAGE is API ${image_api} (Android ${image_os_version}) but TV_SMOKE_OS_VERSION=${os_version}; set both together" >&2
   exit 2
 fi
 case "${create_via}" in

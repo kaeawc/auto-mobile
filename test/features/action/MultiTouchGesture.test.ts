@@ -1,3 +1,4 @@
+import { xrTwoPanelBackStack } from "../../helpers/xrHeadset";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import {
@@ -194,5 +195,22 @@ describe("MultiTouchGesture dispatch (#12535)", () => {
     const androidRun = create(android);
     await androidRun.gesture.execute({ action: "tap", x: 500, y: 1000 });
     expect(androidRun.iosInvalidations()).toBe(0);
+  });
+});
+
+describe("MultiTouchGesture XR default-pose guard (#17819)", () => {
+  test("a two-panel XR back stack centers on native pixels without a pose refusal or warning", async () => {
+    const { gesture, requests } = create(android);
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult({
+      ...observation(2560, 2558),
+      backStack: xrTwoPanelBackStack(),
+    });
+    gesture.observeScreen = observeScreen;
+    const result = await gesture.execute({ action: "tap", x: 1280, y: 1279, fingers: 3 });
+    expect(result.success).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("default pose");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].plan.points[1]).toEqual({ x: 1280, y: 1279 });
   });
 });

@@ -117,7 +117,9 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     expect(action.safeParse("start").success).toBe(false);
     const exportPlan = fieldSchema("exportPlan", "recordingId");
     expect(exportPlan.description).toContain("recordDeviceGestures");
-    expect(exportPlan.description).toContain("recordToolCalls action=end");
+    expect(exportPlan.description).toContain("recordToolCalls recording");
+    expect(ToolRegistry.getTool("exportPlan")!.description).toContain("recordToolCalls");
+    expect(fieldSchema("recordToolCalls", "planName").description).toContain("on begin");
   });
 
   test("recordToolCalls begin, status, and end use the injected connection identity", async () => {
@@ -204,6 +206,77 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     expect(toolField(result, "success")).toBe(true);
     expect(toolField(result, "planContent")).toContain("appId: com.android.settings");
     expect(toolField(result, "planContent")).not.toContain("__");
+  });
+
+  // Fixtures from #17950: begin {"planName":"dogfood-notes"} then end exported
+  // "mcp-recorded-plan-2026-11-11T14-53-07-554Z", and exportPlan after begin returned
+  // {"success":false,"error":"No active recording. Start a recording before exporting."}.
+  const IGNORED_NAME = "mcp-recorded-plan-2026-11-11T14-53-07-554Z";
+  const UNSEEN_RECORDING = {
+    success: false,
+    error: "No active recording. Start a recording before exporting.",
+  };
+
+  test("the begin planName names the plan end exports", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
+    const begin = await asConnection("named", () =>
+      tool.handler(tool.schema.parse({ action: "begin", planName: "dogfood-notes" })),
+    );
+    expect(toolField(begin, "planName")).toBe("dogfood-notes");
+    recordPlanCall(getToolCallRecorder({ connectionId: "named" })!, "tapOn", { text: "Save" });
+    const end = await asConnection("named", () => tool.handler({ action: "end" }));
+    expect(toolField(end, "planName")).toBe("dogfood-notes");
+    expect(toolField(end, "planName")).not.toBe(IGNORED_NAME);
+    expect(String(toolField(end, "planContent"))).toStartWith("name: dogfood-notes\n");
+  });
+
+  test("an end planName overrides the begin planName", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
+    await asConnection("renamed", () =>
+      tool.handler({ action: "begin", planName: "dogfood-notes" }),
+    );
+    recordPlanCall(getToolCallRecorder({ connectionId: "renamed" })!, "tapOn", { text: "Save" });
+    const end = await asConnection("renamed", () =>
+      tool.handler({ action: "end", planName: "  final-name " }),
+    );
+    expect(toolField(end, "planName")).toBe("final-name");
+  });
+
+  test("exportPlan stops and exports this connection's recordToolCalls recording", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const record = ToolRegistry.getTool("recordToolCalls")!;
+    const exportPlan = ToolRegistry.getTool("exportPlan")!;
+    await asConnection("export", () => record.handler({ action: "begin" }));
+    recordPlanCall(getToolCallRecorder({ connectionId: "export" })!, "tapOn", { text: "Save" });
+    const other = await asConnection("elsewhere", () =>
+      exportPlan.handler({ planName: "dogfood-notes" }),
+    );
+    expect(toolIsError(other)).toBe(true);
+    expect(toolField(other, "error")).toContain("recordToolCalls");
+    const response = await asConnection("export", () =>
+      exportPlan.handler({ planName: "dogfood-notes" }),
+    );
+    expect(toolStructured(response)).not.toEqual(UNSEEN_RECORDING);
+    expect(toolIsError(response)).toBe(false);
+    expect(toolStructured(response)).toEqual(toolJson(response));
+    expect(toolField(response, "planName")).toBe("dogfood-notes");
+    expect(toolField(response, "stepCount")).toBe(1);
+    expect(String(toolField(response, "planContent"))).toContain("text: Save");
+    expect(getToolCallRecorder({ connectionId: "export" })).toBeNull();
+  });
+
+  test("exportPlan with a recordingId leaves the recordToolCalls recording running", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    await asConnection("by-id", () =>
+      ToolRegistry.getTool("recordToolCalls")!.handler({ action: "begin" }),
+    );
+    const response = await asConnection("by-id", () =>
+      ToolRegistry.getTool("exportPlan")!.handler({ recordingId: "rec-unknown" }),
+    );
+    expect(toolIsError(response)).toBe(true);
+    expect(getToolCallRecorder({ connectionId: "by-id" })?.isRecording()).toBe(true);
   });
 
   test("direct onclose discards its recording and preserves other connections", () => {

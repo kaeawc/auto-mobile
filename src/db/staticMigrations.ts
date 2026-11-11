@@ -79,6 +79,7 @@ import * as m075 from "./migrations/2026_10_18_000_mcp_tasks";
 import * as m077 from "./migrations/2026_10_29_000_video_recording_audio_state";
 import * as m078 from "./migrations/2026_11_04_000_tool_call_recording_default_on";
 import * as m079 from "./migrations/2026_11_07_000_navigation_build_source_revision";
+import * as m080 from "./migrations/2026_11_11_000_performance_audit_device_session_uuid";
 
 /**
  * Bundle the default migrations without runtime folder discovery. Keep keys identical to
@@ -165,6 +166,7 @@ export const STATIC_MIGRATIONS: Readonly<Record<string, Migration>> = {
   "2026_10_29_000_video_recording_audio_state": m077,
   "2026_11_04_000_tool_call_recording_default_on": m078,
   "2026_11_07_000_navigation_build_source_revision": m079,
+  "2026_11_11_000_performance_audit_device_session_uuid": m080,
 };
 
 export const staticMigrationProvider: MigrationProvider = {

@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { makePool } from "../helpers/makePool";
 import { withWireDeadline } from "../helpers/requestDeadline";
 import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
@@ -124,6 +125,7 @@ describe("device acquisition wait deadlines", () => {
     });
     DaemonState.getInstance().initialize(sessionManager, pool);
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       timer,
       deviceManagerFactory: () => deviceUtils,
       deviceMatcherFactory: () => new FakeDeviceMatcher(),

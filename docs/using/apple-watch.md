@@ -188,7 +188,9 @@ Every other tool refuses a watch before doing anything, with:
   observe the launched app: `verified` stays unset with `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
 - `getLogs` reads the watch simulator's unified log as on an iOS simulator: `appId` is required,
-  and lines from the app's subsystem or its process are returned. `tags`, `buffers` and
+  and lines from the app's subsystem or its process are returned. `minPriority` ranks the
+  unified-log levels as `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log
+  has no warning level), `E` error and fault, and `F` fault only. `tags`, `buffers` and
   `includeSystem` are Android-only and are ignored with a warning. It is not listed by default;
   enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
 

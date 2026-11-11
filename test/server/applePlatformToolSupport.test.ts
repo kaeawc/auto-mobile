@@ -154,10 +154,10 @@ describe("assertToolSupportsDevicePlatform", () => {
     }
   });
 
-  test("admits tvOS diagnostics; visionOS admits getLogs but still refuses crashApp", () => {
+  test("admits tvOS and watchOS diagnostics; visionOS admits getLogs but still refuses crashApp", () => {
     expect(() => assertToolSupportsDevicePlatform("getLogs", visionPro)).not.toThrow();
     for (const tool of ["getLogs", "crashApp"]) {
-      for (const device of [appleTv, iphone, { ...iphone, platform: "android" as const }]) {
+      for (const device of [appleTv, watch, iphone, { ...iphone, platform: "android" as const }]) {
         expect(() => assertToolSupportsDevicePlatform(tool, device)).not.toThrow();
         expect(() =>
           assertRequestedPlatformSupported(tool, { platform: device.platform }),

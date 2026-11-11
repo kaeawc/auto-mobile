@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   DpadTapOn,
   dpadTapOnHoldMs,
+  dpadTapOnRefusal,
   dpadTapOnTarget,
+  dpadTapOnTouchOnlyParts,
   type DpadSelectHolder,
   type DpadTapOnNavigator,
   type DpadTapOnRequest,
@@ -81,6 +83,46 @@ describe("dpadTapOnTarget", () => {
     { selector: { text: "Movies" }, exactText: true },
   ] satisfies DpadTapOnRequest[])("leaves %j to the touch path", (request) => {
     expect(dpadTapOnTarget(request)).toBeUndefined();
+    expect(dpadTapOnTouchOnlyParts(request)).not.toEqual([]);
+  });
+});
+
+describe("dpadTapOnTouchOnlyParts (#17913)", () => {
+  test("is empty for a request the D-pad serves", () => {
+    expect(dpadTapOnTouchOnlyParts({ selector: { text: "Movies" }, action: "longPress" })).toEqual(
+      [],
+    );
+  });
+
+  test("names each part as the caller wrote it", () => {
+    expect(
+      dpadTapOnTouchOnlyParts({
+        selector: { testTag: "row" },
+        action: "doubleTap",
+        selectionStrategy: "random",
+        sibling: true,
+        ensureChecked: false,
+      }),
+    ).toEqual([
+      'action: "doubleTap"',
+      'selectionStrategy: "random"',
+      "sibling",
+      "ensureChecked",
+      "selector.testTag",
+    ]);
+  });
+
+  test("a selector with neither text nor elementId needs touch", () => {
+    expect(dpadTapOnTouchOnlyParts({ selector: {} })).toEqual([
+      "a selector without text or elementId",
+    ]);
+  });
+
+  test("the refusal names the parts and the D-pad alternative", () => {
+    const message = dpadTapOnRefusal(["sibling"]);
+    expect(message).toContain("tapOn cannot use sibling on this device: it has no touchscreen");
+    expect(message).toContain("selector.text or selector.elementId");
+    expect(message).toContain('pressButton "select"');
   });
 });
 

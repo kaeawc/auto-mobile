@@ -58,46 +58,79 @@ function isLongPress(request: DpadTapOnRequest): boolean {
   return request.action === "longPress";
 }
 
-function needsTouch(request: DpadTapOnRequest): boolean {
-  const action = request.action ?? "tap";
-  if (action !== "tap" && action !== "longPress") {
-    return true;
-  }
-  if (action === "tap" && (request.duration ?? 0) > 0) {
-    return true;
-  }
-  if (request.selectionStrategy !== undefined && request.selectionStrategy !== "first") {
-    return true;
-  }
+const UNFOCUSABLE_SELECTORS = ["testTag", "textAny", "accessibilityLink"] as const;
+
+function isSet(request: DpadTapOnRequest, key: (typeof TOUCH_ONLY_OPTIONS)[number]): boolean {
+  const value = request[key];
   // ensureChecked: false asks for the unchecked state, so only the guarded touch path can skip
   // a toggle that is already there; enter would flip it.
-  if (request.ensureChecked !== undefined) {
-    return true;
+  return key === "ensureChecked" ? value !== undefined : value !== undefined && value !== false;
+}
+
+function actionBlockers(request: DpadTapOnRequest): string[] {
+  const action = request.action ?? "tap";
+  if (action !== "tap" && action !== "longPress") {
+    return [`action: "${action}"`];
   }
-  return TOUCH_ONLY_OPTIONS.some((key) => {
-    const value = request[key];
-    return value !== undefined && value !== false;
-  });
+  return action === "tap" && (request.duration ?? 0) > 0 ? ['duration with action: "tap"'] : [];
+}
+
+function selectorBlockers(request: DpadTapOnRequest): string[] {
+  const { selector } = request;
+  const unfocusable = UNFOCUSABLE_SELECTORS.filter((key) => selector[key] !== undefined).map(
+    (key) => `selector.${key}`,
+  );
+  if (unfocusable.length > 0) {
+    return unfocusable;
+  }
+  return selector.text || selector.elementId ? [] : ["a selector without text or elementId"];
 }
 
 /**
- * The focus target for `request`, or undefined when it needs something only a touch tap does:
- * a selector other than text or elementId, an action other than tap, or an option such as
- * sibling, container, index or searchUntil. Options that only tune touch timing or verification
- * (preTapStability, retryIfNoChange, ensureTap) do not apply to a D-pad press and are ignored.
+ * The parts of `request` only a touch tap serves, named as the caller wrote them; empty when the
+ * D-pad can stand in for the tap. Options that only tune touch timing or verification
+ * (preTapStability, retryIfNoChange, ensureTap) do not apply to a D-pad press and are not listed.
+ */
+export function dpadTapOnTouchOnlyParts(request: DpadTapOnRequest): string[] {
+  const strategy =
+    request.selectionStrategy !== undefined && request.selectionStrategy !== "first"
+      ? [`selectionStrategy: "${request.selectionStrategy}"`]
+      : [];
+  return [
+    ...actionBlockers(request),
+    ...strategy,
+    ...TOUCH_ONLY_OPTIONS.filter((key) => isSet(request, key)),
+    ...selectorBlockers(request),
+  ];
+}
+
+/**
+ * The focus target for `request`, or undefined when it needs something only a touch tap does
+ * (see {@link dpadTapOnTouchOnlyParts}).
  */
 export function dpadTapOnTarget(request: DpadTapOnRequest): FocusNavigateTarget | undefined {
-  if (needsTouch(request)) {
+  if (dpadTapOnTouchOnlyParts(request).length > 0) {
     return undefined;
   }
   const { selector } = request;
-  if (selector.testTag || selector.textAny || selector.accessibilityLink) {
-    return undefined;
-  }
   if (selector.text) {
     return { label: selector.text };
   }
   return selector.elementId ? { elementId: selector.elementId } : undefined;
+}
+
+/**
+ * Why a tapOn cannot run on a device without a touchscreen, and the D-pad form that can. A touch
+ * tap there is a silent no-op (#17913), so the caller must refuse rather than inject one.
+ */
+export function dpadTapOnRefusal(parts: readonly string[]): string {
+  const named = parts.length > 0 ? parts.join(", ") : "this request";
+  return (
+    `tapOn cannot use ${named} on this device: it has no touchscreen (Android TV), so a touch ` +
+    `tap would not reach the app. Name the element to activate with only selector.text or ` +
+    `selector.elementId (action "tap" or "longPress") so tapOn moves D-pad focus to it and ` +
+    `presses enter, or move focus with focusNavigate and press pressButton "select".`
+  );
 }
 
 /**

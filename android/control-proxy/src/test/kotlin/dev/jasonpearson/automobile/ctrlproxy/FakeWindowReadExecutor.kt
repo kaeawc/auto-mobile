@@ -3,6 +3,9 @@ package dev.jasonpearson.automobile.ctrlproxy
 /** Virtual durations only: no sleeps, real workers, or wall-clock timing assertions. */
 internal class FakeWindowReadExecutor : WindowReadExecutor {
   var nowMs = 0L
+  var reading = false
+    private set
+
   val durations = ArrayDeque<Long>()
   val budgets = mutableListOf<Long>()
   val abandonedReads = ArrayDeque<() -> Unit>()
@@ -21,6 +24,11 @@ internal class FakeWindowReadExecutor : WindowReadExecutor {
       return WindowReadResult.Skipped("timeout")
     }
     nowMs += duration
-    return WindowReadResult.Completed(read())
+    reading = true
+    return try {
+      WindowReadResult.Completed(read())
+    } finally {
+      reading = false
+    }
   }
 }

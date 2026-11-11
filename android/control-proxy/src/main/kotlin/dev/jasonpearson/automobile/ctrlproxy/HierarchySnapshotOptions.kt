@@ -53,24 +53,6 @@ private constructor(
   private val reasons = linkedSetOf<String>()
   private var finished = false
 
-  /** Worker-private accounting. Abandoned reads must never consume the caller's snapshot cap. */
-  fun fork(): HierarchySnapshotBudget {
-    check(!isScope && !shared.scopeOpen)
-    val local = SharedBudget(shared.options, maxOf(1, shared.remainingSlots), shared.reservation)
-    local.nodes = shared.nodes
-    local.remainingSlots = shared.remainingSlots
-    return HierarchySnapshotBudget(local, nodeLimit, isScope)
-  }
-
-  /** Only the capture caller merges a read that completed within its time budget. */
-  fun mergeCompleted(local: HierarchySnapshotBudget) {
-    check(!isScope && !shared.scopeOpen)
-    shared.nodes = local.shared.nodes
-    shared.remainingSlots = local.shared.remainingSlots
-    reasons += local.reasons
-    shared.reasons += local.shared.reasons
-  }
-
   /** Only one scope may be open: unused nodes become available to the next scope on finish. */
   fun openScope(reserved: Boolean = true): HierarchySnapshotBudget {
     check(!isScope && !shared.scopeOpen)

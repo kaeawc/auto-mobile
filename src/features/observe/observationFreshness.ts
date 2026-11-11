@@ -313,6 +313,9 @@ function incompleteCaptureGuidance(
   reason: CtrlProxyIncompleteReason | undefined,
   accessibilityTool?: boolean,
 ): string {
+  if (reason === "window_read_skipped" || reason === "window_list_skipped") {
+    return "The capture is partial because system_server stalled; observe again.";
+  }
   if (reason === "discarded_windows") {
     return "The focused window's root was present, but every extracted node was discarded as zero-area or entirely offscreen, so the capture came back empty. This is not a withheld or null root, so updating CtrlProxy does not recover it; observe again once the window has laid out on-screen content.";
   }
@@ -337,6 +340,12 @@ function incompleteCaptureGuidance(
  * never claims "no root" for a capture whose root was present.
  */
 function incompleteCaptureLead(reason: CtrlProxyIncompleteReason | undefined): string {
+  if (reason === "window_list_skipped") {
+    return "the window listing read timed out (system_server stalled), so the capture is partial";
+  }
+  if (reason === "window_read_skipped") {
+    return "a window read timed out (system_server stalled), so the capture is partial";
+  }
   if (reason === "discarded_windows") {
     return "the capture came back empty because every extracted window was discarded as zero-area or entirely offscreen (the focused window's root was present, not withheld)";
   }
@@ -400,11 +409,13 @@ function resolveIdentityMismatch(
   if (inputs.incompleteCapture) {
     const { sdkInt, reason, accessibilityTool } = inputs.incompleteCapture;
     const lead =
-      reason === "discarded_windows"
-        ? "every window it extracted was discarded as zero-area or entirely offscreen, even though another window's content was readable"
-        : reason === "extraction_error"
-          ? "extraction threw before the focused application's window could be assembled, even though another window's content was readable"
-          : "it could not read the focused application's root window, even though another window's content was readable";
+      reason === "window_read_skipped" || reason === "window_list_skipped"
+        ? incompleteCaptureLead(reason)
+        : reason === "discarded_windows"
+          ? "every window it extracted was discarded as zero-area or entirely offscreen, even though another window's content was readable"
+          : reason === "extraction_error"
+            ? "extraction threw before the focused application's window could be assembled, even though another window's content was readable"
+            : "it could not read the focused application's root window, even though another window's content was readable";
     return {
       requestedAfter,
       actualTimestamp,

@@ -4,6 +4,7 @@ import android.util.SparseArray
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -60,18 +61,74 @@ internal class ViewHierarchyExtractorWindowReadBudgetTest : WindowReadBudgetFixt
     assertEquals(3, worker.budgets.size)
     assertEquals(1, worker.abandonedReads.size)
     assertTrue(extractor.stats.skippedWindowReads.get() > 0)
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertEquals("window_read_skipped", result.ctrlProxyIncompleteReason)
+    assertEquals(1, result.skippedWindowReads)
+    assertEquals(listOf(2), result.skippedWindowIds)
   }
 
   @Test
-  fun `a slow full tree read within budget is kept with unchanged output`() {
+  fun `a stalled capture root is skipped without being treated as a null root`() {
     useGuard()
-    val input = windows()
-    val expected = encoded(capture(input))
-    worker.durations.addAll(listOf(0, 0, 0, WINDOW_READ_BUDGET_MS - 1))
-    val result = capture(input)
-    assertEquals(listOf(1, 2), result.windows!!.map { it.id })
-    assertEquals(expected, encoded(result))
+    worker.durations.addAll(listOf(0, 0, 0, WINDOW_READ_BUDGET_MS + 1))
+    val result = capture()
+    assertEquals(listOf(1), result.windows!!.map { it.id })
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertEquals("window_read_skipped", result.ctrlProxyIncompleteReason)
+    assertEquals(1, result.skippedWindowReads)
+    assertEquals(listOf(2), result.skippedWindowIds)
+  }
+
+  @Test
+  fun `null root reasons outrank skipped reads while listing outranks root skips`() {
+    useGuard()
+    val input =
+      listOf(
+        fakeWindow(1, 0, null, WindowState(active = true, focused = true)),
+        windows()[1],
+      )
+    worker.durations.addAll(listOf(0, Long.MAX_VALUE))
+    val result = extractor.extractFromAllWindows(input, null, options.copy(listingSkipped = true))
+    assertEquals("active_window_null_root", result.ctrlProxyIncompleteReason)
+    assertEquals(2, result.skippedWindowReads)
+    assertEquals(listOf(2), result.skippedWindowIds)
+    val partial =
+      extractor.extractFromAllWindows(windows(), null, options.copy(listingSkipped = true))
+    assertEquals("window_list_skipped", partial.ctrlProxyIncompleteReason)
+    assertEquals(2, partial.skippedWindowReads)
+    assertEquals(listOf(2), partial.skippedWindowIds)
+  }
+
+  @Test
+  fun `a slow healthy large tree walks on the caller without a read budget`() {
+    useGuard()
+    val root =
+      fakeNode(
+        "example.app",
+        state = NodeState(children = List(16) { fakeNode("example.app", text = "Child $it") }),
+      )
+    val input = listOf(fakeWindow(1, 0, root, WindowState(focused = true, active = true)))
+    val slowWalk =
+      options.copy(
+        snapshotOptions =
+          HierarchySnapshotOptions(
+            isCancelled = {
+              assertFalse("tree walk must not run on the read executor", worker.reading)
+              worker.nowMs += 200
+              false
+            },
+          ),
+      )
+    val result = extractor.extractFromAllWindows(input, null, slowWalk)
+    assertEquals(listOf(1), result.windows!!.map { it.id })
+    assertTrue(encoded(result).contains("Child 15"))
+    assertTrue(worker.nowMs > WINDOW_READ_BUDGET_MS)
+    // Primary selection and capture each read the root; no traversal is submitted.
+    assertEquals(listOf(WINDOW_READ_BUDGET_MS, WINDOW_READ_BUDGET_MS), worker.budgets)
     assertTrue(worker.abandonedReads.isEmpty())
+    assertNull(result.ctrlProxyIncomplete)
+    assertNull(result.skippedWindowReads)
+    assertNull(result.skippedWindowIds)
   }
 
   @Test
@@ -91,9 +148,9 @@ internal class ViewHierarchyExtractorWindowReadBudgetTest : WindowReadBudgetFixt
   }
 
   @Test
-  fun `late capture cannot change published trees metadata counters or later node reservations`() {
+  fun `late root cannot change published trees metadata counters or later node reservations`() {
     useGuard()
-    // Root probes succeed; the app's tree read is abandoned. The XR read must still have its
+    // Root probes succeed; the app's capture root read is abandoned. XR must still have its
     // reserved node allowance, and a later completion must not mutate either capture's state.
     worker.durations.addAll(listOf(0, 0, Long.MAX_VALUE, 0))
     val input = windows()
@@ -101,6 +158,9 @@ internal class ViewHierarchyExtractorWindowReadBudgetTest : WindowReadBudgetFixt
     val result = extractor.extractFromAllWindows(input, null, limited)
     assertNull(result.error)
     assertEquals(listOf(2), result.windows!!.map { it.id })
+    assertEquals("window_read_skipped", result.ctrlProxyIncompleteReason)
+    assertEquals(1, result.skippedWindowReads)
+    assertEquals(listOf(1), result.skippedWindowIds)
     val before = encoded(result)
     val visited = extractor.stats.nodesVisited.get()
     worker.abandonedReads.removeFirst().invoke()
@@ -123,7 +183,11 @@ internal class ViewHierarchyExtractorWindowReadBudgetTest : WindowReadBudgetFixt
     assertEquals(submitted + 2, worker.budgets.size)
     worker.abandonedReads.removeFirst().invoke()
     worker.nowMs += WINDOW_READ_QUARANTINE_MS
-    assertEquals(listOf(1, 2), capture(input).windows!!.map { it.id })
+    val retried = capture(input)
+    assertEquals(listOf(1, 2), retried.windows!!.map { it.id })
+    assertNull(retried.ctrlProxyIncomplete)
+    assertNull(retried.skippedWindowReads)
+    assertNull(retried.skippedWindowIds)
     val recovered = worker.budgets.size
     assertEquals(listOf(1, 2), capture(input).windows!!.map { it.id })
     assertEquals(recovered + 4, worker.budgets.size)
@@ -202,17 +266,16 @@ internal class ViewHierarchyExtractorWindowReadPathsTest : WindowReadBudgetFixtu
 @RunWith(RobolectricTestRunner::class)
 @org.robolectric.annotation.Config(sdk = [34])
 internal class WindowListBudgetTest : WindowReadBudgetFixtures() {
-  private class ListingService(val listing: SparseArray<List<AccessibilityWindowInfo>>) :
-    android.accessibilityservice.AccessibilityService() {
-    override fun getWindowsOnAllDisplays() = listing
-
+  private class ListingService : android.accessibilityservice.AccessibilityService() {
     override fun onAccessibilityEvent(event: android.view.accessibility.AccessibilityEvent?) = Unit
 
     override fun onInterrupt() = Unit
   }
 
   private fun service() =
-    ListingService(SparseArray<List<AccessibilityWindowInfo>>().also { it.put(0, windows()) })
+    org.robolectric.Robolectric.buildService(ListingService::class.java).create().get().also {
+      org.robolectric.Shadows.shadowOf(it).setWindowsOnDisplay(0, windows())
+    }
 
   @Test
   fun `a window listing that never returns yields no windows so capture falls back`() {
@@ -221,7 +284,17 @@ internal class WindowListBudgetTest : WindowReadBudgetFixtures() {
     val selected = extractor.selectDisplayWindows(service())
     assertTrue(selected.windows.isEmpty())
     assertEquals(0, selected.displayId)
-    assertTrue(extractor.stats.skippedWindowReads.get() > 0)
+    assertTrue(selected.listingSkipped)
+    val result =
+      extractor.extractFromActiveWindow(
+        fakeNode("example.app", text = "App"),
+        options.copy(listingSkipped = selected.listingSkipped),
+      )!!
+    assertNotNull(result.hierarchy)
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertEquals("window_list_skipped", result.ctrlProxyIncompleteReason)
+    assertEquals(1, result.skippedWindowReads)
+    assertNull(result.skippedWindowIds)
   }
 
   @Test
@@ -229,5 +302,6 @@ internal class WindowListBudgetTest : WindowReadBudgetFixtures() {
     useGuard()
     val selected = extractor.selectDisplayWindows(service())
     assertEquals(listOf(1, 2), selected.windows.map { it.id })
+    assertFalse(selected.listingSkipped)
   }
 }

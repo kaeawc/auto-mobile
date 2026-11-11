@@ -61,6 +61,10 @@ internal constructor(
   private val crossWindowOcclusionSupported: Boolean = true,
 ) {
 
+  // Acquisition and extraction are synchronous on the caller. Keep overlapping callers'
+  // skipped probes separate; workers never write this capture metadata.
+  private val skippedWindowIds = ThreadLocal.withInitial { linkedSetOf<Int>() }
+
   private fun <T> readWindow(
     windowId: Int,
     read: () -> T,
@@ -71,6 +75,7 @@ internal constructor(
       is WindowReadResult.Completed -> result.value
       is WindowReadResult.Skipped -> {
         stats.skippedWindowReads.incrementAndGet()
+        if (windowId != WINDOW_LIST_KEY) skippedWindowIds.get() += windowId
         Log.w(TAG, "Skipping accessibility window $windowId: ${result.reason}")
         null
       }
@@ -81,16 +86,12 @@ internal constructor(
     window: AccessibilityWindowInfo,
     read: (AccessibilityWindowInfo) -> T,
     discard: (T) -> Unit = {},
-    cleanup: () -> Unit = {},
   ): T? {
     val owned = AccessibilityWindowInfo.obtain(window)
     return readWindow(
       owned.id,
       { read(owned) },
-      {
-        owned.recycle()
-        cleanup()
-      },
+      { owned.recycle() },
       discard,
     )
   }
@@ -104,18 +105,31 @@ internal constructor(
     return readWindow(owned.windowId, { read(owned) }, { owned.recycle() }, discard)
   }
 
-  internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
+  internal data class DisplayWindows(
+    val displayId: Int,
+    val windows: List<AccessibilityWindowInfo>,
+    val listingSkipped: Boolean = false,
+  )
 
   private fun emptyDisplayWindows(requestedDisplayId: Int?) =
-    DisplayWindows(requestedDisplayId ?: Display.DEFAULT_DISPLAY, emptyList())
+    DisplayWindows(
+      requestedDisplayId ?: Display.DEFAULT_DISPLAY,
+      emptyList(),
+      listingSkipped = true,
+    )
 
   internal fun selectDisplayWindows(
     service: AccessibilityService,
     requestedDisplayId: Int? = null,
   ): DisplayWindows {
+    // Begin a new capture's acquisition phase; previous traversal/metadata probes are unrelated.
+    skippedWindowIds.get().clear()
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
       val id = requestedDisplayId ?: Display.DEFAULT_DISPLAY
-      return DisplayWindows(id, windowsForDisplay(service, id))
+      if (id != Display.DEFAULT_DISPLAY) return DisplayWindows(id, emptyList())
+      val windows =
+        readWindow(WINDOW_LIST_KEY, { service.windows.orEmpty() }) ?: return emptyDisplayWindows(id)
+      return DisplayWindows(id, windows)
     }
     // The listing is a system_server call that stalls ~5 s on Android XR (#17817): when it misses
     // the budget, capture falls back to the active window instead of blocking the extraction.
@@ -264,30 +278,36 @@ internal constructor(
     options: HierarchyExtractionOptions = HierarchyExtractionOptions(),
   ): ViewHierarchy? =
     with(options) {
-      if (rootNode == null) {
-        Log.w(TAG, "Root node is null")
-        return@with ViewHierarchy(error = "Root node is null")
-      }
+        if (rootNode == null) {
+          Log.w(TAG, "Root node is null")
+          return@with ViewHierarchy(error = "Root node is null")
+        }
 
-      var accessibilityFocusedNode: AccessibilityNodeInfo? = null
-      return@with try {
-        // Find accessibility-focused node before extracting hierarchy
-        accessibilityFocusedNode = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        ActiveWindowCapture(rootNode, accessibilityFocusedNode, options).capture()
-      } catch (e: IllegalArgumentException) {
-        Log.e(TAG, "Error extracting view hierarchy", e)
-        ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
-      } catch (e: IllegalStateException) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-        Log.e(TAG, "Error extracting view hierarchy", e)
-        ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
-      } catch (e: SecurityException) {
-        Log.e(TAG, "Error extracting view hierarchy", e)
-        ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
-      } finally {
-        accessibilityFocusedNode?.recycle()
+        var accessibilityFocusedNode: AccessibilityNodeInfo? = null
+        return@with try {
+          // Find accessibility-focused node before extracting hierarchy
+          accessibilityFocusedNode =
+            readRoot(
+              rootNode,
+              { it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) },
+              discard = { it?.recycle() },
+            )
+          ActiveWindowCapture(rootNode, accessibilityFocusedNode, options).capture()
+        } catch (e: IllegalArgumentException) {
+          Log.e(TAG, "Error extracting view hierarchy", e)
+          ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+        } catch (e: IllegalStateException) {
+          if (e is kotlinx.coroutines.CancellationException) throw e
+          Log.e(TAG, "Error extracting view hierarchy", e)
+          ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+        } catch (e: SecurityException) {
+          Log.e(TAG, "Error extracting view hierarchy", e)
+          ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+        } finally {
+          accessibilityFocusedNode?.recycle()
+        }
       }
-    }
+      .let { withWindowReadSkips(it, options) }
 
   private inner class ActiveWindowCapture(
     val rootNode: AccessibilityNodeInfo,
@@ -388,20 +408,48 @@ internal constructor(
     options: HierarchyExtractionOptions = HierarchyExtractionOptions(),
   ): ViewHierarchy =
     with(options) {
-      if (windows.isEmpty() && activeWindowRoot == null) {
-        Log.w(TAG, "No windows available for extraction")
-        return@with ViewHierarchy(error = "No windows available")
-      }
+        if (windows.isEmpty() && activeWindowRoot == null) {
+          Log.w(TAG, "No windows available for extraction")
+          return@with ViewHierarchy(error = "No windows available")
+        }
 
-      val accessibilityFocusedNode = findAccessibilityFocus(windows, activeWindowRoot)
+        val accessibilityFocusedNode = findAccessibilityFocus(windows, activeWindowRoot)
 
-      try {
-        return@with WindowCapture(windows, activeWindowRoot, accessibilityFocusedNode, options)
-          .capture()
-      } finally {
-        accessibilityFocusedNode?.recycle()
+        try {
+          return@with WindowCapture(windows, activeWindowRoot, accessibilityFocusedNode, options)
+            .capture()
+        } finally {
+          accessibilityFocusedNode?.recycle()
+        }
       }
-    }
+      .let { checkNotNull(withWindowReadSkips(it, options)) }
+
+  private fun withWindowReadSkips(
+    hierarchy: ViewHierarchy?,
+    options: HierarchyExtractionOptions,
+  ): ViewHierarchy? {
+    val ids = skippedWindowIds.get().toList()
+    skippedWindowIds.get().clear()
+    val count = ids.size + if (options.listingSkipped) 1 else 0
+    if (count == 0 || hierarchy == null) return hierarchy
+    val reason =
+      incompleteReason(
+        activeWindowHasNullRoot =
+          hierarchy.ctrlProxyIncompleteReason == INCOMPLETE_ACTIVE_WINDOW_NULL_ROOT,
+        primaryAppWindowHasNullRoot =
+          hierarchy.ctrlProxyIncompleteReason == INCOMPLETE_APP_WINDOW_NULL_ROOT,
+        hasApplicationWindow = true,
+        mainPackageName = hierarchy.packageName,
+        skippedReason =
+          if (options.listingSkipped) "window_list_skipped" else "window_read_skipped",
+      )
+    return hierarchy.copy(
+      ctrlProxyIncomplete = true,
+      ctrlProxyIncompleteReason = reason,
+      skippedWindowReads = count,
+      skippedWindowIds = ids.ifEmpty { null },
+    )
+  }
 
   private data class CapturedWindow(
     val root: AccessibilityNodeInfo,
@@ -410,79 +458,13 @@ internal constructor(
     val layer: Int,
   )
 
-  // Capture transactions live outside the window reader: only this caller-side boundary can
-  // publish worker-local trees, metadata, node accounting, or null-root/prototype flags.
-  private fun WindowCapture.copyStateFrom(source: WindowCapture) {
-    windowEntries.clear()
-    windowEntries.addAll(source.windowEntries)
-    windowInfos.clear()
-    windowInfos.addAll(source.windowInfos)
-    contentHiddenRegionRoots.clear()
-    contentHiddenRegionRoots.addAll(source.contentHiddenRegionRoots)
-    ownPrototypeWindowCaptured = source.ownPrototypeWindowCaptured
-    prototypeRootUnreadable = source.prototypeRootUnreadable
-    mainHierarchy = source.mainHierarchy
-    mainPackageName = source.mainPackageName
-    intentChooserDetected = source.intentChooserDetected
-    notificationPermissionDetected = source.notificationPermissionDetected
-    activeWindowLayer = source.activeWindowLayer
-    activeWindowKey = source.activeWindowKey
-    activeWindowHasNullRoot = source.activeWindowHasNullRoot
-    primaryAppWindowHasNullRoot = source.primaryAppWindowHasNullRoot
-    hasApplicationWindow = source.hasApplicationWindow
-  }
-
-  private fun WindowCapture.readCapture(
-    windowId: Int,
-    cleanup: () -> Unit = {},
-    read: (WindowCapture) -> Unit,
-  ): Boolean {
-    val focus = accessibilityFocusedNode?.let { AccessibilityNodeInfo.obtain(it) }
-    val active = activeWindowRoot?.let { AccessibilityNodeInfo.obtain(it) }
-    val local = WindowCapture(windows, active, focus, options, primaryAppWindowId, budget.fork())
-    local.copyStateFrom(this)
-    val completed =
-      readWindow(
-        windowId,
-        {
-          read(local)
-          local
-        },
-        cleanup = {
-          focus?.recycle()
-          active?.recycle()
-          cleanup()
-        },
-      ) ?: return false
-    budget.mergeCompleted(completed.budget)
-    copyStateFrom(completed)
-    stats.nodesVisited.addAndGet(completed.visitedNodes)
-    return true
-  }
-
-  private fun WindowCapture.captureWindow(window: AccessibilityWindowInfo) {
-    val owned = AccessibilityWindowInfo.obtain(window)
-    val completed =
-      readCapture(window.id, cleanup = { owned.recycle() }) { local ->
-        local.captureWindowUnchecked(owned)
-      }
-    if (!completed) {
-      // Release this window's node reservation, without merging an abandoned worker's state.
-      budget.inScope {}
-      prototypeRootUnreadable =
-        prototypeRootUnreadable || hasPrototypeTitle(window.type, window.title)
-    }
-  }
-
   private inner class WindowCapture(
     val windows: List<AccessibilityWindowInfo>,
     val activeWindowRoot: AccessibilityNodeInfo?,
     val accessibilityFocusedNode: AccessibilityNodeInfo?,
     val options: HierarchyExtractionOptions,
     val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows),
-    captureBudget: HierarchySnapshotBudget? = null,
   ) {
-    var visitedNodes = 0L
     private val textFilter
       get() = options.textFilter
 
@@ -515,11 +497,10 @@ internal constructor(
     val reserveFallback =
       activeWindowRoot != null && (windows.size != 1 || windows.single().id != primaryAppWindowId)
     val budget =
-      captureBudget
-        ?: HierarchySnapshotBudget(
-          snapshotOptions,
-          slotCount = maxOf(1, windows.size + if (reserveFallback) 1 else 0),
-        )
+      HierarchySnapshotBudget(
+        snapshotOptions,
+        slotCount = maxOf(1, windows.size + if (reserveFallback) 1 else 0),
+      )
     var mainHierarchy: UIElementInfo? = null
     var mainPackageName: String? = null
     var intentChooserDetected = false
@@ -550,13 +531,25 @@ internal constructor(
       return result()
     }
 
-    fun captureWindowUnchecked(window: AccessibilityWindowInfo) {
+    private fun captureWindow(window: AccessibilityWindowInfo) {
       val windowBudget = budget.openScope()
       var rootNode: AccessibilityNodeInfo? = null
       val prototypeTitle = hasPrototypeTitle(window.type, window.title)
       var prototypeRootRead = false
       try {
-        rootNode = window.root
+        // A completed null root is different from an abandoned read. Only the root crosses
+        // the worker boundary; the tree walk and snapshot accounting stay on this caller.
+        val read =
+          readWindow(
+            window,
+            { WindowReadResult.Completed(it.root) },
+            discard = { it.value?.recycle() },
+          )
+        if (read == null) {
+          prototypeRootUnreadable = prototypeRootUnreadable || prototypeTitle
+          return
+        }
+        rootNode = read.value
         prototypeRootRead = recordWindowRoot(window, rootNode, prototypeTitle)
         if (rootNode == null) return
         captureWindowRoot(window, rootNode, windowBudget)
@@ -638,7 +631,6 @@ internal constructor(
             dedupeTextContentDesc,
             accessibilityFocusedNode,
             windowBudget,
-            onNodeVisited = { visitedNodes += 1 },
           ),
           parentPath = "w${window.id}",
         )
@@ -732,12 +724,7 @@ internal constructor(
           (!primaryAppWindowHasNullRoot ||
             activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
       if (canRecoverActiveWindow) {
-        if (
-          !readCapture(checkNotNull(activeWindowRoot).windowId) { it.captureRecoveredWindow() } &&
-            reserveFallback
-        ) {
-          budget.inScope {}
-        }
+        captureRecoveredWindow()
       } else if (reserveFallback) {
         budget.inScope { /* Release the unused fallback reservation. */ }
       }
@@ -756,7 +743,6 @@ internal constructor(
                 dedupeTextContentDesc,
                 accessibilityFocusedNode,
                 fallbackBudget,
-                onNodeVisited = { visitedNodes += 1 },
               ),
             )
           extracted to fallbackBudget.truncationReasons().ifEmpty { null }
@@ -867,6 +853,13 @@ internal constructor(
         }
       val captureDisplayId =
         displayId ?: windowInfos.firstOrNull()?.displayId ?: Display.DEFAULT_DISPLAY
+      val ctrlProxyIncompleteReason =
+        incompleteReason(
+          activeWindowHasNullRoot,
+          primaryAppWindowHasNullRoot,
+          hasApplicationWindow,
+          mainPackageName,
+        )
       if (windowEntries.isEmpty()) {
         Log.w(
           TAG,
@@ -875,6 +868,7 @@ internal constructor(
         return ViewHierarchy(
           error = "No visible windows available",
           ctrlProxyIncomplete = true,
+          ctrlProxyIncompleteReason = ctrlProxyIncompleteReason,
           prototypeHiddenReason = prototypeHiddenReason(captureDisplayId, capturedPrototype),
           windows = windowInfos.takeIf { budget.truncationReasons().isNotEmpty() },
           truncationReasons = budget.truncationReasons().ifEmpty { null },
@@ -889,19 +883,9 @@ internal constructor(
         findAccessibilityFocusedElement(it)
       }
 
-      val ctrlProxyIncompleteReason =
-        incompleteReason(
-          activeWindowHasNullRoot,
-          primaryAppWindowHasNullRoot,
-          hasApplicationWindow,
-          mainPackageName,
-        )
       val ctrlProxyIncomplete = ctrlProxyIncompleteReason != null
       if (ctrlProxyIncomplete) {
-        Log.w(
-          TAG,
-          "[HIERARCHY-DEBUG] Accessibility service incomplete: activeWindowHasNullRoot=$activeWindowHasNullRoot, primaryAppWindowHasNullRoot=$primaryAppWindowHasNullRoot, hasApplicationWindow=$hasApplicationWindow",
-        )
+        Log.w(TAG, "[HIERARCHY-DEBUG] Accessibility service incomplete: $ctrlProxyIncompleteReason")
       }
 
       return ViewHierarchy(
@@ -956,6 +940,7 @@ internal constructor(
     primaryAppWindowHasNullRoot: Boolean,
     hasApplicationWindow: Boolean,
     mainPackageName: String?,
+    skippedReason: String? = null,
   ): String? {
     // Determine if the accessibility service hierarchy is incomplete
     // This happens when:
@@ -964,10 +949,11 @@ internal constructor(
     // 3. Only system UI windows were successfully extracted (no app windows accessible)
     val isSystemUiForeground = mainPackageName == "com.android.systemui"
     // When causes overlap, prefer the active null root, then the selected app null root,
-    // then the absence of any accessible app window. Keep the flag and reason in sync.
+    // then skipped listing/root reads, then the absence of an accessible app window.
     return when {
       activeWindowHasNullRoot -> INCOMPLETE_ACTIVE_WINDOW_NULL_ROOT
       primaryAppWindowHasNullRoot -> INCOMPLETE_APP_WINDOW_NULL_ROOT
+      skippedReason != null -> skippedReason
       !hasApplicationWindow && !isSystemUiForeground -> INCOMPLETE_NO_APP_WINDOW_ROOT
       else -> null
     }
@@ -1471,12 +1457,7 @@ internal constructor(
     val dedupeTextContentDesc: Boolean,
     val accessibilityFocusedNode: AccessibilityNodeInfo?,
     val budget: HierarchySnapshotBudget,
-    val onNodeVisited: (() -> Unit)? = null,
   )
-
-  private fun recordNodeVisit(context: NodeExtraction) {
-    context.onNodeVisited?.invoke() ?: stats.nodesVisited.incrementAndGet()
-  }
 
   private fun extractNodeInfo(
     node: AccessibilityNodeInfo,
@@ -1485,7 +1466,7 @@ internal constructor(
     parentPath: String = "",
     childIndex: Int = 0,
   ): UIElementInfo? {
-    recordNodeVisit(context)
+    stats.nodesVisited.incrementAndGet()
     if (!context.budget.enter(depth)) {
       return null
     }
@@ -2277,30 +2258,21 @@ internal constructor(
     val truncationReasons = linkedSetOf<String>()
     try {
       for (window in windows.sortedBy { it.layer }) {
-        val focus = accessibilityFocusedNode?.let { AccessibilityNodeInfo.obtain(it) }
-        val captured =
-          readWindow(
-            window,
-            { owned ->
-              val elements = mutableListOf<UIElementInfo>()
-              val reasons = linkedSetOf<String>()
-              val root = owned.root
-              try {
-                if (root != null)
-                  collectFocusableElements(
-                    root,
-                    0,
-                    FocusTraversal(screenDimensions, focus, elements, reasons),
-                  )
-                elements.toList() to reasons.toSet()
-              } finally {
-                root?.recycle()
-              }
-            },
-            cleanup = { focus?.recycle() },
-          ) ?: continue
-        focusableElements.addAll(captured.first)
-        truncationReasons.addAll(captured.second)
+        val root = readWindow(window, { it.root }, discard = { it?.recycle() }) ?: continue
+        try {
+          collectFocusableElements(
+            root,
+            0,
+            FocusTraversal(
+              screenDimensions,
+              accessibilityFocusedNode,
+              focusableElements,
+              truncationReasons,
+            ),
+          )
+        } finally {
+          root.recycle()
+        }
       }
       return TraversalOrderResult(
         elements = focusableElements,

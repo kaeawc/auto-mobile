@@ -18,9 +18,11 @@ export type HierarchySource = "control-proxy" | "uiautomator";
  * - `no_app_window_root` — no accessible application window root existed and
  *   SystemUI was not in the foreground.
  * When causes overlap, Android emits the active-window cause first, then the
- * selected-app cause, then the no-app-window cause. These three retain the
- * historical null-root recovery guidance (transient or restricted accessibility,
+ * selected-app cause, then skipped listing/root reads, then the no-app-window cause.
+ * The three null-root causes retain the historical recovery guidance (transient or restricted accessibility,
  * including Android 14+ accessibility-data-sensitive content).
+ * - `window_read_skipped` / `window_list_skipped` — a guarded system_server read
+ *   timed out or was quarantined; the capture is partial and should be retried.
  * - `null_root` — the legacy generic withheld-root reason.
  * - `discarded_windows` — non-null roots were discarded as zero-area or entirely
  *   offscreen. An `isAccessibilityTool` build does not recover these nodes.
@@ -37,7 +39,9 @@ export type CtrlProxyIncompleteReason =
   | "extraction_error"
   | "active_window_null_root"
   | "app_window_null_root"
-  | "no_app_window_root";
+  | "no_app_window_root"
+  | "window_read_skipped"
+  | "window_list_skipped";
 
 /**
  * Represents the ViewHierarchy dump result from a device.
@@ -99,6 +103,10 @@ export interface ViewHierarchyResult {
    * (withheld) focused root. Absent on pre-#6172 runners — treat as `null_root`.
    */
   ctrlProxyIncompleteReason?: CtrlProxyIncompleteReason;
+  /** Distinct skipped window roots plus one when the window listing was skipped. */
+  skippedWindowReads?: number;
+  /** IDs of skipped roots; a skipped listing contributes no ID. */
+  skippedWindowIds?: number[];
   /**
    * Sources that contributed to this hierarchy result.
    * When both sources are present, the hierarchy was merged from accessibility service + uiautomator.

@@ -582,3 +582,27 @@ describe("computeFreshness", () => {
     }
   });
 });
+
+test.each(["window_read_skipped", "window_list_skipped"] as const)(
+  "%s reports a partial system_server timeout on readable and unavailable captures",
+  (reason) => {
+    for (const unavailable of [false, true]) {
+      const result = computeFreshness({
+        actualTimestamp: NOW,
+        now: NOW,
+        verified: true,
+        unavailable,
+        incompleteCapture: { sdkInt: 34, reason },
+      });
+      expect(result.isFresh).toBe(false);
+      expect(result.warning).toContain(
+        reason === "window_list_skipped" ? "listing read timed out" : "window read timed out",
+      );
+      expect(result.warning).toContain("system_server stalled");
+      expect(result.warning).toContain("partial");
+      expect(result.warning).toContain("observe again");
+      expect(result.warning).not.toContain("isAccessibilityTool");
+      expect(result.warning).not.toContain("no root node");
+    }
+  },
+);

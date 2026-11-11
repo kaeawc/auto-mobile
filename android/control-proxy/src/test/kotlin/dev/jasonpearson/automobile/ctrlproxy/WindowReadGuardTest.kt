@@ -65,6 +65,21 @@ internal class WindowReadGuardTest {
   }
 
   @Test
+  fun `an abandoned root is discarded and its window copy cleaned exactly once`() {
+    worker.durations += WINDOW_READ_BUDGET_MS + 1
+    var cleanups = 0
+    val discarded = mutableListOf<String>()
+    val result = guard.read(1, { "root" }, { cleanups += 1 }, { discarded += it })
+    assertTrue(result is WindowReadResult.Skipped)
+    assertEquals(0, cleanups)
+    assertTrue(discarded.isEmpty())
+    worker.abandonedReads.removeFirst().invoke()
+    assertEquals(1, cleanups)
+    assertEquals(listOf("root"), discarded)
+    assertTrue(worker.abandonedReads.isEmpty())
+  }
+
+  @Test
   fun `worker timeout discards a late value without real threads or sleeps`() {
     val tasks = ArrayDeque<Runnable>()
     val executor = WorkerWindowReadExecutor(Executor { tasks.addLast(it) })

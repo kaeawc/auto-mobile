@@ -91,6 +91,7 @@ export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "settleMs",
   "settlePolls",
   "accessibilityAuditSkipped",
+  "surface",
 ] as const satisfies readonly (keyof ObserveResult)[];
 
 /**

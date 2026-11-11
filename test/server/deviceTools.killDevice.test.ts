@@ -1,3 +1,4 @@
+import { FakeAvdColdBootMarkerStore } from "../fakes/FakeAvdColdBootMarkerStore";
 import { createHostEmulatorProcessStopper } from "../../src/devices/hostEmulatorProcessStopper";
 import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -932,50 +933,75 @@ describe("killDevice handler", () => {
     ).toBe(false);
   });
 
-  test("killDevice stops the Desktop Head Unit this daemon spawned for that emulator", async () => {
-    const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
-    manager = new SuccessfulKillDeviceManager();
-    manager.setBootedDevices("android", [device]);
-    const stops: Array<{ deviceId: string; deviceStopped?: boolean }> = [];
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      timer: new FakeTimer(),
-      androidAutoProjection: {
-        resolveInputs: async () => {
-          throw new Error("not used by killDevice");
+  for (const markerFailure of [false, true]) {
+    test(`killDevice stops its DHU and records cold boot before killing, marker failure=${markerFailure}`, async () => {
+      const device: BootedDevice = {
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      };
+      const markers = new FakeAvdColdBootMarkerStore();
+      if (markerFailure) {
+        markers.failure = "write";
+      }
+      class MarkerCheckingManager extends SuccessfulKillDeviceManager {
+        override async killDevice(
+          device: BootedDevice,
+          options?: DeviceShutdownOptions,
+        ): Promise<void> {
+          expect(markers.marked.has(device.name)).toBe(!markerFailure);
+          markers.calls.push("console-kill");
+          await super.killDevice(device, options);
+        }
+      }
+      manager = new MarkerCheckingManager();
+      manager.setBootedDevices("android", [device]);
+      const stops: Array<{ deviceId: string; deviceStopped?: boolean }> = [];
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        timer: new FakeTimer(),
+        avdColdBootMarkers: markers,
+        androidAutoProjection: {
+          resolveInputs: async () => {
+            throw new Error("not used by killDevice");
+          },
+          apply: async () => {
+            throw new Error("not used by killDevice");
+          },
+          resolveHeadUnitInputs: async () => {
+            throw new Error("not used by killDevice");
+          },
+          startHeadUnit: async () => {
+            throw new Error("not used by killDevice");
+          },
+          stopDesktopHeadUnit: async (deviceId, options) => {
+            stops.push({ deviceId, ...options });
+            return !options?.deviceStopped;
+          },
         },
-        apply: async () => {
-          throw new Error("not used by killDevice");
-        },
-        resolveHeadUnitInputs: async () => {
-          throw new Error("not used by killDevice");
-        },
-        startHeadUnit: async () => {
-          throw new Error("not used by killDevice");
-        },
-        stopDesktopHeadUnit: async (deviceId, options) => {
-          stops.push({ deviceId, ...options });
-        },
-      },
+      });
+
+      await ToolRegistry.getTool("killDevice")!.handler({ device });
+
+      expect(markers.calls).toEqual(["write:Pixel", "console-kill"]);
+      // Stopped before the kill; its redirect is forgotten only once the kill succeeded.
+      expect(stops).toEqual([
+        { deviceId: "emulator-5554", deviceStopped: false },
+        { deviceId: "emulator-5554", deviceStopped: true },
+      ]);
     });
-
-    await ToolRegistry.getTool("killDevice")!.handler({ device });
-
-    // Stopped before the kill; its redirect is forgotten only once the kill succeeded.
-    expect(stops).toEqual([
-      { deviceId: "emulator-5554", deviceStopped: false },
-      { deviceId: "emulator-5554", deviceStopped: true },
-    ]);
-  });
+  }
 
   test("a failed kill stops the DHU but keeps its host port redirect for a re-provision", async () => {
     const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+    const markers = new FakeAvdColdBootMarkerStore();
     manager = new FailingKillDeviceManager();
     manager.setBootedDevices("android", [device]);
     const stops: Array<{ deviceId: string; deviceStopped?: boolean }> = [];
     setDeviceToolsDependencies({
       deviceManagerFactory: () => manager,
       timer: new FakeTimer(),
+      avdColdBootMarkers: markers,
       androidAutoProjection: {
         resolveInputs: async () => {
           throw new Error("not used by killDevice");
@@ -991,6 +1017,7 @@ describe("killDevice handler", () => {
         },
         stopDesktopHeadUnit: async (deviceId, options) => {
           stops.push({ deviceId, ...options });
+          return true;
         },
       },
     });
@@ -998,6 +1025,7 @@ describe("killDevice handler", () => {
     await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).rejects.toThrow(
       "adb emu kill failed",
     );
+    expect(markers.marked.has("Pixel")).toBe(true);
     expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     expect(stops).toEqual([{ deviceId: "emulator-5554", deviceStopped: false }]);
   });
@@ -1082,6 +1110,7 @@ describe("killDevice handler", () => {
             redirectOwner = null;
           }
           runningDhus.delete(incarnation);
+          return false;
         },
       },
     });
@@ -1138,12 +1167,13 @@ describe("killDevice handler", () => {
         },
         stopDesktopHeadUnit: async (_deviceId, options) => {
           if (!options?.deviceStopped) {
-            return;
+            return false;
           }
           postKillStopStarted = true;
           await new Promise<void>((resolve) => {
             settleStop = resolve;
           });
+          return false;
         },
       },
     });
@@ -1217,12 +1247,13 @@ describe("killDevice handler", () => {
         stopDesktopHeadUnit: async (deviceId, options) => {
           stoppedDeviceIds.push(deviceId);
           if (!options?.deviceStopped) {
-            return;
+            return false;
           }
           postKillStopStarted = true;
           await new Promise<void>((resolve) => {
             settleStop = resolve;
           });
+          return false;
         },
       },
     });
@@ -1286,6 +1317,7 @@ describe("killDevice handler", () => {
         },
         stopDesktopHeadUnit: async (deviceId) => {
           stops.push(deviceId);
+          return false;
         },
       },
     });

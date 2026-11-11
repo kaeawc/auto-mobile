@@ -120,10 +120,6 @@ interface AutoMobileFeatureOperations {
   fun setFeatureFlag(key: String, enabled: Boolean, config: JsonObject? = null): FeatureFlagState
 
   fun listPerformanceAuditResults(
-    startTime: String? = null,
-    endTime: String? = null,
-    limit: Int? = null,
-    offset: Int? = null,
-    deviceId: String? = null,
+    query: PerformanceAuditQuery = PerformanceAuditQuery(),
   ): PerformanceAuditHistoryResult
 }

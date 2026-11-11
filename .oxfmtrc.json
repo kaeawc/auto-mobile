@@ -1,8 +1,13 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
+    "test/fixtures/wear/systemtray/ctrlproxy-card-expanded-reply-input.json",
+    "test/fixtures/wear/systemtray/ctrlproxy-round384-stream-reply-card.json",
+    "test/fixtures/wear/systemtray/ctrlproxy-reply-keyboard.json",
+    "test/fixtures/wear/systemtray/ctrlproxy-reply-keyboard-typed.json",
     "test/fixtures/xr-headset/*.json",
     "test/fixtures/xr/systemui-hidden-chrome.json",
+    "test/fixtures/ios-carplay/*.json",
     "test/fixtures/simctl/pairs/**",
     "test/fixtures/android-avdmanager/*.txt",
     "test/fixtures/visionos-settings/*.json",

@@ -10,7 +10,14 @@ const PERFORMANCE_RESOURCE_URIS = {
   BASE: "automobile:performance-results",
 } as const;
 
-const PERFORMANCE_QUERY_KEYS = ["startTime", "endTime", "limit", "offset", "deviceId"] as const;
+const PERFORMANCE_QUERY_KEYS = [
+  "startTime",
+  "endTime",
+  "limit",
+  "offset",
+  "deviceId",
+  "deviceSessionUuid",
+] as const;
 const PERFORMANCE_QUERY_TEMPLATE = `${PERFORMANCE_RESOURCE_URIS.BASE}{?${PERFORMANCE_QUERY_KEYS.join(",")}}`;
 const PERFORMANCE_QUERY_PARAM_KEYS = new Set<string>(PERFORMANCE_QUERY_KEYS);
 
@@ -64,9 +71,9 @@ function parseTimestampParam(
   return normalized;
 }
 
-function parsePerformanceParams(
+export function parsePerformanceParams(
   params: Record<string, string>,
-): Pick<PerformanceAuditQueryParams, "startTime" | "endTime" | "limit" | "offset" | "deviceId"> {
+): PerformanceAuditQueryParams {
   const unknownKeys = Object.keys(params).filter((key) => !PERFORMANCE_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
@@ -77,6 +84,7 @@ function parsePerformanceParams(
   const limitRaw = params.limit?.trim();
   const offsetRaw = params.offset?.trim();
   const deviceIdRaw = params.deviceId?.trim();
+  const deviceSessionUuidRaw = params.deviceSessionUuid?.trim();
 
   return {
     startTime,
@@ -84,10 +92,11 @@ function parsePerformanceParams(
     limit: parseInteger(limitRaw, "limit", { min: 1, max: PERFORMANCE_RESULTS_LIMIT_MAX }),
     offset: parseInteger(offsetRaw, "offset", { min: 0 }),
     deviceId: deviceIdRaw || undefined,
+    deviceSessionUuid: deviceSessionUuidRaw || undefined,
   };
 }
 
-function buildPerformanceUri(options: PerformanceAuditQueryParams): string {
+export function buildPerformanceUri(options: PerformanceAuditQueryParams): string {
   const query = new URLSearchParams();
   if (options.startTime !== undefined) {
     query.set("startTime", String(options.startTime));
@@ -103,6 +112,9 @@ function buildPerformanceUri(options: PerformanceAuditQueryParams): string {
   }
   if (options.deviceId !== undefined) {
     query.set("deviceId", options.deviceId);
+  }
+  if (options.deviceSessionUuid !== undefined) {
+    query.set("deviceSessionUuid", options.deviceSessionUuid);
   }
 
   const queryString = query.toString();

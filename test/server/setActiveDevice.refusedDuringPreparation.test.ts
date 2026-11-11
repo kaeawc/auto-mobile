@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool, type DeviceReadinessReservation } from "../../src/daemon/devicePool";
@@ -85,6 +86,7 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
     let readinessCalls = 0;
     let readinessFailure: Error | undefined;
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       deviceManagerFactory: () => utils,

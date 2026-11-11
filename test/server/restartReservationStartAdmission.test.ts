@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { toolJson } from "../helpers/toolResponse";
 import { withWireDeadline } from "../helpers/requestDeadline";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
@@ -150,6 +151,7 @@ describe("start admission and owner resume for restart reservations", () => {
     });
     lastManagerFactory = () => manager;
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       idGenerator: new FakeIdGenerator(),

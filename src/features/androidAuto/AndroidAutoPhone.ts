@@ -36,12 +36,15 @@ export interface AndroidAutoPhone {
   forceStopAndroidAuto(signal?: AbortSignal): Promise<void>;
   /** `adb emu redir add`: unlike `adb forward`, the redirect survives an adb transport drop. */
   addHeadUnitRedirect(signal?: AbortSignal): Promise<void>;
+  /** `adb emu redir del`: frees host port 5277 on a phone emulator that keeps running. */
+  removeHeadUnitRedirect(signal?: AbortSignal): Promise<void>;
 }
 
 export type AndroidAutoPhoneAdb = Pick<AdbExecutor, "execute">;
 
 const QUERY_TIMEOUT_MS = 15_000;
-const STATE_TIMEOUT_MS = 5_000;
+/** Bound on one `adb get-state` check. */
+export const ADB_STATE_TIMEOUT_MS = 5_000;
 const INSTALL_TIMEOUT_MS = 300_000;
 const YES = "yes";
 
@@ -73,7 +76,7 @@ export class AdbAndroidAutoPhone implements AndroidAutoPhone {
   async adbState(signal?: AbortSignal): Promise<string> {
     try {
       const result = await this.adb.execute(["get-state"], {
-        timeoutMs: STATE_TIMEOUT_MS,
+        timeoutMs: ADB_STATE_TIMEOUT_MS,
         signal,
         noRetry: true,
       });
@@ -156,6 +159,19 @@ export class AdbAndroidAutoPhone implements AndroidAutoPhone {
     if (result.error || emulatorConsoleReportsFailure(result.stdout, result.stderr)) {
       throw new ActionableError(
         `adb emu redir add ${spec} failed: ${result.error ?? emulatorConsoleFailureReason(result.stdout, result.stderr)}. The redirect needs an emulator; a physical phone is not supported.`,
+      );
+    }
+  }
+
+  async removeHeadUnitRedirect(signal?: AbortSignal): Promise<void> {
+    const spec = `tcp:${HEAD_UNIT_SERVER_PORT}`;
+    const result = await this.run(["emu", "redir", "del", spec], `adb emu redir del ${spec}`, {
+      timeoutMs: QUERY_TIMEOUT_MS,
+      signal,
+    });
+    if (result.error || emulatorConsoleReportsFailure(result.stdout, result.stderr)) {
+      throw new ActionableError(
+        `adb emu redir del ${spec} failed: ${result.error ?? emulatorConsoleFailureReason(result.stdout, result.stderr)}.`,
       );
     }
   }

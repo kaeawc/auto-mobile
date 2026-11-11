@@ -38,6 +38,9 @@ class PerformanceFacetEpochTest {
   /** Device ids of every audit-history load, in order. */
   private val loads = Collections.synchronizedList(mutableListOf<String?>())
 
+  /** `deviceId to deviceSessionUuid` of every audit-history load, in order. */
+  private val epochLoads = Collections.synchronizedList(mutableListOf<Pair<String?, String?>>())
+
   private fun recordingGraph(): AutoMobileGraphProvider {
     val client = FakeAutoMobileClient()
     val defaults = DefaultDataSourceFactory(client)
@@ -47,10 +50,12 @@ class PerformanceFacetEpochTest {
           mode: DataSourceMode,
           clientProvider: (() -> AutoMobileClient)?,
           deviceId: String?,
+          deviceSessionUuid: String?,
         ): PerformanceDataSource =
           object : PerformanceDataSource {
             override suspend fun getPerformanceRun(): Result<PerformanceRun> {
               loads += deviceId
+              epochLoads += deviceId to deviceSessionUuid
               return Result.Error(IllegalStateException("no audit history for $deviceId"))
             }
           }
@@ -136,6 +141,11 @@ class PerformanceFacetEpochTest {
       waitUntil { loadsFor("device-A") > loadsA }
       waitForIdle()
       assertEquals(loadsB, loadsFor("device-B"))
+      // Each pane's history read is scoped to its own epoch (#17030).
+      synchronized(epochLoads) {
+        assertEquals("epoch-a2", epochLoads.last { it.first == "device-A" }.second)
+        assertTrue(epochLoads.filter { it.first == "device-B" }.all { it.second == "epoch-b1" })
+      }
       assertEquals(2, streams.getValue("device-A").size)
       assertEquals(1, streams.getValue("device-B").size)
       waitForIdle()

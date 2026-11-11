@@ -68,7 +68,7 @@ describe("tapOn semantic link outcomes", () => {
           const invalidate = spyOn(client, "invalidateCache");
           const adb = new FakeAdbClient();
           const tap = new TapOnElement(
-            { deviceId: "semantic-link", name: "Test Device", platform },
+            { deviceId: "semantic-link", name: "Test Device", platform, formFactor: "phone" },
             adb,
             {
               timer,

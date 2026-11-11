@@ -62,6 +62,8 @@ export interface PerformanceAuditResultsTable {
   time_to_interactive_ms: number | null;
   frame_rate_fps: number | null;
   node_id: number | null; // FK to navigation_nodes.id
+  // Device epoch the audit ran against (#17030); null for rows predating it.
+  device_session_uuid: string | null;
   created_at: Generated<string>;
 }
 

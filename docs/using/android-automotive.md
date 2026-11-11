@@ -145,11 +145,14 @@ by default; see [Device condition fixtures](device-condition.md). The `vehicle` 
 
 `vehicle.motion` needs a non-user image (userdebug or eng, such as `android-automotive` API 34 ext9); on a `user` build such as the Play Store AAOS image it returns `unsupported`; `vehicle.nightMode` works on both.
 
-To check before calling, read `vehicle` in a device's `listDevices` or `getAndroid` description. It is
-present only on automotive devices, as `{ "motion": ..., "nightMode": ... }` with each value
-`supported`, `unsupported` or `unknown`: an `android-automotive` image reports motion `supported`, an
-`android-automotive-playstore` image reports it `unsupported`, and motion is `unknown` when no car image
-tag is known. A physical head unit reports both `unsupported`.
+To check before calling, read `vehicle` in a device's `listDevices` or `getAndroid` description, or
+in its booted-devices resource entry. It is present only on automotive devices, as
+`{ "motion": ..., "nightMode": ... }` with each value `supported`, `unsupported` or `unknown`: an
+`android-automotive` image reports motion `supported`, an `android-automotive-playstore` image reports
+it `unsupported`, and motion is `unknown` when no car image tag is known. In the booted-devices
+resource, a booted car emulator's build props (its `traits.vehicle`) take precedence over the image
+tag, so motion is known there even when the image is not. A physical head unit reports both
+`unsupported`.
 
 Motion uses gear and parking-brake events with continuous speed events that renew while driving is
 active. The result includes `Current Driving State`: driving must remain MOVING (2) for two seconds;
@@ -230,7 +233,8 @@ on `pressButton` is Android only.
 
 On an emulator, create the extra display as public: the last field of `-multidisplay` must be `1`, for
 example `-multidisplay 1,1280,720,160,1`. Android accessibility does not track a private virtual display
-(`0`), so it has no view hierarchy and `observe` refuses it.
+(`0`), so it has no view hierarchy and `observe` refuses it with an error that names the display as
+private and gives its logical display id. Retrying does not help; recreate the display as public.
 
 ## Not supported
 

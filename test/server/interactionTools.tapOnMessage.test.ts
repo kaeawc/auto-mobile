@@ -287,7 +287,12 @@ describe("tapOnHandler (registered handler wiring)", () => {
   });
 
   test("IME-occluded Android focus keeps the tapOn MCP failure payload", async () => {
-    const device: BootedDevice = { name: "Pixel", deviceId: "fake", platform: "android" };
+    const device: BootedDevice = {
+      name: "Pixel",
+      deviceId: "fake",
+      platform: "android",
+      formFactor: "phone",
+    };
     const hierarchy = imeOcclusionHierarchy();
     const element = new DefaultElementParser()
       .flattenViewHierarchy(hierarchy, { includeWindows: true })

@@ -843,6 +843,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId", "action"],
@@ -2587,6 +2591,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -9866,6 +9874,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId"],
@@ -14999,6 +15011,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId"],
@@ -15311,6 +15327,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -16070,6 +16090,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -18027,6 +18051,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -21829,6 +21857,7 @@
           "type": "string"
         },
         "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -37492,6 +37521,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId"],
@@ -42824,6 +42857,10 @@
           "type": "boolean"
         },
         "device": {
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },
@@ -56683,6 +56720,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
+          "type": "string"
         }
       },
       "required": ["appId"],
@@ -58559,6 +58600,10 @@
         },
         "device": {
           "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device id (Android serial such as emulator-5554, or iOS UDID) to target when several devices are booted",
           "type": "string"
         }
       },

@@ -19,7 +19,10 @@ internal object DebugInspectorAccess {
   private const val ROOT_UID = 0
   private const val SHELL_UID = 2000
 
-  /** Resolves the packages that share a calling uid; narrow seam over `PackageManager.getPackagesForUid`. */
+  /**
+   * Resolves the packages that share a calling uid; narrow seam over
+   * `PackageManager.getPackagesForUid`.
+   */
   fun interface CallingPackageResolver {
     fun packagesForUid(uid: Int): Array<String>?
   }

@@ -36,14 +36,18 @@ unavailable without hardware). Their `dealloc` is a no-op, so they leak; objects
 
 An injected `IosCameraPosterRegistry` stores image paths or QR text plus generated PNG paths
 by simulator UDID, with an in-memory process-wide default. `startDevice` records after selecting
-or booting the simulator, including already-running simulators. `setDeviceState` validates host
+or booting the simulator, including already-running simulators, and only after the readiness
+reservation's ownership check, so a request rejected for another client's simulator cannot
+overwrite that client's poster. `setDeviceState` validates host
 PNG/JPG/JPEG files and records or clears the poster. Whitespace is allowed; `surface` is echoed
 and ignored. Both run the dylib provider's `ensure()` before recording, so a missing compiler,
 source or override fails the call that sets the poster and leaves the previous record intact;
 `clear` never builds. A record lasts until cleared, the simulator's `killDevice` completes
-(post-shutdown cleanup clears the UDID), its session is released (`SessionReleaseBroadcaster`
-with a device snapshot; upgrade-only re-announcements are ignored because the device may already
-belong to the next owner), the daemon removes the device, or the daemon restarts. A session that
+(post-shutdown cleanup clears the UDID), its session is released or unbinds it (a
+`setActiveDevice` rebind; `registerIosCameraPosterSessionCleanup` on the session manager, plus
+`SessionReleaseBroadcaster` with a device snapshot; upgrade-only re-announcements are ignored
+because the device may already belong to the next owner), the daemon removes the device, or the
+daemon restarts. A session that
 reuses the simulator therefore never inherits an earlier session's poster.
 
 `setDeviceState` returns `supported: true`, `method: "ios_simulator_dyld_injection"`, the path

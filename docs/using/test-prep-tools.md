@@ -201,7 +201,7 @@ On iOS, `launchApp` applies a registered poster with a cold launch and reports
 `cameraPosterApplied: true`. Apple system apps (`com.apple.*`) cannot be injected: they launch
 normally and the result reports `cameraPosterApplied: false` with a note in `message`.
 A poster lasts until it is cleared, the simulator is killed with `killDevice`, the session that
-holds the simulator is released, or the daemon restarts; a later session on the same simulator
+holds the simulator is released or switches to another device, or the daemon restarts; a later session on the same simulator
 starts without one. Use a PNG/JPG/JPEG file that exists on the host.
 Setting a poster prepares the injection library, so a missing Xcode or library fails
 `startDevice` or `setDeviceState` (nothing is recorded) instead of the later `launchApp`.

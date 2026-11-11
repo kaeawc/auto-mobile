@@ -208,9 +208,11 @@ const bootAndPrepareDevice = async (
   );
   const mappingOptions = { signal, totalDeadlineMs: budgets.automationDeadlineMs };
   await validatePooledDeviceMapping(state.boot.device, requestedIdentity, mappingOptions);
-  await recordStartCameraPoster(args, state.boot.device, deps);
   preparation.sourceImage = sourceImageForAcquiredBoot(state.boot, budgets.androidAvdName);
   await reserveBootReadiness(args, budgets, deps, { daemonState: deps.daemonState, ...options });
+  // After the ownership check: a request rejected for another client's simulator must not
+  // overwrite that client's poster.
+  await recordStartCameraPoster(args, state.boot.device, deps);
 
   // A new incarnation must not inherit a prior intentional-shutdown marker
   // while its per-device runner setup is in flight.

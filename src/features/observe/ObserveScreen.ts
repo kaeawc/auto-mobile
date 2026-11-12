@@ -927,6 +927,10 @@ export class RealObserveScreen implements ObserveScreen {
       observation,
       options.signal,
     );
+    if (!disagrees) {
+      // A disagreeing capture is re-polled with its stack, which enriches it in full.
+      this.enrichStage.refreshXrPanelSpace(observation);
+    }
     return disagrees;
   }
 

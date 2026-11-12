@@ -1,3 +1,5 @@
+import { assertXrSwipeDisplayInputSupported } from "../../xr/xrSpatialPanelInput";
+import type { ObservedAndroidXr } from "../../xr/xrPanelSpace";
 import type {
   SwipeGestureRequest,
   BoomerangGestureRequest,
@@ -78,6 +80,7 @@ export type TalkBackSwipeExecutorDependencies = {
   adb: AdbExecutor;
   timer: Timer;
   featureFlags?: FeatureFlagReader;
+  androidXr?: ObservedAndroidXr;
 };
 
 export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
@@ -88,6 +91,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   private readonly adb: AdbExecutor;
   private readonly timer: Timer;
   private readonly featureFlags?: FeatureFlagReader;
+  private readonly androidXr?: ObservedAndroidXr;
 
   constructor({
     device,
@@ -97,6 +101,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     adb,
     timer,
     featureFlags,
+    androidXr,
   }: TalkBackSwipeExecutorDependencies) {
     this.device = device;
     this.executeGesture = executeGesture;
@@ -105,9 +110,11 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     this.adb = adb;
     this.timer = timer;
     this.featureFlags = featureFlags;
+    this.androidXr = androidXr;
   }
 
   async executeSwipeGesture({
+    observation,
     x1,
     y1,
     x2,
@@ -180,6 +187,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
 
       logger.info("[SwipeOn] TalkBack enabled, using accessibility-aware swipe");
       return this.executeAndroidSwipeWithAccessibility({
+        observation,
         x1,
         y1,
         x2,
@@ -191,6 +199,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
         signal,
       });
     } else {
+      await this.assertDisplayInputSupported(observation, signal);
       if (boomerangEnabled) {
         logger.debug("[SwipeOn] TalkBack disabled, using boomerang swipe");
         const result = await this.executeBoomerangGesture({
@@ -353,6 +362,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   }
 
   async executeAndroidSwipeWithAccessibility({
+    observation,
     x1,
     y1,
     x2,
@@ -382,6 +392,8 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     } else {
       logger.debug("[SwipeOn] No container with resource-id, skipping ACTION_SCROLL");
     }
+
+    await this.assertDisplayInputSupported(observation, signal);
 
     // Fallback to two-finger swipe
     logger.info("[SwipeOn] Using two-finger swipe gesture for TalkBack");
@@ -502,6 +514,15 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     }
 
     return undefined;
+  }
+
+  private async assertDisplayInputSupported(
+    observation: SwipeGestureRequest["observation"],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (observation && this.androidXr) {
+      assertXrSwipeDisplayInputSupported(observation, await this.androidXr(observation, signal));
+    }
   }
 
   buildGestureOptions(

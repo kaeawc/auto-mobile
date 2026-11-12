@@ -1,6 +1,7 @@
 import { cropSource } from "../../helpers/imageRelativePoint";
 import { resolveTapAtCoordinates } from "../../../src/features/action/tapAtCoordinateResolution";
 import { xrBackStack } from "../../helpers/xrHeadset";
+import { spatialPanelObservation } from "../../helpers/xrSpatialPanelFixture";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { recordPlanCall } from "../../helpers/recordPlanCall";
 import { expect, test } from "bun:test";
@@ -349,6 +350,25 @@ test("XR native point space dispatches hierarchy coordinates unmapped", async ()
   expect(result.success).toBe(true);
   expect(result.xrPanel).toBeUndefined();
   expect(fake.androidDispatches[0]).toMatchObject({ x: 262, y: 442 });
+});
+
+test("XR native tapAt refuses embedded SpatialPanel display input before dispatch", async () => {
+  const fake = createTapAt(
+    { deviceId: "test", name: "test", platform: "android" },
+    10,
+    10,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    new FakeAndroidXrDetector(true),
+  );
+  fake.observeScreen.setObserveResult(spatialPanelObservation());
+  const result = await fake.tapAt.execute({ x: 262, y: 442, pointSpace: "native" });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("XR spatial-panel input injection is unsupported");
+  expect(fake.androidDispatches).toEqual([]);
 });
 
 test("XR public tapAt with the same numbers still treats them as screenshot pixels", async () => {

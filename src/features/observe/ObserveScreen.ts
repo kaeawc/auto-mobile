@@ -432,6 +432,7 @@ export class RealObserveScreen implements ObserveScreen {
     });
     this.enrichStage = new SingleDisplayEnrichStage({
       device: () => this.device,
+      isAndroidXr: () => this.xrDisplaySize.isXrCached(),
       timer: () => this.timer,
       platformTraits: () => this.platformTraits,
       screenshotRecorder: () => this.screenshotRecorder,

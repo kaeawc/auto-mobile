@@ -1,3 +1,4 @@
+import { isVisibleAutoScrollTarget } from "./SwipeOnAutoTargeting";
 import { observedAndroidXr, withXrPoseWarning, xrScreenSwipeBounds } from "../../xr/xrPanelSpace";
 import { rejectTvosTouch } from "../../tvos/TvosActions";
 import { watchSwipeOn } from "../../watch/WatchActions";
@@ -52,7 +53,7 @@ import {
   NoOpPerformanceTracker,
 } from "../../../utils/PerformanceTracker";
 import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
-import { resolveSwipeDirection } from "./swipeOnUtils";
+import { assertSwipeStartOnLayer, resolveSwipeDirection } from "./swipeOnUtils";
 import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../../ctrlProxy/accessibility/AccessibilityDetector";
 import {
@@ -101,30 +102,12 @@ import { type RenderedObservationReader } from "../TargetDisplayAction";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { FeatureFlagService, type FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
-import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
+import { scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { assessSwipeNavigation } from "./swipeNavigation";
 import { settleSdkRouteAssessment, type SdkRouteSource } from "./sdkRouteSettle";
 import { resolveActionCall, type ActionCall } from "../ActionCall";
 
 /** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
-/**
- * Refuse a swipe whose start point lies on the other `layer`: the window under the down event
- * receives the whole gesture (issue #9305). Resolution itself is scoped where the target is found.
- */
-function assertSwipeStartOnLayer(
-  hierarchy: ViewHierarchyResult | undefined,
-  layer: SwipeOnOptions["layer"],
-  startX: number,
-  startY: number,
-): void {
-  assertGestureOnLayer(
-    hierarchy,
-    layer,
-    [{ x: Math.floor(startX), y: Math.floor(startY) }],
-    "swipe",
-  );
-}
-
 export class SwipeOn extends BaseVisualChange {
   private readonly skipCallerDisplayFence: boolean;
   private readonly stopAfterIosGestureFailure: boolean;
@@ -217,6 +200,7 @@ export class SwipeOn extends BaseVisualChange {
         ),
     }));
     this.talkBackExecutor = new TalkBackSwipeExecutor({
+      androidXr: this.androidXr,
       device,
       executeGesture: this.executeGesture,
       accessibilityService: this.accessibilityService,
@@ -346,9 +330,10 @@ export class SwipeOn extends BaseVisualChange {
     if (resolutionGeneration !== undefined) {
       completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
     }
-    const scrollables = this.scrollables.findScrollableElements(
-      scopeHierarchyForSelector(observeResult.viewHierarchy, layer),
-    );
+    const xr = await this.androidXr(observeResult, signal);
+    const scrollables = this.scrollables
+      .findScrollableElements(scopeHierarchyForSelector(observeResult.viewHierarchy, layer))
+      .filter((element) => isVisibleAutoScrollTarget(element, xr));
     const candidates = this.autoTargeting.buildScrollableCandidates(scrollables);
     return { scrollables, candidates, observeResult };
   }
@@ -836,6 +821,7 @@ export class SwipeOn extends BaseVisualChange {
                 sdkObservation: options.fromEdge ? undefined : observeResult,
               })
             : this.talkBackExecutor.executeSwipeGesture({
+                observation: observeResult,
                 x1: Math.floor(startX),
                 y1: Math.floor(startY),
                 x2: Math.floor(endX),
@@ -967,6 +953,7 @@ export class SwipeOn extends BaseVisualChange {
                 sdkObservation: observeResult,
               })
             : this.talkBackExecutor.executeSwipeGesture({
+                observation: observeResult,
                 x1: Math.floor(startX),
                 y1: Math.floor(startY),
                 x2: Math.floor(endX),

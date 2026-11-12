@@ -1,0 +1,260 @@
+import { getSearchableEntries } from "../../../src/features/observe/output/elementProvenance";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { SafeAreaAuditor } from "../../../src/features/observe/audits/SafeAreaAuditor";
+import { expect, test } from "bun:test";
+import { SingleDisplayEnrichStage } from "../../../src/features/observe/SingleDisplayEnrichStage";
+import { CachedAndroidXrDisplaySize } from "../../../src/features/observe/android/AndroidXrDisplaySize";
+import type { SingleDisplayRun } from "../../../src/features/observe/singleDisplayRun";
+import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
+import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import { ObserveElementsBuilder } from "../../../src/features/observe/ObserveElementsBuilder";
+import { sanitizeObserveResult } from "../../../src/features/observe/output/ObserveResultOutput";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { spatialPanelObservation } from "../../helpers/xrSpatialPanelFixture";
+import type { ObserveResult } from "../../../src/models";
+
+function unused(): never {
+  throw new Error("Unexpected stage dependency");
+}
+async function enrich(result: ObserveResult, xr: boolean, platform: "android" | "ios" = "android") {
+  const timer = new FakeTimer();
+  const detector = new FakeAndroidXrDetector(xr);
+  const device = {
+    name: "fake",
+    deviceId: "fixture-xr-output",
+    platform,
+    formFactor: "phone",
+  } as const;
+  const xrDisplaySize = new CachedAndroidXrDisplaySize({
+    device: () => device,
+    xrDetector: detector,
+    hierarchyCollector: unused,
+    readDisplaySize: async () => result.screenSize,
+  });
+  await xrDisplaySize.prime(result, result.viewHierarchy!);
+  const stage = new SingleDisplayEnrichStage({
+    device: () => device,
+    isAndroidXr: () => xrDisplaySize.isXrCached(),
+    timer: () => timer,
+    platformTraits: unused,
+    screenshotRecorder: unused,
+    pathProtection: unused,
+    performanceAuditor: unused,
+    accessibilityAuditor: unused,
+    accessibilityStateDetector: unused,
+    predictiveUIState: unused,
+    safeAreaAuditor: () => new SafeAreaAuditor(),
+    elementsBuilder: () => new ObserveElementsBuilder(),
+    screenRound: unused,
+    deferredBackStackDisplays: unused,
+    stampScreenSizeUnits: () => {},
+    processRecomposition: async () => {},
+    captureSettledScreenshot: async () => {},
+  });
+  const run: SingleDisplayRun = {
+    options: undefined,
+    perf: new NoOpPerformanceTracker(),
+    queryOptions: undefined,
+    skipWaitForFresh: true,
+    minTimestamp: 0,
+    signal: undefined,
+    skipBackStack: false,
+    observerMode: true,
+    preserveDisplayState: false,
+    displayRequest: undefined,
+    androidDisplayCache: new ObservedAndroidDisplayCache(timer),
+    screenshotMode: "none",
+    iosLockState: undefined,
+    observedAndroid: undefined,
+    explicitlyRouted: false,
+    requestedPanel: undefined,
+    requestedDisplayId: undefined,
+    result,
+    startTime: 0,
+    captureStart: { revision: 0, identityRevision: 0 },
+    routedAggregateSecondary: false,
+    cacheGeneration: 0,
+  };
+  const enriched = stage.enrichSingleDisplay(run);
+  expect(result.elements).toBeDefined();
+  await enriched;
+  return detector;
+}
+const hidden = [
+  "Cancel",
+  "Confirm",
+  "Recents",
+  "Clear all",
+  "Launcher",
+  "Notifications",
+  "Passthrough Window",
+  "Recenter",
+  "Unbind Controllers",
+];
+
+test.each([false, "host-missing"] as const)(
+  "XR elements, visibleTexts and skeleton omit hidden SystemUI while preserving raw action nodes (capture=%s)",
+  async (capture) => {
+    const observation = spatialPanelObservation(capture);
+    const raw = structuredClone(observation.viewHierarchy);
+    const detector = await enrich(observation, true);
+    expect(detector.queries).toEqual(["fixture-xr-output"]);
+    const entries = getSearchableEntries(observation.elements!)!;
+    expect(entries.every((entry, index) => entry.index === index)).toBe(true);
+    const elements = JSON.stringify(observation.elements);
+    const visibleTexts = observation.elements!.text.map(
+      (element) => element.text ?? element["content-desc"],
+    );
+    const output = sanitizeObserveResult(observation, {
+      dropElements: true,
+      compact: true,
+      project: "skeleton",
+    });
+    const skeleton = JSON.stringify(output);
+    for (const text of hidden) {
+      expect(elements.includes(`"${text}"`)).toBe(false);
+      expect(visibleTexts).not.toContain(text);
+      expect(skeleton.includes(text)).toBe(false);
+    }
+    for (const text of ["Settings", "Item 1"]) {
+      expect(elements).toContain(text);
+      expect(skeleton).toContain(text);
+    }
+    expect(observation.viewHierarchy).toEqual(raw);
+    expect(JSON.stringify(raw)).toContain("Unbind Controllers");
+  },
+);
+
+test("non-XR output keeps the captured hidden SystemUI labels", async () => {
+  const observation = spatialPanelObservation();
+  await enrich(observation, false);
+  expect(JSON.stringify(observation.elements)).toContain("Unbind Controllers");
+});
+
+test("XR home space without an app window keeps its hidden chrome", async () => {
+  const observation = spatialPanelObservation();
+  const hierarchy = observation.viewHierarchy!;
+  hierarchy.windows = hierarchy.windows!.filter((window) =>
+    window.packageName?.startsWith("com.android.systemui"),
+  );
+  hierarchy.packageName = "com.android.systemui.xrhomeenv";
+  observation.activeWindow = { ...observation.activeWindow!, appId: hierarchy.packageName };
+  // Use the captured SystemUI window roots; remove the captured app from both representations.
+  hierarchy.hierarchy = {
+    node: {
+      node: hierarchy.windows.flatMap((window) => (window.hierarchy ? [window.hierarchy] : [])),
+    },
+  };
+  await enrich(observation, true);
+  expect(JSON.stringify(observation.elements)).toContain("Unbind Controllers");
+});
+
+test("iOS output never asks the XR detector", async () => {
+  const observation = spatialPanelObservation();
+  const detector = await enrich(observation, true, "ios");
+  expect(detector.queries).toEqual([]);
+  expect(JSON.stringify(observation.elements)).toContain("Unbind Controllers");
+});
+
+test.each([true, undefined, "false"])(
+  "only boolean false hides SystemUI (flag=%s)",
+  async (flag) => {
+    const observation = spatialPanelObservation();
+    const matches = new SearchableHierarchy()
+      .project(observation.viewHierarchy!)
+      .filter((entry) => entry.properties.text === "Confirm");
+    expect(matches.length).toBeGreaterThan(0);
+    for (const match of matches) {
+      Object.assign(match.source, { "visible-to-user": flag });
+    }
+    await enrich(observation, true);
+    expect(observation.elements!.text.some((element) => element.text === "Confirm")).toBe(true);
+  },
+);
+
+test("a package-owned SystemUI window without an id cannot hide app nodes", async () => {
+  const observation = spatialPanelObservation();
+  const hierarchy = observation.viewHierarchy!;
+  for (const window of hierarchy.windows!) {
+    if (window.packageName?.startsWith("com.android.systemui")) {
+      delete window.id;
+    }
+  }
+  for (const entry of new SearchableHierarchy().project(hierarchy)) {
+    if (entry.properties.text === "Settings") {
+      Object.assign(entry.source, { "visible-to-user": false });
+    }
+  }
+  await enrich(observation, true);
+  expect(observation.elements!.text.some((element) => element.text === "Settings")).toBe(true);
+  expect(observation.elements!.text.some((element) => element.text === "Confirm")).toBe(false);
+});
+
+test("XR filtering uses the current task when activeWindow is absent", async () => {
+  const observation = spatialPanelObservation("host-missing");
+  delete observation.activeWindow;
+  // Task order is not foreground evidence.
+  observation.backStack!.tasks.reverse();
+  await enrich(observation, true);
+  expect(JSON.stringify(observation.elements)).not.toContain('"Confirm"');
+  expect(JSON.stringify(observation.elements)).toContain('"Settings"');
+});
+
+test("XR output preserves visible captions", async () => {
+  const observation = spatialPanelObservation();
+  await enrich(observation, true);
+  const output = JSON.stringify(
+    sanitizeObserveResult(observation, { dropElements: true, compact: true, project: "skeleton" }),
+  );
+  for (const text of ["XrDogfood", "Minimize the current window", "Close"]) {
+    expect(output).toContain(text);
+  }
+});
+
+test("unfocused XR settings keeps its visible Notifications label while hiding SystemUI chrome", async () => {
+  const observation = spatialPanelObservation(true);
+  await enrich(observation, true);
+  const output = JSON.stringify(
+    sanitizeObserveResult(observation, { dropElements: true, compact: true, project: "skeleton" }),
+  );
+  for (const text of hidden.filter((text) => text !== "Notifications")) {
+    expect(output).not.toContain(text);
+  }
+  for (const text of ["Settings", "Notifications", "XR Dogfood"]) {
+    expect(output).toContain(text);
+  }
+});
+
+test.each(["no-foreground", "systemui-active", "non-XR"] as const)(
+  "a background app panel does not enable XR filtering (%s)",
+  async (kind) => {
+    const observation = spatialPanelObservation("host-missing");
+    if (kind === "no-foreground") {
+      delete observation.activeWindow;
+      delete observation.backStack;
+    } else if (kind === "systemui-active") {
+      observation.activeWindow!.appId = "com.android.systemui.xrhomeenv";
+    }
+    await enrich(observation, kind !== "non-XR");
+    expect(JSON.stringify(observation.elements)).toContain("Unbind Controllers");
+  },
+);
+
+test("any app application window enables XR filtering even without a window tree", async () => {
+  const observation = spatialPanelObservation("host-missing");
+  delete observation.viewHierarchy!.windows!.find((window) => window.id === 105)!.hierarchy;
+  await enrich(observation, true);
+  expect(JSON.stringify(observation.elements)).not.toContain('"Confirm"');
+  expect(JSON.stringify(observation.elements)).toContain('"Settings"');
+});
+
+test("hierarchy identity alone does not enable foreground XR filtering", () => {
+  const observation = spatialPanelObservation();
+  observation.elements = new ObserveElementsBuilder().build(
+    observation.viewHierarchy!,
+    "android",
+    true,
+  );
+  expect(JSON.stringify(observation.elements)).toContain("Unbind Controllers");
+});

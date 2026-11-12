@@ -1,4 +1,64 @@
-import { SwipeDirection, SwipeOnOptions } from "../../../models";
+import { SwipeDirection, SwipeOnOptions, type ViewHierarchyResult } from "../../../models";
+import { assertGestureOnLayer } from "../../observe/hierarchyLayer";
+
+/**
+ * Refuse a swipe whose start point lies on the other `layer`: the window under the down event
+ * receives the whole gesture (issue #9305). Resolution itself is scoped where the target is found.
+ */
+export function assertSwipeStartOnLayer(
+  hierarchy: ViewHierarchyResult | undefined,
+  layer: SwipeOnOptions["layer"],
+  startX: number,
+  startY: number,
+): void {
+  assertGestureOnLayer(
+    hierarchy,
+    layer,
+    [{ x: Math.floor(startX), y: Math.floor(startY) }],
+    "swipe",
+  );
+}
+
+export function computeHalfScreenReverseCoords(
+  reverseDir: SwipeDirection,
+  effectiveBounds: { left: number; top: number; right: number; bottom: number },
+): { startX: number; startY: number; endX: number; endY: number } {
+  const cx = (effectiveBounds.left + effectiveBounds.right) / 2;
+  const cy = (effectiveBounds.top + effectiveBounds.bottom) / 2;
+  const h = effectiveBounds.bottom - effectiveBounds.top;
+  const w = effectiveBounds.right - effectiveBounds.left;
+
+  switch (reverseDir) {
+    case "down":
+      return {
+        startX: cx,
+        startY: effectiveBounds.top + h * 0.25,
+        endX: cx,
+        endY: effectiveBounds.top + h * 0.75,
+      };
+    case "up":
+      return {
+        startX: cx,
+        startY: effectiveBounds.bottom - h * 0.25,
+        endX: cx,
+        endY: effectiveBounds.top + h * 0.25,
+      };
+    case "right":
+      return {
+        startX: effectiveBounds.left + w * 0.25,
+        startY: cy,
+        endX: effectiveBounds.left + w * 0.75,
+        endY: cy,
+      };
+    case "left":
+      return {
+        startX: effectiveBounds.right - w * 0.25,
+        startY: cy,
+        endX: effectiveBounds.left + w * 0.25,
+        endY: cy,
+      };
+  }
+}
 
 /**
  * Maps scroll content direction to finger swipe direction.

@@ -45,7 +45,7 @@ type InitializeHandler = (request: InitializeRequest) => Promise<InitializeResul
  * leaves the extension undefined on `2025-11-25`, but with no 2026-era `server/discover` path a
  * version gate would leave no client able to negotiate Tasks. Serving it on the 2025-era
  * `initialize` is a documented AutoMobile extension of the spec (owner decision, #13143; see
- * docs/design-docs/mcp/sdk-v2-stateless-migration.md).
+ * docs/how-it-works/mcp/sdk-v2-stateless-migration.md).
  */
 export function advertiseTasksOnDeclaringInitialize(inner: Server): void {
   const initialize: InitializeHandler = inner["_oninitialize"].bind(inner);

@@ -45,4 +45,4 @@ denial of service from running your own prototypes on your own device.
 ## Third-party notices
 
 ProtoViewer lists its open-source licenses in-app under Settings, "Open-source licenses". See
-the [ProtoViewer design doc](docs/design-docs/protoviewer.md) for how they are generated.
+the [ProtoViewer design doc](docs/how-it-works/protoviewer.md) for how they are generated.

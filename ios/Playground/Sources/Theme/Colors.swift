@@ -26,7 +26,7 @@ extension Color {
 
     // MARK: - Playground crayon palette (icon-derived, mirrors the Android
     // design-system Pg* tokens). Every light/dark text pair is WCAG-AA verified
-    // by PlaygroundContrastTests. Spec: docs/design-docs/playground-design-system.md
+    // by PlaygroundContrastTests. Spec: docs/how-it-works/playground-design-system.md
 
     // Light role tokens
     // Marker red from the truck outline (#DF3028), darkened slightly to #D62A22

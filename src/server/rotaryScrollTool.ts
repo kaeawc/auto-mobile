@@ -178,7 +178,7 @@ export const createRotaryScrollHandler =
 const rotaryScrollTool = defineDeviceTool({
   name: "rotaryScroll",
   description:
-    "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/design-docs/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged. On a device that does not announce a watch build the input is still sent and the result carries a warning.",
+    "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/how-it-works/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged. On a device that does not announce a watch build the input is still sent and the result carries a warning.",
   input: rotaryScrollInput,
   handler: createRotaryScrollHandler(),
   options: {

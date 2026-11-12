@@ -16,7 +16,7 @@ import { loadDiffFixture, measureValue } from "../../../fixtures/observe/observe
  * (`test/fixtures/observe/diff/*.json`) — the exact post-sanitize observations
  * `finalizeToolResponse` diffs. Full findings, methodology, and the flag
  * recommendation live in
- * `docs/design-docs/plat/android/actions-diff-observe-signoff.md`.
+ * `docs/how-it-works/plat/android/actions-diff-observe-signoff.md`.
  *
  * The captures drove one shape revision: the raw diff was flooded with volatile
  * `extras` a11y metadata (83 of 85 `changed` entries on the text pair were pure

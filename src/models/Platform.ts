@@ -3,7 +3,7 @@ import { ActionableError } from "./ActionableError";
 /**
  * Platforms AutoMobile drives. `"watchos"` is an Apple Watch simulator, `"tvos"` an Apple TV
  * simulator and `"visionos"` an Apple Vision Pro simulator. A tool rejects each unless the tool
- * opts in (docs/decisions/watchos-platform.md), so none is ever driven as an iPhone.
+ * opts in (docs/devlog/2026-10-28-watchos-platform.md), so none is ever driven as an iPhone.
  */
 export type Platform = "android" | "ios" | "watchos" | "tvos" | "visionos";
 

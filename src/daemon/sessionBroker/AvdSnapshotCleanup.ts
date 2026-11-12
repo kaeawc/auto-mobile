@@ -3,7 +3,6 @@ import { sortedReaddir } from "../../utils/io";
 import { resolve, join, basename, dirname } from "node:path";
 import type { AvdDirectoryResolver } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { AVD_SNAPSHOTS_DIRNAME } from "../../utils/android-cmdline-tools/AvdConfigReader";
-import { AVD_DEFAULT_BOOT_SNAPSHOT } from "../../utils/android-cmdline-tools/AvdSnapshotService";
 import {
   assertSafePathSegment,
   isBrokerBaselineSnapshot,
@@ -80,7 +79,12 @@ function avdKeepReason(evidence: CleanupEvidence): string | undefined {
   return undefined;
 }
 
-/** Pure policy; names alone cannot authorize execution without verified directory evidence. */
+/**
+ * Pure policy; names alone cannot authorize execution without verified directory evidence.
+ * Only the broker baseline is reserved. `default_boot` is deleted like any capture once the AVD
+ * itself passes every keep check (broker name, unreferenced, not running): a retained identity is
+ * referenced, so its quick-boot state is kept by the AVD-level rule (#15477).
+ */
 export function planAvdSnapshotCleanup(evidence: CleanupEvidence): {
   deleteNames: string[];
   keptSnapshots: KeptAvdSnapshot[];
@@ -90,11 +94,8 @@ export function planAvdSnapshotCleanup(evidence: CleanupEvidence): {
   const keepAvd = avdKeepReason(evidence);
   for (const snapshotName of evidence.snapshotNames) {
     let reason = keepAvd;
-    if (
-      snapshotName.toLowerCase() === AVD_DEFAULT_BOOT_SNAPSHOT ||
-      isBrokerBaselineSnapshot(snapshotName)
-    ) {
-      reason = "Reserved boot or broker baseline snapshot";
+    if (isBrokerBaselineSnapshot(snapshotName)) {
+      reason = "Reserved broker baseline snapshot";
     }
     reason ??= evidence.unsafeSnapshotReasons?.get(snapshotName);
     if (reason) {

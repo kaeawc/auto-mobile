@@ -19,6 +19,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   snapshot:
@@ -44,7 +45,31 @@ jobs:
         with:
           bun-version: 1.4.4
 
+      # A metrics commit on main mid-release makes Prepare Release promote past
+      # it (#18175); skip the commit entirely while a release run is active. The
+      # snapshot is cumulative, so tomorrow's run recovers the skipped day.
+      - name: "Skip while a release is in progress"
+        id: release-guard
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Exit 0: a release run is active; 1: none; anything else fails the job.
+          rc=0
+          active="$(bash scripts/metrics/release-run-in-progress.sh "$REPO")" || rc=$?
+          case "$rc" in
+            0)
+              echo "::notice::Skipping download snapshot commit: $active"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              ;;
+            1) echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
+
       - name: "Collect and push download snapshot"
+        if: steps.release-guard.outputs.skip != 'true'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

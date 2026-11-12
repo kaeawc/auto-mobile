@@ -1,3 +1,4 @@
+import { FakeCtrlProxyCaptureCooldown } from "../../fakes/FakeCtrlProxyCaptureCooldown";
 import { createExecResult } from "../../../src/utils/execResult";
 import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
@@ -21,6 +22,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
   test("tracks WebP metadata when requested", async function () {
     const fakeAdb = new FakeAdbExecutor();
     const screenshot = new TakeScreenshot(mockDevice, {
+      ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
       adbFactory: new FakeAdbClientFactory(fakeAdb),
       cacheDirResolver: () => cacheDir,
     });
@@ -50,6 +52,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
   test("persists native Android CtrlProxy JPEG as jpg with metadata", async () => {
     const fakeAdb = new FakeAdbExecutor();
     const screenshot = new TakeScreenshot(mockDevice, {
+      ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
       adbFactory: new FakeAdbClientFactory(fakeAdb),
       cacheDirResolver: () => cacheDir,
     });
@@ -75,6 +78,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
   test("captures requested PNG on the selected Android display through screencap", async () => {
     const fakeAdb = new FakeAdbExecutor();
     const screenshot = new TakeScreenshot(mockDevice, {
+      ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
       adbFactory: new FakeAdbClientFactory(fakeAdb),
       cacheDirResolver: () => cacheDir,
       physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
@@ -111,6 +115,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
   test("keeps the ADB fallback as PNG", async () => {
     const fakeAdb = new FakeAdbExecutor();
     const screenshot = new TakeScreenshot(mockDevice, {
+      ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
       adbFactory: new FakeAdbClientFactory(fakeAdb),
       cacheDirResolver: () => cacheDir,
     });
@@ -146,6 +151,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       ),
     );
     const screenshot = new TakeScreenshot(mockDevice, {
+      ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
       adbFactory: new FakeAdbClientFactory(testFakeAdb),
       cacheDirResolver: () => cacheDir,
     });
@@ -168,6 +174,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       const fakeAdb = new FakeAdbExecutor();
       fakeAdb.setDefaultResponse(createExecResult(pngFixture().toString("base64"), ""));
       const screenshot = new TakeScreenshot(mockDevice, {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(fakeAdb),
         cacheDirResolver: () => cacheDir,
       });

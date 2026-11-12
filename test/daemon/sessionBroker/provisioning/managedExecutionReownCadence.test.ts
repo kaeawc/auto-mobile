@@ -729,7 +729,7 @@ test("a rejected quiet waiter is a failed re-own attempt and later retries norma
 test("published hold timing matches the derived cap in the ownership guide", () => {
   for (const name of ["session-broker-device-reuse"]) {
     const guide = readFileSync(
-      new URL(`../../../../docs/design-docs/${name}.md`, import.meta.url),
+      new URL(`../../../../docs/how-it-works/${name}.md`, import.meta.url),
       "utf8",
     );
     expect(guide).toContain(`up to ${MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / 1_000} s`);

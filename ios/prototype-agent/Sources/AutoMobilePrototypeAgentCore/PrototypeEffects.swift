@@ -2,7 +2,7 @@ import Foundation
 
 /// `style.effects` (#15130, `prototype_effects_v1`): the closed, paint-only looks of #15128 decoded
 /// from the validated JSON, the Swift twin of Android's `PrototypeEffects.kt`. Omitted params take
-/// the same conservative defaults, which `docs/design-docs/plat/android/prototype-ux.md` lists.
+/// the same conservative defaults, which `docs/how-it-works/plat/android/prototype-ux.md` lists.
 ///
 /// Decisions the contract left to the renderers, identical on both platforms:
 /// - `phase` and `animate` move only `shimmer`, `wave` and `ripple`; the other seven are static looks

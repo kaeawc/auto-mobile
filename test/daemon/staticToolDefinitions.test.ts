@@ -67,6 +67,7 @@ describe("getStaticToolDefinitions", () => {
       delete meta["automobile/hostInventory"];
       delete meta["automobile/hostSideState"];
       delete meta["automobile/opaquePersistentState"];
+      delete meta["automobile/requires"];
       if (Object.keys(meta).length) {
         definition._meta = meta;
       } else {

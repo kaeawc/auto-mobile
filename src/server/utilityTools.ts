@@ -982,6 +982,8 @@ export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) 
     {
       handler: withDeviceConditionDispatch(setDeviceStateHandler),
       ...PLAN_RELEVANT,
+      // deviceCondition calls are refused while the flag is off (DEVICE_CONDITION_FLAG_DISABLED_MESSAGE).
+      featureFlags: ["device-condition"],
       defaultEnabled: false,
       // Power faking is plain adb and must reach a device that Doze put to sleep.
       deviceReadiness: (args) => (args.power !== undefined ? "booted" : "automationReady"),

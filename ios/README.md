@@ -13,7 +13,7 @@ The iOS platform consists of the following components:
 1. **XCTest Service** - Native iOS automation server with WebSocket API
 2. **XCTest Runner** - Test execution framework for plan-based tests
 
-For detailed architecture documentation, see `docs/design-docs/plat/ios/`.
+For detailed architecture documentation, see `docs/how-it-works/plat/ios/`.
 
 ## Components
 
@@ -193,7 +193,7 @@ All components have been scaffolded with:
 
 ## Documentation
 
-- **XCTest CI integration**: `docs/design-docs/plat/ios/xctestrunner/ci-integration.md`
+- **XCTest CI integration**: `docs/how-it-works/plat/ios/xctestrunner/ci-integration.md`
 - **Setup**: See [System Requirements](#system-requirements) above.
 
 ## Contributing

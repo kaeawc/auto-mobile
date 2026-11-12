@@ -13,7 +13,7 @@ import {
  * Wear OS rotary (crown) scroll (#14948). The native SCROLL axis command is confirmed on
  * a Wear OS emulator; its axis sign is inverted relative to delta. The emulator-console
  * candidate and physical-device behaviour remain unconfirmed (see
- * docs/design-docs/plat/android/form-factors.md, checklist row 6).
+ * docs/how-it-works/plat/android/form-factors.md, checklist row 6).
  * Each candidate is tried in order and followed by a read-back (the screen
  * fingerprint changed), so a command a release lacks costs one attempt, not a wrong answer.
  */

@@ -142,7 +142,7 @@ text appears to start right under it.
 ## Requests
 
 `request` actions follow the embedded routing decision
-([prototype-embedded-request-routing](../decisions/prototype-embedded-request-routing.md)):
+([prototype-embedded-request-routing](../devlog/2026-10-20-prototype-embedded-request-routing.md)):
 
 - **Android:** pass a device client, `PrototypeNetwork(device = myClient)`. Without one, every
   request fails with a typed `network` error. A `hostHandler` takes over host-routed requests (those

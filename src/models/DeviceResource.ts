@@ -40,7 +40,7 @@ export type CommonDeviceResource = keyof DeviceResourceMap;
  * this base guarantees only its selected keys. Unverified entries use unknown.
  * Groups are reported independently:
  * one group's state does not imply another group's state or automation capability.
- * See docs/design-docs/device-resources.md for group scope and evidence semantics.
+ * See docs/how-it-works/device-resources.md for group scope and evidence semantics.
  */
 export interface DeviceResource<Resource extends string = CommonDeviceResource> {
   deviceId: string;

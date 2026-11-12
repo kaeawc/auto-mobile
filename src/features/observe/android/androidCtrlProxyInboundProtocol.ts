@@ -80,7 +80,8 @@ export interface WsHierarchyUpdateMessage extends WsMessageBase {
   frameContext?: string;
 }
 
-export interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetadata {
+export interface WsScreenshotMessage
+  extends WsMessageBase, Omit<ScreenshotPerformanceMetadata, "screenshotStageDurationsMs"> {
   width?: number;
   height?: number;
   type: "screenshot";

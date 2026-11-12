@@ -19,7 +19,10 @@ import { featureFlagDisabledMessageKeys } from "../../lint/featureFlagDisabledMe
  * has no row, and `test/lint/featureFlagDisabledMessageSource.test.ts` refuses a hand-written
  * flag-disabled message anywhere else.
  */
-const GATED_REFUSALS: Record<string, { toolName: string; refusal: () => Promise<string> }> = {
+const GATED_REFUSALS: Record<
+  string,
+  { toolName: string; field?: string; refusal: () => Promise<string> }
+> = {
   debug: {
     toolName: "__flag_gate_debug__",
     refusal: async () => {
@@ -28,7 +31,8 @@ const GATED_REFUSALS: Record<string, { toolName: string; refusal: () => Promise<
     },
   },
   "device-condition": {
-    toolName: "deviceCondition",
+    toolName: "setDeviceState",
+    field: "deviceCondition",
     refusal: async () => {
       const device: BootedDevice = { name: "e", platform: "android", deviceId: "e" };
       const response = await handleDeviceConditionCall(
@@ -79,7 +83,7 @@ describe("every flag-gated refusal uses featureFlagDisabledMessage (#16906)", ()
   for (const [key, gate] of Object.entries(GATED_REFUSALS)) {
     test(`${key} refuses with the shared message`, async () => {
       expect(await gate.refusal()).toBe(
-        featureFlagDisabledMessage(key as FeatureFlagKey, gate.toolName),
+        featureFlagDisabledMessage(key as FeatureFlagKey, gate.toolName, gate.field),
       );
     });
   }

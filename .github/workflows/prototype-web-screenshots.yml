@@ -8,7 +8,7 @@ name: "Prototype Web Screenshots (Advisory)"
 # goldens are rendered by the Chromium build that the pinned playwright-core
 # installs here. The actual screenshots and diffs are uploaded as the
 # `prototype-web-screenshots` artifact on every run; adopting them is copying its
-# top-level non-.diff PNGs over the goldens (see docs/design-docs/prototype-web-renderer.md).
+# top-level non-.diff PNGs over the goldens (see docs/how-it-works/prototype-web-renderer.md).
 # The same run renders each spec with an Android golden chromeless and compares it
 # with that golden under a per-golden pixel budget (#16534); those screenshots and
 # diffs are under android-parity/ in the same artifact. The iOS-skinned still is

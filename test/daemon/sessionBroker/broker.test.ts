@@ -717,9 +717,31 @@ describe("session-only broker lifecycle", () => {
     });
     expect(await broker.prepare(config("never-sent"), "owner-token")).toEqual(abandoned);
     expect(devices.prepared).toHaveLength(0);
-    await expect(broker.abandon("never-sent", "different-owner")).rejects.toThrow(
-      "another liveness owner",
+    const refusal = broker.abandon("never-sent", "different-owner");
+    await expect(refusal).rejects.toThrow(/another liveness owner/);
+    await expect(refusal).rejects.toMatchObject({
+      code: "session_request_owner_mismatch",
+      terminal: true,
+    });
+  });
+
+  test("a foreign token on status, release lookup and abandon gets the coded refusal (#18150)", async () => {
+    const uuid = await ready("foreign-owner");
+    const live = { code: "session_request_owner_mismatch", terminal: false };
+    await expect(broker.ownedStatus("foreign-owner", "other-token")).rejects.toMatchObject(live);
+    await expect(broker.ownedSessionRequest(uuid, "other-token")).rejects.toMatchObject(live);
+    await expect(broker.abandon("foreign-owner", "other-token")).rejects.toMatchObject(live);
+    await expect(broker.ownedStatus("foreign-owner", "other-token")).rejects.toThrow(
+      /another liveness owner/,
     );
+
+    expect(await broker.release(uuid)).toMatchObject({ outcome: "released" });
+    const finished = { code: "session_request_owner_mismatch", terminal: true };
+    await expect(broker.ownedStatus("foreign-owner", "other-token")).rejects.toMatchObject(
+      finished,
+    );
+    await expect(broker.ownedSessionRequest(uuid, "other-token")).rejects.toMatchObject(finished);
+    await expect(broker.abandon("foreign-owner", "other-token")).rejects.toMatchObject(finished);
   });
 
   test("abandonment wins while the original prepare is still resolving its catalog", async () => {

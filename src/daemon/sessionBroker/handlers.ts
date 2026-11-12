@@ -6,6 +6,7 @@ import {
   SESSION_BROKER_RETRY_AFTER_MS,
 } from "./SessionRequestOwnerMismatchError";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
+import { SessionRequestForeignOwnerError } from "./SessionRequestForeignOwnerError";
 import { z } from "zod";
 import { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
 import { brokerConnectionHostMutationRefusal } from "./connectionScope";
@@ -157,6 +158,17 @@ async function handleSessionExport(
 }
 
 function brokerRejection(error: unknown): DaemonMethodResult {
+  if (error instanceof SessionRequestForeignOwnerError) {
+    logger.warn(`Session broker rejected request: ${errorMessage(error)}`);
+    // `terminal` is the only request fact a non-owner learns (#18150).
+    return {
+      success: false,
+      code: error.code,
+      error: errorMessage(error),
+      retryable: false,
+      details: { terminal: error.terminal },
+    };
+  }
   if (
     error instanceof SessionRequestOwnerMismatchError ||
     error instanceof SessionBrokerStoppingError ||
@@ -198,10 +210,15 @@ export async function handleBrokerSessionStatus(
   if (!parsed.success) {
     return { success: false, error: "requestId and livenessOwnerToken are required" };
   }
-  const result = await service.broker.ownedStatus(
-    parsed.data.requestId,
-    parsed.data.livenessOwnerToken,
-  );
+  let result;
+  try {
+    result = await service.broker.ownedStatus(
+      parsed.data.requestId,
+      parsed.data.livenessOwnerToken,
+    );
+  } catch (error) {
+    return brokerRejection(error);
+  }
   bind(
     state,
     socketSessionId,

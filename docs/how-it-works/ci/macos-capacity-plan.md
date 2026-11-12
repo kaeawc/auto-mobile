@@ -1,8 +1,7 @@
 # macOS CI capacity plan (#11010, #11011, #11012)
 
-How macOS CI jobs are placed across CircleCI, self-hosted Mac pools and Namespace, and the owner
-steps that enable each pool. [CircleCI macOS jobs](circleci-macos-migration.md) covers CircleCI
-reporting and settings.
+Owner steps below are still open. The earlier
+[CircleCI migration plan](circleci-macos-migration.md) (#10887) has the sourced CircleCI plan numbers.
 
 Rule: every pull-request macOS job runs in exactly one place. Hosted
 GitHub `macos-26` is the fallback for fork PRs and, per run, for a self-hosted
@@ -27,7 +26,8 @@ job and the work that is not on the PR critical path.
 `ios-playground-tests` is the only CircleCI job on the PR path (gated on
 `run-ios`, which path filtering sets from the same paths as `filter-ios` in
 `pull_request.yml`). It is advisory and must stay off the required-check list.
-Swift Packages, Build Xcode Projects and Build Root SPM Package run on GitHub only.
+The CircleCI mirrors of Swift Packages, Build Xcode Projects and Build Root SPM
+Package are gone; those jobs run on GitHub only.
 
 ### Post-merge
 
@@ -54,8 +54,8 @@ contains this one, so the older job halts (green) before doing any work. The las
 commit in a burst that touches the group is never superseded, so a burst of N
 merges costs one run for that commit. The check fails open: if it cannot read
 main, the job runs. CircleCI's project-level "auto-cancel redundant workflows" is
-not used: it ignores the default branch, and it would cancel an iOS run in favour
-of a newer pipeline that has no iOS changes.
+not used for this. It ignores the default branch, and it would cancel an iOS
+run in favour of a newer pipeline that has no iOS changes.
 
 ### Nightly
 
@@ -73,8 +73,6 @@ order with `terminal` requirements so a failure never skips later jobs:
 6. macOS BATS Shell Tests
 7. macOS BATS Integration Tests
 8. XCTestRunner Thread Sanitizer
-9. Swift Packages Sweep (Xcode 26.5)
-10. Build Xcode Projects Sweep (Xcode 26.5)
 
 CircleCI posts no commit status for the scheduled pipeline (#11615), so
 `.github/workflows/circleci-nightly-visibility.yml` (ubuntu, daily 10:40 UTC, not a
@@ -84,8 +82,9 @@ updates one `circleci-nightly-macos` issue naming each red job, its job URL and 
 artifact names (for example `bats-unit-joblog/bats-unit-joblog-durations.tsv`).
 Without the secret, or if CircleCI refuses it, the run skips with a notice.
 
-The Xcode 26.5 sweeps run last because every iOS PR already builds on 26.5. The
-nightly sweeps build unsigned (the CircleCI executor pins signing off). Release and signing
+The
+nightly sweeps build unsigned (the CircleCI executor pins signing off); the
+GitHub sweeps signed when certificates were configured. Release and signing
 workflows (`build-ctrl-proxy-ios-ipa`, `build-network-filter-probe`,
 `build-prototype-agent`, `build-screen-capture-helper`, the desktop installers)
 stay on GitHub.
@@ -173,7 +172,8 @@ job does not skip it.
   jobs never overlap, and each job owns the simulators it creates. Heavy jobs
   have tight `timeout-minutes` (25, or 30 for the Playground fallback).
 - Build Xcode Projects is one job that builds Playground and then CtrlProxy in
-  separate named steps (#11580). Prototype Simulator `needs`
+  separate named steps (#11580). As two matrix legs they ran one after the other
+  on the heavy runner anyway and repeated the setup. Prototype Simulator `needs`
   that job, so the runner serves the build behind the required `iOS Build` gate
   first; it still runs whatever the build's result.
 - The PR-time XcodeGen drift check (#10939) is the `Check XcodeGen Project
@@ -207,20 +207,28 @@ job does not skip it.
   `Build Root SPM Package`, `Installer Minimal (macos-latest)`, `iOS Build`), so
   the `green-main` ruleset needs no edit.
 
-**Exception: XCTestRunner Simulator Tests (`run-ios-sim` label or iOS SDK contract inputs)**
-runs on hosted `macos-26` for same-repo PRs. Its daemon steps start an AutoMobile daemon on the
-default port and install gems and Homebrew packages, which would collide with the owner's own daemon
-and tooling on the Mac. Moving it needs a dedicated runner user and an isolated daemon port.
+**Exception: XCTestRunner Simulator Tests (`run-ios-sim` label or iOS SDK contract inputs).** The
+lane still runs on hosted `macos-26` for same-repo PRs. Its daemon steps start
+an AutoMobile daemon on the default port and install gems and Homebrew packages,
+which would collide with the owner's own daemon and tooling on this Mac. Moving
+it needs a dedicated runner user (see owner steps) and an isolated daemon port.
+It runs only on the label or on changes to the layers the iOS SDK contract suite crosses, so this
+was left for an owner decision.
 
-**Small pool size: 4** runner processes (the existing `mac` runner plus three), plus one heavy runner:
-five in total.
+**N for the small pool: 4.** Swift package builds and the desktop Gradle build
+are CPU-bound and each can use most of the cores. Four small jobs plus the heavy
+lane keep about one performance core per process plus headroom for the owner's
+own work. Memory (128 GiB) is not the limit. That is five runner processes in
+total: the existing `mac` runner plus three new small runners, and one heavy
+runner.
 
 ## Namespace macOS (#11012)
 
 iOS Device Capture to WHEP (`ios-device-webrtc`) runs on the Namespace profile
 `namespace-profile-auto-mobile-macos` for owner-authored same-repository PRs.
 The Namespace trial allows one macOS job at a time (6 vCPU / 14 GB, billed at
-10× the Linux rate); WHEP fires only on WebRTC changes.
+10× the Linux rate), and WHEP fires only on WebRTC changes, so it rarely waits
+for that slot. The CircleCI copy is gone.
 
 Routing, in order:
 
@@ -244,7 +252,7 @@ ports, so use that fallback only with the heavy runner under a dedicated user.
 | SwiftLint                                                                      | `ubuntu-24.04`                             | `ubuntu-24.04` |
 | Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest` |
-| Swift Packages (Xcode 26.5)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
+| Swift Packages (Xcode 26.6)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`     |
 | Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
@@ -260,7 +268,7 @@ hosted for any run where Mac Pool Routing finds that pool offline.
 
 ## Owner steps
 
-These need a login or a credential.
+These need a login or a credential, so they were not done in the change.
 
 ### CircleCI (web app; do not script them against the API)
 
@@ -275,18 +283,19 @@ These need a login or a credential.
 4. After the first nightly, check that the `xcode: "26.6"` image still exists
    (the sweep fails at VM start if CircleCI retires it) and that Build Desktop
    App (macos) can install JDK 21 and the Android command-line tools on the
-   image.
+   image. Neither has run on CircleCI yet.
 
 ### Self-hosted Mac runners
 
-Run on the Mac as the user that owns `~/actions-runner`:
+Registering runners needs a registration token, so it was not done here. Run on
+the Mac as the user that owns `~/actions-runner`:
 
 1. Keep an Xcode 26.x installed (currently 26.6 at `/Applications/Xcode.app`,
    next to Xcode 27.1 beta) with its iOS platform
    (`xcodebuild -downloadPlatform iOS`). Swift Packages, Build Root SPM Package,
    Build Xcode Projects, the Playground fallback and Prototype Simulator request
-   26.5; `bash scripts/ci/select-self-hosted-xcode.sh 26.5` uses 26.5 when
-   installed and otherwise the newest installed 26.x at or above it (26.6 today),
+   26.6; `bash scripts/ci/select-self-hosted-xcode.sh 26.6` uses 26.6 when
+   installed and otherwise the newest installed 26.x at or above it,
    printing which it chose (#11422). It never selects Xcode 27.
 2. Get a registration token (valid for one hour):
 
@@ -340,8 +349,3 @@ Run on the Mac as the user that owns `~/actions-runner`:
 3. If it cannot capture, set `gh variable set IOS_WEBRTC_HEAVY_LANE --body true`
    (heavy self-hosted lane) and record why in #11012.
 4. Check the macOS minute cost against the trial/plan on the Namespace usage page.
-
-## Background
-
-- [macOS CI capacity plan choices](../../devlog/2026-10-09-macos-capacity-plan-choices.md)
-- [Moving GitHub-hosted macOS jobs to CircleCI](../../devlog/2026-10-09-circleci-macos-migration-plan.md)

@@ -373,6 +373,7 @@ nav:
       - "Live observe App shell": how-it-works/mcp/observe-app-shell.md
       - "Interactive observe App": how-it-works/mcp/observe-app-interactive.md
       - "Build source revision": how-it-works/mcp/build-source-revision.md
+      - "Tool requirements": how-it-works/mcp/tool-requirements.md
       - "Session state record": how-it-works/session-state-record.md
       - "Test runners": how-it-works/plat/android/junit-runner/index.md
       - "Robolectric runtime jars": how-it-works/plat/android/robolectric-android-all.md

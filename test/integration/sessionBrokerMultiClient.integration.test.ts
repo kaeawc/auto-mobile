@@ -126,7 +126,13 @@ describe("session broker with several MCP clients", () => {
       { context: { socketSessionId: a1.socket } },
     );
     expect(foreignEnd).toMatchObject({ success: false, code: DEVICE_OUTSIDE_BROKER_GRANT_CODE });
-    await expect(release(host, A, b1.sessionUuid)).rejects.toThrow(/another liveness owner/);
+    expect(await release(host, A, b1.sessionUuid)).toEqual({
+      success: false,
+      code: "session_request_owner_mismatch",
+      error: "Session request belongs to another liveness owner",
+      retryable: false,
+      details: { terminal: false },
+    });
     expect(await host.broker.hasActiveSession(b1.sessionUuid)).toBe(true);
 
     // B releases its only device: A's two stay granted and inventoried.

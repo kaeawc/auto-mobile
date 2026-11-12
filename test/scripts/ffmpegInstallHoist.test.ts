@@ -43,7 +43,7 @@ describe("#4124 ffmpeg install hoist", () => {
     // AC1: it must run concurrently with the boot, so it has to be started
     // earlier in the step list than the boot it overlaps.
     const installIndex = indexOfNamed(steps, "Install ffmpeg");
-    const bootIndex = indexOfNamed(steps, "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)");
+    const bootIndex = indexOfNamed(steps, "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.6)");
 
     expect(installIndex).toBeGreaterThanOrEqual(0);
     expect(bootIndex).toBeGreaterThanOrEqual(0);
@@ -72,7 +72,7 @@ describe("#4124 ffmpeg install hoist", () => {
 
   test("advanced iOS integrations reuse one stable daemon tool profile", () => {
     const videoStep = stepNamed(steps, "Run videoRecording MP4 integration test");
-    const daemonStep = stepNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)");
+    const daemonStep = stepNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.6)");
     const navigationStep = stepNamed(steps, "Run iOS navigation graph Simulator workflow");
     const enabledTools = "videoRecording,navigateTo,getNavigationGraph,explore";
 
@@ -84,7 +84,7 @@ describe("#4124 ffmpeg install hoist", () => {
   test("the stable daemon starts with the integration database override", () => {
     const databaseStep = stepNamed(steps, "Prepare isolated video recording database");
     const databaseIndex = indexOfNamed(steps, "Prepare isolated video recording database");
-    const daemonIndex = indexOfNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)");
+    const daemonIndex = indexOfNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.6)");
 
     expect(databaseStep?.run).toContain("AUTOMOBILE_DB_DIR=");
     expect(databaseStep?.run).toContain("GITHUB_ENV");

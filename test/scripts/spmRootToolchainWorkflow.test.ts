@@ -238,7 +238,7 @@ describe("root SPM toolchain floor workflow", () => {
       expect(cleanup?.run).toContain("rm -rf --");
     }
     const coverage = loadJobSteps(".github/workflows/pull_request.yml", "swift-code-coverage");
-    expect(stepNamed(coverage, "Select Xcode 26.5")?.if).toBe(
+    expect(stepNamed(coverage, "Select Xcode 26.6")?.if).toBe(
       "runner.environment == 'github-hosted'",
     );
     const desktop = loadJobSteps(".github/workflows/pull_request.yml", "build-desktop-app");
@@ -407,17 +407,17 @@ describe("root SPM toolchain floor workflow", () => {
     );
   });
 
-  test("selects Xcode 26.5 on every runner before building the root package", () => {
+  test("selects Xcode 26.6 on every runner before building the root package", () => {
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "ios-spm-root-package-build");
-    const selectXcode = stepNamed(steps, "Select Xcode 26.5");
-    const selfHosted = stepNamed(steps, "Select self-hosted Xcode 26.5");
+    const selectXcode = stepNamed(steps, "Select Xcode 26.6");
+    const selfHosted = stepNamed(steps, "Select self-hosted Xcode 26.6");
     const build = steps.findIndex((step) => step.name === "Build root Package.swift");
 
     expect(steps.length).toBeGreaterThan(0);
     expect(selectXcode?.if).toBe("runner.environment == 'github-hosted'");
     expect(selectXcode?.uses).toBe("maxim-lobanov/setup-xcode@v1");
-    expect(selectXcode?.with?.["xcode-version"]).toBe("26.5");
-    expect(selfHosted?.run).toBe('bash scripts/ci/select-self-hosted-xcode.sh "26.5"');
+    expect(selectXcode?.with?.["xcode-version"]).toBe("26.6");
+    expect(selfHosted?.run).toBe('bash scripts/ci/select-self-hosted-xcode.sh "26.6"');
     expect(steps.indexOf(selectXcode!)).toBeLessThan(build);
     expect(steps.indexOf(selfHosted!)).toBeLessThan(build);
     const prototypeBuild = stepNamed(steps, "Build AutoMobilePrototype library and embed consumer");

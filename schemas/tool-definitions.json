@@ -90,7 +90,8 @@
         {
           "absentArguments": ["talkback", "voiceover"]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -188,6 +189,9 @@
       },
       "required": ["success", "action", "resourceId"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -444,6 +448,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -705,7 +712,8 @@
       }
     },
     "_meta": {
-      "automobile/debugOnly": true
+      "automobile/debugOnly": true,
+      "automobile/requires": ["debugBuild", "platform:android", "platform:ios"]
     }
   },
   {
@@ -810,6 +818,9 @@
       },
       "required": ["success", "action", "ambient", "message"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -989,6 +1000,9 @@
       },
       "required": ["message", "success", "supported", "action", "platform", "appId", "mechanism"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -1197,6 +1211,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -1519,6 +1536,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -1590,7 +1610,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/planOnly": true
+      "automobile/planOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -1702,6 +1723,9 @@
       },
       "required": ["success", "message", "action", "modality", "supported"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -1956,6 +1980,9 @@
         "transportShared"
       ],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -2062,7 +2089,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -2191,6 +2219,9 @@
       },
       "required": ["success", "action", "traceId", "deviceId", "warnings", "message"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -2331,6 +2362,9 @@
       },
       "required": ["success", "changes", "intentBroadcast"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -2410,7 +2444,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -2499,7 +2534,8 @@
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
-      "automobile/hostSideState": true
+      "automobile/hostSideState": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -2576,7 +2612,8 @@
           "argument": "action",
           "values": ["get"]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -2829,7 +2866,8 @@
       }
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
     }
   },
   {
@@ -3057,6 +3095,14 @@
         "confirmed"
       ],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos"
+      ]
     }
   },
   {
@@ -3164,7 +3210,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/planOnly": true
+      "automobile/planOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -3242,6 +3289,9 @@
       },
       "required": ["target", "mode", "verifyAbsence"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -3353,7 +3403,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -3532,7 +3583,8 @@
       }
     },
     "_meta": {
-      "automobile/opaquePersistentState": true
+      "automobile/opaquePersistentState": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -3964,7 +4016,8 @@
             "extraDim"
           ]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -4113,6 +4166,9 @@
           "enum": ["screenSize", "display", "cutout", "navigationMode", "forceDark", "posture"]
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -6230,6 +6286,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -6386,6 +6445,9 @@
       "required": ["points"],
       "additionalProperties": false,
       "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag. With pointer: { toolType: \"stylus\" } it draws with a stylus (Android 12+) with per-point pressure and tilt, and is refused instead of using a finger if the device cannot."
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -6889,6 +6951,15 @@
       },
       "required": ["success", "executedSteps", "totalSteps"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -9516,7 +9587,8 @@
       }
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios", "platform:tvos"]
     }
   },
   {
@@ -9624,6 +9696,9 @@
       },
       "required": ["success"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -9736,6 +9811,9 @@
       },
       "required": ["path", "sha256", "bytes", "frame", "revision", "variants", "rendererVersion"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -9856,6 +9934,9 @@
       },
       "required": ["success", "status", "steps", "path", "selected"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
     }
   },
   {
@@ -10072,6 +10153,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -10242,6 +10326,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -10383,7 +10470,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -10454,7 +10542,8 @@
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -10631,7 +10720,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
     }
   },
   {
@@ -11502,7 +11592,8 @@
       }
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -11613,7 +11704,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": []
     }
   },
   {
@@ -11801,7 +11893,14 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -12253,7 +12352,8 @@
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -12341,7 +12441,8 @@
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -12459,7 +12560,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -12608,7 +12710,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -12702,6 +12805,9 @@
       },
       "required": ["success", "message", "gesture", "axis", "count", "keyCodes", "commands"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -12791,6 +12897,9 @@
       },
       "required": ["success", "path", "sizeBytes", "appId", "native", "attempts", "message"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -13089,6 +13198,9 @@
       },
       "required": ["success"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -13145,7 +13257,8 @@
       "description": "Preview which hierarchy nodes sit beneath one absolute point without dispatching input."
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -15064,6 +15177,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
     }
   },
   {
@@ -15166,6 +15282,9 @@
       "required": ["points"],
       "additionalProperties": false,
       "description": "Hover a stylus or mouse over a path of points with no contact: hover enter, move and exit (Android, needs the hover_input_v1 capability or, for a stylus, a root adb shell with a writable /dev/uinput; refused on iOS and otherwise, never turned into a touch)."
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -15425,7 +15544,8 @@
     },
     "_meta": {
       "automobile/debugOnly": true,
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["debugBuild", "platform:android", "platform:ios"]
     }
   },
   {
@@ -15540,6 +15660,9 @@
         "route"
       ],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -15784,7 +15907,8 @@
       }
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -15975,6 +16099,15 @@
       },
       "required": ["message", "success"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -16124,7 +16257,8 @@
           "argument": "action",
           "values": ["detect", "listImes", "listProfiles"]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -16165,6 +16299,9 @@
       },
       "required": ["device"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -16449,7 +16586,8 @@
           "argument": "action",
           "values": ["list"]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -18645,6 +18783,15 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -18848,7 +18995,14 @@
       }
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -18912,7 +19066,8 @@
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -19589,7 +19744,8 @@
     },
     "_meta": {
       "automobile/hostInventory": true,
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": []
     }
   },
   {
@@ -20453,7 +20609,8 @@
     },
     "_meta": {
       "automobile/hostInventory": true,
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": []
     }
   },
   {
@@ -20743,7 +20900,8 @@
           "argument": "action",
           "values": ["list", "describe"]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -20906,6 +21064,9 @@
           "additionalProperties": false
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -21316,7 +21477,8 @@
           "argument": "action",
           "values": ["get"]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -21443,7 +21605,8 @@
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
-      "automobile/hostSideState": true
+      "automobile/hostSideState": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -21629,6 +21792,9 @@
         "points"
       ],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -21716,7 +21882,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -21865,7 +22032,8 @@
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
-      "automobile/hostSideState": true
+      "automobile/hostSideState": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -26109,6 +26277,13 @@
     },
     "_meta": {
       "automobile/deviceReadOnly": true,
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ],
       "ui": {
         "resourceUri": "ui://automobile/observe"
       }
@@ -26592,6 +26767,9 @@
       },
       "required": ["success", "url", "message"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
     }
   },
   {
@@ -26690,6 +26868,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -26945,6 +27126,9 @@
         "warnings"
       ],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -27030,6 +27214,9 @@
       "then": {
         "required": ["reason"]
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -29102,6 +29289,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -29463,6 +29653,9 @@
           "enum": ["other_session", "external_live", "external_unknown", "prototype"]
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -29596,6 +29789,14 @@
       },
       "required": ["message", "success", "supported"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos"
+      ]
     }
   },
   {
@@ -31577,6 +31778,14 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos"
+      ]
     }
   },
   {
@@ -33810,7 +34019,8 @@
             "stop"
           ]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -35329,6 +35539,9 @@
           "additionalProperties": false
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -35579,6 +35792,9 @@
           "required": ["appId", "container", "destinationPath", "byteCount", "resourceUri"]
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -37497,6 +37713,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -38100,7 +38319,8 @@
       }
     },
     "_meta": {
-      "automobile/deviceResourceBudget": true
+      "automobile/deviceResourceBudget": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -38179,6 +38399,9 @@
       },
       "required": ["success"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -38300,6 +38523,9 @@
       },
       "required": ["success"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": ["featureFlag:tool-call-recording"]
     }
   },
   {
@@ -38386,7 +38612,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -38487,6 +38714,9 @@
       },
       "required": ["success", "deviceId", "platform", "appId", "container", "entries"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -38722,6 +38952,9 @@
         "message"
       ],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -38816,6 +39049,9 @@
       },
       "required": ["success", "message", "delta", "attempts"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -40771,6 +41007,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -40859,6 +41098,9 @@
       },
       "required": ["success", "delta", "velocity"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/requires": ["platform:watchos"]
     }
   },
   {
@@ -41097,6 +41339,9 @@
           "additionalProperties": false
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -43016,6 +43261,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -43296,6 +43544,9 @@
       },
       "required": ["message", "success", "status", "delivered", "deviceId", "appId"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -43837,6 +44088,15 @@
           "additionalProperties": false
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -43900,6 +44160,9 @@
       },
       "required": ["success", "phoneNumber", "messageLength", "supported", "message"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -43971,6 +44234,9 @@
       },
       "required": ["message", "deviceId"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -44201,6 +44467,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -44382,6 +44651,9 @@
         "operations"
       ],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
     }
   },
   {
@@ -45022,7 +45294,8 @@
     },
     "_meta": {
       "automobile/deviceResourceBudget": true,
-      "automobile/hostSideState": true
+      "automobile/hostSideState": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -46903,6 +47176,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["featureFlag:device-condition", "platform:android", "platform:ios"]
     }
   },
   {
@@ -47034,7 +47310,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -47155,6 +47432,9 @@
       },
       "required": ["message", "success", "appId", "deviceId", "platform", "policyAccess"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -47283,6 +47563,9 @@
           "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent", "unknown"]
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -47449,6 +47732,9 @@
       },
       "required": ["success", "deviceId", "platform", "scope", "key", "value", "found"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -47584,6 +47870,9 @@
         "reset"
       ],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -47927,6 +48216,9 @@
       },
       "required": ["sessionUuid", "scope", "enabled"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": []
     }
   },
   {
@@ -48105,7 +48397,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true
+      "automobile/debugOnly": true,
+      "automobile/requires": ["debugBuild", "platform:android", "platform:ios"]
     }
   },
   {
@@ -50044,6 +50337,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -51820,6 +52116,9 @@
           "additionalProperties": false
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -52032,7 +52331,8 @@
       }
     },
     "_meta": {
-      "automobile/deviceReadOnly": true
+      "automobile/deviceReadOnly": true,
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -52149,7 +52449,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
     }
   },
   {
@@ -52350,7 +52651,8 @@
           "argument": "action",
           "values": ["get"]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -52416,6 +52718,9 @@
       },
       "required": ["success", "message", "injectionId", "framesQueued", "framesPlayed", "reason"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -52919,6 +53224,9 @@
         "duration"
       ],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -53150,6 +53458,9 @@
           ]
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios", "platform:watchos"]
     }
   },
   {
@@ -53310,7 +53621,8 @@
           "argument": "action",
           "values": ["get"]
         }
-      ]
+      ],
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -55539,6 +55851,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -55682,6 +55997,9 @@
           ]
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -56074,6 +56392,9 @@
       },
       "additionalProperties": false,
       "description": "Tap, long press, or double tap a screen point. Bare x/y use platform-native observe coordinates, except on Android XR home-space, where they are screenshot pixels inside an app panel; XR observe node bounds stay in panel-window space and are not screenshot coordinates. image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop."
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios", "platform:watchos"]
     }
   },
   {
@@ -58341,6 +58662,15 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -60283,6 +60613,15 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -60386,6 +60725,15 @@
       },
       "required": ["message", "success", "packageName", "keepData"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {
@@ -60706,6 +61054,9 @@
       },
       "required": ["action", "count", "recordings"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
     }
   },
   {
@@ -60779,6 +61130,9 @@
       },
       "required": ["message"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -61190,6 +61544,9 @@
           }
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
   {
@@ -61620,6 +61977,9 @@
           "$ref": "#/$defs/__schema0"
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
     }
   }
 ]

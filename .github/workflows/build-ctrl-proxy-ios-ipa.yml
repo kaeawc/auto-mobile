@@ -42,10 +42,10 @@ jobs:
           ref: ${{ inputs.checkout-ref || github.sha }}
           persist-credentials: false
 
-      - name: "Select Xcode 26.5"
+      - name: "Select Xcode 26.6"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.5"
+          xcode-version: "26.6"
 
       # Both installs are network I/O and independent of the simulator-runtime
       # ensure below, so background them and let it overlap. The single barrier
@@ -74,7 +74,7 @@ jobs:
         id: install-xcpretty
 
       # Foreground, and now overlapped by both installs. Stays after
-      # `Select Xcode 26.5` because it resolves against the selected toolchain.
+      # `Select Xcode 26.6` because it resolves against the selected toolchain.
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 

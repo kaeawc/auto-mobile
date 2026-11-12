@@ -315,7 +315,11 @@
                 await assertAsyncThrowsError { try await executor.execute(testMetadata: metadata) }
 
                 XCTAssertNil(client.executePlanCalls[0].arguments["holdSessionOnFailure"])
-                XCTAssertEqual(heldSessions.events, [], "nothing held, nothing to heartbeat or release")
+                XCTAssertEqual(
+                    heldSessions.events,
+                    [.released("acquired-session")],
+                    "release the acquisition without a hold"
+                )
             }
         }
 
@@ -386,7 +390,7 @@
             XCTAssertEqual(sessions.count, 2)
             XCTAssertEqual(sessions[0], "first-session")
             XCTAssertNotEqual(sessions[1], "first-session", "a released UUID is terminal on the daemon")
-            XCTAssertEqual(heldSessions.releasedSessions, ["first-session"])
+            XCTAssertEqual(heldSessions.releasedSessions, ["first-session", "acquired-session"])
         }
 
         // MARK: - Helpers

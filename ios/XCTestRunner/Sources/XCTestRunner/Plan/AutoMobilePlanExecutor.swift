@@ -252,6 +252,7 @@ public final class AutoMobilePlanExecutor: Sendable {
         deviceIdOverride: String?,
         sessionUuidOverride: String?,
         testMetadata: TestMetadata?,
+        ownsSession: Bool = false,
         executePlanDispatch: ExecutePlanDispatch? = nil
     )
         async throws -> ExecutePlanResult
@@ -300,6 +301,7 @@ public final class AutoMobilePlanExecutor: Sendable {
             PerfTimer.log("sessionUuid=\(sessionUuid)")
 
             let acquiredSession = sessionUuidOverride == nil
+            let ownsAttemptSession = acquiredSession || ownsSession
             var holdForRecovery = false
             var dispatched = false
             let result: ExecutePlanResult
@@ -350,13 +352,11 @@ public final class AutoMobilePlanExecutor: Sendable {
                     try decodeExecutePlanResult(from: response)
                 }
             } catch {
-                // No decoded result takes over this acquisition. Free it even before dispatch (#11139),
-                // shielding cleanup from cancellation. A caller-supplied session is released only
-                // when the daemon was asked to hold it.
-                if acquiredSession || (holdForRecovery && dispatched) {
-                    await Task.detached {
-                        await self.releaseHeldSession(sessionUuid)
-                    }.value
+                // Free a new acquisition even before dispatch (#11139). On a recovery resume the
+                // parent owns pre-dispatch cleanup; after dispatch this attempt owns cleanup of an
+                // inherited acquisition. Caller-supplied sessions are released only when held.
+                if acquiredSession || ((ownsSession || holdForRecovery) && dispatched) {
+                    await releaseHeldSession(sessionUuid)
                 }
                 throw error
             }
@@ -365,7 +365,15 @@ public final class AutoMobilePlanExecutor: Sendable {
                     "executeAttempt END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)"
                 )
             if result.success {
+                if ownsAttemptSession {
+                    await releaseHeldSession(sessionUuid)
+                }
                 return result
+            }
+            // The daemon preserves a caller-held base, including one this executor acquired. A
+            // held failure delegates cleanup to handleFailure until recovery finishes or resumes.
+            if ownsAttemptSession, !holdForRecovery {
+                await releaseHeldSession(sessionUuid)
             }
             return try await handleFailure(
                 result: result,
@@ -376,7 +384,8 @@ public final class AutoMobilePlanExecutor: Sendable {
                 deviceIdOverride: deviceIdOverride,
                 recoveryAlreadyAttempted: recoveryAlreadyAttempted,
                 testMetadata: testMetadata,
-                sessionHeld: holdForRecovery
+                sessionHeld: holdForRecovery,
+                ownsSession: ownsAttemptSession
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -481,7 +490,8 @@ public final class AutoMobilePlanExecutor: Sendable {
         deviceIdOverride: String?,
         recoveryAlreadyAttempted: Bool,
         testMetadata: TestMetadata?,
-        sessionHeld: Bool
+        sessionHeld: Bool,
+        ownsSession: Bool
     )
         async throws -> ExecutePlanResult
     {
@@ -567,7 +577,8 @@ public final class AutoMobilePlanExecutor: Sendable {
         // `recoveryAlreadyAttempted: true` prevents a second recovery within this attempt.
         let resumeStep = failedStep.stepIndex
         logger.info("AI recovery succeeded, re-running failed step \(resumeStep + 1) and resuming")
-        // The resumed plan takes the held session over, and its executePlan lifecycle releases it.
+        // The resumed plan takes the held session over, including this executor's ownership of an
+        // acquisition. Caller-supplied sessions retain their existing daemon-managed hold lifecycle.
         // A resume that fails before executePlan is sent (initialize, setToolEnabled, cancellation)
         // never hands it over, so release it here before the caller retries under a fresh session;
         // otherwise it blocks that retry's device until its lease lapses (#11139).
@@ -580,6 +591,7 @@ public final class AutoMobilePlanExecutor: Sendable {
                 deviceIdOverride: context.deviceId,
                 sessionUuidOverride: sessionUuid,
                 testMetadata: testMetadata,
+                ownsSession: ownsSession,
                 executePlanDispatch: dispatch
             )
         } catch {
@@ -608,8 +620,18 @@ public final class AutoMobilePlanExecutor: Sendable {
     }
 
     private func releaseHeldSession(_ sessionUuid: String) async {
-        logger.info("Releasing session \(sessionUuid) held for AI recovery")
-        await heldSessionController?.release(sessionId: sessionUuid)
+        guard let heldSessionController else {
+            logger
+                .warn(
+                    "Cannot explicitly release session \(sessionUuid): this transport has no session release controller"
+                )
+            return
+        }
+        logger.info("Releasing session \(sessionUuid)")
+        // Cleanup must also finish when the attempt or recovery was cancelled.
+        await Task.detached {
+            await heldSessionController.release(sessionId: sessionUuid)
+        }.value
     }
 
     private func buildFailedStepContext(
@@ -813,8 +835,8 @@ extension AutoMobilePlanExecutor {
     }
 }
 
-/// Whether an attempt sent its `executePlan` call, after which the daemon's plan lifecycle (not
-/// this runner) owns the attempt's session. Confined to the one attempt that writes and reads it.
+/// Whether a resumed attempt sent its `executePlan` call and took over cleanup from handleFailure.
+/// Confined to the one attempt that writes and reads it.
 final class ExecutePlanDispatch {
     var sent = false
 }

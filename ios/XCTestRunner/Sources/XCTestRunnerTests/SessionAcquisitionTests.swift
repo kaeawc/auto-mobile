@@ -179,34 +179,108 @@ final class SessionAcquisitionTests: XCTestCase {
         }
     }
 
-    func testSuccessfulRunReleasesNothingExtra() async throws {
+    func testSuccessfulRunReleasesOnlyTheAcquiredSessionExactlyOnce() async throws {
         for sessionUuid: String? in [nil, "caller-session"] {
-            let client = AcquisitionMCPClient()
-            let heldSessions = RecordingHeldSessionController()
-            let executor = makeExecutor(client: client, heldSessionController: heldSessions)
+            for recoveryEnabled in [false, true] {
+                let client = AcquisitionMCPClient()
+                let heldSessions = RecordingHeldSessionController()
+                let executor = makeExecutor(
+                    client: client, heldSessionController: heldSessions, recoveryEnabled: recoveryEnabled
+                )
 
-            let result = try await executor.execute(sessionUuid: sessionUuid)
+                let result = try await executor.execute(sessionUuid: sessionUuid)
 
-            XCTAssertTrue(result.success)
-            XCTAssertEqual(heldSessions.releasedSessions, [])
+                XCTAssertTrue(result.success)
+                XCTAssertEqual(heldSessions.releasedSessions, sessionUuid == nil ? ["issued-session"] : [])
+            }
         }
     }
 
-    func testDecodedFailureKeepsExistingReleaseBehavior() async {
-        for recoveryEnabled in [false, true] {
+    func testDecodedFailureReleasesOnlyTheAcquiredOrHeldSessionExactlyOnce() async {
+        for sessionUuid: String? in [nil, "caller-session"] {
+            for recoveryEnabled in [false, true] {
+                let client = AcquisitionMCPClient()
+                client.replies["executePlan"] = [MCPToolResponse(
+                    text: #"{"success":false,"executedSteps":0,"totalSteps":1}"#
+                )]
+                let heldSessions = RecordingHeldSessionController()
+                let executor = makeExecutor(
+                    client: client, heldSessionController: heldSessions, recoveryEnabled: recoveryEnabled
+                )
+
+                await assertAsyncThrowsError { try await executor.execute(sessionUuid: sessionUuid) }
+
+                XCTAssertEqual(
+                    heldSessions.releasedSessions,
+                    sessionUuid == nil ? ["issued-session"] : (recoveryEnabled ? ["caller-session"] : [])
+                )
+            }
+        }
+    }
+
+    func testAcquiredSessionRecoveryReleasesExactlyOnceAfterResumeCompletes() async throws {
+        for success in [false, true] {
             let client = AcquisitionMCPClient()
-            client.replies["executePlan"] = [MCPToolResponse(
-                text: #"{"success":false,"executedSteps":0,"totalSteps":1}"#
-            )]
+            client.replies["executePlan"] = [
+                recoverableFailure,
+                MCPToolResponse(text: "{\"success\":\(success),\"executedSteps\":1,\"totalSteps\":1}"),
+            ]
             let heldSessions = RecordingHeldSessionController()
             let executor = makeExecutor(
-                client: client, heldSessionController: heldSessions, recoveryEnabled: recoveryEnabled
+                client: client,
+                heldSessionController: heldSessions,
+                recoveryEnabled: true,
+                recoveryHandler: AcquisitionSuccessfulRecoveryHandler(heldSessions: heldSessions)
+            )
+
+            if success {
+                let result = try await executor.execute()
+                XCTAssertTrue(result.success)
+                XCTAssertTrue(result.aiRecoverySuccessful)
+            } else {
+                await assertAsyncThrowsError { try await executor.execute() }
+            }
+
+            XCTAssertEqual(heldSessions.events, [
+                .heartbeatStarted("issued-session"), .heartbeatStopped("issued-session"), .released("issued-session"),
+            ])
+            XCTAssertEqual(client.events.filter { $0 == "getApple" }.count, 1, "resume reuses the acquisition")
+            let plans = client.calls.filter { $0.name == "executePlan" }
+            XCTAssertEqual(plans.count, 2)
+            XCTAssertEqual(plans.first?.arguments["holdSessionOnFailure"] as? Bool, true)
+            XCTAssertNil(plans.last?.arguments["holdSessionOnFailure"])
+        }
+    }
+
+    func testAcquiredSessionResumeFailuresReleaseExactlyOnceBeforeOrAfterDispatch() async {
+        for beforeDispatch in [false, true] {
+            let client = AcquisitionMCPClient()
+            client.replies["executePlan"] = [recoverableFailure, MCPToolResponse(text: "{broken")]
+            if beforeDispatch {
+                client.replies["setToolEnabled"] = [
+                    MCPToolResponse(text: #"{"enabled":true}"#),
+                    MCPToolResponse(text: "enable failed", isError: true),
+                ]
+            }
+            let heldSessions = RecordingHeldSessionController()
+            let executor = makeExecutor(
+                client: client,
+                heldSessionController: heldSessions,
+                recoveryEnabled: true,
+                recoveryHandler: AcquisitionSuccessfulRecoveryHandler(heldSessions: heldSessions)
             )
 
             await assertAsyncThrowsError { try await executor.execute() }
 
-            XCTAssertEqual(heldSessions.releasedSessions, recoveryEnabled ? ["issued-session"] : [])
+            XCTAssertEqual(heldSessions.releasedSessions, ["issued-session"])
+            XCTAssertEqual(client.events.filter { $0 == "executePlan" }.count, beforeDispatch ? 1 : 2)
         }
+    }
+
+    private var recoverableFailure: MCPToolResponse {
+        MCPToolResponse(
+            text: #"{"success":false,"executedSteps":0,"totalSteps":1,"sessionHeld":true,"failedStep":{"stepIndex":0,"tool":"observe","error":"retry","device":"configured-device"}}"#
+        )
     }
 
     func testDaemonErrorsPreserveTextAtEveryToolBoundary() async throws {
@@ -331,7 +405,8 @@ final class SessionAcquisitionTests: XCTestCase {
                     logger: AcquisitionLogger(),
                     recoveryModelConfig: nil,
                     daemonEnsurer: HermeticDaemonEnsurer(),
-                    deadlineScheduler: VirtualDeadlineScheduler()
+                    deadlineScheduler: VirtualDeadlineScheduler(),
+                    heldSessionController: RecordingHeldSessionController()
                 )
             }
             // The custom socket avoids a daemon preflight; all tool calls use the fake.
@@ -356,8 +431,9 @@ final class SessionAcquisitionTests: XCTestCase {
         platform: String = "ios",
         deviceId: String? = "configured-device",
         scheduler: any DeadlineScheduler = VirtualDeadlineScheduler(),
-        heldSessionController: HeldSessionControlling? = nil,
-        recoveryEnabled: Bool = false
+        heldSessionController: HeldSessionControlling = RecordingHeldSessionController(),
+        recoveryEnabled: Bool = false,
+        recoveryHandler: PlanRecoveryHandler? = nil
     )
         -> AutoMobilePlanExecutor
     {
@@ -372,7 +448,7 @@ final class SessionAcquisitionTests: XCTestCase {
             mcpClient: client,
             timer: FakeTimer(),
             logger: AcquisitionLogger(),
-            recoveryHandler: recoveryEnabled ? AcquisitionRecoveryHandler() : nil,
+            recoveryHandler: recoveryHandler ?? (recoveryEnabled ? AcquisitionRecoveryHandler() : nil),
             recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: recoveryEnabled),
             recoveryModelConfig: nil,
             daemonEnsurer: HermeticDaemonEnsurer(),
@@ -407,6 +483,17 @@ private struct AcquisitionRecoveryHandler: PlanRecoveryHandler {
     func attemptRecovery(_: FailedStepContext) async -> RecoveryOutcome {
         XCTFail("a transport/decode error or a result without a failed step must not reach recovery")
         return RecoveryOutcome(success: false)
+    }
+}
+
+private struct AcquisitionSuccessfulRecoveryHandler: PlanRecoveryHandler {
+    let heldSessions: RecordingHeldSessionController
+
+    func attemptRecovery(_ context: FailedStepContext) async -> RecoveryOutcome {
+        XCTAssertEqual(context.sessionUuid, "issued-session")
+        XCTAssertEqual(heldSessions.liveHeartbeats, ["issued-session"])
+        XCTAssertEqual(heldSessions.releasedSessions, [], "the session stays acquired throughout recovery")
+        return RecoveryOutcome(success: true)
     }
 }
 

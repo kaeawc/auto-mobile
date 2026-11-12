@@ -1,3 +1,4 @@
+import { validateCameraPosterRequest } from "./deviceCameraPosterTarget";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError, requireAndroidOrIosPlatform } from "../models";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
@@ -117,11 +118,7 @@ export class DeviceBootService {
   }
 
   async boot(request: DeviceBootRequest, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
-    if (request.cameraPosterPath !== undefined && request.platform !== "android") {
-      throw new ActionableError(
-        "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
-      );
-    }
+    validateCameraPosterRequest(request, request.cameraPosterPath);
     const timeoutMs = request.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const context: BootDeadlineContext = {
       request,
@@ -765,7 +762,8 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress?: DeviceBootProgress,
   ): Promise<DeviceBootResult> {
-    if (context.request.cameraPosterPath !== undefined) {
+    validateCameraPosterRequest(device, context.request.cameraPosterPath);
+    if (context.request.cameraPosterPath !== undefined && device.platform === "android") {
       throw new ActionableError(
         !isAndroidEmulatorSerial(device.deviceId)
           ? "cameraPosterPath is unsupported on physical Android devices. Use a stopped Android emulator."

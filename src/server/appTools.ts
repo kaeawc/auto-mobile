@@ -1,3 +1,7 @@
+import {
+  cameraPosterLaunchSkip,
+  prepareCameraPosterLaunch,
+} from "../features/utility/ios/iosCameraPosterLaunch";
 import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 import type { ActionCall } from "../features/action/ActionCall";
@@ -63,6 +67,7 @@ import {
   buildLaunchAppResponse,
   createDefaultLaunchAppToolDependencies,
   executeLaunch,
+  withCameraPosterApplied,
   type LaunchAppToolDependencies,
   prepareLaunchArguments,
   type PrototypeLaunch,
@@ -431,6 +436,16 @@ const createLaunchAppHandler =
         ? await beginPrototypeLaunch(dependencies, device, args.appId)
         : undefined;
       signal?.throwIfAborted();
+      const cameraPosterEnvironment = await prepareCameraPosterLaunch(
+        device,
+        {
+          registry: dependencies.iosCameraPosterRegistry,
+          provider: dependencies.iosCameraPosterDylibProvider,
+          hostEnv: dependencies.hostEnv,
+        },
+        prototypeLaunch?.environment,
+        args.appId,
+      );
       const prepared = prepareLaunchArguments(device, args, dependencies.idGenerator);
       mutationToken = prepared.mutationToken;
       await dependencies.prearmNetwork(device, args);
@@ -439,6 +454,7 @@ const createLaunchAppHandler =
       mutationMayHaveHappened = true;
       const result = await executeLaunch(launchApp, args, prepared.launchArguments, {
         prototypeLaunch,
+        cameraPosterEnvironment,
         signal,
       });
       signal?.throwIfAborted();
@@ -446,7 +462,12 @@ const createLaunchAppHandler =
       const safeResult = result.error
         ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
         : result;
-      const response = buildLaunchAppResponse(args.appId, safeResult);
+      const launchResponse = buildLaunchAppResponse(args.appId, safeResult);
+      const response = withCameraPosterApplied(
+        launchResponse,
+        cameraPosterEnvironment,
+        cameraPosterLaunchSkip(device, dependencies.iosCameraPosterRegistry, args.appId),
+      );
       await attachLaunchedViewer(
         dependencies.prototypeViewerAttacher,
         dependencies.timer,
@@ -717,16 +738,20 @@ const createUninstallAppHandler =
 // Register tools
 let unsubscribePrototypeAgentLifecycle: (() => void) | undefined;
 
-/** A released session or a removed device ends every agent recorded on its device. */
+/**
+ * A released session or a removed device ends every agent recorded on its device and forgets its
+ * camera poster, so the next session that reuses the simulator starts without one.
+ */
 function subscribePrototypeAgentLifecycle(
   dependencies: Pick<
     LaunchAppToolDependencies,
-    "prototypeAgentRegistry" | "prototypeViewerConnections"
+    "prototypeAgentRegistry" | "prototypeViewerConnections" | "iosCameraPosterRegistry"
   >,
 ): () => void {
   const releaseDevice = (deviceId: string) => {
     dependencies.prototypeAgentRegistry.releaseDevice(deviceId);
     dependencies.prototypeViewerConnections.releaseDevice(deviceId);
+    dependencies.iosCameraPosterRegistry.clear(deviceId);
   };
   const cleanups = [
     SessionReleaseBroadcaster.subscribe((_sessionUuid, _reason, snapshot, extras) => {

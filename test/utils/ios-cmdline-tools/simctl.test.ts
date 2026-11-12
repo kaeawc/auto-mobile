@@ -642,9 +642,10 @@ describe("Simctl", function () {
           { id: "ios.simulator.biometric", state: "available", source: "platform" },
           {
             id: "ios.simulator.cameraPoster",
-            state: "unsupported",
+            state: "available",
             source: "platform",
-            reason: "Camera posters are only supported at Android emulator boot.",
+            reason:
+              "Camera posters apply on the next launchApp cold launch through simulator process injection.",
           },
           {
             id: "ios.simulator.nfc",

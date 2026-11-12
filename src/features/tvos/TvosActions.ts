@@ -12,7 +12,7 @@ import {
   TVOS_RUNNER_COMMAND_TIMEOUT_MS,
   type TVRemoteButton,
 } from "./TvosRunnerClient";
-import { tvosRunners } from "./TvosRunnerRegistry";
+import { requireTvosRunner } from "./TvosRunnerRecovery";
 
 export function unsupportedTvosAction(action: string): never {
   throw new ActionableError(
@@ -35,15 +35,15 @@ export async function tvosPress(
     unsupportedTvosAction(`press ${button}`);
   }
   signal?.throwIfAborted();
-  await tvosRunners
-    .require(deviceId)
-    .request(
-      { type: "request_press_button", action, ...(durationMs === undefined ? {} : { durationMs }) },
-      signal,
-      durationMs === undefined
-        ? undefined
-        : { timeoutMs: durationMs + TVOS_RUNNER_COMMAND_TIMEOUT_MS },
-    );
+  await (
+    await requireTvosRunner(deviceId, signal)
+  ).request(
+    { type: "request_press_button", action, ...(durationMs === undefined ? {} : { durationMs }) },
+    signal,
+    durationMs === undefined
+      ? undefined
+      : { timeoutMs: durationMs + TVOS_RUNNER_COMMAND_TIMEOUT_MS },
+  );
   return { success: true, button, keyCode: 0 };
 }
 
@@ -85,9 +85,9 @@ export async function tvosSendKeys(
   for (const [index, command] of typing.entries()) {
     signal?.throwIfAborted();
     try {
-      await tvosRunners
-        .require(deviceId)
-        .request({ type: "request_append_text", text: command.text }, signal);
+      await (
+        await requireTvosRunner(deviceId, signal)
+      ).request({ type: "request_append_text", text: command.text }, signal);
     } catch (error) {
       signal?.throwIfAborted();
       const failure = toActionableError(

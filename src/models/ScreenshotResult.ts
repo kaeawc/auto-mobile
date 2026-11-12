@@ -1,4 +1,4 @@
-import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
+import type { ScreenshotMetadata } from "./ScreenshotMetadata";
 import type { ScreenshotFormat, ScreenshotMimeType } from "./ScreenshotFormat";
 
 /**

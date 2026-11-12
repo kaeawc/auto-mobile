@@ -16,6 +16,8 @@ setup() {
   mkdir -p "$REPO/docs/metrics/data" "$REPO/src"
   echo '{"day":0}' > "$REPO/docs/metrics/data/downloads.jsonl"
   echo 'export const VERSION = "0.0.93";' > "$REPO/src/release.ts"
+  echo "guard" > "$REPO/src/guard.ts"
+  echo "metrics" > "$REPO/docs/metrics/x"
   commit_all "base"
   BASE="$(git -C "$REPO" rev-parse HEAD)"
 
@@ -150,5 +152,39 @@ run_rebase() {
   run_rebase
   [ "$status" -eq 1 ]
   [[ "$output" == *"do not replay cleanly"* ]]
+  [ "$(git -C "$REPO" worktree list | wc -l)" -eq 1 ]
+}
+
+@test "refuses a rename into docs/metrics from a source path in base" {
+  git -C "$REPO" mv src/guard.ts docs/metrics/guard.ts
+  commit_all "move source into metrics"
+
+  run_rebase
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"src/guard.ts"* ]]
+  [[ "$output" == *"refusing to promote"* ]]
+}
+
+@test "refuses a rename out of docs/metrics" {
+  git -C "$REPO" mv docs/metrics/x src/x
+  commit_all "move metrics into source"
+
+  run_rebase
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"src/x"* ]]
+  [[ "$output" == *"refusing to promote"* ]]
+}
+
+@test "recovers the existing rebased release before a later metrics commit" {
+  metrics_commit 1
+  run_rebase
+  [ "$status" -eq 0 ]
+  local rebased="${lines[-1]}"
+  git -C "$REPO" merge --quiet --ff-only "$rebased"
+  metrics_commit 2
+
+  run_rebase
+  [ "$status" -eq 0 ]
+  [ "$output" = "$rebased" ]
   [ "$(git -C "$REPO" worktree list | wc -l)" -eq 1 ]
 }

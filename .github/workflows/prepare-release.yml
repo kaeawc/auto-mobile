@@ -109,7 +109,7 @@ jobs:
           base_main_commit="$(git rev-parse HEAD)"
 
           mapfile -t changed_files < <(
-            { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
+            { git diff --no-renames --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
           )
           # The bump script owns the list of files it rewrites; consume it so
           # the allow-list cannot drift from the script again (#5008).
@@ -425,7 +425,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           mapfile -t changed_files < <(
-            { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
+            { git diff --no-renames --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
           )
           if ((${#changed_files[@]} == 0)); then
             echo "Release files are already up to date for v$VERSION"
@@ -645,7 +645,7 @@ jobs:
             if [[ "$existing_tag_commit" != "$EXPECTED_RELEASE_COMMIT" ]]; then
               git fetch origin main
               if ! git merge-base --is-ancestor "$existing_tag_commit" FETCH_HEAD \
-                || ! git diff --name-only "$EXPECTED_RELEASE_COMMIT" "$existing_tag_commit" \
+                || ! git diff --no-renames --name-only "$EXPECTED_RELEASE_COMMIT" "$existing_tag_commit" \
                   | bash scripts/release/rebase-release-past-metrics.sh check-paths; then
                 echo "Tag $TAG already exists on a different commit" >&2
                 exit 1
@@ -672,7 +672,9 @@ jobs:
                 fi
                 echo "main moved only under docs/metrics/**; promoting $release_commit (rebase of $EXPECTED_RELEASE_COMMIT)"
                 # Not forced: if main moved again, this push fails closed.
-                git push origin "$release_commit":main
+                if ! git merge-base --is-ancestor "$release_commit" FETCH_HEAD; then
+                  git push origin "$release_commit":main
+                fi
               fi
             fi
             git tag "$TAG" "$release_commit"

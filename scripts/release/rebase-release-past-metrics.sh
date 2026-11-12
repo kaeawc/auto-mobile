@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
 # Decide whether a verified release may be promoted after main moved, and if so
-# rebase it onto the new main.
+# rebase it onto the new main, or recover an already-promoted release.
 #
 # Prepare Release builds and verifies a release commit on top of BASE (the main
 # commit it started from). If main moved meanwhile, promotion is only safe when
 # every new main commit touches nothing but docs/metrics/** (the daily
 # release-download snapshot bot): those paths never feed a release artifact, so
 # the verified artifacts still describe the rebased tree (#18175). Any other
-# change refuses promotion.
+# change refuses promotion, except the matching release commit on a retry.
 #
 # Usage:
 #   rebase-release-past-metrics.sh check-paths
@@ -16,9 +16,10 @@
 #       is under docs/metrics/, else list the offenders on stderr and exit 1.
 #   rebase-release-past-metrics.sh rebase <verified> <base> <main>
 #       Verify BASE is an ancestor of MAIN and of VERIFIED, that BASE..MAIN only
-#       touches docs/metrics/**, replay BASE..VERIFIED onto MAIN, check the
-#       rebased tree differs from VERIFIED only under docs/metrics/**, and print
-#       the rebased commit SHA on stdout. Exit 1 on any refusal.
+#       touches docs/metrics/**, replay BASE..VERIFIED onto MAIN, and print the
+#       rebased SHA after checking its tree differs only under docs/metrics/**.
+#       On retries, reuse the oldest matching non-merge commit already on MAIN
+#       whose tree differs only under docs/metrics/**. Exit 1 on any refusal.
 set -euo pipefail
 
 readonly ALLOWED_PREFIX="docs/metrics/"
@@ -78,8 +79,21 @@ rebase_release() {
   # Every commit must stay inside docs/metrics/**, not just the net diff: a
   # change that was later reverted still means main ran something unverified.
   local offenders
-  offenders="$(git log --format= --name-only "$base..$main" \
+  offenders="$(git log --format= --no-renames --name-only "$base..$main" \
     | awk -v prefix="$ALLOWED_PREFIX" "$OUTSIDE_PREFIX_AWK")"
+  # A previous attempt may have pushed the rebased release before tagging.
+  # Its release changes appear in the history check above, so recover a tree
+  # matching the verified release before refusing those changes.
+  local candidate candidate_offenders
+  while IFS= read -r candidate; do
+    [[ -z "$(git rev-list --merges -1 "$candidate^..$candidate")" ]] || continue
+    candidate_offenders="$(git diff --no-renames --name-only "$verified" "$candidate" \
+      | awk -v prefix="$ALLOWED_PREFIX" "$OUTSIDE_PREFIX_AWK")"
+    [[ -z "$candidate_offenders" ]] || continue
+    echo "$candidate"
+    return 0
+  done < <(git rev-list --reverse "$base..$main")
+
   require_no_offenders "$offenders" \
     "main moved by more than docs/metrics/** since $base; refusing to promote a different tree"
 
@@ -93,7 +107,7 @@ rebase_release() {
   local rebased
   rebased="$(git -C "$worktree" rev-parse HEAD)"
 
-  offenders="$(git diff --name-only "$verified" "$rebased" \
+  offenders="$(git diff --no-renames --name-only "$verified" "$rebased" \
     | awk -v prefix="$ALLOWED_PREFIX" "$OUTSIDE_PREFIX_AWK")"
   require_no_offenders "$offenders" \
     "rebased release tree differs from the verified tree outside docs/metrics/**; refusing to promote"

@@ -51,7 +51,7 @@ describe("parsePrototypePreviewRoute", () => {
   });
 
   test("anything else, or a malformed escape, is notFound", () => {
-    ["/p", "/p/", "/p/a/other", "/x", "/p/%E0%A4%A"].forEach((path) =>
+    ["/p", "/p/", "/p/a/other", "/x", "/p/%E0%A4%A", "//["].forEach((path) =>
       expect(parsePrototypePreviewRoute(path)).toEqual({ kind: "notFound" }),
     );
   });

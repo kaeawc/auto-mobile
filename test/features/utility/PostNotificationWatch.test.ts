@@ -1,21 +1,39 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
+import { readFileSync } from "node:fs";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { InMemoryPostedNotificationLedger } from "../../../src/features/utility/postedNotificationLedger";
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 
 const WATCH_UDID = "11111111-2222-3333-4444-555555555555";
-const BUNDLE_ID = "com.example.App.watchkitapp";
+const BUNDLE_ID = "dev.dogfood.factorywatch";
+const capture = readFileSync(
+  new URL("../../fixtures/ios/watch-log-saving-notification.txt", import.meta.url),
+  "utf8",
+);
+const noOnly = capture
+  .split("\n")
+  .filter((line) => line.includes(": NO ["))
+  .join("\n");
+const yesOnly = capture
+  .split("\n")
+  .filter((line) => line.includes(": YES ["))
+  .join("\n");
 
 describe("PostNotification - watchOS simulator", () => {
   let simctl: FakeSimctl;
+  let timer: FakeTimer;
 
   beforeEach(() => {
     simctl = new FakeSimctl();
+    timer = new FakeTimer();
+    timer.enableAutoAdvance();
   });
 
   const make = (deviceId = WATCH_UDID) => {
     const device: BootedDevice = { name: "Watch", deviceId, platform: "watchos" };
-    return new PostNotification(device, { simctl });
+    return new PostNotification(device, { simctl, timer });
   };
   const pushCalls = () => simctl.getMethodCalls("pushNotification");
 
@@ -53,6 +71,132 @@ describe("PostNotification - watchOS simulator", () => {
         }),
       }),
     ]);
+  });
+
+  test("reports a dropped notification with permission guidance and does not record it", async () => {
+    simctl.notificationDeliveryLogs = ["", noOnly];
+    const postedNotifications = new InMemoryPostedNotificationLedger();
+    const result = await new PostNotification(
+      { name: "Watch", deviceId: WATCH_UDID, platform: "watchos", osVersion: "26.5" },
+      {
+        simctl,
+        timer,
+        postedNotifications,
+        notificationAuthorization: {
+          read: async () => ({
+            supported: true,
+            allowed: null,
+            warning: "No notification section registered",
+          }),
+        },
+      },
+    ).execute({ title: "T", body: "B", appId: BUNDLE_ID });
+    expect(result.success).toBe(false);
+    expect(result.supported).toBe(true);
+    expect(result.appId).toBe(BUNDLE_ID);
+    expect(result.error).toContain("The watch dropped the push because notifications are denied");
+    for (const text of [
+      "the permission prompt was answered Don't Allow, or Allow was never reached",
+      "A denied app is not asked again",
+      "uninstall and reinstall",
+      "installApp resets its permissions",
+      "launch it, answer Allow",
+      "Allow",
+      "Don't Allow",
+      "observe",
+      "rotateCrown",
+      "swipeOn",
+      "CtrlProxyWatch",
+      "post again",
+    ]) {
+      expect(result.error).toContain(text);
+    }
+    expect(postedNotifications.postedBy(WATCH_UDID, BUNDLE_ID)).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(pushCalls()).toHaveLength(1);
+  });
+
+  test("keeps success when the newest captured verdict is YES", async () => {
+    simctl.notificationDeliveryLogs = ["", capture];
+    const result = await new PostNotification(
+      { name: "Watch", deviceId: WATCH_UDID, platform: "watchos", osVersion: "26.5" },
+      {
+        simctl,
+        timer,
+        notificationAuthorization: {
+          read: async () => ({
+            supported: true,
+            allowed: null,
+            warning: "No notification section registered",
+          }),
+        },
+      },
+    ).execute({ title: "T", body: "B", appId: BUNDLE_ID });
+    expect(result.success).toBe(true);
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toEqual([
+      { deviceId: WATCH_UDID },
+      { deviceId: WATCH_UDID },
+    ]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("keeps success when log reading fails", async () => {
+    simctl.notificationDeliveryLogError = new Error("log unavailable");
+    expect((await make().execute({ title: "T", body: "B", appId: BUNDLE_ID })).success).toBe(true);
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(2);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("retries an absent verdict once using the fake timer", async () => {
+    simctl.notificationDeliveryLogs = ["", "", noOnly];
+    const result = await make().execute({ title: "T", body: "B", appId: BUNDLE_ID });
+    expect(result.success).toBe(false);
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(3);
+    expect(timer.getSleepHistory()).toEqual([100]);
+  });
+
+  test("keeps success when both bounded reads have no verdict", async () => {
+    expect((await make().execute({ title: "T", body: "B", appId: BUNDLE_ID })).success).toBe(true);
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(3);
+    expect(timer.getSleepHistory()).toEqual([100]);
+  });
+
+  test("ignores an old NO and waits for a new YES", async () => {
+    simctl.notificationDeliveryLogs = [noOnly, noOnly, capture];
+    const pushNotification = simctl.pushNotification.bind(simctl);
+    simctl.pushNotification = async (...args) => {
+      expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(1);
+      return pushNotification(...args);
+    };
+    const result = await make().execute({ title: "T", body: "B", appId: BUNDLE_ID });
+    expect(result.success).toBe(true);
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(3);
+    expect(timer.getSleepHistory()).toEqual([100]);
+  });
+
+  test("ignores an old YES and reports a new NO", async () => {
+    simctl.notificationDeliveryLogs = [yesOnly, yesOnly, `${yesOnly}\n${noOnly}`];
+    const result = await make().execute({ title: "T", body: "B", appId: BUNDLE_ID });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("The watch dropped the push");
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(3);
+    expect(timer.getSleepHistory()).toEqual([100]);
+  });
+
+  test("uses an empty baseline when the pre-push log read fails", async () => {
+    simctl.notificationDeliveryLogError = new Error("baseline unavailable");
+    simctl.notificationDeliveryLogs = [noOnly];
+    const pushNotification = simctl.pushNotification.bind(simctl);
+    simctl.pushNotification = async (...args) => {
+      simctl.notificationDeliveryLogError = undefined;
+      return pushNotification(...args);
+    };
+    const result = await make().execute({ title: "T", body: "B", appId: BUNDLE_ID });
+    expect(pushCalls()).toHaveLength(1);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("The watch dropped the push");
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(2);
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 
   test("requires appId before pushing", async () => {
@@ -113,5 +257,6 @@ describe("PostNotification - watchOS simulator", () => {
       warning: undefined,
     });
     expect(pushCalls()).toHaveLength(1);
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(1);
   });
 });

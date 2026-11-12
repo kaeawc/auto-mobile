@@ -29,6 +29,9 @@ import {
   type IosNotificationAuthorizationReader,
 } from "./ios/IosNotificationAuthorizationReader";
 
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { watchNotificationDeliveryVerdict } from "./ios/watchNotificationDeliveryLog";
+
 export { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 
 interface PostNotificationAction {
@@ -134,8 +137,9 @@ export class PostNotification {
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
   private window: WindowInterface;
-  private simctl: Pick<SimCtlClient, "pushNotification">;
+  private simctl: Pick<SimCtlClient, "pushNotification" | "readNotificationDeliveryLog">;
   private fileSystem: FileSystem;
+  private readonly timer: Pick<Timer, "sleep">;
   private notificationAuthorization:
     | Pick<IosNotificationAuthorizationReader, "read">
     | null
@@ -150,17 +154,20 @@ export class PostNotification {
       simctl = null,
       fileSystem = null,
       notificationAuthorization,
+      timer = defaultTimer,
       postedNotifications = defaultPostedNotificationLedger,
     }: {
       adbFactoryOrExecutor?: AdbClientFactory | AdbExecutor | null;
       window?: WindowInterface | null;
-      simctl?: Pick<SimCtlClient, "pushNotification"> | null;
+      simctl?: Pick<SimCtlClient, "pushNotification" | "readNotificationDeliveryLog"> | null;
       fileSystem?: FileSystem | null;
+      timer?: Pick<Timer, "sleep">;
       notificationAuthorization?: Pick<IosNotificationAuthorizationReader, "read"> | null;
       postedNotifications?: PostedNotificationRecorder;
     } = {},
   ) {
     this.device = device;
+    this.timer = timer;
     this.fileSystem = fileSystem ?? new DefaultFileSystem();
     this.notificationAuthorization = notificationAuthorization;
     this.postedNotifications = postedNotifications;
@@ -236,6 +243,8 @@ export class PostNotification {
       return refusal;
     }
 
+    const deliveryLogBaseline = await this.readWatchDeliveryLogBaseline();
+
     const result = await this.simctl.pushNotification(this.device.deviceId, bundleId, built.json);
     if (!result.success) {
       return {
@@ -243,6 +252,18 @@ export class PostNotification {
         supported: true,
         appId: bundleId,
         error: preserveOrExplainSimctlPushError(result.error ?? "simctl push failed."),
+        warning,
+      };
+    }
+    if (
+      this.device.platform === "watchos" &&
+      (await this.watchDeliveryVerdict(bundleId, deliveryLogBaseline)) === "NO"
+    ) {
+      return {
+        success: false,
+        supported: true,
+        appId: bundleId,
+        error: `The watch dropped the push because notifications are denied for app ${bundleId} (the permission prompt was answered Don't Allow, or Allow was never reached). A denied app is not asked again, so uninstall and reinstall it (installApp resets its permissions), launch it, answer Allow, then post again. Use observe to find Allow / Don't Allow and rotateCrown or swipeOn to scroll the sheet; a "CtrlProxyWatch" runner prompt can appear first.`,
         warning,
       };
     }
@@ -259,6 +280,54 @@ export class PostNotification {
     };
   }
 
+  private async readWatchDeliveryLogBaseline(): Promise<Set<string>> {
+    // Exclude previous pushes still present in the rolling delivery log window.
+    const deliveryLogBaseline = new Set<string>();
+    if (this.device.platform === "watchos") {
+      try {
+        const output = await this.simctl.readNotificationDeliveryLog(this.device.deviceId);
+        for (const line of output.split(/\r?\n/)) {
+          deliveryLogBaseline.add(line);
+        }
+      } catch (error) {
+        logger.warn(
+          `[PostNotification] Failed to read watch notification delivery log baseline: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return deliveryLogBaseline;
+  }
+
+  private async watchDeliveryVerdict(
+    bundleId: string,
+    ignoreLines: ReadonlySet<string>,
+  ): Promise<"NO" | "YES" | null> {
+    try {
+      const first = watchNotificationDeliveryVerdict(
+        await this.simctl.readNotificationDeliveryLog(this.device.deviceId),
+        bundleId,
+        ignoreLines,
+      );
+      if (first !== null) {
+        return first;
+      }
+      // The notification pipeline can lag simctl push; allow one bounded settling interval.
+      await this.timer.sleep(100);
+      return watchNotificationDeliveryVerdict(
+        await this.simctl.readNotificationDeliveryLog(this.device.deviceId),
+        bundleId,
+        ignoreLines,
+      );
+    } catch (error) {
+      logger.warn(
+        `[PostNotification] Failed to read watch notification delivery log: ${errorMessage(error)}`,
+        error,
+      );
+      return null;
+    }
+  }
+
   private async checkIosNotificationAuthorization(
     bundleId: string,
     warning: string | undefined,
@@ -272,7 +341,12 @@ export class PostNotification {
     if (iosMajor !== null && iosMajor < 27) {
       const reader = this.notificationAuthorization ?? defaultBulletinBoardReader();
       const authorization = await reader.read(this.device.deviceId, bundleId);
-      if (authorization.allowed !== true) {
+      // watchOS has no BulletinBoard section even after authorization; only its delivery log
+      // distinguishes that inconclusive state from a push dropped for missing permission.
+      if (
+        authorization.allowed !== true &&
+        !(this.device.platform === "watchos" && authorization.allowed === null)
+      ) {
         const detail = [
           `Notification authorization status is ${authorization.authorizationStatus ?? "unknown"}.`,
           authorization.warning || authorization.error,

@@ -21,6 +21,8 @@
 # matches nothing, and when a `portable` rule is not needed. Put the more
 # specific `portable` rules before the broader ones.
 
+portable test/features/utility/WatchNotificationDeliveryLog.test.ts     # pure watch delivery log parser over a captured fixture
+
 # --- portable: path has an iOS token but the test needs no iOS host --------------
 
 portable test/features/utility/ios/*.test.ts  # registry, env construction and injected compiler/filesystem only

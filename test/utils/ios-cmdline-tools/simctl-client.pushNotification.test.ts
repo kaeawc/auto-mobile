@@ -52,6 +52,57 @@ describe("SimCtlClient pushNotification", () => {
     source: "local",
   };
 
+  test("reads recent notification delivery logs with literal argv and a bounded timeout", async () => {
+    const calls: { file: string; args: string[] }[] = [];
+    const output = "captured log output";
+    const simctl = new SimCtlClient(
+      device,
+      async (file, args) => {
+        calls.push({ file, args });
+        return createExecResult(output, "");
+      },
+      { timer: new FakeTimer() },
+    );
+    expect(await simctl.readNotificationDeliveryLog("watch udid")).toBe(output);
+    expect(calls).toEqual([
+      {
+        file: "xcrun",
+        args: [
+          "simctl",
+          "spawn",
+          "watch udid",
+          "log",
+          "show",
+          "--last",
+          "10s",
+          "--style",
+          "compact",
+          "--predicate",
+          'eventMessage CONTAINS "Saving notification"',
+        ],
+      },
+    ]);
+  });
+
+  test("bounds a stalled delivery log read with the injected timer", async () => {
+    const timer = new FakeTimer();
+    let commandSignal: AbortSignal | undefined;
+    const simctl = new SimCtlClient(
+      device,
+      (_file, _args, options) => {
+        commandSignal = options?.signal;
+        return new Promise(() => {});
+      },
+      { timer },
+    );
+    const read = simctl.readNotificationDeliveryLog("watch udid");
+    const outcome = read.catch((error: unknown) => error);
+    expect(timer.getPendingTimeouts()).toEqual([2000]);
+    timer.advanceTime(2000);
+    expect(String(await outcome)).toContain("Command timed out after 2000ms");
+    expect(commandSignal?.aborted).toBe(true);
+  });
+
   // Issue #6517: `simctl push` can exit 0 (delivered) while still writing
   // advisory/diagnostic text to stderr. Success must be driven by the exit
   // code (via executeCommandArgs throwing on non-zero exit), not by stderr

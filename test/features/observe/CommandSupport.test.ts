@@ -138,6 +138,7 @@ describe("CtrlProxy command support", () => {
     expect(ANDROID_CAPABILITY_GATED_COMMANDS).toEqual(
       new Set([
         ...oldApkAdvertisedCommands,
+        "node_selector_bounds_v2",
         // Newer than the old-APK fixture (#5190).
         "reset_keystore",
         "show_prototype",
@@ -343,4 +344,9 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_set_text")).toBe(true);
     expect(context.isCommandSupported?.("request_tap_coordinates")).toBe(false);
   });
+});
+
+test("bounds v2 is advertised separately while old APK fixtures retain v1", () => {
+  expect(ANDROID_CAPABILITY_FLAGS).toContain("node_selector_bounds_v2");
+  expect(oldApkAdvertisedCommands).not.toContain("node_selector_bounds_v2");
 });

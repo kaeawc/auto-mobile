@@ -27,6 +27,7 @@ class CommandAdvertisementTest {
       "prototype_storage_v1",
       "node_selector_actions",
       "node_selector_bounds_v1",
+      "node_selector_bounds_v2",
       "ime_key_events_v1",
       "ime_clear_field_v1",
       "ime_password_commit_v1",
@@ -177,6 +178,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("full_command_set_v1"))
     assertTrue(commands.contains("node_selector_actions"))
     assertTrue(commands.contains("node_selector_bounds_v1"))
+    assertTrue(commands.contains("node_selector_bounds_v2"))
     assertTrue(commands.contains("ime_key_events_v1"))
     assertTrue(commands.contains("ime_clear_field_v1"))
     assertTrue(commands.contains("ime_password_commit_v1"))

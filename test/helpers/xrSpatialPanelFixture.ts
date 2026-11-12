@@ -30,10 +30,28 @@ const hostMissingCapture: SpatialPanelCapture = JSON.parse(
   ),
 );
 
+const switchScrollCapture: SpatialPanelCapture = JSON.parse(
+  readFileSync(
+    new URL(
+      "../fixtures/android-xr/observe-spatial-panel-switch-scroll-18022.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+
 /** Preserve both serialized tree representations; normalize only task geometry as the wire reader does. */
-export function spatialPanelObservation(noFocus: boolean | "host-missing" = false): ObserveResult {
+export function spatialPanelObservation(
+  noFocus: boolean | "host-missing" | "switch-scroll" = false,
+): ObserveResult {
   const clone = structuredClone(
-    noFocus === "host-missing" ? hostMissingCapture : noFocus ? noFocusCapture : capture,
+    noFocus === "switch-scroll"
+      ? switchScrollCapture
+      : noFocus === "host-missing"
+        ? hostMissingCapture
+        : noFocus
+          ? noFocusCapture
+          : capture,
   );
   for (const task of clone.backStack?.tasks ?? []) {
     task.bounds = parseBounds(task.bounds) ?? undefined;

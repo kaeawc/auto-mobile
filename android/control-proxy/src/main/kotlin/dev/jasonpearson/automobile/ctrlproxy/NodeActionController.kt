@@ -300,10 +300,19 @@ internal class NodeActionController(
       }
     }
 
+    private val boundsActionId: Int?
+      get() =
+        when (action) {
+          "click" -> AccessibilityNodeInfo.ACTION_CLICK
+          "scroll_forward" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+          "scroll_backward" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+          else -> null
+        }
+
     private suspend fun perform(target: NodeActionTarget) {
       val expectedBounds = boundsConstraint.expectedBounds
       val boundsOnly = target.selector == null && target.resourceId.isNullOrEmpty()
-      if (boundsOnly && (expectedBounds == null || action != "click")) {
+      if (boundsOnly && (expectedBounds == null || boundsActionId == null)) {
         perfProvider.end()
         val errorTime = timeProvider.currentTimeMillis()
         val error = "A resource-id or stable node selector is required for accessibility actions"
@@ -364,7 +373,7 @@ internal class NodeActionController(
         val selector = target.selector ?: NodeSelector(resourceId = target.resourceId)
         selectNodeWithBounds(
           host.findNodesInDisplayWindows {
-            if (boundsOnly) findNodesByBounds(it, expectedBounds)
+            if (boundsOnly) findNodesByBounds(it, expectedBounds, checkNotNull(boundsActionId))
             else findNodesBySelector(it, selector)
           },
           expectedBounds,

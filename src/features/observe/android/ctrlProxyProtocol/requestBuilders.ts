@@ -197,6 +197,7 @@ export const ctrlProxyRequests = {
     identityContentDesc?: string;
     identityLabelText?: string;
     identityLabelContentDesc?: string;
+    identityCheckable?: boolean;
     allowInvisible?: boolean;
     customAction?: string;
     progress?: number;
@@ -224,6 +225,7 @@ export const ctrlProxyRequests = {
       ...(args.identityLabelContentDesc !== undefined
         ? { identityLabelContentDesc: args.identityLabelContentDesc }
         : {}),
+      identityCheckable: args.identityCheckable,
       customAction: args.customAction,
       ...(args.allowInvisible ? { allowInvisible: true } : {}),
       ...(args.progress !== undefined ? { progress: args.progress } : {}),

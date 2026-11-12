@@ -11,9 +11,11 @@ data class NodeIdentityHints(
   val contentDesc: String? = null,
   val labelText: String? = null,
   val labelContentDesc: String? = null,
+  val checkable: Boolean? = null,
 ) {
   fun matches(node: AccessibilityNodeInfo): Boolean =
     (className == null || node.className?.toString() == className) &&
+      (checkable == null || node.isCheckable == checkable) &&
       (text == null || node.text?.toString() == text) &&
       (contentDesc == null || node.contentDescription?.toString() == contentDesc) &&
       ((labelText == null && labelContentDesc == null) || matchesLabel(node))
@@ -76,26 +78,34 @@ internal fun findNodesBySelector(
   return matches
 }
 
-/** Exact clickable bounds matches across a tree. The caller owns the returned nodes. */
+/**
+ * Exact bounds matches advertising the required action across a tree. The caller owns the returned
+ * nodes.
+ */
 internal fun findNodesByBounds(
   root: AccessibilityNodeInfo,
   expectedBounds: NodeExpectedBounds,
+  requiredAction: Int,
 ): List<AccessibilityNodeInfo> {
   val matches = mutableListOf<AccessibilityNodeInfo>()
   if (
     expectedBounds.matches(root) &&
-      root.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
+      root.actionList.any { it.id == requiredAction } &&
+      isVisibleForBoundsAction(root, requiredAction)
   ) {
     matches += root
   }
   for (index in 0 until root.childCount) {
     val child = root.getChild(index) ?: continue
-    val found = findNodesByBounds(child, expectedBounds)
+    val found = findNodesByBounds(child, expectedBounds, requiredAction)
     matches += found
     if (found.none { it === child }) child.recycle()
   }
   return matches
 }
+
+private fun isVisibleForBoundsAction(node: AccessibilityNodeInfo, requiredAction: Int): Boolean =
+  requiredAction == AccessibilityNodeInfo.ACTION_CLICK || node.isVisibleToUser
 
 /** Panel bounds must never be compared to physical display dimensions. Releases every non-hit. */
 internal fun selectNodeWithBounds(

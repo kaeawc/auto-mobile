@@ -110,7 +110,7 @@ describe("tapAny on Android XR (#17811)", () => {
     const { tapper, service, adb, target } = setup(true);
     await expect(
       tapper.executeAndroidTap("doubleTap", point, 0, { target: target() }),
-    ).rejects.toThrow(/XR panel coordinate space.*tapAt/);
+    ).rejects.toThrow(/XR panel coordinate space.*keyboard focus keys/);
     expect(service.getNodeActionHistory()).toHaveLength(0);
     expect(service.getTapHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(0);

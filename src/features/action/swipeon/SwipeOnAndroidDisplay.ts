@@ -1,5 +1,8 @@
 import { isVisibleAutoScrollTarget } from "./SwipeOnAutoTargeting";
-import { assertXrSwipeDisplayInputSupported } from "../../xr/xrSpatialPanelInput";
+import {
+  isXrSpatialPanelApp,
+  assertXrSwipeDisplayInputSupported,
+} from "../../xr/xrSpatialPanelInput";
 import {
   appendWarning,
   type ObservedAndroidXr,
@@ -244,11 +247,14 @@ export class SwipeOnAndroidDisplay {
     });
     const duration = resolveSwipeDuration({ ...options, geometry: this.ctx().geometry });
     const boomerang = resolveBoomerangConfig(options);
-    if (talkBack.enabled) {
+    const spatialPanel = isXrSpatialPanelApp(observation, androidXr);
+    if (talkBack.enabled || spatialPanel) {
       // A raw one-finger swipe only moves TalkBack focus; reuse the default route's executor.
       const swipe = await this.dispatchTalkBackDisplaySwipe({
         options,
-        element: decision.element,
+        element:
+          decision.element ??
+          (spatialPanel ? this.selectedDisplayContainerElement(options, observation) : undefined),
         observation,
         coordinates: { x1, y1, x2, y2 },
         duration,
@@ -436,7 +442,7 @@ export class SwipeOnAndroidDisplay {
         warning: appendWarning(coordinates.warning, xrWarning),
       };
     }
-    const bounds = this.selectedDisplayContainerBounds(options, observation);
+    const bounds = this.selectedDisplayContainerElement(options, observation)?.bounds;
     if (options.container && !bounds) {
       throw new ActionableError("Swipe container not found on selected display");
     }
@@ -598,6 +604,7 @@ export class SwipeOnAndroidDisplay {
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     observation: ObserveResult;
     searchDragState?: AndroidSearchDragState;
+    spatialPanel?: boolean;
     signal?: AbortSignal;
     onDispatched?: () => void;
   }): Promise<SwipeResult> {
@@ -608,7 +615,9 @@ export class SwipeOnAndroidDisplay {
       x2: input.x2,
       y2: input.y2,
       direction: input.direction,
-      containerElement: null,
+      containerElement: input.spatialPanel
+        ? (this.selectedDisplayContainerElement(input.options, input.observation) ?? null)
+        : null,
       observation: input.observation,
       gestureOptions: {
         displayFence: { assertCurrent: input.target.assertCurrent },
@@ -715,13 +724,11 @@ export class SwipeOnAndroidDisplay {
                 dispatched = true;
                 return { ...coordinates, success: true };
               };
-              if (!talkBack.enabled) {
-                assertXrSwipeDisplayInputSupported(
-                  previousObservation,
-                  await this.ctx().androidXr(previousObservation, signal),
-                );
-              }
-              const gesture = await (talkBack.enabled
+              const spatialPanel = isXrSpatialPanelApp(
+                previousObservation,
+                await this.ctx().androidXr(previousObservation, signal),
+              );
+              const gesture = await (talkBack.enabled || spatialPanel
                 ? this.executeDisplayTalkBackSwipe({
                     ...coordinates,
                     observation: previousObservation,
@@ -729,6 +736,7 @@ export class SwipeOnAndroidDisplay {
                     options,
                     target,
                     searchDragState,
+                    spatialPanel,
                     signal,
                     onDispatched,
                   })
@@ -858,10 +866,10 @@ export class SwipeOnAndroidDisplay {
     }
   }
 
-  private selectedDisplayContainerBounds(
+  private selectedDisplayContainerElement(
     options: SwipeOnOptions,
     observation: ObserveResult,
-  ): Element["bounds"] | undefined {
+  ): Element | undefined {
     if (!options.container || !observation.viewHierarchy) {
       return undefined;
     }
@@ -869,7 +877,7 @@ export class SwipeOnAndroidDisplay {
       return this.ctx().scrollUntilVisible.resolveSwipeContainer(
         observation.viewHierarchy,
         options.container,
-      ).bounds;
+      );
     }
     const container = this.ctx().scrollUntilVisible.resolveElement(
       observation.viewHierarchy,
@@ -883,8 +891,8 @@ export class SwipeOnAndroidDisplay {
           observation.viewHierarchy,
           container,
           options.direction,
-        ).bounds
-      : container?.bounds;
+        )
+      : (container ?? undefined);
   }
 
   async executeExplicitDisplay(

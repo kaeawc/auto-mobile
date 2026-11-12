@@ -1,3 +1,4 @@
+import { executeXrPanelScroll } from "../../xr/xrPanelScroll";
 import { assertXrSwipeDisplayInputSupported } from "../../xr/xrSpatialPanelInput";
 import type { ObservedAndroidXr } from "../../xr/xrPanelSpace";
 import type {
@@ -113,19 +114,20 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     this.androidXr = androidXr;
   }
 
-  async executeSwipeGesture({
-    observation,
-    x1,
-    y1,
-    x2,
-    y2,
-    direction,
-    containerElement,
-    gestureOptions,
-    perf,
-    boomerang,
-    signal,
-  }: SwipeGestureRequest): Promise<SwipeResult> {
+  async executeSwipeGesture(request: SwipeGestureRequest): Promise<SwipeResult> {
+    const {
+      observation,
+      x1,
+      y1,
+      x2,
+      y2,
+      direction,
+      containerElement,
+      gestureOptions,
+      perf,
+      boomerang,
+      signal,
+    } = request;
     throwIfAborted(signal);
     const boomerangEnabled = Boolean(boomerang);
     logger.info(
@@ -199,30 +201,38 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
         signal,
       });
     } else {
-      await this.assertDisplayInputSupported(observation, signal);
-      if (boomerangEnabled) {
-        logger.debug("[SwipeOn] TalkBack disabled, using boomerang swipe");
-        const result = await this.executeBoomerangGesture({
-          x1,
-          y1,
-          x2,
-          y2,
-          gestureOptions,
-          boomerang: boomerang!,
-          perf,
-          signal,
-        });
-        return withEpilogueWarning(result, warning);
-      }
+      return this.executeNonTalkBackSwipe(request, warning);
+    }
+  }
 
-      // Standard mode: Use coordinate-based swipes
-      logger.debug("[SwipeOn] TalkBack disabled, using standard swipe");
-      const result = await this.executeGesture.swipe({ x1, y1, x2, y2 }, gestureOptions, {
+  private async executeNonTalkBackSwipe(
+    request: SwipeGestureRequest,
+    warning?: string,
+  ): Promise<SwipeResult> {
+    const { observation, x1, y1, x2, y2, gestureOptions, boomerang, perf, signal } = request;
+    const panelScroll = await this.executePanelScroll(request);
+    if (panelScroll) {
+      return withEpilogueWarning(panelScroll, warning);
+    }
+    await this.assertDisplayInputSupported(observation, signal);
+    if (boomerang) {
+      const result = await this.executeBoomerangGesture({
+        x1,
+        y1,
+        x2,
+        y2,
+        gestureOptions,
+        boomerang,
         perf,
         signal,
       });
       return withEpilogueWarning(result, warning);
     }
+    const result = await this.executeGesture.swipe({ x1, y1, x2, y2 }, gestureOptions, {
+      perf,
+      signal,
+    });
+    return withEpilogueWarning(result, warning);
   }
 
   async executeBoomerangGesture({
@@ -393,6 +403,21 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       logger.debug("[SwipeOn] No container with resource-id, skipping ACTION_SCROLL");
     }
 
+    const panelScroll = await this.executePanelScroll({
+      observation,
+      x1,
+      y1,
+      x2,
+      y2,
+      direction,
+      containerElement,
+      gestureOptions,
+      perf,
+      signal,
+    });
+    if (panelScroll) {
+      return panelScroll;
+    }
     await this.assertDisplayInputSupported(observation, signal);
 
     // Fallback to two-finger swipe
@@ -514,6 +539,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     }
 
     return undefined;
+  }
+
+  private async executePanelScroll(request: SwipeGestureRequest): Promise<SwipeResult | undefined> {
+    return executeXrPanelScroll(
+      this.accessibilityService,
+      request,
+      request.observation && this.androidXr
+        ? await this.androidXr(request.observation, request.signal)
+        : false,
+    );
   }
 
   private async assertDisplayInputSupported(

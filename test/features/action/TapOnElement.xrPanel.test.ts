@@ -1,3 +1,4 @@
+import { spatialPanelObservation } from "../../helpers/xrSpatialPanelFixture";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -164,7 +165,9 @@ describe("XR panel-space tap routing", () => {
             : element;
       await expect(
         execute(target, mode === "doubleTap" ? "doubleTap" : "tap", mode === "talkback"),
-      ).rejects.toThrow(/XR panel coordinate space.*not tappable screen coordinates.*tapAt/);
+      ).rejects.toThrow(
+        /XR panel coordinate space.*not tappable screen coordinates.*keyboard focus keys/,
+      );
       if (mode === "bounds-unsupported") {
         expect(service.getNodeActionHistory()).toHaveLength(0);
       }
@@ -180,7 +183,7 @@ describe("XR panel-space tap routing", () => {
       const panel = new SearchableHierarchy().project(panelHierarchy)[0];
       const { execute, service, adb } = setup();
       await expect(execute({ ...panel.properties, bounds: panel.bounds! })).rejects.toThrow(
-        /XR panel coordinate space.*tapAt/,
+        /XR panel coordinate space.*keyboard focus keys/,
       );
       expect(service.getTapHistory()).toHaveLength(0);
       expect(adb.getAllCommands()).toHaveLength(0);
@@ -345,7 +348,7 @@ describe("XR panel-space tap routing", () => {
         ]);
       } else {
         await expect(result).rejects.toThrow(
-          /XR panel coordinate space.*not tappable screen coordinates.*tapAt/,
+          /XR panel coordinate space.*not tappable screen coordinates.*keyboard focus keys/,
         );
         expect(service.getNodeActionHistory()).toHaveLength(0);
       }
@@ -489,7 +492,7 @@ describe("XR panel-space tap routing", () => {
         isTalkBackEnabled: false,
         options: { action: "tap", resolvedHierarchy: tree },
       }),
-    ).rejects.toThrow(/XR panel coordinate space.*tapAt/);
+    ).rejects.toThrow(/XR panel coordinate space.*keyboard focus keys/);
     expect(service.getNodeActionHistory()).toHaveLength(0);
     expect(service.getTapHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(0);
@@ -511,7 +514,7 @@ describe("XR panel-space tap routing", () => {
         isTalkBackEnabled: false,
         options: { action: "tap", resolvedHierarchy: tree },
       }),
-    ).rejects.toThrow(/XR panel coordinate space.*tapAt/);
+    ).rejects.toThrow(/XR panel coordinate space.*keyboard focus keys/);
     expect(service.getNodeActionHistory()).toHaveLength(1);
     expect(service.getNodeActionHistory()[0]!.selector).toBeUndefined();
     expect(service.getTapHistory()).toHaveLength(0);
@@ -521,7 +524,7 @@ describe("XR panel-space tap routing", () => {
     const { tap, service, adb } = setup();
     await expect(
       tap.executeAndroidTapWithCoordinates("tap", 1052, 1961, 0, element),
-    ).rejects.toThrow(/XR panel coordinate space.*tapAt/);
+    ).rejects.toThrow(/XR panel coordinate space.*keyboard focus keys/);
     expect(service.getTapHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(0);
   });
@@ -546,4 +549,28 @@ describe("XR panel-space tap routing", () => {
     expect(service.getTapHistory()).toHaveLength(1);
     expect(adb.getAllCommands()).toHaveLength(0);
   });
+});
+
+test("the captured unlabeled SpatialPanel switch clicks with a checkable identity hint", async () => {
+  const observation = spatialPanelObservation("switch-scroll");
+  const target = new SearchableHierarchy()
+    .project(observation.viewHierarchy!)
+    .find((entry) => entry.properties["view-id"] === "s2-54a37556722ca76a")!;
+  const { tap, service, adb } = setup();
+  await tap.executeAndroidTap("tap", point, 0, {
+    element: { ...target.properties, bounds: target.bounds! },
+    isTalkBackEnabled: false,
+    options: { action: "tap", resolvedHierarchy: observation.viewHierarchy! },
+  });
+  expect(service.getNodeActionHistory()).toMatchObject([
+    {
+      action: "click",
+      selector: undefined,
+      expectedBounds: { left: 32, top: 65, right: 136, bottom: 161 },
+      identityHints: { checkable: true },
+    },
+  ]);
+  expect(service.getNodeActionHistory()[0]!.identityHints).not.toHaveProperty("stateDescription");
+  expect(service.getTapHistory()).toEqual([]);
+  expect(adb.getAllCommands()).toEqual([]);
 });

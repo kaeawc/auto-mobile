@@ -1213,3 +1213,21 @@ test("pin builder omits absent icon and participates in supported requests", () 
   ).toBe('{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"hero"}');
   expect(KNOWN_REQUEST_TYPES).toContain("pin_saved_prototype");
 });
+
+test("bounds-only checkable action builder preserves boolean identity and omits synthetic selectors", () => {
+  expect(
+    serializeCtrlProxyRequest(
+      ctrlProxyRequests.requestAction({
+        requestId: "switch",
+        action: "click",
+        boundsLeft: 32,
+        boundsTop: 65,
+        boundsRight: 136,
+        boundsBottom: 161,
+        identityCheckable: true,
+      }),
+    ),
+  ).toBe(
+    '{"type":"request_action","requestId":"switch","action":"click","boundsLeft":32,"boundsTop":65,"boundsRight":136,"boundsBottom":161,"identityCheckable":true}',
+  );
+});

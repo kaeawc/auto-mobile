@@ -304,6 +304,7 @@ class WebSocketServer(
   private fun MutableList<String>.addInputAndGestureFlags() {
     add("node_selector_actions")
     add("node_selector_bounds_v1")
+    add("node_selector_bounds_v2")
     add("ime_key_events_v1")
     add("ime_clear_field_v1")
     // The IME commits and clears password fields; older APKs refuse them.

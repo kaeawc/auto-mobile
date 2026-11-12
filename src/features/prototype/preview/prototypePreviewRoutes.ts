@@ -74,7 +74,14 @@ function queryRoute(params: URLSearchParams): PrototypePreviewRoute {
 
 /** The route of a request target (path and query); anything else is notFound. */
 export function parsePrototypePreviewRoute(target: string): PrototypePreviewRoute {
-  const url = new URL(target, "http://preview.invalid");
+  let url: URL;
+  try {
+    url = new URL(target, "http://preview.invalid");
+  } catch (error) {
+    // A request target that is not a URL (such as `//[`) is a bad request, answered with 404.
+    logger.debug(`[prototype] preview request target not parseable: ${errorMessage(error)}`);
+    return { kind: "notFound" };
+  }
   if (url.pathname === "/") {
     return { kind: "index" };
   }

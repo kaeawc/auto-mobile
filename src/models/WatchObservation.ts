@@ -17,7 +17,8 @@ export type AppleScreenshotOnlyPlatform = "watchos" | "tvos" | "visionos";
 
 export const TVOS_HIERARCHY_UNAVAILABLE_MESSAGE =
   "No tvOS runner is connected: this observation carries only a screenshot. " +
-  "Call startDevice to prepare the runner for hierarchy and focus navigation. " +
+  "Call startDevice to prepare the runner for hierarchy and focus navigation " +
+  '(provisionDevice with readiness "automation" starts it too). ' +
   "Absent hierarchy fields do not mean the screen is empty; read the screenshot instead.";
 
 /** A tvOS runner is registered but did not return a hierarchy (stuck, disconnected or failed). */

@@ -198,8 +198,14 @@ final class RemindersTests: AutoMobileTestCase {
 ```
 
 Run the test target from Xcode or with `xcodebuild test` against a booted iOS
-Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
-checkpoints so failures explain which state was missing.
+Simulator. A device identifier is required unless you pass an explicit issued
+session to the executor. Set `AUTOMOBILE_DEVICE_ID` to the simulator UDID, or
+override `deviceId` in the test class. `AUTOMOBILE_DEVICE_UDID` is also accepted
+when `AUTOMOBILE_DEVICE_ID` is unset or empty. Without an explicit session, the test
+acquires its own device session before executing the plan, and the daemon releases it after the
+plan completes. Acquisition and execution errors include the daemon's message.
+Keep selectors semantic and add `observe.waitFor` steps at important checkpoints
+so failures explain which state was missing.
 
 By default `observe` lists actionable rows in `skeleton` and static text, such as
 a status label or a validation error, in `context`. Read `context` to verify a

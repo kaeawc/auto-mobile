@@ -27,6 +27,8 @@ private final class LaunchPlanContractMCPClient: AutoMobileMCPClient, @unchecked
         toolCalls.append(ToolCall(name: name, arguments: arguments, timeout: timeout))
 
         switch name {
+        case "getApple":
+            return MCPToolResponse(text: #"{"runtime":{"session":{"sessionUuid":"launch-plan-contract-session"}}}"#)
         case "setToolEnabled":
             return MCPToolResponse(text: #"{"success":true}"#)
         case "executePlan":
@@ -97,6 +99,7 @@ final class RemindersLaunchPlanTests: XCTestCase {
             configuration: AutoMobilePlanExecutor.Configuration(
                 transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost/unused"))),
                 planPath: "launch-reminders-app.yaml",
+                deviceId: "fake-device",
                 timeoutSeconds: 1,
                 planBundle: .module,
                 aiAssistance: false
@@ -106,8 +109,7 @@ final class RemindersLaunchPlanTests: XCTestCase {
             logger: LaunchPlanContractLogger(),
             recoveryModelConfig: nil,
             daemonEnsurer: HermeticDaemonEnsurer(),
-            deadlineScheduler: VirtualDeadlineScheduler(),
-            idGenerator: { "launch-plan-contract-session" }
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
         let result = try await executor.execute(
             testMetadata: AutoMobilePlanExecutor.TestMetadata(
@@ -122,8 +124,8 @@ final class RemindersLaunchPlanTests: XCTestCase {
         XCTAssertEqual(result.totalSteps, 3)
         XCTAssertEqual(result.platform, "ios")
         XCTAssertEqual(client.initializeTimeouts, [1])
-        XCTAssertEqual(client.toolCalls.map(\.name), ["setToolEnabled", "executePlan"])
-        XCTAssertEqual(client.toolCalls.map(\.timeout), [1, 600]) // executePlan uses the daemon 600 s floor
+        XCTAssertEqual(client.toolCalls.map(\.name), ["getApple", "setToolEnabled", "executePlan"])
+        XCTAssertEqual(client.toolCalls.map(\.timeout), [1, 1, 600]) // executePlan uses the daemon 600 s floor
 
         let executePlanArguments = try XCTUnwrap(client.toolCalls.last?.arguments)
         XCTAssertEqual(executePlanArguments["platform"] as? String, "ios")

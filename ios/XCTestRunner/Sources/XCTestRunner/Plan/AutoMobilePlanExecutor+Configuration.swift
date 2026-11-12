@@ -6,6 +6,8 @@ extension AutoMobilePlanExecutor {
         public let transport: Transport
         /// Source checkout whose built daemon should own the managed socket, when available.
         public let daemonRepoRoot: String?
+        /// Acquisition target (Apple UDID or Android device identifier); not needed for an issued session.
+        public let deviceId: String?
         public let planPath: String
         public let retryCount: Int
         /// Connection and tool-selection timeout. executePlan uses at least the daemon's 600-second floor.
@@ -31,6 +33,7 @@ extension AutoMobilePlanExecutor {
         public init(
             transport: Transport,
             planPath: String,
+            deviceId: String? = nil,
             daemonRepoRoot: String? = nil,
             retryCount: Int = 0,
             timeoutSeconds: TimeInterval = 300,
@@ -43,6 +46,7 @@ extension AutoMobilePlanExecutor {
             defaultPlatform: PlanPlatform = .ios,
             aiAssistance: Bool = true
         ) {
+            self.deviceId = deviceId
             self.transport = transport
             self.daemonRepoRoot = daemonRepoRoot
             self.planPath = planPath

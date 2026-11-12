@@ -1,10 +1,13 @@
+import Foundation
+
 extension AutoMobilePlanExecutor {
-    public enum ExecutorError: Error, CustomStringConvertible, Sendable {
+    public enum ExecutorError: Error, LocalizedError, CustomStringConvertible, Sendable {
         case planNotFound(String)
         case invalidPlan(String)
         case mcpFailure(String)
         case executionFailed(String)
         case invalidResponse(String)
+        case daemonError(tool: String, message: String)
         /// The daemon refused `tool` with a typed error instead of running it (#11195).
         case refused(tool: String, DaemonRefusal)
         /// The bounded wait for a held device ran out; retrying immediately would hit the same holder.
@@ -20,6 +23,8 @@ extension AutoMobilePlanExecutor {
                 return "MCP failure: \(message)"
             case let .executionFailed(message):
                 return "Plan execution failed: \(message)"
+            case let .daemonError(tool, message):
+                return "Daemon error from \(tool): \(message)"
             case let .invalidResponse(message):
                 return "Invalid response: \(message)"
             case let .refused(tool, refusal):
@@ -30,6 +35,8 @@ extension AutoMobilePlanExecutor {
             }
         }
 
+        public var errorDescription: String? { description }
+
         public var isRetryable: Bool {
             switch self {
             case .planNotFound, .invalidPlan, .deviceUnavailable:
@@ -38,7 +45,7 @@ extension AutoMobilePlanExecutor {
                 // A typed refusal is retried only when the daemon says so, or under a fresh session
                 // when it named this one terminal; an untyped failure keeps the blind retry.
                 return refusal.retryable || refusal.acquiresNewSession || refusal.code == nil
-            case .mcpFailure, .executionFailed, .invalidResponse:
+            case .mcpFailure, .executionFailed, .invalidResponse, .daemonError:
                 return true
             }
         }

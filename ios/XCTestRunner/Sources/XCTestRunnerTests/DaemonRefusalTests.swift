@@ -317,6 +317,25 @@ final class DaemonRefusalTests: XCTestCase {
         }
     }
 
+    /// A caller-issued session with no device identifier cannot be replaced for a retry: the original
+    /// failure surfaces and no second attempt runs, instead of a missing-device invalidPlan.
+    func testSuppliedSessionWithoutDeviceIdDoesNotRetryAndKeepsTheOriginalError() async throws {
+        let client = RefusalMCPClient()
+        client.executePlanErrors = [.serverError("daemon request timeout"), .serverError("second")]
+        client.executePlanReplies = [successPayload]
+        let executor = makeExecutor(
+            client: client, scheduler: RecordingScheduler(), retryCount: 2, deviceId: nil
+        )
+
+        do {
+            _ = try await executor.execute(sessionUuid: "first")
+            XCTFail("expected the original failure to throw")
+        } catch let AutoMobilePlanExecutor.ExecutorError.mcpFailure(message) {
+            XCTAssertTrue(message.contains("daemon request timeout"), message)
+        }
+        XCTAssertEqual(client.executePlanSessions, ["first"])
+    }
+
     func testAFailedFrameForAHeldDeviceIsWaitedOutWithoutSpendingARetry() async throws {
         let client = RefusalMCPClient()
         client.executePlanErrors = [
@@ -562,15 +581,16 @@ final class DaemonRefusalTests: XCTestCase {
     private func makeExecutor(
         client: RefusalMCPClient,
         scheduler: RecordingScheduler,
-        retryCount: Int
+        retryCount: Int,
+        deviceId: String? = "fake-device"
     )
         -> AutoMobilePlanExecutor
     {
-        let ids = SequentialIds()
         return AutoMobilePlanExecutor(
             configuration: AutoMobilePlanExecutor.Configuration(
                 transport: .daemonUnixSocket(path: "/tmp/xctestrunner-refusal-test.sock"),
                 planPath: "refusal-plan.yaml",
+                deviceId: deviceId,
                 retryCount: retryCount,
                 timeoutSeconds: 5,
                 retryDelaySeconds: 0,
@@ -583,7 +603,6 @@ final class DaemonRefusalTests: XCTestCase {
             recoveryModelConfig: nil,
             daemonEnsurer: HermeticDaemonEnsurer(),
             deadlineScheduler: scheduler,
-            idGenerator: { ids.next() },
             heldSessionController: RecordingHeldSessionController()
         )
     }
@@ -638,6 +657,7 @@ private final class RecordingScheduler: DeadlineScheduler, @unchecked Sendable {
 
 /// Sequential fake: the executor calls it serially; tests inspect it after the awaited run.
 private final class RefusalMCPClient: AutoMobileMCPClient, @unchecked Sendable {
+    private let ids = SequentialIds()
     var setToolEnabledReplies: [String] = []
     var executePlanReplies: [String] = []
     /// Failures thrown (in order) before any reply is served, as a failed daemon frame is.
@@ -650,6 +670,8 @@ private final class RefusalMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) async throws -> MCPToolResponse {
         let session = arguments["sessionUuid"] as? String ?? ""
         switch name {
+        case "getApple", "getAndroid":
+            return MCPToolResponse(text: "{\"runtime\":{\"session\":{\"sessionUuid\":\"\(ids.next())\"}}}")
         case "setToolEnabled":
             setToolEnabledSessions.append(session)
             let reply = setToolEnabledReplies.isEmpty ? #"{"enabled":true}"# : setToolEnabledReplies.removeFirst()

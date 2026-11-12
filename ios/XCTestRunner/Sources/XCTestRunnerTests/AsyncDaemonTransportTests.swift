@@ -28,6 +28,21 @@ final class AsyncDaemonTransportTests: XCTestCase {
         XCTAssertEqual(AsyncFakeDaemonConnection.requestId(connection.sent[0]), "1")
     }
 
+    func testToolErrorFlagAndDaemonTextSurviveTheSocketTransport() async throws {
+        let connection = AsyncFakeDaemonConnection()
+        let (client, _) = makeClient([connection])
+        let task = Task { try await client.callTool(name: "executePlan", arguments: [:], timeout: 5) }
+        try await connection.receives.wait(for: 1)
+        let id = AsyncFakeDaemonConnection.requestId(connection.sent[0])
+        connection.deliver(Data(
+            #"{"id":"\#(id)","type":"mcp_response","success":true,"result":{"isError":true,"content":[{"type":"text","text":"Session is not active"}]}}"#
+                .utf8
+        ))
+        let response = try await task.value
+        XCTAssertTrue(response.isError)
+        XCTAssertEqual(response.text, "Session is not active")
+    }
+
     func testTransportErrorDropsConnectionAndNextCallReconnects() async throws {
         let broken = AsyncFakeDaemonConnection(sendError: URLError(.networkConnectionLost))
         let healthy = AsyncFakeDaemonConnection(autoReply: true)

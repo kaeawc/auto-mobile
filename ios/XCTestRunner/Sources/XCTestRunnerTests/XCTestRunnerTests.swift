@@ -16,6 +16,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "test-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -46,11 +47,11 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try await executor.execute(testMetadata: metadata)
 
-        XCTAssertEqual(mcpClient.calls.count, 2)
-        let toolSelectionCall = mcpClient.calls[0]
+        XCTAssertEqual(mcpClient.calls.count, 3)
+        let toolSelectionCall = mcpClient.calls[1]
         XCTAssertEqual(toolSelectionCall.name, "setToolEnabled")
         XCTAssertEqual(toolSelectionCall.arguments["toolName"] as? String, "executePlan")
-        let call = mcpClient.calls[1]
+        let call = mcpClient.calls[2]
         XCTAssertEqual(call.name, "executePlan")
         XCTAssertEqual(call.arguments["platform"] as? String, "ios")
         XCTAssertEqual(call.arguments["startStep"] as? Int, 0)
@@ -83,6 +84,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "retry-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 1,
             timeoutSeconds: 5,
             retryDelaySeconds: 1,
@@ -121,6 +123,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "test-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -141,7 +144,7 @@ final class XCTestRunnerTests: XCTestCase {
         )
 
         await assertAsyncThrowsError { try await executor.execute(testMetadata: nil) }
-        XCTAssertEqual(mcpClient.calls.map(\.name), ["setToolEnabled"])
+        XCTAssertEqual(mcpClient.calls.map(\.name), ["getApple", "setToolEnabled"])
     }
 
     func testDaemonSocketPreflightPassesConfiguredRepoRootToDaemonManager() async throws {
@@ -154,6 +157,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = AutoMobilePlanExecutor.Configuration(
             transport: .daemonUnixSocket(path: DaemonManager.socketPath),
             planPath: "daemon-plan.yaml",
+            deviceId: "fake-device",
             daemonRepoRoot: repoRoot
         )
         let executor = AutoMobilePlanExecutor(
@@ -184,6 +188,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "fail-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 1,
             timeoutSeconds: 5,
             retryDelaySeconds: 1,
@@ -223,6 +228,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "sub-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -274,6 +280,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "sub-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -318,6 +325,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "platform-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -362,6 +370,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "multi-device.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -416,6 +425,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "fail-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -464,11 +474,12 @@ final class XCTestRunnerTests: XCTestCase {
         let content = try XCTUnwrap(envelope["content"] as? [[String: Any]])
         let reply = try XCTUnwrap(content.first?["text"] as? String)
         let mcpClient = FakeMCPClient()
-        mcpClient.queueRawResponse(reply)
+        mcpClient.queueRawResponse(reply, isError: envelope["isError"] as? Bool ?? false)
 
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "counter-increments.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -580,6 +591,7 @@ final class XCTestRunnerTests: XCTestCase {
         let config = try AutoMobilePlanExecutor.Configuration(
             transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
             planPath: "fail-plan.yaml",
+            deviceId: "fake-device",
             retryCount: 0,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
@@ -773,8 +785,8 @@ private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
         queuedResults.append(.success(MCPToolResponse(text: text)))
     }
 
-    func queueRawResponse(_ text: String) {
-        queuedResults.append(.success(MCPToolResponse(text: text)))
+    func queueRawResponse(_ text: String, isError: Bool = false) {
+        queuedResults.append(.success(MCPToolResponse(text: text, isError: isError)))
     }
 
     func queueError(_ error: Error) {
@@ -793,6 +805,9 @@ private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
         async throws -> MCPToolResponse
     {
         calls.append(Call(name: name, arguments: arguments))
+        if name == "getApple" || name == "getAndroid" {
+            return MCPToolResponse(text: #"{"runtime":{"session":{"sessionUuid":"issued-session"}}}"#)
+        }
         if name == "setToolEnabled" {
             if let toolSelectionError {
                 throw toolSelectionError

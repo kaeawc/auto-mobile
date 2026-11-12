@@ -8,7 +8,18 @@ the `ios-build` repository.
 
 AutoMobile tests need a pre-built `.xctestrun` containing the `YourAppAutoMobileTests` bundle, a
 booted iOS Simulator, a running AutoMobile daemon reachable over the Unix socket, and the CtrlProxy
-iOS app installed in the simulator.
+iOS app installed in the simulator. The device identifier is optional; when more than one
+device is booted, set `AUTOMOBILE_DEVICE_ID` (or the `AUTOMOBILE_DEVICE_UDID` alias)
+to its UDID, or override `AutoMobileTestCase.deviceId`.
+After initialization, `AutoMobilePlanExecutor` acquires an issued session with `getApple`
+(`udid`) for iOS or `getAndroid` (`deviceId`) for Android, passing empty arguments when
+no identifier is configured so the daemon selects the device or returns a typed ambiguity refusal.
+It then enables and executes `executePlan` with `runtime.session.sessionUuid` from that response.
+An explicit caller-supplied
+session skips acquisition on the initial attempt. Retries and device waits acquire new sessions;
+AI recovery resumes reuse the held session, and the daemon releases it when the plan completes.
+Typed acquisition refusals retain the existing device-wait and retry policy; other daemon tool
+errors preserve the response text in the test failure.
 
 > [!NOTE]
 > **No cloud device service required.** Unlike Android — which uses

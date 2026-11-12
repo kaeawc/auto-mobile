@@ -3,8 +3,7 @@ import Foundation
 /// Loads a plan, resolves its platform/devices, drives the daemon over an `AutoMobileMCPClient` to run
 /// it, and — on failure, when enabled — hands off to an AI recovery handler and resumes.
 ///
-/// Async execution owns an explicit session value: the caller's ID or a fresh ID for this run.
-/// The injected idGenerator supplies one fresh ID when the caller does not provide a sessionUuid.
+/// Execution uses the caller's issued session or acquires one from the daemon for each attempt.
 /// Immutable dependencies refine Sendable; execution state and wire arguments remain local to a run.
 /// Concurrent runs require distinct transport clients if their session lifetimes must be independent.
 public final class AutoMobilePlanExecutor: Sendable {
@@ -17,7 +16,6 @@ public final class AutoMobilePlanExecutor: Sendable {
     private let deadlineScheduler: any DeadlineScheduler
     private let logger: AutoMobileLogger
     private let daemonEnsurer: AutoMobileDaemonEnsuring
-    private let idGenerator: @Sendable () -> String
     private static let daemonEnsureQueue = DispatchQueue(
         label: "com.automobile.xctestrunner.daemon-ensure",
         qos: .utility,
@@ -42,7 +40,6 @@ public final class AutoMobilePlanExecutor: Sendable {
         recoveryModelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve(),
         daemonEnsurer: AutoMobileDaemonEnsuring = SystemDaemonEnsurer(),
         deadlineScheduler: any DeadlineScheduler = SystemDeadlineScheduler(),
-        idGenerator: @escaping @Sendable () -> String = { UUID().uuidString },
         heldSessionController: HeldSessionControlling? = nil
     ) {
         self.deadlineScheduler = deadlineScheduler
@@ -50,7 +47,6 @@ public final class AutoMobilePlanExecutor: Sendable {
         self.planLoader = planLoader
         self.logger = logger
         self.daemonEnsurer = daemonEnsurer
-        self.idGenerator = idGenerator
         if let heldSessionController = heldSessionController {
             self.heldSessionController = heldSessionController
         } else if case let .daemonUnixSocket(path) = configuration.transport {
@@ -109,14 +105,12 @@ public final class AutoMobilePlanExecutor: Sendable {
     )
         async throws -> ExecutePlanResult
     {
-        // Resolve identity once, before suspension, and reuse it across retries and recovery.
-        let sessionUuid = sessionUuid ?? idGenerator()
         return try await executeWithRetries(testMetadata: testMetadata, sessionUuid: sessionUuid)
     }
 
     private func executeWithRetries(
         testMetadata: TestMetadata?,
-        sessionUuid: String
+        sessionUuid: String?
     )
         async throws -> ExecutePlanResult
     {
@@ -143,7 +137,7 @@ public final class AutoMobilePlanExecutor: Sendable {
                 // attempt's session was released (by the daemon, or by this runner when it was held
                 // for recovery), and a released UUID is terminal on the daemon.
                 return try await executeAttemptWaitingForDevice(
-                    sessionUuid: attempt == 0 ? sessionUuid : idGenerator(),
+                    sessionUuid: attempt == 0 ? sessionUuid : nil,
                     testMetadata: testMetadata,
                     deviceWait: &deviceWait
                 )
@@ -174,7 +168,7 @@ public final class AutoMobilePlanExecutor: Sendable {
     /// wait honours the daemon's `retryAfterMs` and runs the next pass under a fresh session, as the
     /// Android runner does; once the budget is spent the attempt fails without a further retry.
     private func executeAttemptWaitingForDevice(
-        sessionUuid: String,
+        sessionUuid: String?,
         testMetadata: TestMetadata?,
         deviceWait: inout DeviceWaitBackoff
     )
@@ -202,7 +196,7 @@ public final class AutoMobilePlanExecutor: Sendable {
                         "(wait \(deviceWait.waits)): \(refusal.message)"
                 )
                 try await deadlineScheduler.sleep(seconds: TimeInterval(delayMs) / 1000)
-                session = idGenerator()
+                session = nil
             }
         }
     }
@@ -245,12 +239,12 @@ public final class AutoMobilePlanExecutor: Sendable {
     /// yet been attempted for this test, hand the failure to the recovery handler and — on success —
     /// resume by re-running the failed step (see `handleFailure`). `sessionUuidOverride` lets a
     /// resume reuse the failed attempt's session so it continues on the same device; the transient
-    /// retry loop also reuses the one explicit session value captured by execute().
+    /// retry loop acquires a new issued session after a released attempt.
     private func executeAttempt(
         startStep: Int,
         recoveryAlreadyAttempted: Bool,
         deviceIdOverride: String?,
-        sessionUuidOverride: String,
+        sessionUuidOverride: String?,
         testMetadata: TestMetadata?,
         executePlanDispatch: ExecutePlanDispatch? = nil
     )
@@ -287,35 +281,41 @@ public final class AutoMobilePlanExecutor: Sendable {
         let platform = try resolvePlatform(from: planMetadata)
         PerfTimer.log("resolved platform=\(platform)")
 
-        let sessionUuid = sessionUuidOverride
-        PerfTimer.log("sessionUuid=\(sessionUuid)")
-
-        // Ask the daemon to keep this attempt's session and device on failure only when AI recovery
-        // may follow (#10834 / #11072); every path that does not resume on it releases it.
-        let holdForRecovery = await recoveryMayFollow(
-            recoveryAlreadyAttempted: recoveryAlreadyAttempted,
-            testMetadata: testMetadata
-        )
-
-        var arguments = PerfTimer.measure("buildExecutePlanArguments") {
-            buildExecutePlanArguments(
-                planContent: substituted,
-                sessionUuid: sessionUuid,
-                platform: platform,
-                startStep: startStep,
-                deviceIdOverride: deviceIdOverride,
-                deviceLabels: planMetadata.deviceLabels,
-                testMetadata: testMetadata
-            )
-        }
-        if holdForRecovery {
-            arguments["holdSessionOnFailure"] = true
-        }
-        PerfTimer.log("arguments built, keys=\(arguments.keys.sorted())")
-
         do {
             try Task.checkCancellation()
             try await mcpClient.initialize(timeout: configuration.timeoutSeconds)
+            try Task.checkCancellation()
+            let sessionUuid: String
+            if let sessionUuidOverride {
+                sessionUuid = sessionUuidOverride
+            } else {
+                sessionUuid = try await acquireSession(platform: platform)
+            }
+            PerfTimer.log("sessionUuid=\(sessionUuid)")
+
+            // Ask the daemon to keep this attempt's session and device on failure only when AI recovery
+            // may follow (#10834 / #11072); every path that does not resume on it releases it.
+            let holdForRecovery = await recoveryMayFollow(
+                recoveryAlreadyAttempted: recoveryAlreadyAttempted,
+                testMetadata: testMetadata
+            )
+
+            var arguments = PerfTimer.measure("buildExecutePlanArguments") {
+                buildExecutePlanArguments(
+                    planContent: substituted,
+                    sessionUuid: sessionUuid,
+                    platform: platform,
+                    startStep: startStep,
+                    deviceIdOverride: deviceIdOverride,
+                    deviceLabels: planMetadata.deviceLabels,
+                    testMetadata: testMetadata
+                )
+            }
+            if holdForRecovery {
+                arguments["holdSessionOnFailure"] = true
+            }
+            PerfTimer.log("arguments built, keys=\(arguments.keys.sorted())")
+
             try Task.checkCancellation()
             let enabled = try await mcpClient.callTool(
                 name: "setToolEnabled",
@@ -325,9 +325,7 @@ public final class AutoMobilePlanExecutor: Sendable {
             try Task.checkCancellation()
             // A refused opt-in (held device, terminal session) must not go on to executePlan, which
             // the daemon would then refuse as not enabled for this session.
-            if let refusal = DaemonRefusal.parse(enabled.text) {
-                throw ExecutorError.refused(tool: "setToolEnabled", refusal)
-            }
+            try validateToolResponse(enabled, tool: "setToolEnabled")
             let result: ExecutePlanResult
             do {
                 executePlanDispatch?.sent = true
@@ -338,7 +336,7 @@ public final class AutoMobilePlanExecutor: Sendable {
                 try Task.checkCancellation()
                 PerfTimer.log("executePlan response received, length=\(response.text.count) chars")
                 result = try PerfTimer.measure("decodeExecutePlanResult") {
-                    try decodeExecutePlanResult(from: response.text)
+                    try decodeExecutePlanResult(from: response)
                 }
             } catch {
                 // No failure result reaches recovery, so a session the daemon may hold is freed now.
@@ -381,6 +379,60 @@ public final class AutoMobilePlanExecutor: Sendable {
         } catch {
             PerfTimer.log("executeAttempt ERROR: \(error.localizedDescription)")
             throw ExecutorError.executionFailed(error.localizedDescription)
+        }
+    }
+
+    /// Both acquisition tools return the canonical device-description runtime session.
+    private struct AcquiredDevice: Decodable {
+        struct Runtime: Decodable {
+            struct Session: Decodable {
+                let sessionUuid: String
+            }
+
+            let session: Session
+        }
+
+        let runtime: Runtime
+    }
+
+    private func acquireSession(platform: PlanPlatform) async throws -> String {
+        let tool = platform == .ios ? "getApple" : "getAndroid"
+        var arguments: [String: Any] = [:]
+        if let deviceId = configuration.deviceId, !deviceId.isEmpty {
+            arguments[platform == .ios ? "udid" : "deviceId"] = deviceId
+        }
+        let response = try await mcpClient.callTool(
+            name: tool, arguments: arguments, timeout: configuration.timeoutSeconds
+        )
+        try Task.checkCancellation()
+        try validateToolResponse(response, tool: tool)
+        do {
+            let device = try JSONDecoder().decode(AcquiredDevice.self, from: Data(response.text.utf8))
+            guard !device.runtime.session.sessionUuid.isEmpty else {
+                throw ExecutorError.invalidResponse("\(tool) returned an empty runtime.session.sessionUuid")
+            }
+            return device.runtime.session.sessionUuid
+        } catch let error as ExecutorError {
+            throw error
+        } catch {
+            throw ExecutorError.invalidResponse("Failed to decode \(tool) acquisition response: \(error)")
+        }
+    }
+
+    /// Typed refusals retain their retry policy. Plain daemon failures retain their message, while
+    /// JSON-shaped malformed payloads still reach the response decoder for a useful schema error.
+    private func validateToolResponse(_ response: MCPToolResponse, tool: String) throws {
+        if let refusal = DaemonRefusal.parse(response.text) {
+            throw ExecutorError.refused(tool: tool, refusal)
+        }
+        if response.isError {
+            throw ExecutorError.daemonError(tool: tool, message: response.text)
+        }
+        let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let first = text.first, first != "{", first != "[", first != "\"",
+           (try? JSONSerialization.jsonObject(with: Data(text.utf8), options: .fragmentsAllowed)) == nil
+        {
+            throw ExecutorError.daemonError(tool: tool, message: response.text)
         }
     }
 
@@ -670,10 +722,9 @@ public final class AutoMobilePlanExecutor: Sendable {
         return values
     }
 
-    private func decodeExecutePlanResult(from text: String) throws -> ExecutePlanResult {
-        guard let data = text.data(using: .utf8) else {
-            throw ExecutorError.invalidResponse("Response text is not valid UTF-8")
-        }
+    private func decodeExecutePlanResult(from response: MCPToolResponse) throws -> ExecutePlanResult {
+        let text = response.text
+        let data = Data(text.utf8)
         // A refusal carries no step counts; decoding it as a plan result would hide its typed code.
         if let refusal = DaemonRefusal.parse(text) {
             throw ExecutorError.refused(tool: "executePlan", refusal)
@@ -681,6 +732,9 @@ public final class AutoMobilePlanExecutor: Sendable {
         do {
             return try JSONDecoder().decode(ExecutePlanResult.self, from: data)
         } catch {
+            // A failed plan is a valid result even when MCP marks it isError; recovery needs its
+            // step details. Only a response without a plan result is a daemon-level error.
+            try validateToolResponse(response, tool: "executePlan")
             throw ExecutorError.invalidResponse("Failed to decode executePlan response: \(error)")
         }
     }

@@ -91,10 +91,10 @@ Source breaks in this step and their replacements:
   there is no thread-local or task-local session storage.
 
 The executor initializes the MCP client and acquires a device session with `getApple` for iOS
-or `getAndroid` for Android before enabling and running `executePlan`. The device identifier is
-optional; when more than one device is booted, configure `deviceId`, or set `AUTOMOBILE_DEVICE_ID`
-(`AUTOMOBILE_DEVICE_UDID` is a fallback) on `AutoMobileTestCase`. Without an identifier, acquisition
-passes empty arguments and lets the daemon select the device or return a typed ambiguity refusal.
+or `getAndroid` for Android before enabling and running `executePlan`. A device identifier is
+required unless the caller passes an explicit issued session. Set `AUTOMOBILE_DEVICE_ID`
+(`AUTOMOBILE_DEVICE_UDID` is a fallback), override `AutoMobileTestCase.deviceId`, or set
+`Configuration.deviceId` directly. Missing or empty identifiers fail before either acquisition call.
 A caller-supplied issued `sessionUuid` skips acquisition on the initial attempt.
 Transient retries and device waits acquire new issued
 sessions; recovery and its resumed plan retain the held session. The daemon releases the session

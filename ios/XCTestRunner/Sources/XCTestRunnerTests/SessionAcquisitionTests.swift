@@ -33,25 +33,39 @@ final class SessionAcquisitionTests: XCTestCase {
         XCTAssertEqual(client.calls[2].arguments["sessionUuid"] as? String, "issued-session")
     }
 
-    func testMissingDeviceIdentifierAcquiresWithEmptyArguments() async throws {
+    func testAcquisitionRequiresADeviceIdentifier() async throws {
         for platform in ["ios", "android"] {
-            let client = AcquisitionMCPClient()
-            _ = try await makeExecutor(client: client, platform: platform, deviceId: nil).execute()
-
-            let tool = platform == "ios" ? "getApple" : "getAndroid"
-            XCTAssertEqual(client.events, ["initialize", tool, "setToolEnabled", "executePlan"])
-            XCTAssertTrue(client.calls[0].arguments.isEmpty)
-            XCTAssertEqual(client.calls[2].arguments["sessionUuid"] as? String, "issued-session")
+            for deviceId: String? in [nil, ""] {
+                let client = AcquisitionMCPClient()
+                do {
+                    _ = try await makeExecutor(client: client, platform: platform, deviceId: deviceId).execute()
+                    XCTFail("expected missing device identifier error for \(platform)")
+                } catch let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) {
+                    for guidance in [
+                        "requires a device identifier", "AUTOMOBILE_DEVICE_ID", "AUTOMOBILE_DEVICE_UDID",
+                        "override deviceId", "Configuration.deviceId", "explicit issued sessionUuid",
+                    ] {
+                        XCTAssertTrue(message.contains(guidance), message)
+                    }
+                }
+                XCTAssertEqual(client.events, ["initialize"])
+                XCTAssertTrue(client.calls.isEmpty, "missing identifiers must fail before any tool call")
+            }
         }
     }
 
     func testExplicitSessionSkipsAcquisition() async throws {
-        let client = AcquisitionMCPClient()
-        _ = try await makeExecutor(client: client, deviceId: nil).execute(sessionUuid: "already-acquired")
-        XCTAssertEqual(client.events, ["initialize", "setToolEnabled", "executePlan"])
-        XCTAssertEqual(client.calls.compactMap { $0.arguments["sessionUuid"] as? String }, [
-            "already-acquired", "already-acquired",
-        ])
+        for platform in ["ios", "android"] {
+            for deviceId: String? in [nil, ""] {
+                let client = AcquisitionMCPClient()
+                _ = try await makeExecutor(client: client, platform: platform, deviceId: deviceId)
+                    .execute(sessionUuid: "already-acquired")
+                XCTAssertEqual(client.events, ["initialize", "setToolEnabled", "executePlan"])
+                XCTAssertEqual(client.calls.compactMap { $0.arguments["sessionUuid"] as? String }, [
+                    "already-acquired", "already-acquired",
+                ])
+            }
+        }
     }
 
     func testDaemonErrorsPreserveTextAtEveryToolBoundary() async throws {
@@ -145,7 +159,7 @@ final class SessionAcquisitionTests: XCTestCase {
             isError: true
         )]
         do {
-            _ = try await makeExecutor(client: client, deviceId: nil).execute()
+            _ = try await makeExecutor(client: client).execute()
             XCTFail("expected ambiguity refusal")
         } catch let AutoMobilePlanExecutor.ExecutorError.refused(tool, refusal) {
             XCTAssertEqual(tool, "getApple")
@@ -153,7 +167,7 @@ final class SessionAcquisitionTests: XCTestCase {
             XCTAssertEqual(refusal.message, "Choose simulator A or B")
         }
         XCTAssertEqual(client.events, ["initialize", "getApple"])
-        XCTAssertTrue(client.calls[0].arguments.isEmpty)
+        XCTAssertEqual(client.calls[0].arguments["udid"] as? String, "configured-device")
     }
 
     func testTestCaseDeviceEnvironmentPrecedenceAndConfiguration() async throws {

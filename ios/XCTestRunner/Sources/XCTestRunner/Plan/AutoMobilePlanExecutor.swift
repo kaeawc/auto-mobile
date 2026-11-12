@@ -396,11 +396,15 @@ public final class AutoMobilePlanExecutor: Sendable {
     }
 
     private func acquireSession(platform: PlanPlatform) async throws -> String {
-        let tool = platform == .ios ? "getApple" : "getAndroid"
-        var arguments: [String: Any] = [:]
-        if let deviceId = configuration.deviceId, !deviceId.isEmpty {
-            arguments[platform == .ios ? "udid" : "deviceId"] = deviceId
+        guard let deviceId = configuration.deviceId, !deviceId.isEmpty else {
+            throw ExecutorError.invalidPlan(
+                "Session acquisition requires a device identifier. Set AUTOMOBILE_DEVICE_ID or " +
+                    "AUTOMOBILE_DEVICE_UDID, override deviceId on AutoMobileTestCase, or set " +
+                    "Configuration.deviceId; alternatively, pass an explicit issued sessionUuid."
+            )
         }
+        let tool = platform == .ios ? "getApple" : "getAndroid"
+        let arguments: [String: Any] = [platform == .ios ? "udid" : "deviceId": deviceId]
         let response = try await mcpClient.callTool(
             name: tool, arguments: arguments, timeout: configuration.timeoutSeconds
         )

@@ -3,6 +3,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { sleepUnlessAborted } from "../deviceLifecycle/core/deadlines";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { combineAbortSignals } from "../../utils/AbortContext";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { VisionosTargetApps } from "../visionos/VisionosTargetApps";
 
 /**
@@ -89,7 +91,11 @@ export class TargetAppForegroundRestore implements TvosForegroundRestore {
     let lastSeen: string | undefined;
     for (;;) {
       signal?.throwIfAborted();
-      lastSeen = await this.readForeground(probe, deviceId, signal);
+      lastSeen = await this.readForeground(probe, deviceId, {
+        timer,
+        remainingMs: deadline - timer.now(),
+        signal,
+      });
       if (lastSeen === bundleId) {
         return;
       }
@@ -105,16 +111,33 @@ export class TargetAppForegroundRestore implements TvosForegroundRestore {
     );
   }
 
+  /**
+   * A probe is bounded by the time left before the restore's deadline, so a slow hierarchy read
+   * cannot push the restore past its bound (#18123); the probe's signal aborts when it runs out.
+   */
   private async readForeground(
     probe: TvosForegroundProbe,
     deviceId: string,
-    signal: AbortSignal | undefined,
+    {
+      timer,
+      remainingMs,
+      signal,
+    }: { timer: Timer; remainingMs: number; signal: AbortSignal | undefined },
   ): Promise<string | undefined> {
+    const probeTimeout = new AbortController();
+    const probeSignal = combineAbortSignals(signal, probeTimeout.signal);
     try {
-      return await probe(deviceId, signal);
+      return await raceWithDeadline(() => probe(deviceId, probeSignal), {
+        timer,
+        timeoutMs: Math.max(1, remainingMs),
+        signal,
+        label: "tvOS foreground probe",
+        onTimeout: () => probeTimeout.abort(),
+      });
     } catch (error) {
       signal?.throwIfAborted();
-      // A hierarchy read can fail while the app is still coming up; the next poll retries it.
+      // A hierarchy read can fail or run out of time while the app is still coming up; the next
+      // poll (or the bound's failure message) covers it.
       logger.debug(`[TvosRunner] foreground probe on ${deviceId} failed: ${errorMessage(error)}`);
       return undefined;
     }

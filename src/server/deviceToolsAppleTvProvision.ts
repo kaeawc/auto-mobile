@@ -17,7 +17,8 @@ import {
   type AppleTvProvisionDeviceRequest,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { ActionableError, toActionableError } from "../models";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
@@ -164,6 +165,7 @@ export async function provisionAppleTvDevice(
             const runner =
               args.readiness === "automation"
                 ? await startProvisionedTvRunner(tv.deviceId, booted.sessionId, deps, {
+                    deadlineMs,
                     signal: requestSignal,
                     stage,
                   })
@@ -237,15 +239,24 @@ async function bootAndBind(
 /**
  * readiness "automation" starts the runner for the bound session, as startDevice does (#18020).
  * As there, a runner that cannot start leaves the booted session and the result says why.
+ * Startup gets only what is left of the provisionDevice budget, so a slow runner is reported
+ * unavailable instead of overrunning `timeoutMs` (#18123). A runner started here is stopped when
+ * the request aborts after attach, so a rejected provisionDevice does not leave it bound.
  */
 async function startProvisionedTvRunner(
   deviceId: string,
   sessionId: string,
   deps: DeviceToolsDependencies,
-  { signal, stage }: { signal: AbortSignal; stage: { current: string } },
+  {
+    deadlineMs,
+    signal,
+    stage,
+  }: { deadlineMs: number; signal: AbortSignal; stage: { current: string } },
 ): Promise<{ runnerUnavailable?: string }> {
   stage.current = "starting the Apple TV automation runner";
   let runnerUnavailable: string | undefined;
+  let stopStartedRunner: (() => void) | undefined;
+  const budget = new AbortController();
   try {
     if (!deps.daemonState.isInitialized()) {
       throw new ActionableError(
@@ -254,14 +265,37 @@ async function startProvisionedTvRunner(
     }
     const sessions = deps.daemonState.getSessionManager();
     const runner = (deps.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)();
-    const started = await runner.start({ deviceId, sessions, signal });
+    const remainingMs = deadlineMs - deps.timer.now();
+    const started = await raceWithDeadline(
+      () =>
+        runner.start({
+          deviceId,
+          sessions,
+          signal: combineAbortSignals(signal, budget.signal),
+        }),
+      {
+        timer: deps.timer,
+        timeoutMs: Math.max(1, remainingMs),
+        signal,
+        label: "tvOS runner startup",
+        timeoutError: () =>
+          new ActionableError(
+            `runner startup did not finish within the ${Math.max(0, remainingMs)} ms left of the provisionDevice timeoutMs`,
+          ),
+        onTimeout: () => budget.abort(),
+      },
+    );
+    stopStartedRunner = started.stop;
     runnerUnavailable =
       runner.attach({ deviceId, ownerSession: sessionId, sessions }) ?? started.runnerUnavailable;
   } catch (error) {
     runnerUnavailable = errorMessage(error);
     logger.warn(`[TvosRunner] Runner unavailable for ${deviceId}: ${runnerUnavailable}`, error);
   }
-  signal.throwIfAborted();
+  if (signal.aborted) {
+    stopStartedRunner?.();
+    signal.throwIfAborted();
+  }
   return runnerUnavailable === undefined ? {} : { runnerUnavailable };
 }
 

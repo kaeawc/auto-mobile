@@ -101,7 +101,9 @@ automobile-tests:
       run: auto-mobile --cli observe --platform ios
 
     - name: Run AutoMobile tests
-      run: xcodebuild test-without-building -xctestrun "$xctestrun_file" -destination "platform=iOS Simulator,id=$booted_udid" -only-testing:YourAppAutoMobileTests -enableCodeCoverage NO -skipMacroValidation
+      run: |
+        export TEST_RUNNER_AUTOMOBILE_DEVICE_UDID="$booted_udid"
+        xcodebuild test-without-building -xctestrun "$xctestrun_file" -destination "platform=iOS Simulator,id=$booted_udid" -only-testing:YourAppAutoMobileTests -enableCodeCoverage NO -skipMacroValidation
 
     - name: Stop AutoMobile daemon
       if: always()

@@ -317,6 +317,25 @@ final class DaemonRefusalTests: XCTestCase {
         }
     }
 
+    /// A caller-issued session with no device identifier cannot be replaced for a retry: the original
+    /// failure surfaces and no second attempt runs, instead of a missing-device invalidPlan.
+    func testSuppliedSessionWithoutDeviceIdDoesNotRetryAndKeepsTheOriginalError() async throws {
+        let client = RefusalMCPClient()
+        client.executePlanErrors = [.serverError("daemon request timeout"), .serverError("second")]
+        client.executePlanReplies = [successPayload]
+        let executor = makeExecutor(
+            client: client, scheduler: RecordingScheduler(), retryCount: 2, deviceId: nil
+        )
+
+        do {
+            _ = try await executor.execute(sessionUuid: "first")
+            XCTFail("expected the original failure to throw")
+        } catch let AutoMobilePlanExecutor.ExecutorError.mcpFailure(message) {
+            XCTAssertTrue(message.contains("daemon request timeout"), message)
+        }
+        XCTAssertEqual(client.executePlanSessions, ["first"])
+    }
+
     func testAFailedFrameForAHeldDeviceIsWaitedOutWithoutSpendingARetry() async throws {
         let client = RefusalMCPClient()
         client.executePlanErrors = [
@@ -562,7 +581,8 @@ final class DaemonRefusalTests: XCTestCase {
     private func makeExecutor(
         client: RefusalMCPClient,
         scheduler: RecordingScheduler,
-        retryCount: Int
+        retryCount: Int,
+        deviceId: String? = "fake-device"
     )
         -> AutoMobilePlanExecutor
     {
@@ -570,7 +590,7 @@ final class DaemonRefusalTests: XCTestCase {
             configuration: AutoMobilePlanExecutor.Configuration(
                 transport: .daemonUnixSocket(path: "/tmp/xctestrunner-refusal-test.sock"),
                 planPath: "refusal-plan.yaml",
-                deviceId: "fake-device",
+                deviceId: deviceId,
                 retryCount: retryCount,
                 timeoutSeconds: 5,
                 retryDelaySeconds: 0,

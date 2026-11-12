@@ -152,7 +152,12 @@ public final class AutoMobilePlanExecutor: Sendable {
             } catch {
                 try Task.checkCancellation()
                 lastError = error
-                let shouldRetry = shouldRetry(error: error, attempt: attempt)
+                // A retry runs under a fresh session, which needs a device identifier to acquire. A
+                // caller-supplied session without one cannot be replaced: stop and surface this failure
+                // rather than replace it with a missing-device invalidPlan before any tool call.
+                let canAcquireFreshSession = configuration.deviceId.map { !$0.isEmpty } ?? false
+                let shouldRetry = (sessionUuid == nil || canAcquireFreshSession)
+                    && shouldRetry(error: error, attempt: attempt)
                 logger.warn("Plan execution attempt \(attempt + 1) failed: \(error)")
                 if shouldRetry {
                     try await recoverDaemonBeforeRetry()

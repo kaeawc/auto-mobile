@@ -357,8 +357,14 @@ describe("session broker abandon command", () => {
 });
 
 describe("session broker refusal CLI forwarding", () => {
-  for (const command of ["release-broker-session", "abandon-session-request"] as const) {
+  for (const command of [
+    "session-request-status",
+    "release-broker-session",
+    "abandon-session-request",
+  ] as const) {
     test.each([
+      { code: "session_request_owner_mismatch", retryable: false, details: { terminal: true } },
+      { code: "session_request_owner_mismatch", retryable: false, details: { terminal: false } },
       {
         code: "session_restart_handoff_pending",
         retryable: true,
@@ -386,7 +392,11 @@ describe("session broker refusal CLI forwarding", () => {
         await expect(
           runDaemonCommand(
             command,
-            command === "release-broker-session" ? releaseArgs : abandonArgs,
+            command === "release-broker-session"
+              ? releaseArgs
+              : command === "abandon-session-request"
+                ? abandonArgs
+                : statusArgs,
             { clientFactory: () => client },
             SafeDaemonManager,
           ),

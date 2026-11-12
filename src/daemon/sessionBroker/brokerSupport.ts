@@ -9,6 +9,7 @@ import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import { SessionBrokerFailureError } from "./devicePort";
 import { BindingRegistrySchemaUnsupportedError } from "./provisioning/BindingRegistrySchemaUnsupportedError";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
+import { SessionRequestForeignOwnerError } from "./SessionRequestForeignOwnerError";
 import { SESSION_BROKER_RETRY_AFTER_MS } from "./timing";
 import type { BrokerRequestRecord, BrokerResourceRecord } from "./store";
 import { nativeProfile } from "./profile";
@@ -135,17 +136,42 @@ export function drainFailureOutcome(
   return "pending";
 }
 
-export function brokerResult(
+/** Whether device cleanup for this request is still in progress (the result's `cleanupPending`). */
+export function requestCleanupPending(
   request: BrokerRequestRecord,
   resource: BrokerResourceRecord | undefined,
   hasPendingPreparation: boolean,
-): SessionBrokerResult {
+): boolean {
   const durableCleanupPending =
     resource?.requestId === request.requestId &&
     ["destroying", "resetting", "unknown"].includes(resource.state);
   const preparationPending =
     request.errorCode === SESSION_REQUEST_ABANDONED_CODE && hasPendingPreparation;
-  const cleanupPending = Boolean(durableCleanupPending || preparationPending);
+  return Boolean(durableCleanupPending || preparationPending);
+}
+
+/**
+ * The refusal a non-owner token gets (#18150): terminal only when the request is released, or
+ * failed with no device cleanup still in progress. It reveals nothing else about the request.
+ */
+export function foreignOwnerRefusal(
+  request: BrokerRequestRecord,
+  resource: BrokerResourceRecord | undefined,
+  hasPendingPreparation: boolean,
+): SessionRequestForeignOwnerError {
+  return new SessionRequestForeignOwnerError(
+    request.state === "released" ||
+      (request.state === "failed" &&
+        !requestCleanupPending(request, resource, hasPendingPreparation)),
+  );
+}
+
+export function brokerResult(
+  request: BrokerRequestRecord,
+  resource: BrokerResourceRecord | undefined,
+  hasPendingPreparation: boolean,
+): SessionBrokerResult {
+  const cleanupPending = requestCleanupPending(request, resource, hasPendingPreparation);
   return {
     contractVersion: 1,
     requestId: request.requestId,

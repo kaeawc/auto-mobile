@@ -109,6 +109,14 @@ non-retryable owner and export identity mismatches warn. A failed initial handof
 snapshot warns and still joins preparations; close retries the snapshot after the
 join. A failed second snapshot rejects close so the service keeps its host lock.
 
+A liveness owner token that does not own a request gets non-retryable
+`session_request_owner_mismatch` from status, release and abandon, with
+`details: { terminal }` and nothing else. Ownership protects binding and release, so
+a non-owner learns only whether the request is finished: `terminal` is true when the
+request is released, or failed with no device cleanup (durable resource cleanup or an
+abandoned preparation still unwinding) in progress. A host restarted under a new token
+can drop a journal whose refusal is terminal; a non-terminal one is still live.
+
 ## Reuse and reset boundary
 
 Default is zero pooling: every relinquished device is destroyed through the

@@ -29,6 +29,7 @@ import {
   SessionRequestOwnerMismatchError,
   SESSION_BROKER_RETRY_AFTER_MS,
 } from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
+import { SessionRequestForeignOwnerError } from "../../../src/daemon/sessionBroker/SessionRequestForeignOwnerError";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import {
@@ -188,7 +189,7 @@ class HandlerBroker extends SessionBroker {
       return undefined;
     }
     if (owner !== token) {
-      throw new ActionableError("Session request belongs to another liveness owner");
+      throw new SessionRequestForeignOwnerError(false);
     }
     return {
       requestId: "request-1",
@@ -795,10 +796,8 @@ describe("session broker daemon handlers", () => {
     ]);
   });
 
-  test("status stays fail-closed when ownership validation throws", async () => {
-    broker.ownedStatusError = new ActionableError(
-      "Session request belongs to another liveness owner",
-    );
+  test("status refuses a foreign owner with a coded refusal and stays fail-closed", async () => {
+    broker.ownedStatusError = new SessionRequestForeignOwnerError(true);
     scopes.bind("wrong-owner-status", {
       scopeKey: "stale-scope",
       sessionUuids: [SESSION],
@@ -810,7 +809,13 @@ describe("session broker daemon handlers", () => {
         state,
         "wrong-owner-status",
       ),
-    ).rejects.toThrow("another liveness owner");
+    ).resolves.toEqual({
+      success: false,
+      code: "session_request_owner_mismatch",
+      error: "Session request belongs to another liveness owner",
+      retryable: false,
+      details: { terminal: true },
+    });
 
     expect(scopes.get("wrong-owner-status")).toEqual({
       scopeKey: SCOPE,
@@ -818,6 +823,30 @@ describe("session broker daemon handlers", () => {
     });
     expect(broker.statusCalls).toEqual([{ requestId: "request-1", token: "wrong-owner" }]);
   });
+
+  for (const terminal of [true, false]) {
+    test(`abandon returns the coded foreign-owner refusal (terminal=${terminal})`, async () => {
+      broker.mutationError = new SessionRequestForeignOwnerError(terminal);
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(
+          await handleAbandonBrokerSessionRequest(
+            request({ requestId: "request-1", livenessOwnerToken: "wrong-owner" }),
+            state,
+          ),
+        ).toEqual({
+          success: false,
+          code: "session_request_owner_mismatch",
+          error: "Session request belongs to another liveness owner",
+          retryable: false,
+          details: { terminal },
+        });
+        expect(warning).toHaveBeenCalledTimes(1);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+  }
 
   for (const restartHandoff of [true, false]) {
     test(`release and abandon return typed generation refusals (restartHandoff=${restartHandoff})`, async () => {
@@ -1008,7 +1037,13 @@ describe("session broker daemon handlers", () => {
         request({ sessionId: SESSION, livenessOwnerToken: "wrong-owner" }),
         state,
       ),
-    ).rejects.toThrow("another liveness owner");
+    ).resolves.toEqual({
+      success: false,
+      code: "session_request_owner_mismatch",
+      error: expect.stringMatching(/another liveness owner/),
+      retryable: false,
+      details: { terminal: false },
+    });
     expect(broker.releaseCalls).toEqual([]);
 
     const owned = await handleReleaseBrokerSession(

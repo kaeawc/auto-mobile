@@ -1,503 +1,512 @@
-import Foundation
-import Tachikoma
+#if canImport(Tachikoma)
+    import Foundation
+    import Tachikoma
 
-// Tachikoma-backed implementation of `PlanRecoveryHandler` — the iOS counterpart to the Android JUnit
-// runner's `AutoMobileAgent.attemptAiRecovery` (which uses Koog). Tachikoma v1.0.0 exposes a low-level
-// `ModelInterface.getResponse` primitive rather than a packaged agent loop, so the multi-step
-// tool-calling loop is implemented here: prompt the model with the failure context + the AutoMobile
-// tool set, execute each requested tool over the shared `AutoMobileMCPClient`, feed results back, and
-// repeat up to the `maxToolCalls` budget. After the agent finishes we observe the device ourselves
-// (outside the budget) to verify it is in a queryable state — the same success signal Android uses.
+    // Tachikoma-backed implementation of `PlanRecoveryHandler` for macOS test bundles, mirroring the Android
+    // JUnit runner's `AutoMobileAgent.attemptAiRecovery` (which uses Koog). Tachikoma v1.0.0 exposes a low-level
+    // `ModelInterface.getResponse` primitive rather than a packaged agent loop, so the multi-step
+    // tool-calling loop is implemented here: prompt the model with the failure context + the AutoMobile
+    // tool set, execute each requested tool over the shared `AutoMobileMCPClient`, feed results back, and
+    // repeat up to the `maxToolCalls` budget. After the agent finishes we observe the device ourselves
+    // (outside the budget) to verify it is in a queryable state — the same success signal Android uses.
 //
-// All dependencies are immutable Sendable seams. Model deadlines do not join abandoned operations;
-// late responses lose the single-resume arbitration and can never trigger recovery tools.
-public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
-    private let mcpClient: AutoMobileMCPClient
-    private let configProvider: RecoveryConfigProviding
-    private let modelConfig: RecoveryModelConfig?
-    private let timeoutSeconds: TimeInterval
-    private let timer: AutoMobileTimer
-    private let logger: AutoMobileLogger
-    private let responderFactory: @Sendable (RecoveryModelConfig) -> ModelResponding
-    private let deadlineScheduler: any DeadlineScheduler
+    // All dependencies are immutable Sendable seams. Model deadlines do not join abandoned operations;
+    // late responses lose the single-resume arbitration and can never trigger recovery tools.
+    public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
+        private let mcpClient: AutoMobileMCPClient
+        private let configProvider: RecoveryConfigProviding
+        private let modelConfig: RecoveryModelConfig?
+        private let timeoutSeconds: TimeInterval
+        private let timer: AutoMobileTimer
+        private let logger: AutoMobileLogger
+        private let responderFactory: @Sendable (RecoveryModelConfig) -> ModelResponding
+        private let deadlineScheduler: any DeadlineScheduler
 
-    public init(
-        mcpClient: AutoMobileMCPClient,
-        configProvider: RecoveryConfigProviding,
-        modelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve(),
-        timeoutSeconds: TimeInterval = 120,
-        timer: AutoMobileTimer = SystemTimer(),
-        logger: AutoMobileLogger = StdoutLogger(),
-        responderFactory: @escaping @Sendable (RecoveryModelConfig) -> ModelResponding = { config in
-            TachikomaModelResponder(modelName: config.modelName)
-        },
-        deadlineScheduler: any DeadlineScheduler = SystemDeadlineScheduler()
-    ) {
-        self.mcpClient = mcpClient
-        self.configProvider = configProvider
-        self.modelConfig = modelConfig
-        self.timeoutSeconds = timeoutSeconds
-        self.timer = timer
-        self.logger = logger
-        self.responderFactory = responderFactory
-        self.deadlineScheduler = deadlineScheduler
-    }
-
-    public func attemptRecovery(_ context: FailedStepContext) async -> RecoveryOutcome {
-        let start = timer.now()
-        guard !Task.isCancelled else {
-            logger.warn("AI recovery cancelled before starting")
-            return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
+        public init(
+            mcpClient: AutoMobileMCPClient,
+            configProvider: RecoveryConfigProviding,
+            modelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve(),
+            timeoutSeconds: TimeInterval = 120,
+            timer: AutoMobileTimer = SystemTimer(),
+            logger: AutoMobileLogger = StdoutLogger(),
+            responderFactory: @escaping @Sendable (RecoveryModelConfig) -> ModelResponding = { config in
+                TachikomaModelResponder(modelName: config.modelName)
+            },
+            deadlineScheduler: any DeadlineScheduler = SystemDeadlineScheduler()
+        ) {
+            self.mcpClient = mcpClient
+            self.configProvider = configProvider
+            self.modelConfig = modelConfig
+            self.timeoutSeconds = timeoutSeconds
+            self.timer = timer
+            self.logger = logger
+            self.responderFactory = responderFactory
+            self.deadlineScheduler = deadlineScheduler
         }
 
-        guard let modelConfig = modelConfig else {
-            // No API key for the configured provider — recovery is unavailable. Return failure so the
-            // executor falls back to throwing the original plan failure, exactly as before this feature.
-            logger.warn("AI recovery unavailable: no API key for the configured provider; skipping.")
-            return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
-        }
+        public func attemptRecovery(_ context: FailedStepContext) async -> RecoveryOutcome {
+            let start = timer.now()
+            guard !Task.isCancelled else {
+                logger.warn("AI recovery cancelled before starting")
+                return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
+            }
 
-        let maxToolCalls = await configProvider.maxRecoveryToolCalls()
-        let responder = responderFactory(modelConfig)
-        logger.info(
-            "Starting AI recovery for step \(context.failedStepIndex + 1) (\(context.failedTool)) "
-                + "with model \(modelConfig.modelName), budget \(maxToolCalls) tool calls..."
-        )
+            guard let modelConfig = modelConfig else {
+                // No API key for the configured provider — recovery is unavailable. Return failure so the
+                // executor falls back to throwing the original plan failure, exactly as before this feature.
+                logger.warn("AI recovery unavailable: no API key for the configured provider; skipping.")
+                return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
+            }
 
-        // Normalize the context's concrete secret values into every scrub form (NFC/NFD + the
-        // transport-encoding depths) HERE, at the recovery entry point, so the loop is safe no matter
-        // whether a caller passed raw or pre-expanded values (issue #6094): `FailedStepContext` is a
-        // public type, so a direct caller could set raw concrete values, and matching only those would
-        // miss the escaped representation in JSON tool results. Idempotent for the executor's already-
-        // expanded input (dedup collapses the repeats).
-        let secretValues = SecretRedaction.secretValues(context.secretValues)
-
-        do {
-            try await runAgentLoop(
-                context: context,
-                responder: responder,
-                settings: modelSettings(for: modelConfig),
-                maxToolCalls: maxToolCalls,
-                secretValues: secretValues
-            )
-        } catch is CancellationError {
-            logger.warn("AI recovery cancelled")
-            return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
-        } catch {
-            logger.warn("AI recovery execution failed: \(error)")
-            return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
-        }
-
-        // Verify the device is in a queryable state after recovery (outside the tool budget). Mirrors
-        // Android: success == a post-recovery observe returned something. The resumed step is the real
-        // check of whether recovery actually worked.
-        logger.info("AI recovery agent finished, verifying device state...")
-        let observeResult: String?
-        do {
-            try Task.checkCancellation()
-            observeResult = try await observeDeviceState(context: context, secretValues: secretValues)
-        } catch {
-            logger.warn("AI recovery verification cancelled: \(error)")
-            return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
-        }
-        return RecoveryOutcome(
-            success: observeResult != nil,
-            recoveryTimeMs: elapsedMs(since: start),
-            observeResultAfterRecovery: observeResult
-        )
-    }
-
-    // MARK: - Agent loop
-
-    private func runAgentLoop(
-        context: FailedStepContext,
-        responder: ModelResponding,
-        settings: ModelSettings,
-        maxToolCalls: Int,
-        secretValues: [String]
-    )
-        async throws
-    {
-        let tools = Self.buildToolDefinitions()
-        let timeoutSeconds = self.timeoutSeconds
-        // Redact the STATIC context fields that go into the initial prompt too (#6094). The executor
-        // already redacts these on the FailedStepContext (#6092), so this is a no-op for that path; it
-        // makes the public entry point self-contained, so a direct caller who supplies raw context
-        // fields cannot leak them in the first ModelRequest. Routing fields stay real — `executeTool`
-        // reads the ORIGINAL `context` for platform/session/device.
-        let promptContext = Self.redactContext(context, secretValues: secretValues)
-        var messages: [Message] = [
-            .user(content: .text(Self.buildRecoveryPrompt(context: promptContext, maxToolCalls: maxToolCalls))),
-        ]
-
-        var toolCallsUsed = 0
-        while true {
-            let request = ModelRequest(
-                messages: messages,
-                tools: tools,
-                settings: settings,
-                systemInstructions: Self.systemInstructions
+            let maxToolCalls = await configProvider.maxRecoveryToolCalls()
+            let responder = responderFactory(modelConfig)
+            logger.info(
+                "Starting AI recovery for step \(context.failedStepIndex + 1) (\(context.failedTool)) "
+                    + "with model \(modelConfig.modelName), budget \(maxToolCalls) tool calls..."
             )
 
-            try Task.checkCancellation()
-            let response = try await withDeadline(
-                seconds: timeoutSeconds,
-                scheduler: deadlineScheduler,
-                timeoutError: RecoveryTimeoutError(timeoutSeconds: timeoutSeconds)
-            ) { try await responder.respond(request) }
-            try Task.checkCancellation()
-            messages.append(.assistant(content: response.content))
+            // Normalize the context's concrete secret values into every scrub form (NFC/NFD + the
+            // transport-encoding depths) HERE, at the recovery entry point, so the loop is safe no matter
+            // whether a caller passed raw or pre-expanded values (issue #6094): `FailedStepContext` is a
+            // public type, so a direct caller could set raw concrete values, and matching only those would
+            // miss the escaped representation in JSON tool results. Idempotent for the executor's already-
+            // expanded input (dedup collapses the repeats).
+            let secretValues = SecretRedaction.secretValues(context.secretValues)
 
-            let toolCalls = response.content.compactMap { content -> ToolCallItem? in
-                if case let .toolCall(item) = content {
-                    return item
-                }
-                return nil
-            }
-
-            if toolCalls.isEmpty {
-                // The model produced a final answer with no further actions — recovery attempt done.
-                return
-            }
-            if toolCallsUsed >= maxToolCalls {
-                // Budget spent and the model still wants to act. Stop here; the resumed step is the
-                // real verification of whether the device recovered.
-                return
-            }
-
-            for call in toolCalls {
-                guard toolCallsUsed < maxToolCalls else {
-                    // Budget exhausted mid-batch: acknowledge the remaining calls so the transcript
-                    // stays well-formed, but do not touch the device.
-                    messages.append(.tool(toolCallId: call.id, content: "{\"error\":\"tool-call budget exhausted\"}"))
-                    continue
-                }
-                toolCallsUsed += 1
-                let resultText = try await executeTool(
-                    name: call.function.name,
-                    argumentsJSON: call.function.arguments,
+            do {
+                try await runAgentLoop(
                     context: context,
+                    responder: responder,
+                    settings: modelSettings(for: modelConfig),
+                    maxToolCalls: maxToolCalls,
                     secretValues: secretValues
                 )
-                messages.append(.tool(toolCallId: call.id, content: resultText))
+            } catch is CancellationError {
+                logger.warn("AI recovery cancelled")
+                return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
+            } catch {
+                logger.warn("AI recovery execution failed: \(error)")
+                return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
+            }
+
+            // Verify the device is in a queryable state after recovery (outside the tool budget). Mirrors
+            // Android: success == a post-recovery observe returned something. The resumed step is the real
+            // check of whether recovery actually worked.
+            logger.info("AI recovery agent finished, verifying device state...")
+            let observeResult: String?
+            do {
+                try Task.checkCancellation()
+                observeResult = try await observeDeviceState(context: context, secretValues: secretValues)
+            } catch {
+                logger.warn("AI recovery verification cancelled: \(error)")
+                return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
+            }
+            return RecoveryOutcome(
+                success: observeResult != nil,
+                recoveryTimeMs: elapsedMs(since: start),
+                observeResultAfterRecovery: observeResult
+            )
+        }
+
+        // MARK: - Agent loop
+
+        private func runAgentLoop(
+            context: FailedStepContext,
+            responder: ModelResponding,
+            settings: ModelSettings,
+            maxToolCalls: Int,
+            secretValues: [String]
+        )
+            async throws
+        {
+            let tools = Self.buildToolDefinitions()
+            let timeoutSeconds = self.timeoutSeconds
+            // Redact the STATIC context fields that go into the initial prompt too (#6094). The executor
+            // already redacts these on the FailedStepContext (#6092), so this is a no-op for that path; it
+            // makes the public entry point self-contained, so a direct caller who supplies raw context
+            // fields cannot leak them in the first ModelRequest. Routing fields stay real — `executeTool`
+            // reads the ORIGINAL `context` for platform/session/device.
+            let promptContext = Self.redactContext(context, secretValues: secretValues)
+            var messages: [Message] = [
+                .user(content: .text(Self.buildRecoveryPrompt(context: promptContext, maxToolCalls: maxToolCalls))),
+            ]
+
+            var toolCallsUsed = 0
+            while true {
+                let request = ModelRequest(
+                    messages: messages,
+                    tools: tools,
+                    settings: settings,
+                    systemInstructions: Self.systemInstructions
+                )
+
+                try Task.checkCancellation()
+                let response = try await withDeadline(
+                    seconds: timeoutSeconds,
+                    scheduler: deadlineScheduler,
+                    timeoutError: RecoveryTimeoutError(timeoutSeconds: timeoutSeconds)
+                ) { try await responder.respond(request) }
+                try Task.checkCancellation()
+                messages.append(.assistant(content: response.content))
+
+                let toolCalls = response.content.compactMap { content -> ToolCallItem? in
+                    if case let .toolCall(item) = content {
+                        return item
+                    }
+                    return nil
+                }
+
+                if toolCalls.isEmpty {
+                    // The model produced a final answer with no further actions — recovery attempt done.
+                    return
+                }
+                if toolCallsUsed >= maxToolCalls {
+                    // Budget spent and the model still wants to act. Stop here; the resumed step is the
+                    // real verification of whether the device recovered.
+                    return
+                }
+
+                for call in toolCalls {
+                    guard toolCallsUsed < maxToolCalls else {
+                        // Budget exhausted mid-batch: acknowledge the remaining calls so the transcript
+                        // stays well-formed, but do not touch the device.
+                        messages.append(.tool(
+                            toolCallId: call.id,
+                            content: "{\"error\":\"tool-call budget exhausted\"}"
+                        ))
+                        continue
+                    }
+                    toolCallsUsed += 1
+                    let resultText = try await executeTool(
+                        name: call.function.name,
+                        argumentsJSON: call.function.arguments,
+                        context: context,
+                        secretValues: secretValues
+                    )
+                    messages.append(.tool(toolCallId: call.id, content: resultText))
+                }
             }
         }
-    }
 
-    private func modelSettings(for config: RecoveryModelConfig) -> ModelSettings {
-        ModelSettings(modelName: config.modelName, maxTokens: 4096, toolChoice: .auto)
-    }
+        private func modelSettings(for config: RecoveryModelConfig) -> ModelSettings {
+            ModelSettings(modelName: config.modelName, maxTokens: 4096, toolChoice: .auto)
+        }
 
-    // MARK: - Tool execution over the AutoMobile MCP client
+        // MARK: - Tool execution over the AutoMobile MCP client
 
-    private func executeTool(
-        name: String,
-        argumentsJSON: String,
-        context: FailedStepContext,
-        secretValues: [String]
-    )
-        async throws -> String
-    {
-        try Task.checkCancellation()
-        var arguments = Self.parseArguments(argumentsJSON)
-        // Required routing fields are injected by us, not trusted from the model, so every recovery
-        // call is valid and targets the same platform/session/device as the plan.
-        arguments["platform"] = context.platform
-        if let session = context.sessionUuid {
-            arguments["sessionUuid"] = session
-        }
-        if let device = context.deviceId {
-            arguments["device"] = device
-        }
-        if name == "tapOn", arguments["action"] == nil {
-            arguments["action"] = "tap"
-        }
-        if name == "sendKeys" {
-            if let error = Self.buildSendKeysCommands(in: &arguments) {
-                return error
+        private func executeTool(
+            name: String,
+            argumentsJSON: String,
+            context: FailedStepContext,
+            secretValues: [String]
+        )
+            async throws -> String
+        {
+            try Task.checkCancellation()
+            var arguments = Self.parseArguments(argumentsJSON)
+            // Required routing fields are injected by us, not trusted from the model, so every recovery
+            // call is valid and targets the same platform/session/device as the plan.
+            arguments["platform"] = context.platform
+            if let session = context.sessionUuid {
+                arguments["sessionUuid"] = session
+            }
+            if let device = context.deviceId {
+                arguments["device"] = device
+            }
+            if name == "tapOn", arguments["action"] == nil {
+                arguments["action"] = "tap"
+            }
+            if name == "sendKeys" {
+                if let error = Self.buildSendKeysCommands(in: &arguments) {
+                    return error
+                }
+            }
+
+            do {
+                let response = try await mcpClient.callTool(name: name, arguments: arguments, timeout: timeoutSeconds)
+                try Task.checkCancellation()
+                // The tool EXECUTED against the device with real values above; only the RESULT TEXT that
+                // re-enters the next ModelRequest is scrubbed, so a secret still visible on-screen at
+                // recovery time cannot reach the LLM provider through the agent loop (issue #6094).
+                return SecretRedaction.redact(response.text, secretValues: secretValues)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                try Task.checkCancellation()
+                logger.warn("Recovery tool \(name) failed: \(error)")
+                // The error can echo on-screen/tool content, so scrub it too before it enters the
+                // transcript (issue #6094).
+                let message = SecretRedaction.redact(String(describing: error), secretValues: secretValues)
+                return "{\"error\":\"\(Self.escapeForJSON(message))\"}"
             }
         }
 
-        do {
-            let response = try await mcpClient.callTool(name: name, arguments: arguments, timeout: timeoutSeconds)
-            try Task.checkCancellation()
-            // The tool EXECUTED against the device with real values above; only the RESULT TEXT that
-            // re-enters the next ModelRequest is scrubbed, so a secret still visible on-screen at
-            // recovery time cannot reach the LLM provider through the agent loop (issue #6094).
-            return SecretRedaction.redact(response.text, secretValues: secretValues)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            try Task.checkCancellation()
-            logger.warn("Recovery tool \(name) failed: \(error)")
-            // The error can echo on-screen/tool content, so scrub it too before it enters the
-            // transcript (issue #6094).
-            let message = SecretRedaction.redact(String(describing: error), secretValues: secretValues)
-            return "{\"error\":\"\(Self.escapeForJSON(message))\"}"
-        }
-    }
-
-    private static func buildSendKeysCommands(in arguments: inout [String: Any]) -> String? {
-        let action = arguments.removeValue(forKey: "action") as? String ?? "type"
-        let command: [String: Any]
-        switch action {
-        case "type":
-            guard let text = arguments.removeValue(forKey: "text") as? String else {
-                return "{\"error\":\"text is required for type\"}"
+        private static func buildSendKeysCommands(in arguments: inout [String: Any]) -> String? {
+            let action = arguments.removeValue(forKey: "action") as? String ?? "type"
+            let command: [String: Any]
+            switch action {
+            case "type":
+                guard let text = arguments.removeValue(forKey: "text") as? String else {
+                    return "{\"error\":\"text is required for type\"}"
+                }
+                command = ["action": "type", "text": text, "operation": "replace"]
+            case "clear":
+                command = ["action": "clear"]
+            case "key":
+                guard let key = arguments.removeValue(forKey: "key") as? String else {
+                    return "{\"error\":\"key is required for key\"}"
+                }
+                command = ["action": "key", "key": key]
+            default:
+                return "{\"error\":\"action must be type, clear, or key\"}"
             }
-            command = ["action": "type", "text": text, "operation": "replace"]
-        case "clear":
-            command = ["action": "clear"]
-        case "key":
-            guard let key = arguments.removeValue(forKey: "key") as? String else {
-                return "{\"error\":\"key is required for key\"}"
-            }
-            command = ["action": "key", "key": key]
-        default:
-            return "{\"error\":\"action must be type, clear, or key\"}"
-        }
-        arguments["commands"] = [command]
-        return nil
-    }
-
-    private func observeDeviceState(context: FailedStepContext, secretValues: [String]) async throws -> String? {
-        try Task.checkCancellation()
-        var arguments: [String: Any] = ["platform": context.platform]
-        if let session = context.sessionUuid {
-            arguments["sessionUuid"] = session
-        }
-        if let device = context.deviceId {
-            arguments["device"] = device
-        }
-        do {
-            let response = try await mcpClient.callTool(name: "observe", arguments: arguments, timeout: timeoutSeconds)
-            try Task.checkCancellation()
-            // Post-recovery liveness observe. Its text can carry an on-screen secret, so scrub it
-            // before it is surfaced as the recovery result (issue #6094).
-            return SecretRedaction.redact(response.text, secretValues: secretValues)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            try Task.checkCancellation()
-            logger.warn("Post-recovery observe failed: \(error)")
+            arguments["commands"] = [command]
             return nil
         }
-    }
 
-    // MARK: - Prompt
-
-    static let systemInstructions = """
-    You are an iOS UI test recovery agent. A recorded test plan hit a failing step. Your job is to use \
-    the provided AutoMobile tools to clear whatever blocked that step (a dialog, alert, permission \
-    prompt, or the wrong screen) and return the app to the screen the failed step expects. The test \
-    runner re-runs the failed step itself after you finish, so do NOT perform that step's action — \
-    just remove the obstruction. Start by calling observe to see the current screen. Then take the \
-    minimal corrective actions needed (dismiss dialogs, navigate to the right screen, wait for \
-    elements). Do not try to complete the test. When the device is ready, stop and briefly say what \
-    you did.
-    """
-
-    /// A copy of `context` with every field that reaches the initial prompt scrubbed of secret
-    /// values (#6094). Routing fields (`platform`/`sessionUuid`/`deviceId`) and `secretValues` are
-    /// preserved unchanged. A no-op when there is nothing to redact.
-    static func redactContext(_ context: FailedStepContext, secretValues: [String]) -> FailedStepContext {
-        guard !secretValues.isEmpty else {
-            return context
-        }
-        return FailedStepContext(
-            failedStepIndex: context.failedStepIndex,
-            failedTool: SecretRedaction.redact(context.failedTool, secretValues: secretValues),
-            error: SecretRedaction.redact(context.error, secretValues: secretValues),
-            succeededSteps: context.succeededSteps.map {
-                SucceededStepSummary(
-                    stepIndex: $0.stepIndex,
-                    tool: SecretRedaction.redact($0.tool, secretValues: secretValues)
+        private func observeDeviceState(context: FailedStepContext, secretValues: [String]) async throws -> String? {
+            try Task.checkCancellation()
+            var arguments: [String: Any] = ["platform": context.platform]
+            if let session = context.sessionUuid {
+                arguments["sessionUuid"] = session
+            }
+            if let device = context.deviceId {
+                arguments["device"] = device
+            }
+            do {
+                let response = try await mcpClient.callTool(
+                    name: "observe",
+                    arguments: arguments,
+                    timeout: timeoutSeconds
                 )
-            },
-            planContent: SecretRedaction.redact(context.planContent, secretValues: secretValues),
-            platform: context.platform,
-            sessionUuid: context.sessionUuid,
-            deviceId: context.deviceId,
-            failureObservation: SecretRedaction.redact(context.failureObservation, secretValues: secretValues),
-            secretValues: context.secretValues
-        )
-    }
-
-    static func buildRecoveryPrompt(context: FailedStepContext, maxToolCalls: Int) -> String {
-        let succeeded: String
-        if context.succeededSteps.isEmpty {
-            succeeded = "  (none — the first step failed)"
-        } else {
-            succeeded = context.succeededSteps
-                .map { "  - Step \($0.stepIndex + 1): \($0.tool) (completed)" }
-                .joined(separator: "\n")
-        }
-
-        var prompt = """
-        A test plan step failed. Here is the context:
-
-        FAILED STEP: Step \(context.failedStepIndex + 1) using tool "\(context.failedTool)"
-        ERROR: \(context.error)
-
-        PREVIOUSLY SUCCEEDED STEPS:
-        \(succeeded)
-        """
-
-        if let observation = context.failureObservation {
-            var lines: [String] = []
-            if let observeError = observation.observeError {
-                lines.append("  observeError: \(observeError)")
-            }
-            if observation.awaitTimeout == true {
-                lines.append("  awaitTimeout: true")
-            }
-            if let texts = observation.visibleTextsSample, !texts.isEmpty {
-                lines.append("  visibleTexts: \(texts.prefix(40).joined(separator: ", "))")
-            }
-            if let ids = observation.resourceIdsSample, !ids.isEmpty {
-                lines.append("  resourceIds: \(ids.prefix(40).joined(separator: ", "))")
-            }
-            if !lines.isEmpty {
-                prompt += "\n\nDEVICE STATE AT FAILURE:\n" + lines.joined(separator: "\n")
+                try Task.checkCancellation()
+                // Post-recovery liveness observe. Its text can carry an on-screen secret, so scrub it
+                // before it is surfaced as the recovery result (issue #6094).
+                return SecretRedaction.redact(response.text, secretValues: secretValues)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                try Task.checkCancellation()
+                logger.warn("Post-recovery observe failed: \(error)")
+                return nil
             }
         }
 
-        prompt += """
+        // MARK: - Prompt
 
-
-        PLAN YAML:
-        \(context.planContent)
-
-        You have a maximum of \(maxToolCalls) tool calls to recover the device state. The test resumes \
-        by re-running the failed step \(context.failedStepIndex + 1), so do not perform its action \
-        yourself: only clear what blocked it.
+        static let systemInstructions = """
+        You are an iOS UI test recovery agent. A recorded test plan hit a failing step. Your job is to use \
+        the provided AutoMobile tools to clear whatever blocked that step (a dialog, alert, permission \
+        prompt, or the wrong screen) and return the app to the screen the failed step expects. The test \
+        runner re-runs the failed step itself after you finish, so do NOT perform that step's action — \
+        just remove the obstruction. Start by calling observe to see the current screen. Then take the \
+        minimal corrective actions needed (dismiss dialogs, navigate to the right screen, wait for \
+        elements). Do not try to complete the test. When the device is ready, stop and briefly say what \
+        you did.
         """
 
-        return prompt
-    }
-
-    // MARK: - Tool definitions (mirror the Android SimpleTool set; schemas from schemas/tool-definitions.json)
-
-    static func buildToolDefinitions() -> [ToolDefinition] {
-        let selectorSchema = ParameterSchema.object(
-            properties: [
-                "text": .string(description: "Visible text or accessibility label of the element"),
-                "id": .string(description: "Resource id / accessibility identifier of the element"),
-                "description": .string(description: "Accessibility description of the element"),
-            ],
-            description: "How to find the element — provide at least one of text, id, or description"
-        )
-
-        return [
-            tool(
-                name: "observe",
-                description: "Capture the current screen state and UI hierarchy. Call this first.",
-                properties: [:],
-                required: []
-            ),
-            tool(
-                name: "tapOn",
-                description: "Tap an element located by text, id, or accessibility description.",
-                properties: [
-                    "selector": selectorSchema,
-                    "action": .enumeration(
-                        ["tap", "doubleTap", "longPress"],
-                        description: "Gesture to perform; defaults to tap"
-                    ),
-                ],
-                required: ["selector"]
-            ),
-            tool(
-                name: "sendKeys",
-                description: "Type, clear, or submit text in the focused input field.",
-                properties: [
-                    "action": .enumeration(
-                        ["type", "clear", "key"],
-                        description: "Text action to perform; defaults to type"
-                    ),
-                    "text": .string(description: "Text for a type action"),
-                    "key": .string(description: "Semantic key for a key action"),
-                ],
-                required: []
-            ),
-            tool(
-                name: "pressButton",
-                description: "Press a device or navigation button (e.g. back, home, enter).",
-                properties: [
-                    "button": .string(description: "The button to press, e.g. back, home, enter"),
-                ],
-                required: ["button"]
-            ),
-            tool(
-                name: "swipeOn",
-                description: "Swipe or scroll the screen in a direction to reveal off-screen content.",
-                properties: [
-                    "direction": .enumeration(
-                        ["up", "down", "left", "right"],
-                        description: "Direction to swipe/scroll"
-                    ),
-                ],
-                required: ["direction"]
-            ),
-            tool(
-                name: "launchApp",
-                description: "Launch an app by its bundle/package id.",
-                properties: [
-                    "appId": .string(description: "The app bundle identifier / package name"),
-                ],
-                required: ["appId"]
-            ),
-            tool(
-                name: "terminateApp",
-                description: "Terminate a running app by its bundle/package id.",
-                properties: [
-                    "appId": .string(description: "The app bundle identifier / package name"),
-                ],
-                required: ["appId"]
-            ),
-        ]
-    }
-
-    private static func tool(
-        name: String,
-        description: String,
-        properties: [String: ParameterSchema],
-        required: [String]
-    )
-        -> ToolDefinition
-    {
-        ToolDefinition(
-            function: FunctionDefinition(
-                name: name,
-                description: description,
-                parameters: ToolParameters.object(properties: properties, required: required),
-                strict: false
+        /// A copy of `context` with every field that reaches the initial prompt scrubbed of secret
+        /// values (#6094). Routing fields (`platform`/`sessionUuid`/`deviceId`) and `secretValues` are
+        /// preserved unchanged. A no-op when there is nothing to redact.
+        static func redactContext(_ context: FailedStepContext, secretValues: [String]) -> FailedStepContext {
+            guard !secretValues.isEmpty else {
+                return context
+            }
+            return FailedStepContext(
+                failedStepIndex: context.failedStepIndex,
+                failedTool: SecretRedaction.redact(context.failedTool, secretValues: secretValues),
+                error: SecretRedaction.redact(context.error, secretValues: secretValues),
+                succeededSteps: context.succeededSteps.map {
+                    SucceededStepSummary(
+                        stepIndex: $0.stepIndex,
+                        tool: SecretRedaction.redact($0.tool, secretValues: secretValues)
+                    )
+                },
+                planContent: SecretRedaction.redact(context.planContent, secretValues: secretValues),
+                platform: context.platform,
+                sessionUuid: context.sessionUuid,
+                deviceId: context.deviceId,
+                failureObservation: SecretRedaction.redact(context.failureObservation, secretValues: secretValues),
+                secretValues: context.secretValues
             )
-        )
-    }
-
-    // MARK: - Helpers
-
-    static func parseArguments(_ json: String) -> [String: Any] {
-        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let data = trimmed.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data, options: []),
-              let dict = object as? [String: Any]
-        else {
-            return [:]
         }
-        return dict
-    }
 
-    private static func escapeForJSON(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: " ")
-    }
+        static func buildRecoveryPrompt(context: FailedStepContext, maxToolCalls: Int) -> String {
+            let succeeded: String
+            if context.succeededSteps.isEmpty {
+                succeeded = "  (none — the first step failed)"
+            } else {
+                succeeded = context.succeededSteps
+                    .map { "  - Step \($0.stepIndex + 1): \($0.tool) (completed)" }
+                    .joined(separator: "\n")
+            }
 
-    private func elapsedMs(since start: TimeInterval) -> Int {
-        Int((timer.now() - start) * 1000)
+            var prompt = """
+            A test plan step failed. Here is the context:
+
+            FAILED STEP: Step \(context.failedStepIndex + 1) using tool "\(context.failedTool)"
+            ERROR: \(context.error)
+
+            PREVIOUSLY SUCCEEDED STEPS:
+            \(succeeded)
+            """
+
+            if let observation = context.failureObservation {
+                var lines: [String] = []
+                if let observeError = observation.observeError {
+                    lines.append("  observeError: \(observeError)")
+                }
+                if observation.awaitTimeout == true {
+                    lines.append("  awaitTimeout: true")
+                }
+                if let texts = observation.visibleTextsSample, !texts.isEmpty {
+                    lines.append("  visibleTexts: \(texts.prefix(40).joined(separator: ", "))")
+                }
+                if let ids = observation.resourceIdsSample, !ids.isEmpty {
+                    lines.append("  resourceIds: \(ids.prefix(40).joined(separator: ", "))")
+                }
+                if !lines.isEmpty {
+                    prompt += "\n\nDEVICE STATE AT FAILURE:\n" + lines.joined(separator: "\n")
+                }
+            }
+
+            prompt += """
+
+
+            PLAN YAML:
+            \(context.planContent)
+
+            You have a maximum of \(maxToolCalls) tool calls to recover the device state. The test resumes \
+            by re-running the failed step \(context.failedStepIndex + 1), so do not perform its action \
+            yourself: only clear what blocked it.
+            """
+
+            return prompt
+        }
+
+        // MARK: - Tool definitions (mirror the Android SimpleTool set; schemas from schemas/tool-definitions.json)
+
+        static func buildToolDefinitions() -> [ToolDefinition] {
+            let selectorSchema = ParameterSchema.object(
+                properties: [
+                    "text": .string(description: "Visible text or accessibility label of the element"),
+                    "id": .string(description: "Resource id / accessibility identifier of the element"),
+                    "description": .string(description: "Accessibility description of the element"),
+                ],
+                description: "How to find the element — provide at least one of text, id, or description"
+            )
+
+            return [
+                tool(
+                    name: "observe",
+                    description: "Capture the current screen state and UI hierarchy. Call this first.",
+                    properties: [:],
+                    required: []
+                ),
+                tool(
+                    name: "tapOn",
+                    description: "Tap an element located by text, id, or accessibility description.",
+                    properties: [
+                        "selector": selectorSchema,
+                        "action": .enumeration(
+                            ["tap", "doubleTap", "longPress"],
+                            description: "Gesture to perform; defaults to tap"
+                        ),
+                    ],
+                    required: ["selector"]
+                ),
+                tool(
+                    name: "sendKeys",
+                    description: "Type, clear, or submit text in the focused input field.",
+                    properties: [
+                        "action": .enumeration(
+                            ["type", "clear", "key"],
+                            description: "Text action to perform; defaults to type"
+                        ),
+                        "text": .string(description: "Text for a type action"),
+                        "key": .string(description: "Semantic key for a key action"),
+                    ],
+                    required: []
+                ),
+                tool(
+                    name: "pressButton",
+                    description: "Press a device or navigation button (e.g. back, home, enter).",
+                    properties: [
+                        "button": .string(description: "The button to press, e.g. back, home, enter"),
+                    ],
+                    required: ["button"]
+                ),
+                tool(
+                    name: "swipeOn",
+                    description: "Swipe or scroll the screen in a direction to reveal off-screen content.",
+                    properties: [
+                        "direction": .enumeration(
+                            ["up", "down", "left", "right"],
+                            description: "Direction to swipe/scroll"
+                        ),
+                    ],
+                    required: ["direction"]
+                ),
+                tool(
+                    name: "launchApp",
+                    description: "Launch an app by its bundle/package id.",
+                    properties: [
+                        "appId": .string(description: "The app bundle identifier / package name"),
+                    ],
+                    required: ["appId"]
+                ),
+                tool(
+                    name: "terminateApp",
+                    description: "Terminate a running app by its bundle/package id.",
+                    properties: [
+                        "appId": .string(description: "The app bundle identifier / package name"),
+                    ],
+                    required: ["appId"]
+                ),
+            ]
+        }
+
+        private static func tool(
+            name: String,
+            description: String,
+            properties: [String: ParameterSchema],
+            required: [String]
+        )
+            -> ToolDefinition
+        {
+            ToolDefinition(
+                function: FunctionDefinition(
+                    name: name,
+                    description: description,
+                    parameters: ToolParameters.object(properties: properties, required: required),
+                    strict: false
+                )
+            )
+        }
+
+        // MARK: - Helpers
+
+        static func parseArguments(_ json: String) -> [String: Any] {
+            let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  let data = trimmed.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data, options: []),
+                  let dict = object as? [String: Any]
+            else {
+                return [:]
+            }
+            return dict
+        }
+
+        private static func escapeForJSON(_ value: String) -> String {
+            value
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: " ")
+        }
+
+        private func elapsedMs(since start: TimeInterval) -> Int {
+            Int((timer.now() - start) * 1000)
+        }
     }
-}
+#endif

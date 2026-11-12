@@ -50,10 +50,10 @@ jobs:
         with:
           lfs: false
 
-      - name: "Select Xcode 26.5"
+      - name: "Select Xcode 26.6"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.5"
+          xcode-version: "26.6"
 
       - name: "Cache XCTestRunner Swift package dependencies"
         uses: actions/cache@v5
@@ -62,9 +62,9 @@ jobs:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm/cache
-          key: ${{ runner.os }}-spm-xctestrunner-26.5-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          key: ${{ runner.os }}-spm-xctestrunner-26.6-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
-            ${{ runner.os }}-spm-xctestrunner-26.5-
+            ${{ runner.os }}-spm-xctestrunner-26.6-
 
       - name: "Cache XCTestRunner DerivedData"
         uses: actions/cache@v5
@@ -73,9 +73,9 @@ jobs:
           path: |
             /tmp/automobile-ctrl-proxy/Build
             /tmp/automobile-ctrl-proxy/ModuleCache.noindex
-          key: ${{ runner.os }}-derived-xctestrunner-26.5-${{ hashFiles('ios/control-proxy/**/*.swift', 'ios/sdk-wire/**/*.swift', 'ios/control-proxy/**/*.m', 'ios/sdk-wire/**/*.m', 'ios/control-proxy/**/*.mm', 'ios/sdk-wire/**/*.mm', 'ios/control-proxy/**/*.h', 'ios/sdk-wire/**/*.h', 'ios/control-proxy/**/*.c', 'ios/sdk-wire/**/*.c', 'ios/control-proxy/**/*.cpp', 'ios/sdk-wire/**/*.cpp', 'ios/control-proxy/**/*.xcconfig', 'ios/sdk-wire/**/*.xcconfig', 'ios/control-proxy/**/*.plist', 'ios/sdk-wire/**/*.plist', 'ios/control-proxy/**/*.entitlements', 'ios/sdk-wire/**/*.entitlements', 'ios/control-proxy/**/*.storyboard', 'ios/sdk-wire/**/*.storyboard', 'ios/control-proxy/**/*.xib', 'ios/sdk-wire/**/*.xib', 'ios/control-proxy/**/*.xcassets/**', 'ios/sdk-wire/**/*.xcassets/**', 'ios/control-proxy/**/*.strings', 'ios/sdk-wire/**/*.strings', 'ios/control-proxy/**/*.ttf', 'ios/sdk-wire/**/*.ttf', 'ios/control-proxy/**/*.otf', 'ios/sdk-wire/**/*.otf', 'ios/control-proxy/**/*.xcprivacy', 'ios/sdk-wire/**/*.xcprivacy', 'ios/control-proxy/**/*.pbxproj', 'ios/sdk-wire/**/*.pbxproj', 'ios/control-proxy/**/*.xcscheme', 'ios/sdk-wire/**/*.xcscheme', 'ios/control-proxy/**/project.yml', 'ios/sdk-wire/**/project.yml', 'ios/control-proxy/**/Package.swift', 'ios/sdk-wire/**/Package.swift', 'ios/control-proxy/**/Package.resolved', 'ios/sdk-wire/**/Package.resolved') }}
+          key: ${{ runner.os }}-derived-xctestrunner-26.6-${{ hashFiles('ios/control-proxy/**/*.swift', 'ios/sdk-wire/**/*.swift', 'ios/control-proxy/**/*.m', 'ios/sdk-wire/**/*.m', 'ios/control-proxy/**/*.mm', 'ios/sdk-wire/**/*.mm', 'ios/control-proxy/**/*.h', 'ios/sdk-wire/**/*.h', 'ios/control-proxy/**/*.c', 'ios/sdk-wire/**/*.c', 'ios/control-proxy/**/*.cpp', 'ios/sdk-wire/**/*.cpp', 'ios/control-proxy/**/*.xcconfig', 'ios/sdk-wire/**/*.xcconfig', 'ios/control-proxy/**/*.plist', 'ios/sdk-wire/**/*.plist', 'ios/control-proxy/**/*.entitlements', 'ios/sdk-wire/**/*.entitlements', 'ios/control-proxy/**/*.storyboard', 'ios/sdk-wire/**/*.storyboard', 'ios/control-proxy/**/*.xib', 'ios/sdk-wire/**/*.xib', 'ios/control-proxy/**/*.xcassets/**', 'ios/sdk-wire/**/*.xcassets/**', 'ios/control-proxy/**/*.strings', 'ios/sdk-wire/**/*.strings', 'ios/control-proxy/**/*.ttf', 'ios/sdk-wire/**/*.ttf', 'ios/control-proxy/**/*.otf', 'ios/sdk-wire/**/*.otf', 'ios/control-proxy/**/*.xcprivacy', 'ios/sdk-wire/**/*.xcprivacy', 'ios/control-proxy/**/*.pbxproj', 'ios/sdk-wire/**/*.pbxproj', 'ios/control-proxy/**/*.xcscheme', 'ios/sdk-wire/**/*.xcscheme', 'ios/control-proxy/**/project.yml', 'ios/sdk-wire/**/project.yml', 'ios/control-proxy/**/Package.swift', 'ios/sdk-wire/**/Package.swift', 'ios/control-proxy/**/Package.resolved', 'ios/sdk-wire/**/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-derived-xctestrunner-26.5-
+            ${{ runner.os }}-derived-xctestrunner-26.6-
 
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
@@ -99,7 +99,7 @@ jobs:
 
       # ffmpeg is consumed only by the videoRecording test far below, so it gets
       # the widest possible window: it overlaps the drift check, the CtrlProxy
-      # build, the UI test, and the Xcode 26.5 simulator boot. Previously this
+      # build, the UI test, and the Xcode 26.6 simulator boot. Previously this
       # ran inline in that test step, charging a cold multi-minute brew install
       # against the step's own 10-minute cap and the test's 180s budget — a known
       # intermittent timeout (#4124). No brew-lock contention: install-xcodegen.sh
@@ -131,7 +131,7 @@ jobs:
       # The #3779 spike confirmed a backgrounded step's outputs survive `wait`,
       # so the UI test can still read steps.ctrlproxy-simulator.outputs.simulator_udid
       # after the barrier — no file fallback needed.
-      - name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)"
+      - name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.6)"
         id: ctrlproxy-simulator
         run: |
           ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
@@ -196,7 +196,7 @@ jobs:
       # booted sim's UDID.
       - wait: ctrlproxy-simulator
 
-      - name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
+      - name: "Run selected CtrlProxy iOS tests (Xcode 26.6)"
         # About 2 min xcodebuild startup, 2.3 min tests, remainder teardown (passing 4m51s; failing teardown 60-80 s).
         timeout-minutes: 8
         env:
@@ -239,7 +239,7 @@ jobs:
           # This runner's only daemon uses that DB, so its lifecycle commands may act on it (#11252).
           echo "AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE=1" >> "${GITHUB_ENV}"
 
-      - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
+      - name: "Ensure AutoMobile daemon ready (Xcode 26.6)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         env:
           AUTOMOBILE_DAEMON_DEBUG: "1"
@@ -254,7 +254,7 @@ jobs:
       # window and time out (#2730 follow-up). Worst case ≈ 3 × (observe floor 150s
       # + delay); bound the step so a pathological hang points here instead of at
       # the 45-min job cap.
-      - name: "Warm up iOS CtrlProxy (Xcode 26.5)"
+      - name: "Warm up iOS CtrlProxy (Xcode 26.6)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh

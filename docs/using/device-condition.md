@@ -15,7 +15,7 @@
 `deviceCondition` is behind the `device-condition` feature flag, which is off by default. While it is off, every `deviceCondition` call fails with:
 
 ```text
-deviceCondition is behind the 'device-condition' feature flag, which is disabled. Enable it with `auto-mobile --daemon set-feature-flag device-condition true` or in the IDE plugin under Settings > AutoMobile > Feature Flags, then retry the call.
+setDeviceState deviceCondition is behind the 'device-condition' feature flag, which is disabled. Enable it with `auto-mobile --daemon set-feature-flag device-condition true` or in the IDE plugin under Settings > AutoMobile > Feature Flags, then retry the call.
 ```
 
 Turn it on from a shell with:

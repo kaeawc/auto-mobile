@@ -259,6 +259,7 @@ nav:
       - "Live observe App shell": design-docs/mcp/observe-app-shell.md
       - "Interactive observe App": design-docs/mcp/observe-app-interactive.md
       - "Build source revision": design-docs/mcp/build-source-revision.md
+      - "Tool requirements": design-docs/mcp/tool-requirements.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "Robolectric runtime jars": design-docs/plat/android/robolectric-android-all.md

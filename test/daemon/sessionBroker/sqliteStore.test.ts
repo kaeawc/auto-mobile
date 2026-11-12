@@ -18,6 +18,7 @@ import {
   SESSION_BROKER_RETRY_AFTER_MS,
 } from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { sessionRequestFingerprint } from "../../../src/daemon/sessionBroker/requestIdentity";
+import { SessionRequestForeignOwnerError } from "../../../src/daemon/sessionBroker/SessionRequestForeignOwnerError";
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "daemon-a",
@@ -242,9 +243,28 @@ describe("session broker durable admission", () => {
     });
     expect(abandoned.ticket).toBeUndefined();
     expect(await store.abandon("never-admitted", OWNER, CONSUMER_TOKEN)).toEqual(abandoned);
-    await expect(store.abandon("never-admitted", OWNER, "different-owner")).rejects.toThrow(
-      "another liveness owner",
-    );
+    const refusal = store.abandon("never-admitted", OWNER, "different-owner");
+    await expect(refusal).rejects.toThrow(/another liveness owner/);
+    await expect(refusal).rejects.toMatchObject({
+      code: "session_request_owner_mismatch",
+      terminal: true,
+    });
+    await expect(refusal).rejects.toBeInstanceOf(SessionRequestForeignOwnerError);
+  });
+
+  test("a foreign owner abandoning a live request gets a non-terminal coded refusal", async () => {
+    const parameters = input("foreign-live").parameters;
+    await prepare("foreign-live", {
+      fingerprint: sessionRequestFingerprint(parameters, CONSUMER_TOKEN),
+    });
+    const before = await store.getRequest("foreign-live");
+    expect(before?.state).not.toBe("failed");
+    await expect(store.abandon("foreign-live", OWNER, "different-owner")).rejects.toMatchObject({
+      code: "session_request_owner_mismatch",
+      message: "Session request belongs to another liveness owner",
+      terminal: false,
+    });
+    expect(await store.getRequest("foreign-live")).toEqual(before);
   });
 
   test("abandoning an active request atomically preserves its session and cleanup ownership", async () => {

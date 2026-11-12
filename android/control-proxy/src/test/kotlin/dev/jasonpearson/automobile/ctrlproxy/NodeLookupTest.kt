@@ -33,6 +33,31 @@ class NodeLookupTest {
   }
 
   @Test
+  fun `bounds lookup qualifies only the requested scroll action`() {
+    val node = root("scroll-only")
+    every { node.isVisibleToUser } returns true
+    every { node.getBoundsInScreen(any()) } answers
+      {
+        firstArg<android.graphics.Rect>().set(32, 289, 2368, 1968)
+      }
+    every { node.actionList } returns
+      listOf(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
+    val bounds = NodeExpectedBounds(32, 289, 2368, 1968)
+    assertEquals(
+      listOf(node),
+      findNodesByBounds(node, bounds, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD),
+    )
+    assertEquals(
+      emptyList<AccessibilityNodeInfo>(),
+      findNodesByBounds(node, bounds, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD),
+    )
+    assertEquals(
+      emptyList<AccessibilityNodeInfo>(),
+      findNodesByBounds(node, bounds, AccessibilityNodeInfo.ACTION_CLICK),
+    )
+  }
+
+  @Test
   fun `all-match lookup retains active and other window hits and skips the listed active copy`() {
     val active = root("dup")
     val other = root("dup")

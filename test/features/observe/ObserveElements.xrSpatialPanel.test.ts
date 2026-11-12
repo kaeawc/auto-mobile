@@ -21,54 +21,80 @@ function unused(): never {
   throw new Error("Unexpected stage dependency");
 }
 
-test.each([
+const panelCaptures = [
   [false, 93],
   ["host-missing", 105],
   [true, 98],
-] as const)("XR panel coordinates are declared (capture=%s)", async (capture, windowId) => {
-  const observation = spatialPanelObservation(capture);
-  const raw = structuredClone(observation.viewHierarchy);
-  await enrich(observation, true);
-  expect(observation).toMatchObject({
-    xrPanelSpace: { windowId, bounds: { left: 0, top: 0, right: 2768, bottom: 2400 } },
-  });
-  const appRows = observation.elements!.text.filter((row) =>
-    ["Settings", "Item 1", "Notifications"].includes(row.text ?? ""),
-  );
-  expect(appRows.length).toBeGreaterThan(0);
-  expect(appRows.every((row) => row.boundsSpace === "panel")).toBe(true);
-  const captions = observation.elements!.clickable.filter((row) =>
-    ["Minimize the current window", "Close"].includes(row["content-desc"] ?? ""),
-  );
-  expect(captions.length).toBeGreaterThan(0);
-  expect(captions.every((row) => row.boundsSpace === "window")).toBe(true);
-  const elements = Object.values(observation.elements!).flat();
-  expect(elements.every((row) => row.boundsSpace !== undefined)).toBe(true);
-  const statusRows = elements.filter((row) => row.bounds.top === 0 && row.bounds.bottom === 48);
-  expect(statusRows.length).toBeGreaterThan(0);
-  expect(statusRows.every((row) => row.boundsSpace === "window")).toBe(true);
-  for (const project of ["full", "skeleton"] as const) {
-    const output = sanitizeObserveResult(observation, {
-      dropElements: false,
-      compact: true,
-      project,
+] as const;
+
+test.each(panelCaptures)(
+  "XR panel coordinates are declared (capture=%s)",
+  async (capture, windowId) => {
+    const observation = spatialPanelObservation(capture);
+    const raw = structuredClone(observation.viewHierarchy);
+    await enrich(observation, true);
+    expect(observation).toMatchObject({
+      xrPanelSpace: { windowId, bounds: { left: 0, top: 0, right: 2768, bottom: 2400 } },
     });
-    expect(output).toMatchObject({ xrPanelSpace: { windowId, bounds: [0, 0, 2768, 2400] } });
-    if (project === "skeleton") {
-      const rows = [...output.skeleton!, ...(output.context ?? [])];
-      expect(rows.find((row) => row.label === "Settings")).toMatchObject({ boundsSpace: "panel" });
-      expect(rows.find((row) => row.label === "Close")).toMatchObject({ boundsSpace: "window" });
-      expect(rows.every((row) => row.boundsSpace !== undefined)).toBe(true);
-    }
-    expect(
-      sanitizeObserveResult(structuredClone(observation), {
+    const appRows = observation.elements!.text.filter((row) =>
+      ["Settings", "Item 1", "Notifications"].includes(row.text ?? ""),
+    );
+    expect(appRows.length).toBeGreaterThan(0);
+    expect(appRows.every((row) => row.boundsSpace === "panel")).toBe(true);
+    const captions = observation.elements!.clickable.filter((row) =>
+      ["Minimize the current window", "Close"].includes(row["content-desc"] ?? ""),
+    );
+    expect(captions.length).toBeGreaterThan(0);
+    expect(captions.every((row) => row.boundsSpace === "window")).toBe(true);
+    const elements = Object.values(observation.elements!).flat();
+    expect(elements.every((row) => row.boundsSpace !== undefined)).toBe(true);
+    const statusRows = elements.filter((row) => row.bounds.top === 0 && row.bounds.bottom === 48);
+    expect(statusRows.length).toBeGreaterThan(0);
+    expect(statusRows.every((row) => row.boundsSpace === "window")).toBe(true);
+    expect(observation.viewHierarchy).toEqual(raw);
+  },
+);
+
+for (const project of ["full", "skeleton"] as const) {
+  test.each(panelCaptures)(
+    `XR panel coordinates survive ${project} projection (capture=%s)`,
+    async (capture, windowId) => {
+      const observation = spatialPanelObservation(capture);
+      const raw = structuredClone(observation.viewHierarchy);
+      await enrich(observation, true);
+      const output = sanitizeObserveResult(observation, {
         dropElements: false,
         compact: true,
         project,
-      }),
-    ).toEqual(output);
-  }
-  expect(observation.viewHierarchy).toEqual(raw);
+      });
+      expect(output).toMatchObject({ xrPanelSpace: { windowId, bounds: [0, 0, 2768, 2400] } });
+      if (project === "skeleton") {
+        const rows = [...output.skeleton!, ...(output.context ?? [])];
+        expect(rows.find((row) => row.label === "Settings")).toMatchObject({
+          boundsSpace: "panel",
+        });
+        expect(rows.find((row) => row.label === "Close")).toMatchObject({ boundsSpace: "window" });
+        expect(rows.every((row) => row.boundsSpace !== undefined)).toBe(true);
+      }
+      expect(observation.viewHierarchy).toEqual(raw);
+    },
+  );
+}
+
+test("XR skeleton sanitization is deterministic across repeated calls", async () => {
+  const observation = spatialPanelObservation("host-missing");
+  await enrich(observation, true);
+  const config = { dropElements: false, compact: true, project: "skeleton" } as const;
+  const output = sanitizeObserveResult(observation, config);
+  expect(sanitizeObserveResult(observation, config)).toEqual(output);
+});
+
+test("XR skeleton sanitization preserves its input", async () => {
+  const observation = spatialPanelObservation("host-missing");
+  await enrich(observation, true);
+  const original = structuredClone(observation);
+  sanitizeObserveResult(observation, { dropElements: false, compact: true, project: "skeleton" });
+  expect(observation).toEqual(original);
 });
 
 test("non-XR full and skeleton output stay byte-identical", () => {

@@ -38,7 +38,7 @@ function setup(
   spatial = true,
   talkBack = false,
   xr = true,
-  capture: boolean | "host-missing" = false,
+  capture: boolean | "host-missing" | "switch-scroll" = false,
 ) {
   const observation = spatialPanelObservation(capture);
   if (!spatial) {
@@ -102,20 +102,22 @@ const paths: Array<[string, SwipeOnOptions]> = [
 for (const capture of [false, "host-missing"] as const) {
   for (const display of [undefined, "0"]) {
     for (const [path, options] of paths) {
-      test(`SpatialPanel refuses ${path} before display input (display=${display}, capture=${capture})`, async () => {
+      test(`SpatialPanel uses node scrolling for ${path} (display=${display}, capture=${capture})`, async () => {
         const { swipe, gesture, service, adb } = setup(true, false, true, capture);
         const result = await swipe.execute({
           ...options,
           display,
           ...(display && path === "unscoped auto-target" ? { autoTarget: true } : {}),
         });
-        expect(result.success).toBe(false);
-        expect(result.error).toContain(refusal);
+        expect(result.success).toBe(!options.lookFor);
+        expect(service.getNodeActionHistory().length).toBeGreaterThan(0);
         expect(gesture.getSwipeCalls()).toEqual([]);
         expect(service.getSwipeHistory()).toEqual([]);
         expect(service.getDragHistory()).toEqual([]);
         expect(service.getTwoFingerSwipeHistory()).toEqual([]);
-        expect(adb.getAllCommands()).toEqual([]);
+        expect(
+          adb.getAllCommands().filter((command) => command.startsWith("shell input ")),
+        ).toEqual([]);
       });
     }
   }
@@ -190,15 +192,15 @@ for (const capture of [false, "host-missing"] as const) {
       ).toBeGreaterThan(0);
     });
 
-    test(`SpatialPanel TalkBack two-finger fallback refuses display=${display}, capture=${capture}`, async () => {
+    test(`SpatialPanel TalkBack fallback uses a panel node scroll display=${display}, capture=${capture}`, async () => {
       const { swipe, gesture, service, adb } = setup(true, true, true, capture);
       const result = await swipe.execute({
         direction: "up",
         container: { elementId: "s2-d4898bda13fe07ef" },
         display,
       });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain(refusal);
+      expect(result.success).toBe(true);
+      expect(service.getNodeActionHistory().length).toBeGreaterThan(0);
       expect(gesture.getSwipeCalls()).toEqual([]);
       expect(service.getTwoFingerSwipeHistory()).toEqual([]);
       expect(adb.getAllCommands()).toEqual([]);
@@ -255,6 +257,95 @@ for (const display of [undefined, "0"]) {
     expect(service.getSwipeHistory()).toEqual([]);
     expect(service.getDragHistory()).toEqual([]);
     expect(service.getTwoFingerSwipeHistory()).toEqual([]);
+    expect(adb.getAllCommands()).toEqual([]);
+  });
+}
+
+for (const direction of ["up", "down", "left", "right"] as const) {
+  for (const display of [undefined, "0"]) {
+    for (const container of [undefined, { elementId: "s2-2b57a0f616cc9987" }]) {
+      test(`captured panel ${direction} uses a bounds-only node scroll, display=${display}, container=${!!container}`, async () => {
+        const { swipe, service, gesture, adb, observation } = setup(
+          true,
+          false,
+          true,
+          "switch-scroll",
+        );
+        // The real initial capture only advertises forward. A later page also exposes backward.
+        if (direction === "down" || direction === "right") {
+          for (const entry of new SearchableHierarchy().project(observation.viewHierarchy!)) {
+            if (entry.properties["view-id"] === "s2-2b57a0f616cc9987") {
+              entry.source.actions = ["accessibility_focus", "scroll_backward"];
+            }
+          }
+        }
+        const result = await swipe.execute({ direction, display, container });
+        expect(result.success).toBe(true);
+        expect(service.getNodeActionHistory()).toMatchObject([
+          {
+            action:
+              direction === "up" || direction === "left" ? "scroll_forward" : "scroll_backward",
+            selector: undefined,
+            expectedBounds: { left: 32, top: 289, right: 2368, bottom: 1968 },
+          },
+        ]);
+        expect(gesture.getSwipeCalls()).toEqual([]);
+        expect(service.getSwipeHistory()).toEqual([]);
+        expect(service.getDragHistory()).toEqual([]);
+        expect(service.getTwoFingerSwipeHistory()).toEqual([]);
+        expect(adb.getAllCommands()).toEqual([]);
+      });
+    }
+  }
+}
+
+for (const mode of [
+  "refused",
+  "unacknowledged",
+  "missing-action",
+  "ambiguous",
+  "hidden",
+] as const) {
+  test(`captured panel node scroll ${mode} never injects a gesture`, async () => {
+    const { swipe, service, gesture, adb, observation } = setup(true, false, true, "switch-scroll");
+    if (mode === "refused" || mode === "unacknowledged") {
+      service.setActionResult({
+        success: false,
+        action: "scroll_forward",
+        totalTimeMs: 1,
+        error: "node_bounds_mismatch",
+        dispatched: true,
+        acknowledged: mode === "refused",
+      });
+    }
+    if (mode === "hidden") {
+      for (const entry of new SearchableHierarchy().project(observation.viewHierarchy!)) {
+        if (entry.properties["view-id"] === "s2-2b57a0f616cc9987") {
+          Object.assign(entry.source, { "visible-to-user": false });
+        }
+      }
+    }
+    if (mode === "ambiguous") {
+      const entry = new SearchableHierarchy()
+        .project(observation.viewHierarchy!)
+        .find((entry) => entry.properties["view-id"] === "s2-2b57a0f616cc9987")!;
+      observation.viewHierarchy!.windows!.push({
+        id: 999,
+        hierarchy: { ...structuredClone(entry.source), node: undefined },
+      });
+    }
+    const result = await swipe.execute({ direction: mode === "missing-action" ? "down" : "up" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      mode === "unacknowledged"
+        ? "indeterminate"
+        : mode === "hidden"
+          ? refusal
+          : "cannot scroll further",
+    );
+    expect(gesture.getSwipeCalls()).toEqual([]);
+    expect(service.getSwipeHistory()).toEqual([]);
+    expect(service.getDragHistory()).toEqual([]);
     expect(adb.getAllCommands()).toEqual([]);
   });
 }

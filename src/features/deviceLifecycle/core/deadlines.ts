@@ -108,6 +108,7 @@ export function shutdownTimeoutError(
     `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
       `${phase} after ${timeoutMs}ms: ${detail}. ` +
       "Verify the platform shutdown state and retry.",
+    detail,
   );
 }
 

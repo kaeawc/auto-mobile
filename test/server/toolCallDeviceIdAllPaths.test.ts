@@ -362,7 +362,14 @@ describe("every tool that takes a device id decides the same for any id of the d
       TOOLS.filter((tool) => !ToolRegistry.getRegisteredTool(tool.name)?.requiresDevice)
         .map((tool) => tool.name)
         .toSorted(),
-    ).toEqual(["getAndroid", "getApple", "killDevice", "setActiveDevice", "startDevice"]);
+    ).toEqual([
+      "blePeripheral",
+      "getAndroid",
+      "getApple",
+      "killDevice",
+      "setActiveDevice",
+      "startDevice",
+    ]);
   });
 
   describe.each(CALLERS)("called by the %s", (caller, identity) => {

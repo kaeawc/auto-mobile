@@ -85,6 +85,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   // Gestures, app interaction and multiplexed controls can have additional effects on repetition.
   accessibility: entry("Control Accessibility", controlDevice),
   biometricAuth: entry("Simulate Biometrics", destructiveDevice),
+  blePeripheral: entry("Manage BLE Peripheral", controlDevice),
   focusNavigate: entry("Navigate D-pad Focus", destructiveDevice),
   dragAndDrop: entry("Drag and Drop Element", destructiveDevice),
   dragPath: entry("Drag Along Path", destructiveDevice),

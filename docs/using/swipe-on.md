@@ -32,9 +32,11 @@ result carries a `warning` about that default-pose assumption, and the swipe is
 refused before input when more than one app panel is open or the panel cannot
 fit the screenshot at the default pose.
 
-Apps whose content is a Compose spatial panel cannot receive swipe gestures.
-Screen, container, and coordinate swipes, and the gesture fallback of
-`lookFor` scrolling, are refused wherever the panel sits; a scroll the
-accessibility service performs on the node itself still works. Use `tapOn` or
-`tapAny` on the target, or move keyboard focus with `focusNavigate` (or
-`sendKeys` arrow keys).
+On a Compose spatial panel, `swipeOn` scrolls through accessibility node actions:
+up/left scroll forward and down/right scroll backward. It uses the supplied
+scrollable container, or the largest visible scrollable in the foreground app.
+This also applies to `lookFor` searches. Gesture duration does not control node
+scroll speed; `boomerang` performs one node scroll without a return stroke. If the panel cannot scroll further or its layout changed, observe
+again before retrying. Without a scrollable node, the swipe is refused; use
+`tapOn`/`tapAny` or keyboard focus keys. Older runners may require a CtrlProxy
+update. Display touches cannot reach spatial-panel content.

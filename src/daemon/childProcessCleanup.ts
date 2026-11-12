@@ -1,4 +1,5 @@
 import { stopVisionosRunners } from "../features/visionos/VisionosRunnerLifecycle";
+import { defaultBlePeripheralManager } from "../features/blePeripheral/defaultBlePeripheralManager";
 import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import {
@@ -27,6 +28,7 @@ const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 1_500;
  * without starting real capture or iOS runner processes.
  */
 export interface DaemonChildProcessCleanupDependencies {
+  stopBlePeripherals?(): Promise<void>;
   shutdownInventoryReads?(): void;
   stopAcceptingVideoRecordingStarts(): Promise<void>;
   listActiveVideoRecordings(): Promise<VideoRecordingRecord[]>;
@@ -43,6 +45,7 @@ export interface DaemonChildProcessCleanupDependencies {
 }
 
 const defaultDependencies: DaemonChildProcessCleanupDependencies = {
+  stopBlePeripherals: () => defaultBlePeripheralManager.shutdown(),
   shutdownInventoryReads: () => {
     invalidateAndroidInventoryProvenanceAndCatalog();
   },
@@ -58,6 +61,20 @@ const defaultDependencies: DaemonChildProcessCleanupDependencies = {
   stopVisionosRunners,
 };
 
+async function stopBleChildren(
+  dependencies: DaemonChildProcessCleanupDependencies,
+  timer: Timer,
+  timeoutMs: number,
+): Promise<void> {
+  if (!dependencies.stopBlePeripherals) {
+    return;
+  }
+  const result = await settleWithin(dependencies.stopBlePeripherals(), timer, timeoutMs);
+  if (result.status !== "fulfilled") {
+    logger.warn("Failed to stop BLE sidecars during shutdown", result.error);
+  }
+}
+
 /**
  * Stop every capture child and iOS CtrlProxy instance during daemon shutdown.
  * Failures are deliberately isolated: a failed child must not strand unrelated
@@ -72,6 +89,7 @@ export async function cleanupDaemonChildProcesses(
   dependencies.stopVisionosRunners?.();
   const timer = dependencies.timer ?? defaultTimer;
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
+  await stopBleChildren(dependencies, timer, timeoutMs);
   const recordingIds = new Set<string>();
   try {
     const admission = await settleWithin(

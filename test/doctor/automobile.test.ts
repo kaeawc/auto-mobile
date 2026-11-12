@@ -1174,6 +1174,11 @@ describe("post-repair read-only Android verification", () => {
 
 describe("runAutoMobileChecks", () => {
   const stubChecks = {
+    checkPython3: async () => ({
+      name: "python3 (BLE peripheral)",
+      status: "pass" as const,
+      message: "Python 3.11.9",
+    }),
     checkSpotlightIndexing: async () => ({
       name: "Spotlight Indexing",
       status: "warn" as const,

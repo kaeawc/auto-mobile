@@ -178,6 +178,7 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     identityContentDesc: "optional",
     identityLabelText: "optional",
     identityLabelContentDesc: "optional",
+    identityCheckable: "optional",
     allowInvisible: "optional",
     type: "required",
     requestId: "required",

@@ -128,6 +128,8 @@ type Runtime = Pick<
 export class ProxyConnection {
   /** Identifies the live connection attempt; bumping it supersedes a stalled one (#15019). */
   private connectionGeneration = 0;
+  /** The in-flight deferred version recheck that concurrent callers await (#18104). */
+  private deferredVersionRecheck: Promise<void> | undefined;
 
   constructor(
     private readonly runtime: Runtime,
@@ -149,13 +151,15 @@ export class ProxyConnection {
         throw new DaemonUnavailableError("MCP proxy is closing");
       }
     }
-    if (
-      this.runtime.connected &&
-      this.runtime.client &&
+    if (this.runtime.connected && this.runtime.client) {
       // Checked synchronously so the established fast path adds no microtask turns.
-      (!this.deferredVersionRecheckDue() || !(await this.recheckDeferredVersion()))
-    ) {
-      return;
+      if (this.deferredVersionRecheck === undefined && !this.deferredVersionRecheckDue()) {
+        return;
+      }
+      await this.recheckDeferredVersion();
+      if (this.runtime.connected && this.runtime.client) {
+        return;
+      }
     }
 
     try {
@@ -181,22 +185,22 @@ export class ProxyConnection {
 
   /**
    * An established connection skips doConnect's reconciliation, so a daemon reused inside the
-   * version-restart cooldown is rechecked here once the cooldown ends (#18099). Resolves true
-   * when it restarted the daemon and the connection was reset to be re-established.
+   * version-restart cooldown is rechecked here once the cooldown ends (#18099). When the
+   * recheck restarted the daemon the connection is reset, and the caller reconnects through
+   * doConnect and its failure handling. Concurrent callers share one in-flight recheck
+   * (#18104), so none of them returns a client the restart is about to tear down.
    */
-  private async recheckDeferredVersion(): Promise<boolean> {
-    let restarted: boolean;
-    try {
-      restarted = await this.runtime.lifecycleReconciler.recheckDeferredVersion();
-    } catch (error) {
-      // Drop the connection so the next operation reconciles through doConnect again.
+  private recheckDeferredVersion(): Promise<void> {
+    this.deferredVersionRecheck ??= this.runDeferredVersionRecheck().finally(() => {
+      this.deferredVersionRecheck = undefined;
+    });
+    return this.deferredVersionRecheck;
+  }
+
+  private async runDeferredVersionRecheck(): Promise<void> {
+    if ((await this.runtime.lifecycleReconciler.recheckDeferredVersion()) === "restarted") {
       await this.resetConnection();
-      throw error;
     }
-    if (restarted) {
-      await this.resetConnection();
-    }
-    return restarted;
   }
 
   /**

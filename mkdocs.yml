@@ -145,6 +145,7 @@ nav:
       - "Hackathon demo kit": using/hackathon.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
       - "Prototype icons": using/prototype-icons.md
+      - "Virtual BLE peripherals": using/ble-peripheral.md
       - "Headless prototypes": using/prototype-headless.md
       - "Installing ProtoViewer (Android)": using/protoviewer-install.md
       - "Agent benchmarks": using/agent-benchmarks.md
@@ -226,6 +227,7 @@ nav:
       - "ProtoViewer support": protoviewer/support.md
       - "ProtoViewer store listing": design-docs/protoviewer-store-listing.md
       - "Native prototype embedding": design-docs/prototype-embedding.md
+      - "Virtual BLE peripheral": design-docs/ble-peripheral.md
       - "Prototype platform security": design-docs/prototype-platform-security.md
       - "Prototype user-test sessions": design-docs/prototype-user-test-sessions.md
       - "Prototype SDK support matrix": design-docs/prototype-sdk-matrix.md

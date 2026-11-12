@@ -281,6 +281,7 @@ export interface RequestActionMessage {
   identityContentDesc?: string;
   identityLabelText?: string;
   identityLabelContentDesc?: string;
+  identityCheckable?: boolean;
   allowInvisible?: boolean;
   type: "request_action";
   requestId: string;

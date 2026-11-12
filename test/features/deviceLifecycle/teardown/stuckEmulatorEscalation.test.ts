@@ -237,6 +237,64 @@ describe("waitForEmulatorShutdownWithEscalation", () => {
     expect(message).not.toContain(`${TOTAL_MS}ms`);
   });
 
+  test("an exited emulator is confirmed by one final poll when the stopper used up the deadline", async () => {
+    // #17957 review: the process-table read itself ran past the deadline, and by then adb had
+    // dropped the serial. One bounded discovery must confirm it rather than report a timeout.
+    stopper.outcome = { kind: "unidentified", identity: { kind: "absent" } };
+    stopper.onStop = () => {
+      timer.advanceTime(TOTAL_MS);
+      emulatorGone();
+    };
+
+    await expect(run()).resolves.toBeUndefined();
+    expect(stopper.stopCalls).toHaveLength(1);
+  });
+
+  test("past the deadline with the serial still listed, the final poll's timeout quotes the total wait", async () => {
+    stopper.outcome = { kind: "unidentified", identity: { kind: "absent" } };
+    const started = timer.now();
+    let pastDeadlineAt = 0;
+    stopper.onStop = () => {
+      timer.advanceTime(TOTAL_MS);
+      pastDeadlineAt = timer.now();
+    };
+
+    const error = await run().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DeviceShutdownTimeoutError);
+    expect(error).not.toBeInstanceOf(EmulatorTeardownEscalationError);
+    const elapsed = timer.now() - started;
+    expect(elapsed).toBeGreaterThan(TOTAL_MS);
+    // One bounded poll, not a fresh polling window past the deadline.
+    expect(timer.now() - pastDeadlineAt).toBeLessThan(2_000);
+    const message = (error as Error).message;
+    expect(message).toContain(`after ${elapsed}ms`);
+    expect(message).toContain("still reported as booted");
+  });
+
+  test("past the deadline with discovery wedged, it reports the total wait without another read", async () => {
+    let discoveryReads = 0;
+    manager.getBootedDevicesDetailed = () => {
+      discoveryReads++;
+      return new Promise(() => {});
+    };
+    stopper.outcome = { kind: "unidentified", identity: { kind: "absent" } };
+    const started = timer.now();
+    let readsAtStop = 0;
+    stopper.onStop = () => {
+      timer.advanceTime(TOTAL_MS);
+      readsAtStop = discoveryReads;
+    };
+
+    const error = await run().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DeviceShutdownTimeoutError);
+    expect(discoveryReads).toBe(readsAtStop);
+    const message = (error as Error).message;
+    expect(message).toContain(`after ${timer.now() - started}ms`);
+    expect(message).toContain("platform discovery did not complete");
+  });
+
   test("without an AVD name there is no identity to signal, so it fails typed without a stop call", async () => {
     const error = (await run({ avdName: undefined }).catch(
       (e: unknown) => e,

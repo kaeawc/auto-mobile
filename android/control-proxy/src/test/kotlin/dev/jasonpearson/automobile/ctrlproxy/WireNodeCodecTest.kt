@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.protocol.RequestAction
+import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
@@ -74,6 +76,24 @@ class WireNodeCodecTest {
       // Synthetic root wrapper, exactly as the extractor builds it before materializing.
       hierarchy = WireNodeCodec.materialize(UIElementInfo(children = listOf(root()))),
     )
+
+  @Test
+  fun `request action decodes nullable checkable identity`() {
+    for (checkable in listOf(true, false)) {
+      val request =
+        jsonCompact.decodeFromString(
+          WebSocketRequest.serializer(),
+          """{"type":"request_action","requestId":"switch","action":"click","identityCheckable":$checkable}""",
+        )
+      assertEquals(checkable, (request as RequestAction).identityCheckable)
+    }
+    val legacy =
+      jsonCompact.decodeFromString(
+        WebSocketRequest.serializer(),
+        """{"type":"request_action","requestId":"legacy","action":"click"}""",
+      )
+    assertNull((legacy as RequestAction).identityCheckable)
+  }
 
   @Test
   fun `serialized wire JSON is byte-identical to the pre-refactor format`() {

@@ -38,6 +38,7 @@ export interface AndroidActionRequestOptions {
   expectedBounds?: { left: number; top: number; right: number; bottom: number };
   allowInvisible?: boolean;
   identityHints?: {
+    checkable?: boolean;
     className?: string;
     text?: string;
     contentDesc?: string;
@@ -92,6 +93,7 @@ export class AndroidActionDispatcher {
     }: AndroidActionRequestOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
     const { selector, signal, expectedBounds, identityHints, allowInvisible } = options;
+    await this.assertNodeBoundsV2Support(action, resourceId, options, perf);
     return this.dispatchActionRequest(
       action,
       (requestId) =>
@@ -101,6 +103,7 @@ export class AndroidActionDispatcher {
             action,
             resourceId,
             selector,
+            identityCheckable: identityHints?.checkable,
             identityClassName: identityHints?.className,
             identityText: identityHints?.text,
             identityContentDesc: identityHints?.contentDesc,
@@ -120,6 +123,30 @@ export class AndroidActionDispatcher {
       timeoutMs,
       { perf, signal },
     );
+  }
+
+  private async assertNodeBoundsV2Support(
+    action: string,
+    resourceId: string | undefined,
+    options: AndroidActionRequestOptions,
+    perf: PerformanceTracker,
+  ): Promise<void> {
+    const { selector, signal, expectedBounds, identityHints } = options;
+    const boundsOnlyScroll =
+      !selector &&
+      !resourceId &&
+      expectedBounds &&
+      (action === "scroll_forward" || action === "scroll_backward");
+    if (identityHints?.checkable !== undefined || boundsOnlyScroll) {
+      if (
+        !(await this.supportsNodeActionSelectors(perf, signal, true)) ||
+        !this.context.isCommandSupported("node_selector_bounds_v2")
+      ) {
+        throw new ActionableError(
+          "Update CtrlProxy: this node action requires node_selector_bounds_v2.",
+        );
+      }
+    }
   }
 
   async requestAccessibilityAction(
@@ -354,7 +381,10 @@ export class AndroidActionDispatcher {
       allowInvisible,
     }: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
-    if (!selector && (action !== "click" || !expectedBounds)) {
+    if (
+      !selector &&
+      (!expectedBounds || !["click", "scroll_forward", "scroll_backward"].includes(action))
+    ) {
       throw new ActionableError(
         "A resource-id or stable node selector is required for accessibility actions",
       );

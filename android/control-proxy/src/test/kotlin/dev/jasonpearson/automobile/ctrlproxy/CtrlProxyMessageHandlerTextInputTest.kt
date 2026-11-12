@@ -391,6 +391,27 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
   }
 
   @Test
+  fun `decodes and forwards checkable identity on a bounds-only click`() = runTest {
+    dispatch(
+      """{"type":"request_action","requestId":"switch","action":"click","boundsLeft":32,"boundsTop":65,"boundsRight":136,"boundsBottom":161,"identityCheckable":true}""",
+    )
+    assertEquals(
+      "requestAction" to
+        listOf<Any?>(
+          "switch",
+          "click",
+          null,
+          null,
+          NodeActionArguments(),
+          NodeExpectedBounds(32, 65, 136, 161),
+          NodeIdentityHints(checkable = true),
+          false,
+        ),
+      lastCall,
+    )
+  }
+
+  @Test
   fun `dispatches captured node and label identity with bounds-only clicks`() = runTest {
     dispatch(
       """{"type":"request_action","requestId":"identity","action":"click","boundsLeft":10,"boundsTop":20,"boundsRight":110,"boundsBottom":120,"identityClassName":"Row","identityText":"","identityContentDesc":"","identityLabelText":"Connected devices","identityLabelContentDesc":"Connections"}""",

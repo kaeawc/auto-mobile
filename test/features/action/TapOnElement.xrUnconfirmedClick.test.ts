@@ -2,10 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import {
-  settleUnconfirmedXrClick,
-  xrCoordinateError,
-} from "../../../src/features/action/xrPanelNodeClick";
+import { settleUnconfirmedXrClick } from "../../../src/features/action/xrPanelNodeClick";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import type { A11yActionResult } from "../../../src/features/observe/android/types";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
@@ -107,7 +104,9 @@ describe("XR node click whose CtrlProxy reply is lost (#17983)", () => {
     );
     expect(issue.observeAfter.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
     expect(issue.tapOnStorage.payload.success).toBe(false);
-    expect(issue.tapOnStorage.payload.error).toContain(xrCoordinateError().message);
+    expect(issue.tapOnStorage.payload.error).toContain(
+      "bounds are in an XR panel coordinate space",
+    );
     // The whole call outlived the client's action timeout.
     expect(issue.tapOnStorage.ms).toBeGreaterThan(CLIENT_ACTION_TIMEOUT_MS);
   });

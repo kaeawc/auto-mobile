@@ -62,7 +62,7 @@ type XrContainerResolver = (hierarchy: ViewHierarchyResult) => Element | undefin
 
 export function xrCoordinateError(): ActionableError {
   return new ActionableError(
-    "The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Use tapAt with screen coordinates from the screenshot instead.",
+    "The element's bounds are in an XR panel coordinate space and are not tappable screen coordinates. A safe accessibility node click is unavailable. Observe again and select an actionable node or use keyboard focus keys.",
   );
 }
 
@@ -179,6 +179,7 @@ function xrNodeIdentityHints(
   const ownLabeled = Boolean(captured.text || captured["content-desc"]);
   const labelSource = ownLabeled ? undefined : label;
   const hints = {
+    ...(captured.checkable === true || captured.checkable === "true" ? { checkable: true } : {}),
     className: typeof rawClassName === "string" ? nonEmpty(rawClassName) : undefined,
     text: nonEmpty(captured.text),
     contentDesc: nonEmpty(captured["content-desc"]),
@@ -480,7 +481,10 @@ async function dispatchXrNodeClick(
     return result;
   } catch (error) {
     throwIfAborted(signal);
-    if (error instanceof StaleDisplayError) {
+    if (
+      error instanceof StaleDisplayError ||
+      (error instanceof ActionableError && error.message.includes("Update CtrlProxy"))
+    ) {
       throw error;
     }
     throw new ActionableError(xrCoordinateError().message, { cause: error });

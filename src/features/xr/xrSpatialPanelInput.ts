@@ -20,9 +20,17 @@ function assertDisplayInputSupported(
   androidXr: boolean,
   message: string,
 ): void {
-  if (findXrSpatialPanelWindow(observation, androidXr)) {
+  if (isXrSpatialPanelApp(observation, androidXr)) {
     throw new ActionableError(message);
   }
+}
+
+/** Whether the foreground app embeds content outside its task's display-input surface. */
+export function isXrSpatialPanelApp(
+  observation: Pick<ObserveResult, "activeWindow" | "backStack" | "viewHierarchy">,
+  androidXr: boolean,
+): boolean {
+  return Boolean(findXrSpatialPanelWindow(observation, androidXr));
 }
 
 /** Shared geometry evidence for input refusal and output-only coordinate declarations. */
@@ -31,7 +39,7 @@ export function findXrSpatialPanelWindow(
   androidXr: boolean,
 ) {
   if (!androidXr) {
-    return;
+    return undefined;
   }
   const hierarchy = resolveViewHierarchyForSearch(observation.viewHierarchy);
   const packageName = xrForegroundApp(observation);
@@ -43,7 +51,7 @@ export function findXrSpatialPanelWindow(
     ) ?? observation.backStack?.tasks.find((candidate) => candidate.packageName === packageName);
   const taskBounds = parseBounds(task?.bounds);
   if (!packageName || packageName.startsWith("com.android.systemui") || !taskBounds) {
-    return;
+    return undefined;
   }
   return hierarchy?.windows?.find((window) => {
     if (window.type !== 1 || window.packageName !== packageName) {

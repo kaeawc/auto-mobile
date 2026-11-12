@@ -54,6 +54,7 @@ import {
 } from "../../daemon/deviceOwnershipView";
 import { checkSpotlightIndexing } from "./spotlightIndexing";
 import { checkOrphanedDaemons } from "./orphanedDaemons";
+import { checkPython3 } from "./python3";
 import { listForwardLeaseHolders } from "../../daemon/forwardLeaseHolders";
 
 export const MAX_CTRL_PROXY_DOCTOR_DEVICES = 8;
@@ -77,6 +78,7 @@ export interface CtrlProxyDoctorDependencies {
 }
 
 export interface AutoMobileCheckDependencies {
+  checkPython3?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkImageBackend?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkDaemonStatus?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkDaemonConnectivity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
@@ -729,6 +731,7 @@ export async function runAutoMobileChecks(
 
   results.push(checkDaemonVersion());
   results.push(checkCtrlProxyVersion());
+  await run(() => (dependencies.checkPython3 ?? checkPython3)(options));
   await run(() =>
     (dependencies.checkImageBackend ?? ((probe) => checkImageBackend({}, probe)))(options),
   );

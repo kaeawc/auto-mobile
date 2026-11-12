@@ -1,4 +1,5 @@
 import { freshSwipeHierarchy, swipeHierarchyReadTimeoutMs } from "./freshSwipeHierarchy";
+import { MovedSwipeTally } from "./movedSwipeTally";
 import type { IosSdkTapOutcome } from "../IosSdkBridgeTapRouter";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { type StaleDisplayDetails } from "../../observe/StaleDisplayError";
@@ -149,7 +150,7 @@ export class ScrollSearchSession {
   private unchangedScrollCount = 0;
   private maxUnchangedScrolls = 2;
   private reachedEnd = false;
-  private movedSwipes = 0;
+  private readonly moves = new MovedSwipeTally();
   private scopeDescription = "";
   private target = "";
   private accessibilityWarnings = new Set<string>();
@@ -323,6 +324,7 @@ export class ScrollSearchSession {
     this.lastFingerprint = this.host.computeHierarchyFingerprint(
       this.lastObservation.viewHierarchy!,
     );
+    this.moves.reset(this.lastFingerprint);
     this.unchangedScrollCount = 0;
     this.maxUnchangedScrolls = this.request.options.lookFor!.maxUnchangedSwipes ?? 2;
     if (!Number.isInteger(this.maxUnchangedScrolls) || this.maxUnchangedScrolls < 1) {
@@ -371,38 +373,21 @@ export class ScrollSearchSession {
       previousContent: ContainerContent;
     },
   ): void {
-    if (recoveryAttempted) {
-      this.recordMovedSwipe(
-        forward.fingerprint,
-        failedAndroidSwipe,
-        forward.observation,
-        previousContent,
-      );
-    } else {
-      this.recordMovedSwipe(
-        currentFingerprint,
-        failedAndroidSwipe,
-        this.lastObservation,
-        previousContent,
-      );
-    }
-  }
-
-  private recordMovedSwipe(
-    currentFingerprint: string,
-    failedAndroidSwipe: boolean,
-    observation: ObserveResult,
-    previousContent: ContainerContent,
-  ): void {
+    // A recovery may undo the forward move, so only a fresh forward frame counts it.
+    const observation = recoveryAttempted ? forward.observation : this.lastObservation;
+    const fingerprint = recoveryAttempted ? forward.fingerprint : currentFingerprint;
+    const fresh = observation.freshness?.isFresh !== false;
     if (
       !failedAndroidSwipe &&
-      observation.freshness?.isFresh !== false &&
-      currentFingerprint &&
+      fingerprint &&
       this.lastFingerprint &&
-      currentFingerprint !== this.lastFingerprint &&
+      fingerprint !== this.lastFingerprint &&
       !itemsStayed(previousContent, observation)
     ) {
-      this.movedSwipes++;
+      this.moves.recordMove(fresh, !recoveryAttempted);
+    }
+    if (!recoveryAttempted) {
+      this.moves.confirm(fingerprint, fresh);
     }
   }
 
@@ -485,6 +470,7 @@ export class ScrollSearchSession {
       this.lastFingerprint = this.host.computeHierarchyFingerprint(
         this.lastObservation.viewHierarchy!,
       );
+      this.moves.rebase(this.lastFingerprint);
     }
   }
 
@@ -948,8 +934,8 @@ export class ScrollSearchSession {
     // Half-screen reverse swipes travel at most half of a forward swipe's capped
     // travel, so twice the moving forward swipes plus the end check returns past
     // the start. A search that never moved forward has no range to bound.
-    if (this.movedSwipes > 0) {
-      this.reverseSwipeBudget = 2 * this.movedSwipes + this.maxUnchangedScrolls;
+    if (this.moves.count > 0) {
+      this.reverseSwipeBudget = 2 * this.moves.count + this.maxUnchangedScrolls;
     }
     logger.info(
       `[SwipeOn] Reached end in forward direction without finding ${this.target}, switching to reverse half-screen recovery`,
@@ -968,7 +954,7 @@ export class ScrollSearchSession {
         : `Scroll reached end of container going ${direction} (no change after ${this.maxUnchangedScrolls} consecutive swipes); ` +
           `the ${reverse} sweep stopped after ${this.reverseSwipes} swipes because the ${this.maxTime}ms search time budget could not cover another swipe.`;
     return (
-      `${ends} ${this.target} not found${this.scopeDescription}. ${this.movedSwipes} swipes moved the screen. ` +
+      `${ends} ${this.target} not found${this.scopeDescription}. ${this.moves.count} swipes moved the screen. ` +
       `The item may be absent from this container, or the swipe direction may be wrong.`
     );
   }
@@ -997,7 +983,7 @@ export class ScrollSearchSession {
       targetType: "screen",
       found: false,
       reachedEnd: true,
-      movedSwipes: this.movedSwipes,
+      movedSwipes: this.moves.count,
       scrollIterations: this.scrollIteration,
       elapsedMs: elapsed,
       observation: this.lastObservation,
@@ -1031,7 +1017,7 @@ export class ScrollSearchSession {
       element: this.foundElement,
       found: true,
       scrollIterations: this.scrollIteration,
-      movedSwipes: this.movedSwipes,
+      movedSwipes: this.moves.count,
       elapsedMs: this.deps.timer.now() - this.startTime,
       ...this.webScrollFields(),
       observation: this.lastObservation,

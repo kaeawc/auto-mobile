@@ -35,6 +35,7 @@ function listHarness({
   pauseSwipes = [],
   staleSwipes = [],
   topEdgeChrome = false,
+  cachedReadsStale = false,
 }: {
   overshoot?: boolean;
   stuckRecovery?: boolean;
@@ -45,15 +46,19 @@ function listHarness({
   staleSwipes?: number[];
   /** Chrome outside the list that changes on every swipe while the list is at its top. */
   topEdgeChrome?: boolean;
+  /** A read that does not ask for freshness is served from the cache and is not fresh. */
+  cachedReadsStale?: boolean;
 } = {}) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   let offset = initialOffset;
   const steps: Step[] = [];
-  const observe = (): ObserveResult => ({
+  const observe = (freshness?: "fresh" | "cached-ok"): ObserveResult => ({
     updatedAt: timer.now(),
     observationId: "test-observation",
-    freshness: { isFresh: !staleSwipes.includes(steps.length) },
+    freshness: {
+      isFresh: !staleSwipes.includes(steps.length) && !(cachedReadsStale && freshness !== "fresh"),
+    },
     display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     screenSize: { width: 1080, height: 2400 },
@@ -94,7 +99,7 @@ function listHarness({
     },
   });
   const observation = new FakeObserveScreen();
-  observation.setObserveResult(observe);
+  observation.setObserveResult(() => observe());
   const geometry = new DefaultElementGeometry();
   const scroll = new ScrollUntilVisible({
     // No device handle: the shared predicate decides from the back stack.
@@ -135,7 +140,7 @@ function listHarness({
   const search = (text: string, extra = {}) =>
     scroll.executeWithStrategy({
       options: { direction: "up", lookFor: { text }, ...extra },
-      strategy: { observe: async () => observe(), swipe },
+      strategy: { observe: async (capture) => observe(capture?.freshness), swipe },
     });
   return { search, steps, timer };
 }
@@ -296,6 +301,25 @@ test("end detection counts only swipes that changed the settled screen", async (
   expect(h.timer.now()).toBe(12600);
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
+
+test.each([
+  ["from the end", 24, MOVED_BACK],
+  ["from the top", 0, 6 + MOVED_BACK],
+] as const)(
+  "a miss %s counts the swipes that moved both sweeps when cache reads are stale",
+  async (_label, initialOffset, moved) => {
+    const h = listHarness({ initialOffset, cachedReadsStale: true });
+    const result = await h.search("absent");
+    expect(result).toMatchObject({
+      success: false,
+      found: false,
+      reachedEnd: true,
+      movedSwipes: moved,
+    });
+    expect(result.error).toContain(`${moved} swipes moved the screen`);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  },
+);
 
 test.each([1, 3])(
   "a list at its end turns back after the configured threshold of %i swipes",

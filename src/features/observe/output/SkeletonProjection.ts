@@ -812,21 +812,27 @@ function hasNativeId(acc: SkeletonAccumulator): boolean {
   return acc.target !== undefined && searchableNativeId(acc.target) !== undefined;
 }
 
-/** Unnamed tap-only artwork overflowing multiple screen edges is iOS presentation chrome. */
+/** Remove presentation artwork taps before labels are hoisted onto enclosing controls. */
 function removeIosChromeTaps(
   accumulators: SkeletonAccumulator[],
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+  nodes: readonly SearchableEntry[] | undefined,
 ): void {
+  nodes ??= [];
+  const bySource = new Map(nodes.map((node) => [node.source, node]));
   for (const acc of accumulators) {
     const [left, top, right, bottom] = acc.bounds;
+    const source = acc.target && getHierarchyNodeSource(acc.target);
     if (
       isIosPresentationChrome(
         {
+          ...(source && bySource.get(source)),
           ...acc,
           nativeId: acc.target && searchableNativeId(acc.target),
           bounds: { left, top, right, bottom },
         },
         viewport,
+        nodes,
       )
     ) {
       acc.affordances.delete("tap");
@@ -894,7 +900,7 @@ export function projectSkeleton(
   const prototypeSources = ownPrototypeNodeSources(androidHierarchy);
   const accumulators = accumulateByIdentity(elements, ime, prototypeSources);
   if (ios) {
-    removeIosChromeTaps(accumulators, viewport);
+    removeIosChromeTaps(accumulators, viewport, getSearchableEntries(elements));
   }
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue

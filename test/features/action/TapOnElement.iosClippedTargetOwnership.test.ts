@@ -34,6 +34,7 @@ const capture = JSON.parse(
 const presentations = [
   { file: "ios18_6-menu-open", label: "Item One", point: { x: 269, y: 769 } },
   { file: "ios26_5-confirmationDialog-open", label: "Option A", point: { x: 201, y: 444 } },
+  { file: "ios26_5-listConfirmationDialog-open", label: "Option 1", point: { x: 130, y: 299 } },
 ].map(({ file, ...scenario }) => {
   const viewHierarchy: ViewHierarchyResult = JSON.parse(
     readFileSync(
@@ -52,21 +53,36 @@ const presentations = [
 });
 
 const menu = presentations[0];
+const listDialog = presentations[2];
 const identifiedShadows = [
   { name: "native id", fields: { "resource-id": "presentation-control" } },
   { name: "label", fields: { text: "Presentation control" } },
-].map(({ name, fields }) => {
-  const observation = structuredClone(menu.observation);
-  const shadow = new SearchableHierarchy()
-    .project(observation.viewHierarchy!)
-    .find((node) => node.className === "UIImageView")!;
-  Object.assign(shadow.source.$!, fields);
-  observation.elements = new DefaultObserveElementCollector().collect(
-    observation.viewHierarchy!,
-    "ios",
-  );
-  return { name, observation };
-});
+].flatMap(({ name, fields }) =>
+  [menu, listDialog].map((presentation) => {
+    const observation = structuredClone(presentation.observation);
+    const shadow = new SearchableHierarchy()
+      .project(observation.viewHierarchy!)
+      .find((node) => node.className === "UIImageView")!;
+    Object.assign(shadow.source.$!, fields);
+    observation.elements = new DefaultObserveElementCollector().collect(
+      observation.viewHierarchy!,
+      "ios",
+    );
+    return { name, label: presentation.label, observation };
+  }),
+);
+
+const unrelatedOverflow = structuredClone(listDialog.observation);
+moveFrame(
+  new SearchableHierarchy()
+    .project(unrelatedOverflow.viewHierarchy!)
+    .find((node) => node.className === "UIImageView")!,
+  { left: -140, top: 109, right: 400, bottom: 379 },
+);
+unrelatedOverflow.elements = new DefaultObserveElementCollector().collect(
+  unrelatedOverflow.viewHierarchy!,
+  "ios",
+);
 
 const remove = (row: number, cart = "cart_A"): TapOnElementOptions => ({
   action: "tap",
@@ -265,14 +281,24 @@ test.each(presentations)(
 );
 
 test.each(identifiedShadows)(
-  "PIN: an overflowing image with a $name still covers the menu item",
-  async ({ observation }) => {
-    const { result, points } = await tapOn(observation, { action: "tap", text: menu.label });
+  "PIN: an overflowing image with a $name still covers $label",
+  async ({ observation, label }) => {
+    const { result, points } = await tapOn(observation, { action: "tap", text: label });
     expect(result.success).toBe(false);
     expect(result.error).toContain("is covered by");
     expect(points).toEqual([]);
   },
 );
+
+test("PIN: one-edge overflow that does not contain the presentation still covers its item", async () => {
+  const { result, points } = await tapOn(unrelatedOverflow, {
+    action: "tap",
+    text: listDialog.label,
+  });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("is covered by");
+  expect(points).toEqual([]);
+});
 
 test("PIN: a later-drawn labeled button outside the scroll container still covers the item", () => {
   const nodes = new SearchableHierarchy().project(menu.observation.viewHierarchy!);

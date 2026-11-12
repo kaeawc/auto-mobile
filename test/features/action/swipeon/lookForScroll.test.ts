@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import type { Element, ObserveResult } from "../../../../src/models";
 import {
+  containerContentSignature,
+  itemsStayed,
   recoverLookForOverlap,
   visibleScrollKeys,
 } from "../../../../src/features/action/swipeon/lookForScroll";
@@ -76,4 +78,27 @@ test("review: dense pages overlap through a key duplicated in the second page", 
     }),
   ).toBe(after);
   expect(backwards).toBe(0);
+});
+
+function formObservation(values: string[]): ObserveResult {
+  const page = observation([]);
+  const root = page.viewHierarchy?.hierarchy.node as Element & { node?: unknown };
+  root.node = values.map((value, i) => ({
+    text: "Name",
+    "resource-id": "field",
+    class: "android.widget.EditText",
+    value,
+    bounds: { left: 0, top: i * 100, right: 400, bottom: (i + 1) * 100 },
+  }));
+  return page;
+}
+
+test("itemsStayed tells reused-ID form rows apart by their editable value", () => {
+  const previous = {
+    container,
+    signature: containerContentSignature(formObservation(["Ann", "Bob"]), container),
+  };
+  expect(previous.signature).not.toBe("");
+  expect(itemsStayed(previous, formObservation(["Cy", "Di"]))).toBe(false);
+  expect(itemsStayed(previous, formObservation(["Ann", "Bob"]))).toBe(true);
 });

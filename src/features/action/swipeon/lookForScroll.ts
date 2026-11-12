@@ -43,7 +43,7 @@ export function oppositeDirection(direction: SwipeDirection): SwipeDirection {
 function containerItems(
   observation: ObserveResult,
   container: Element,
-): Array<{ key: string; bounds: SearchableEntry["bounds"] }> {
+): Array<{ key: string; bounds: SearchableEntry["bounds"]; value?: string }> {
   if (!observation.viewHierarchy) {
     return [];
   }
@@ -55,7 +55,7 @@ function containerItems(
       boundsEqual(node.element.bounds, container.bounds),
   );
   const descendants = new Set<number>();
-  const items: Array<{ key: string; bounds: SearchableEntry["bounds"] }> = [];
+  const items: Array<{ key: string; bounds: SearchableEntry["bounds"]; value?: string }> = [];
   for (const node of nodes) {
     if (node === root) {
       descendants.add(node.index);
@@ -67,7 +67,7 @@ function containerItems(
     descendants.add(node.index);
     const key = scrollItemKey(node, container.bounds);
     if (key) {
-      items.push({ key, bounds: node.bounds });
+      items.push({ key, bounds: node.bounds, value: node.textSources.value });
     }
   }
   return items;
@@ -90,10 +90,14 @@ export function visibleScrollKeys(
  * The container's visible items with their positions; `""` when it has none.
  * Equal signatures mean the list did not scroll, even when chrome outside the
  * container (a clock, an edge indicator) changed the whole-screen fingerprint.
+ * Editable values count: a virtualized form can reuse ids, placeholders and
+ * bounds while scrolling different values.
  */
 export function containerContentSignature(observation: ObserveResult, container: Element): string {
   const items = containerItems(observation, container);
-  return items.length === 0 ? "" : JSON.stringify(items.map(({ key, bounds }) => [key, bounds]));
+  return items.length === 0
+    ? ""
+    : JSON.stringify(items.map(({ key, bounds, value }) => [key, bounds, value ?? null]));
 }
 
 export interface ContainerContent {

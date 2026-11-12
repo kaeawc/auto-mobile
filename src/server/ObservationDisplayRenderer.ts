@@ -127,6 +127,7 @@ export class ObservationDisplayRenderer {
       ...copyDefinedFields(panel, [
         "importedPrototypeContent",
         "viewHierarchy",
+        "xrPanelSpace",
         "skeleton",
         "context",
         "keyboard",

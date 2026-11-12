@@ -63,24 +63,51 @@ export class SingleDisplayEnrichStage {
     result.layoutWarnings = { scope: "full", warnings: this.d.safeAreaAuditor().inspect(result) };
 
     if (result.viewHierarchy) {
-      const device = this.d.device();
-      const androidXr = device.platform === "android" && (this.d.isAndroidXr?.() ?? false);
-      const panel = findXrSpatialPanelWindow(result, androidXr);
-      const bounds = parseBounds(panel?.bounds);
-      if (panel?.id !== undefined && Number.isInteger(panel.id) && bounds) {
-        result.xrPanelSpace = { windowId: panel.id, bounds };
-      } else {
-        delete result.xrPanelSpace;
-      }
-      result.elements = this.d
-        .elementsBuilder()
-        .build(
-          result.viewHierarchy,
-          requireAndroidOrIosPlatform(device.platform, "Observing the view hierarchy"),
-          androidXr,
-          result,
-        );
+      this.buildElementsWithPanelSpace(result, result.viewHierarchy);
     }
+  }
+
+  private buildElementsWithPanelSpace(
+    result: ObserveResult,
+    viewHierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+  ): void {
+    const device = this.d.device();
+    const androidXr = this.isAndroidXr();
+    const panel = findXrSpatialPanelWindow(result, androidXr);
+    const bounds = parseBounds(panel?.bounds);
+    if (panel?.id !== undefined && Number.isInteger(panel.id) && bounds) {
+      result.xrPanelSpace = { windowId: panel.id, bounds };
+    } else {
+      delete result.xrPanelSpace;
+    }
+    result.elements = this.d
+      .elementsBuilder()
+      .build(
+        viewHierarchy,
+        requireAndroidOrIosPlatform(device.platform, "Observing the view hierarchy"),
+        androidXr,
+        result,
+      );
+  }
+
+  private isAndroidXr(): boolean {
+    return this.d.device().platform === "android" && (this.d.isAndroidXr?.() ?? false);
+  }
+
+  /**
+   * A deferred back stack (`skipBackStack` polls) supplies the task bounds the XR panel
+   * detector needs, so re-derive the panel space and element `boundsSpace` once it is attached.
+   * Off XR, or when the panel evidence is unchanged, the observation is left untouched.
+   */
+  refreshXrPanelSpace(result: ObserveResult): void {
+    if (!result.viewHierarchy || !result.elements || !this.isAndroidXr()) {
+      return;
+    }
+    const panel = findXrSpatialPanelWindow(result, true);
+    if (!panel && !result.xrPanelSpace) {
+      return;
+    }
+    this.buildElementsWithPanelSpace(result, result.viewHierarchy);
   }
   /** Stage 3: derive elements, start screenshots, and run audits and predictions. */
   async enrichSingleDisplay(run: SingleDisplayRun): Promise<void> {

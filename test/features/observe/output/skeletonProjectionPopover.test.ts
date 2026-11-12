@@ -144,6 +144,73 @@ describe("iOS compact popover shadow artwork", () => {
     expect(projectSkeletonReplayRows(elements, projection).rowsBySource.has(source!)).toBe(false);
   });
 
+  // Synthetic layout from the #17942 device report (no captured popover fixture yet): the
+  // shadow overflows only the right edge and surrounds the popover body sibling.
+  const oneEdgeShadowBounds = { left: 101, top: 267, right: 538, bottom: 635 };
+  const oneEdgeBodyBounds = { left: 150, top: 400, right: 300, bottom: 421 };
+  function syntheticOneEdgePopover(
+    options: { nested?: boolean; bodyBounds?: typeof bodyBounds; bodyFirst?: boolean } = {},
+  ): ViewHierarchyResult {
+    const shadow = {
+      class: "UIImageView",
+      role: "image",
+      clickable: "true",
+      "view-id": shadowId,
+      bounds: oneEdgeShadowBounds,
+    };
+    const body = {
+      class: "UILabel",
+      role: "text",
+      text: "Popover body",
+      "resource-id": "popover-body",
+      bounds: options.bodyBounds ?? oneEdgeBodyBounds,
+    };
+    const dismiss = {
+      class: "UIView",
+      text: "dismiss popup",
+      "resource-id": "PopoverDismissRegion",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+    };
+    const layer = options.bodyFirst ? [body, dismiss, shadow] : [shadow, dismiss, body];
+    return createHierarchyForTest({
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+          node: options.nested
+            ? [
+                {
+                  class: "UIView",
+                  bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+                  node: layer,
+                },
+              ]
+            : layer,
+        },
+      },
+    });
+  }
+  function shadowRow(hierarchy: ViewHierarchyResult) {
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios")!;
+    return projectSkeleton(elements, viewport, undefined, { ios: true }).skeleton.find(
+      (row) => row.elementId === shadowId,
+    );
+  }
+
+  test("synthetic: drops a one-edge popover shadow enclosing its top-level content sibling", () => {
+    expect(shadowRow(syntheticOneEdgePopover())).toBeUndefined();
+  });
+
+  test.each([
+    { name: "nested inside app content", options: { nested: true } },
+    {
+      name: "content not enclosed",
+      options: { bodyBounds: { left: 20, top: 700, right: 200, bottom: 721 } },
+    },
+    { name: "content drawn before the image", options: { bodyFirst: true } },
+  ])("PIN synthetic: keeps a one-edge unlabeled image $name", ({ options }) => {
+    expect(shadowRow(syntheticOneEdgePopover(options))?.affordances).toContain("tap");
+  });
+
   test("removes tap before geometric text hoisting and suppression", () => {
     const elements = imageElements();
     elements.text.push({ class: "UILabel", text: "Popover body", bounds: bodyBounds });

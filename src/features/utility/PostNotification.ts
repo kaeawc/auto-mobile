@@ -243,21 +243,7 @@ export class PostNotification {
       return refusal;
     }
 
-    // Exclude previous pushes still present in the rolling delivery log window.
-    const deliveryLogBaseline = new Set<string>();
-    if (this.device.platform === "watchos") {
-      try {
-        const output = await this.simctl.readNotificationDeliveryLog(this.device.deviceId);
-        for (const line of output.split(/\r?\n/)) {
-          deliveryLogBaseline.add(line);
-        }
-      } catch (error) {
-        logger.warn(
-          `[PostNotification] Failed to read watch notification delivery log baseline: ${errorMessage(error)}`,
-          error,
-        );
-      }
-    }
+    const deliveryLogBaseline = await this.readWatchDeliveryLogBaseline();
 
     const result = await this.simctl.pushNotification(this.device.deviceId, bundleId, built.json);
     if (!result.success) {
@@ -292,6 +278,25 @@ export class PostNotification {
       channelId: options.channelId,
       warning,
     };
+  }
+
+  private async readWatchDeliveryLogBaseline(): Promise<Set<string>> {
+    // Exclude previous pushes still present in the rolling delivery log window.
+    const deliveryLogBaseline = new Set<string>();
+    if (this.device.platform === "watchos") {
+      try {
+        const output = await this.simctl.readNotificationDeliveryLog(this.device.deviceId);
+        for (const line of output.split(/\r?\n/)) {
+          deliveryLogBaseline.add(line);
+        }
+      } catch (error) {
+        logger.warn(
+          `[PostNotification] Failed to read watch notification delivery log baseline: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return deliveryLogBaseline;
   }
 
   private async watchDeliveryVerdict(

@@ -374,7 +374,7 @@ function isOverlay(query: OwnershipQuery, node: SearchableEntry, scroll: Searcha
   return (
     !!target &&
     !!node.bounds &&
-    !isIosPresentationChrome(node, query.screen) &&
+    !isIosPresentationChrome(node, query.screen, nodes) &&
     node.affordances.some((affordance) => affordance !== "scroll") &&
     !isFalsy(node.properties.visible) &&
     !isTruthy(node.properties.hidden) &&

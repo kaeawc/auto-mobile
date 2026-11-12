@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";
 import {
   projectSkeleton,
   projectSkeletonReplayRows,
@@ -15,6 +16,15 @@ const viewport = { width: 402, height: 874 };
 const shadowBounds = { left: -140, top: -78, right: 297, bottom: 290 };
 const bodyBounds = { left: 26, top: 95, right: 131, bottom: 116 };
 const shadowId = "s2-7edfbf5215a4f07c";
+const listDialog: ViewHierarchyResult = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../../fixtures/ios-presentation-chrome/ios26_5-listConfirmationDialog-open.viewHierarchy.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
 
 function imageElements(overrides: Partial<Element> = {}): NonNullable<ObserveResult["elements"]> {
   return {
@@ -38,6 +48,7 @@ describe("iOS compact popover shadow artwork", () => {
   test.each([
     { file: "ios18_6-menu-open", labels: ["Item One", "Item Two"] },
     { file: "ios26_5-confirmationDialog-open", labels: ["Option A", "Delete"] },
+    { file: "ios26_5-listConfirmationDialog-open", labels: ["Option 1", "Delete"] },
   ])("keeps the captured $file actions tappable", ({ file, labels }) => {
     const hierarchy: ViewHierarchyResult = JSON.parse(
       readFileSync(
@@ -57,6 +68,28 @@ describe("iOS compact popover shadow artwork", () => {
       expect(row?.occluded).toBeUndefined();
       expect(projection.context.some((row) => row.label === label && row.occluded)).toBe(false);
     }
+  });
+
+  test("PIN: one-edge overflow that does not contain the presentation remains a cover", () => {
+    const hierarchy = structuredClone(listDialog);
+    const shadow = new SearchableHierarchy()
+      .project(hierarchy)
+      .find((node) => node.className === "UIImageView")!;
+    expect(shadow.nativeId).toBeUndefined();
+    expect(shadow.label).toBeUndefined();
+    expect(shadow.nodeKey).toBe(shadowId);
+    // Covers Option 1, but stops short of the UIActionSheet and its scroll container.
+    shadow.source.$!.bounds = [-140, 109, 400, 379];
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios")!;
+    const projection = projectSkeleton(elements, viewport, undefined, { ios: true });
+    expect(projection.skeleton.find((row) => row.elementId === shadowId)?.affordances).toContain(
+      "tap",
+    );
+    expect(
+      [...projection.skeleton, ...projection.context].some(
+        (row) => row.label === "Option 1" && row.occluded,
+      ),
+    ).toBe(true);
   });
 
   test("drops the measured shadow without dropping popover context or replaying a tap row", () => {

@@ -21,7 +21,8 @@ import {
   setDaemonPrototypeShownSpecsReader,
 } from "./daemonSpecRevisions";
 import { MAX_MOCK_DOCUMENT_BYTES } from "../../features/prototype/prototypeMockSchema";
-import { isMockBackendAction, mockBackendOutput } from "./mockBackend";
+import { mockBackendOutput } from "./mockBackend";
+import { isPrototypeHostOnlyAction, isPrototypePreviewAction } from "./hostOnlyActions";
 import { PrototypeMockBackendRegistry } from "../../features/prototype/PrototypeMockBackendRegistry";
 import { PrototypeCommitGenerations } from "../../features/prototype/PrototypeCommitGenerations";
 import { PrototypeEventCoordinator } from "../../features/prototype/PrototypeEventCoordinator";
@@ -94,7 +95,6 @@ import type { ProgressCallback } from "../toolRegistry";
 import { stageAssets } from "./assets";
 import {
   daemonPrototypePreviewBinding,
-  isPrototypePreviewAction,
   prototypePreviewOutput,
   type PrototypePreviewBinding,
 } from "./preview";
@@ -108,6 +108,7 @@ import { performPrototypeAction } from "./mutation";
 import { VirtualPrototypeDevice } from "../../features/prototype/headless/VirtualPrototypeDevice";
 import {
   headlessPrototypeRefusal,
+  isHeadlessPrototypeMode,
   isVirtualPrototypeDevice,
   virtualPrototypeDeviceReport,
 } from "../../features/prototype/headless/headlessPrototypeMode";
@@ -170,9 +171,19 @@ function mutationCallOptions(
 const responseFor = (payload: z.infer<typeof prototypeOutputSchema>) =>
   withIsErrorOnFailure(createStructuredToolResponse(payload), payload.success);
 
-/** A result from the headless virtual device says so, with the capabilities it cannot emulate. */
-function responderFor(device: BootedDevice) {
-  return isVirtualPrototypeDevice(device)
+/**
+ * A result from the headless virtual device says so, with the capabilities it cannot emulate.
+ * Outside headless mode a host-only action reaches the virtual device only because it needs no
+ * device (#18083), so its result is not attributed to one.
+ */
+function responderFor(device: BootedDevice, input: unknown, env: NodeJS.ProcessEnv | undefined) {
+  const action =
+    typeof input === "object" && input !== null && "action" in input ? input.action : undefined;
+  const hostOnlyOutsideHeadless =
+    typeof action === "string" &&
+    isPrototypeHostOnlyAction(action) &&
+    !isHeadlessPrototypeMode(env);
+  return isVirtualPrototypeDevice(device) && !hostOnlyOutsideHeadless
     ? (payload: z.infer<typeof prototypeOutputSchema>) =>
         responseFor({ ...payload, virtualDevice: virtualPrototypeDeviceReport() })
     : responseFor;
@@ -579,22 +590,6 @@ function readsSpecFile(args: z.infer<typeof prototypeSchema>): boolean {
   );
 }
 
-type HostOnlyAction =
-  | "screenMap"
-  | "share"
-  | "defineBackend"
-  | "clearBackend"
-  | "backendLog"
-  | "publish"
-  | "serve"
-  | "stop";
-
-const isHostOnlyAction = (action: string): action is HostOnlyAction =>
-  action === "screenMap" ||
-  action === "share" ||
-  isMockBackendAction(action) ||
-  isPrototypePreviewAction(action);
-
 /** Actions answered by the host alone, before any device or scope is involved. */
 async function hostOnlyOutput(
   host: { mocks: PrototypeMockBackendRegistry; preview: () => PrototypePreviewBinding },
@@ -683,7 +678,7 @@ export function createPrototypeToolRuntime(
     signal?: AbortSignal,
   ) => {
     host.ensureLifecycle();
-    const respond = responderFor(device);
+    const respond = responderFor(device, input, dependencies.env);
     const parsed = parsePrototypeInput(input);
     if (!parsed.success) {
       return respond({
@@ -713,7 +708,7 @@ export function createPrototypeToolRuntime(
         return respond(settled);
       }
     }
-    if (isHostOnlyAction(args.action)) {
+    if (isPrototypeHostOnlyAction(args.action)) {
       const shareFiles = dependencies.protoViewerShareFiles;
       const hostOnly = { mocks: host.mocks, preview };
       return respond(await hostOnlyOutput(hostOnly, args, assetReaders, shareFiles));

@@ -127,4 +127,60 @@ describe("tappable match count (#17939)", () => {
       ]),
     ).toBe(0);
   });
+
+  test("a sublabel naming the label only inside a longer word does not fold (#18098)", () => {
+    const container = {
+      affordances: ["tap" as const],
+      label: "Tab Bar",
+      sublabel: "Home, Profiles",
+      bounds: bounds(0, 0, 400, 50),
+    };
+    const button = {
+      affordances: ["tap" as const],
+      label: "Files",
+      bounds: bounds(100, 10, 200, 40),
+    };
+    expect(countTappableMatches([container, button])).toBe(2);
+    expect(
+      countTappableMatches([{ ...container, sublabel: "Home, Files+, Profiles" }, button]),
+    ).toBe(1);
+    expect(
+      countTappableMatches([
+        { ...container, sublabel: "C++ (beta)" },
+        { ...button, label: "C++ (beta)" },
+      ]),
+    ).toBe(1);
+  });
+
+  test("a three-target fold cycle keeps one match (#18098)", () => {
+    // A folds into B (A's sublabel names B), B into C (B's sublabel names C), C into A (same label).
+    const a = {
+      affordances: ["tap" as const],
+      label: "Files",
+      sublabel: "Tab Bar",
+      bounds: bounds(0, 0, 400, 100),
+    };
+    const b = {
+      affordances: ["tap" as const],
+      label: "Tab Bar",
+      sublabel: "Files",
+      bounds: bounds(10, 10, 390, 90),
+    };
+    const c = { affordances: ["tap" as const], label: "Files", bounds: bounds(20, 20, 380, 80) };
+    expect(countTappableMatches([a, b, c])).toBe(1);
+    expect(countTappableMatches([c, b, a])).toBe(1);
+    expect(countTappableMatches([b, c, a])).toBe(1);
+  });
+
+  test("a fold cycle inside a separate container's target counts with that target", () => {
+    const box = bounds(0, 0, 100, 50);
+    const a = { affordances: ["tap" as const], label: "Files", sublabel: "Tab Bar", bounds: box };
+    const b = { affordances: ["tap" as const], label: "Tab Bar", sublabel: "Files", bounds: box };
+    const elsewhere = {
+      affordances: ["tap" as const],
+      label: "Files",
+      bounds: bounds(0, 60, 100, 90),
+    };
+    expect(countTappableMatches([a, b, elsewhere])).toBe(2);
+  });
 });

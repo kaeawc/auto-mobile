@@ -8,13 +8,17 @@ import { registerContentSeedTools } from "../../src/server/contentSeedTools";
 isolateToolRegistry();
 
 describe("seedContent tool", () => {
-  test("strict schema requires namespace, rejects photos and supports standard device targeting", () => {
+  test("strict schema requires namespace, accepts photos and supports standard device targeting", () => {
     expect(seedContentSchema.safeParse({}).success).toBe(false);
     expect(
       seedContentSchema.safeParse({
         namespace: "demo",
         contacts: [{ name: "A", photoPath: "a.png" }],
       }).success,
+    ).toBe(true);
+    expect(
+      seedContentSchema.safeParse({ namespace: "demo", contacts: [{ name: "A", photo: "a.png" }] })
+        .success,
     ).toBe(false);
     expect(
       seedContentSchema.safeParse({

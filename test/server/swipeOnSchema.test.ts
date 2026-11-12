@@ -10,6 +10,18 @@ import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 
 const interactionDeps: InteractionToolDependencies = {};
 const scope = { elementId: "list", container: { text: "Panel", index: 0 } };
+test("lookFor accepts a configurable positive integer no-change threshold", () => {
+  for (const selector of [{ text: "Item 12" }, { elementId: "item12" }]) {
+    const lookFor = { ...selector, maxUnchangedSwipes: 3 };
+    expect(swipeOnSchema.parse({ direction: "up", lookFor }).lookFor).toEqual(lookFor);
+  }
+  for (const maxUnchangedSwipes of [0, -1, 1.5, NaN, Infinity]) {
+    expect(
+      swipeOnSchema.safeParse({ direction: "up", lookFor: { text: "Item 12", maxUnchangedSwipes } })
+        .success,
+    ).toBe(false);
+  }
+});
 for (const field of ["container", "lookFor"] as const) {
   test(`${field} accepts a recursive scope and every selection strategy`, () => {
     for (const selectionStrategy of ["first", "random", "unique"] as const) {
@@ -62,6 +74,7 @@ test("advertised schema retains recursive scope and strategy fields", () => {
         properties: {
           container: { $ref: expect.stringContaining("#/$defs/") },
           selectionStrategy: { enum: ["first", "random", "unique"] },
+          maxUnchangedSwipes: { type: "integer", exclusiveMinimum: 0 },
         },
       },
       {
@@ -69,6 +82,7 @@ test("advertised schema retains recursive scope and strategy fields", () => {
         properties: {
           container: { $ref: expect.stringContaining("#/$defs/") },
           selectionStrategy: { enum: ["first", "random", "unique"] },
+          maxUnchangedSwipes: { type: "integer", exclusiveMinimum: 0 },
         },
       },
     ],
@@ -96,7 +110,12 @@ test("handler forwards complete selectors and reports a structured resolution fa
     const scoped = {
       direction: "down",
       container: { ...scope, selectionStrategy: "unique" },
-      lookFor: { text: "Target", container: { elementId: "row" }, selectionStrategy: "unique" },
+      lookFor: {
+        text: "Target",
+        container: { elementId: "row" },
+        selectionStrategy: "unique",
+        maxUnchangedSwipes: 3,
+      },
     };
     const response = await swipeOnHandler(
       { name: "fake", deviceId: "swipe-schema-fake", platform: "android" },

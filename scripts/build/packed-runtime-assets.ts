@@ -10,6 +10,8 @@ export const REQUIRED_PACKED_RUNTIME_ASSETS: readonly string[] = [
   // WebpBinaryResolver resolves both tools from the published dist project root.
   "dist/vendor/libwebp/win32-x64/cwebp.exe",
   "dist/vendor/libwebp/win32-x64/dwebp.exe",
+  // The iOS Simulator camera poster dylib is compiled on demand from this source.
+  "ios/CameraPosterInjection/Injection/CameraPosterInjection.m",
 ];
 
 /**

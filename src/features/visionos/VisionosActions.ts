@@ -39,13 +39,29 @@ function assertVisionosTapOptions(options: TapOnElementOptions): void {
 // The shared iOS resolver also ranks geometry, windows and ancestry. Here only the runner's
 // explicit clickable flag and identifier are relevant; preserve capture order within each tier.
 function tapCandidateRank(element: Element): number {
-  if (element.enabled !== "false" && element["resource-id"]) {
+  if (element.enabled === "false") {
+    return 4;
+  }
+  if (element["resource-id"]) {
     return element.clickable === "true" ? 0 : 1;
   }
-  return 2;
+  return element.clickable === "true" ? 2 : 3;
 }
 
-/** Ornament frames are scene-local. Resolve by identifier, optionally narrowed by type and label. */
+function assertVisionosTapTarget(target: Element): void {
+  if (!target["resource-id"] && !target.text) {
+    throw new ActionableError(
+      "The matched visionOS element has no accessibility identifier or text; add an accessibility label or identifier to the control, then observe again.",
+    );
+  }
+  if (target.enabled === "false") {
+    throw new ActionableError(
+      "The matched visionOS element is disabled; observe and select an enabled control.",
+    );
+  }
+}
+
+/** Ornament frames are scene-local. Resolve by identifier or exact type and label. */
 export async function visionosTapOn(
   deviceId: string,
   options: TapOnElementOptions,
@@ -79,18 +95,10 @@ async function tapOnce(
       "No visionOS element matched the selector and index; observe and use its identifier or exact text.",
     );
   }
-  const identifier = target["resource-id"];
-  if (!identifier) {
-    throw new ActionableError(
-      "The matched visionOS element has no accessibility identifier; use an identified control's text or elementId.",
-    );
-  }
-  if (target.enabled === "false") {
-    throw new ActionableError(
-      "The matched visionOS element is disabled; observe and select an enabled control.",
-    );
-  }
-  const sharers = all.filter((element) => element["resource-id"] === identifier);
+  assertVisionosTapTarget(target);
+  const identifier = target["resource-id"] ?? "";
+  const label = target.text ?? "";
+  const sharers = all.filter((element) => (element["resource-id"] ?? "") === identifier);
   // The runner resolves only enabled elements, so a disabled twin never makes a tap ambiguous.
   // It still makes the identifier shared: send type and label so a twin enabled after capture
   // cannot take the tap.
@@ -98,15 +106,17 @@ async function tapOnce(
     (element) =>
       element.enabled !== "false" &&
       element.class === target.class &&
-      (element.text ?? "") === (target.text ?? ""),
+      (element.text ?? "") === label,
   );
-  if (sharers.length > 1 && narrowed.length !== 1) {
+  if (narrowed.length > 1) {
     const details = narrowed.map(
       (element) =>
         `className=${element.class}, text=${JSON.stringify(element.text ?? "")}, bounds=${JSON.stringify(element.bounds)}`,
     );
     throw new ActionableError(
-      `The visionOS match was ambiguous for identifier '${identifier}'; candidates: ${details.join("; ")}. Pass index or a distinct text/elementId to select a distinguishable target.`,
+      identifier
+        ? `The visionOS match was ambiguous for identifier '${identifier}'; candidates: ${details.join("; ")}. Pass index or a distinct text/elementId to select a distinguishable target.`
+        : `The visionOS match was ambiguous for type ${target.class} and label ${JSON.stringify(label)}; candidates: ${details.join("; ")}. Pass index to select a distinguishable type/label or add an accessibility identifier; identical type/label matches cannot be distinguished by index.`,
     );
   }
   signal?.throwIfAborted();
@@ -114,9 +124,7 @@ async function tapOnce(
     {
       type: "request_tap_element",
       identifier,
-      ...(sharers.length > 1
-        ? { label: target.text ?? "", elementType: Number(target.class) }
-        : {}),
+      ...(!identifier || sharers.length > 1 ? { label, elementType: Number(target.class) } : {}),
     },
     signal,
   );

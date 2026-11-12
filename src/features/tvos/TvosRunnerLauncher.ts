@@ -14,6 +14,7 @@ import { tvosTargetApps } from "./TvosTargetApps";
 import type { VisionosTargetApps } from "../visionos/VisionosTargetApps";
 import type { IosCtrlProxyBuilder } from "../../ctrlProxy/IosCtrlProxyBuilder";
 import { rm } from "node:fs/promises";
+import { createTvosAppExit, type TvosAppExit } from "./TvosAppExit";
 
 export interface TvosRunnerLaunchOptions {
   deviceId: string;
@@ -38,6 +39,7 @@ export function connectTvosRunnerClient(
     timer?: Timer;
     factory?: TvosSocketFactory;
     targetApps?: Pick<VisionosTargetApps, "get">;
+    appExit?: Pick<TvosAppExit, "diagnose">;
   } = {},
 ): TvosRunnerClient {
   const targetApps = options.targetApps ?? tvosTargetApps;
@@ -45,6 +47,7 @@ export function connectTvosRunnerClient(
     timer: options.timer,
     factory: options.factory,
     foregroundApp: () => targetApps.get(deviceId),
+    appExit: options.appExit ?? createTvosAppExit(deviceId, options.timer),
   });
 }
 
@@ -112,13 +115,18 @@ export class XcodebuildTvosRunnerLauncher implements TvosRunnerLauncher {
     );
     const state: TvosStartup = { exited: false, unregister: () => {} };
     const cleanup = () => {
+      if (!state.exited) {
+        state.client?.runnerExited();
+      } else {
+        state.client?.close();
+      }
       state.exited = true;
       state.unregister();
-      state.client?.close();
       removePrepared();
     };
     const stop = () => {
       const running = !state.exited;
+      state.exited = true;
       cleanup();
       if (running) {
         process.kill("SIGTERM");

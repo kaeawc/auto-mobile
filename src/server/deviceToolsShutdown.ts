@@ -22,6 +22,7 @@ import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { unregisterDirectSessionsForDevice } from "../utils/directSessionDeviceRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
+import { iosCameraPosterRegistry } from "../features/utility/ios/IosCameraPosterRegistry";
 import { DeviceShutdownService } from "../devices/deviceShutdownService";
 import {
   DEVICE_ALREADY_STOPPED_ERROR_CODE,
@@ -708,6 +709,10 @@ async function finishShutdownCleanup(
 ): Promise<void> {
   const { device } = shutdownContext;
   const { strictDeadline, timeoutMs, retiredIncarnation } = options;
+  if (device.platform === "ios") {
+    // A poster is per simulator boot: a later session on the same UDID must not inherit it.
+    (dependencies.iosCameraPosterRegistry ?? iosCameraPosterRegistry).clear(device.deviceId);
+  }
   const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
   const notification = cleanup.then(async () => {
     await notifyResourcesAfterShutdown(dependencies);

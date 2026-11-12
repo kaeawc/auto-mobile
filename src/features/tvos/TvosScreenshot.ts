@@ -2,6 +2,7 @@ import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { tvosRunners, type TvosRunnerRegistry } from "./TvosRunnerRegistry";
+import { requireTvosRunner } from "./TvosRunnerRecovery";
 
 /** Captures an Apple TV simulator's screen as PNG bytes. */
 export type TvosScreenshotCapture = (device: BootedDevice, signal?: AbortSignal) => Promise<Buffer>;
@@ -10,11 +11,12 @@ export type TvosScreenshotCapture = (device: BootedDevice, signal?: AbortSignal)
 export async function captureTvosRunnerScreenshot(
   device: BootedDevice,
   signal?: AbortSignal,
-  runners: Pick<TvosRunnerRegistry, "require"> = tvosRunners,
+  runners?: Pick<TvosRunnerRegistry, "require">,
 ): Promise<Buffer> {
-  const data = await runners
-    .require(device.deviceId)
-    .request({ type: "request_screenshot" }, signal);
+  const client = runners
+    ? runners.require(device.deviceId)
+    : await requireTvosRunner(device.deviceId, signal);
+  const data = await client.request({ type: "request_screenshot" }, signal);
   if (typeof data !== "string") {
     throw new ActionableError("Invalid tvOS screenshot; reconnect the runner.");
   }
@@ -29,10 +31,10 @@ export const captureTvosSimctlScreenshot: TvosScreenshotCapture = (device, signa
 export function captureTvosScreenshot(
   device: BootedDevice,
   signal?: AbortSignal,
-  runners: Pick<TvosRunnerRegistry, "get" | "require"> = tvosRunners,
+  runners?: Pick<TvosRunnerRegistry, "get" | "require">,
   simctl: TvosScreenshotCapture = captureTvosSimctlScreenshot,
 ): Promise<Buffer> {
-  return runners.get(device.deviceId)
+  return (runners ?? tvosRunners).get(device.deviceId)
     ? captureTvosRunnerScreenshot(device, signal, runners)
     : simctl(device, signal);
 }

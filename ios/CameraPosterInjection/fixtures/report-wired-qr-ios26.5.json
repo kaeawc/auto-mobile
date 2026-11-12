@@ -1,0 +1,40 @@
+{
+  "authorizationStatus" : "authorized",
+  "complete" : true,
+  "dataScannerAvailable" : true,
+  "dataScannerSupported" : false,
+  "defaultVideoDevicePresent" : true,
+  "deviceInputCreated" : true,
+  "discoverySessionDeviceCount" : 1,
+  "imagePickerCameraAvailable" : true,
+  "iosVersion" : "26.5",
+  "metadataQrStrings" : [
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982",
+    "https:\/\/automobile.example\/poster?id=17982"
+  ],
+  "photo" : {
+    "byteCount" : 61532,
+    "error" : null,
+    "height" : 1440,
+    "received" : true,
+    "sha256" : "1db49eee406d914b1355ff8bf22151fbc710f11d11aeb26633e68516483f672b",
+    "width" : 1080
+  },
+  "photoDecodedQr" : [
+    "https:\/\/automobile.example\/poster?id=17982"
+  ],
+  "previewLayerHasContent" : true,
+  "sessionCanAddMetadataOutput" : true,
+  "sessionCanAddPhotoOutput" : true,
+  "timestamp" : "2026-11-11T18:30:59Z"
+}

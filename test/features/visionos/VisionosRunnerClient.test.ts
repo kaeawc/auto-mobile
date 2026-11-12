@@ -90,6 +90,42 @@ test("correlates taps and typing and propagates runner refusal", async () => {
   client.close();
 });
 
+test.each([true, false])(
+  "label-only tap preserves the wire request and runner response: %s",
+  async (success) => {
+    const { socket, client } = fixture();
+    socket.receive(connected);
+    const command = {
+      type: "request_tap_element",
+      identifier: "",
+      label: "Item 3",
+      elementType: 9,
+    } as const;
+    const pending = client.request(command);
+    await drainMicrotasks(2);
+    expect(socket.sent[0]).toEqual({ ...command, requestId: socket.sent[0].requestId });
+    const error =
+      "Invalid parameter 'identifier': supply an accessibility identifier; frame taps are unsupported";
+    socket.receive({
+      type: success ? "tap_element_result" : "error",
+      requestId: socket.sent[0].requestId,
+      success,
+      ...(success ? {} : { error, errorCode: "invalid_parameter" }),
+    });
+    if (success) {
+      await pending;
+    } else {
+      await expect(pending).rejects.toMatchObject({
+        message: error,
+        errorCode: "invalid_parameter",
+      });
+    }
+    expect(socket.sent).toHaveLength(1);
+    expect(client.isUsable()).toBe(true);
+    client.close();
+  },
+);
+
 test("maps Safari's captured AX window failure to per-app screenshot advice", async () => {
   const { socket, client } = fixture();
   socket.receive(connected);

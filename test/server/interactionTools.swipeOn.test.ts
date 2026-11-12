@@ -113,6 +113,32 @@ describe("swipeOnHandler (registered handler wiring)", () => {
     expect(getStructuredField(response, "message")).toBe("Swiped up");
   });
 
+  test("end-of-list evidence survives the tool envelope with its actionable message", async () => {
+    const error =
+      'Scroll reached end of container (no change after 2 consecutive swipes). text "Item 12" not found. 0 swipes moved the screen. Try the opposite direction.';
+    interactionDeps.swipeOnFactory = () => ({
+      execute: async () =>
+        fakeResult({
+          error,
+          found: false,
+          reachedEnd: true,
+          movedSwipes: 0,
+          scrollIterations: 2,
+        }),
+    });
+    const response = await swipeOnHandler(fakeDevice, args, { deps: interactionDeps });
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toMatchObject({
+      success: false,
+      message: error,
+      error,
+      found: false,
+      reachedEnd: true,
+      movedSwipes: 0,
+      scrollIterations: 2,
+    });
+  });
+
   test("omitting display preserves swipe defaults and forwards the original signal", async () => {
     const signal = new AbortController().signal;
     let options: SwipeOnOptions | undefined;

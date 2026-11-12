@@ -316,7 +316,6 @@ export class ScrollUntilVisible {
             findVisibleSearchTarget: (...args) => this.findVisibleSearchTarget(...args),
             shouldGuardSearchStep: (...args) => this.shouldGuardSearchStep(...args),
             recoverSearchObservation: (...args) => this.recoverSearchObservation(...args),
-            checkReverseExhausted: (...args) => this.checkReverseExhausted(...args),
           },
           args.perf ?? new NoOpPerformanceTracker(),
         ).execute(),
@@ -325,30 +324,6 @@ export class ScrollUntilVisible {
     } catch (error) {
       // A search cancelled after it moved the screen must say so (#10151).
       throw annotateSearchCancellation(error, args.signal, swipes);
-    }
-  }
-
-  private checkReverseExhausted(
-    reverseMode: boolean,
-    context: {
-      perf: PerformanceTracker;
-      startTime: number;
-      maxUnchangedScrolls: number;
-      target: string;
-      scopeDescription: string;
-      scrollIteration: number;
-    },
-  ): void {
-    const { perf, startTime, maxUnchangedScrolls, target, scopeDescription, scrollIteration } =
-      context;
-    if (reverseMode) {
-      // Reverse also exhausted — element truly not found
-      perf.end();
-      const elapsed = this.deps.timer.now() - startTime;
-      throw new ActionableError(
-        `Scroll reached end of container (no change after ${maxUnchangedScrolls} scrolls). ` +
-          `${target} not found${scopeDescription} after ${scrollIteration} iterations (${elapsed}ms).`,
-      );
     }
   }
 

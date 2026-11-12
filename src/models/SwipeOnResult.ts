@@ -43,6 +43,10 @@ export interface SwipeOnResult extends BaseActionResult {
   path?: number;
 
   // Search results (when using lookFor)
+  /** The search stopped after consecutive unchanged swipes in the requested direction. */
+  reachedEnd?: boolean;
+  /** Successful search swipes whose settled hierarchy changed, excluding overlap recovery. */
+  movedSwipes?: number;
   found?: boolean; // Was the target element found?
   scrollIterations?: number; // Number of scrolls performed
   elapsedMs?: number; // Time taken to find element

@@ -1,0 +1,240 @@
+{
+ "data": {
+  "packageName": "dev.dogfood.tvdog",
+  "hierarchy": {
+   "enabled": "true",
+   "focused": "false",
+   "selected": "false",
+   "node": [
+    {
+     "enabled": "true",
+     "focused": "false",
+     "selected": "false",
+     "node": [
+      {
+       "enabled": "true",
+       "focused": "false",
+       "selected": "false",
+       "node": [
+        {
+         "enabled": "true",
+         "focused": "false",
+         "selected": "false",
+         "node": [
+          {
+           "enabled": "true",
+           "focused": "false",
+           "selected": "false",
+           "node": [
+            {
+             "enabled": "true",
+             "focused": "false",
+             "selected": "false",
+             "node": [
+              {
+               "enabled": "true",
+               "focused": "false",
+               "selected": "false",
+               "node": [
+                {
+                 "enabled": "true",
+                 "focused": "false",
+                 "selected": "false",
+                 "node": [
+                  {
+                   "enabled": "true",
+                   "focused": "false",
+                   "selected": "false",
+                   "node": [
+                    {
+                     "enabled": "true",
+                     "focused": "false",
+                     "selected": "false",
+                     "node": [
+                      {
+                       "enabled": "true",
+                       "focused": "false",
+                       "selected": "false",
+                       "node": [
+                        {
+                         "enabled": "true",
+                         "focused": "false",
+                         "selected": "false",
+                         "node": [],
+                         "text": "Detail of Show 2",
+                         "bounds": {
+                          "top": 427,
+                          "left": 856,
+                          "bottom": 462,
+                          "right": 1065
+                         },
+                         "className": "48",
+                         "resource-id": ""
+                        },
+                        {
+                         "enabled": "true",
+                         "focused": "false",
+                         "selected": "false",
+                         "node": [],
+                         "text": "Play",
+                         "bounds": {
+                          "top": 492,
+                          "left": 903,
+                          "bottom": 558,
+                          "right": 1018
+                         },
+                         "className": "9",
+                         "resource-id": ""
+                        },
+                        {
+                         "enabled": "true",
+                         "focused": "false",
+                         "selected": "false",
+                         "node": [],
+                         "text": "Crash",
+                         "bounds": {
+                          "top": 588,
+                          "left": 892,
+                          "bottom": 654,
+                          "right": 1029
+                         },
+                         "className": "9",
+                         "resource-id": ""
+                        }
+                       ],
+                       "text": "",
+                       "bounds": {
+                        "bottom": 1080,
+                        "right": 1920,
+                        "top": 0,
+                        "left": 0
+                       },
+                       "className": "1",
+                       "resource-id": ""
+                      }
+                     ],
+                     "text": "",
+                     "bounds": {
+                      "bottom": 1080,
+                      "right": 1920,
+                      "left": 0,
+                      "top": 0
+                     },
+                     "className": "1",
+                     "resource-id": ""
+                    }
+                   ],
+                   "text": "",
+                   "bounds": {
+                    "top": 0,
+                    "left": 0,
+                    "right": 1920,
+                    "bottom": 1080
+                   },
+                   "className": "1",
+                   "resource-id": ""
+                  }
+                 ],
+                 "text": "",
+                 "bounds": {
+                  "left": 0,
+                  "right": 1920,
+                  "bottom": 1080,
+                  "top": 0
+                 },
+                 "className": "1",
+                 "resource-id": ""
+                }
+               ],
+               "text": "",
+               "bounds": {
+                "left": 0,
+                "top": 0,
+                "bottom": 1080,
+                "right": 1920
+               },
+               "className": "1",
+               "resource-id": ""
+              }
+             ],
+             "text": "",
+             "bounds": {
+              "left": 0,
+              "top": 0,
+              "bottom": 1080,
+              "right": 1920
+             },
+             "className": "1",
+             "resource-id": ""
+            }
+           ],
+           "text": "",
+           "bounds": {
+            "right": 1920,
+            "top": 0,
+            "bottom": 1080,
+            "left": 0
+           },
+           "className": "1",
+           "resource-id": ""
+          }
+         ],
+         "text": "",
+         "bounds": {
+          "top": 0,
+          "right": 1920,
+          "left": 0,
+          "bottom": 1080
+         },
+         "className": "1",
+         "resource-id": ""
+        }
+       ],
+       "text": "",
+       "bounds": {
+        "left": 0,
+        "top": 0,
+        "bottom": 1080,
+        "right": 1920
+       },
+       "className": "1",
+       "resource-id": ""
+      }
+     ],
+     "text": "",
+     "bounds": {
+      "top": 0,
+      "right": 1920,
+      "left": 0,
+      "bottom": 1080
+     },
+     "className": "4",
+     "resource-id": ""
+    }
+   ],
+   "text": "TVDog",
+   "bounds": {
+    "left": 0,
+    "right": 1920,
+    "bottom": 1080,
+    "top": 0
+   },
+   "className": "2",
+   "resource-id": ""
+  },
+  "insets": {
+   "units": "unknown",
+   "displayCutoutInfo": {
+    "classification": "unknown"
+   },
+   "source": "unavailable",
+   "available": false
+  },
+  "updatedAt": 1794426596594,
+  "screenWidth": 1920,
+  "screenHeight": 1080
+ },
+ "timestamp": 1794426596594,
+ "type": "hierarchy_update",
+ "requestId": "3"
+}

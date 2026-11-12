@@ -7,7 +7,13 @@ import { isVisionosHierarchy, type VisionosHierarchy } from "./VisionosHierarchy
 
 export type VisionosCommand =
   | { type: "request_hierarchy" }
-  | { type: "request_tap_element"; identifier: string; label?: string; elementType?: number }
+  | {
+      type: "request_tap_element";
+      /** Empty only for an exact, non-empty label plus elementType on an unidentified element. */
+      identifier: string;
+      label?: string;
+      elementType?: number;
+    }
   | { type: "request_append_text"; text: string };
 
 /** Default budget for commands other than hierarchy, and for the connected handshake. */

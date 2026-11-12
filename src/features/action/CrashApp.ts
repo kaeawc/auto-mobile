@@ -22,6 +22,8 @@ import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   resolveIosCrashBackend,
+  findIosSimulatorAppProcess,
+  findIosSimulatorAppProcessId,
   type IosCrashBackend,
   type SimulatorCrashCommandRunner,
 } from "../../utils/ios-cmdline-tools/IosCrashBackend";
@@ -53,6 +55,12 @@ import {
   type CrashReportRecorder,
 } from "../crashReports/recordNativeCrashReport";
 
+export {
+  findIosSimulatorAppProcess,
+  findIosSimulatorAppProcessId,
+  type IosSimulatorAppProcess,
+} from "../../utils/ios-cmdline-tools/IosCrashBackend";
+
 export type { SimulatorCrashCommandRunner } from "../../utils/ios-cmdline-tools/IosCrashBackend";
 
 const PROCESS_STATE_COMMAND = "shell dumpsys activity processes";
@@ -65,11 +73,6 @@ const CONFIRMATION_COMMAND_TIMEOUT_MS = 2_000;
 const ANDROID_CRASH_LOG_COMMAND = "shell logcat -b crash -d -v epoch -t 200";
 /** Crashing-thread frames shown in tool output; the failures entry keeps the full bounded stack. */
 const CRASH_REPORT_SUMMARY_FRAMES = 8;
-
-export interface IosSimulatorAppProcess {
-  pid: number;
-  serviceLabel: string;
-}
 
 interface AndroidCrashMatch {
   evidence: CrashAppEvidence;
@@ -661,23 +664,6 @@ export class CrashApp {
       /unknown command(?::)?\s*crash/i.test(message) || /no such file or directory/i.test(message)
     );
   }
-}
-
-export function findIosSimulatorAppProcess(
-  processList: string,
-  appId: string,
-): IosSimulatorAppProcess | null {
-  for (const line of processList.split("\n")) {
-    const match = line.trim().match(/^(\d+)\s+\S+\s+(UIKitApplication:(.+?)\[[^\]]+\]\[[^\]]+\])$/);
-    if (match?.[3] === appId) {
-      return { pid: Number(match[1]), serviceLabel: match[2] };
-    }
-  }
-  return null;
-}
-
-export function findIosSimulatorAppProcessId(processList: string, appId: string): number | null {
-  return findIosSimulatorAppProcess(processList, appId)?.pid ?? null;
 }
 
 export function findAndroidCrashCommandRejection(result: ExecResult): string | undefined {

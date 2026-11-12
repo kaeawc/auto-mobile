@@ -53,6 +53,7 @@ describe("MCP tool annotations", () => {
     ["navigateTo", "Navigate to Screen", false, true],
     ["killDevice", "Kill Device", false, true],
     ["videoRecording", "Record Video", false, false],
+    ["blePeripheral", "Manage BLE Peripheral", false, false],
     ["seedContent", "Seed System Content", false, true],
     ["setPreference", "Set Preference", false, true],
     ["biometricAuth", "Simulate Biometrics", false, true],

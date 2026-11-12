@@ -1700,6 +1700,250 @@
     }
   },
   {
+    "name": "blePeripheral",
+    "title": "Manage BLE Peripheral",
+    "annotations": {
+      "destructiveHint": false
+    },
+    "description": "Manage a session-owned virtual BLE peripheral on Android netsim. start advertises battery, heartRate and/or custom GATT services; notify sends values to subscribed centrals; status reports readiness, connections and subscriptions; stop kills the sidecar. Requires python3; first start provisions Bumble. A connection pauses advertising until disconnect. Handles end with the session.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["start", "stop", "notify", "status"]
+        },
+        "name": {
+          "description": "Advertised local name (at most 20 UTF-8 bytes)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "address": {
+          "description": "Default F0:F1:F2:F3:F4:F5; use distinct addresses for simultaneous peripherals",
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$"
+        },
+        "presets": {
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["battery", "heartRate", "custom"]
+          }
+        },
+        "services": {
+          "description": "Required with the custom preset",
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uuid": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-f]{4}|[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+              },
+              "characteristics": {
+                "minItems": 1,
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "uuid": {
+                      "type": "string",
+                      "pattern": "^(?:[0-9a-f]{4}|[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+                    },
+                    "properties": {
+                      "minItems": 1,
+                      "maxItems": 2,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["read", "notify"]
+                      }
+                    },
+                    "initialValue": {
+                      "type": "object",
+                      "properties": {
+                        "value": {
+                          "type": "string",
+                          "maxLength": 1024
+                        },
+                        "encoding": {
+                          "default": "utf8",
+                          "type": "string",
+                          "enum": ["utf8", "hex"]
+                        }
+                      },
+                      "required": ["value"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["uuid", "properties"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["uuid", "characteristics"],
+            "additionalProperties": false
+          }
+        },
+        "deviceId": {
+          "description": "Android emulator serial; defaults to the session's device",
+          "type": "string",
+          "minLength": 1
+        },
+        "transport": {
+          "description": "Explicit Bumble transport URL; overrides device netsim discovery",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "handle": {
+          "description": "Session-owned handle returned by start; required for stop/notify/status",
+          "type": "string",
+          "minLength": 1
+        },
+        "characteristic": {
+          "description": "battery, heartRate, or a configured custom characteristic UUID",
+          "type": "string",
+          "minLength": 1
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "bpm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "value": {
+          "description": "Custom notification bytes as UTF-8 or hex",
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "encoding": {
+              "default": "utf8",
+              "type": "string",
+              "enum": ["utf8", "hex"]
+            }
+          },
+          "required": ["value"],
+          "additionalProperties": false
+        },
+        "sessionUuid": {
+          "description": "Calling device session",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "advertising": {
+          "type": "boolean"
+        },
+        "connected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "subscribed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pythonReady": {
+          "type": "boolean"
+        },
+        "bumbleReady": {
+          "type": "boolean"
+        },
+        "handle": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "presets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["battery", "heartRate", "custom"]
+          }
+        },
+        "transport": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "running",
+        "advertising",
+        "connected",
+        "subscribed",
+        "pythonReady",
+        "bumbleReady",
+        "handle",
+        "name",
+        "address",
+        "presets",
+        "transport"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "captureAudio",
     "title": "Capture Emulator Audio Output",
     "annotations": {
@@ -9629,6 +9873,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "blePeripheral",
               "captureAudio",
               "captureTrace",
               "changeLocalization",
@@ -9798,6 +10043,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "blePeripheral",
               "captureAudio",
               "captureTrace",
               "changeLocalization",
@@ -33982,6 +34228,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "blePeripheral",
               "captureAudio",
               "captureTrace",
               "changeLocalization",
@@ -47019,6 +47266,7 @@
             "audit",
             "backgroundWork",
             "biometricAuth",
+            "blePeripheral",
             "captureAudio",
             "captureTrace",
             "changeLocalization",
@@ -47150,6 +47398,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "blePeripheral",
               "captureAudio",
               "captureTrace",
               "changeLocalization",

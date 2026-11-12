@@ -35,6 +35,7 @@ import { registerRotateCrownTools } from "./rotateCrownTool";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools/registration";
 import { registerPrototypeWebExportTool } from "./prototypeWebExportTool";
+import { registerBlePeripheralTool } from "./blePeripheralTool";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
 import {
   CompositePrototypeAgentConnections,
@@ -142,6 +143,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
     ),
   });
   registerPrototypeWebExportTool();
+  registerBlePeripheralTool();
   registerDatabaseTools();
   registerStorageTools();
   registerPreferenceTools();

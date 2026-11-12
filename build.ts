@@ -87,6 +87,12 @@ if (!result.success) {
 
 console.log(`✓ Built ${result.outputs.length} files`);
 
+// Python stays outside the npm dependency graph; bundled chunks resolve this sibling asset.
+cpSync(
+  join(import.meta.dir, "src/features/blePeripheral/sidecar/peripheral.py"),
+  join(distPath, "src/ble-peripheral.py"),
+);
+
 const bundleDir = join(distPath, "src");
 const orderViolations = findEntryEvaluationOrderViolations(
   "index.js",

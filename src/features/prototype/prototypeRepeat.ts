@@ -1,5 +1,6 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { chargeMotionNode } from "./prototypeMotionBudget";
+import { PrototypeScreenBudget, prototypeScreenBudgetMessage } from "./prototypeScreenBudget";
 import { effectUses } from "./prototypeEffects";
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PrototypeRepeatData } from "./prototypeData";
@@ -481,8 +482,8 @@ function repeatKeyError(
 }
 
 interface Budget {
-  nodes: number;
-  images: number;
+  /** Expanded nodes and images, per stack screen and for the whole spec (#14213). */
+  screens: PrototypeScreenBudget;
   effects: number;
   animatedEffects: number;
   keyframeNodes: number;
@@ -533,13 +534,9 @@ function chargeExpandedNode(
   budget: Budget,
   at: string,
 ): RepeatError | undefined {
-  budget.nodes++;
-  if (budget.nodes > contract.limits.MAX_PROTOTYPE_NODES) {
-    return fail(at, "Expanded node limit exceeded");
-  }
-  budget.images += imageUses(node);
-  if (budget.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
-    return fail(at, "Expanded image limit exceeded");
+  const overflow = budget.screens.charge(1, 0) ?? budget.screens.charge(0, imageUses(node));
+  if (overflow) {
+    return fail(at, prototypeScreenBudgetMessage(overflow, true));
   }
   const motionLimit = chargeMotionNode(node, budget, contract.limits, path);
   if (motionLimit) {
@@ -572,15 +569,40 @@ function expandedErrors(
   const instances = scope && node.type !== "list" ? scope.items.length : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
-    for (const child of childrenOf(node, path)) {
-      const error = expandedErrors(child.node, child.path, budget, {
-        data,
-        repeatPath: nestedPath,
-      });
-      if (error) {
-        return error;
-      }
+    const error = expandedChildErrors(node, path, budget, { data, repeatPath: nestedPath });
+    if (error) {
+      return error;
     }
+  }
+  return undefined;
+}
+
+/** One instance's children; a stack's screens each open their own screen budget (#14213). */
+function expandedChildErrors(
+  node: Raw,
+  path: string,
+  budget: Budget,
+  options: { data: PrototypeRepeatData; repeatPath?: string },
+): RepeatError | undefined {
+  const stack = record(node.screens) !== undefined;
+  if (stack) {
+    budget.screens.enterStack();
+  }
+  for (const child of childrenOf(node, path)) {
+    const screen = stack && child.path.startsWith(`${path}.screens[`);
+    if (screen) {
+      budget.screens.enterScreen();
+    }
+    const error = expandedErrors(child.node, child.path, budget, options);
+    if (error) {
+      return error;
+    }
+    if (screen) {
+      budget.screens.exitScreen();
+    }
+  }
+  if (stack) {
+    budget.screens.exitStack();
   }
   return undefined;
 }
@@ -599,7 +621,13 @@ export function repeatErrors(
     expandedErrors(
       root,
       "root",
-      { nodes: 0, images: 0, effects: 0, animatedEffects: 0, keyframeNodes: 0, videoNodes: 0 },
+      {
+        screens: new PrototypeScreenBudget(),
+        effects: 0,
+        animatedEffects: 0,
+        keyframeNodes: 0,
+        videoNodes: 0,
+      },
       { data },
     )
   );

@@ -397,10 +397,330 @@
         {
           "type": "use",
           "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
         }
       ]
     }
   },
-  "expectedPath": "root.children[19] (use block) → components.block.root.children[79]",
+  "expectedPath": "root.children[99] (use block) \u2192 components.block.root",
   "expectedMessage": "Expanded node limit exceeded"
 }

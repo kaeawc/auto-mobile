@@ -12,8 +12,6 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.definitions
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_ACTION_DEPTH
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_CONDITION_DEPTH
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_IMAGES
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_NODES
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_SELECTOR_DEPTH
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Context
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Located
@@ -68,8 +66,9 @@ internal object PrototypeStructuralWalk {
       if (rule.text("name") == "item") prototypeImageSlotUses((value as? JsonObject)?.get("image"))
       else 0
     if (itemImages > 0) {
-      context.images += itemImages
-      if (context.images > MAX_PROTOTYPE_IMAGES) return fail("$path.image", "Image limit exceeded")
+      context.screens.charge(0, itemImages)?.let {
+        return fail("$path.image", it.message)
+      }
     }
     if (rule.text("name") == "condition") return visitCondition(value, target, path, context, depth)
     if (rule.text("name") == "action") return visitAction(value, target, path, context, depth)
@@ -104,10 +103,13 @@ internal object PrototypeStructuralWalk {
       return fail("$path.onAppear", "onAppear requires visibleWhen or the root")
     val node = value as? JsonObject ?: return fail(path, "Expected object")
     context.nodes.add(Located(node, path))
-    if (context.nodes.size > MAX_PROTOTYPE_NODES) return fail(path, "Node limit exceeded")
+    context.screens.charge(1, 0)?.let {
+      return fail(path, it.message)
+    }
     if (depth + 1 > MAX_PROTOTYPE_DEPTH) return fail(path, "Tree depth limit exceeded")
-    context.images += prototypeNodeImageUses(node)
-    if (context.images > MAX_PROTOTYPE_IMAGES) return fail(path, "Image limit exceeded")
+    context.screens.charge(0, prototypeNodeImageUses(node))?.let {
+      return fail(path, it.message)
+    }
     if (
       "keyframes" in node &&
         ++context.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES

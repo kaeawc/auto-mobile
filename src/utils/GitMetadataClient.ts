@@ -20,8 +20,6 @@ export interface GitVersionInfo {
 export interface GitCommandOptions {
   cwd: string;
   timeoutMs: number;
-  /** Stdout cap for a probe whose output scales with the tree; defaults to execFile's 1 MiB. */
-  maxBufferBytes?: number;
 }
 
 /** Injectable synchronous argv boundary for git metadata probes. */
@@ -42,11 +40,6 @@ export type GitAsyncCommandRunner = (
 export interface GitMetadataReader {
   kind(path: string): "file" | "directory" | null;
   readFile(path: string): string | null;
-  /**
-   * Last change time in epoch ms (the later of mtime and ctime, so a rename or
-   * an mtime-preserving copy still counts); null when the path is absent.
-   */
-  modifiedAtMs?(path: string): number | null;
 }
 
 const defaultReader: GitMetadataReader = {
@@ -65,11 +58,6 @@ const defaultReader: GitMetadataReader = {
       throw error;
     }
   },
-  modifiedAtMs(path) {
-    const stat = statSync(path, { throwIfNoEntry: false });
-    // User space can set mtime back (rename of an old file, `cp -p`, `touch -d`) but not ctime.
-    return stat ? Math.max(stat.mtimeMs, stat.ctimeMs) : null;
-  },
 };
 
 interface GitLocation {
@@ -81,8 +69,6 @@ interface GitLocation {
 
 export interface GitMetadataClient {
   readDirtyState(cwd: string): Promise<GitDirtyState | null>;
-  /** Latest write time (epoch ms) of any tracked path; null when unknown. */
-  readTrackedModifiedAt?(cwd: string): Promise<number | null>;
   readVersion(
     cwd: string,
     readPackageName: (directory: string) => string | null,
@@ -91,8 +77,6 @@ export interface GitMetadataClient {
 
 const PACKAGE_NAME = "@kaeawc/auto-mobile";
 const GIT_TIMEOUT_MS = 2_000;
-/** This repository's tracked-path listing is ~1.2 MiB; leave room for growth. */
-const TRACKED_LISTING_MAX_BYTES = 64 * 1024 * 1024;
 
 const defaultRunner: GitCommandRunner = (_command, args, { cwd, timeoutMs }) => {
   let result: ReturnType<typeof spawnSync> | null = null;
@@ -113,23 +97,13 @@ const defaultRunner: GitCommandRunner = (_command, args, { cwd, timeoutMs }) => 
   return (typeof result.stdout === "string" ? result.stdout : result.stdout.toString()).trim();
 };
 
-const defaultAsyncRunner: GitAsyncCommandRunner = async (
-  command,
-  args,
-  { cwd, timeoutMs, maxBufferBytes },
-) => {
+const defaultAsyncRunner: GitAsyncCommandRunner = async (command, args, { cwd, timeoutMs }) => {
   try {
     return await new Promise<string | null>((resolve) => {
       execFile(
         command,
         args,
-        {
-          cwd,
-          encoding: "utf8",
-          timeout: timeoutMs,
-          killSignal: "SIGTERM",
-          ...(maxBufferBytes === undefined ? {} : { maxBuffer: maxBufferBytes }),
-        },
+        { cwd, encoding: "utf8", timeout: timeoutMs, killSignal: "SIGTERM" },
         (error, stdout) => resolve(error ? null : stdout.trim()),
       );
     });
@@ -198,46 +172,6 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
       }
     }
     return { dirty, dirtyHash };
-  }
-
-  /**
-   * When any tracked file of the checkout was last written. A daemon process
-   * started after this instant loaded the working tree as it is now, whatever
-   * its own best-effort dirty stamp says (#17991). Every tracked path counts,
-   * not only the dirty ones, so an edit reverted to HEAD after the daemon
-   * started still shows. Paths changed against HEAD are added, so a staged
-   * deletion (`git rm`), which `ls-files` no longer lists, still counts. A
-   * deleted path uses its parent directory's time; any unreadable path or a
-   * failed listing makes the answer unknown.
-   */
-  async readTrackedModifiedAt(cwd: string): Promise<number | null> {
-    const toplevel = this.locate(cwd)?.toplevel;
-    if (!toplevel || !this.fs.modifiedAtMs) {
-      return null;
-    }
-    const options = { cwd, timeoutMs: GIT_TIMEOUT_MS, maxBufferBytes: TRACKED_LISTING_MAX_BYTES };
-    const [tracked, changed] = await Promise.all([
-      this.runAsync("git", ["ls-files", "-z", "--full-name", "--", ":/"], options),
-      this.runAsync(
-        "git",
-        ["diff", "HEAD", "--name-only", "--no-renames", "-z", "--", ":/"],
-        options,
-      ),
-    ]);
-    if (tracked === null || changed === null) {
-      return null;
-    }
-    const paths = new Set(`${tracked}\0${changed}`.split("\0").filter((name) => name.length > 0));
-    let latest: number | null = null;
-    for (const name of paths) {
-      const absolute = join(toplevel, name);
-      const modifiedAt = this.fs.modifiedAtMs(absolute) ?? this.fs.modifiedAtMs(dirname(absolute));
-      if (modifiedAt === null) {
-        return null;
-      }
-      latest = Math.max(latest ?? modifiedAt, modifiedAt);
-    }
-    return latest;
   }
 
   /**

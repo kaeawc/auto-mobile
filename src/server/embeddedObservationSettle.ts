@@ -9,6 +9,9 @@ import {
   hasPendingTerminalScreenshot,
 } from "../utils/PostActionCaptureContext";
 import { isAdoptableCapture } from "../features/observe/isAdoptableCapture";
+import { followUpDisplaySelector } from "../features/observe/DisplaySelection";
+import type { BootedDevice } from "../models";
+import type { displayInventoryOutcome } from "../models/DeviceInfo";
 import type { ObserveResult } from "../models/ObserveResult";
 import type { Platform } from "../models/Platform";
 import type { SettleObserve, SettleOptions } from "../features/observe/interfaces/SettleObserve";
@@ -60,6 +63,8 @@ export interface EmbeddedObservationSettleInput {
   observation: ObserveResult;
   /** Selector presence only; the action observation owns the resolved panel key. */
   args?: { display?: unknown };
+  /** The resolved device's inventory outcome, which decides an `active` selector's poll pin. */
+  device?: Pick<BootedDevice, typeof displayInventoryOutcome>;
   settleObserve: SettleObserve;
   signal?: AbortSignal;
   /** Drives the outer abort fence; defaults to the real clock. */
@@ -212,7 +217,7 @@ function settleOptions(
 ): SettleOptions {
   return {
     // Keep post-action polls on the panel selected at the shared tool boundary.
-    display: strictDisplay ? input.observation.display?.key : undefined,
+    display: strictDisplay ? settleDisplay(input) : undefined,
     timeoutMs: budgetMs,
     pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
     signal,
@@ -248,6 +253,15 @@ function settleOptions(
     // adopted terminal capture is processed once inside the poll loop (#6932).
     skipRecompositionTracking: true,
   };
+}
+
+/** The poll selector: the action's panel key, or `active` where that key is only a fallback. */
+function settleDisplay(input: EmbeddedObservationSettleInput): string | undefined {
+  const key = input.observation.display?.key;
+  const requested = input.args?.display;
+  return key !== undefined && typeof requested === "string" && input.device
+    ? followUpDisplaySelector(input.device, requested, key)
+    : key;
 }
 
 const defaultTimer: Timer = new SystemTimer();
@@ -522,6 +536,8 @@ export interface EmbeddedObservationSettleContext {
   screenshotHierarchyLagThresholdMs?: number;
   /** The resolved device's platform, which decides the lag's clock fallback (#17787). */
   platform?: Platform;
+  /** The resolved device's inventory outcome; see {@link EmbeddedObservationSettleInput.device}. */
+  device?: Pick<BootedDevice, typeof displayInventoryOutcome>;
 }
 
 /**
@@ -689,6 +705,7 @@ async function settleEmbeddedObservationResponse(
         actionClass,
         observation,
         args: ctx.args,
+        device: ctx.device,
         settleObserve,
         signal: ctx.signal,
         timer: ctx.timer,

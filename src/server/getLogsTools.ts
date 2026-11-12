@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { AndroidLogReader } from "../features/deviceLogs/AndroidLogReader";
 import {
@@ -32,11 +33,13 @@ const getLogsInput = z.object({
     .describe("Package or bundle id; on Android every process of the app, not one pid"),
   since: z
     .union([
-      z.enum(["lastAction", "sessionStart"]),
+      z.enum(["lastAction", "sessionStart", "run-start"]),
       z.object({ seconds: z.number().int().min(1).max(GET_LOGS_MAX_SECONDS) }).strict(),
     ])
     .optional()
-    .describe('Window start: "lastAction", "sessionStart", or {seconds} (default 300s)'),
+    .describe(
+      'Window start: "lastAction", "sessionStart", "run-start" (executePlan only), or {seconds} (default 300s)',
+    ),
   tags: z
     .array(z.string().min(1))
     .max(32)
@@ -78,6 +81,7 @@ export type GetLogsDependencyFactory = (
 export const defaultGetLogsDependencies: GetLogsDependencyFactory = (device, args) => ({
   clock: {
     now: () => defaultTimer.now(),
+    planStartMs: () => getToolSelectionContext()?.planStartMs,
     lastActionStartMs: (deviceId) => deviceActionClock.lastActionStartMs(deviceId),
     sessionStartMs: () =>
       args.sessionUuid

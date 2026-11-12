@@ -1,0 +1,39 @@
+{
+  "toolsListNames": [
+    "appLifecycle",
+    "crashApp",
+    "getAndroid",
+    "getApple",
+    "homeScreen",
+    "installApp",
+    "keyboard",
+    "killDevice",
+    "launchApp",
+    "listApps",
+    "listDeviceImages",
+    "listDevices",
+    "observe",
+    "pressButton",
+    "putAppFile",
+    "recentApps",
+    "sendKeys",
+    "setActiveDevice",
+    "setToolEnabled",
+    "swipeOn",
+    "tapAny",
+    "tapAt",
+    "tapOn",
+    "terminateApp",
+    "uninstallApp",
+    "wakeAndUnlock"
+  ],
+  "toolCatalogEntries": [
+    { "name": "executePlan", "enabledWithoutSession": false, "requiresDeviceSession": true },
+    { "name": "focusNavigate", "enabledWithoutSession": false, "requiresDeviceSession": true },
+    { "name": "getLogs", "enabledWithoutSession": false, "requiresDeviceSession": true },
+    { "name": "observe", "enabledWithoutSession": true, "requiresDeviceSession": false },
+    { "name": "provisionDevice", "enabledWithoutSession": false, "requiresDeviceSession": true },
+    { "name": "recordToolCalls", "enabledWithoutSession": false, "requiresDeviceSession": true },
+    { "name": "tapOn", "enabledWithoutSession": true, "requiresDeviceSession": false }
+  ]
+}

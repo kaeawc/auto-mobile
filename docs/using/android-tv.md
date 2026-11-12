@@ -98,7 +98,9 @@ appears in `listDevices` and can be asked for in a device `requires` clause or a
 
 ## Navigating a TV app
 
-TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
+TV apps are driven by focus, not touch. A TV session lists `focusNavigate` in `tools/list` without
+`enableTools`; other tools that are off by default, such as `executePlan`, stay off until you enable
+them (see [Dynamic tools](dynamic-tools.md)). Use `focusNavigate` to move D-pad focus to an element and
 `sendKeys` with `enter` to activate the focused item, or pass `select: true` to `focusNavigate` to
 press `enter` once focus lands; the result's `selected` is `true` only when `enter` was pressed.
 `pressButton` handles back, home and the remote's keys:
@@ -127,7 +129,12 @@ Both are available only when the server runs with `--embedded-sdk` and the app e
 AutoMobile SDK; see [Navigation graph](navigation-graph.md#availability).
 
 `focusNavigate` matches a target on the focused element or on a child label belonging to that
-control, so a card with its title in a child view counts. A focused scrollable container, or a
+control, so a card with its title in a child view counts. `observe` names such a card the same way:
+when the focused element has no text or content-desc of its own, `focusedElement.descendantLabel`
+is its child label, the `label` of its `skeleton` row. The field is omitted when no `skeleton` row
+at the focused bounds carries a label shown by a child, and for text fields. A card with several
+child labels gets the row's first one, which can differ from the child label `focusNavigate`
+matched. A focused scrollable container, or a
 container holding the target inside another focusable or clickable control, does not count for
 that child target; navigation continues until the control owns focus. To land on the exact control `tapOn` would tap, name the target
 with `until.label` or `until.elementId` alone: focus must then reach that control, and a focused

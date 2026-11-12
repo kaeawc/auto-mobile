@@ -10,6 +10,7 @@ import {
   probeCheckoutMcpServerVersion,
   type GitVersionInfo,
   type McpVersionDeps,
+  type McpVersionResolverDeps,
 } from "../../src/utils/mcpVersion";
 import {
   DefaultGitMetadataClient,
@@ -142,7 +143,7 @@ describe("createMcpVersionResolver", () => {
       dirty: true,
       dirtyHash: "abc123def456",
     }),
-    overrides: Partial<McpVersionDeps> = {},
+    overrides: Partial<McpVersionResolverDeps> = {},
   ) => {
     const timer = new FakeTimer();
     let dirtyReads = 0;
@@ -211,6 +212,76 @@ describe("createMcpVersionResolver", () => {
   test("isSettled is immediately true when no refinement is due", () => {
     const { resolver } = fixture(undefined, { env: { MCP_SERVER_VERSION: "9.9.9" } });
     expect(resolver.isSettled()).toBe(true);
+  });
+
+  // #18071: a daemon whose own dirty probe times out reports the content key its
+  // launching manager probed, so equal working trees compare equal by content.
+  describe("launch checkout key", () => {
+    const LAUNCHED = `${plain}.dirty.47e2e3e8f6a5`;
+    const launchedWith = (key: string | undefined) => ({ readLaunchVersion: () => key });
+
+    test.each([
+      ["timed out", async () => null],
+      ["dirty without a hash", async () => ({ dirty: true, dirtyHash: null })],
+    ])("adopts the launch key when the probe %s", async (_label, readDirtyState) => {
+      const { resolver } = fixture(readDirtyState, launchedWith(LAUNCHED));
+      expect(await resolver.resolveSettled()).toBe(LAUNCHED);
+    });
+
+    test("adopts the launch key when the probe throws", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { resolver } = fixture(async () => {
+          throw new Error("git timed out");
+        }, launchedWith(LAUNCHED));
+        expect(await resolver.resolveSettled()).toBe(LAUNCHED);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("its own hash wins over the launch key", async () => {
+      const { resolver } = fixture(undefined, launchedWith(LAUNCHED));
+      expect(await resolver.resolveSettled()).toBe(`${plain}.dirty.abc123def456`);
+    });
+
+    test("a tree its own probe saw clean ignores the launch key", async () => {
+      const { resolver } = fixture(async () => ({ dirty: false, dirtyHash: null }), {
+        ...launchedWith(LAUNCHED),
+      });
+      expect(await resolver.resolveSettled()).toBe(plain);
+    });
+
+    test.each([
+      ["another commit", "0.0.39+gbbbbbbbbbbbb.dirty.47e2e3e8f6a5"],
+      ["another release", "0.0.40+g1a2b3c4d5e6f.dirty.47e2e3e8f6a5"],
+      ["no working-tree hash", `${plain}.dirty`],
+      ["no key", undefined],
+    ])("ignores a launch key from %s", async (_label, key) => {
+      const { resolver } = fixture(async () => null, launchedWith(key));
+      expect(await resolver.resolveSettled()).toBe(plain);
+    });
+
+    test("keeps the hashless dirty marker when the launch key does not apply", async () => {
+      const { resolver } = fixture(async () => ({ dirty: true, dirtyHash: null }), {
+        ...launchedWith(undefined),
+      });
+      expect(await resolver.resolveSettled()).toBe(`${plain}.dirty`);
+    });
+
+    test("a repository with no commits stays unstamped and never reads the key", async () => {
+      let keyReads = 0;
+      const { resolver, counts } = fixture(undefined, {
+        readGitVersion: () => null,
+        readLaunchVersion: () => {
+          keyReads++;
+          return LAUNCHED;
+        },
+      });
+      expect(await resolver.resolveSettled()).toBe("0.0.39");
+      expect(counts().dirtyReads).toBe(0);
+      expect(keyReads).toBe(0);
+    });
   });
 
   test("settlement can be the first read, as in the version-only entrypoint", async () => {

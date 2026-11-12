@@ -609,7 +609,16 @@ const migrateStepFields = (
     // `expectations` is likewise a plan-step field: as a tool param a strict schema rejects the
     // step (#9925). PlanNormalizer keeps it off `params` and the executor checks it.
     if (
-      ["tool", "command", "label", "params", "optional", "expectations", "geometry"].includes(key)
+      [
+        "tool",
+        "command",
+        "label",
+        "params",
+        "optional",
+        "expectations",
+        "expect",
+        "geometry",
+      ].includes(key)
     ) {
       continue;
     }

@@ -141,11 +141,30 @@ function boundPages(
   return pages;
 }
 
-/** Initial navigation only; route declarations describe types, not parameter values. */
-function initialStacks(spec: Record<string, unknown>): NonNullable<PrototypeEvent["stacks"]> {
-  const stacks: NonNullable<PrototypeEvent["stacks"]> = {};
+type PrototypeStacks = NonNullable<PrototypeEvent["stacks"]>;
+
+/**
+ * Each stack's navigation. A same-id show or patch keeps the previous snapshot whose screens all
+ * still exist, as `PrototypeRuntime.retainedStack` does; any other stack starts at `start`. Route
+ * declarations describe types, not parameter values.
+ */
+function boundStacks(
+  spec: Record<string, unknown>,
+  previous: PrototypeStacks = {},
+): PrototypeStacks {
+  const stacks: PrototypeStacks = {};
   walkPrototypeNodes({ root: spec.root }, (node) => {
     if (node.type !== "stack" || typeof node.id !== "string" || typeof node.start !== "string") {
+      return;
+    }
+    const screens = record(node.screens) ?? {};
+    const kept = previous[node.id];
+    if (
+      kept !== undefined &&
+      kept.path.length > 0 &&
+      kept.path.every((screen) => screen in screens)
+    ) {
+      stacks[node.id] = structuredClone(kept);
       return;
     }
     const route = record(record(node.routes)?.[node.start]);
@@ -157,6 +176,26 @@ function initialStacks(spec: Record<string, unknown>): NonNullable<PrototypeEven
     };
   });
   return stacks;
+}
+
+/**
+ * `state` with each integral value bound to a pager clamped to its pages, as
+ * `PrototypeRuntime.normalizePagerState` writes it back, so state and pages never disagree.
+ */
+function normalizePagerState(spec: Record<string, unknown>, state: PrototypeState): PrototypeState {
+  const normalized = { ...state };
+  walkPrototypeNodes({ root: spec.root }, (node) => {
+    if (node.type !== "pager" || typeof node.stateKey !== "string") {
+      return;
+    }
+    const value = normalized[node.stateKey];
+    if (typeof value !== "number" || !Number.isInteger(value)) {
+      return;
+    }
+    const last = Math.max(0, (Array.isArray(node.children) ? node.children.length : 0) - 1);
+    normalized[node.stateKey] = Math.min(Math.max(value, 0), last);
+  });
+  return normalized;
 }
 
 const asState = (value: unknown): PrototypeState =>
@@ -199,7 +238,8 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
     }
     const inPlace = previous !== undefined && overrides.reset !== true;
     const copy: Record<string, unknown> = { ...structuredClone(spec) };
-    const state = asState(copy.state);
+    const state = normalizePagerState(copy, asState(copy.state));
+    copy.state = state;
     const ledger = this.ledgers.get(spec.id) ?? { revision: 0, lastSequence: 0 };
     const revision = ++ledger.revision;
     this.ledgers.set(spec.id, ledger);
@@ -208,7 +248,7 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
       state,
       pages: boundPages(copy, state, inPlace ? previous.pages : {}),
       ledger,
-      stacks: initialStacks(copy),
+      stacks: boundStacks(copy, inPlace ? previous.stacks : {}),
       // A show writes every declared key, as CtrlProxy stamps them with the show's revision.
       stateRevisions: new Map(Object.keys(state).map((key) => [key, revision])),
     });
@@ -252,7 +292,7 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
         error: `Invalid patch at ${applied.error.path}: ${applied.error.message}`,
       };
     }
-    const state = asState(applied.spec.state);
+    const state = normalizePagerState(applied.spec, asState(applied.spec.state));
     entry.ledger.revision += 1;
     const changed = stampChangedKeys(
       entry.stateRevisions,
@@ -260,14 +300,15 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
       state,
       entry.ledger.revision,
     ).filter((key) => key in state);
-    entry.spec = applied.spec;
+    entry.spec = { ...applied.spec, state };
     entry.state = state;
     entry.pages = boundPages(entry.spec, state, entry.pages);
-    entry.stacks = initialStacks(entry.spec);
+    entry.stacks = boundStacks(entry.spec, entry.stacks);
     if (changed.length > 0) {
       this.dispatch({
         id: patch.id,
-        kind: "change",
+        // PrototypeRuntime reports a landed state write as an `emit` named `change`.
+        kind: "emit",
         name: "change",
         payload:
           changed.length === 1

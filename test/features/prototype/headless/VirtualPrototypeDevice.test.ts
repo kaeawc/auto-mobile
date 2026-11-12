@@ -140,7 +140,10 @@ describe("VirtualPrototypeDevice (#17974)", () => {
       );
       store.record(scope, "show", { id: "one" }, { result });
       virtual.dispatch({ id: "one", kind: "emit", name: "before" });
-      const waiting = coordinator.awaitEvent(scope, "one", virtual, { kind: "change" });
+      const waiting = coordinator.awaitEvent(scope, "one", virtual, {
+        kind: "emit",
+        eventName: "change",
+      });
       expect(
         await virtual.requestPatchPrototype({
           id: "one",
@@ -150,7 +153,7 @@ describe("VirtualPrototypeDevice (#17974)", () => {
       ).toMatchObject({ success: true, revision: 2 });
       expect((await waiting).event).toMatchObject({
         sequence: 2,
-        kind: "change",
+        kind: "emit",
         name: "change",
         payload: { key: "page", value: 1 },
         state: { page: 1 },
@@ -182,7 +185,7 @@ describe("VirtualPrototypeDevice (#17974)", () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       sequence: 1,
-      kind: "change",
+      kind: "emit",
       name: "change",
       payload: { keys: ["count", "label"], values: { count: 2, label: "b" } },
       state: { count: 2, label: "b" },
@@ -282,6 +285,108 @@ describe("VirtualPrototypeDevice (#17974)", () => {
     expect(events[0].stacks).toEqual(stacks);
     await virtual.requestDismissPrototype({ all: true });
     expect((await virtual.requestInspectPrototypes()).stacks).toBeUndefined();
+  });
+
+  const stackSpec = (screens: Record<string, unknown>) =>
+    spec("nav", {
+      root: { type: "stack", id: "main", start: "home", screens },
+    });
+  const text = (value: string) => ({ type: "text", text: value });
+  const showOnHome = async (virtual: VirtualPrototypeDevice) => {
+    await virtual.requestShowPrototype(stackSpec({ home: text("Home"), detail: text("Detail") }));
+    const { stacks } = await virtual.requestInspectPrototypes();
+    expect(stacks?.main).toEqual({ path: ["home"], depth: 1 });
+  };
+
+  test("an in-place show keeps a stack path whose screens still exist (#18076)", async () => {
+    const virtual = device();
+    await showOnHome(virtual);
+    await virtual.requestShowPrototype(
+      spec("nav", {
+        root: {
+          type: "stack",
+          id: "main",
+          start: "detail",
+          screens: { home: text("Home"), detail: text("Detail") },
+        },
+      }),
+    );
+    expect((await virtual.requestInspectPrototypes()).stacks?.main).toEqual({
+      path: ["home"],
+      depth: 1,
+    });
+  });
+
+  test("a reset show or a removed screen restarts the stack from start (#18076)", async () => {
+    for (const variant of ["reset", "removed"] as const) {
+      const virtual = device();
+      await showOnHome(virtual);
+      const screens =
+        variant === "removed"
+          ? { detail: text("Detail") }
+          : { home: text("Home"), detail: text("Detail") };
+      await virtual.requestShowPrototype(
+        spec("nav", { root: { type: "stack", id: "main", start: "detail", screens } }),
+        undefined,
+        undefined,
+        variant === "reset" ? { reset: true } : {},
+      );
+      expect((await virtual.requestInspectPrototypes()).stacks?.main).toEqual({
+        path: ["detail"],
+        depth: 1,
+      });
+    }
+  });
+
+  test("a patch keeps a compatible stack path (#18076)", async () => {
+    const virtual = device();
+    await showOnHome(virtual);
+    await virtual.requestPatchPrototype({
+      id: "nav",
+      ops: [
+        {
+          op: "replaceNode",
+          id: "main",
+          node: {
+            type: "stack",
+            id: "main",
+            start: "detail",
+            screens: { home: text("Home"), detail: text("Detail") },
+          },
+        },
+      ],
+    });
+    expect((await virtual.requestInspectPrototypes()).stacks?.main).toEqual({
+      path: ["home"],
+      depth: 1,
+    });
+  });
+
+  test("show and patch write a clamped pager position back into state (#18076)", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(
+      spec("one", { state: { page: 99 }, ...pager(2, { stateKey: "page" }) }),
+    );
+    expect((await virtual.requestInspectPrototypes()).prototypes?.[0]).toMatchObject({
+      state: { page: 1 },
+      pages: { tabs: 1 },
+    });
+    const events: PrototypeEvent[] = [];
+    virtual.onPrototypeEvent((event) => events.push(event));
+    await virtual.requestPatchPrototype({
+      id: "one",
+      baseRevision: 1,
+      ops: [{ op: "replace", path: "/state/page", value: -4 }],
+    });
+    expect((await virtual.requestInspectPrototypes()).prototypes?.[0]).toMatchObject({
+      state: { page: 0 },
+      pages: { tabs: 0 },
+    });
+    expect(events[0]).toMatchObject({
+      kind: "emit",
+      name: "change",
+      payload: { key: "page", value: 0 },
+    });
   });
 
   test("a show replaces other prototypes unless replaceOthers is false", async () => {

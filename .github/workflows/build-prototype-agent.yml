@@ -41,10 +41,10 @@ jobs:
           ref: ${{ inputs.checkout-ref || github.sha }}
           persist-credentials: false
 
-      - name: "Select Xcode 26.5"
+      - name: "Select Xcode 26.6"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.5"
+          xcode-version: "26.6"
 
       - name: "Build and ad-hoc sign prototype agent"
         run: ./scripts/ios/build-prototype-agent.sh /tmp/AutoMobilePrototypeAgent.dylib

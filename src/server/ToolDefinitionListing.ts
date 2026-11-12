@@ -5,6 +5,11 @@ import { serverConfig } from "../utils/ServerConfig";
 import { RegisteredTool, ToolListingOptions, withItemsEnum } from "./toolRegistryTypes";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import { TOOL_ANNOTATIONS } from "./toolAnnotations";
+import {
+  deriveToolRequirements,
+  TOOL_REQUIREMENTS_META_KEY,
+  type ToolRequirement,
+} from "./toolRequirements";
 /**
  * Registration flags advertised as `true` under a `_meta` key: plan-only, debug-only and
  * embedded-SDK-only gating, plus the traits the daemon reads from the committed definitions.
@@ -81,6 +86,7 @@ export class ToolDefinitionListing {
           "automobile/hostSideState"?: boolean;
           "automobile/opaquePersistentState"?: boolean;
           "automobile/deviceReadOnlyArgs"?: readonly DeviceReadOnlyArgShape[];
+          "automobile/requires"?: ToolRequirement[];
           ui?: { resourceUri: string };
         };
       } = {
@@ -118,6 +124,13 @@ export class ToolDefinitionListing {
         definition._meta = {
           ...definition._meta,
           "automobile/deviceReadOnlyArgs": tool.deviceReadOnlyArgs,
+        };
+      }
+      // Typed requirements derived from the runtime gates (#18141), empty when none. Catalog only.
+      if (options.includeRequirements) {
+        definition._meta = {
+          ...definition._meta,
+          [TOOL_REQUIREMENTS_META_KEY]: deriveToolRequirements(tool, inputSchema),
         };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.

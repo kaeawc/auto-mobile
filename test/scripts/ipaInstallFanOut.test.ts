@@ -93,8 +93,8 @@ describe("#4127 CtrlProxy IPA install fan-out", () => {
 
   test("Xcode selection still precedes the simulator runtime ensure", () => {
     // The runtime ensure resolves against the selected toolchain, so the
-    // reorder must not float it above `Select Xcode 26.5`.
-    const selectIndex = indexOfNamed(steps, "Select Xcode 26.5");
+    // reorder must not float it above `Select Xcode 26.6`.
+    const selectIndex = indexOfNamed(steps, "Select Xcode 26.6");
     const runtimeIndex = indexOfNamed(steps, RUNTIME_STEP);
 
     expect(selectIndex).toBeGreaterThanOrEqual(0);

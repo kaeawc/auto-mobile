@@ -6,8 +6,10 @@ import {
 
 describe("featureFlagDisabledMessage (#16906)", () => {
   test("names the tool, the flag, the exact CLI command and the IDE settings page", () => {
-    expect(featureFlagDisabledMessage("device-condition", "deviceCondition")).toBe(
-      "deviceCondition is behind the 'device-condition' feature flag, which is disabled. " +
+    expect(
+      featureFlagDisabledMessage("device-condition", "setDeviceState", "deviceCondition"),
+    ).toBe(
+      "setDeviceState deviceCondition is behind the 'device-condition' feature flag, which is disabled. " +
         "Enable it with `auto-mobile --daemon set-feature-flag device-condition true` " +
         "or in the IDE plugin under Settings > AutoMobile > Feature Flags, then retry the call.",
     );

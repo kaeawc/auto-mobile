@@ -31,6 +31,12 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { getToolCallRecorder, stopToolCallRecording } from "../daemon/toolCallRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
+import {
+  planExportFormatField,
+  xcTestScaffoldField,
+  xcTestScaffoldSchema,
+  type PlanExportFormat,
+} from "../features/record/swiftTestScaffold";
 
 // Start device gesture recording tool schema (empty - uses active device)
 const recordDeviceGesturesSchema = addSessionUuidToSchema(z.object({}).strict());
@@ -83,6 +89,7 @@ const exportPlanSchema = addSessionUuidToSchema(
           "recordDeviceGestures recordingId; defaults to the active recording. Omit it to end this connection's recordToolCalls recording",
         ),
       planName: z.string().optional().describe("Plan name"),
+      format: planExportFormatField(),
       resourceLink: resourceLinkField(),
     })
     .strict(),
@@ -101,6 +108,7 @@ const exportPlanResultSchema = z.object({
     .describe(
       "recordToolCalls recordings only, present when non-empty: calls skipped or recorded in a weakened form",
     ),
+  xctest: xcTestScaffoldSchema,
   error: z.string().optional(),
   reason: z.string().optional(),
 });
@@ -114,7 +122,11 @@ const NO_ACTIVE_RECORDING_ERROR =
  * exports either recorder (#17950). A recordingId names a device gesture recording, so a call
  * that passes one never ends tool calls; with no recording to export it is the no-recording error.
  */
-function exportToolCallRecording(params: { recordingId?: string; planName?: string }) {
+function exportToolCallRecording(params: {
+  recordingId?: string;
+  planName?: string;
+  format?: PlanExportFormat;
+}) {
   const connectionId = currentAutolockMcpSessionId();
   if (
     params.recordingId ||
@@ -134,6 +146,7 @@ function exportToolCallRecording(params: { recordingId?: string; planName?: stri
     stepCount: result.stepCount,
     durationMs: result.durationMs,
     ...(result.warnings.length > 0 && { warnings: result.warnings }),
+    ...xcTestScaffoldField(params.format, result.planName),
   });
 }
 
@@ -209,6 +222,7 @@ function exportRequester(params: object, deviceId: string): LifecycleRequester {
 
 function exportedDeviceGestureRecordingResponse(
   result: Awaited<ReturnType<typeof stopDeviceGestureRecording>>,
+  format: PlanExportFormat | undefined,
 ) {
   return createStructuredToolResponse({
     success: true,
@@ -217,6 +231,7 @@ function exportedDeviceGestureRecordingResponse(
     planContent: result.planContent,
     stepCount: result.stepCount,
     durationMs: result.durationMs,
+    ...xcTestScaffoldField(format, result.planName),
     ...(result.error ? { error: result.error } : {}),
   });
 }
@@ -225,6 +240,7 @@ function exportedDeviceGestureRecordingResponse(
 const exportPlanTool = async (params: {
   recordingId?: string;
   planName?: string;
+  format?: PlanExportFormat;
   sessionUuid?: string;
 }): Promise<any> => {
   const failedResponse = (error: unknown) =>
@@ -244,7 +260,7 @@ const exportPlanTool = async (params: {
         params.sessionUuid,
       );
       if (joined) {
-        return exportedDeviceGestureRecordingResponse(joined);
+        return exportedDeviceGestureRecordingResponse(joined, params.format);
       }
     }
   } catch (error) {
@@ -260,7 +276,7 @@ const exportPlanTool = async (params: {
         ? getStoppedDeviceGestureRecording(params.recordingId, params.sessionUuid)
         : undefined;
     if (retained) {
-      return exportedDeviceGestureRecordingResponse(retained);
+      return exportedDeviceGestureRecordingResponse(retained, params.format);
     }
     if (!status) {
       return exportToolCallRecording(params);
@@ -280,7 +296,7 @@ const exportPlanTool = async (params: {
     // Stop the recording the holder check judged, and get the plan
     const result = await stopDeviceGestureRecording(status.recordingId, params.planName);
 
-    return exportedDeviceGestureRecordingResponse(result);
+    return exportedDeviceGestureRecordingResponse(result, params.format);
   } catch (error) {
     logger.error(`[exportPlan] Failed to export plan: ${error}`);
     return failedResponse(error);

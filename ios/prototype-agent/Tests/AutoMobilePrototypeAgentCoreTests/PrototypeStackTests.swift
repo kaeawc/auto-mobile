@@ -431,7 +431,7 @@ final class PrototypeStackTests: XCTestCase {
         let invalidScreens: [[String: JSONValue]] = [
             [:],
             ["": text("bad")],
-            Dictionary(uniqueKeysWithValues: (0 ... 32).map { ("s\($0)", text("x")) }),
+            Dictionary(uniqueKeysWithValues: (0 ... 64).map { ("s\($0)", text("x")) }),
         ]
         for screens in invalidScreens {
             XCTAssertThrowsError(try spec(.object([

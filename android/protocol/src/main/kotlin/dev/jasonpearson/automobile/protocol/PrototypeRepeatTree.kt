@@ -175,6 +175,40 @@ internal object PrototypeRepeatTree {
     return null
   }
 
+  private fun expandedNodeErrors(
+    node: JsonObject,
+    path: String,
+    budget: Budget,
+    at: String,
+  ): PrototypeSpecError? {
+    (budget.screens.charge(1, 0) ?: budget.screens.charge(0, imageUses(node)))?.let {
+      return fail(at, it.expandedMessage)
+    }
+    return specialNodeErrors(node, path, budget)
+      ?: PrototypeEffectRules.chargeExpanded(node, at, budget)
+  }
+
+  private fun expandedChildErrors(
+    node: JsonObject,
+    path: String,
+    budget: Budget,
+    repeatPath: String?,
+    data: PrototypeRepeatData,
+  ): PrototypeSpecError? {
+    val stack = node["screens"] is JsonObject
+    if (stack) budget.screens.enterStack()
+    for (child in childrenOf(node, path)) {
+      val screen = stack && child.path.startsWith("$path.screens[")
+      if (screen) budget.screens.enterScreen()
+      expandedErrors(child.node, child.path, budget, repeatPath, data)?.let {
+        return it
+      }
+      if (screen) budget.screens.exitScreen()
+    }
+    if (stack) budget.screens.exitStack()
+    return null
+  }
+
   /** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
   fun expandedErrors(
     node: JsonObject,
@@ -183,30 +217,15 @@ internal object PrototypeRepeatTree {
     repeatPath: String?,
     data: PrototypeRepeatData,
   ): PrototypeSpecError? {
-    val at = repeatPath ?: path
-    (budget.screens.charge(1, 0) ?: budget.screens.charge(0, imageUses(node)))?.let {
-      return fail(at, it.expandedMessage)
-    }
-    specialNodeErrors(node, path, budget)?.let {
-      return it
-    }
-    PrototypeEffectRules.chargeExpanded(node, at, budget)?.let {
+    expandedNodeErrors(node, path, budget, repeatPath ?: path)?.let {
       return it
     }
     val scope = scopeOf(node, path, data)
     val nestedPath = if (scope != null) "$path.repeat" else repeatPath
-    val stack = node["screens"] is JsonObject
     repeat(if (node.text("type") == "list") 1 else scope?.items?.size ?: 1) {
-      if (stack) budget.screens.enterStack()
-      for (child in childrenOf(node, path)) {
-        val screen = stack && child.path.startsWith("$path.screens[")
-        if (screen) budget.screens.enterScreen()
-        expandedErrors(child.node, child.path, budget, nestedPath, data)?.let {
-          return it
-        }
-        if (screen) budget.screens.exitScreen()
+      expandedChildErrors(node, path, budget, nestedPath, data)?.let {
+        return it
       }
-      if (stack) budget.screens.exitStack()
     }
     return null
   }

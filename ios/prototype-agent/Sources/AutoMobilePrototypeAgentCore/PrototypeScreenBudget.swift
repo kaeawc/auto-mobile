@@ -58,6 +58,9 @@ struct PrototypeScreenBudget {
     private var stacks: [Counts] = []
     private var total = Counts()
 
+    var totalNodes: Int { total.nodes }
+    var totalImages: Int { total.images }
+
     init(
         maxNodes: Int = PrototypeLimits.maxNodes,
         maxImages: Int = PrototypeContractValidator.limit("MAX_PROTOTYPE_IMAGES"),

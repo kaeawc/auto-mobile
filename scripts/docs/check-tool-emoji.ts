@@ -14,7 +14,7 @@ import { TOOL_EMOJI, TOOLS_PAGE, toolPage } from "../../src/server/toolEmoji";
 
 const EMOJI = String.raw`\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic}|\p{Emoji_Modifier})*`;
 const NAME = String.raw`(?:\x60(\w+)\x60|<code>(\w+)</code>)`;
-const LINKED_NAME = String.raw`\[(?:\x60(\w+)\x60|<code>(\w+)</code>)\]\(([^)\s]+)\)`;
+const LINKED_NAME = String.raw`\[(?:\x60(\w+)\x60|<code>(\w+)</code>)\]\(([^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)`;
 const REFERENCE = new RegExp(String.raw`(${EMOJI})[ \t]*(?:${LINKED_NAME}|${NAME})`, "gu");
 
 export interface ToolEmojiReference {

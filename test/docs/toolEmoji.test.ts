@@ -83,6 +83,16 @@ describe("tool emoji docs check", () => {
     ]);
   });
 
+  test("checks titled links like plain ones", () => {
+    expect(checkDoc("docs/using/a.md", '👁️ [`observe`](observe.md "Observe")', registry)).toEqual(
+      [],
+    );
+    expect(checkDoc("docs/other.md", "🚀 [`observe`](wrong.md 'Observe')", registry)).toEqual([
+      "docs/other.md:1: 🚀 is launchApp's emoji but is used with observe (use 👁️)",
+      "docs/other.md:1: 🚀 observe must link to docs/using/observe.md",
+    ]);
+  });
+
   test("lists tools the tools page does not show with an emoji", () => {
     expect(
       missingFromToolsPage("| 👆 <code>tapOn</code> |\n| `launchApp` |", ["tapOn", "launchApp"]),

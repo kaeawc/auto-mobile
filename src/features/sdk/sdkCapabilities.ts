@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Host-side model of the Android SDK's versioned capability and capture-policy snapshot

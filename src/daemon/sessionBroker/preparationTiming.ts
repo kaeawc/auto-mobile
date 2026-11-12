@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { TimingData, TimingEntry } from "../../models/TimingData";
 import type { SessionPreparationTiming } from "./devicePort";
 

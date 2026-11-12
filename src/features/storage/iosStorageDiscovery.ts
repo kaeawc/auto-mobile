@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * iOS Keychain capability and shared-store states the AutoMobile SDK reports in its

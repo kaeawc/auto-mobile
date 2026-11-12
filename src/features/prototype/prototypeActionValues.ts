@@ -1,5 +1,5 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeJsonSchema } from "./prototypeJson";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";

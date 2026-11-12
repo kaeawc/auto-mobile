@@ -27,9 +27,11 @@ in that bundle: **`kysely`**. Migrations are bundled through static imports.
 `sql` tag, and such a folder resolves it from its own location. Dropping the root
 is a separate runtime-graph change.
 
-The server uses the `zod/v4` subpath exported by **`zod@3.25.76`**. It remains
-bundled into `dist/`, while the exact root package is also published so every
-Jimp `zod: ^3.23.8` edge resolves to the same pinned version. Every other
+The server uses the `zod/v4` and `zod/v3` subpaths exported by **`zod@4.6.7`**
+(`zod/v3` keeps the v3 API for schemas written against it). It remains bundled into
+`dist/`, while the exact root package is also published. Jimp's `@jimp/plugin-*`
+packages declare `zod: ^3.23.8`; a root `overrides.zod` entry lifts those edges onto the
+same 4.x version, so the lock holds one zod copy below no patched floor. Every other
 inlined package (`werift`, the MCP SDK, `@anthropic-ai/sdk`, …) is not needed at install time and
 lives in `devDependencies`; consumers never install them, which is what removed
 the `@peculiar/asn1-*` install path entirely.
@@ -46,9 +48,9 @@ small `bundledDependencies` set for the conflicting Jimp paths:
   `@material-design-icons/svg` (read from disk through `import.meta.resolve`, which
   the roots derivation counts like a dynamic import) — and every
   **pure-transitive** node of their closure are pinned to exact versions;
-- **shared Jimp validator** — `zod@3.25.76` is a direct exact pin. AutoMobile
-  imports its `zod/v4` subpath, so the bundled server retains the v4 API while
-  Jimp's v3-compatible ranges cannot re-resolve;
+- **shared Jimp validator** — `zod@4.6.7` is a direct exact pin, and `overrides.zod`
+  holds Jimp's `^3.23.8` ranges on it. Jimp's plugins call only the zod API shared by
+  v3 and v4 (`z.object`, `z.number`, `z.union`, …);
 - **platform-native `@img/sharp-*`** binaries stay in `optionalDependencies`
   (already exact-pinned, resolved per platform);
 - non-native `@img` transitives, including sharp's `@img/colour`, remain in

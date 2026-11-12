@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { keySchema, pointerSchema } from "./prototypeActionValues";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";

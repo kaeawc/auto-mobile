@@ -9,7 +9,7 @@
  * unsolicited `prototype_event` pushes. Same-id `show_prototype` is the update path.
  */
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../prototypeSpec";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { createConnection } from "node:net";
 import { ActionableError } from "../../../models/ActionableError";
 import type { IdGenerator } from "../../../utils/IdGenerator";

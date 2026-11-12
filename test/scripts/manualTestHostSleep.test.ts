@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   createSleepGapDetector,
   markRowsHostSlept,

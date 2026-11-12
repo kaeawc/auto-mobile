@@ -312,7 +312,7 @@ describe("MCP Tools Schema", () => {
     // NAME (issue #4181): the old title claimed "fields ... have incorrect
     // values" but the body calls a nonexistent tool and asserts "Unknown tool".
     try {
-      const { z } = await import("zod");
+      const { z } = await import("zod/v3");
       await client.request(
         {
           method: "tools/call",

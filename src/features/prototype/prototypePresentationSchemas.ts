@@ -1,5 +1,5 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { pointerSchema, stateKeySchema } from "./prototypeActionValues";

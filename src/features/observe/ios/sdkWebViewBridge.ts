@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Host-side model of the iOS SDK WKWebView bridge's values (#5162). The Swift source of truth is

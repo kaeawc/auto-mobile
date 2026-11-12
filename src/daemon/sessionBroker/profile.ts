@@ -2,7 +2,7 @@ import type { AvdConfig, AvdConfigReader } from "../../utils/android-cmdline-too
 import type { BindingResultEntry } from "./provisioning/acquisitionResult";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
 import type { BrokerResourceRecord } from "./store";

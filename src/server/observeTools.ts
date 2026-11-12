@@ -139,7 +139,12 @@ const observeScopeFocusSchema = z
       ).safeParse(cleanValue);
       if (!parsed.success) {
         // Abort before the permissive legacy arm can consume an invalid nested selector.
-        ctx.issues.push(...parsed.error.issues.map((issue) => ({ ...issue, continue: false })));
+        // zod 4.6 types each finalized issue's `input` per code; re-raising is still the same issue.
+        ctx.issues.push(
+          ...parsed.error.issues.map(
+            (issue) => ({ ...issue, continue: false }) as z.core.$ZodRawIssue,
+          ),
+        );
         return z.NEVER;
       }
       return parsed.data;

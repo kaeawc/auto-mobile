@@ -1,5 +1,5 @@
 import { releaseVersion, withoutDirtyStamp } from "../../utils/mcpVersion";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { type BuildIdentity, buildIdentitiesMatch, describeBuildIdentity } from "./buildIdentity";
 
 /**

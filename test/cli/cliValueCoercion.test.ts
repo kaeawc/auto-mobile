@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { z as v4 } from "zod/v4";
 import {
   asDeclaredNumber,

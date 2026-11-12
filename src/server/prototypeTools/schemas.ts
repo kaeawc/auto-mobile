@@ -3,7 +3,7 @@ import {
   MOCK_BACKEND_ID,
 } from "../../features/prototype/prototypeMockSchema";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
-import { z as specZ } from "zod";
+import { z as specZ } from "zod/v3";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
 import { prototypeContractPatterns } from "../../features/prototype/prototypeContractPatterns";
 import { z } from "zod/v4";

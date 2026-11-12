@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /** Every `transition` value the contract names; `blurReplace` is gated by `prototype_choreography_v1`. */
 export const prototypeTransitionTypeSchema = z.enum([

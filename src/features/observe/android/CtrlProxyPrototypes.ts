@@ -12,7 +12,7 @@ import {
   type PrototypePatchReply,
 } from "../../prototype/prototypePatchWire";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { parsePrototypeStacks, prototypeStacksSchema } from "./prototypeStacksWire";
 import { ActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";

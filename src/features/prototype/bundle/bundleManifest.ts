@@ -2,7 +2,7 @@ import { record } from "../prototypeTemplate";
 import { PROTOTYPE_SHADER_MIME_TYPE } from "../prototypeShaderSource";
 import { BundleFailure } from "./bundleContract";
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   detectFontMimeType,
   isPrototypeFontMimeType,

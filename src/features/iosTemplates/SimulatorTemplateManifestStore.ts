@@ -3,7 +3,7 @@ import {
   type PrebootLeanProfileName,
 } from "../../utils/ios-cmdline-tools/SimulatorPrebootProfile";
 import { IOS_SIMULATOR_UUID_PATTERN } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { SimulatorTemplateKey } from "../../utils/ios-cmdline-tools/SimulatorTemplateKey";
 export const templateManifestSchema = z
   .object({

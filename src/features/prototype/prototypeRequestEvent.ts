@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import { PROTOTYPE_REQUEST_EVENT_NAME } from "./prototypeRequest";
 import { PROTOTYPE_REQUEST_META_ERROR_CODES } from "./prototypeRequestOutcome";

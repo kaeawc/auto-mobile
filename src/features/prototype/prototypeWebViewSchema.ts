@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { keySchema } from "./prototypeActionValues";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeMapSchema } from "./prototypeMapSchema";

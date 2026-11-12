@@ -6,7 +6,7 @@ import {
   SESSION_BROKER_RETRY_AFTER_MS,
 } from "./SessionRequestOwnerMismatchError";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
 import { brokerConnectionHostMutationRefusal } from "./connectionScope";
 import { RECEIPT_RETENTION_MS } from "./retention";

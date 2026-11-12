@@ -1,5 +1,5 @@
 import type { BootedDevice } from "../../models";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,

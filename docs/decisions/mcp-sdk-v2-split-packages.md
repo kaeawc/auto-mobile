@@ -66,7 +66,6 @@ converter directly with the same options keeps `schemas/tool-definitions.json` u
   reason), so daemon socket frames are unchanged. The harness clients (`scripts/mcp-drive.ts`,
   `scripts/manual-test/proxy-session.ts`) do the same through `withV1ClientErrors`, so a
   request timeout is still reported as `-32001`.
-- v2 requires Zod `^4.2.0` for schemas it converts itself. This repository still pins Zod
-  3.25.76; no v2 code path converts our schemas, because `tools/list`, `tools/call` and the
-  resource handlers remain our own `setRequestHandler` handlers. The v2 packages carry their
-  own nested Zod 4 copy.
+- v2 requires Zod `^4.2.0` for schemas it converts itself. This repository pins Zod 4.6.7,
+  which the v2 packages share; no v2 code path converts our schemas, because `tools/list`,
+  `tools/call` and the resource handlers remain our own `setRequestHandler` handlers.

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 const unit = z.number().finite().min(0).max(1);
 const angle = z.number().finite().min(-360).max(360);

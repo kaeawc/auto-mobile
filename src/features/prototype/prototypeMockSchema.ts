@@ -2,7 +2,7 @@
  * Definition of a declarative mock backend (#14271): json-server style collections, canned routes,
  * seeded latency and faults. Plain data, no code; every binding in a route body is a placeholder.
  */
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
 

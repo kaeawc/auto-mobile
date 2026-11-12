@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
 import { readFileSync, rmSync } from "node:fs";

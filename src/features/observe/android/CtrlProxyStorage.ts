@@ -6,7 +6,7 @@
  */
 
 import WebSocket from "ws";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { keystoreResetSchema, type KeystoreReset } from "../../storage/keystoreReset";
 import { toActionableError } from "../../../models/ActionableError";
 import {

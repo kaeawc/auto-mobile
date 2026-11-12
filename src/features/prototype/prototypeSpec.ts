@@ -20,7 +20,7 @@ import { prototypeStringsSchema } from "./prototypeStringsSchema";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {

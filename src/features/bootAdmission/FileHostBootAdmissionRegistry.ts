@@ -5,7 +5,7 @@ import {
 } from "../../daemon/daemonFiles";
 import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";

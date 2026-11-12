@@ -2,7 +2,7 @@
  * Manages accessibility violation baselines for suppressing known violations
  */
 
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { Kysely } from "kysely";
 import { AccessibilityBaselineRepository } from "../../db/accessibilityBaselineRepository";
 import type { Database } from "../../db/types";

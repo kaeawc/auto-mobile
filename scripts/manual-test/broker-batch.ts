@@ -2,7 +2,7 @@
 import "./harnessLogSink";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { parseSessionBrokerHostConfig } from "../../src/daemon/sessionBroker/hostConfig";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";

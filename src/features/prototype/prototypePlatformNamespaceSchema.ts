@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { prototypeNodeSchema, type PrototypeNode } from "./prototypeSpec";
 
 export type PrototypeIosNamespace = {

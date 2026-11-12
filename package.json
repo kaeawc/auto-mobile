@@ -193,7 +193,7 @@
     "utif2": "4.1.0",
     "xml-parse-from-string": "1.0.1",
     "xmlbuilder": "11.0.1",
-    "zod": "3.25.76"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^1.1.0",
@@ -273,7 +273,8 @@
     "path-to-regexp": "^8.4.0",
     "proxy-addr": "^2.0.8",
     "qs": "^6.16.0",
-    "tar": "^7.5.8"
+    "tar": "^7.5.8",
+    "zod": "4.6.7"
   },
   "engines": {
     "bun": ">=1.4.4"
@@ -283,7 +284,8 @@
     "lodash": "CVE-2025-13465: prototype pollution in _.unset and _.omit",
     "tar": "CVE-2026-26960 (GHSA-83g3-92jg-28cx): Arbitrary file read/write via hardlink target escape through symlink chain",
     "hono": "GHSA-gq3j-xvxp-8hrf: timing comparison hardening in basicAuth and bearerAuth",
-    "qs": "CVE-2026-2391 (GHSA-w7fw-mjwx-w883): arrayLimit bypass in comma parsing allows denial of service"
+    "qs": "CVE-2026-2391 (GHSA-w7fw-mjwx-w883): arrayLimit bypass in comma parsing allows denial of service",
+    "zod": "GHSA-mrhx-c7xc-m3w5: unbounded array validation memory exhaustion below 4.6.6; also lifts the @jimp/plugin-* ^3.23.8 range onto the one 4.x copy (#16102)"
   },
   "mcpName": "dev.jasonpearson/auto-mobile"
 }

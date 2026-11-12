@@ -28,6 +28,7 @@ describe("runtime dependency graph is pinned (#5421)", () => {
     devDependencies: Record<string, string>;
     optionalDependencies: Record<string, string>;
     bundledDependencies?: string[];
+    overrides: Record<string, string>;
   };
   const manifestPath = path.join(repoRoot, "scripts/release/runtime-graph.json");
 
@@ -54,8 +55,10 @@ describe("runtime dependency graph is pinned (#5421)", () => {
   });
 
   test("Jimp and the server share the exact zod package with the v4 subpath", () => {
-    expect(pkg.dependencies.zod).toBe("3.25.76");
+    expect(pkg.dependencies.zod).toBe("4.6.7");
     expect(pkg.devDependencies.zod).toBeUndefined();
+    // @jimp/plugin-* declare zod ^3.23.8; the override keeps them on the one patched 4.x copy (#16102).
+    expect(pkg.overrides.zod).toBe(pkg.dependencies.zod);
   });
 
   test("the runtime roots the artifact imports are present in dependencies", () => {

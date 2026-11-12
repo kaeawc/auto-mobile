@@ -78,7 +78,7 @@ describe("extractValueImportPackages", () => {
     const source = [
       'import type { Kysely } from "kysely";',
       'import { sql } from "kysely";',
-      'import { z } from "zod";',
+      'import { z } from "zod/v3";',
       'import { EVENT_TABLES } from "../eventTables";',
     ].join("\n");
     expect(extractValueImportPackages(source)).toEqual(["kysely", "zod"]);
@@ -105,7 +105,7 @@ describe("findMigrationDependencyDrift detector (issue #2867)", () => {
   });
 
   test("flags a value import from a package missing from the allowlist", () => {
-    const sources = new Map([["m1.ts", 'import { z } from "zod";']]);
+    const sources = new Map([["m1.ts", 'import { z } from "zod/v3";']]);
     const violations = findMigrationDependencyDrift(sources, ["kysely"]);
     expect(violations).toHaveLength(1);
     expect(violations[0].package).toBe("zod");
@@ -121,8 +121,8 @@ describe("findMigrationDependencyDrift detector (issue #2867)", () => {
 
   test("aggregates every file importing the same missing package, sorted", () => {
     const sources = new Map([
-      ["b.ts", 'import { z } from "zod";'],
-      ["a.ts", 'import { schema } from "zod";'],
+      ["b.ts", 'import { z } from "zod/v3";'],
+      ["a.ts", 'import { schema } from "zod/v3";'],
     ]);
     const violations = findMigrationDependencyDrift(sources, ["kysely"]);
     expect(violations).toHaveLength(1);
@@ -131,7 +131,7 @@ describe("findMigrationDependencyDrift detector (issue #2867)", () => {
 
   test("reports one violation per distinct missing package, sorted by name", () => {
     const sources = new Map([
-      ["m1.ts", 'import { z } from "zod";\nimport { produce } from "immer";'],
+      ["m1.ts", 'import { z } from "zod/v3";\nimport { produce } from "immer";'],
     ]);
     const violations = findMigrationDependencyDrift(sources, ["kysely"]);
     expect(violations.map((v) => v.package)).toEqual(["immer", "zod"]);

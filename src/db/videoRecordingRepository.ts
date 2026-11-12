@@ -1,5 +1,5 @@
 import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { getDatabase } from "./database";
 import type {
   VideoCaptureTeardownDescriptor,

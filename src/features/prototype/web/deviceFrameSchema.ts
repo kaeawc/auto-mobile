@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { FormFactor } from "../../../models/DeviceMatchCriteria";
 import type { PanelRole, Posture } from "../../../models/DisplayPanel";
 

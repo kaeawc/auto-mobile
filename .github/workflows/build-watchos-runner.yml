@@ -22,6 +22,8 @@ on:
       sha256:
         description: "SHA256 checksum of the watchOS runner archive"
         value: ${{ jobs.build.outputs.sha256 }}
+  # Manual build check outside a release; it uploads nothing.
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -1211,9 +1211,10 @@ load yq-helpers
     grep -Fq "build-simulator-runner-release.sh --platform ${platform} --output /tmp/${platform}-runner-macos.zip" "$builder"
     grep -Fq "name: ${platform}-runner" "$builder"
     grep -Fq "path: /tmp/${platform}-runner-macos.zip" "$builder"
-    # Builders are reusable only: they never run on pull requests or pushes.
+    # Builders are reusable or dispatched by hand: they never run on pull requests or pushes.
     grep -Fxq "  workflow_call:" "$builder"
-    run grep -Eq '^  (pull_request|pull_request_target|push|schedule|workflow_dispatch):' "$builder"
+    grep -Fxq "  workflow_dispatch:" "$builder"
+    run grep -Eq '^  (pull_request|pull_request_target|push|schedule):' "$builder"
     [ "$status" -ne 0 ]
   done
 }

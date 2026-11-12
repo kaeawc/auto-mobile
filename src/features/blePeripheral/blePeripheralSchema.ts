@@ -1,5 +1,8 @@
 import { z } from "zod/v4";
 
+/** Only netsim transports; the resolver further pins the port to the calling session's emulator. */
+export const NETSIM_TRANSPORT = /^android-netsim(?::(?:localhost|127\.0\.0\.1):(\d{1,5}))?$/;
+
 const uuid = z
   .string()
   .regex(
@@ -71,8 +74,14 @@ const blePeripheralInput = z
       .string()
       .min(1)
       .max(512)
+      .regex(
+        NETSIM_TRANSPORT,
+        "transport must be android-netsim or android-netsim:localhost:<port>",
+      )
       .optional()
-      .describe("Explicit Bumble transport URL; overrides device netsim discovery"),
+      .describe(
+        "android-netsim or android-netsim:localhost:<port>; must match the netsim of the session's emulator",
+      ),
     handle: z
       .string()
       .min(1)

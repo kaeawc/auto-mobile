@@ -11,13 +11,53 @@ describe("BLE netsim transport selection", () => {
     expect(await resolver.resolve("emulator-5554")).toBe("android-netsim");
   });
 
-  test("explicit transport bypasses discovery even for non-emulator targets", async () => {
+  test("an override may only restate the calling session's own netsim", async () => {
     const sources = new FakeBleTransportSources();
+    sources.rows = [
+      {
+        pid: 10,
+        ppid: 1,
+        command: "qemu-system-aarch64 -port 5554 -packet-streamer-endpoint localhost:12345",
+      },
+      {
+        pid: 11,
+        ppid: 1,
+        command: "qemu-system-aarch64 -port 5556 -packet-streamer-endpoint localhost:23456",
+      },
+    ];
     const resolver = new NetsimBleTransportResolver(sources);
-    expect(await resolver.resolve("device", "android-netsim:localhost:12345")).toBe(
+    expect(await resolver.resolve("emulator-5554", "android-netsim:127.0.0.1:12345")).toBe(
       "android-netsim:localhost:12345",
     );
-    expect(sources.reads).toBe(0);
+    await expect(
+      resolver.resolve("emulator-5554", "android-netsim:localhost:23456"),
+    ).rejects.toThrow(/does not belong to this session's emulator/);
+    await expect(resolver.resolve("emulator-5554", "android-netsim")).rejects.toThrow(
+      /does not belong/,
+    );
+  });
+
+  test.each(["file:/tmp/hci", "tcp-server:0.0.0.0:9000", "android-netsim:localhost:70000"])(
+    "refuses non-netsim or out-of-range transport %s before discovery",
+    async (transport) => {
+      const sources = new FakeBleTransportSources();
+      await expect(
+        new NetsimBleTransportResolver(sources).resolve("emulator-5554", transport),
+      ).rejects.toThrow(/must be android-netsim/);
+      expect(sources.reads).toBe(0);
+    },
+  );
+
+  test("an override cannot bypass failed discovery", async () => {
+    const sources = new FakeBleTransportSources();
+    const resolver = new NetsimBleTransportResolver(sources);
+    await expect(
+      resolver.resolve("physical-device", "android-netsim:localhost:12345"),
+    ).rejects.toThrow(/Android emulator serial/);
+    sources.incomplete = true;
+    await expect(
+      resolver.resolve("emulator-5554", "android-netsim:localhost:12345"),
+    ).rejects.toThrow(/Cannot resolve/);
   });
 
   test.each([
@@ -88,7 +128,7 @@ describe("BLE netsim transport selection", () => {
     const sources = new FakeBleTransportSources();
     sources.incomplete = true;
     await expect(new NetsimBleTransportResolver(sources).resolve("emulator-5554")).rejects.toThrow(
-      /supply transport/,
+      /Cannot resolve this emulator's private netsimd/,
     );
   });
 
@@ -103,7 +143,9 @@ describe("BLE netsim transport selection", () => {
         command: "qemu-system-aarch64 -port 5554 -packet-streamer-endpoint localhost:70000",
       },
     ];
-    await expect(resolver.resolve("emulator-5554")).rejects.toThrow(/explicit Bumble transport/);
+    await expect(resolver.resolve("emulator-5554")).rejects.toThrow(
+      /Unsupported emulator packet-streamer endpoint/,
+    );
   });
 
   test("a stale or mismatched advertisement cannot select a different emulator's netsim", async () => {

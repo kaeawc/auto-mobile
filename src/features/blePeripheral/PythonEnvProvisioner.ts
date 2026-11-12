@@ -9,6 +9,18 @@ export const BLE_PYTHON_PINS = ["bumble==0.0.236", "grpcio==1.85.1", "protobuf==
 export const PYTHON_INSTALL_FIX =
   "Install Python 3.11 with venv support, ensure python3 is on the daemon's PATH, then retry blePeripheral start.";
 
+export const MIN_PYTHON = [3, 11] as const;
+
+/** Parses `Python X.Y.Z` from `python3 --version` (stdout on 3.4+, stderr on older interpreters). */
+export function parsePythonVersion(output: string): [number, number] | undefined {
+  const match = /Python (\d+)\.(\d+)/.exec(output);
+  return match ? [Number(match[1]), Number(match[2])] : undefined;
+}
+
+function supported([major, minor]: [number, number]): boolean {
+  return major > MIN_PYTHON[0] || (major === MIN_PYTHON[0] && minor >= MIN_PYTHON[1]);
+}
+
 export interface PythonEnvProvisioner {
   ensure(): Promise<string>;
 }
@@ -51,17 +63,12 @@ export class ManagedPythonEnvProvisioner implements PythonEnvProvisioner {
       ) {
         return python;
       }
-      try {
-        await commands.executeCommand("python3", ["--version"], { timeoutMs: 10_000 });
-      } catch (error) {
-        throw new ActionableError(`python3 is unavailable. ${PYTHON_INSTALL_FIX}`, {
-          cause: error,
-        });
-      }
+      await this.assertSupportedPython();
       await files.ensureDir(root);
-      if (!files.existsSync(python)) {
-        await commands.executeCommand("python3", ["-m", "venv", venv], { timeoutMs: 60_000 });
-      }
+      // Without a matching marker the venv may be half-built (no pip, interrupted install); rebuild it.
+      await commands.executeCommand("python3", ["-m", "venv", "--clear", venv], {
+        timeoutMs: 60_000,
+      });
       try {
         await commands.executeCommand(python, ["-I", "-m", "pip", "install", ...BLE_PYTHON_PINS], {
           timeoutMs: 180_000,
@@ -78,6 +85,26 @@ export class ManagedPythonEnvProvisioner implements PythonEnvProvisioner {
       throw toActionableError(
         error,
         `Could not prepare BLE Python environment at ${venv}. ${PYTHON_INSTALL_FIX}`,
+      );
+    }
+  }
+
+  private async assertSupportedPython(): Promise<void> {
+    let output: string;
+    try {
+      const result = await this.deps.commands.executeCommand("python3", ["--version"], {
+        timeoutMs: 10_000,
+      });
+      output = `${result.stdout}\n${result.stderr}`;
+    } catch (error) {
+      throw new ActionableError(`python3 is unavailable. ${PYTHON_INSTALL_FIX}`, {
+        cause: error,
+      });
+    }
+    const version = parsePythonVersion(output);
+    if (!version || !supported(version)) {
+      throw new ActionableError(
+        `python3 reports ${version ? version.join(".") : "an unrecognized version"}; Bumble needs Python ${MIN_PYTHON.join(".")}+. ${PYTHON_INSTALL_FIX}`,
       );
     }
   }

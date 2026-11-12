@@ -1,3 +1,4 @@
+import type { NetsimBleTransportResolver } from "../../src/features/blePeripheral/BleTransportResolver";
 import type {
   EmulatorProcessTableSource,
   EmulatorHostProcessRow,
@@ -7,7 +8,9 @@ import type {
   EmulatorGrpcEndpoint,
 } from "../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 
-export class FakeBleTransportSources {
+type BleTransportSources = ConstructorParameters<typeof NetsimBleTransportResolver>[0];
+
+export class FakeBleTransportSources implements BleTransportSources {
   rows: EmulatorHostProcessRow[] = [];
   advertised?: EmulatorGrpcEndpoint;
   incomplete = false;

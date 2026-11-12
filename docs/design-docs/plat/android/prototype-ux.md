@@ -982,7 +982,7 @@ horizontal scroll".
 Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
-stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Indicator and carousel remain deferred. On iOS dp means points.
+stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and `tapOn`; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Indicator and carousel remain deferred. On iOS dp means points.
 
 ## Icon effects
 
@@ -4231,7 +4231,7 @@ Spans do not count as nodes and require `prototype_rich_text_v1`; older devices 
 A tappable span is part of the text node, not a separate accessibility node, and runs actions without opening URLs.
 On Android, activate it with `tapOn {accessibilityLink:"<span text>"}` or
 `tapOn {text:"<full plain text>", subtext:{text:"<span text>"}}` without `layer`:
-these selectors act across windows because tapOn refuses layer with accessibilityLink/subtext (#9305).
+these selectors act across windows because `tapOn` refuses layer with accessibilityLink/subtext (#9305).
 Use `tapAt` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
 `rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.

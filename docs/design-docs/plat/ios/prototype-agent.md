@@ -1034,7 +1034,7 @@ On Android activate with `tapOn {accessibilityLink:"<span text>"}` or
 windows; `tapOn` refuses `layer` with them, #9305); `tapAt` on span bounds is the fallback. On iOS links
 are drawn as links and tap-through is by `tapAt` only; show reports the `rich-text-links` platform note.
 Owed: advertise only after renderer support; device checks of mixed span styles, concatenated observe
-text, per-span actions without URL navigation, Android semanticLinks, and iOS tapAt links.
+text, per-span actions without URL navigation, Android semanticLinks, and iOS `tapAt` links.
 
 ## Menu and select
 

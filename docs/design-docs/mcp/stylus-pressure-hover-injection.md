@@ -336,7 +336,7 @@ Open verification gaps:
 - Multi-display injection (non-default displays are currently refused).
 - Quiet-host latency; cold one-point hover on a loaded host is not a latency budget.
 
-## Rich stylus on tapAt, swipeAt and dragPath (#13099)
+## Rich stylus on `tapAt`, `swipeAt` and `dragPath` (#13099)
 
 The nested `pointer` option keeps its shape and gains `tilt`, `orientation` (radians) and `buttons`
 (`primary`, `secondary`); `pressure` may be any 0..1. A plain stylus (`pressure` omitted or 1) still uses

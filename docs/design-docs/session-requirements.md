@@ -89,7 +89,7 @@ with non-retryable `requires_real_device` before anything is reserved. Selecting
 a matching hardware profile or emulator skin, and routing to real OEM devices,
 are not part of this boundary yet.
 
-A watchOS request names one exact Apple Watch simulator: `spec` is provisionDevice's
+A watchOS request names one exact Apple Watch simulator: `spec` is `provisionDevice`'s
 watch spec (a watchOS CoreSimulator runtime and an Apple Watch device type, nothing
 else). It has no hardware or OS selector and no host defaults, so
 `normalizeSessionDeviceRequirement` refuses it; `normalizeWatchSessionDeviceRequirement`

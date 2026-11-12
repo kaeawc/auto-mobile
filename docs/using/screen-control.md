@@ -43,7 +43,7 @@ On failure `success` is `false` and `error` holds a human-readable message.
 
 ## Input commands
 
-Every command requires `platform`. Tap, swipe, pressButton, and typeText accept
+Every command requires `platform`. Tap, swipe, `pressButton`, and typeText accept
 `"android"` or `"ios"`; gestures and `input/key` require `"android"`.
 `deviceId` is an optional string: when it
 is omitted, the daemon uses the socket session's autolocked device for that
@@ -114,7 +114,7 @@ Two rules to get right:
   `text` must be a non-empty string. `submit` is an optional boolean, defaulting
   to false.
 - **`frameContext` is optional but recommended for tap, swipe, typeText,
-  pressButton, and key.** Pass the non-empty context string reported by the
+  `pressButton`, and key.** Pass the non-empty context string reported by the
   device data stream for the frame you used. The daemon rejects the command if
   the newest device context differs or is unavailable; observe a fresh frame
   before retrying. Omit it and this check is skipped. Gesture commands do not

@@ -25,7 +25,7 @@ disable launchd services inside the simulator before it first boots (a "lean pro
   system's own cost. Sampler overhead was 4 to 9 percent of one core.
 - Breakage check: a private daemon (own data, log, database, coordination and aux-socket directories, explicit
   port, every call naming the deviceId) ran 14 steps after the window: runner start, runner process present,
-  observe, screenshot, launch and terminate of Settings and Safari, tapOn, sendKeys with the typed text read
+  observe, screenshot, launch and terminate of Settings and Safari, `tapOn`, `sendKeys` with the typed text read
   back through observe.
 - Conditions: baseline (create and boot), clone (boot of a clone of a settled template, new device id), lean
   (profile disabled either before first boot or right after `simctl boot` returns), clone plus lean. Two or

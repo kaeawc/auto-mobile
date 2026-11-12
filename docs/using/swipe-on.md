@@ -18,7 +18,7 @@ position. The search returns `success: false`, `found: false`, and
 range, or cannot fit another swipe in the 15-second search budget. The
 error says how the sweep ended and that the item may be absent or the direction
 wrong. `scrollIterations` counts search swipes in both directions;
-`movedSwipes` counts successful search swipes whose settled content changed,
+`movedSwipes` counts successful search swipes in both directions whose settled content changed,
 excluding overlap recovery. For content that changes slowly, increase
 `lookFor.maxUnchangedSwipes` (a positive integer; default `2`), which applies to
 each direction.

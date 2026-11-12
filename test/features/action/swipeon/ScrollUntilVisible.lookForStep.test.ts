@@ -159,10 +159,56 @@ test("a target missing in both directions reports reachedEnd after both sweeps",
     reachedEnd: true,
     movedSwipes: MOVED_BACK,
     scrollIterations: 4 + MOVED_BACK,
-    error: `Scroll reached end of container in both directions (up and down; no change after 2 consecutive swipes each way). text "Item 12" not found. ${MOVED_BACK} swipes moved the screen.`,
+    error: `Scroll reached end of container in both directions (up and down; no change after 2 consecutive swipes each way). text "Item 12" not found. ${MOVED_BACK} swipes moved the screen. The item may be absent from this container, or the swipe direction may be wrong.`,
   });
   expect(h.steps.slice(0, 2).every((step) => step.y2 < step.y1)).toBe(true);
   expect(h.steps.slice(2).every((step) => step.y2 > step.y1)).toBe(true);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("a miss after forward movement bounds the reverse sweep by the forward swipes", async () => {
+  // Two moving forward swipes reach the end from offset 18; the reverse sweep may take
+  // 2 x 2 + 2 half-screen swipes, which returns past the start without reaching the top.
+  const h = listHarness({ initialOffset: 18 });
+  const result = await h.search("absent");
+  expect(result).toMatchObject({
+    success: false,
+    found: false,
+    reachedEnd: true,
+    movedSwipes: 2 + 6,
+    scrollIterations: 2 + 2 + 6,
+  });
+  expect(result.error).toContain(
+    "the down sweep then covered the searched range back past the start (6 swipes)",
+  );
+  expect(result.error).toContain(
+    "may be absent from this container, or the swipe direction may be wrong",
+  );
+  expect(h.steps.slice(4).every((step) => step.y2 > step.y1)).toBe(true);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("a target behind a forward-moving start is still found within the reverse budget", async () => {
+  const h = listHarness({ initialOffset: 18 });
+  expect(await h.search("row 12")).toMatchObject({
+    success: true,
+    found: true,
+    element: { text: "row 12" },
+  });
+  expect(h.steps.length).toBeLessThanOrEqual(2 + 2 + 6);
+});
+
+test("a reverse sweep the time budget cannot cover ends with reachedEnd before maxTime", async () => {
+  const maxTime = 6000;
+  const h = listHarness({ initialOffset: 24 });
+  const result = await h.search("absent", { lookFor: { text: "absent", maxTime } });
+  expect(result).toMatchObject({ success: false, found: false, reachedEnd: true });
+  expect(result.error).toContain(
+    `because the ${maxTime}ms search time budget could not cover another swipe`,
+  );
+  expect(result.error).toContain("the swipe direction may be wrong");
+  expect(h.timer.now()).toBeLessThanOrEqual(maxTime);
+  expect(result.scrollIterations).toBeLessThan(2 + MOVED_BACK + 2);
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
 

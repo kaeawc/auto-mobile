@@ -8,10 +8,14 @@ extended drag and warns if clamping leaves less than 120 pt of travel.
 Use `lookFor` to scroll until an element appears. When two consecutive swipes
 leave the content unchanged, the end in `direction` has been reached and the
 search sweeps back the other way with slower half-screen swipes, so a target that
-was skipped or lies behind the starting position is still found. Only when the
-reverse sweep also reaches its end does the search return `success: false`,
-`found: false`, and `reachedEnd: true`, with an error saying both directions
-were searched. `scrollIterations` counts search swipes in both directions;
+was skipped or lies behind the starting position is still found. After forward
+swipes that moved the content, the reverse sweep is limited to twice that many
+swipes plus `lookFor.maxUnchangedSwipes`, which returns past the starting
+position. The search returns `success: false`, `found: false`, and
+`reachedEnd: true` when the reverse sweep also reaches its end, covers that
+range, or cannot fit another swipe in the 15-second search budget. The
+error says how the sweep ended and that the item may be absent or the direction
+wrong. `scrollIterations` counts search swipes in both directions;
 `movedSwipes` counts successful search swipes whose settled content changed,
 excluding overlap recovery. For content that changes slowly, increase
 `lookFor.maxUnchangedSwipes` (a positive integer; default `2`), which applies to

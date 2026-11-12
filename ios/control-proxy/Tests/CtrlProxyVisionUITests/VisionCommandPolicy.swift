@@ -114,6 +114,21 @@ struct VisionElementTraits: Equatable {
         }
     }
 
+    /// Toggle snapshots expose state as a string or NSNumber, including disabled controls.
+    /// Preserve that state verbatim; placeholder filtering applies only to text inputs.
+    func snapshotValue(_ raw: Any?, placeholder: String?, isToggle: Bool) -> String? {
+        if isToggle {
+            if let text = raw as? String {
+                return text
+            }
+            if let number = raw as? NSNumber {
+                return number.stringValue
+            }
+            return nil
+        }
+        return enteredValue(raw, placeholder: placeholder)
+    }
+
     /// The entered text when it differs from the placeholder and may be exposed. A field whose
     /// accessibility label equals what the user typed still reports it.
     func enteredValue(_ raw: Any?, placeholder: String?) -> String? {

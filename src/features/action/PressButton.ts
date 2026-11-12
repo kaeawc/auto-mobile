@@ -251,7 +251,7 @@ export class PressButton extends BaseVisualChange {
       if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
         unsupportedTvosAction("remote press with steps");
       }
-      return tvosPress(this.device.deviceId, button, signal);
+      return tvosPress(this.device.deviceId, button, signal, durationMs);
     }
     if (this.device.platform === "watchos") {
       if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {

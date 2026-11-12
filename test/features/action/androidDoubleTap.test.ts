@@ -352,6 +352,7 @@ describe("explicit-display dispatcher (tapOn / tapAny display)", () => {
       display: { key: "inner", role: "inner", posture: "opened", generation: 7 } as const,
     },
     displayId: 2,
+    followUpDisplay: "inner",
     assertCurrent: () => {},
   };
 

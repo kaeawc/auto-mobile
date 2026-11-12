@@ -1,5 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
+import { displayInventoryOutcome } from "../../../src/models/DeviceInfo";
+import { DisplayInventoryUnavailableError } from "../../../src/models/DisplayInventoryUnavailableError";
 import { resolveAndroidRecordingDisplay } from "../../../src/features/video/AndroidRecordingDisplay";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -19,6 +21,23 @@ const device: BootedDevice = {
 };
 
 afterEach(() => displayTransitions.reset(device.deviceId));
+
+test.each([undefined, 33, 34])(
+  "unreadable recording inventory rejects an explicit selector before API %s routing",
+  async (apiLevel) => {
+    const adb = new FakeAdbClient();
+    const target: BootedDevice = {
+      ...device,
+      apiLevel,
+      displays: apiLevel === undefined ? undefined : device.displays,
+      [displayInventoryOutcome]: { kind: "unreadable", reason: "dumpsys display timed out" },
+    };
+    const read = resolveAndroidRecordingDisplay(target, adb, { request: "inner" });
+    await expect(read).rejects.toBeInstanceOf(DisplayInventoryUnavailableError);
+    await expect(read).rejects.toMatchObject({ details: { retryable: true } });
+    expect(adb.getAllCommands()).toEqual([]);
+  },
+);
 
 test("recording follows the latest observation stamp and accepts an explicit role", async () => {
   const adb = new FakeAdbClient();

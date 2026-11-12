@@ -130,22 +130,18 @@ export class DragPath extends BaseVisualChange {
     try {
       throwIfAborted(signal);
       if (options.display !== undefined) {
-        const { observation, displayId, assertCurrent } = await prepareTargetDisplayAction(
-          this.device,
-          options.display,
-          this.observeScreen,
-          {
+        const { observation, displayId, followUpDisplay, assertCurrent } =
+          await prepareTargetDisplayAction(this.device, options.display, this.observeScreen, {
             adb: this.adb,
             lastRenderedObservation: this.lastRenderedObservation,
             signal,
             transitions: this.displayTransitionReader,
-          },
-        );
+          });
         return await this.observedInteraction(
           () => this.drive(options, observation, call, { displayId, assertCurrent }),
           {
             changeExpected: false,
-            display: observation.display.key,
+            display: followUpDisplay,
             previousObservation: observation,
             signal,
             progress,

@@ -99,6 +99,7 @@ export class PlanDeviceTrackExecutor {
               deviceId: this.context.resolveTrackDeviceId(device, sessionUuid),
               sessionUuid,
               signal,
+              planStartMs: options.planStartMs,
               logPrefix: `[PARALLEL_EXEC][${device}]`,
               debugLog: true,
             },
@@ -291,6 +292,7 @@ export class PlanDeviceTrackExecutor {
 }
 
 export interface DeviceTrackOptions {
+  planStartMs?: number;
   device: string;
   track: TrackedStep[];
   startStep: number;

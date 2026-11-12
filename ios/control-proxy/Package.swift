@@ -60,6 +60,7 @@ let package = Package(
         // Pure tvOS policy is separate from the shipped iOS library.
         .target(
             name: "TVCommandPolicy",
+            dependencies: ["CtrlProxy"],
             path: "Tests/CtrlProxyTVUITests",
             exclude: ["CtrlProxyTVUITests.swift", "TVCommandRouter.swift", "TVWebSocketServer.swift"],
             sources: ["TVCommandPolicy.swift", "ConnectedEvent.swift"],

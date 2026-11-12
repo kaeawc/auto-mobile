@@ -1,3 +1,5 @@
+import ornamentCapture from "../fixtures/visionos-xcuitest/hierarchy-ornament-window.json";
+import { isVisionosHierarchy } from "../../src/features/visionos/VisionosHierarchy";
 import { tvosRunners } from "../../src/features/tvos/TvosRunnerRegistry";
 import { visionosRunners } from "../../src/features/visionos/VisionosRunnerRegistry";
 import { FakeVisionosRunnerClient } from "../fakes/FakeVisionosRunnerClient";
@@ -60,10 +62,11 @@ function pngOfSize(width: number, height: number): Buffer {
 }
 
 class RecordingVisionProScreenshots implements WatchScreenshotSource {
+  constructor(private readonly size: [number, number] = [396, 484]) {}
   readonly captures: Array<{ deviceId: string; display: string | undefined }> = [];
   async capture(device: BootedDevice, display?: string): Promise<Buffer> {
     this.captures.push({ deviceId: device.deviceId, display });
-    return pngOfSize(396, 484);
+    return pngOfSize(...this.size);
   }
 }
 
@@ -83,8 +86,11 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
     cleanup();
   });
 
-  async function arrange() {
-    cleanups.push(visionosRunners.register(visionPro.deviceId, new FakeVisionosRunnerClient()));
+  async function arrange(
+    runner = new FakeVisionosRunnerClient(),
+    screenshotSize?: [number, number],
+  ) {
+    cleanups.push(visionosRunners.register(visionPro.deviceId, runner));
     const connected = [iphone];
     const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     const timer = new FakeTimer();
@@ -134,7 +140,7 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
       sessions.stopCleanupTimer();
     });
 
-    const screenshots = new RecordingVisionProScreenshots();
+    const screenshots = new RecordingVisionProScreenshots(screenshotSize);
     const writer = new FakeScreenshotFileWriter();
     // The Android/iOS observe pipeline starts by building a screen; record it and stop there.
     const iosScreens: string[] = [];
@@ -199,6 +205,61 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
     expect(writer.written).toEqual([String(result.screenshotPath)]);
     expect(iosScreens).toEqual([]);
   });
+
+  test.each(["skeleton", "full"] as const)(
+    "captured 4K ornament hierarchy reaches observe %s in separate coordinate spaces",
+    async (project) => {
+      const tree = structuredClone(ornamentCapture.data);
+      if (!isVisionosHierarchy(tree)) {
+        throw new Error("Invalid captured hierarchy");
+      }
+      await arrange(new FakeVisionosRunnerClient(tree), [3840, 2160]);
+      const result = toolJson(
+        await call("observe", {
+          platform: "visionos",
+          deviceId: visionPro.deviceId,
+          project,
+        }),
+      );
+      expectRunnerObservation(result);
+      expect(result).toMatchObject({
+        screenSize: { width: 1280, height: 720, units: "points" },
+        screenshotImageSize: { width: 3840, height: 2160 },
+      });
+      if (project === "skeleton") {
+        expect(result.skeleton).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              label: "Add item",
+              bounds: [16, 16, 127, 60],
+              space: "ornament",
+            }),
+          ]),
+        );
+        expect(result.context).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ label: "Dogfood Items", bounds: [24, 28, 222, 63] }),
+          ]),
+        );
+      } else {
+        expect(result.viewHierarchy).toMatchObject({
+          hierarchy: {
+            node: {
+              node: expect.arrayContaining([
+                expect.objectContaining({
+                  $: expect.objectContaining({
+                    text: "Add item",
+                    bounds: [16, 16, 127, 60],
+                    space: "ornament",
+                  }),
+                }),
+              ]),
+            },
+          },
+        });
+      }
+    },
+  );
 
   test("sessionless observe with platform visionos and the visionPro deviceId reaches the visionPro", async () => {
     const { screenshots, iosScreens } = await arrange();

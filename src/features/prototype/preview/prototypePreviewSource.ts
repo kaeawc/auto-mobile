@@ -11,7 +11,7 @@ export interface PrototypePreviewPageQuery {
 /**
  * What the preview server reads (#17975): the current web output of shown prototypes and a signal
  * when it changes. The server never renders or stores a spec itself, so any producer of web
- * output (a real device's acknowledged show and patch today, headless mode later) plugs in here.
+ * output (a real device's or the headless virtual device's acknowledged show and patch) plugs in here.
  */
 export interface PrototypePreviewPageSource {
   /** Prototype ids with web output, in first-seen order. */

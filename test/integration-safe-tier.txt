@@ -267,6 +267,7 @@ test/server/planExecutionOrchestrator.integration.test.ts | unsafe | DevicePool 
 test/server/planReleaseTransportBindingTeardown.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L37
 test/server/planTools.executePlanThrow.integration.test.ts | safe | executePlan and startVideoRecording spied to reject L29/L32
 test/server/prototypeHeadless.integration.test.ts | safe | registry and prototype runtime over FakeTimer, an in-memory virtual device and in-memory stores; no I/O, ports or shared paths
+test/server/prototypeHeadlessServe.integration.test.ts | safe | headless registry over FakeTimer and an in-memory virtual device; node:http preview server on 127.0.0.1 port 0, stopped in afterEach; no writes
 test/server/prototypeWebExportFiles.integration.test.ts | safe | real NodePrototypeWebExportFiles over a private mkdtemp directory removed afterwards L31
 test/server/proxyServerListChanged.integration.test.ts | safe | FakeDaemonClient/FakeDaemonManager; isAvailable mocked L20/L25/L44
 test/server/proxyServerTransportFailure.integration.test.ts | safe | fake client/manager; DaemonClient("/unused") never connects L288

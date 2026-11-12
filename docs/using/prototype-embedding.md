@@ -262,7 +262,8 @@ alternative in the group by its label. The device keeps showing whichever was sh
 ### Live preview in a browser
 
 To keep a browser tab on a prototype while an agent iterates, call `prototype` with
-`{action: "serve", id: "<id>"}`. It needs no device request and returns `previewServer` with
+`{action: "serve", id: "<id>"}`. It needs no device request, works the same on a device and in
+[headless mode](prototype-headless.md), and returns `previewServer` with
 `pageUrl` (the live page for that id) and `url` (an index of every prototype shown in this daemon).
 Each `show` and each `patch` that lands reloads the open page within about a second, keeping the
 variant picked in its switcher. The page is the same HTML as `automobile:prototype/<id>/web`; add

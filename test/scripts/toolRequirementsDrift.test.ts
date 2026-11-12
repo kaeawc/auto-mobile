@@ -30,9 +30,14 @@ describe("scanFeatureFlagRefusals (#18141)", () => {
         ].join("\n"),
       },
       { path: "src/b.ts", text: `const unrelated = 1;` },
+      {
+        path: "src/c.ts",
+        text: `const D = featureFlagDisabledMessage /* gated */ ("tool-call-recording", "recordToolCalls");`,
+      },
     ]);
     expect(scan.sites).toEqual([
       { flag: "device-condition", tool: "setDeviceState", location: "src/a.ts:1" },
+      { flag: "tool-call-recording", tool: "recordToolCalls", location: "src/c.ts:1" },
     ]);
     expect(scan.unresolved).toEqual(["src/a.ts:3"]);
   });

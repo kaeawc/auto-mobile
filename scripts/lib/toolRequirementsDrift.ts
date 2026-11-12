@@ -57,7 +57,7 @@ function literalText(node: ts.Expression | undefined): string | undefined {
 }
 
 function scanFile(file: SourceFile, scan: FeatureFlagRefusalScan): void {
-  if (!file.text.includes(`${REFUSAL_HELPER}(`)) {
+  if (!file.text.includes(REFUSAL_HELPER)) {
     return;
   }
   const source = ts.createSourceFile(file.path, file.text, ts.ScriptTarget.Latest, true);

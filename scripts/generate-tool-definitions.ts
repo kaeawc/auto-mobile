@@ -97,7 +97,7 @@ function refusalSources(): SourceFile[] {
       path: file,
       text: fs.readFileSync(path.resolve(process.cwd(), file), "utf8"),
     }))
-    .filter((file) => file.text.includes(`${REFUSAL_HELPER}(`));
+    .filter((file) => file.text.includes(REFUSAL_HELPER));
 }
 
 function declaredRequirements(definitions: unknown[]): Map<string, string[]> {

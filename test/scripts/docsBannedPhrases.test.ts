@@ -153,3 +153,64 @@ describe("banned-phrases.json", () => {
     }
   });
 });
+
+describe("findBannedPhrases source lines", () => {
+  const linesOf = (source: string) =>
+    findBannedPhrases("docs/x.md", source, RULES).map((hit) => [hit.rule, hit.line]);
+
+  test("skips a link reference definition that contains the phrase", () => {
+    expect(linesOf("[ref]: /robust\n\nrobust\n")).toEqual([["robust", 3]]);
+  });
+
+  test("skips definition labels, titles and multi-line definitions", () => {
+    const source = [
+      '[robust]: /robust "robust title"',
+      "[seamless]:",
+      "  /seamless",
+      "  'seamless title'",
+      "",
+      "See [robust] and [seamless].",
+      "",
+    ].join("\n");
+    expect(linesOf(source)).toEqual([
+      ["robust", 6],
+      ["seamless", 6],
+    ]);
+  });
+
+  test("still searches definition look-alikes that md4c renders", () => {
+    const source = "```\n[robust]: /x\n```\n\nText\n[robust]: /y\n\nrobust\n";
+    expect(linesOf(source)).toEqual([
+      ["robust", 6],
+      ["robust", 8],
+    ]);
+  });
+
+  test("reports each repeated phrase on its own line", () => {
+    expect(linesOf("robust\n\nA robust\nrobust line.\n\n- robust\n")).toEqual([
+      ["robust", 1],
+      ["robust", 3],
+      ["robust", 4],
+      ["robust", 6],
+    ]);
+  });
+
+  test("keeps words on either side of a soft line break apart", () => {
+    expect(linesOf("A foldable\nseamless fold.\n")).toEqual([["seamless", 2]]);
+  });
+
+  test("does not double the space around a newline inside link syntax", () => {
+    expect(linesOf("It's [worth](\n/url) noting.\n")).toEqual([["worth-noting", 1]]);
+    expect(linesOf("*robust*\nrobust\n")).toEqual([
+      ["robust", 1],
+      ["robust", 2],
+    ]);
+  });
+
+  test("locates front matter prose and the body after it", () => {
+    expect(linesOf("---\ntitle: robust\n---\n\nrobust\n")).toEqual([
+      ["robust", 2],
+      ["robust", 5],
+    ]);
+  });
+});

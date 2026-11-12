@@ -11,6 +11,12 @@
       "rule": "seamless",
       "count": 1,
       "reason": "A seamless fold is a foldable display with no hinge gap, a device posture term."
+    },
+    {
+      "file": "docs/design-docs/prototype-web-frames-v2.md",
+      "rule": "seamless",
+      "count": 2,
+      "reason": "A seamless fold is a foldable display with no hinge gap, a device posture term."
     }
   ]
 }

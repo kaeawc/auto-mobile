@@ -36,11 +36,13 @@ async function main(): Promise<number> {
   for (const file of files) {
     hits.push(...findBannedPhrases(file, await Bun.file(join(ROOT, file)).text(), list.rules));
   }
-  // With explicit files, entries for unchecked files are out of scope, not stale.
+  // With explicit files, entries for unchecked files are out of scope, not stale. A full scan
+  // keeps every entry so one for a moved or deleted file is reported as stale.
   const checked = new Set(files);
-  const scoped: Allowlist = {
-    entries: allowlist.entries.filter((entry) => checked.has(entry.file)),
-  };
+  const scoped: Allowlist =
+    process.argv.length > 2
+      ? { entries: allowlist.entries.filter((entry) => checked.has(entry.file)) }
+      : allowlist;
   const result = applyAllowlist(hits, scoped, list.rules);
   for (const problem of result.invalid) {
     console.error(`banned-phrases allowlist: ${problem}`);

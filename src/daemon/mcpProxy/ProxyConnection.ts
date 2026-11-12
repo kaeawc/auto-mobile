@@ -149,7 +149,12 @@ export class ProxyConnection {
         throw new DaemonUnavailableError("MCP proxy is closing");
       }
     }
-    if (this.runtime.connected && this.runtime.client) {
+    if (
+      this.runtime.connected &&
+      this.runtime.client &&
+      // Checked synchronously so the established fast path adds no microtask turns.
+      (!this.deferredVersionRecheckDue() || !(await this.recheckDeferredVersion()))
+    ) {
       return;
     }
 
@@ -163,6 +168,35 @@ export class ProxyConnection {
     } catch (error) {
       await this.handleConnectionFailure(error);
     }
+  }
+
+  /** Observe-only connections keep a due deferral for a later lifecycle-allowed operation. */
+  private deferredVersionRecheckDue(): boolean {
+    return (
+      this.runtime.lifecycleReconciler.versionRecheckDue() &&
+      daemonLifecycleAllowed() &&
+      !this.port.hasLivenessLifecycleFence()
+    );
+  }
+
+  /**
+   * An established connection skips doConnect's reconciliation, so a daemon reused inside the
+   * version-restart cooldown is rechecked here once the cooldown ends (#18099). Resolves true
+   * when it restarted the daemon and the connection was reset to be re-established.
+   */
+  private async recheckDeferredVersion(): Promise<boolean> {
+    let restarted: boolean;
+    try {
+      restarted = await this.runtime.lifecycleReconciler.recheckDeferredVersion();
+    } catch (error) {
+      // Drop the connection so the next operation reconciles through doConnect again.
+      await this.resetConnection();
+      throw error;
+    }
+    if (restarted) {
+      await this.resetConnection();
+    }
+    return restarted;
   }
 
   /**

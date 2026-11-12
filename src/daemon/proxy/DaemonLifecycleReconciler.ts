@@ -124,6 +124,9 @@ export class DaemonLifecycleReconciler {
   private lastRunningStatus: DaemonStatus | undefined;
   private checkoutVersion: string | undefined;
   private readonly acceptedCheckoutVersions = new Set<string>();
+  /** When a version reconciliation deferred by the restart cooldown is due again (#18099). */
+  private deferredVersionRecheckAt: number | undefined;
+  private versionRestarts = 0;
 
   constructor(private readonly deps: DaemonLifecycleReconcilerDeps) {}
 
@@ -306,6 +309,8 @@ export class DaemonLifecycleReconciler {
     observedStatus: DaemonStatus | undefined,
   ): Promise<void> {
     const status = this.observeStatus(observedStatus ?? (await this.deps.reconciliationStatus()));
+    // This reconciliation decides afresh; only a new cooldown reuse defers it again.
+    this.deferredVersionRecheckAt = undefined;
     if (!status.running) {
       return;
     }
@@ -350,6 +355,7 @@ export class DaemonLifecycleReconciler {
       mergeDaemonOptions(status.options, this.deps.config.daemonOptions),
       status,
     );
+    this.versionRestarts++;
     this.deps.reconciliationSnapshot = undefined;
     if (restartResult === "joined") {
       const successorStatus = await this.deps.waitForJoinedRestartSuccessor(
@@ -369,6 +375,26 @@ export class DaemonLifecycleReconciler {
     }
 
     await this.deps.verifyRestartedVersion();
+  }
+
+  /** Whether a cooldown-deferred version reconciliation has come due (#18099). */
+  versionRecheckDue(): boolean {
+    return (
+      this.deferredVersionRecheckAt !== undefined &&
+      this.deps.timer.now() >= this.deferredVersionRecheckAt
+    );
+  }
+
+  /**
+   * Re-runs the version reconciliation a cooldown reuse deferred, against a fresh status
+   * read. Resolves true when it restarted the daemon, so the caller must reconnect.
+   */
+  async recheckDeferredVersion(): Promise<boolean> {
+    this.deferredVersionRecheckAt = undefined;
+    this.deps.reconciliationSnapshot = undefined;
+    const restartsBefore = this.versionRestarts;
+    await this.deps.ensureVersionMatches();
+    return this.versionRestarts !== restartsBefore;
   }
 
   async verifyRestartedVersion(): Promise<void> {
@@ -406,8 +432,9 @@ export class DaemonLifecycleReconciler {
    * reused for this call instead of refused:
    * restarting is suppressed by the cooldown, and the daemon already runs this
    * checkout's build, so failing the call would only report identical builds as a
-   * mismatch (#18090). Acceptance is not remembered, so a later call past the
-   * cooldown still restarts it if the version still differs.
+   * mismatch (#18090). Acceptance is not remembered: the deferral is due once the
+   * cooldown ends, and an established connection rechecks it on its next operation
+   * ({@link recheckDeferredVersion}), restarting the daemon if the version still differs.
    */
   private reusesFreshCheckoutDaemon(status: DaemonStatus, runningVersion: string): boolean {
     if (!status.startedAt) {
@@ -417,6 +444,7 @@ export class DaemonLifecycleReconciler {
     if (daemonAgeMs >= DAEMON_VERSION_RESTART_COOLDOWN_MS) {
       return false;
     }
+    this.deferredVersionRecheckAt = status.startedAt + DAEMON_VERSION_RESTART_COOLDOWN_MS;
     logger.warn(
       `[DaemonMcpProxy] Reusing daemon ${runningVersion || "unknown"} from this checkout's build inside the restart cooldown (${daemonAgeMs}ms old); client version is ${this.deps.clientVersion}`,
     );

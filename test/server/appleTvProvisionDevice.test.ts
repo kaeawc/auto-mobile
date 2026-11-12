@@ -720,20 +720,50 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(provisionDeviceOutputSchema.safeParse(result).success).toBe(true);
   });
 
-  test("refuses readiness automation, resources and enableTools before any simctl call", async () => {
+  test("refuses readiness automation, resources and enableTools without boot before any simctl call", async () => {
     const { simctl } = await arrange();
 
     const readiness = await failure(provision({ device: TV, readiness: "automation" }));
     const resources = await failure(
       provision({ device: TV, resources: { animations: "disabled" } }),
     );
-    const tools = await failure(provision({ device: TV, enableTools: ["observe"] }));
+    const unbooted = await failure(
+      provision({ device: TV, boot: false, enableTools: ["executePlan"] }),
+    );
 
     expect(readiness).toBeInstanceOf(ActionableError);
     expect(String(readiness)).toContain("tvOS provisioning accepts only readiness");
     expect(String(resources)).toContain("resources is not supported on tvOS");
-    expect(String(tools)).toContain("enableTools is not supported on tvOS");
+    expect(String(unbooted)).toContain("requires boot=true");
     expect(simctl.commands).toEqual([]);
+  });
+
+  test("accepts enableTools with boot and binds a session for the grant", async () => {
+    const { pool } = await arrange();
+
+    const result = toolJson(
+      await provision({ device: TV, enableTools: ["executePlan", "getLogs", "focusNavigate"] }),
+    );
+
+    const { sessionId } = sessionSchema.parse(result);
+    expect(result).toMatchObject({ lifecycleState: "ready" });
+    expect(pool.getAllDevices().find((device) => device.sessionId === sessionId)).toBeDefined();
+  });
+
+  test("startDevice accepts enableTools for the session it binds", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    await arrange([tv]);
+
+    const result = toolJson(
+      await call("startDevice", {
+        platform: "tvos",
+        deviceId: tv.udid,
+        enableTools: ["executePlan"],
+        __mcpSessionId: "client-a",
+      }),
+    );
+
+    expect(result).toMatchObject({ platform: "tvos", readiness: { level: "booted" } });
   });
 
   test("cancelled boot false deletes the created TV through the acquisition receipt", async () => {

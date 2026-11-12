@@ -91,11 +91,14 @@ runtime and device type identifiers from `automobile:devices/images/tvos`:
   simulator the call created is deleted again if booting or binding fails; if that deletion fails,
   the error says so and tells you to delete it with `deleteDevice`.
 - `boot: false` creates or adopts the simulator without a session.
-- `resources`, `enableTools` and `readiness: "automation"` are refused.
+- `enableTools` enables the named tools for the new session, as on iOS; it requires `boot`.
+- `resources` and `readiness: "automation"` are refused.
 
 `startDevice { platform: "tvos", name: "tv-4k" }` boots an existing simulator, starts its automation
-runner and binds a session. It never creates a simulator; a name or `deviceId` that matches none,
-or more than one, fails and asks for an exact `deviceId`.
+runner and binds a session. It accepts `enableTools` too. It never creates a simulator; a name or
+`deviceId` that matches none, or more than one, fails and asks for an exact `deviceId`. Starting the
+runner brings its own host app to the front, so an app you launched with `launchApp` before is
+brought back to the foreground once the runner is up, including after an automatic restart.
 
 On first tvOS use, AutoMobile downloads and verifies the release’s prebuilt runner; no source
 checkout is needed. `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` selects an explicit `.xctestrun` instead.

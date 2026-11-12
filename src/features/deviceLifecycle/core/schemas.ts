@@ -709,7 +709,10 @@ function refineWatchProvisionOptions(
   }
 }
 
-/** The options an Apple TV cannot honour: resources and tool grants need the automation runner. */
+/**
+ * The options an Apple TV or Vision Pro cannot honour. Resource settings need the automation
+ * runner on both; a tvOS boot binds a session, so its tool grants apply as on iOS (#18020).
+ */
 function refineAppleTvProvisionOptions(
   args: ProvisionDeviceRefinable,
   context: z.RefinementCtx,
@@ -717,7 +720,11 @@ function refineAppleTvProvisionOptions(
   if (args.device.platform !== "tvos" && args.device.platform !== "visionos") {
     return;
   }
-  for (const field of ["resources", "enableTools"] as const) {
+  const unsupported =
+    args.device.platform === "visionos"
+      ? (["resources", "enableTools"] as const)
+      : (["resources"] as const);
+  for (const field of unsupported) {
     if (args[field] !== undefined) {
       context.addIssue({
         code: "custom",

@@ -1902,6 +1902,14 @@
         "transport": {
           "type": "string"
         },
+        "transportShared": {
+          "description": "True when transport is the host-wide netsim that every emulator can see",
+          "type": "boolean"
+        },
+        "warning": {
+          "description": "Present when transportShared is true",
+          "type": "string"
+        },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",
@@ -1944,7 +1952,8 @@
         "name",
         "address",
         "presets",
-        "transport"
+        "transport",
+        "transportShared"
       ],
       "additionalProperties": false
     }

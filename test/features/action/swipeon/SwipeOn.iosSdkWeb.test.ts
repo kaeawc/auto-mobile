@@ -85,10 +85,26 @@ function harness(outcome: IosSdkTapOutcome | null) {
   );
   action.awaitIdle = new FakeAwaitIdle();
   action.window = new FakeWindow();
-  return { action, web, xctest };
+  return { action, web, xctest, observe };
 }
 
 describe("swipeOn lookFor a web-view DOM element (#5162)", () => {
+  test("an unsuccessful page scroll resets the baseline before stationary search swipes", async () => {
+    const h = harness({ backend: "sdk" });
+    h.observe.setObserveResult(() => screen(h.web.scrolled ? 2 : 1, false));
+
+    const result = await h.action.execute({ direction: "up", lookFor: { text: "Pay" } });
+
+    expect(result).toMatchObject({
+      success: false,
+      found: false,
+      reachedEnd: true,
+      movedSwipes: 0,
+      scrollIterations: 4,
+    });
+    expect(h.xctest.getDirections()).toEqual(["up", "up", "down", "down"]);
+  });
+
   test("the page scrolls the element into view, with no swipe, and reports backend sdk", async () => {
     const h = harness({ backend: "sdk" });
     const result = await h.action.execute({ direction: "up", lookFor: { text: "Pay" } });

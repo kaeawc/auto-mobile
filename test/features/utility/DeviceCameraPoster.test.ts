@@ -8,7 +8,11 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 const emulator: BootedDevice = { platform: "android", deviceId: "emulator-5554", name: "Pixel" };
 const physical: BootedDevice = { platform: "android", deviceId: "R58M12ABCDE", name: "Phone" };
-const ios: BootedDevice = { platform: "ios", deviceId: "12345678-1234", name: "iPhone" };
+const physicalIos: BootedDevice = {
+  platform: "ios",
+  deviceId: "00008110-001A2B3C4D5E6F70",
+  name: "iPhone",
+};
 // The tool resolves the poster path on the host, so on Windows "/img/poster.png" becomes
 // "<drive>:\img\poster.png". Build the fixture the same way to stay platform-native.
 const POSTER_PATH = resolve("/img/poster.png");
@@ -84,7 +88,7 @@ describe("setDeviceState cameraPoster", () => {
 
   test.each([
     ["physical Android", physical, "physical Android"],
-    ["iOS", ios, "iOS"],
+    ["physical iOS", physicalIos, "physical iOS"],
   ])("returns unsupported on %s without issuing a command", async (_name, device, text) => {
     const { client, state } = setup(device);
     const result = await state.setState({ cameraPoster: { mode: "clear" } });

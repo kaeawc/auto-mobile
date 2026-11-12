@@ -143,6 +143,7 @@ class TvosGridRunner implements TvosRunnerClient {
   }
 
   close(): void {}
+  runnerExited(): void {}
 
   private snapshot(): TvosHierarchy {
     return {

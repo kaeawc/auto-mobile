@@ -101,8 +101,9 @@ On first tvOS use, AutoMobile downloads and verifies the release’s prebuilt ru
 checkout is needed. `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` selects an explicit `.xctestrun` instead.
 Existing local build products take precedence over the download. If the selected release has no
 runner checksum, use the override or a source checkout to build one. If the runner cannot start, the
-call still returns a booted session and `message` explains why. Call `startDevice` again after
-fixing the cause.
+call still returns a booted session and `message` explains why. If a runner started for the session
+later disconnects, the next call restarts it automatically. Call `startDevice` again after fixing
+the cause if initial startup or automatic recovery fails.
 
 ## Lifecycle
 
@@ -139,11 +140,12 @@ state when available, including when focus belongs to the row containing the tog
 `checked` means its state is unknown. The hierarchy describes the app in front: the app
 you last started with `launchApp`, Settings or another Apple app, or the home screen.
 
-Without a runner it returns a screenshot with `hierarchyUnavailable`; call `startDevice` again to
-prepare automation. A runner that does not answer a command within 5 seconds is disconnected:
-`observe` then returns a screenshot with `hierarchyUnavailable` and the reason in its `message`
-(`project` and `waitFor` are refused), and `pressButton`, `tapOn` and `sendKeys` fail at once,
-asking you to call `startDevice` to restart the runner. With a runner, `waitFor`
+Without a runner it returns a screenshot with `hierarchyUnavailable`; call `startDevice` to
+prepare automation. A runner that does not answer a command within 5 seconds is disconnected.
+An app crash is reported as an app exit. After a disconnect or crash, the next call automatically
+restarts a runner AutoMobile started for the session. If recovery fails, `observe` returns a
+screenshot with `hierarchyUnavailable` and the recovery error in its `message` (`project` and
+`waitFor` are refused); call `startDevice` to restart the runner. With a runner, `waitFor`
 waits for an element (`elementId`, `testTag`, `text`, `textAny`, `className`,
 `contentDescription`, `absent`) by re-reading the hierarchy until it matches or `timeout` elapses;
 `waitFor` with `for`, `posture`, `activeDisplay` or `activeWindow` is refused. Other advanced

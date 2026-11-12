@@ -8,7 +8,7 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { isTvosHierarchy, normalizeTvosHierarchy } from "./TvosHierarchy";
 import type { TVRemoteButton } from "./TvosRunnerClient";
-import { tvosRunners } from "./TvosRunnerRegistry";
+import { requireTvosRunner } from "./TvosRunnerRecovery";
 
 type Direction = "up" | "down" | "left" | "right";
 /** Order focus moves are tried in: reading order first, so rows are crawled before columns. */
@@ -411,7 +411,7 @@ export function createTvosExploreDevice(
 ): TvosExploreDevice {
   return {
     read: async (signal) => {
-      const raw = await tvosRunners.require(deviceId).hierarchy(signal);
+      const raw = await (await requireTvosRunner(deviceId, signal)).hierarchy(signal);
       if (!isTvosHierarchy(raw)) {
         throw new ActionableError("Invalid tvOS hierarchy; reconnect the runner.");
       }
@@ -426,9 +426,9 @@ export function createTvosExploreDevice(
       };
     },
     press: async (button, signal) => {
-      await tvosRunners
-        .require(deviceId)
-        .request({ type: "request_press_button", action: button }, signal);
+      await (
+        await requireTvosRunner(deviceId, signal)
+      ).request({ type: "request_press_button", action: button }, signal);
       await timer.sleep(
         button === "select" || button === "menu"
           ? TVOS_EXPLORE_ACTION_SETTLE_MS

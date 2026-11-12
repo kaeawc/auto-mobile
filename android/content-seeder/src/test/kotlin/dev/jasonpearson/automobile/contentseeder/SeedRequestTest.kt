@@ -16,6 +16,41 @@ private class FakeSeedItemsReader(val items: List<Map<String, Any?>>) : SeedItem
 }
 
 class SeedRequestTest {
+  @Test
+  fun parsesPhotoWithoutJsonAndRejectsInvalidIdsOrUnscopedFiles() {
+    val parameters =
+      mapOf(
+        "kind" to "photo",
+        "namespace" to "ns1",
+        "rawContactId" to "3",
+        "photoFile" to "automobile.ns1.3.photo",
+      )
+    val reader = FakeSeedItemsReader(emptyList())
+    assertEquals(
+      SeedParseResult.Valid(SeedRequest.Photo("ns1", 3, "automobile.ns1.3.photo")),
+      parseSeedRequest(parameters, reader),
+    )
+    assertEquals(null, reader.json)
+    for (id in listOf(null, "", "0", "-1", "1.5", "9223372036854775808")) {
+      assertTrue(
+        parseSeedRequest(parameters + ("rawContactId" to id), reader) is SeedParseResult.Invalid,
+      )
+    }
+    for (file in
+      listOf(
+        null,
+        "",
+        "../automobile.ns1.3.photo",
+        "/data/local/tmp/a.png",
+        "automobile.other.3.photo",
+        "automobile.ns1.4.photo",
+      )) {
+      assertTrue(
+        parseSeedRequest(parameters + ("photoFile" to file), reader) is SeedParseResult.Invalid,
+      )
+    }
+  }
+
   private val calendar =
     mapOf("title" to "Test event", "startMillis" to 1000L, "endMillis" to 2000L)
   private val sms =

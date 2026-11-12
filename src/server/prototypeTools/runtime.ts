@@ -105,6 +105,12 @@ import {
   waitForPrototypeEvent,
 } from "./inspection";
 import { performPrototypeAction } from "./mutation";
+import { VirtualPrototypeDevice } from "../../features/prototype/headless/VirtualPrototypeDevice";
+import {
+  headlessPrototypeRefusal,
+  isVirtualPrototypeDevice,
+  virtualPrototypeDeviceReport,
+} from "../../features/prototype/headless/headlessPrototypeMode";
 import { prototypeOutputSchema, prototypeSchema, specProblem } from "./schemas";
 import type {
   AssetReaders,
@@ -163,6 +169,14 @@ function mutationCallOptions(
 
 const responseFor = (payload: z.infer<typeof prototypeOutputSchema>) =>
   withIsErrorOnFailure(createStructuredToolResponse(payload), payload.success);
+
+/** A result from the headless virtual device says so, with the capabilities it cannot emulate. */
+function responderFor(device: BootedDevice) {
+  return isVirtualPrototypeDevice(device)
+    ? (payload: z.infer<typeof prototypeOutputSchema>) =>
+        responseFor({ ...payload, virtualDevice: virtualPrototypeDeviceReport() })
+    : responseFor;
+}
 
 function prototypeDeviceUnboundSource(): object | undefined {
   return defaultDaemonContext.sessionManager();
@@ -337,6 +351,8 @@ interface PrototypeHost {
   transports: PrototypeTransportCache;
   /** Declarative mock backends of this session (#14271). */
   mocks: PrototypeMockBackendRegistry;
+  /** The headless virtual device (#17974); holds state only while headless calls use it. */
+  virtualDevice: VirtualPrototypeDevice;
   /** Subscribes any lifecycle hook that was not yet available; a no-op once all are active. */
   ensureLifecycle(): void;
   dispose(): void;
@@ -379,6 +395,8 @@ function createPrototypeHost(
     patchQueue: createPrototypePatchQueue(),
     transports: { android: new WeakMap(), ios: new WeakMap(), requests, channels },
     mocks,
+    virtualDevice:
+      dependencies.virtualDevice ?? new VirtualPrototypeDevice(prototypeClock(dependencies)),
     ensureLifecycle: cleanup.ensureSubscribed,
     dispose: () => {
       if (!disposed) {
@@ -409,7 +427,8 @@ function prototypeHostFor(dependencies: PrototypeToolDependencies): PrototypeHos
     lifecycle ||
     dependencies.testSessionStore ||
     dependencies.idGenerator ||
-    dependencies.channelExecutor
+    dependencies.channelExecutor ||
+    dependencies.virtualDevice
   ) {
     return createPrototypeHost(dependencies);
   }
@@ -523,6 +542,13 @@ function expandedPrototypeInput(
   if ("error" in loaded) {
     return loaded;
   }
+  // The headless virtual device refuses what only a real device can do, before anything runs.
+  const headlessRefusal = isVirtualPrototypeDevice(device)
+    ? headlessPrototypeRefusal(loaded.args)
+    : undefined;
+  if (headlessRefusal) {
+    return { error: headlessRefusal };
+  }
   const args = withExpandedSpec(loaded.args);
   const error = device.platform === "ios" ? undefined : prototypeShaderOptInProblem(args.spec, env);
   return error ? { error } : defineShowMocks(args, mocks);
@@ -623,9 +649,11 @@ export function createPrototypeToolRuntime(
   // Per-connection registrations run after DaemonState initialises: pick up the unbound hook.
   host.ensureLifecycle();
   const { store, events, commits } = host;
-  const clientFactory =
+  const deviceClientFactory =
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
+  const clientFactory = (device: BootedDevice): PrototypeClient =>
+    isVirtualPrototypeDevice(device) ? host.virtualDevice : deviceClientFactory(device);
   const agentConnections = dependencies.agentConnections ?? noPrototypeAgentConnections;
   const { androidTarget, iosTarget } = prototypeTargets(
     clientFactory,
@@ -655,9 +683,10 @@ export function createPrototypeToolRuntime(
     signal?: AbortSignal,
   ) => {
     host.ensureLifecycle();
+    const respond = responderFor(device);
     const parsed = parsePrototypeInput(input);
     if (!parsed.success) {
-      return responseFor({
+      return respond({
         success: false,
         error: `Invalid prototype input: ${parsed.error.message}`,
       });
@@ -668,7 +697,7 @@ export function createPrototypeToolRuntime(
       : { args: parsed.data };
     const prepared = expandedPrototypeInput(loaded, device, dependencies.env, host.mocks);
     if ("error" in prepared) {
-      return responseFor({ success: false, error: prepared.error });
+      return respond({ success: false, error: prepared.error });
     }
     const args = prepared.args;
     const platformResult = savedPlatformDispatch(
@@ -681,28 +710,28 @@ export function createPrototypeToolRuntime(
       // A ProtoViewer-routed save settles undefined when ProtoViewer is absent: keep today's path.
       const settled = await platformResult;
       if (settled) {
-        return responseFor(settled);
+        return respond(settled);
       }
     }
     if (isHostOnlyAction(args.action)) {
       const shareFiles = dependencies.protoViewerShareFiles;
       const hostOnly = { mocks: host.mocks, preview };
-      return responseFor(await hostOnlyOutput(hostOnly, args, assetReaders, shareFiles));
+      return respond(await hostOnlyOutput(hostOnly, args, assetReaders, shareFiles));
     }
     const scope = prototypeScope(device, args);
     if (isHostLocalPrototypeAction(args.action)) {
       const local = { recorder: host.recorder, store, events, preview: () => preview().server };
-      return responseFor(await hostLocalPrototypeOutput(local, scope, args));
+      return respond(await hostLocalPrototypeOutput(local, scope, args));
     }
     const target = device.platform === "android" ? androidTarget(device) : iosTarget(device);
     if (!target) {
       const error = new ActionableError(prototypeAgentNotConnectedMessage(device.deviceId));
-      return responseFor({ success: false, error: error.message });
+      return respond({ success: false, error: error.message });
     }
     const { action } = args;
     if (isDeviceRequestAction(action)) {
       const host = { store, events };
-      return responseFor(await deviceRequestAction(args, host, device, { target, scope, signal }));
+      return respond(await deviceRequestAction(args, host, device, { target, scope, signal }));
     }
     if (action === "awaitEvent") {
       const source = prototypeEventSource(target.transport);
@@ -710,7 +739,7 @@ export function createPrototypeToolRuntime(
         query: args,
         context: { progress, signal },
       });
-      return responseFor({
+      return respond({
         success: true,
         ...waited,
         ...suspendedWaitWarning(store, scope, args.id, waited),
@@ -751,7 +780,7 @@ export function createPrototypeToolRuntime(
           mutationCallOptions(scope, host.patchQueue, signal),
         ),
     );
-    return responseFor(attributeRevision(dispatched, action));
+    return respond(attributeRevision(dispatched, action));
   };
   const dispose = prototypeRegistrationDisposer(host);
   activeRegistration = { host, dispose };

@@ -145,6 +145,7 @@ nav:
       - "Hackathon demo kit": using/hackathon.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
       - "Prototype icons": using/prototype-icons.md
+      - "Headless prototypes": using/prototype-headless.md
       - "Installing ProtoViewer (Android)": using/protoviewer-install.md
       - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
@@ -229,6 +230,7 @@ nav:
       - "Prototype SDK support matrix": design-docs/prototype-sdk-matrix.md
       - "Prototype camera and media guide": design-docs/prototype-camera-media.md
       - "Prototype web renderer": design-docs/prototype-web-renderer.md
+      - "Headless prototype mode": design-docs/prototype-headless.md
       - "Prototype web frames for every form factor": design-docs/prototype-web-frames-v2.md
       - "Prototype web library": design-docs/prototype-web-library.md
       - "Prototype web 3D device view": design-docs/prototype-web-3d.md

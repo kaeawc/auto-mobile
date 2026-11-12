@@ -1,3 +1,5 @@
+import type { IosCameraPosterRegistry } from "../../utility/ios/IosCameraPosterRegistry";
+import type { IosCameraPosterDylibProvider } from "../../utility/ios/IosCameraPosterDylibProvider";
 import type { AvdColdBootMarkerStore } from "../../../utils/android-cmdline-tools/AvdColdBootMarkerStore";
 import type { SimulatorPairService } from "../../../utils/ios-cmdline-tools/SimulatorPairs";
 import type { AndroidAutoProjectionApplier } from "../../androidAuto/AndroidAutoProjectionService";
@@ -107,6 +109,10 @@ export interface DeviceToolsDependencies {
   androidEmulatorProcessStopper: EmulatorProcessStopper;
   /** Renders `cameraPosterQr` payloads to a poster image; defaults to a file writer under the data dir. */
   cameraPosterQrWriter?: QrPosterWriter;
+  iosCameraPosterRegistry?: IosCameraPosterRegistry;
+  /** Preflighted when startDevice records a poster; defaults to the on-demand simulator build. */
+  iosCameraPosterDylibProvider?: IosCameraPosterDylibProvider;
+  cameraPosterFileExists?: (path: string) => boolean;
   androidAdbFactory: AdbClientFactory;
   env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;

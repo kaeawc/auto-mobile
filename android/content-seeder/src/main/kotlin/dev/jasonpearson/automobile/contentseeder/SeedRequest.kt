@@ -8,6 +8,12 @@ sealed interface SeedRequest {
 
   data class Account(override val namespace: String) : SeedRequest
 
+  data class Photo(
+    override val namespace: String,
+    val rawContactId: Long,
+    val photoFile: String,
+  ) : SeedRequest
+
   data class CalendarBatch(override val namespace: String, val items: List<CalendarEvent>) :
     SeedRequest
 
@@ -55,7 +61,7 @@ private val androidItemsReader = SeedItemsReader { json ->
   }
 }
 
-/** String extras carry a namespace and an items JSON array or comma-separated reset kinds. */
+/** String extras carry a namespace plus a batch, photo target, or reset options. */
 fun parseSeedRequest(
   parameters: Map<String, String?>,
   itemsReader: SeedItemsReader = androidItemsReader,
@@ -80,6 +86,7 @@ private fun parseBatch(
 ): SeedRequest {
   val kind = parameters["kind"]
   if (kind == "account") return SeedRequest.Account(namespace)
+  if (kind == "photo") return parsePhoto(parameters, namespace)
   if (kind == "reset") {
     val dropAccount =
       parameters["dropAccount"]?.let {
@@ -91,12 +98,24 @@ private fun parseBatch(
     }
     return SeedRequest.Reset(namespace, kinds, dropAccount)
   }
-  require(kind == "calendar" || kind == "sms") { "kind must be account, calendar, sms or reset" }
+  require(kind == "calendar" || kind == "sms") {
+    "kind must be account, photo, calendar, sms or reset"
+  }
   val items = reader.read(requireNotNull(parameters["items"]) { "items JSON array is required" })
   return when (kind) {
     "calendar" -> SeedRequest.CalendarBatch(namespace, items.map { parseCalendar(it, namespace) })
     else -> SeedRequest.SmsBatch(namespace, items.map { parseSms(it) })
   }
+}
+
+private fun parsePhoto(parameters: Map<String, String?>, namespace: String): SeedRequest.Photo {
+  val id = parameters["rawContactId"]?.toLongOrNull()
+  require(id != null && id > 0) { "rawContactId must be a positive integer" }
+  val file = requireNotNull(parameters["photoFile"]) { "photoFile is required" }
+  require(file == "automobile.$namespace.$id.photo") {
+    "photoFile must be the namespace/raw-contact cache filename automobile.$namespace.$id.photo"
+  }
+  return SeedRequest.Photo(namespace, id, file)
 }
 
 private fun Map<String, Any?>.text(key: String): String {

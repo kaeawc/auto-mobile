@@ -575,6 +575,7 @@ All scripts should:
 
 ## Android prototype performance
 
+- `scripts/android/grant-content-seeder-roles.sh` — grants the emulator-only content seeder its SMS role and runtime permissions; takes `--serial <adb-serial>` or `ANDROID_SERIAL`.
 - `scripts/android/compose-compiler-report.sh` — opt-in release compiler reports, package stability summary, and generated Compose compiler report pages.
 - `scripts/android/prototype-frame-benchmark.sh` — explicit-device gfxinfo scenarios for the fixed benchmark prototype; supports command-only dry runs and stub executables.
 - `scripts/prototype/generate-plural-categories-fixture.ts` — regenerates `test/fixtures/prototype-spec/strings/plural-categories.json` (string-table plural categories per language) shared by the TypeScript, Kotlin and Swift tests.

@@ -128,8 +128,6 @@ const NIGHTLY_ORDER = [
   "macOS BATS Shell Tests",
   "macOS BATS Integration Tests",
   "XCTestRunner Thread Sanitizer",
-  "Swift Packages Sweep (Xcode 26.5)",
-  "Build Xcode Projects Sweep (Xcode 26.5)",
 ];
 
 function workflowsGatedBy(parameters: string[]): CircleWorkflow[] {
@@ -299,7 +297,7 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
   test("nightly XCTestRunner Simulator Tests runs the same tests and daemon budget as the PR opt-in workflow", () => {
     const githubSteps = loadJobSteps(XCTESTRUNNER_WORKFLOW, "ios-xctest-runner-simulator-tests");
     for (const name of [
-      "Run selected CtrlProxy iOS tests (Xcode 26.5)",
+      "Run selected CtrlProxy iOS tests (Xcode 26.6)",
       "Run odd-width CtrlProxy screenshot test (iPhone 15)",
     ]) {
       const github = onlyTesting(stepNamed(githubSteps, name)?.run ?? "");

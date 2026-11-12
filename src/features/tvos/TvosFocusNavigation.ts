@@ -330,6 +330,14 @@ function describe(element: Element): string {
   return element["resource-id"] || element.text || focusKey(element);
 }
 
+function checkMoveBudget(moves: number, maxMoves: number, target: Element): void {
+  if (moves >= maxMoves) {
+    throw new ActionableError(
+      `tvOS tapOn exceeded maxMoves (${maxMoves}) before reaching ${describe(target)}; observe and move closer with pressButton before retrying.`,
+    );
+  }
+}
+
 /** Read focus and target; with neither identity nor match yet, search the rows for the target. */
 async function locate(
   lookup: Lookup,
@@ -403,11 +411,7 @@ export async function tvosTapOn(
         `tvOS focus stopped making progress from ${describe(focus)} toward ${describe(target)}; the target may be unreachable or in a focus trap. Observe and navigate with pressButton before retrying.`,
       );
     }
-    if (moves >= maxMoves) {
-      throw new ActionableError(
-        `tvOS tapOn exceeded maxMoves (${maxMoves}) before reaching ${describe(target)}; observe and move closer with pressButton before retrying.`,
-      );
-    }
+    checkMoveBudget(moves, maxMoves, target);
     await client.request({ type: "request_press_button", action: direction }, signal);
     previous = { signature: state.signature, direction };
   }

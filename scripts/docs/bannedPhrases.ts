@@ -239,9 +239,15 @@ export function findBannedPhrases(
     let previousEnd = -1;
     for (const segment of block) {
       // md4c drops soft line breaks between leaves; restore one as a space so
-      // words on adjacent lines do not run together.
-      if (previousEnd >= 0 && segment.offset > previousEnd) {
-        joined += source.slice(previousEnd, segment.offset).includes("\n") ? " " : "";
+      // words on adjacent lines do not run together. A newline inside skipped
+      // syntax (such as a link destination) next to existing whitespace is not
+      // a break, so no second space is added there.
+      const brokenLine =
+        previousEnd >= 0 &&
+        segment.offset > previousEnd &&
+        source.slice(previousEnd, segment.offset).includes("\n");
+      if (brokenLine && !/\s$/u.test(joined) && !/^\s/u.test(segment.text)) {
+        joined += " ";
       }
       starts.push(joined.length);
       joined += segment.text;

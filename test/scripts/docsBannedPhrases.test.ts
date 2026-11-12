@@ -199,6 +199,14 @@ describe("findBannedPhrases source lines", () => {
     expect(linesOf("A foldable\nseamless fold.\n")).toEqual([["seamless", 2]]);
   });
 
+  test("does not double the space around a newline inside link syntax", () => {
+    expect(linesOf("It's [worth](\n/url) noting.\n")).toEqual([["worth-noting", 1]]);
+    expect(linesOf("*robust*\nrobust\n")).toEqual([
+      ["robust", 1],
+      ["robust", 2],
+    ]);
+  });
+
   test("locates front matter prose and the body after it", () => {
     expect(linesOf("---\ntitle: robust\n---\n\nrobust\n")).toEqual([
       ["robust", 2],

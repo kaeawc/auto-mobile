@@ -29,6 +29,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { isTeardownFailure } from "../features/deviceLifecycle/provisioning/provisioning";
 import { forgetFixturesOfDestroyedAvd } from "../daemon/snapshotDeletion";
+import { forgetTouchscreenFeature } from "../utils/android-cmdline-tools/touchscreenFeature";
 import { hasSimctlTimeoutCause } from "../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import {
   BootConcurrencyGate,
@@ -881,6 +882,8 @@ async function stopDevice(
         },
       },
     );
+    // The next device booted on this serial may be another AVD; probe its touchscreen again (#18091).
+    forgetTouchscreenFeature(args.device.deviceId);
     return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
   } finally {
     if (!retainLifecycleLease) {

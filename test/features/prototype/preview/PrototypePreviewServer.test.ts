@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../../src/models/ActionableError";
+import {
+  PrototypeSpecRevisions,
+  type PrototypeSpecRevisionEvent,
+} from "../../../../src/features/prototype/prototypeSpecRevisions";
+import { revisionPreviewPageSource } from "../../../../src/features/prototype/preview/prototypePreviewSource";
 import { DEFAULT_PROTOTYPE_PREVIEW_IDLE_TIMEOUT_MS } from "../../../../src/features/prototype/preview/prototypePreviewLimits";
 import {
   PROTOTYPE_PREVIEW_KEEPALIVE_MS,
@@ -137,6 +142,33 @@ describe("PrototypePreviewServer event streams", () => {
     source.change("b");
     source.change("b");
     expect(stream.chunks.length).toBe(2);
+  });
+
+  test("an unrelated revision preserves the watch for a variant evicted in the same show", async () => {
+    const spec = { id: "example", root: { type: "text", text: "preview" } };
+    const revisions = new PrototypeSpecRevisions(new FakeTimer(), {
+      revisions: 20,
+      bytes: Buffer.byteLength(JSON.stringify(spec)) * 2,
+    });
+    // B is least recently revised, so showing C evicts B while keeping A.
+    revisions.recordShow("b", { spec, variant: { group: "g", label: "B" } });
+    revisions.recordShow("a", { spec, variant: { group: "g", label: "A" } });
+    const pageSource = revisionPreviewPageSource(revisions, async () => "");
+    server = new PrototypePreviewServer({ source: pageSource, http, timer });
+    await server.serve({});
+    expect(revisions.ids()).toEqual(["b", "a"]);
+    const stream = http.request("/p/a/events", LOCAL);
+    const events: PrototypeSpecRevisionEvent[] = [];
+    revisions.onRevision((event) => events.push(event));
+
+    revisions.recordShow("c", { spec });
+
+    expect(revisions.ids()).toEqual(["a", "c"]);
+    expect(events).toEqual([
+      { kind: "revision", id: "c", revision: 1 },
+      { kind: "evicted", id: "b" },
+    ]);
+    expect(stream.chunks.slice(1)).toEqual(['event: reload\ndata: {"id":"b","generation":3}\n\n']);
   });
 
   test("a restart advances the generation, so a reconnecting tab reloads", async () => {

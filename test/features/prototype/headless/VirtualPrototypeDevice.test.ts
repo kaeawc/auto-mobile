@@ -5,6 +5,8 @@ import {
   prototypeSpecSchema,
   type PrototypeSpec,
 } from "../../../../src/features/prototype/prototypeSpec";
+import { PrototypeEventCoordinator } from "../../../../src/features/prototype/PrototypeEventCoordinator";
+import { InMemoryPrototypeStatusStore } from "../../../../src/features/prototype/PrototypeStatusStore";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const spec = (id: string, extra: Record<string, unknown> = {}): PrototypeSpec =>
@@ -76,6 +78,210 @@ describe("VirtualPrototypeDevice (#17974)", () => {
     await virtual.requestShowPrototype(spec("one", pager(1)));
     const inspected = await virtual.requestInspectPrototypes();
     expect(inspected.prototypes?.[0]?.pages).toEqual({ tabs: 0 });
+  });
+
+  test("patch re-derives bound pages and clamps a replaced pager", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(
+      spec("one", {
+        state: { page: 0 },
+        root: { type: "column", children: [pager(3, { stateKey: "page" }).root] },
+      }),
+    );
+    expect(
+      await virtual.requestPatchPrototype({
+        id: "one",
+        baseRevision: 1,
+        ops: [{ op: "replace", path: "/state/page", value: 1 }],
+      }),
+    ).toMatchObject({ success: true, revision: 2 });
+    expect((await virtual.requestInspectPrototypes()).prototypes?.[0].pages).toEqual({ tabs: 1 });
+    expect(
+      await virtual.requestPatchPrototype({
+        id: "one",
+        ops: [{ op: "replaceNode", id: "tabs", node: pager(1, { stateKey: "page" }).root }],
+      }),
+    ).toMatchObject({ success: true, revision: 3 });
+    expect((await virtual.requestInspectPrototypes()).prototypes?.[0].pages).toEqual({ tabs: 0 });
+  });
+
+  test("patch clamps retained unbound pages and removes obsolete pagers", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(
+      spec("one", { root: { type: "column", children: [pager(3).root] } }),
+    );
+    virtual.dispatch({ id: "one", kind: "page_changed", name: "tabs", pages: { tabs: 2 } });
+    expect(
+      await virtual.requestPatchPrototype({
+        id: "one",
+        ops: [{ op: "replaceNode", id: "tabs", node: pager(1).root }],
+      }),
+    ).toMatchObject({ success: true });
+    expect((await virtual.requestInspectPrototypes()).prototypes?.[0].pages).toEqual({ tabs: 0 });
+    expect(
+      await virtual.requestPatchPrototype({
+        id: "one",
+        ops: [{ op: "replaceNode", id: "tabs", node: { type: "text", id: "tabs", text: "Done" } }],
+      }),
+    ).toMatchObject({ success: true });
+    expect((await virtual.requestInspectPrototypes()).prototypes?.[0].pages).toEqual({});
+  });
+
+  test("a patch change reaches awaitEvent and updates the host status with committed pages", async () => {
+    const timer = new FakeTimer();
+    const virtual = new VirtualPrototypeDevice(timer);
+    const store = new InMemoryPrototypeStatusStore(timer);
+    const coordinator = new PrototypeEventCoordinator(timer, store);
+    const scope = { deviceId: "virtual" };
+    try {
+      coordinator.show(scope, "one", virtual);
+      const result = await virtual.requestShowPrototype(
+        spec("one", { state: { page: 0 }, ...pager(2, { stateKey: "page" }) }),
+      );
+      store.record(scope, "show", { id: "one" }, { result });
+      virtual.dispatch({ id: "one", kind: "emit", name: "before" });
+      const waiting = coordinator.awaitEvent(scope, "one", virtual, { kind: "change" });
+      expect(
+        await virtual.requestPatchPrototype({
+          id: "one",
+          baseRevision: 1,
+          ops: [{ op: "replace", path: "/state/page", value: 1 }],
+        }),
+      ).toMatchObject({ success: true, revision: 2 });
+      expect((await waiting).event).toMatchObject({
+        sequence: 2,
+        kind: "change",
+        name: "change",
+        payload: { key: "page", value: 1 },
+        state: { page: 1 },
+        pages: { tabs: 1 },
+      });
+      expect(store.status(scope).prototypes[0]).toMatchObject({
+        state: { page: 1 },
+        pages: { tabs: 1 },
+      });
+      expect(coordinator.counts(scope, "one")?.lastSequence).toBe(2);
+    } finally {
+      coordinator.dispose();
+    }
+  });
+
+  test("a multi-key patch emits once, while unchanged and rejected patches emit nothing", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(spec("one"));
+    const events: PrototypeEvent[] = [];
+    virtual.onPrototypeEvent((event) => events.push(event));
+    await virtual.requestPatchPrototype({
+      id: "one",
+      baseRevision: 1,
+      ops: [
+        { op: "replace", path: "/state/count", value: 2 },
+        { op: "replace", path: "/state/label", value: "b" },
+      ],
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      sequence: 1,
+      kind: "change",
+      name: "change",
+      payload: { keys: ["count", "label"], values: { count: 2, label: "b" } },
+      state: { count: 2, label: "b" },
+      pages: {},
+    });
+    expect(
+      await virtual.requestPatchPrototype({
+        id: "one",
+        baseRevision: 2,
+        ops: [{ op: "replace", path: "/state/count", value: 2 }],
+      }),
+    ).toMatchObject({ success: true, revision: 3 });
+    expect(
+      (
+        await virtual.requestPatchPrototype({
+          id: "one",
+          baseRevision: 3,
+          ops: [{ op: "replace", path: "/state/missing", value: 2 }],
+        })
+      ).success,
+    ).toBe(false);
+    expect(events).toHaveLength(1);
+  });
+
+  for (const removal of ["dismiss", "dismissAll", "replaceOthers"] as const) {
+    test(`revision and sequence survive ${removal}`, async () => {
+      const virtual = device();
+      await virtual.requestShowPrototype(spec("x", { state: { n: 1 } }));
+      virtual.dispatch({ id: "x", kind: "emit", name: "before" });
+      if (removal === "replaceOthers") {
+        await virtual.requestShowPrototype(spec("other"));
+      } else {
+        await virtual.requestDismissPrototype(removal === "dismiss" ? { id: "x" } : { all: true });
+      }
+      await virtual.requestShowPrototype(spec("x", { state: { n: 2 } }));
+      expect(
+        (
+          await virtual.requestPatchPrototype({
+            id: "x",
+            baseRevision: 1,
+            ops: [{ op: "replace", path: "/state/n", value: 3 }],
+          })
+        ).conflict,
+      ).toEqual({ revision: 2, state: { n: 2 } });
+      expect((await virtual.requestInspectPrototypes()).prototypes?.[0]).toMatchObject({
+        state: { n: 2 },
+        lastSequence: 1,
+      });
+      const events: PrototypeEvent[] = [];
+      virtual.onPrototypeEvent((event) => events.push(event));
+      expect(
+        await virtual.requestPatchPrototype({
+          id: "x",
+          baseRevision: 2,
+          ops: [{ op: "replace", path: "/state/n", value: 4 }],
+        }),
+      ).toMatchObject({ success: true, revision: 3 });
+      expect(events[0].sequence).toBe(2);
+    });
+  }
+
+  test("inspect reports initial nested stacks per prototype and at top level", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(
+      spec("one", {
+        root: {
+          type: "stack",
+          id: "outer",
+          start: "home",
+          screens: {
+            home: {
+              type: "stack",
+              id: "inner",
+              start: "list",
+              screens: {
+                list: { type: "text", text: "List" },
+                detail: { type: "text", text: "Detail" },
+              },
+              routes: { list: { params: {} }, detail: { params: { item: "string" } } },
+            },
+          },
+        },
+      }),
+    );
+    const stacks = {
+      outer: { path: ["home"], depth: 1 },
+      inner: { path: ["list"], depth: 1, params: [{}] },
+    };
+    const inspected = await virtual.requestInspectPrototypes();
+    expect(inspected.prototypes?.[0].stacks).toEqual(stacks);
+    expect(inspected.stacks).toEqual(stacks);
+    inspected.stacks!.outer.path.push("mutated");
+    expect((await virtual.requestInspectPrototypes()).stacks).toEqual(stacks);
+    const events: PrototypeEvent[] = [];
+    virtual.onPrototypeEvent((event) => events.push(event));
+    virtual.dispatch({ id: "one", kind: "emit", name: "snapshot" });
+    expect(events[0].stacks).toEqual(stacks);
+    await virtual.requestDismissPrototype({ all: true });
+    expect((await virtual.requestInspectPrototypes()).stacks).toBeUndefined();
   });
 
   test("a show replaces other prototypes unless replaceOthers is false", async () => {

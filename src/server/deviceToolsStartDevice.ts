@@ -1,3 +1,8 @@
+import {
+  recordStartCameraPoster,
+  validateCameraPosterPlatform,
+  resolveCameraPosterQr,
+} from "../features/utility/ios/iosCameraPosterStart";
 import { isAppleVisionStartRequest, startAppleVisionDevice } from "./deviceToolsAppleVisionStart";
 import {
   currentAutolockMcpSessionId,
@@ -42,7 +47,6 @@ import {
   type RunnerReadinessRequest,
 } from "../ctrlProxy/RunnerReadinessService";
 import { createDefaultRunnerReadinessService } from "../daemon/defaultRunnerReadinessService";
-import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { getAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -206,6 +210,9 @@ const bootAndPrepareDevice = async (
   await validatePooledDeviceMapping(state.boot.device, requestedIdentity, mappingOptions);
   preparation.sourceImage = sourceImageForAcquiredBoot(state.boot, budgets.androidAvdName);
   await reserveBootReadiness(args, budgets, deps, { daemonState: deps.daemonState, ...options });
+  // After the ownership check: a request rejected for another client's simulator must not
+  // overwrite that client's poster.
+  await recordStartCameraPoster(args, state.boot.device, deps);
 
   // A new incarnation must not inherit a prior intentional-shutdown marker
   // while its per-device runner setup is in flight.
@@ -887,29 +894,6 @@ function buildBootedResponse(
   });
 }
 
-function validateCameraPosterPlatform(args: StartDeviceArgs): void {
-  if (args.cameraPosterPath !== undefined && args.platform !== "android") {
-    throw new ActionableError(
-      "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
-    );
-  }
-  if (args.cameraPosterQr !== undefined && args.platform !== "android") {
-    throw new ActionableError(
-      "cameraPosterQr is unsupported on iOS. Use a stopped Android emulator.",
-    );
-  }
-}
-
-/** Replace `cameraPosterQr` with the rendered poster's `cameraPosterPath`. */
-async function resolveCameraPosterQr<T extends StartDeviceArgs>(args: T): Promise<T> {
-  const { cameraPosterQr, ...rest } = args;
-  if (cameraPosterQr === undefined) {
-    return args;
-  }
-  const writer = getDeviceToolsDependencies().cameraPosterQrWriter ?? new FileQrPosterWriter();
-  return { ...rest, cameraPosterPath: await writer.writePoster(cameraPosterQr.text) } as T;
-}
-
 /** Boot + prepare, rolling a createIfMissing image back via the injected rollback (#11100, #11827). */
 export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceRollback) {
   return async (
@@ -943,6 +927,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    validateCameraPosterPlatform(rawArgs);
     if (isAppleVisionStartRequest(rawArgs)) {
       return await startAppleVisionDevice(rawArgs, bindBootedDeviceSession, signal);
     }
@@ -968,11 +953,14 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
         operationName: "startDevice",
         operation: async (deadlineMs, requestSignal, stage) => {
           // Poster rendering runs under the acquisition deadline and cancellation.
-          const resolvedArgs = await raceWithDeadline(resolveCameraPosterQr(args), {
-            timer: getDeviceToolsDependencies().timer,
-            signal: requestSignal,
-            label: "startDevice camera poster",
-          });
+          const resolvedArgs = await raceWithDeadline(
+            resolveCameraPosterQr(args, getDeviceToolsDependencies().cameraPosterQrWriter),
+            {
+              timer: getDeviceToolsDependencies().timer,
+              signal: requestSignal,
+              label: "startDevice camera poster",
+            },
+          );
           const target = {
             ...resolvedArgs,
             ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),

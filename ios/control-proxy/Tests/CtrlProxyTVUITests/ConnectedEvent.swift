@@ -7,5 +7,5 @@ struct TVConnectedEvent: Encodable, Sendable {
     let id: Int
     let platform = "tvos"
     let supportedCommands = TVCommandPolicy.supportedCommands
-    let supportedFeatures: [String] = []
+    let supportedFeatures = TVCommandPolicy.supportedFeatures
 }

@@ -30,19 +30,47 @@ enum VisionCommandPolicy {
         let isEnabled: Bool
     }
 
+    enum TapSelector: Equatable {
+        case identifier(String)
+        case label(String, UInt)
+
+        func matches(identifier: String, label: String, elementType: UInt) -> Bool {
+            switch self {
+            case let .identifier(expected):
+                return identifier == expected
+            case let .label(expectedLabel, expectedType):
+                return identifier.isEmpty && label == expectedLabel && elementType == expectedType
+            }
+        }
+    }
+
+    /// A label-only request must identify an exact type; scene-local frame taps remain unsupported.
+    static func tapSelector(
+        identifier: String, label: String?, elementType: UInt?, frameContext: String?
+    )
+        -> TapSelector?
+    {
+        guard frameContext == nil else { return nil }
+        if !identifier.isEmpty { return .identifier(identifier) }
+        guard let label, !label.isEmpty, let elementType else { return nil }
+        return .label(label, elementType)
+    }
+
     enum TapResolution: Equatable {
         case match(Int)
-        /// No candidate has the identifier with the supplied type/label.
+        /// No candidate matches the selector with the supplied type/label.
         case missing
-        /// Candidates match the identifier, type and label, but none is enabled.
+        /// Candidates match the selector, type and label, but none is enabled.
         case disabled
         case ambiguous(Int)
     }
 
-    /// Indices refer to the original identifier query, so the router taps the snapshotted element.
+    /// Indices refer to the original query, so the router taps the snapshotted element.
     static func tapResolution(
         candidates: [TapCandidate], label: String? = nil, elementType: UInt? = nil
-    ) -> TapResolution {
+    )
+        -> TapResolution
+    {
         let selected = candidates.indices.filter { index in
             let candidate = candidates[index]
             return (label == nil || candidate.label == label)
@@ -112,6 +140,21 @@ struct VisionElementTraits: Equatable {
         case .other:
             return VisionElementTraits(clickable: nil, focusable: nil, actions: nil, exposesValue: false)
         }
+    }
+
+    /// Toggle snapshots expose state as a string or NSNumber, including disabled controls.
+    /// Preserve that state verbatim; placeholder filtering applies only to text inputs.
+    func snapshotValue(_ raw: Any?, placeholder: String?, isToggle: Bool) -> String? {
+        if isToggle {
+            if let text = raw as? String {
+                return text
+            }
+            if let number = raw as? NSNumber {
+                return number.stringValue
+            }
+            return nil
+        }
+        return enteredValue(raw, placeholder: placeholder)
     }
 
     /// The entered text when it differs from the placeholder and may be exposed. A field whose

@@ -99,6 +99,18 @@ export const DEVICES_ENV = {
     min: 1,
     doc: "Idle window in ms after which a daemon gives up a CtrlProxy forwarding lease.",
   },
+  IOS_CAMERA_POSTER_DYLIB: {
+    name: "AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB",
+    kind: "path",
+    default: "unset",
+    doc: "Prebuilt iOS Simulator camera poster injection dylib; overrides build-on-demand.",
+  },
+  IOS_CAMERA_POSTER_SOURCE: {
+    name: "AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE",
+    kind: "path",
+    default: "unset",
+    doc: "CameraPosterInjection.m source for the iOS Simulator camera poster build; overrides the one shipped in the package.",
+  },
   IOS_PROTOTYPE_AGENT: {
     name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT",
     kind: "path",

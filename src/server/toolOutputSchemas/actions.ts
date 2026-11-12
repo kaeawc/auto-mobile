@@ -198,6 +198,7 @@ export const launchAppResultSchema = z
     userId: z.number().optional(),
     pid: z.number().optional(),
     alreadyForeground: z.boolean().optional(),
+    cameraPosterApplied: z.boolean().optional(),
     foregroundActivityPackage: z.string().optional(),
     verifiedBy: z.string().optional(),
     verified: z.boolean().optional(),

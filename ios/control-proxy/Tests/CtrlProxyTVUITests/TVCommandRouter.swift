@@ -72,8 +72,9 @@ final class TVCommandRouter {
                 guard request.frameContext == nil else {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
+                let hold = try TVRemoteHold.seconds(durationMs: request.durationMs)
                 let startTime = Date()
-                textEntryCommands.press(button, perform: press, snapshot: {
+                textEntryCommands.press(button, perform: { press($0, forDuration: hold) }, snapshot: {
                     let resolved = target(requested: envelope.bundleId)
                     return try sketch(resolved.app.snapshot())
                 })
@@ -157,17 +158,23 @@ final class TVCommandRouter {
         )
     }
 
-    private func press(_ button: TVRemoteButton) {
+    private func press(_ button: TVRemoteButton, forDuration duration: TimeInterval?) {
         let remote = XCUIRemote.shared
+        let remoteButton: XCUIRemote.Button
         switch button {
-        case .moveUp: remote.press(.up)
-        case .down: remote.press(.down)
-        case .left: remote.press(.left)
-        case .right: remote.press(.right)
-        case .select: remote.press(.select)
-        case .menu: remote.press(.menu)
-        case .home: remote.press(.home)
-        case .playPause: remote.press(.playPause)
+        case .moveUp: remoteButton = .up
+        case .down: remoteButton = .down
+        case .left: remoteButton = .left
+        case .right: remoteButton = .right
+        case .select: remoteButton = .select
+        case .menu: remoteButton = .menu
+        case .home: remoteButton = .home
+        case .playPause: remoteButton = .playPause
+        }
+        if let duration {
+            remote.press(remoteButton, forDuration: duration)
+        } else {
+            remote.press(remoteButton)
         }
     }
 }

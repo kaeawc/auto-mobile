@@ -12,6 +12,7 @@ import {
 import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
 import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
 import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
+import { registerIosCameraPosterSessionCleanup } from "./iosCameraPosterSessionCleanup";
 import { registerPortReverseSessionCleanup } from "./portReverseSessionCleanup";
 import { registerAndroidAutoSessionCleanup } from "./androidAutoSessionCleanup";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
@@ -140,6 +141,7 @@ export function wireSessionLifecycle(
   registerDisplayProfileSessionCleanup(sessionManager);
   registerKeyboardProfileSessionCleanup(sessionManager);
   registerDeviceConditionSessionCleanup(sessionManager);
+  registerIosCameraPosterSessionCleanup(sessionManager);
   registerPortReverseSessionCleanup(sessionManager);
   registerAndroidAutoSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);

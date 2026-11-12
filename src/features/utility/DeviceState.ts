@@ -136,6 +136,8 @@ export class DeviceState {
   private readonly onLocationApplied?: () => void;
   private readonly iosRunnerLocation?: IosRunnerLocationClient;
   private readonly cameraPosterQrWriter?: QrPosterWriter;
+  private readonly iosCameraPosterRegistry: DeviceStateDependencies["iosCameraPosterRegistry"];
+  private readonly iosCameraPosterDylibProvider: DeviceStateDependencies["iosCameraPosterDylibProvider"];
   private readonly cameraPosterFileExists?: (path: string) => boolean;
   private injectedNetworkFilterBridge?: NetworkFilterBridge;
   private readonly iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
@@ -213,6 +215,8 @@ export class DeviceState {
     this.timer = dependencies.timer ?? defaultTimer;
     this.clock.initializeMutation(dependencies.clockMutation);
     this.clock.initializeCacheInvalidation(dependencies.invalidateClockCaches);
+    this.iosCameraPosterRegistry = dependencies.iosCameraPosterRegistry;
+    this.iosCameraPosterDylibProvider = dependencies.iosCameraPosterDylibProvider;
     this.cameraPosterQrWriter = dependencies.cameraPosterQrWriter;
     this.cameraPosterFileExists = dependencies.cameraPosterFileExists;
     this.simctl = dependencies.simctl ?? null;
@@ -420,6 +424,8 @@ export class DeviceState {
         ? {
             cameraPoster: await writeDeviceCameraPoster(this.device, input.cameraPoster, {
               adbFactory: this.adbFactory,
+              iosCameraPosterRegistry: this.iosCameraPosterRegistry,
+              iosCameraPosterDylibProvider: this.iosCameraPosterDylibProvider,
               qrWriter: this.cameraPosterQrWriter,
               fileExists: this.cameraPosterFileExists,
             }),

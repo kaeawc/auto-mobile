@@ -18,9 +18,6 @@ automatically.
 - The accessibility findings a successful `show` or `patch` returns.
 - `automobile:prototype/<id>/web` returns the prototype as one HTML page in a device frame, and
   `automobile:prototype/native?id=<id>` returns the files that embed it in an app.
-- `serve` and `stop` run the live preview server: open the returned `pageUrl` in a browser and
-  each `show` or `patch` on the virtual device reloads it. See
-  [Live preview in a browser](prototype-embedding.md#live-preview-in-a-browser).
 
 Every result includes `virtualDevice`:
 

@@ -13,6 +13,8 @@ export interface DaemonManagerSeams {
     closeSync(fd: number): void;
   };
   launchWorkingDirectory: () => string;
+  /** This checkout's version as a process launched now would report it (#18071). */
+  probeLaunchCheckoutVersion: () => Promise<string>;
 }
 
 /** Typed view of `DaemonManager` internals for tests (see `getInternalsForTesting`). */

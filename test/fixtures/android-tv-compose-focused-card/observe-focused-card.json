@@ -1,0 +1,25 @@
+{
+  "focusedElement": {
+    "actions": ["clear_focus", "accessibility_focus", "click", "long_click"],
+    "visible-to-user": true,
+    "view-id": "s2-54a37556722ca76a-7",
+    "clickable": "true",
+    "focusable": "true",
+    "focused": true,
+    "long-clickable": "true",
+    "bounds": [488, 214, 888, 434]
+  },
+  "skeleton_trending_card_2": [
+    {
+      "bounds": [488, 214, 888, 434],
+      "affordances": ["tap", "long-press"],
+      "elementId": "s2-54a37556722ca76a-7",
+      "label": "Trending card 2"
+    }
+  ],
+  "activeWindow": {
+    "appId": "dev.dogfood.tv",
+    "activityName": "dev.dogfood.tv.MainActivity",
+    "layoutSeqSum": 0
+  }
+}

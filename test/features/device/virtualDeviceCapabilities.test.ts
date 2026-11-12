@@ -93,9 +93,10 @@ describe("virtual device capability inventories", () => {
         { id: "ios.simulator.biometric", state: "available", source: "platform" },
         {
           id: "ios.simulator.cameraPoster",
-          state: "unsupported",
+          state: "available",
           source: "platform",
-          reason: "Camera posters are only supported at Android emulator boot.",
+          reason:
+            "Camera posters apply on the next launchApp cold launch through simulator process injection.",
         },
         {
           id: "ios.simulator.nfc",
@@ -144,7 +145,8 @@ describe("virtual device capability inventories", () => {
           id: "ios.simulator.cameraPoster",
           state: "unsupported",
           source: "platform",
-          reason: "Camera posters are only supported at Android emulator boot.",
+          reason:
+            "Camera injection requires an iOS Simulator app process; other Apple platforms are unsupported.",
         },
         {
           id: "ios.simulator.nfc",

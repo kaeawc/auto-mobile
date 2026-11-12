@@ -23,6 +23,10 @@ internal class ContentSeeder(private val context: Context) {
     val removed: Int
     when (request) {
       is SeedRequest.Account -> return JSONObject().put("inserted", ensureAccount(account))
+      is SeedRequest.Photo -> {
+        inserted = seedContactPhoto(request, AndroidContactPhotoAccess(context))
+        removed = 0
+      }
       is SeedRequest.CalendarBatch -> {
         ensureAccount(account)
         val ids = request.items.map { seedCalendarEvent(account, it) }

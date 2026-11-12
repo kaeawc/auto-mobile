@@ -164,6 +164,16 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   },
   { name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT", kind: "input", reason: "Read-only agent dylib." },
   {
+    name: "AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB",
+    kind: "input",
+    reason: "Read-only prebuilt camera poster dylib.",
+  },
+  {
+    name: "AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE",
+    kind: "input",
+    reason: "Read-only camera poster library source compiled on demand.",
+  },
+  {
     name: "AUTOMOBILE_BUNDLETOOL_JAR",
     kind: "input",
     reason: "Read-only bundletool jar for installApp .aab/.apks.",
@@ -221,6 +231,7 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
   "AUTOMOBILE_DAEMON_HTTP_TOKEN",
   "AUTOMOBILE_DAEMON_LAUNCHER_PID",
+  "AUTOMOBILE_DAEMON_LAUNCH_CHECKOUT_VERSION",
   "AUTOMOBILE_DAEMON_LAUNCH_NONCE",
   "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET",
   "AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS",

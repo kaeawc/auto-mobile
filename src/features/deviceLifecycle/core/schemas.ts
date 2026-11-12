@@ -135,7 +135,7 @@ export const startDeviceParametersSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Host PNG/JPG/JPEG poster image for the Android emulator back camera wall; cold boot only",
+      "Host PNG/JPG/JPEG camera poster. Android emulator: back camera wall, cold boot only. iOS Simulator: records for the next launchApp cold launch, including on an already-running simulator. Physical devices are unsupported.",
     ),
   cameraPosterQr: z
     .object({
@@ -148,7 +148,7 @@ export const startDeviceParametersSchema = z.object({
     .strict()
     .optional()
     .describe(
-      "Generate a QR code PNG and use it as the Android emulator back camera wall poster; cold boot only. Mutually exclusive with cameraPosterPath.",
+      "Generate a QR PNG camera poster. Android emulator: back camera wall, cold boot only. iOS Simulator: records for the next launchApp cold launch. Physical devices are unsupported. Mutually exclusive with cameraPosterPath.",
     ),
   formFactor: z
     .enum(["phone", "tablet", "foldable", "tv", "watch", "automotive", "xr-headset", "xr-glasses"])

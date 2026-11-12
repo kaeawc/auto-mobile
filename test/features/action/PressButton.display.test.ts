@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { clearResolvedHomePackageCache } from "../../../src/features/observe/androidLauncherPackages";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+import { displayInventoryOutcome } from "../../../src/models/DeviceInfo";
 import type { TapCoordinatesRequest } from "../../../src/utils/interfaces/TapCoordinatesRequest";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -146,6 +147,33 @@ describe("PressButton display (#17643)", () => {
       true,
     );
     expect(result.success).toBe(true);
+  });
+
+  test("active on an unreadable inventory presses display 0 with unscoped reads", async () => {
+    // Its fallback panel key is not a caller selector, so the reads must not re-check it (#16741).
+    const unreadable: BootedDevice = {
+      ...android,
+      [displayInventoryOutcome]: { kind: "unreadable", reason: "dumpsys display timed out" },
+    };
+    const { action, adb, observe, resolved } = harness(unreadable, { displayId: 0, panelKey: "0" });
+    const result = await action.execute("back", { display: "active" });
+    expect(resolved).toEqual(["active"]);
+    expect(keyeventArgv(adb)).toEqual([["shell", "input", "-d", "0", "keyevent", "4"]]);
+    expect(observe.getExecuteOptions().length).toBeGreaterThanOrEqual(1);
+    expect(observe.getExecuteOptions().every((options) => options.display === undefined)).toBe(
+      true,
+    );
+    expect(result.success).toBe(true);
+  });
+
+  test("an explicit selector on an unreadable inventory keeps its scoped reads", async () => {
+    const unreadable: BootedDevice = {
+      ...android,
+      [displayInventoryOutcome]: { kind: "unreadable", reason: "dumpsys display timed out" },
+    };
+    const { action, observe } = harness(unreadable, { displayId: 0, panelKey: "main" });
+    await action.execute("back", { display: "inner" });
+    expect(observe.getExecuteOptions().every((options) => options.display === "main")).toBe(true);
   });
 
   test("an unchanged targeted display fails the press with no visual change", async () => {

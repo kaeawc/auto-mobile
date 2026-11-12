@@ -1,7 +1,7 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import { displayTransitions } from "../DisplayTransition";
-import { DisplaySelectionError, resolveTargetDisplay } from "../DisplaySelection";
+import { DisplaySelectionError, resolveDeviceTargetDisplay } from "../DisplaySelection";
 import {
   type ObservedAndroidDisplay,
   type ObservedAndroidDisplayCache,
@@ -17,7 +17,7 @@ export interface DisplayRecordProvenance {
 export interface DisplayTargetBinding {
   observedAndroid: ObservedAndroidDisplay | undefined;
   explicitlyRouted: boolean;
-  requestedPanel: ReturnType<typeof resolveTargetDisplay> | undefined;
+  requestedPanel: ReturnType<typeof resolveDeviceTargetDisplay> | undefined;
   requestedDisplayId: number | undefined;
 }
 
@@ -75,7 +75,7 @@ export function resolveExplicitTarget(
   const { result, displayRequest } = context;
   const explicitlyRouted = displayRequest !== undefined && displayRequest !== "active";
   const requestedPanel = explicitlyRouted
-    ? resolveTargetDisplay(device.displays, displayRequest, {
+    ? resolveDeviceTargetDisplay(device, displayRequest, {
         activePanelKey: observedAndroid?.display.key,
         posture: result.display.posture,
       })
@@ -250,7 +250,7 @@ export class AndroidDisplayBindingCollector implements DisplayBindingCollector {
   ): void {
     const panel =
       requestedPanel ??
-      resolveTargetDisplay(device.displays, displayRequest, {
+      resolveDeviceTargetDisplay(device, displayRequest, {
         focusedPanelKey,
         activePanelKey,
         posture: result.display.posture,

@@ -5,7 +5,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage as describeError } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
-import { resolveTargetDisplay } from "./DisplaySelection";
+import { resolveDeviceTargetDisplay } from "./DisplaySelection";
 import type { ObservedAndroidDisplayCache } from "./ObservationDisplay";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import type { ScreenshotEncodingOptions } from "./screenshot/screenshotOptions";
@@ -151,7 +151,7 @@ export class DeviceReadScreenshot {
     if (this.device.platform !== "android" || !display || display === "active") {
       return undefined;
     }
-    const panel = resolveTargetDisplay(this.device.displays, display, {});
+    const panel = resolveDeviceTargetDisplay(this.device, display, {});
     const displayId = await this.observedAndroidDisplayCache.logicalIdForPanel(
       this.device,
       this.adb,

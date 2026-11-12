@@ -42,6 +42,8 @@ import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
 import { FakeDeviceStateCollector } from "../fakes/FakeDeviceStateCollector";
 import { resetObserveCacheStore } from "../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
+import { assertDisplayInventoryAvailable } from "../../src/features/observe/DisplaySelection";
+import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import { createDeviceHierarchyCapture } from "../../src/features/observe/DeviceHierarchyCapture";
 import type { AccessibilityHierarchy } from "../../src/features/observe/android/types";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
@@ -1806,6 +1808,48 @@ describe("explicit-display embedded observation", () => {
     expect(payload.observation).toEqual({ ...settled, settled: true, settleMs: 0, settlePolls: 2 });
     expect(payload.observation.display).not.toHaveProperty("pinned");
   });
+
+  test.each([
+    { outcome: "unreadable" as const, expected: "active" },
+    { outcome: "single" as const, expected: "0" },
+  ])(
+    "an active selector on a $outcome inventory polls display $expected (#16741)",
+    async ({ outcome, expected }) => {
+      const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+      action.display = { key: "0", role: "unknown", posture: "unknown", generation: 0 };
+      const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+      settled.display = { ...action.display };
+      const device = {
+        [displayInventoryOutcome]:
+          outcome === "unreadable"
+            ? { kind: "unreadable" as const, reason: "dumpsys display timed out" }
+            : { kind: "single" as const },
+      };
+      const requested: Array<string | undefined> = [];
+      const response = createStructuredToolResponse({ success: true, observation: action });
+
+      await settleEmbeddedObservationInResponse(response, {
+        name: "tapOn",
+        args: { display: "active" },
+        internal: false,
+        timer: new FakeTimer(),
+        device,
+        createSettleObserve: () => ({
+          execute: async (options = {}) => {
+            requested.push(options.display);
+            // The real observe guard: an unreadable inventory rejects an explicit key.
+            assertDisplayInventoryAvailable(device, options.display);
+            return settleResult(settled);
+          },
+        }),
+      });
+
+      expect(requested).toEqual([expected]);
+      const payload = JSON.parse(response.content[0].text);
+      expect(payload.observation.settled).toBe(true);
+      expect(payload.observation.viewHierarchy).toEqual(settled.viewHierarchy);
+    },
+  );
 
   test.each(["internal-key", undefined])(
     "an unpinned capture cannot be replaced by panel %s",

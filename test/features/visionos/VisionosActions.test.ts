@@ -1,5 +1,11 @@
-import { isVisionosHierarchy } from "../../../src/features/visionos/VisionosHierarchy";
+import {
+  isVisionosHierarchy,
+  normalizeVisionosHierarchy,
+} from "../../../src/features/visionos/VisionosHierarchy";
 import settingsHierarchy from "../../fixtures/visionos-settings/hierarchy.json";
+import ornamentHierarchy from "../../fixtures/visionos-xcuitest/hierarchy-ornament-window.json";
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { readToolResponse } from "../../helpers/toolResponse";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { visionosTapOn, visionosSendKeys } from "../../../src/features/visionos/VisionosActions";
@@ -209,11 +215,160 @@ test.each(["clickable-first", "clickable-second", "identified", "disabled"])(
   },
 );
 
-test("a text-only Settings target reports the missing identifier", async () => {
+test("index cannot disambiguate identical text-only Settings targets", async () => {
   useSettingsHierarchy();
   await expect(
     visionosTapOn(device.deviceId, { action: "tap", text: "General", index: 1 }),
-  ).rejects.toThrow("no accessibility identifier");
+  ).rejects.toThrow("ambiguous");
+  expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
+});
+
+function useOrnamentHierarchy() {
+  unregister();
+  const tree = structuredClone(ornamentHierarchy.data);
+  if (!isVisionosHierarchy(tree)) {
+    throw new Error("Expected a valid ornament hierarchy fixture");
+  }
+  client = new FakeVisionosRunnerClient(tree);
+  unregister = visionosRunners.register(device.deviceId, client);
+  return tree;
+}
+
+test.each([
+  "Item 1",
+  "Item 2",
+  "Item 3",
+  "Item 4",
+  "Item 5",
+  "Item 6",
+  "Item 7",
+  "Item 8",
+  "Settings",
+])("captured label %s taps its button without an identifier or coordinates", async (text) => {
+  const tree = useOrnamentHierarchy();
+  const matches = new DefaultElementParser()
+    .flattenViewHierarchy(normalizeVisionosHierarchy(tree))
+    .map(({ element }) => element)
+    .filter((element) => element.text === text);
+  expect(matches.some((element) => element.class === "9" && element.clickable === "true")).toBe(
+    true,
+  );
+  expect(matches.some((element) => element.class === (text === "Settings" ? "1" : "48"))).toBe(
+    true,
+  );
+  // Put the competing label first to prove ranking, rather than capture order, picks the button.
+  tree.hierarchy.node.reverse();
+  const result = await visionosTapOn(device.deviceId, { action: "tap", text });
+  expect(result.element).toMatchObject({ class: "9", clickable: "true", text });
+  expect(client.commands).toEqual([
+    { type: "request_hierarchy" },
+    { type: "request_tap_element", identifier: "", label: text, elementType: 9 },
+  ]);
+});
+
+test("index selects a distinguishable label-only type", async () => {
+  useOrnamentHierarchy();
+  await visionosTapOn(device.deviceId, { action: "tap", text: "Item 3", index: 1 });
+  expect(client.commands[1]).toEqual({
+    type: "request_tap_element",
+    identifier: "",
+    label: "Item 3",
+    elementType: 48,
+  });
+});
+
+test.each([undefined, 1])(
+  "identical label-only buttons refuse even with index %s",
+  async (index) => {
+    const tree = useOrnamentHierarchy();
+    const row = tree.hierarchy.node.find(
+      (node) => node.text === "Item 3" && node.className === "9",
+    )!;
+    tree.hierarchy.node.push({ ...row });
+    const tap = visionosTapOn(device.deviceId, { action: "tap", text: "Item 3", index });
+    await expect(tap).rejects.toBeInstanceOf(ActionableError);
+    await expect(tap).rejects.toThrow(/ambiguous.*[Pp]ass index.*add.*identifier/);
+    expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
+  },
+);
+
+test("label-only matching ignores disabled and identified twins", async () => {
+  const tree = useOrnamentHierarchy();
+  const row = tree.hierarchy.node.find((node) => node.text === "Item 3" && node.className === "9")!;
+  tree.hierarchy.node.unshift(
+    { ...row, enabled: "false" },
+    { ...row, "resource-id": "identified" },
+  );
+  // Identified controls retain priority, followed by the enabled label-only button.
+  await visionosTapOn(device.deviceId, { action: "tap", text: "Item 3" });
+  expect(client.commands[1]).toEqual({ type: "request_tap_element", identifier: "identified" });
+  await visionosTapOn(device.deviceId, { action: "tap", text: "Item 3", index: 1 });
+  expect(client.commands[3]).toEqual({
+    type: "request_tap_element",
+    identifier: "",
+    label: "Item 3",
+    elementType: 9,
+  });
+});
+
+test.each(["40", "41"])(
+  "label-only switch/toggle type %s uses an element tap",
+  async (className) => {
+    const tree = useOrnamentHierarchy();
+    const row = tree.hierarchy.node.find(
+      (node) => node.text === "Item 3" && node.className === "9",
+    )!;
+    tree.hierarchy.node = [{ ...row, className }];
+    await visionosTapOn(device.deviceId, { action: "tap", text: "Item 3" });
+    expect(client.commands[1]).toEqual({
+      type: "request_tap_element",
+      identifier: "",
+      label: "Item 3",
+      elementType: Number(className),
+    });
+  },
+);
+
+test.each(["item 3", "Item", "Item 30"])("label-only tap requires exact text: %s", async (text) => {
+  useOrnamentHierarchy();
+  await expect(visionosTapOn(device.deviceId, { action: "tap", text })).rejects.toThrow(
+    "No visionOS element matched",
+  );
+  expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
+});
+
+test("disabled label-only controls and targets without identifier or text refuse input", async () => {
+  const tree = useOrnamentHierarchy();
+  const row = tree.hierarchy.node.find((node) => node.text === "Item 3" && node.className === "9")!;
+  tree.hierarchy.node = [{ ...row, enabled: "false" }];
+  await expect(visionosTapOn(device.deviceId, { action: "tap", text: "Item 3" })).rejects.toThrow(
+    "disabled",
+  );
+  const anonymous = { ...row, text: "", viewId: "unlabelled" };
+  tree.hierarchy.node = [anonymous];
+  await expect(
+    visionosTapOn(device.deviceId, { action: "tap", elementId: "unlabelled" }),
+  ).rejects.toThrow(/no accessibility identifier or text.*identifier/);
+  expect(client.commands).toEqual([{ type: "request_hierarchy" }, { type: "request_hierarchy" }]);
+});
+
+test("label-only tap surfaces an older runner's own refusal", async () => {
+  useOrnamentHierarchy();
+  const refusal = new ActionableError(
+    "identifier: supply an accessibility identifier; frame taps are unsupported",
+  );
+  const request = client.request.bind(client);
+  client.request = async (command, signal) => {
+    if (command.type === "request_tap_element") {
+      client.commands.push(command);
+      throw refusal;
+    }
+    return request(command, signal);
+  };
+  await expect(visionosTapOn(device.deviceId, { action: "tap", text: "Item 3" })).rejects.toBe(
+    refusal,
+  );
+  expect(client.commands).toHaveLength(2);
 });
 
 test("registered sendKeys handler types through visionOS rather than the iOS client", async () => {

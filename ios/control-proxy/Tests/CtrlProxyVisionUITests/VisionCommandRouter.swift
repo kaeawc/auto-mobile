@@ -78,18 +78,31 @@ final class VisionCommandRouter {
                 ))
             case "request_tap_element":
                 let request = try decoder.decode(TapRequest.self, from: data)
-                guard !request.identifier.isEmpty, request.frameContext == nil else {
+                guard let selector = VisionCommandPolicy.tapSelector(
+                    identifier: request.identifier, label: request.label,
+                    elementType: request.elementType, frameContext: request.frameContext
+                ) else {
                     throw CommandError.invalidParameter(
                         "identifier",
-                        "supply an accessibility identifier; frame taps are unsupported"
+                        "supply an accessibility identifier or a non-empty label and elementType; frame taps are unsupported"
                     )
                 }
-                // XCUITest's identifier query also matches elements whose label equals the identifier
-                // (a row's static text), so keep only elements whose own identifier is the one asked for.
-                let queried = application.descendants(matching: .any)
-                    .matching(identifier: request.identifier).allElementsBoundByIndex
-                let resolved = try queried.map { (element: $0, snapshot: try $0.snapshot()) }
-                    .filter { $0.snapshot.identifier == request.identifier }
+                let descendants = application.descendants(matching: .any)
+                let queried: [XCUIElement]
+                switch selector {
+                case let .identifier(identifier):
+                    // Identifier queries also match labels; the snapshot filter checks the own identifier.
+                    queried = descendants.matching(identifier: identifier).allElementsBoundByIndex
+                case let .label(label, _):
+                    queried = descendants.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
+                }
+                let resolved = try queried.map { try (element: $0, snapshot: $0.snapshot()) }
+                    .filter {
+                        selector.matches(
+                            identifier: $0.snapshot.identifier, label: $0.snapshot.label,
+                            elementType: $0.snapshot.elementType.rawValue
+                        )
+                    }
                 let matches = resolved.map(\.element)
                 let snapshots = resolved.map(\.snapshot)
                 let candidates = snapshots.map {
@@ -106,7 +119,7 @@ final class VisionCommandRouter {
                 case .missing:
                     throw CommandError.invalidParameter(
                         "identifier",
-                        "no element matches the identifier (and type/label when supplied); observe again"
+                        "no element matches the selector (and type/label when supplied); observe again"
                     )
                 case .disabled:
                     throw CommandError.invalidParameter(
@@ -118,11 +131,11 @@ final class VisionCommandRouter {
                         "\($0.elementType.rawValue)/\($0.label)/\($0.frame)"
                     }.joined(separator: "; ")
                     throw CommandError.executionFailed(
-                        "ambiguous_element: \(count) enabled elements share identifier '\(request.identifier)' "
+                        "ambiguous_element: \(count) enabled elements share selector '\(selector)' "
                             + "with the supplied type/label; candidates: \(details)"
                     )
                 }
-                lastTappedIdentifier = request.identifier
+                lastTappedIdentifier = request.identifier.isEmpty ? nil : request.identifier
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "tap_element_result", requestId: requestId, totalTimeMs: 0
                 ))
@@ -212,7 +225,11 @@ final class VisionCommandRouter {
         let traits = VisionElementTraits.traits(for: kind(of: snapshot.elementType), isEnabled: snapshot.isEnabled)
         return UIElementInfo(
             text: snapshot.label,
-            value: traits.enteredValue(snapshot.value, placeholder: snapshot.placeholderValue),
+            value: traits.snapshotValue(
+                snapshot.value,
+                placeholder: snapshot.placeholderValue,
+                isToggle: [.switch, .toggle, .checkBox].contains(snapshot.elementType)
+            ),
             resourceId: snapshot.identifier,
             className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),

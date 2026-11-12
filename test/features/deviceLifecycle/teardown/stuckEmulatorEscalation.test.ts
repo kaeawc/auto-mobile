@@ -57,6 +57,7 @@ function run(
     avdName?: string | undefined;
     redispatchSoftKill?: () => Promise<void>;
     requestAbortSignal?: AbortSignal;
+    remainingMs?: number;
   } = {},
 ) {
   return waitForEmulatorShutdownWithEscalation({
@@ -64,7 +65,7 @@ function run(
       deviceManager: manager,
       device,
       timer,
-      deadlineMs: timer.now() + TOTAL_MS,
+      deadlineMs: timer.now() + (overrides.remainingMs ?? TOTAL_MS),
       requestAbortSignal: overrides.requestAbortSignal,
       timeoutMs: TOTAL_MS,
     },
@@ -206,13 +207,34 @@ describe("waitForEmulatorShutdownWithEscalation", () => {
     expect(error.reason).toBe("unidentified");
   });
 
-  test("with no emulator process left in the table the retryable shutdown timeout stands", async () => {
+  test("an emulator whose process already exited is confirmed once adb drops the serial", async () => {
+    // #17957: a re-kill's own stop made the emulator exit, so the escalation found no process,
+    // and adb dropped the serial about 3 s later. That is a successful kill, not a timeout.
     stopper.outcome = { kind: "unidentified", identity: { kind: "absent" } };
+    stopper.onStop = () => {
+      stopTimes.push(timer.now());
+      timer.setTimeout(emulatorGone, 3_000);
+    };
 
-    const error = await run().catch((e: unknown) => e);
+    await expect(run()).resolves.toBeUndefined();
+    expect(stopper.stopCalls).toHaveLength(1);
+  });
+
+  test("with no emulator process left but the serial still listed, the retryable timeout quotes the real wait", async () => {
+    stopper.outcome = { kind: "unidentified", identity: { kind: "absent" } };
+    const started = timer.now();
+
+    // Part of the 30 s shutdown budget was already spent before the disappearance wait began.
+    const error = await run({ remainingMs: 12_000 }).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(DeviceShutdownTimeoutError);
     expect(error).not.toBeInstanceOf(EmulatorTeardownEscalationError);
+    // It waited out the whole remaining budget, not just the soft-kill windows...
+    expect(timer.now() - started).toBeGreaterThanOrEqual(12_000);
+    // ...and says how long it waited, not the unrelated 30000ms total budget.
+    const message = (error as Error).message;
+    expect(message).toContain("after 12000ms");
+    expect(message).not.toContain(`${TOTAL_MS}ms`);
   });
 
   test("without an AVD name there is no identity to signal, so it fails typed without a stop call", async () => {

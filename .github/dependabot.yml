@@ -63,7 +63,7 @@ updates:
       #      A human must run
       #      `bun run build && bun scripts/release/pin-runtime-deps.ts --write && bun install`
       #      and commit package.json + bun.lock + runtime-graph.json together;
-      #      see docs/design-docs/release/runtime-dependency-pinning.md.
+      #      see docs/how-it-works/release/runtime-dependency-pinning.md.
       #
       # No `update-types:` here on purpose — ignore every version, patches
       # included, since even a patch splits the matrix and stales the manifest.

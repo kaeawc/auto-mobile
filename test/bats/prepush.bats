@@ -121,7 +121,7 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
 @test "docs, skills, workflow, XML and test-plan paths select the shell lane" {
   # Each is a path scripts/prepush-shell.sh (CI's required "Shell Changed
   # Files" job) selects a check for; none selected a lane before.
-  for path in docs/design-docs/ci/a.md docs/using/a.md mkdocs.yml docs-assets/src/a.ts CHANGELOG.md \
+  for path in docs/how-it-works/ci/a.md docs/using/a.md mkdocs.yml docs-assets/src/a.ts CHANGELOG.md \
     .github/workflows/a.yml .github/actions/a/action.yml .github/CONTRIBUTING.md .githooks/pre-push \
     skills/a/SKILL.md .agents/skills/a/SKILL.md AGENTS.md .claude/commands/a.md .claude-plugin/plugin.json \
     plugins/a/x.json Dockerfile android/app/src/main/res/values/strings.xml test/test-plans/a.yaml \

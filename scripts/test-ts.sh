@@ -94,7 +94,7 @@ validate_positive_integer() {
 # Windows). test/macos-only-tests.txt classifies them; scripts/lib/macOsOnlyTests.ts
 # applies it. AUTOMOBILE_MACOS_ONLY_TESTS=auto (default) skips them on any host
 # that is not macOS, "include" runs them anywhere, "skip" drops them even on macOS.
-# Design: docs/design-docs/ci/macos-only-tests.md.
+# Design: docs/how-it-works/ci/macos-only-tests.md.
 macos_only_tool="$ROOT/scripts/lib/macOsOnlyTests.ts"
 case "${AUTOMOBILE_MACOS_ONLY_TESTS:-auto}" in
   include) skip_macos_only=0 ;;

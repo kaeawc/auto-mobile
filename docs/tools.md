@@ -196,8 +196,8 @@ the other arrows are tried. It returns the `path` of focused elements and a `sta
 (default 30, at most 100) or `stuck` (every arrow from the focused element was tried; an explicit `direction` stops
 after two unchanged presses). With `select: true` it presses enter once focused and reports `selected`. On Apple TV
 the arrows are Siri Remote directional presses, `select` presses the remote's select button, and focus is re-read
-after each press (see `docs/design-docs/plat/android/form-factors.md` and
-`docs/design-docs/plat/tvos/xcuitest-spike.md`).
+after each press (see `docs/how-it-works/plat/android/form-factors.md` and
+`docs/how-it-works/plat/tvos/xcuitest-spike.md`).
 
 ## 📝 Notes
 
@@ -236,12 +236,12 @@ virtual pen; each stroke starts about 4 seconds later while the pen attaches.
 `releaseHoldMs` become holds at the first and last point. A device or runner that cannot honour the request is refused before
 anything is sent, naming the missing capability. `tilt`, `orientation` and `buttons` are Android only; `doubleTap` and a panel
 `display` are not supported with a stylus yet. Details and the unverified parts are in the
-[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md).
+[stylus design note](how-it-works/mcp/stylus-pressure-hover-injection.md).
 
 ### hoverAt
 
 Hover enter, move and exit over `points` with no contact (Android only; the reasons iOS is refused are in the
-[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md)). It takes the `dragPath` point shape
+[stylus design note](how-it-works/mcp/stylus-pressure-hover-injection.md)). It takes the `dragPath` point shape
 (`x`, `y`, per-point `durationMs`) plus an optional per-point `distance` (stylus only), and the same
 `coordinateSpace`, `display`, `snapshotId` and `layer`.
 
@@ -256,13 +256,13 @@ It needs the `hover_input_v1` runner capability, or, for a `stylus` hover, an `a
 root with a writable `/dev/uinput` (after `adb root` on an emulator or userdebug build). A device or runner without either, and iOS, are refused before
 anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
 advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
-[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)). The tool type, source
+[stylus design note](how-it-works/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)). The tool type, source
 and hover actions above are confirmed on API 31 to 37 emulators; the stylus `AXIS_DISTANCE` value and physical pen
 devices are unverified.
 
 ### prototype
 
-Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md). Camera and media support per runtime: [camera and media guide](design-docs/prototype-camera-media.md).
+Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](how-it-works/plat/android/prototype-ux.md). Camera and media support per runtime: [camera and media guide](how-it-works/prototype-camera-media.md).
 
 #### Watch-sized mockups
 

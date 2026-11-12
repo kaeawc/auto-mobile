@@ -560,7 +560,7 @@ jobs:
               - 'docs/using/ui-tests.md'
               - 'docs/webrtc-streaming.md'
               - 'docs/assets/mdm/**'
-              - 'docs/decisions/**'
+              - 'docs/devlog/**'
               - 'src/constants/release.ts'
               - 'src/devices/deviceBootService.ts'
               - 'test/setup/**'

@@ -28,7 +28,7 @@ val AutoMobileInfo = PromoBlue
 // Playground crayon/marker palette — sampled from the app-icon illustration
 // (docs/img/playground-launch-icon-concept.png). Every light/dark role pair
 // below is verified against WCAG AA in PlaygroundContrastTest. See
-// docs/design-docs/playground-design-system.md for the full spec.
+// docs/how-it-works/playground-design-system.md for the full spec.
 // ---------------------------------------------------------------------------
 
 // Light scheme role tokens

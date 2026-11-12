@@ -89,7 +89,7 @@ test("disabled reports follow catalog order and exclude unreadable, enabled and 
 test("documented impact table matches every resource, label and impact", () => {
   // Windows checkouts convert line endings.
   const doc = readFileSync(
-    new URL("../../docs/design-docs/device-resources.md", import.meta.url),
+    new URL("../../docs/how-it-works/device-resources.md", import.meta.url),
     "utf8",
   ).replaceAll("\r\n", "\n");
   const section =

@@ -86,7 +86,7 @@ function elementValuesEqual(a: unknown, b: unknown): boolean {
 /**
  * Node attributes excluded from the *changed* comparison (issue #3051 — the
  * real-device diff-format sign-off). The real-device run
- * (`docs/design-docs/plat/android/actions-diff-observe-signoff.md`) found `extras`
+ * (`docs/how-it-works/plat/android/actions-diff-observe-signoff.md`) found `extras`
  * — a bag of `AccessibilityNodeInfo` SDK metadata
  * (`AccessibilityNodeInfoCompat.SPANS_START_KEY`,
  * `EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL`, `AccessibilityNodeInfo.roleDescription`) —

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Live-emulator smoke test for the `emu finger` biometric enrollment/match/unlock
-# sequence documented in docs/design-docs/plat/android/biometrics.md.
+# sequence documented in docs/how-it-works/plat/android/biometrics.md.
 #
 # This is a best-effort probe, not a hermetic unit test. The fake-backed unit
 # coverage lives in test/features/action/BiometricAuth.test.ts; this script

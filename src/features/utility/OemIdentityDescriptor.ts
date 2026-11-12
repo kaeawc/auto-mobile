@@ -3,7 +3,7 @@
  * present so an app under test takes its own `if (Build.MANUFACTURER == …)` branches on an
  * emulator. A descriptor is data only. AutoMobile ships no OEM APKs or images and installs no root
  * tooling; applying a descriptor is a later, separately reviewed step
- * (docs/design-docs/plat/android/oem-identity-lane.md).
+ * (docs/how-it-works/plat/android/oem-identity-lane.md).
  */
 import { z } from "zod/v4";
 import { MANUFACTURER_PROFILE_IDS } from "../../models/ManufacturerProfileIds";

@@ -99,7 +99,7 @@ public data class DeviceScreenGeometry(
  * viewport<->device mapping itself is a plain scale + translate with no further rotation.
  *
  * Contract (documented for third-party clients in
- * `docs/design-docs/mcp/daemon/screen-control-mapping.md`):
+ * `docs/how-it-works/mcp/daemon/screen-control-mapping.md`):
  * - **Scale/pan:** device = round((viewport - offset) / scale * deviceWidth / frameWidthPx). The
  *   width-based scale is used for both axes because the frame is fitted to the device aspect ratio.
  * - **Rounding:** nearest integer, halves rounding up (Kotlin `roundToInt`).

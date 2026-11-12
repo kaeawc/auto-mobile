@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Host-side cost of one running Android emulator process (#15478, measurement plan in
-# docs/design-docs/android-emulator-host-cost.md, section 6). Read-only: it never touches adb or
+# docs/how-it-works/android-emulator-host-cost.md, "Measuring host cost"). Read-only: it never touches adb or
 # the emulator, only `ps` and `footprint` (macOS) or /proc/PID/smaps_rollup (Linux).
 #
 # Unlike benchmark-emulator-resources.sh it records cumulative CPU time (not the decaying `ps`

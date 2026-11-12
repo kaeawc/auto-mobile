@@ -11,7 +11,7 @@ export const { MAX_PROTOTYPE_SECURE_VALUE_BYTES } = contract.limits;
 /**
  * The precedence rules for a prototype's stored values on a show (#12522), as one pure function so
  * the device runtimes and the host agree. ADOPTED DECISION (the issue was labelled needs-decision;
- * the proposal is the decision), written up in docs/design-docs/plat/android/prototype-ux.md:
+ * the proposal is the decision), written up in docs/how-it-works/plat/android/prototype-ux.md:
  *
  * - Stored values replace the spec's values for the keys the spec lists, unless `storage.version`
  *   differs from the version the values were stored under: then every stored value is discarded

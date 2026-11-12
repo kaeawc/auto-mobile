@@ -6,7 +6,7 @@ import XCTest
 ///
 /// The pairs in `test/fixtures/ios/merger-pairs/` were recorded by a simulator runner
 /// with `CTRL_PROXY_IOS_HIERARCHY_PAIR_DIR` set (see
-/// `docs/design-docs/plat/ios/ctrlproxy-implementation/golden-replay.md`). Each pair is merged
+/// `docs/how-it-works/plat/ios/ctrlproxy-implementation/golden-replay.md`). Each pair is merged
 /// with the production nearest-match tie-break and with the pre-#8662 delta-loop
 /// tie-break; every output node that differs is a frame the reviewed behavior change
 /// affects. The expected differences are the documented, accepted ones.

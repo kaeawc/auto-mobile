@@ -655,7 +655,7 @@ export const COARSE_SLOT_PATHS: readonly {
   { event: "unpublished", from: "releasing", via: "ended", to: "creating" },
 ];
 
-// docs/design-docs/session-state-record.md §4 "S7 guard findings" documents these
+// docs/how-it-works/session-state-record.md §4 "S7 guard findings" documents these
 // seven §3.1 gaps and the four coarse paths above. Count both at debug: they are known
 // observations, so warning or throwing would add production noise without a new finding.
 // Scope each exception to its actual hook so it cannot silently bless a new transition.

@@ -413,13 +413,7 @@ function skeletonSourceForProjection(source: ObserveResult): ObserveResult {
   // Collected entries retain node identities. Own their hierarchy as well so a
   // later cache clone (or a caller mutating an earlier return) cannot detach them.
   const hierarchy = cloneSkeletonHierarchy(source.viewHierarchy, searchHierarchy);
-  const collected = new DefaultObserveElementCollector().collect(hierarchy, platform);
-  const validated = isDeepStrictEqual(
-    skeletonElementShape(elements),
-    skeletonElementShape(collected),
-  )
-    ? collected
-    : undefined;
+  const validated = recollectMatchingElements(elements, hierarchy, platform, source);
   if (hierarchy !== source.viewHierarchy) {
     const next = validation ?? {};
     next.inputs = inputs;
@@ -428,6 +422,37 @@ function skeletonSourceForProjection(source: ObserveResult): ObserveResult {
     skeletonValidationByElements.set(elements, next);
   }
   return sourceWithSkeletonValidation(source, { collected: validated, hierarchy });
+}
+
+/**
+ * Recollect provenance for `elements`. A live Android XR observation hides SystemUI nodes
+ * with the device's XR answer, which a cached clone no longer carries, so a capture with
+ * SystemUI windows also tries that visibility policy with the clone's own foreground
+ * evidence (#18084). Only a collection that reproduces `elements` is returned.
+ */
+function recollectMatchingElements(
+  elements: NonNullable<ObserveResult["elements"]>,
+  hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+  platform: "android" | "ios",
+  foreground: Pick<ObserveResult, "activeWindow" | "backStack">,
+): ObserveResult["elements"] {
+  const collector = new DefaultObserveElementCollector();
+  const expected = skeletonElementShape(elements);
+  const matches = (collected: ObserveResult["elements"]) =>
+    isDeepStrictEqual(expected, skeletonElementShape(collected)) ? collected : undefined;
+  const plain = matches(collector.collect(hierarchy, platform));
+  if (plain || platform !== "android" || !hasSystemUiWindow(hierarchy)) {
+    return plain;
+  }
+  return matches(collector.collect(hierarchy, platform, true, foreground));
+}
+
+function hasSystemUiWindow(hierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean {
+  const search = resolveViewHierarchyForSearch(hierarchy) ?? hierarchy;
+  return (
+    search.windows?.some((window) => window.packageName?.startsWith("com.android.systemui")) ??
+    false
+  );
 }
 
 /** Normalize only the existing lossless wire transforms before comparing collections. */

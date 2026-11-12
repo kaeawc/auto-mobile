@@ -65,4 +65,8 @@ binds the server to Bun's API where the daemon's other HTTP servers use node:htt
 Headless mode (#17974) needs no source of its own. A show or patch on the virtual device runs the
 same Android path as a device, so the status store records it into the daemon's spec revisions and
 the default `PrototypePreviewPageSource` serves it and signals the reload. `serve` and `stop` are
-host-only, so the registry's headless `nonDeviceHandler` reaches them with no device resolved.
+host-only: in every mode the registration's `shouldEnsureDevice` skips device resolution for them
+(and for `screenMap`, `share` and the mock-backend actions), and `nonDeviceHandler` runs them on
+the virtual device, so a disconnected device cannot block the preview. Outside headless mode their
+results carry no `virtualDevice` report. `status` still resolves a device, because its entries are
+scoped to the device that showed them.

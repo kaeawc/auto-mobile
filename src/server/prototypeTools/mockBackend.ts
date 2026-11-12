@@ -6,11 +6,6 @@ import type { PrototypeOutput } from "./types";
 import type { prototypeSchema } from "./schemas";
 import type { z } from "zod/v4";
 
-export const isMockBackendAction = (
-  action: string,
-): action is "defineBackend" | "clearBackend" | "backendLog" | "publish" =>
-  ["defineBackend", "clearBackend", "backendLog", "publish"].includes(action);
-
 const originOf = (backendId: string): string => `https://${backendId}${MOCK_ORIGIN_SUFFIX}`;
 
 /** Host-local mock backend actions (#14271): no device request, session-scoped state. */

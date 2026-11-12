@@ -6,6 +6,7 @@ import {
 import { lazyFeatureModule, type LazyFeatureModule } from "../../utils/lazyFeatureModule";
 import { ToolRegistry } from "../toolRegistry";
 import type { DeviceAwareToolHandler } from "../toolRegistryTypes";
+import { isPrototypeHostOnlyAction } from "./hostOnlyActions";
 import {
   isPrototypeReadAction,
   PROTOTYPE_READ_ACTIONS,
@@ -114,6 +115,7 @@ export function registerPrototypeTools(
 ): () => void {
   const { handler, dispose } = lazyPrototypeRuntime(dependencies, module);
   // Headless mode (#17974) resolves no device: every call runs on the in-memory virtual device.
+  // A host-only action (serve, stop, screenMap, share, mock backends) never needs one (#18083).
   const headless = () => isHeadlessPrototypeMode(dependencies.env);
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,
@@ -121,7 +123,7 @@ export function registerPrototypeTools(
     prototypeSchema,
     {
       handler,
-      shouldEnsureDevice: () => !headless(),
+      shouldEnsureDevice: (args) => !headless() && !isPrototypeHostOnlyAction(args.action),
       nonDeviceHandler: (args, progress, signal) =>
         handler({ ...VIRTUAL_PROTOTYPE_DEVICE }, args, progress, signal),
       defaultEnabled: false,

@@ -38,7 +38,7 @@ import {
   type ResolutionAction,
   type ElementResolution,
 } from "../../utility/ElementResolver";
-import { SearchableHierarchy } from "../../utility/SearchableNode";
+import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { AutoTargetSelector } from "./AutoTargetSelector";
 import { resolveScrollableSwipeTarget } from "./scrollableAncestor";
@@ -168,6 +168,14 @@ export interface SearchSwipeDispatchOptions {
   onSearchFallback: () => void;
   searchDragState: AndroidSearchDragState;
   swipes: SwipeCounter;
+}
+
+/** XR auto-scroll searches only nodes visible to the user; other platforms search all. */
+function xrVisibleNodes(
+  nodes: readonly SearchableEntry[],
+  xr: boolean,
+): readonly SearchableEntry[] | undefined {
+  return xr ? nodes.filter((node) => !isFalsy(node.properties["visible-to-user"])) : undefined;
 }
 
 export class ScrollUntilVisible {
@@ -754,13 +762,15 @@ export class ScrollUntilVisible {
     }
     if (!element) {
       // Automatic scrolling keeps traversal priority: the outer scrollable
-      // precedes nested carousels in the same window.
+      // precedes nested carousels in the same window. Hidden XR nodes leave only
+      // the searched list: `index`/`parentIndex` address the full projection, so
+      // filtering `nodes` itself would misresolve ancestry (#18084).
+      const nodes = this.searchable.project(viewHierarchy);
       const resolution = this.resolver.resolve(
         {
           id: String(viewHierarchy.updatedAt ?? "swipe"),
-          nodes: this.searchable
-            .project(viewHierarchy)
-            .filter((node) => !xr || !isFalsy(node.properties["visible-to-user"])),
+          nodes,
+          searchedNodes: xrVisibleNodes(nodes, xr),
         },
         {},
         { action: "scroll" },

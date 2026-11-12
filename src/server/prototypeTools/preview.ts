@@ -53,9 +53,6 @@ export function daemonPrototypePreviewBinding(): PrototypePreviewBinding {
   return daemonBinding;
 }
 
-export const isPrototypePreviewAction = (action: string): action is "serve" | "stop" =>
-  action === "serve" || action === "stop";
-
 /** serve and stop: host-only, no device request. */
 export async function prototypePreviewOutput(
   preview: PrototypePreviewBinding,

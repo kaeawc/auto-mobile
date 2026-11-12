@@ -14,6 +14,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "PROVISION_DEVICE_SETTLEMENT_WAIT_MS",
     "PooledAvdIdentityError",
     "ProvisionDeviceRollbackError",
+    "SHUTDOWN_DISCOVERY_INCOMPLETE_DETAIL",
     "acceptancePresentationOrder",
     "acquisitionLifecycleTimeoutError",
     "activeProvisionDeviceRequests",

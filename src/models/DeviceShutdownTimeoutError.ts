@@ -9,4 +9,12 @@ import { ActionableError } from "./ActionableError";
 export class DeviceShutdownTimeoutError extends ActionableError {
   readonly code = "timeout";
   readonly retryable = true;
+
+  /** Why the device was not confirmed gone, without the surrounding message text. */
+  readonly detail?: string;
+
+  constructor(message: string, detail?: string) {
+    super(message);
+    this.detail = detail;
+  }
 }

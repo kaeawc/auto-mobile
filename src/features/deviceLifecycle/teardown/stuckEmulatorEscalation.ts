@@ -9,10 +9,15 @@ import {
 } from "../../../utils/android-cmdline-tools/EmulatorProcessStop";
 import { EmulatorStopDispatchedError } from "../../../utils/android-cmdline-tools/EmulatorStopDispatchedError";
 import { emulatorProcessEscapeHint } from "../../../utils/android-cmdline-tools/EmulatorStillRunningError";
+import { DeviceShutdownTimeoutError } from "../../../models/DeviceShutdownTimeoutError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import { shutdownTimeoutError } from "../core/deadlines";
 import {
   DEVICE_SHUTDOWN_POLL_INTERVAL_MS,
+  getShutdownDiscovery,
+  judgeShutdownDiscovery,
+  SHUTDOWN_DISCOVERY_INCOMPLETE_DETAIL,
   type ShutdownDiscoveryContext,
   waitForDeviceShutdown,
 } from "./shutdownDiscovery";
@@ -100,7 +105,7 @@ export async function waitForEmulatorShutdownWithEscalation(
   );
 
   let softAttempts = 1;
-  let lastTimeout: unknown;
+  let lastDetail: string | undefined;
   for (;;) {
     try {
       return await waitForDeviceShutdown(
@@ -115,7 +120,9 @@ export async function waitForEmulatorShutdownWithEscalation(
       if (!isShutdownTimeoutError(error) || context.requestAbortSignal?.aborted) {
         throw error;
       }
-      lastTimeout = error;
+      // A soft window running out is the expected stuck state; the loop re-kills or escalates.
+      logger.debug(`[DeviceTools] Soft window ${softAttempts} ended: ${errorMessage(error)}`);
+      lastDetail = error instanceof DeviceShutdownTimeoutError ? error.detail : undefined;
     }
     if (softAttempts >= STUCK_EMULATOR_MAX_SOFT_ATTEMPTS || timer.now() >= softDeadlineMs) {
       break;
@@ -126,7 +133,7 @@ export async function waitForEmulatorShutdownWithEscalation(
     softAttempts++;
     await redispatch(input, softDeadlineMs);
   }
-  return await escalateToProcessStop(input, softAttempts, { startedAt, lastTimeout });
+  return await escalateToProcessStop(input, softAttempts, { startedAt, lastDetail });
 }
 
 /**
@@ -162,7 +169,7 @@ async function redispatch(input: StuckEmulatorEscalationInput, softDeadlineMs: n
 async function escalateToProcessStop(
   input: StuckEmulatorEscalationInput,
   softAttempts: number,
-  { startedAt, lastTimeout }: { startedAt: number; lastTimeout: unknown },
+  { startedAt, lastDetail }: { startedAt: number; lastDetail: string | undefined },
 ): Promise<BootedDevice | undefined> {
   const { context, stopper, avdName } = input;
   const serial = context.device.deviceId;
@@ -192,10 +199,11 @@ async function escalateToProcessStop(
     // the serial yet. Keep confirming for the rest of the budget the escalation reserved rather
     // than reporting the stale soft-window timeout while the device is going away (#17957). A
     // serial that never leaves stays the plain retryable shutdown timeout, not a failed stop.
-    // Nothing was signalled here, so unlike a stop's verification it gets no grace past the
-    // caller's deadline; with none left, the last soft window's observation stands.
+    // Nothing was signalled here, so unlike a stop's verification it gets no polling past the
+    // caller's deadline. With none left, one bounded discovery still runs: the stopper's own
+    // process-table read can spend the rest of the budget, and the serial may already be gone.
     if (context.timer.now() >= context.deadlineMs) {
-      throw lastTimeout;
+      return await finalPollAfterDeadline(input, startedAt, lastDetail);
     }
     return await waitForDeviceShutdown(
       waitContext(context, startedAt, context.deadlineMs),
@@ -203,6 +211,31 @@ async function escalateToProcessStop(
     );
   }
   throw failureForOutcome(outcome, serial, avdName, softAttempts);
+}
+
+/**
+ * One discovery, bounded by {@link FINAL_VERIFICATION_MS}, for an exited emulator whose budget ran
+ * out before adb was re-checked. A serial still listed is the plain retryable shutdown timeout,
+ * quoting the whole escalation's wait rather than the last soft window's (#17957).
+ */
+async function finalPollAfterDeadline(
+  input: StuckEmulatorEscalationInput,
+  startedAt: number,
+  lastDetail: string | undefined,
+): Promise<BootedDevice | undefined> {
+  const { context } = input;
+  const { timer, device } = context;
+  if (lastDetail === SHUTDOWN_DISCOVERY_INCOMPLETE_DETAIL) {
+    // Discovery itself was wedged, so one more read could not confirm anything within the bound.
+    throw shutdownTimeoutError(device, lastDetail, Math.max(0, timer.now() - startedAt));
+  }
+  const pollContext = waitContext(context, startedAt, timer.now() + FINAL_VERIFICATION_MS);
+  const discovery = await getShutdownDiscovery(pollContext, input.skipAndroidNameEnrichment);
+  const judgement = await judgeShutdownDiscovery(pollContext, discovery);
+  if (judgement.settled) {
+    return judgement.replacement;
+  }
+  throw shutdownTimeoutError(device, judgement.detail, Math.max(0, timer.now() - startedAt));
 }
 
 function consoleKills(count: number): string {

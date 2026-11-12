@@ -52179,6 +52179,12 @@
                   "description": "ID of the element to look for",
                   "type": "string"
                 },
+                "maxUnchangedSwipes": {
+                  "description": "Consecutive unchanged swipes that end each search direction (default: 2): forward, then a reverse sweep; increase for slow content",
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
                 "container": {
                   "description": "Additional nested scope within the swipe container; re-resolved on every observation",
                   "$ref": "#/$defs/__schema0"
@@ -52198,6 +52204,12 @@
                 "text": {
                   "description": "Text to look for",
                   "type": "string"
+                },
+                "maxUnchangedSwipes": {
+                  "description": "Consecutive unchanged swipes that end each search direction (default: 2): forward, then a reverse sweep; increase for slow content",
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
                 },
                 "container": {
                   "description": "Additional nested scope within the swipe container; re-resolved on every observation",

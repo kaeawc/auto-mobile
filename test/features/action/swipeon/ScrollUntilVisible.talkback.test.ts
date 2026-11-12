@@ -629,7 +629,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
     talkBackExecutor = new FakeTalkBackSwipeExecutor();
   });
 
-  test("throws when hierarchy unchanged for maxUnchangedScrolls iterations", async () => {
+  test("reports reachedEnd when hierarchy is unchanged for two consecutive swipes each way", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     lookup.nextElementByText = null; // never found
 
@@ -644,7 +644,12 @@ describe("ScrollUntilVisible end-of-list detection", () => {
       talkBackExecutor,
     });
 
-    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(/Scroll reached end of container/);
+    expect(await suv.execute(BASE_OPTIONS)).toMatchObject({
+      success: false,
+      reachedEnd: true,
+      movedSwipes: 0,
+      scrollIterations: 4,
+    });
   });
 
   test("continues scrolling when hierarchy changes between iterations", async () => {
@@ -682,11 +687,11 @@ describe("ScrollUntilVisible end-of-list detection", () => {
     let findCount = 0;
     lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
-      // Found after 3 calls: initial check + 1 forward miss + 1 reverse miss + found on 4th
+      // Found after the initial check and three forward swipes.
       return findCount > 3 ? TARGET_ELEMENT : null;
     };
 
-    // One same triggers reverseMode; subsequent changes in reverse reset the counter,
+    // One unchanged swipe is tolerated; subsequent changes reset the counter,
     // allowing continued scrolling until the element is found.
     const sameA = makeObserveResult(10);
     const suv = makeScrollUntilVisible({
@@ -698,7 +703,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
       talkBackExecutor,
     });
 
-    // Should not throw — hierarchy changes during reverse reset the unchanged counter
+    // Hierarchy changes reset the unchanged counter.
     const result = await suv.execute(BASE_OPTIONS);
     expect(result.success).toBe(true);
   });

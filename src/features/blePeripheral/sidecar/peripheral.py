@@ -4,6 +4,9 @@ import asyncio
 import json
 import sys
 
+# Stdin EOF is only watched once the transport is open, so a hung open must end on its own.
+OPEN_TRANSPORT_TIMEOUT_S = 20
+
 
 def emit(event, command_id=None, **fields):
     print(json.dumps({"event": event, **({"id": command_id} if command_id is not None else {}), **fields}), flush=True)
@@ -27,7 +30,8 @@ async def main():
     if not config_line:
         return
     config = json.loads(config_line)
-    async with await open_transport(config["transport"]) as (source, sink):
+    transport = await asyncio.wait_for(open_transport(config["transport"]), OPEN_TRANSPORT_TIMEOUT_S)
+    async with transport as (source, sink):
         device = Device.with_hci(config["name"], Address(config["address"]), source, sink)
         level = [87]
         heart_rate = [72]

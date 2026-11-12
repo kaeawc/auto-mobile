@@ -27,6 +27,9 @@ describe("blePeripheral tool contract", () => {
     },
     { action: "notify", handle: "h", characteristic: "not-a-uuid", value: { value: "hello" } },
     { action: "stop", handle: "h", undeclared: true },
+    { action: "start", name: "x", presets: ["battery"], transport: "file:/tmp/hci" },
+    { action: "start", name: "x", presets: ["battery"], transport: "tcp-server:0.0.0.0:9000" },
+    { action: "start", name: "x", presets: ["battery"], transport: "android-netsim:example:1" },
   ])("rejects invalid action arguments: %j", (args) => {
     expect(blePeripheralSchema.safeParse(args).success).toBe(false);
   });

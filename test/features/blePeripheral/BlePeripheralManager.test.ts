@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { MAX_ENDED_SESSIONS } from "../../../src/features/blePeripheral/BlePeripheralManager";
 import { blePeripheralSchema } from "../../../src/features/blePeripheral/blePeripheralSchema";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { blePeripheralFixture, bleStartArgs } from "../../helpers/blePeripheralFixture";
@@ -35,9 +36,51 @@ describe("session-owned BLE peripherals", () => {
       "s1",
       blePeripheralSchema.parse({ action: "stop", handle: started.handle }),
     );
-    expect(stopped.running).toBe(false);
+    expect(stopped).toMatchObject({ handle: started.handle, running: false });
     expect(sidecars.created[0].stops).toBe(1);
-    await manager.run("s1", blePeripheralSchema.parse({ action: "stop", handle: started.handle }));
+    await expect(
+      manager.run("s1", blePeripheralSchema.parse({ action: "stop", handle: started.handle })),
+    ).rejects.toThrow(/Unknown BLE handle/);
+    // The stopped handle is gone, so releasing the session has nothing left to kill.
+    await manager.releaseSession("s1");
+    expect(sidecars.created[0].stops).toBe(1);
+  });
+
+  test("a failed stop keeps the handle so stop can be retried", async () => {
+    const { manager, sidecars } = blePeripheralFixture();
+    const started = await manager.run("s1", bleStartArgs());
+    const stop = blePeripheralSchema.parse({ action: "stop", handle: started.handle });
+    sidecars.created[0].stopError = new Error("unconfirmed exit");
+    await expect(manager.run("s1", stop)).rejects.toThrow(/unconfirmed exit/);
+    sidecars.created[0].stopError = undefined;
+    expect(await manager.run("s1", stop)).toMatchObject({ running: false });
+    expect(sidecars.created[0].stops).toBe(2);
+  });
+
+  test("released-session tombstones are bounded, oldest first", async () => {
+    const { manager } = blePeripheralFixture();
+    const owners = Array.from({ length: MAX_ENDED_SESSIONS + 1 }, (_, i) => `s${i}`);
+    for (const owner of owners) {
+      await manager.run(owner, bleStartArgs());
+      await manager.releaseSession(owner);
+    }
+    await expect(manager.run(owners.at(-1)!, bleStartArgs())).rejects.toThrow(/ended/);
+    await expect(manager.run(owners[1], bleStartArgs())).rejects.toThrow(/ended/);
+    expect(await manager.run(owners[0], bleStartArgs())).toMatchObject({ running: true });
+  });
+
+  test("a failing cleanup stop keeps the original start error and drops the handle", async () => {
+    const { manager, environments, sidecars } = blePeripheralFixture();
+    environments.error = new Error("pip offline");
+    const started = manager.run("s1", bleStartArgs());
+    sidecars.created[0].stopError = new Error("kill failed");
+    await expect(started).rejects.toThrow(/pip offline/);
+    expect(sidecars.created[0].stops).toBe(1);
+    await expect(manager.run("s1", { action: "status", handle: "fake-1" })).rejects.toThrow(
+      /Unknown BLE handle/,
+    );
+    await manager.releaseSession("s1");
+    expect(sidecars.created[0].stops).toBe(1);
   });
 
   test("multiple handles stay isolated across owners", async () => {

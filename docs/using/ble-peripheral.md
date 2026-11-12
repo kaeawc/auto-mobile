@@ -4,7 +4,7 @@ Use `blePeripheral` to prototype a wearable or smart lock against an Android emu
 
 Start with `{"action":"start","sessionUuid":"<session>","name":"Prototype","presets":["battery","heartRate"]}`. The result includes a session-owned `handle`, name, address, presets, transport, `running`, `advertising`, `connected`, `subscribed`, `pythonReady` and `bumbleReady`. Initial battery level is 87 and heart rate is 72 bpm.
 
-`name` is the advertised local name, limited to 20 UTF-8 bytes. `address` defaults to `F0:F1:F2:F3:F4:F5`; choose distinct addresses for simultaneous peripherals. `deviceId` defaults to the calling session's emulator and must match that session. A private netsim instance is selected automatically when discoverable. `transport` explicitly overrides discovery, for example `android-netsim:localhost:12345`. Without a known private instance, the default is `android-netsim`.
+`name` is the advertised local name, limited to 20 UTF-8 bytes. `address` defaults to `F0:F1:F2:F3:F4:F5`; choose distinct addresses for simultaneous peripherals. `deviceId` defaults to the calling session's emulator and must match that session. A private netsim instance is selected automatically when discoverable. Without a known private instance, the default is `android-netsim`. `transport` is optional and only accepts `android-netsim` or `android-netsim:localhost:<port>`; it must match the transport discovered for the session's emulator, otherwise start fails and the error names the expected value.
 
 For custom GATT, include `custom` in `presets` and supply `services`, for example:
 
@@ -39,4 +39,4 @@ A connected peripheral stops advertising until disconnect. Advertising restarts 
 
 Advertisements include the selected battery and heart-rate service UUIDs. Discover custom service UUIDs after connecting; scan for their advertised local name rather than filtering by a custom service UUID.
 
-If Python is missing, install Python 3.11 with venv support and ensure `python3` is on the daemon's PATH. `doctor` reports a warning when it is unavailable. Installation errors include the exact pip repair command; check access to PyPI before retrying. Transport errors require a running emulator with Bluetooth/netsim enabled; supply an explicit transport when host discovery is unavailable. A stopped or crashed sidecar requires a new start. Unknown handles require the original session and its returned handle.
+If Python is missing or older than 3.11, install Python 3.11 with venv support and ensure `python3` is on the daemon's PATH. `doctor` reports a warning when it is unavailable. Installation errors include the exact pip repair command; check access to PyPI before retrying. Transport errors require a running emulator with Bluetooth/netsim enabled; retry once the emulator is fully running when host discovery is unavailable. A stopped or crashed sidecar requires a new start. Unknown handles require the original session and its returned handle.

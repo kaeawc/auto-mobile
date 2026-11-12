@@ -1798,10 +1798,11 @@
           "minLength": 1
         },
         "transport": {
-          "description": "Explicit Bumble transport URL; overrides device netsim discovery",
+          "description": "android-netsim or android-netsim:localhost:<port>; must match the netsim of the session's emulator",
           "type": "string",
           "minLength": 1,
-          "maxLength": 512
+          "maxLength": 512,
+          "pattern": "^android-netsim(?::(?:localhost|127\\.0\\.0\\.1):(\\d{1,5}))?$"
         },
         "handle": {
           "description": "Session-owned handle returned by start; required for stop/notify/status",

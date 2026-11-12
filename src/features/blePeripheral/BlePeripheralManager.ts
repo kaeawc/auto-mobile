@@ -1,5 +1,6 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { IdGenerator } from "../../utils/IdGenerator";
+import { logger } from "../../utils/logger";
 import type { PythonEnvProvisioner } from "./PythonEnvProvisioner";
 import type { BleTransportResolver } from "./BleTransportResolver";
 import type {
@@ -25,6 +26,9 @@ interface Peripheral {
   sidecar: BlePeripheralSidecar;
   controller: AbortController;
 }
+
+/** Released-session tombstones only fence calls racing the release; the oldest are dropped past this bound. */
+export const MAX_ENDED_SESSIONS = 256;
 
 /** Handles are never transferable, and cleanup fences starts before any provisioning await. */
 export class BlePeripheralManager {
@@ -63,7 +67,11 @@ export class BlePeripheralManager {
       );
     }
     if (args.action === "stop") {
+      // A failed stop keeps the handle so the caller or session cleanup can retry the kill.
       await peripheral.sidecar.stop();
+      const status = await peripheral.sidecar.status();
+      this.peripherals.delete(args.handle!);
+      return { handle: args.handle!, ...peripheral.config, ...status };
     }
     if (args.action === "notify") {
       await peripheral.sidecar.notify(args);
@@ -105,7 +113,9 @@ export class BlePeripheralManager {
       }
       return { handle, ...config, ...status };
     } catch (error) {
-      await peripheral.sidecar.stop();
+      await peripheral.sidecar.stop().catch((stopError: unknown) => {
+        logger.warn("BLE sidecar cleanup after a failed start did not complete", stopError);
+      });
       this.peripherals.delete(handle);
       throw toActionableError(
         error,
@@ -122,6 +132,12 @@ export class BlePeripheralManager {
       return Promise.resolve();
     }
     this.ended.add(owner);
+    for (const stale of this.ended) {
+      if (this.ended.size <= MAX_ENDED_SESSIONS) {
+        break;
+      }
+      this.ended.delete(stale);
+    }
     return this.stopMatching((peripheral) => peripheral.owner === owner);
   }
 

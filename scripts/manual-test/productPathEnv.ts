@@ -164,6 +164,16 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   },
   { name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT", kind: "input", reason: "Read-only agent dylib." },
   {
+    name: "AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB",
+    kind: "input",
+    reason: "Read-only prebuilt camera poster dylib.",
+  },
+  {
+    name: "AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE",
+    kind: "input",
+    reason: "Read-only camera poster library source compiled on demand.",
+  },
+  {
     name: "AUTOMOBILE_BUNDLETOOL_JAR",
     kind: "input",
     reason: "Read-only bundletool jar for installApp .aab/.apks.",
@@ -248,6 +258,7 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_ENABLED_TOOLS",
   "AUTOMOBILE_EVENT_ALL_MARKERS",
   "AUTOMOBILE_HARNESS_PRIVATE_DAEMON",
+  "AUTOMOBILE_HEADLESS",
   "AUTOMOBILE_IOS_CODE_SIGN_IDENTITY",
   "AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH",
   "AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_DEVICE",

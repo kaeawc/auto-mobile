@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.database.SQLException
 import android.util.Log
+import java.io.IOException
 
 /**
  * Send an ordered explicit broadcast with action dev.jasonpearson.automobile.contentseeder.SEED.
@@ -35,13 +36,15 @@ class SeedReceiver : BroadcastReceiver() {
       fail(error)
     } catch (error: SQLException) {
       fail(error)
+    } catch (error: IOException) {
+      fail(error)
     }
   }
 
   private fun fail(error: Exception) {
     Log.e(
       "ContentSeeder",
-      "Seeding failed; check the SMS role and runtime permission grants",
+      "Seeding failed; check the staged photo, SMS role and runtime permission grants",
       error,
     )
     setResult(Activity.RESULT_CANCELED, "Seeding failed: ${error.message}", null)
@@ -49,6 +52,7 @@ class SeedReceiver : BroadcastReceiver() {
 
   companion object {
     private const val ACTION_SEED = "dev.jasonpearson.automobile.contentseeder.SEED"
-    private val PARAMETER_NAMES = listOf("kind", "namespace", "items", "kinds", "dropAccount")
+    private val PARAMETER_NAMES =
+      listOf("kind", "namespace", "items", "kinds", "dropAccount", "rawContactId", "photoFile")
   }
 }

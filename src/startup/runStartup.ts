@@ -9,6 +9,7 @@ import {
 import { daemonCommandSkipsServerBootstrap } from "../daemon/cli/daemonCommandRouting";
 import { resolveSessionOwnerGenerationToken } from "../devices/sessionConfig";
 import { configureToolSelectionCliDefaults } from "../features/toolSelection/SessionToolSelectionService";
+import { enableHeadlessPrototypeMode } from "../features/prototype/headless/headlessPrototypeMode";
 import { startBackgroundDeviceWork } from "./backgroundPrefetch";
 import {
   buildDaemonModeOptions,
@@ -41,6 +42,10 @@ export async function runStartup(
     console.error(args.invalidInvocation);
     process.exit(1);
     return;
+  }
+  if (args.headless) {
+    // Before any daemon is spawned, so it inherits the mode (#17974).
+    enableHeadlessPrototypeMode(process.env);
   }
   const ownerGenerationToken = await resolveOwnerGenerationToken(args);
   if (await runSkippedBootstrapDaemonCommand(args, modules)) {

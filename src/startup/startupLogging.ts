@@ -28,6 +28,10 @@ export function logActiveDaemonFlags(args: ParsedArgs, logger: ServerModules["lo
       "Accessibility retrieveInteractiveWindows disabled (--no-retrieve-interactive-windows)",
     ],
     [args.noOcclusion, "Observe occlusion pass disabled (--no-occlusion)"],
+    [
+      args.headless,
+      "Headless prototype mode: prototype calls run on the virtual device (--headless)",
+    ],
   ];
   for (const [active, message] of silentDaemonFlags) {
     if (active) {

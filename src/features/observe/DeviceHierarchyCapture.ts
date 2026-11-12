@@ -6,7 +6,7 @@ import {
 import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
 import { UntrackedAndroidDisplayError } from "./UntrackedAndroidDisplayError";
 import { normalizeTvosHierarchy } from "../tvos/TvosHierarchy";
-import { tvosRunners } from "../tvos/TvosRunnerRegistry";
+import { requireTvosRunner } from "../tvos/TvosRunnerRecovery";
 import { normalizeWatchHierarchy } from "../watch/WatchHierarchy";
 import { watchRunners } from "../watch/WatchRunnerRegistry";
 import { holderOf } from "../../daemon/deviceBinding";
@@ -495,7 +495,9 @@ export function createDeviceHierarchyCapture(
           )
         : device.platform === "tvos"
           ? normalizeTvosHierarchy(
-              await tvosRunners.require(device.deviceId).hierarchy(request.signal),
+              await (
+                await requireTvosRunner(device.deviceId, request.signal)
+              ).hierarchy(request.signal),
             )
           : normalizeWatchHierarchy(
               await watchRunners.require(device.deviceId).hierarchy(request.signal),

@@ -99,6 +99,18 @@ export const DEVICES_ENV = {
     min: 1,
     doc: "Idle window in ms after which a daemon gives up a CtrlProxy forwarding lease.",
   },
+  IOS_CAMERA_POSTER_DYLIB: {
+    name: "AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB",
+    kind: "path",
+    default: "unset",
+    doc: "Prebuilt iOS Simulator camera poster injection dylib; overrides build-on-demand.",
+  },
+  IOS_CAMERA_POSTER_SOURCE: {
+    name: "AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE",
+    kind: "path",
+    default: "unset",
+    doc: "CameraPosterInjection.m source for the iOS Simulator camera poster build; overrides the one shipped in the package.",
+  },
   IOS_PROTOTYPE_AGENT: {
     name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT",
     kind: "path",
@@ -262,6 +274,12 @@ export const DEVICES_ENV = {
     kind: "path",
     default: "unset",
     doc: "Directory where the iOS client records CtrlProxy exchanges.",
+  },
+  HEADLESS: {
+    name: "AUTOMOBILE_HEADLESS",
+    kind: "bool",
+    default: "unset",
+    doc: "1/true runs prototype calls on the in-memory virtual device instead of a real device (same as --headless).",
   },
   IOS_HEADLESS: {
     name: "AUTOMOBILE_IOS_HEADLESS",

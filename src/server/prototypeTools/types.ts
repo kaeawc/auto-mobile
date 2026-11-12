@@ -1,3 +1,4 @@
+import type { VirtualPrototypeDevice } from "../../features/prototype/headless/VirtualPrototypeDevice";
 import type { PrototypeTestSessionStore } from "../../db/prototypeTestSessionRepository";
 import type { PrototypeChannelExecutor } from "../../features/prototype/PrototypeChannelExecutor";
 import type { IdGenerator } from "../../utils/IdGenerator";
@@ -73,6 +74,8 @@ export interface PrototypeToolDependencies {
   /** Resolves `assets[].observation` URIs; defaults to the observation screenshot resource. */
   observationScreenshotReader?: PrototypeObservationScreenshotReader;
   clientFactory?: (device: BootedDevice) => PrototypeClient;
+  /** The headless virtual device's client (#17974); tests inject one to drive its inputs. */
+  virtualDevice?: VirtualPrototypeDevice;
   /** Injected iOS simulator agent connections, recorded by `launchApp {prototype: true}` (#10567). */
   agentConnections?: PrototypeAgentConnections;
   adbFactory?: AdbClientFactory;

@@ -21,7 +21,8 @@ import type { InputKeyName } from "../action/InputKey";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { normalizeTvosHierarchy } from "./TvosHierarchy";
 import type { TVRemoteButton, TvosRunnerClient } from "./TvosRunnerClient";
-import { tvosRunners } from "./TvosRunnerRegistry";
+import type { TvosRunnerRegistry } from "./TvosRunnerRegistry";
+import { requireTvosRunner } from "./TvosRunnerRecovery";
 
 const REMOTE_DIRECTIONS: Partial<Record<InputKeyName, TVRemoteButton>> = {
   arrow_up: "up",
@@ -74,14 +75,16 @@ export async function tvosFocusNavigate(
   deviceId: string,
   options: FocusNavigateOptions,
   timer: Timer,
-  runners: Pick<typeof tvosRunners, "require"> = tvosRunners,
+  runners?: Pick<TvosRunnerRegistry, "require">,
 ): Promise<FocusNavigateResult> {
   const targetError = focusNavigateTargetError(options.until);
   if (targetError) {
     throw new ActionableError(targetError);
   }
   options.signal?.throwIfAborted();
-  const client = runners.require(deviceId);
+  const client = runners
+    ? runners.require(deviceId)
+    : await requireTvosRunner(deviceId, options.signal);
   return new FocusNavigate(
     createTvosFocusObserver(client),
     createTvosFocusKeyPresser(client),

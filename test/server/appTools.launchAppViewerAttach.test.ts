@@ -1,3 +1,4 @@
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, LaunchAppResult } from "../../src/models";
 import {
@@ -100,8 +101,7 @@ test("launch response waits for attach to settle", async () => {
     return value;
   });
   try {
-    await Promise.resolve();
-    await Promise.resolve();
+    await drainUntil(() => attacher.calls.length === 1, { description: "viewer attach" });
     expect(settled).toBe(false);
     expect(attacher.calls).toHaveLength(1);
     pending.resolve(undefined);
@@ -118,8 +118,7 @@ test("a hanging attach times out after three seconds and launch succeeds", async
   const debug = spyOn(logger, "debug").mockImplementation(() => {});
   try {
     const response = launch();
-    await Promise.resolve();
-    await Promise.resolve();
+    await drainUntil(() => attacher.calls.length === 1, { description: "viewer attach" });
     timer.advanceTime(3000);
     expect(await response).toBeDefined();
     expect(debug.mock.calls).toContainEqual([

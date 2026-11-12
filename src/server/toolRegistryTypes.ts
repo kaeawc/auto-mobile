@@ -428,6 +428,16 @@ export interface RegisteredTool extends ToolTraits {
   deviceReadOnlyArgs?: readonly DeviceReadOnlyArgShape[];
 }
 
+/** Both registration paths' debug and feature-flag gate fields (#18141). */
+export function availabilityGateMetadata(
+  options: Pick<ToolRegistrationOptions, "debugOnly" | "featureFlags">,
+): Pick<RegisteredTool, "debugOnly" | "featureFlags"> {
+  return {
+    debugOnly: options.debugOnly ?? false,
+    ...(options.featureFlags?.length ? { featureFlags: options.featureFlags } : {}),
+  };
+}
+
 /** Keep both registration paths' advertised read metadata consistent. */
 export function deviceReadOnlyMetadata(
   deviceReadOnly: RegisteredTool["deviceReadOnly"],

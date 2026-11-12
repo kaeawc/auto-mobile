@@ -178,6 +178,7 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
     "automobile/hostSideState",
     "automobile/opaquePersistentState",
     "automobile/planOnly",
+    "automobile/requires",
   ];
 
   interface ServedTool {

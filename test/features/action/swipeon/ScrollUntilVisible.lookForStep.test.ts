@@ -34,6 +34,7 @@ function listHarness({
   initialOffset = 0,
   pauseSwipes = [],
   staleSwipes = [],
+  topEdgeChrome = false,
 }: {
   overshoot?: boolean;
   stuckRecovery?: boolean;
@@ -42,6 +43,8 @@ function listHarness({
   initialOffset?: number;
   pauseSwipes?: number[];
   staleSwipes?: number[];
+  /** Chrome outside the list that changes on every swipe while the list is at its top. */
+  topEdgeChrome?: boolean;
 } = {}) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -62,6 +65,14 @@ function listHarness({
         node: createFlatNodeForTest({
           bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
           node: [
+            ...(topEdgeChrome && offset === 0
+              ? [
+                  createFlatNodeForTest({
+                    text: `edge indicator ${steps.length}`,
+                    bounds: { left: 0, top: 0, right: 1080, bottom: 300 },
+                  }),
+                ]
+              : []),
             createFlatNodeForTest({
               "resource-id": "list",
               scrollable: true,
@@ -210,6 +221,64 @@ test("a reverse sweep the time budget cannot cover ends with reachedEnd before m
   expect(h.timer.now()).toBeLessThanOrEqual(maxTime);
   expect(result.scrollIterations).toBeLessThan(2 + MOVED_BACK + 2);
   expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("a miss that starts at the end stops when the reverse sweep reaches the top", async () => {
+  // Forward never moves, so the reverse sweep is unbounded; chrome that changes at the
+  // top edge must not keep it running to the time budget once the rows stop moving.
+  const h = listHarness({ initialOffset: 24, topEdgeChrome: true });
+  const result = await h.search("absent");
+  expect(result).toMatchObject({
+    success: false,
+    found: false,
+    reachedEnd: true,
+    movedSwipes: MOVED_BACK,
+    scrollIterations: 2 + MOVED_BACK + 2,
+  });
+  expect(result.error).toContain("Scroll reached end of container in both directions");
+  expect(result.error).toContain("the swipe direction may be wrong");
+  expect(h.timer.now()).toBeLessThan(15000);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("a miss that starts at the top stops when each direction stops moving", async () => {
+  const h = listHarness({ topEdgeChrome: true });
+  const result = await h.search("absent", { direction: "down" });
+  expect(result).toMatchObject({
+    success: false,
+    found: false,
+    reachedEnd: true,
+    movedSwipes: MOVED_BACK,
+    scrollIterations: 2 + MOVED_BACK + 2,
+  });
+  expect(result.error).toContain("in both directions (down and up;");
+  expect(h.steps.slice(0, 2).every((step) => step.y2 > step.y1)).toBe(true);
+  expect(h.steps.slice(2).every((step) => step.y2 < step.y1)).toBe(true);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("a miss that starts mid-list keeps the bounded reverse sweep", async () => {
+  const h = listHarness({ initialOffset: 18, topEdgeChrome: true });
+  const result = await h.search("absent");
+  expect(result).toMatchObject({
+    success: false,
+    found: false,
+    reachedEnd: true,
+    movedSwipes: 2 + 6,
+    scrollIterations: 2 + 2 + 6,
+  });
+  expect(result.error).toContain(
+    "the down sweep then covered the searched range back past the start (6 swipes)",
+  );
+});
+
+test("an item behind a start at the end is still found with chrome at the top edge", async () => {
+  const h = listHarness({ initialOffset: 24, topEdgeChrome: true });
+  const result = await h.search("row 4");
+  expect(result).toMatchObject({ success: true, found: true, element: { text: "row 4" } });
+  expect(result.reachedEnd).toBeUndefined();
+  expect(result.movedSwipes).toBeLessThanOrEqual(MOVED_BACK);
+  expect(h.steps.slice(2).every((step) => step.y2 > step.y1)).toBe(true);
 });
 
 test("end detection counts only swipes that changed the settled screen", async () => {

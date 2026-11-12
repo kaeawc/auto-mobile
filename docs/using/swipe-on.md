@@ -6,7 +6,9 @@ grabber) starts the drag at its centre and travels 240 pt in that direction,
 clamped to the screen bounds. The result includes a `warning` explaining the
 extended drag and warns if clamping leaves less than 120 pt of travel.
 Use `lookFor` to scroll until an element appears. When two consecutive swipes
-leave the content unchanged, the end in `direction` has been reached and the
+leave the content unchanged (the container's items stay in place; changes outside
+it, such as a clock or an edge indicator, do not count), the end in `direction`
+has been reached and the
 search sweeps back the other way with slower half-screen swipes, so a target that
 was skipped or lies behind the starting position is still found. After forward
 swipes that moved the content, the reverse sweep is limited to twice that many

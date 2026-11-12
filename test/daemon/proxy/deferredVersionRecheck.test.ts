@@ -106,4 +106,85 @@ describe("cooldown-deferred version reconciliation on an established connection 
       await proxy.close();
     }
   });
+
+  // #18104: concurrent callers share one recheck instead of one of them skipping it.
+  test("a concurrent call waits for the in-flight recheck and its reconnect", async () => {
+    const { clientCount, manager, proxy, timer, young } = connectedProxy();
+    try {
+      await proxy.ensureConnected();
+      timer.advanceTime(COOLDOWN_MS);
+      const restarted: DaemonStatus = {
+        ...young,
+        pid: 5678,
+        startedAt: timer.now(),
+        version: DIRTY,
+      };
+      manager.statusResults = [young, restarted, restarted, restarted];
+      const first = proxy.ensureConnected();
+      const second = proxy.ensureConnected().then(() => ({
+        restarts: manager.restartCallCount,
+        clients: clientCount(),
+      }));
+      await first;
+      expect(await second).toEqual({ restarts: 1, clients: 2 });
+      expect(manager.restartCallCount).toBe(1);
+      expect(clientCount()).toBe(2);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("a recheck that cannot restart keeps the connection and retries later", async () => {
+    const { clientCount, manager, proxy, timer, young } = connectedProxy();
+    try {
+      await proxy.ensureConnected();
+      timer.advanceTime(COOLDOWN_MS);
+      // Active provisioning defers the restart (DaemonRestartDeferredError).
+      manager.statusResult = { ...young, activeProvisioning: true };
+      await proxy.ensureConnected();
+      expect(manager.restartCallCount).toBe(0);
+      expect(clientCount()).toBe(1);
+
+      // Re-armed one cooldown later, not on every call.
+      manager.statusResult = { ...young };
+      await proxy.ensureConnected();
+      expect(manager.restartCallCount).toBe(0);
+
+      timer.advanceTime(COOLDOWN_MS);
+      const restarted: DaemonStatus = {
+        ...young,
+        pid: 5678,
+        startedAt: timer.now(),
+        version: DIRTY,
+      };
+      manager.statusResults = [young, restarted, restarted, restarted];
+      await proxy.ensureConnected();
+      expect(manager.restartCallCount).toBe(1);
+      expect(clientCount()).toBe(2);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("a recheck that fails after restarting reconnects instead of failing the call", async () => {
+    const { clientCount, manager, proxy, timer, young } = connectedProxy();
+    try {
+      await proxy.ensureConnected();
+      timer.advanceTime(COOLDOWN_MS);
+      const restarted: DaemonStatus = {
+        ...young,
+        pid: 5678,
+        startedAt: timer.now(),
+        version: DIRTY,
+      };
+      manager.statusResult = restarted;
+      manager.statusResults = [young];
+      manager.waitForReadyResult = false;
+      await proxy.ensureConnected();
+      expect(manager.restartCallCount).toBe(1);
+      expect(clientCount()).toBe(2);
+    } finally {
+      await proxy.close();
+    }
+  });
 });

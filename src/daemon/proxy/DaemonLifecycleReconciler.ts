@@ -8,6 +8,7 @@ import {
   isDaemonNamespaceIsolated,
 } from "../sharedNamespaceGuard";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import {
   DAEMON_STARTUP_TIMEOUT_MS,
   resolveDaemonVersion,
@@ -351,11 +352,13 @@ export class DaemonLifecycleReconciler {
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
+    // Counted before the restart settles: a restart that throws may still have stopped the
+    // daemon, so the established connection must not be kept (#18104).
+    this.versionRestarts++;
     const restartResult = await this.deps.daemonManager.restart(
       mergeDaemonOptions(status.options, this.deps.config.daemonOptions),
       status,
     );
-    this.versionRestarts++;
     this.deps.reconciliationSnapshot = undefined;
     if (restartResult === "joined") {
       const successorStatus = await this.deps.waitForJoinedRestartSuccessor(
@@ -387,14 +390,31 @@ export class DaemonLifecycleReconciler {
 
   /**
    * Re-runs the version reconciliation a cooldown reuse deferred, against a fresh status
-   * read. Resolves true when it restarted the daemon, so the caller must reconnect.
+   * read. Resolves "restarted" when a restart was started, so the caller must reconnect.
+   * It never rejects (#18104): a failure before any restart (deferred by active provisioning,
+   * a lifecycle fence, a status read error) leaves the daemon and the established connection
+   * as they were, so it resolves "unchanged" and re-arms the recheck one cooldown later.
    */
-  async recheckDeferredVersion(): Promise<boolean> {
+  async recheckDeferredVersion(): Promise<"restarted" | "unchanged"> {
     this.deferredVersionRecheckAt = undefined;
     this.deps.reconciliationSnapshot = undefined;
     const restartsBefore = this.versionRestarts;
-    await this.deps.ensureVersionMatches();
-    return this.versionRestarts !== restartsBefore;
+    try {
+      await this.deps.ensureVersionMatches();
+    } catch (error) {
+      if (this.versionRestarts !== restartsBefore) {
+        logger.warn(
+          `[DaemonMcpProxy] Deferred version recheck failed after restarting the daemon; reconnecting: ${errorMessage(error)}`,
+        );
+        return "restarted";
+      }
+      this.deferredVersionRecheckAt = this.deps.timer.now() + DAEMON_VERSION_RESTART_COOLDOWN_MS;
+      logger.warn(
+        `[DaemonMcpProxy] Deferred version recheck could not restart the daemon; keeping the connection and rechecking in ${DAEMON_VERSION_RESTART_COOLDOWN_MS}ms: ${errorMessage(error)}`,
+      );
+      return "unchanged";
+    }
+    return this.versionRestarts !== restartsBefore ? "restarted" : "unchanged";
   }
 
   async verifyRestartedVersion(): Promise<void> {

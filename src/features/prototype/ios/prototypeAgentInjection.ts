@@ -33,6 +33,11 @@ export const SIMCTL_CHILD_DYLD_INSERT_LIBRARIES = "SIMCTL_CHILD_DYLD_INSERT_LIBR
 const DYLD_PATH_SEPARATOR = ":";
 const SYSTEM_BUNDLE_PREFIX = "com.apple.";
 
+/** SpringBoard and Apple system apps cannot be injected through `DYLD_INSERT_LIBRARIES`. */
+export function isAppleSystemBundleId(bundleId: string): boolean {
+  return bundleId.startsWith(SYSTEM_BUNDLE_PREFIX);
+}
+
 /** Resolves a verified agent dylib; `PrototypeAgentProvider` implements it. */
 export interface PrototypeAgentDylibResolver {
   ensure(): Promise<ResolvedPrototypeAgent>;
@@ -92,7 +97,7 @@ export function assertPrototypeInjectionSupported(device: BootedDevice, bundleId
         "the app instead.",
     );
   }
-  if (bundleId.startsWith(SYSTEM_BUNDLE_PREFIX)) {
+  if (isAppleSystemBundleId(bundleId)) {
     throw new ActionableError(
       `launchApp prototype:true cannot inject the prototype agent into ${bundleId}: SpringBoard and ` +
         "Apple system apps cannot be injected. Launch your own app with prototype:true.",

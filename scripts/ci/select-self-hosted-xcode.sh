@@ -6,7 +6,7 @@
 # steps of the job only, so concurrent jobs on the Mac never fight over the
 # global selection.
 #
-# Usage: scripts/ci/select-self-hosted-xcode.sh <version>   e.g. 26.5
+# Usage: scripts/ci/select-self-hosted-xcode.sh <version>   e.g. 26.6
 #
 # Looks at every Xcode*.app in XCODE_APPLICATIONS_DIR (default /Applications) and
 # picks the one whose CFBundleShortVersionString is <version> or <version>.0.

@@ -28,7 +28,7 @@ and standard runners are free for public repositories.
 The `kaeawc` organization's actual CircleCI plan was not checked (needs a login).
 
 The `xcode: "26.5"` and `"26.6"` images exist and are current; `26.6` ships the iOS **26.5**
-simulator runtime, not a 26.6 one. The `ios` executor runs on `xcode: "26.5"` + `m4pro.medium`.
+simulator runtime, not a 26.6 one. The `ios` executor runs on `xcode: "26.6"` + `m4pro.medium`.
 
 ### Does the allowance cover the load? No.
 
@@ -160,7 +160,7 @@ Estimates: CircleCI minutes = GitHub mean + ~1.5 min VM start; credits = minutes
 | Swift Packages / Build Xcode Projects (→ **iOS Build**)                                         | `ios-swift-packages` / `ios-xcode-build` | ~7 / ~5                     | Yes, behind the shim                                      |
 | iOS Playground Tests (advisory)                                                                 | `ios-playground-tests`                   | ~6                          | Already moved                                             |
 | Swift Code Coverage, Build Desktop App, Installer Minimal (**required**; hosted only for forks) | none / `swift-code-coverage` (main)      | 2-6                         | Fork leg only, behind a shim; same-repo stays self-hosted |
-| Nightly sweeps (Swift Packages/Xcode 26.5+26.6, TSan, macOS BATS/Node)                          | new nightly workflow                     | ~6-10 each                  | Paid plan; scheduled pipeline on main                     |
+| Nightly sweeps (Swift Packages/Xcode 26.6, TSan, macOS BATS/Node)                               | new nightly workflow                     | ~6-10 each                  | Paid plan; scheduled pipeline on main                     |
 | Release: CtrlProxy IPA, prototype-agent (unsigned/ad-hoc)                                       | none                                     | ~3                          | Could move; no secrets                                    |
 | Release: screen-capture helper, network-filter probe, desktop DMG installers                    | none                                     | 10-25 (notarization billed) | **Do not move** (below)                                   |
 

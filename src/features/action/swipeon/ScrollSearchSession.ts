@@ -155,6 +155,12 @@ export class ScrollSearchSession {
   private reverseDirection!: SwipeDirection;
   private reverseOptions!: SwipeOnResolvedOptions;
   private fallbackLogged = false;
+  /** Reverse swipes allowed after the forward end; bounded by the forward swipes that moved. */
+  private reverseSwipeBudget = Number.POSITIVE_INFINITY;
+  private reverseSwipes = 0;
+  private reverseSweepMs = 0;
+  private lastIterationMs = 0;
+  private reverseStopReason?: "covered" | "time";
   /** The backend that brought the target into view, when the page scrolled it there (#5162). */
   private webScroll?: IosSdkTapOutcome;
   private readonly onSearchFallback = () => {
@@ -207,8 +213,10 @@ export class ScrollSearchSession {
     while (
       this.deps.timer.now() - this.startTime < this.maxTime &&
       this.scrollIteration < this.maxSwipes &&
-      !this.reachedEnd
+      !this.reachedEnd &&
+      !this.reverseSweepShouldStop()
     ) {
+      const iterationStart = this.deps.timer.now();
       const step = this.createStep();
       const outcome = await this.dispatchStep(step);
       if (outcome.kind === "interrupted") {
@@ -238,12 +246,14 @@ export class ScrollSearchSession {
       if (this.foundElement) {
         break;
       }
+      const wasReverse = this.reverseMode;
       await this.finishIteration({
         recoveryAttempted,
         currentFingerprint,
         failedAndroidSwipe: outcome.failedAndroidSwipe,
         chromeStartWarning: step.chromeStartWarning,
       });
+      this.recordIterationTime(wasReverse, this.deps.timer.now() - iterationStart);
     }
     return this.finish();
   }
@@ -513,6 +523,41 @@ export class ScrollSearchSession {
     this.reverseMode = false;
     this.reverseDirection = oppositeDirection(this.request.options.direction);
     this.reverseOptions = { ...this.lookForOptions, speed: "slow" as const };
+    this.reverseSwipeBudget = Number.POSITIVE_INFINITY;
+    this.reverseSwipes = 0;
+    this.reverseSweepMs = 0;
+    this.lastIterationMs = 0;
+    this.reverseStopReason = undefined;
+  }
+
+  private recordIterationTime(reverse: boolean, durationMs: number): void {
+    this.lastIterationMs = durationMs;
+    if (reverse) {
+      this.reverseSwipes++;
+      this.reverseSweepMs += durationMs;
+    }
+  }
+
+  /**
+   * Ends a reverse sweep that has covered the forward range, or that the time
+   * budget cannot cover for one more swipe, so a miss returns reachedEnd (#18034).
+   */
+  private reverseSweepShouldStop(): boolean {
+    if (!this.reverseMode) {
+      return false;
+    }
+    if (this.reverseSwipes >= this.reverseSwipeBudget) {
+      this.reverseStopReason = "covered";
+      return true;
+    }
+    const perSwipeMs =
+      this.reverseSwipes > 0 ? this.reverseSweepMs / this.reverseSwipes : this.lastIterationMs;
+    const remainingMs = this.maxTime - (this.deps.timer.now() - this.startTime);
+    if (remainingMs < perSwipeMs) {
+      this.reverseStopReason = "time";
+      return true;
+    }
+    return false;
   }
 
   private createStep(): SearchStep {
@@ -853,48 +898,75 @@ export class ScrollSearchSession {
     }
     this.reverseMode = true;
     this.unchangedScrollCount = 0;
+    // Half-screen reverse swipes travel at most half of a forward swipe's capped
+    // travel, so twice the moving forward swipes plus the end check returns past
+    // the start. A search that never moved forward has no range to bound.
+    if (this.movedSwipes > 0) {
+      this.reverseSwipeBudget = 2 * this.movedSwipes + this.maxUnchangedScrolls;
+    }
     logger.info(
       `[SwipeOn] Reached end in forward direction without finding ${this.target}, switching to reverse half-screen recovery`,
     );
   }
 
-  private async finish(): Promise<SwipeOnResult> {
-    if (!this.foundElement) {
-      throwIfAborted(this.request.signal);
-      this.perf.end();
-      const elapsed = this.deps.timer.now() - this.startTime;
-      if (this.lastAndroidSwipeError !== undefined) {
-        throw new ActionableError(`Scroll swipe failed: ${this.lastAndroidSwipeError}`);
-      }
-      if (this.reachedEnd) {
-        const error =
-          `Scroll reached end of container in both directions (${this.request.options.direction} and ${this.reverseDirection}; ` +
-          `no change after ${this.maxUnchangedScrolls} consecutive swipes each way). ` +
-          `${this.target} not found${this.scopeDescription}. ${this.movedSwipes} swipes moved the screen.`;
-        logger.info(`[SwipeOn] ${error}`);
-        await this.deps.captureTerminalObservationScreenshot?.(this.lastObservation, this.perf);
-        return {
-          success: false,
-          error,
-          targetType: "screen",
-          found: false,
-          reachedEnd: true,
-          movedSwipes: this.movedSwipes,
-          scrollIterations: this.scrollIteration,
-          elapsedMs: elapsed,
-          observation: this.lastObservation,
-          x1: 0,
-          y1: 0,
-          x2: 0,
-          y2: 0,
-          duration: 0,
-          warning: this.swipeWarning,
-          ...(this.accessibilityWarnings.size ? { warnings: [...this.accessibilityWarnings] } : {}),
-        };
-      }
+  private missMessage(): string {
+    const { direction } = this.request.options;
+    const reverse = this.reverseDirection;
+    const ends = this.reachedEnd
+      ? `Scroll reached end of container in both directions (${direction} and ${reverse}; ` +
+        `no change after ${this.maxUnchangedScrolls} consecutive swipes each way).`
+      : this.reverseStopReason === "covered"
+        ? `Scroll reached end of container going ${direction} (no change after ${this.maxUnchangedScrolls} consecutive swipes); ` +
+          `the ${reverse} sweep then covered the searched range back past the start (${this.reverseSwipes} swipes).`
+        : `Scroll reached end of container going ${direction} (no change after ${this.maxUnchangedScrolls} consecutive swipes); ` +
+          `the ${reverse} sweep stopped after ${this.reverseSwipes} swipes because the ${this.maxTime}ms search time budget could not cover another swipe.`;
+    return (
+      `${ends} ${this.target} not found${this.scopeDescription}. ${this.movedSwipes} swipes moved the screen. ` +
+      `The item may be absent from this container, or the swipe direction may be wrong.`
+    );
+  }
+
+  private async notFound(): Promise<SwipeOnResult> {
+    throwIfAborted(this.request.signal);
+    this.perf.end();
+    const elapsed = this.deps.timer.now() - this.startTime;
+    if (this.lastAndroidSwipeError !== undefined) {
+      throw new ActionableError(`Scroll swipe failed: ${this.lastAndroidSwipeError}`);
+    }
+    if (this.reverseMode && !this.reachedEnd && elapsed >= this.maxTime) {
+      this.reverseStopReason = "time";
+    }
+    if (!this.reachedEnd && !this.reverseStopReason) {
       throw new ActionableError(
         `${this.target} not found${this.scopeDescription} after scrolling for ${elapsed}ms (${this.scrollIteration} iterations, timeout=${this.maxTime}ms).`,
       );
+    }
+    const error = this.missMessage();
+    logger.info(`[SwipeOn] ${error}`);
+    await this.deps.captureTerminalObservationScreenshot?.(this.lastObservation, this.perf);
+    return {
+      success: false,
+      error,
+      targetType: "screen",
+      found: false,
+      reachedEnd: true,
+      movedSwipes: this.movedSwipes,
+      scrollIterations: this.scrollIteration,
+      elapsedMs: elapsed,
+      observation: this.lastObservation,
+      x1: 0,
+      y1: 0,
+      x2: 0,
+      y2: 0,
+      duration: 0,
+      warning: this.swipeWarning,
+      ...(this.accessibilityWarnings.size ? { warnings: [...this.accessibilityWarnings] } : {}),
+    };
+  }
+
+  private async finish(): Promise<SwipeOnResult> {
+    if (!this.foundElement) {
+      return this.notFound();
     }
 
     // Set accessibility focus on found element if requested

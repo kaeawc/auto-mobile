@@ -254,6 +254,8 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
 }
 
 export interface SearchableEntry extends SearchableNode {
+  /** Descendant labels announced by this entry alongside its own label. */
+  sublabel?: string;
   source: ViewHierarchyNode;
   properties: Element;
   element?: Element;
@@ -485,6 +487,7 @@ function hoistSearchableLabels(entries: SearchableEntry[]): void {
     const labelPart = folded.label !== row.label ? parts[0] : undefined;
     row.displayedLabel = displayedSearchableLabel(folded.label);
     row.label = row.displayedLabel;
+    row.sublabel = folded.sublabel;
     row.hoistedSources = texts;
     row.hoistedLabelSources = texts.filter((text) => text.label === labelPart);
     row.textFields = [

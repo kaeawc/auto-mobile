@@ -97,6 +97,27 @@ enum VisionCommandPolicy {
         return .none
     }
 
+    struct TextInputCandidate {
+        let identifier: String
+        let label: String
+        let elementType: UInt
+    }
+
+    /// Indices of the text inputs the last tap hit. The tap's selector is kept, not only its
+    /// identifier, so a label-only tap on an anonymous text input still finds its field when no
+    /// input reports focus afterwards (#18079).
+    static func lastTappedTextInputIndices(
+        candidates: [TextInputCandidate], lastTapped: TapSelector?
+    ) -> [Int] {
+        guard let lastTapped else { return [] }
+        return candidates.indices.filter {
+            lastTapped.matches(
+                identifier: candidates[$0].identifier, label: candidates[$0].label,
+                elementType: candidates[$0].elementType
+            )
+        }
+    }
+
     /// The window app under automation: the daemon-supplied bundle id, else nil (demo app).
     static func targetBundleId(environment: [String: String]) -> String? {
         guard let value = environment["AM_BUNDLE_ID"]?

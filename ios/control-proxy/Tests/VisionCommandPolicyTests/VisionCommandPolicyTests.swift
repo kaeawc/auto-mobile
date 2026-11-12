@@ -232,6 +232,30 @@ final class VisionCommandPolicyTests: XCTestCase {
         XCTAssertEqual(VisionCommandPolicy.typingTarget(focusedCount: 2, lastTappedTextInputCount: 1), .none)
     }
 
+    func testLabelOnlyTapOnAnUnfocusedTextInputKeepsTheTypingFallback() throws {
+        // A label-only tap on an anonymous text field (elementType 49), then typing while no
+        // input reports hasFocus (#18079).
+        let selector = try XCTUnwrap(VisionCommandPolicy.tapSelector(
+            identifier: "", label: "Name", elementType: 49, frameContext: nil
+        ))
+        let inputs = [
+            VisionCommandPolicy.TextInputCandidate(identifier: "email", label: "Email", elementType: 49),
+            VisionCommandPolicy.TextInputCandidate(identifier: "", label: "Name", elementType: 49),
+            VisionCommandPolicy.TextInputCandidate(identifier: "", label: "Name", elementType: 50),
+        ]
+        let tapped = VisionCommandPolicy.lastTappedTextInputIndices(candidates: inputs, lastTapped: selector)
+        XCTAssertEqual(tapped, [1])
+        XCTAssertEqual(
+            VisionCommandPolicy.typingTarget(focusedCount: 0, lastTappedTextInputCount: tapped.count),
+            .lastTapped
+        )
+        XCTAssertEqual(
+            VisionCommandPolicy.lastTappedTextInputIndices(candidates: inputs, lastTapped: .identifier("email")),
+            [0]
+        )
+        XCTAssertEqual(VisionCommandPolicy.lastTappedTextInputIndices(candidates: inputs, lastTapped: nil), [])
+    }
+
     func testHandshakeAdvertisesOnlyTheVisionWindowSubset() throws {
         struct Event: Decodable {
             let type: String

@@ -191,6 +191,24 @@ describe("waitForObservation DSL branch", () => {
     expect(outcome.matchedElement?.text).toBe("Account settings");
   });
 
+  test("for:'focused' is refused off tvOS before any poll", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveSequence([makeObservation([node({ text: "Account" })], 10)]);
+
+    const error = await waitForObservation(
+      observeScreen,
+      { for: "focused" } satisfies WaitForWithSettled,
+      { skipBackStack: false, timer },
+    ).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(String(error)).toContain('"for: focused" is supported only on tvOS');
+  });
+
   test("for:'appear' matches text that only a context row carries", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

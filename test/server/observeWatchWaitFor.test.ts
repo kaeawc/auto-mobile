@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { tvosRunners } from "../../src/features/tvos/TvosRunnerRegistry";
 import type { TvosHierarchy } from "../../src/features/tvos/TvosHierarchy";
 import { ActionableError, type BootedDevice, type ObserveResult } from "../../src/models";
+import { waitForSchema } from "../../src/features/observe/wait/WaitForSchemas";
 import type { ObserveArgs } from "../../src/server/observeTools";
 import { observeWatch, type WatchScreenshotSource } from "../../src/server/observeWatch";
 import { observeToolResultSchema } from "../../src/server/toolOutputSchemas";
@@ -72,6 +73,22 @@ function arrange(runner: FakeTvosRunnerClient) {
       cacheDir: () => "/cache/screenshots",
     });
   return { observe, unregister };
+}
+
+/** The B01 capture with focus moved: `focusedId` holds focus, or nothing does when undefined. */
+function withFocusOn(focusedId: string | undefined): unknown {
+  const unfocused = JSON.stringify(b01.data).replace(
+    '"focused":"true","text":"B01"',
+    '"focused":"false","text":"B01"',
+  );
+  return JSON.parse(
+    focusedId === undefined
+      ? unfocused
+      : unfocused.replace(
+          `"focused":"false","text":"${focusedId}"`,
+          `"focused":"true","text":"${focusedId}"`,
+        ),
+  );
 }
 
 const lastIs = (text: string) => ({ elementId: "last", text, textMatch: "exact" as const });
@@ -150,6 +167,75 @@ describe("observe waitFor with the tvOS runner", () => {
     } finally {
       unregister();
     }
+  });
+});
+
+describe("observe waitFor focused on tvOS", () => {
+  test("waits until focus settles on an element after a frame with nothing focused", async () => {
+    const runner = new ChangingTvosRunner(withFocusOn(undefined), b01.data, 2);
+    const { observe, unregister } = arrange(runner);
+    try {
+      const response = await observe({ waitFor: { for: "focused", timeout: 2000 } });
+      const result = getStructuredPayload<ObserveResult & Record<string, unknown>>(response)!;
+      expect(response.isError).toBeUndefined();
+      expect(result).toMatchObject({ matched: true, awaitTimeout: false, polls: 3 });
+      expect(result.awaitedElement).toMatchObject({ "resource-id": "B01", focused: true });
+      expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+    } finally {
+      unregister();
+    }
+  });
+
+  test("an elementId narrows the wait to that element holding focus", async () => {
+    const runner = new ChangingTvosRunner(b01.data, withFocusOn("B02"), 1);
+    const { observe, unregister } = arrange(runner);
+    try {
+      const result = getStructuredPayload<ObserveResult & Record<string, unknown>>(
+        await observe({ waitFor: { for: "focused", elementId: "B02", timeout: 2000 } }),
+      )!;
+      expect(result).toMatchObject({ matched: true, polls: 2 });
+      expect(result.awaitedElement).toMatchObject({ "resource-id": "B02" });
+    } finally {
+      unregister();
+    }
+  });
+
+  test("times out when focus stays on another element", async () => {
+    const runner = new ChangingTvosRunner(b01.data, b01.data, 0);
+    const { observe, unregister } = arrange(runner);
+    try {
+      const response = await observe({ waitFor: { for: "focused", text: "B02", timeout: 300 } });
+      const result = getStructuredPayload<ObserveResult & Record<string, unknown>>(response)!;
+      expect(response.isError).toBe(true);
+      expect(result).toMatchObject({ matched: false, awaitTimeout: true, timedOut: true });
+      expect(result.focusedElement?.["resource-id"]).toBe("B01");
+    } finally {
+      unregister();
+    }
+  });
+
+  test("other for kinds stay refused and the error names the focus wait", async () => {
+    const { observe, unregister } = arrange(new FakeTvosRunnerClient());
+    try {
+      const error = await observe({ waitFor: { for: "clickable", text: "B01" } }).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(String(error)).toContain("does not support: waitFor.for");
+      expect(String(error)).toContain('{for: "focused"}');
+    } finally {
+      unregister();
+    }
+  });
+
+  test("the schema accepts a selector-free focus wait and refuses a container", () => {
+    expect(waitForSchema.safeParse({ for: "focused" }).success).toBe(true);
+    expect(waitForSchema.safeParse({ for: "focused", text: "B01" }).success).toBe(true);
+    expect(
+      waitForSchema.safeParse({ for: "focused", container: { elementId: "row" } }).success,
+    ).toBe(false);
+    expect(waitForSchema.safeParse({ for: "clickable" }).success).toBe(false);
   });
 });
 

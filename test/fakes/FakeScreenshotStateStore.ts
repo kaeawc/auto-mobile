@@ -1,3 +1,4 @@
+import type { ScreenshotMetadata } from "../../src/features/observe/ScreenshotMetadata";
 import {
   MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE,
   OBSERVE_RESULT_CACHE_TTL_MS,
@@ -8,6 +9,7 @@ import type { Timer } from "../../src/utils/SystemTimer";
 
 interface FakeScreenshotState {
   imageSize?: { width: number; height: number };
+  metadata?: ScreenshotMetadata;
   path: string | null;
   error: string | null;
   timestamp: number;
@@ -49,7 +51,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
   updateForObservation(
     deviceId: string,
     observationId: string,
-    { path, error, imageSize }: ScreenshotStateUpdate = {},
+    { path, error, imageSize, metadata }: ScreenshotStateUpdate = {},
   ): void {
     if (this.isCleared(deviceId, observationId)) {
       return;
@@ -60,6 +62,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
       path: path ?? null,
       error: error ?? null,
       ...(imageSize ? { imageSize } : {}),
+      ...(metadata ? { metadata } : {}),
       timestamp: this.now(),
     });
     while (states.size > MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE) {
@@ -138,6 +141,15 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
   getImageSizeForObservation(deviceId: string, observationId: string, path: string) {
     const state = this.findObservation(deviceId, observationId);
     return state?.path === path ? state.imageSize : undefined;
+  }
+
+  getMetadataForObservation(
+    deviceId: string,
+    observationId: string,
+    path: string,
+  ): ScreenshotMetadata | undefined {
+    const state = this.findObservation(deviceId, observationId);
+    return state?.path === path ? state.metadata : undefined;
   }
 
   getErrorForObservation(deviceId: string, observationId: string): string | undefined {

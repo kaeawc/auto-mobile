@@ -265,6 +265,9 @@ export type ObserveResult = {
   /** Provenance of the screenshot returned with this observation. */
   screenshotSource?: "fresh" | "cached";
   screenshotCaptureSource?: "device" | "observation-cache";
+  screenshotFallback?: boolean;
+  screenshotFallbackReason?: import("./ScreenshotMetadata").ScreenshotFallbackReason | null;
+  screenshotStageDurationsMs?: import("./ScreenshotMetadata").ScreenshotStageDurationsMs;
   screenshotCapturedAt?: string;
   screenshotAgeMs?: number;
   /**

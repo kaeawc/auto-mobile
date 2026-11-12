@@ -1,34 +1,13 @@
-import type { ScreenshotFormat, ScreenshotMimeType } from "../../models/ScreenshotFormat";
+import type { ScreenshotMetadata } from "../../models/ScreenshotMetadata";
 
-export type { ScreenshotFormat, ScreenshotMimeType };
-
-export type ScreenshotCaptureSource =
-  | "android_ctrlproxy_a11y"
-  | "android_adb_screencap"
-  | "ios_ctrlproxy";
-
-export type ScreenshotFallbackReason =
-  | "a11y_screenshot_unsupported"
-  | "websocket_unavailable"
-  | "ctrlproxy_failed"
-  | "ctrlproxy_rate_limited"
-  | "ctrlproxy_timeout"
-  | "ctrlproxy_exception";
-
-export interface ScreenshotPerformanceMetadata {
-  screenshotCaptureDurationMs?: number;
-  screenshotEncodeDurationMs?: number;
-  screenshotByteLength?: number;
-  screenshotBase64Length?: number;
-}
-
-export interface ScreenshotMetadata extends ScreenshotPerformanceMetadata {
-  screenshotMimeType?: ScreenshotMimeType;
-  screenshotFormat?: ScreenshotFormat;
-  screenshotCaptureSource?: ScreenshotCaptureSource;
-  screenshotFallback?: boolean;
-  screenshotFallbackReason?: ScreenshotFallbackReason | null;
-}
+export type { ScreenshotFormat, ScreenshotMimeType } from "../../models/ScreenshotFormat";
+export type {
+  ScreenshotCaptureSource,
+  ScreenshotFallbackReason,
+  ScreenshotStageDurationsMs,
+  ScreenshotPerformanceMetadata,
+  ScreenshotMetadata,
+} from "../../models/ScreenshotMetadata";
 
 export const ANDROID_CTRLPROXY_SCREENSHOT_METADATA: ScreenshotMetadata = {
   screenshotMimeType: "image/jpeg",
@@ -100,6 +79,9 @@ export function pickScreenshotMetadata(metadata: ScreenshotMetadata): Screenshot
   }
   if (metadata.screenshotFallbackReason !== undefined) {
     pickedMetadata.screenshotFallbackReason = metadata.screenshotFallbackReason;
+  }
+  if (metadata.screenshotStageDurationsMs !== undefined) {
+    pickedMetadata.screenshotStageDurationsMs = metadata.screenshotStageDurationsMs;
   }
   if (metadata.screenshotCaptureDurationMs !== undefined) {
     pickedMetadata.screenshotCaptureDurationMs = metadata.screenshotCaptureDurationMs;

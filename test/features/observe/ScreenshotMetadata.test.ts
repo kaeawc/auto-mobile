@@ -1,4 +1,8 @@
+import { createScreenshotUpdate } from "../../../src/daemon/deviceDataStream/screenshotUpdate";
+import { screenshotFrameSchema } from "../../helpers/wireMessageSchemas";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { describe, expect, test } from "bun:test";
+import { screenshotPerformanceMetadataFrom } from "../../../src/features/observe/android/androidCtrlProxyInboundWire";
 import {
   ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
   ANDROID_ADB_SCREENSHOT_METADATA,
@@ -83,7 +87,8 @@ describe("pickScreenshotMetadata", () => {
       screenshotFormat: "jpeg",
       screenshotCaptureSource: "android_ctrlproxy_a11y",
       screenshotFallback: true,
-      screenshotFallbackReason: "ctrlproxy_timeout",
+      screenshotFallbackReason: "ctrlproxy_recent_failure",
+      screenshotStageDurationsMs: { ctrlProxyMs: 3000, adbMs: 200, totalMs: 3200 },
       screenshotCaptureDurationMs: 12,
       screenshotEncodeDurationMs: 3,
       screenshotByteLength: 4096,
@@ -120,4 +125,45 @@ describe("pickScreenshotMetadata", () => {
     expect(picked).toEqual({ screenshotFormat: "png" });
     expect("unrelated" in picked).toBe(false);
   });
+});
+
+test("runner metadata cannot supply daemon stage timings", () => {
+  const metadata: ScreenshotMetadata = {
+    screenshotStageDurationsMs: { ctrlProxyMs: 3000, totalMs: 3000 },
+    screenshotCaptureDurationMs: 12,
+    screenshotEncodeDurationMs: 3,
+    screenshotByteLength: 4096,
+    screenshotBase64Length: 5461,
+  };
+  const inbound = screenshotPerformanceMetadataFrom(metadata);
+  expect(inbound).not.toHaveProperty("screenshotStageDurationsMs");
+  expect(inbound).toEqual({
+    screenshotCaptureDurationMs: 12,
+    screenshotEncodeDurationMs: 3,
+    screenshotByteLength: 4096,
+    screenshotBase64Length: 5461,
+  });
+});
+
+test("daemon screenshot updates retain the recent-failure reason and stage timings on the wire", () => {
+  const metadata: ScreenshotMetadata = {
+    ...ANDROID_ADB_SCREENSHOT_METADATA,
+    screenshotFallbackReason: "ctrlproxy_recent_failure",
+    screenshotStageDurationsMs: { adbMs: 200, totalMs: 200 },
+  };
+  const update = createScreenshotUpdate(
+    {
+      deviceId: "fake",
+      screenshotBase64: "",
+      screenWidth: undefined,
+      screenHeight: undefined,
+      metadata,
+      options: {},
+    },
+    new FakeTimer(),
+  );
+  expect(pickScreenshotMetadata(update)).toEqual(metadata);
+  expect(screenshotFrameSchema.parse(update).screenshotStageDurationsMs).toEqual(
+    metadata.screenshotStageDurationsMs,
+  );
 });

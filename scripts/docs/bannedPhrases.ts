@@ -163,7 +163,9 @@ function blank(source: string, start: number, end: number): string {
  * regex only proposes a span; md4c accepts it only if blanking the span in
  * place and re-appending it at the end of the document (definitions are
  * document-wide, so links that use it still resolve) renders the same leaves.
- * That rejects look-alikes inside code blocks or paragraph continuations.
+ * That rejects look-alikes inside code blocks or paragraph continuations. A
+ * span must also render nothing on its own, so a paragraph that merely starts
+ * like a definition is never blanked whole.
  */
 function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
   const lineStarts = lineStartsOf(source);
@@ -181,6 +183,11 @@ function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
     for (let last = line; last < lineStarts.length && lineText(last).trim() !== ""; last++) {
       const span = last - line + 1;
       const definition = source.slice(lineStarts[line], lineEnd(last));
+      // A paragraph that only starts like a definition renders prose of its
+      // own; relocating the whole paragraph would keep the leaves unchanged.
+      if (collectLeaves(definition).length > 0) {
+        continue;
+      }
       const candidate = blank(searchable, lineStarts[line], lineEnd(last));
       if (sameLeaves(collectLeaves(`${candidate}\n\n${moved}${definition}\n`), leaves)) {
         searchable = candidate;

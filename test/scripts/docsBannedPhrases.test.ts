@@ -212,6 +212,11 @@ describe("findBannedPhrases source lines", () => {
     expect(linesOf(source)).toEqual([["robust", 6]]);
   });
 
+  test("never blanks a paragraph that only starts like a definition", () => {
+    expect(linesOf("[ref]: /url nope\nA robust\n")).toEqual([["robust", 2]]);
+    expect(linesOf("[ref]: /url nope\none\ntwo\nA robust\n")).toEqual([["robust", 4]]);
+  });
+
   test("a newline inside link syntax is not a prose break", () => {
     // md4c renders "It's worthnoting.": the newline sits in the destination.
     expect(linesOf("It's [worth](\n/url)noting.\n")).toEqual([]);

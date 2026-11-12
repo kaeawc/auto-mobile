@@ -400,6 +400,29 @@ export class DaemonLifecycleReconciler {
     );
   }
 
+  /**
+   * A daemon from this client's own checkout (the caller has checked that) that
+   * started inside the restart cooldown (a sibling client just restarted it) is
+   * reused for this call instead of refused:
+   * restarting is suppressed by the cooldown, and the daemon already runs this
+   * checkout's build, so failing the call would only report identical builds as a
+   * mismatch (#18090). Acceptance is not remembered, so a later call past the
+   * cooldown still restarts it if the version still differs.
+   */
+  private reusesFreshCheckoutDaemon(status: DaemonStatus, runningVersion: string): boolean {
+    if (!status.startedAt) {
+      return false;
+    }
+    const daemonAgeMs = this.deps.timer.now() - status.startedAt;
+    if (daemonAgeMs >= DAEMON_VERSION_RESTART_COOLDOWN_MS) {
+      return false;
+    }
+    logger.warn(
+      `[DaemonMcpProxy] Reusing daemon ${runningVersion || "unknown"} from this checkout's build inside the restart cooldown (${daemonAgeMs}ms old); client version is ${this.deps.clientVersion}`,
+    );
+    return true;
+  }
+
   private async staleClientDisposition(
     status: DaemonStatus,
     runningVersion: string,
@@ -412,7 +435,7 @@ export class DaemonLifecycleReconciler {
         ? this.checkoutVersion
         : await this.probeCheckoutVersion();
     if (checkoutVersion !== runningVersion) {
-      return "restart";
+      return this.reusesFreshCheckoutDaemon(status, runningVersion) ? "accept" : "restart";
     }
     this.acceptCheckoutVersion(status, runningVersion);
     return "accept";

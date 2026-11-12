@@ -21,6 +21,7 @@ function harness(options: {
   buildIdentity?: BuildIdentity;
   daemonBuild?: BuildIdentity;
   readCheckoutVersion?: () => Promise<string | null>;
+  daemonAgeMs?: number;
 }) {
   const manager = new FakeDaemonManager();
   const timer = new FakeTimer();
@@ -28,7 +29,7 @@ function harness(options: {
   manager.statusResult = {
     running: true,
     pid: 1234,
-    startedAt: 1,
+    startedAt: options.daemonAgeMs === undefined ? 1 : timer.now() - options.daemonAgeMs,
     version: options.runningVersion,
     options: { debug: true, port: 3195 },
     ...(options.daemonBuild ?? BUILD),
@@ -73,7 +74,7 @@ function harness(options: {
     startedAt: timer.now(),
     version,
   });
-  return { manager, reconciler, restarted };
+  return { manager, reconciler, restarted, timer };
 }
 
 describe("stale MCP client version convergence", () => {
@@ -265,5 +266,92 @@ describe("dirty-checkout daemon reuse by content key (#18071)", () => {
 
   test("a genuinely stale daemon, launched on another working tree, still restarts", async () => {
     expect(await cliCall(`${CLEAN}.dirty.000000000000`, DIRTY)).toBe(1);
+  });
+});
+
+describe("same-checkout calls inside the restart cooldown (#18090)", () => {
+  let settled: ReturnType<typeof spyOn<typeof constants, "syncSettledDaemonVersion">>;
+  beforeEach(() => {
+    settled = spyOn(constants, "syncSettledDaemonVersion").mockReturnValue(true);
+  });
+  afterEach(() => settled.mockRestore());
+
+  const young = constants.DAEMON_VERSION_RESTART_COOLDOWN_MS / 2;
+
+  test("reuses a young daemon from this checkout's build instead of refusing", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const { manager, reconciler } = harness({
+      clientVersion: DIRTY,
+      runningVersion: CLEAN,
+      readCheckoutVersion: async () => DIRTY,
+      daemonAgeMs: young,
+    });
+    try {
+      await reconciler.ensureVersionMatches();
+      expect(manager.restartCallCount).toBe(0);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("restarts the reused daemon once the cooldown has passed", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const { manager, reconciler, restarted, timer } = harness({
+      clientVersion: DIRTY,
+      runningVersion: CLEAN,
+      readCheckoutVersion: async () => DIRTY,
+      daemonAgeMs: young,
+    });
+    try {
+      await reconciler.ensureVersionMatches();
+      timer.advanceTime(constants.DAEMON_VERSION_RESTART_COOLDOWN_MS);
+      manager.statusResults = [manager.statusResult, restarted(DIRTY)];
+      await reconciler.ensureVersionMatches();
+      expect(manager.restartCallCount).toBe(1);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("a refusal between equal builds names the versions, not 'build X != build X'", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const { manager, reconciler } = harness({
+      clientVersion: DIRTY,
+      runningVersion: CLEAN,
+      daemonBuild: { ...BUILD, entryScript: "/other/src/index.ts" },
+      daemonAgeMs: young,
+    });
+    try {
+      const failure = await reconciler.ensureVersionMatches().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      if (!(failure instanceof DaemonVersionMismatchError)) {
+        throw new Error("Expected a typed version refusal");
+      }
+      expect(failure.reason).toBe("cooldown");
+      expect(failure.message).toContain(`daemon=${CLEAN}, client=${DIRTY}`);
+      expect(failure.message).not.toContain("build mismatch");
+      expect(manager.restartCallCount).toBe(0);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("differing builds keep the build-mismatch wording", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const { reconciler } = harness({
+      clientVersion: DIRTY,
+      runningVersion: CLEAN,
+      daemonBuild: { entryScript: "/other/src/index.ts", buildId: "other-build" },
+      daemonAgeMs: young,
+    });
+    try {
+      await expect(reconciler.ensureVersionMatches()).rejects.toThrow(
+        "daemon build other-build (/other/src/index.ts) != client build same-build",
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 });

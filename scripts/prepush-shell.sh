@@ -482,6 +482,12 @@ for path in "${changed_files[@]}"; do
       add_check "mkdocs-nav"
       add_check "docs-github-markdown"
       ;;
+  esac
+
+  case "${path}" in
+    docs/*.md|scripts/docs/banned-phrases.json|scripts/docs/banned-phrases-allowlist.json)
+      add_check "docs-banned-phrases"
+      ;;
     CHANGELOG.md|.github/CONTRIBUTING.md)
       add_check "docs-github-markdown"
       ;;

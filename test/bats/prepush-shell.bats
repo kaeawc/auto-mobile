@@ -565,6 +565,24 @@ EOF
   grep -Fqx -- '--only stdlib-first,docs-github-markdown' "${FAST_LOG}"
 }
 
+@test "changed docs Markdown selects docs-banned-phrases" {
+  commit_change "docs/page.md" "# Page"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only mkdocs-nav,docs-github-markdown,docs-banned-phrases' "${FAST_LOG}"
+}
+
+@test "changed banned-phrase list or allowlist selects docs-banned-phrases" {
+  commit_change "scripts/docs/banned-phrases-allowlist.json" '{"entries":[]}'
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only docs-banned-phrases,stdlib-first' "${FAST_LOG}"
+}
+
 @test "a changed shell script outside scripts/ selects shellcheck without portability or sete" {
   commit_change "demo/scripts/bad.sh" "#!/usr/bin/env bash"
 

@@ -159,7 +159,7 @@ Two tools reuse MCP `prototype` actions (`patch`, and `inspect` / `events` from 
 | `patch(ops)`                 | JSON-Patch subset plus `replaceNode`, against the draft's revision. Validates the result; returns the new revision or the error path. |
 | `preview`                    | Renders the draft and returns an `observe`-style summary of what is on screen, so the model can check layout.                         |
 | `inspect`, `events`          | Runtime state and recent events (`emit`, `change`, `validation_failed`) after the user tries the draft.                               |
-| `askUser(question, options)` | Shows a choice in the agent sheet, for genuine ambiguity.                                                                             |
+| `askUser(question, options)` | Shows a choice in the agent sheet, when the request is ambiguous.                                                                     |
 
 A rejection is returned as the tool result with its path, and the model retries; Koog's tool
 error result carries it. Create-from-description starts from a template spec (section 4.4) and is

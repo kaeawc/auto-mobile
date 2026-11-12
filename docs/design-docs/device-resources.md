@@ -555,7 +555,7 @@ Hot presence, disconnect and lifecycle-notification resets clear the 2,500 ms re
 stage and enrichment caches without aborting shared catalog/provenance fetches. Successful
 AVD create/delete/provision, system-image install and daemon shutdown use full invalidation:
 obsolete catalog reads report `code: "superseded"` with retry hints, rather than a timeout.
-Only an actual 30,000 ms hard-cap expiry reports that background timeout; genuine catalog
+Only an actual 30,000 ms hard-cap expiry reports that background timeout; real catalog
 failures retain `code: "failed"` with the underlying cause.
 
 All ordinary ADB device-list readers share a 10,000 ms subprocess bound. Inventory callers

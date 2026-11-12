@@ -62,6 +62,7 @@ add_check "stdlib-first" "\"$PROJECT_ROOT/scripts/conventions/validate-stdlib-fi
 add_check "mkdocs-nav" "\"$PROJECT_ROOT/scripts/validate_mkdocs_nav.sh\"" "docs" "Validate MkDocs navigation"
 add_check "docs-assets" "bun \"$PROJECT_ROOT/scripts/docs/build-docs-assets.ts\" --check" "docs,typescript" "Keep docs/assets/javascripts/*.js in sync with their docs-assets/src TypeScript sources"
 add_check "env-var-docs" "bun --cwd \"$PROJECT_ROOT\" test test/lint/envVarDocsConformance.test.ts" "docs,typescript" "Check environment variable documentation against source reads and table structure"
+add_check "docs-banned-phrases" "bun \"$PROJECT_ROOT/scripts/docs/check-banned-phrases.ts\"" "docs,typescript" "Reject filler and machine-written phrasing in docs/ prose (#18143)"
 add_check "docs-github-markdown" "\"$PROJECT_ROOT/scripts/validate_docs_github_markdown.sh\"" "docs" "Reject MkDocs-only syntax that breaks GitHub rendering of docs/"
 add_check "claude-plugin" "\"$PROJECT_ROOT/scripts/claude/validate_plugin.sh\"" "config" "Validate Claude plugin structure"
 add_check "codex-skills" "\"$PROJECT_ROOT/scripts/validate_codex_skills.sh\"" "config,docs" "Validate Codex skills and AGENTS inventory"

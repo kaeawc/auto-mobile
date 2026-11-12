@@ -866,6 +866,92 @@ describe("provisionDevice on an Apple TV simulator", () => {
     }
   });
 
+  /** Records each acquiring-session hold; `lost` aborts the held session's work. */
+  function recordHolds() {
+    const lost = new AbortController();
+    const holds: Array<{ sessionUuid: string; deadlineMs: number; released: boolean }> = [];
+    setDeviceToolsDependencies({
+      holdAcquiringSession: (sessionUuid, deadlineMs) => {
+        const hold = { sessionUuid, deadlineMs, released: false };
+        holds.push(hold);
+        return {
+          signal: lost.signal,
+          release: () => {
+            hold.released = true;
+          },
+        };
+      },
+    });
+    return { holds, lost };
+  }
+
+  test("readiness automation holds the bound session while a slow runner starts", async () => {
+    const { artifacts, sessions, timer } = await arrange();
+    const { holds } = recordHolds();
+    const reachedRunner = Promise.withResolvers<void>();
+    const finishResolve = Promise.withResolvers<string>();
+    artifacts.resolve = async () => {
+      reachedRunner.resolve();
+      return await finishResolve.promise;
+    };
+    const pending = provision({ device: TV, readiness: "automation", timeoutMs: 60_000 });
+    await reachedRunner.promise;
+    // Well past the pre-first-heartbeat grace: the caller still has no session id to heartbeat.
+    timer.advanceTime(30_000);
+
+    const [bound] = sessions.getAllSessions();
+    expect(holds).toEqual([
+      { sessionUuid: bound!.sessionId, deadlineMs: expect.any(Number), released: false },
+    ]);
+    expect(holds[0]!.deadlineMs).toBeGreaterThanOrEqual(timer.now());
+    finishResolve.resolve("/products/TV.xctestrun");
+    const result = toolJson(await pending);
+
+    expect(result).toMatchObject({
+      sessionId: bound!.sessionId,
+      readiness: { mode: "automation", status: "automation_ready" },
+    });
+    expect(holds.map((hold) => hold.released)).toEqual([true]);
+    await sessions.releaseSession(bound!.sessionId, "explicit-release");
+  });
+
+  test("readiness none binds without holding the session for a runner", async () => {
+    await arrange();
+    const { holds } = recordHolds();
+
+    toolJson(await provision({ device: TV }));
+
+    expect(holds).toEqual([]);
+  });
+
+  test("a session lost while its runner starts stops startup and fails the provision", async () => {
+    const { artifacts, launcher, sessions } = await arrange();
+    const { holds, lost } = recordHolds();
+    let artifactSignal: AbortSignal | undefined;
+    artifacts.resolve = async (signal?: AbortSignal) => {
+      artifactSignal = signal;
+      lost.abort(new Error("session released by the daemon"));
+      signal?.throwIfAborted();
+      return "/products/TV.xctestrun";
+    };
+
+    // Called directly, so no tool-layer rollback releases the bound session on the abort.
+    const error = await failure(
+      withWireConnection(
+        { __mcpSessionId: "client-a", device: TV, readiness: "automation" },
+        (wireArgs) => provisionAppleTvDevice(wireArgs, bindBootedDeviceSession),
+      ),
+    );
+
+    expect(String(error)).toContain("session released by the daemon");
+    expect(artifactSignal?.aborted).toBe(true);
+    expect(launcher.launches).toEqual([]);
+    expect(holds.map((hold) => hold.released)).toEqual([true]);
+    for (const session of sessions.getAllSessions()) {
+      await sessions.releaseSession(session.sessionId, "explicit-release");
+    }
+  });
+
   test("accepts enableTools with boot and binds a session for the grant", async () => {
     const { pool } = await arrange();
 

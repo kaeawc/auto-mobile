@@ -134,6 +134,8 @@ export interface SimctlLaunchOptions {
    * one `simctl launch`, so a host-level `SIMCTL_CHILD_*` value is replaced, not combined.
    */
   environment?: Record<string, string>;
+  /** Aborting kills the `simctl launch` child instead of waiting out its timeout. */
+  signal?: AbortSignal;
 }
 
 export function launchEnvironment(

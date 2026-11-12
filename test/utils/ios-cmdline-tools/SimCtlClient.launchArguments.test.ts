@@ -117,3 +117,24 @@ test("simctl launch rejects environment keys simctl would not forward", async ()
   expect(result.error).toContain("must start with SIMCTL_CHILD_: DYLD_INSERT_LIBRARIES");
   expect(calls).toHaveLength(0);
 });
+
+test("simctl launch hands its abort signal to the child so an abort kills it", async () => {
+  const seen: Array<AbortSignal | undefined> = [];
+  const client = new SimCtlClient(device, async (_file, _args, options: SimctlExecOptions = {}) => {
+    seen.push(options.signal);
+    await new Promise<void>((resolve) => {
+      options.signal?.addEventListener("abort", () => resolve(), { once: true });
+    });
+    throw new Error("simctl launch killed");
+  });
+  const controller = new AbortController();
+  const launched = client.launchApp("com.example.app", { signal: controller.signal });
+  await Promise.resolve();
+  expect(seen).toHaveLength(1);
+  controller.abort();
+
+  const result = await launched;
+
+  expect(seen[0]?.aborted).toBe(true);
+  expect(result.success).toBe(false);
+});

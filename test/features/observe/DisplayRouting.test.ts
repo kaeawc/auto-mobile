@@ -10,6 +10,8 @@ import { displayTransitions } from "../../../src/features/observe/DisplayTransit
 import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { displayInventoryOutcome } from "../../../src/models/DeviceInfo";
+import { DisplayInventoryUnavailableError } from "../../../src/models/DisplayInventoryUnavailableError";
 import type { BootedDevice, ObservationInsets, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -56,6 +58,53 @@ describe("display read routing", () => {
     skipRecompositionTracking: true,
     skipAccessibilityAudit: true,
   };
+
+  test.each(["options", "constructor", "observer", "cached", "screenshot", "aggregate"] as const)(
+    "explicit display from %s preserves an unreadable inventory error before capture",
+    async (mode) => {
+      const target: BootedDevice = {
+        ...device,
+        deviceId: `unreadable-inventory-${mode}`,
+        displays: undefined,
+        [displayInventoryOutcome]: { kind: "unreadable", reason: "dumpsys display timed out" },
+      };
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      const capture = new FakeHierarchyCapture(() => ({ hierarchy: {} }));
+      const screen = new RealObserveScreen(
+        target,
+        new FakeAdbClientFactory(adb),
+        {
+          display:
+            mode === "options" ? undefined : mode === "aggregate" ? "all" : "4619827551948147201",
+          hierarchyCapture: capture,
+          cacheStore: new FakeObserveCacheStore(timer),
+        },
+        { timer },
+      );
+      try {
+        const read =
+          mode === "observer"
+            ? screen.executeDeviceRead(undefined, "none")
+            : mode === "cached"
+              ? screen.getMostRecentCachedObserveResult()
+              : mode === "screenshot"
+                ? screen.captureScreenshot()
+                : screen.execute({
+                    ...readOptions,
+                    ...(mode === "options" ? { display: "4619827551948147201" } : {}),
+                  });
+        await expect(read).rejects.toBeInstanceOf(DisplayInventoryUnavailableError);
+        await expect(read).rejects.toMatchObject({ details: { retryable: true } });
+        expect(capture.requests).toEqual([]);
+        expect(adb.getExecutedCommands()).toEqual([]);
+      } finally {
+        ObservedAndroidDisplayCache.release(target.deviceId);
+        displayTransitions.reset(target.deviceId);
+        resetObserveCacheStore();
+      }
+    },
+  );
 
   test.each(["options", "constructor", "observer"] as const)(
     "explicit Android display from %s rejects an unreadable list with retry guidance",

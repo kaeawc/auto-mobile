@@ -9,7 +9,7 @@ import {
   type FinalDisplayBindingContext,
 } from "./DisplayBindingCollector";
 import { displayTransitions } from "../DisplayTransition";
-import { DisplaySelectionError, resolveTargetDisplay } from "../DisplaySelection";
+import { DisplaySelectionError, resolveDeviceTargetDisplay } from "../DisplaySelection";
 import { liveIosPanelFor, observedIosDisplay } from "../ObservationDisplay";
 
 export class IosDisplayBindingCollector implements DisplayBindingCollector {
@@ -51,7 +51,7 @@ export class IosDisplayBindingCollector implements DisplayBindingCollector {
         identityRevision: displayTransitions.identityRevision(device.deviceId),
       };
     }
-    const panel = resolveTargetDisplay(device.displays, displayRequest, {
+    const panel = resolveDeviceTargetDisplay(device, displayRequest, {
       focusedPanelKey: result.display.key,
       activePanelKey: result.display.key,
       posture: result.display.posture,

@@ -1,0 +1,49 @@
+---
+name: garage-flow
+description: Garage car app. List, push detail, book service, back; settings blocked while driving.
+steps:
+  - tool: launchApp
+    params:
+      appId: dev.dogfood.garage
+      coldBoot: true
+    label: Launch Garage
+  - tool: tapOn
+    params:
+      selector:
+        text: Roadster
+    label: Open Roadster detail
+  - tool: tapOn
+    params:
+      selector:
+        text: Book service
+    label: Book service
+  - tool: observe
+    params:
+      waitFor:
+        text: Service booked
+        timeout: 5000
+    label: Status updated
+  - tool: pressButton
+    params:
+      button: back
+    label: Back to list
+  - tool: setDeviceState
+    params:
+      deviceCondition:
+        vehicle:
+          motion: driving
+    label: Start driving
+  - tool: launchApp
+    params:
+      appId: dev.dogfood.garage
+      intent:
+        component: .SettingsActivity
+    label: Try settings while driving (expect the blocking overlay)
+    expectation: fail
+  - tool: setDeviceState
+    params:
+      deviceCondition:
+        vehicle:
+          motion: parked
+    label: Park again
+

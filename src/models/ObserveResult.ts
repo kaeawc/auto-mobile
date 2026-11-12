@@ -117,6 +117,8 @@ export interface SkeletonElement {
   semanticLinks?: SemanticLink[];
   /** Compact bounds tuple `[left, top, right, bottom]`. */
   bounds: [number, number, number, number];
+  /** visionOS ornament-local bounds: tap by label/identifier, never coordinates. */
+  space?: "ornament";
   /** Actionable affordances, in canonical order tap, long-press, input, scroll, toggle. */
   affordances: Affordance[];
   /** Fully covered by the Android IME window or the visible iOS keyboard, or an iOS row with no visible tap area: off screen, under a navigation/status/tab bar, scrolled out of its scroll container, or covered by another control; this row has no actionable affordance. */
@@ -303,8 +305,15 @@ export type ObserveResult = {
       activeRestrictions: number;
     };
     foregroundActivity?: { distractionOptimized: boolean };
-    /** DO is required and a known foreground activity is not distraction optimized. */
+    /**
+     * DO is required and a known foreground activity is not distraction optimized, or the car's
+     * blocking activity is in front.
+     */
     blocked: boolean;
+    /** The car's blocking activity in front, when that is what blocks. */
+    blockedBy?: string;
+    /** The activity the blocking activity covers, when the back stack lists it. */
+    blockedActivity?: string;
     /**
      * The foreground screen belongs to the Car App Library (#17499); `hostPackage` is present when
      * host-drawn template nodes were seen. Absence is not proof of app-drawn views. Read it with

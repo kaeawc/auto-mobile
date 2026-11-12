@@ -216,7 +216,7 @@ export class SwipeOnAndroidDisplay {
         (timeoutMs) =>
           this.ctx().observeScreen.execute({
             ...INTERMEDIATE_OBSERVATION_OPTIONS,
-            display: target.observation.display.key,
+            display: target.followUpDisplay,
             freshness: "fresh",
             timeoutMs,
             signal,
@@ -665,7 +665,7 @@ export class SwipeOnAndroidDisplay {
       throw new ActionableError(direction.error);
     }
     const useCtrlProxy = await this.resolveSearchDisplaySwipeRoute({ options, target, signal });
-    const display = target.observation.display.key;
+    const display = target.followUpDisplay;
     const validateObservation = (observation: ObserveResult) =>
       this.validateSelectedDisplayObservation({
         observation,
@@ -932,7 +932,7 @@ export class SwipeOnAndroidDisplay {
                 () => this.executeOnAndroidDisplay({ options, target, signal, talkBack }),
                 {
                   changeExpected: false,
-                  display: target.observation.display.key,
+                  display: target.followUpDisplay,
                   previousObservation: target.observation,
                   signal,
                 },

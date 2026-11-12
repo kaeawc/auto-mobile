@@ -30,6 +30,11 @@ const SYSTEM_TAG_SPECS = [
 export interface AndroidLogRequest {
   appId?: string;
   sinceSeconds: number;
+  /**
+   * Re-derives the look-back from an absolute anchor. Called right before each logcat read so the
+   * time spent in the API-level and UID probes does not shrink the window.
+   */
+  refreshSinceSeconds?: () => number;
   tags?: readonly string[];
   minPriority: LogcatPriority;
   grep?: string;
@@ -110,7 +115,7 @@ export class AndroidLogReader {
     const appLines = await this.logcat(
       {
         buffers: request.buffers,
-        sinceSeconds: request.sinceSeconds,
+        sinceSeconds: request.refreshSinceSeconds?.() ?? request.sinceSeconds,
         filterSpecs,
         ...(scope.attribution === "uid" ? { uid: scope.uid } : {}),
       },
@@ -120,7 +125,11 @@ export class AndroidLogReader {
       scope.attribution === "pid" ? appLines.filter((line) => scope.pids.has(line.pid)) : appLines;
     const system =
       request.includeSystem && request.appId
-        ? await this.systemLines(request.appId, request.sinceSeconds, signal)
+        ? await this.systemLines(
+            request.appId,
+            request.refreshSinceSeconds?.() ?? request.sinceSeconds,
+            signal,
+          )
         : [];
     const lines = mergeByTimestamp(scoped, system).filter((line) => matchesGrep(line, grep));
     return {

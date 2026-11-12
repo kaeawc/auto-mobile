@@ -239,7 +239,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       return checked.failure;
     }
     const { from, to } = checked.resolved;
-    const panel = target.observation.display.key;
+    const panel = target.followUpDisplay;
     const duration = options.durationMs ?? this.geometry.getSwipeDurationFromSpeed(options.speed);
     const result = await this.observedInteraction(
       async () => {

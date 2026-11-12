@@ -289,17 +289,13 @@ export class TapAtCoordinate extends BaseVisualChange {
   ): Promise<TapAtResult> {
     const { onTapDelivered, signal, onDispatchCompleted, onActivationWarnings } = call;
     const action = options.action ?? "tap";
-    const { observation, displayId, assertCurrent } = await prepareTargetDisplayAction(
-      this.device,
-      display,
-      this.observeScreen,
-      {
+    const { observation, displayId, followUpDisplay, assertCurrent } =
+      await prepareTargetDisplayAction(this.device, display, this.observeScreen, {
         adb: this.adb,
         lastRenderedObservation: this.lastRenderedObservation,
         signal,
         transitions: this.displayTransitionReader,
-      },
-    );
+      });
     const stale = this.staleSnapshotReason(options, observation);
     if (stale) {
       return {
@@ -335,6 +331,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           await this.dispatchDisplayTalkBackTapWithOneFreshRetry(options, resolved, observation, {
             signal,
             assertCurrent,
+            followUpDisplay,
             onTapDelivered: () => onTapDelivered(true),
             onActivationWarnings,
           });
@@ -359,7 +356,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       },
       {
         changeExpected: false,
-        display: observation.display.key,
+        display: followUpDisplay,
         previousObservation: observation,
         signal,
       },
@@ -719,6 +716,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     context: {
       signal?: AbortSignal;
       assertCurrent: () => void;
+      followUpDisplay: string;
       onTapDelivered: () => void;
       onActivationWarnings?: (warnings?: string[]) => void;
     },
@@ -757,7 +755,7 @@ export class TapAtCoordinate extends BaseVisualChange {
 
       // Pin the prepared panel instead of resolving an active-display alias again.
       const refreshedObservation = await this.observeScreen.execute({
-        display: observation.display.key,
+        display: context.followUpDisplay,
         freshness: this.retryFreshness(options),
         signal,
       });

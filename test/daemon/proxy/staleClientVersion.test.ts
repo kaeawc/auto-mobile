@@ -228,3 +228,42 @@ describe("stale MCP client version convergence", () => {
     expect(manager.restartCallCount).toBe(1);
   });
 });
+
+// #17991 / #18071: a daemon whose own dirty probe timed out reported only its commit
+// stamp, so each one-shot `--cli` process restarted it. The relaunched daemon now
+// reports the content key its manager probed at launch, compared by content.
+describe("dirty-checkout daemon reuse by content key (#18071)", () => {
+  let settled: ReturnType<typeof spyOn<typeof constants, "syncSettledDaemonVersion">>;
+  beforeEach(() => {
+    settled = spyOn(constants, "syncSettledDaemonVersion").mockReturnValue(true);
+  });
+  afterEach(() => settled.mockRestore());
+
+  const cliCall = async (runningVersion: string, relaunchedVersion: string) => {
+    // Each `--cli` invocation is a new process: nothing learnt in memory survives.
+    const { manager, reconciler, restarted } = harness({
+      clientVersion: DIRTY,
+      runningVersion,
+      readCheckoutVersion: async () => DIRTY,
+    });
+    manager.statusResults = [manager.statusResult, restarted(relaunchedVersion)];
+    await reconciler.ensureVersionMatches();
+    return manager.restartCallCount;
+  };
+
+  test("a hashless daemon restarts once, then its launch key is reused by every later call", async () => {
+    // The relaunched daemon's own probe timed out again; it reports the launch key.
+    expect(await cliCall(CLEAN, DIRTY)).toBe(1);
+    expect(await cliCall(DIRTY, DIRTY)).toBe(0);
+    expect(await cliCall(DIRTY, DIRTY)).toBe(0);
+  });
+
+  test("a touched or reverted file leaves the key unchanged, so the daemon is reused", async () => {
+    // A checkout, formatter run, editor save, or edit-then-revert keeps the content at DIRTY.
+    expect(await cliCall(DIRTY, DIRTY)).toBe(0);
+  });
+
+  test("a genuinely stale daemon, launched on another working tree, still restarts", async () => {
+    expect(await cliCall(`${CLEAN}.dirty.000000000000`, DIRTY)).toBe(1);
+  });
+});

@@ -1,3 +1,4 @@
+import { TV_REMOTE_BUTTONS } from "../tvos/TvosRunnerClient";
 import { ActionableError } from "../../models/ActionableError";
 import type { PressButtonResult } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
@@ -16,7 +17,7 @@ export function holdDurationOf(call: unknown): number | undefined {
     : undefined;
 }
 
-/** A hold is a long press of D-pad center on Android only; refuse it anywhere else before observing. */
+/** Refuse unsupported holds before observing: Android select or any tvOS remote button. */
 export function rejectUnsupportedHold(
   platform: string,
   button: string,
@@ -25,12 +26,18 @@ export function rejectUnsupportedHold(
   if (durationMs === undefined) {
     return;
   }
+  if (platform === "tvos") {
+    if (!TV_REMOTE_BUTTONS.some((remoteButton) => remoteButton === button)) {
+      throw new ActionableError(`durationMs requires a tvOS remote button, not ${button}.`);
+    }
+    return;
+  }
   if (!isHoldablePressButton(button)) {
     throw new ActionableError(`durationMs applies to select (D-pad center) only, not ${button}.`);
   }
   if (platform !== "android") {
     throw new ActionableError(
-      `durationMs (long press of select) is supported on Android only, not ${platform}.`,
+      `durationMs (long press of select) is supported on Android and tvOS only, not ${platform}.`,
     );
   }
 }

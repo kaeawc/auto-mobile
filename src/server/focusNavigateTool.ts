@@ -157,6 +157,8 @@ export const focusNavigateTool = defineDeviceTool({
     // `select` can navigate, so record the call like tapOn and sendKeys for navigateTo to replay.
     recordsNavigation: true,
     defaultEnabled: false,
+    // The D-pad is a TV's only input, so a TV session lists this tool (#18029).
+    defaultEnabledOnTv: true,
     outputSchema: focusNavigateResultSchema,
   },
 });

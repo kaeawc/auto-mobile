@@ -4,9 +4,9 @@ import XCTest
 @MainActor
 final class VisionCommandRouter {
     private let application: XCUIApplication
-    /// Identifier of the element the last `request_tap_element` hit; typing falls back to it when
-    /// no field reports focus.
-    private var lastTappedIdentifier: String?
+    /// Selector of the element the last `request_tap_element` hit (identifier, or label and type);
+    /// typing falls back to it when no field reports focus.
+    private var lastTappedSelector: VisionCommandPolicy.TapSelector?
 
     init(application: XCUIApplication) {
         self.application = application
@@ -135,7 +135,7 @@ final class VisionCommandRouter {
                             + "with the supplied type/label; candidates: \(details)"
                     )
                 }
-                lastTappedIdentifier = request.identifier.isEmpty ? nil : request.identifier
+                lastTappedSelector = selector
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "tap_element_result", requestId: requestId, totalTimeMs: 0
                 ))
@@ -150,7 +150,8 @@ final class VisionCommandRouter {
                     throw CommandError.invalidParameter("text", "append text must not contain the delete key")
                 }
                 var focusedFields: [XCUIElement] = []
-                var lastTappedFields: [XCUIElement] = []
+                var textInputs: [XCUIElement] = []
+                var textInputCandidates: [VisionCommandPolicy.TextInputCandidate] = []
                 let textTypes: [XCUIElement.ElementType] = [.textField, .secureTextField, .textView, .searchField]
                 for candidate in application.descendants(matching: .any).allElementsBoundByIndex {
                     let snapshot = try candidate.snapshot()
@@ -158,10 +159,15 @@ final class VisionCommandRouter {
                     if snapshot.hasFocus {
                         focusedFields.append(candidate)
                     }
-                    if let tapped = lastTappedIdentifier, snapshot.identifier == tapped {
-                        lastTappedFields.append(candidate)
-                    }
+                    textInputs.append(candidate)
+                    textInputCandidates.append(VisionCommandPolicy.TextInputCandidate(
+                        identifier: snapshot.identifier, label: snapshot.label,
+                        elementType: snapshot.elementType.rawValue
+                    ))
                 }
+                let lastTappedFields = VisionCommandPolicy.lastTappedTextInputIndices(
+                    candidates: textInputCandidates, lastTapped: lastTappedSelector
+                ).map { textInputs[$0] }
                 let target: XCUIElement
                 switch VisionCommandPolicy.typingTarget(
                     focusedCount: focusedFields.count,

@@ -62,7 +62,7 @@ jobs:
   build:
     name: "Package ${{ matrix.format }} (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout-minutes }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +70,9 @@ jobs:
           - os: macos-latest
             platform: macos
             format: dmg
+            # Packaging plus two sequential notary waits (app image, then DMG),
+            # each bounded by notarize-macos-artifact.sh's 30m --timeout (#18176).
+            timeout-minutes: 90
             # Build only the signed app-image here; the DMG is assembled later,
             # after the app-image is notarized and stapled, so the app bundle
             # inside the shipped DMG carries its own notarization ticket (#4955).
@@ -77,10 +80,12 @@ jobs:
           - os: windows-latest
             platform: windows
             format: msi
+            timeout-minutes: 45
             gradle-task: ":desktop-app:packageMsi"
           - os: ubuntu-latest
             platform: linux
             format: deb
+            timeout-minutes: 45
             gradle-task: ":desktop-app:packageDeb"
     steps:
       - name: "Git Checkout"

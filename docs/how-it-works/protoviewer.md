@@ -549,9 +549,8 @@ Release checks need a device and run from `scripts/release/protoviewer-release-s
   `firstInstallTime`, iOS data container path) and the saved entry still opens under the same library id.
 - **Minified smoke** (`--mode smoke`): install the R8-minified APK (`--build` passes
   `-Pautomobile.protoviewer.minifyRelease=true`) or the stripped iOS release, import and open two
-  validated asset-free specs (one standing in for the bundled sample, one for an import), and on
-  Android read the library screen's settings switch and open "Open-source licenses" through
-  `uiautomator dump`.
+  validated asset-free specs, and on Android read the library screen's settings switch and open
+  "Open-source licenses" through `uiautomator dump`.
 
 - **iPhone Duo** (`--duo`, iOS only): after the normal flows install the candidate, import and
   open the smoke bundle in each posture. `--posture-command <executable>` receives `closed` or

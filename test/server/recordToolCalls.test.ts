@@ -335,6 +335,42 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     expect(getToolCallRecorder({ connectionId: "export" })).toBeNull();
   });
 
+  test('format "xctest" adds the Swift scaffold to end and exportPlan; the default omits it', async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const record = ToolRegistry.getTool("recordToolCalls")!;
+    const exportPlan = ToolRegistry.getTool("exportPlan")!;
+    const recordOnce = async (connectionId: string) => {
+      await asConnection(connectionId, () => record.handler({ action: "begin" }));
+      recordPlanCall(getToolCallRecorder({ connectionId })!, "tapOn", { text: "Save" });
+    };
+
+    await recordOnce("xctest-end");
+    const end = await asConnection("xctest-end", () =>
+      record.handler(
+        record.schema.parse({ action: "end", planName: "save-note", format: "xctest" }),
+      ),
+    );
+    expect(toolStructured(end)).toEqual(toolJson(end));
+    expect(toolField(end, "planContent")).toContain("text: Save");
+    expect(toolField(end, "xctest")).toMatchObject({
+      className: "SaveNoteTests",
+      swiftFileName: "SaveNoteTests.swift",
+      planFileName: "save-note.yaml",
+      planResourcePath: "test-plans/save-note.yaml",
+    });
+
+    await recordOnce("xctest-export");
+    const exported = await asConnection("xctest-export", () =>
+      exportPlan.handler(exportPlan.schema.parse({ planName: "save-note", format: "xctest" })),
+    );
+    expect(toolField(exported, "xctest")).toEqual(toolField(end, "xctest"));
+
+    await recordOnce("yaml-default");
+    const plain = await asConnection("yaml-default", () => record.handler({ action: "end" }));
+    expect(toolField(plain, "xctest")).toBeUndefined();
+    expect(() => exportPlan.schema.parse({ format: "swift" })).toThrow();
+  });
+
   test("exportPlan with a recordingId leaves the recordToolCalls recording running", async () => {
     serverConfig.setToolCallRecordingEnabled(true);
     await asConnection("by-id", () =>

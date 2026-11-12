@@ -75,6 +75,7 @@ plugins:
         "design-docs/mcp/sdk-v2-stateless-migration.md": "how-it-works/mcp/sdk-v2-stateless-migration.md"
         "design-docs/mcp/stylus-pressure-hover-injection.md": "how-it-works/mcp/stylus-pressure-hover-injection.md"
         "design-docs/mcp/tool-registration.md": "using/dynamic-tools.md"
+        "design-docs/mcp/tool-requirements.md": "how-it-works/mcp/tool-requirements.md"
         "design-docs/plat/android/accessibility-data-sensitive-windows.md": "how-it-works/plat/android/accessibility-data-sensitive-windows.md"
         "design-docs/plat/android/android-17-target-sdk-audit.md": "how-it-works/plat/android/android-17-target-sdk-audit.md"
         "design-docs/plat/android/android-auto-projection-provisioning.md": "how-it-works/plat/android/android-auto-projection-provisioning.md"

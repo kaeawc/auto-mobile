@@ -16,6 +16,8 @@ import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimension
 import { shellQuote } from "../../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { parseBroadcastOutput } from "../intent/SendBroadcast";
+import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
+import { logger } from "../../utils/logger";
 import { z } from "zod/v4";
 import {
   CALLS,
@@ -38,6 +40,14 @@ import {
 const PACKAGE = "dev.jasonpearson.automobile.contentseeder";
 const DATA = "content://com.android.contacts/data";
 const MAX_PHOTO_BYTES = 512 * 1024;
+/** Runtime permissions granted to the seeder; its manifest must request each one. */
+const SEEDER_PERMISSIONS = [
+  "READ_CALENDAR",
+  "WRITE_CALENDAR",
+  "READ_SMS",
+  "READ_CONTACTS",
+  "WRITE_CONTACTS",
+].map((name) => `android.permission.${name}`);
 
 /** Drop `content query` result rows so row values cannot read as shell diagnostics. */
 export function withoutProviderRows(stdout: string): string {
@@ -414,25 +424,61 @@ export class SeedContent {
     return apk;
   }
 
+  /**
+   * Installs the seeder, or upgrades an installed one whose manifest predates a permission it is
+   * now granted (#18078): `pm grant` refuses a permission the package never requested.
+   */
   private async prepareApp(signal?: AbortSignal): Promise<void> {
     const listing = await this.shell([`pm list packages --user 0 ${shellQuote(PACKAGE)}`], signal);
-    if (!packageListingContains(listing, PACKAGE)) {
+    const installed = packageListingContains(listing, PACKAGE);
+    const outdated = installed && (await this.unrequestedPermissions(signal)).length > 0;
+    if (!installed || outdated) {
       const apk = await this.resolveApkPath();
-      const output = await this.run(["install", "-t", apk], signal);
+      const output = await this.run(["install", ...(outdated ? ["-r"] : []), "-t", apk], signal);
       if (!/\bSuccess\b/.test(output)) {
         throw new ActionableError(`Could not install the content seeder APK: ${output}`);
+      }
+    }
+    if (outdated) {
+      const missing = await this.unrequestedPermissions(signal);
+      if (missing.length > 0) {
+        throw new ActionableError(
+          `The content seeder APK does not request ${missing.join(", ")}. Rebuild it with ./gradlew :content-seeder:assembleDebug (or update AUTOMOBILE_CONTENT_SEEDER_APK_PATH) and retry.`,
+        );
       }
     }
     await this.shell(
       [
         `cmd role add-role-holder --user 0 android.app.role.SMS ${shellQuote(PACKAGE)}`,
-        ...["READ_CALENDAR", "WRITE_CALENDAR", "READ_SMS", "READ_CONTACTS", "WRITE_CONTACTS"].map(
-          (permission) =>
-            `pm grant --user 0 ${shellQuote(PACKAGE)} ${shellQuote(`android.permission.${permission}`)}`,
+        ...SEEDER_PERMISSIONS.map(
+          (permission) => `pm grant --user 0 ${shellQuote(PACKAGE)} ${shellQuote(permission)}`,
         ),
       ],
       signal,
     );
+  }
+
+  /** The seeder permissions the installed package's manifest does not request. */
+  private async unrequestedPermissions(signal?: AbortSignal): Promise<string[]> {
+    // Read directly: package dumps name classes such as *Exception that the write heuristics flag.
+    const reply = await this.deps.adb
+      .execute(["shell", `dumpsys package ${shellQuote(PACKAGE)}`], {
+        noRetry: true,
+        signal,
+        timeoutMs: 120_000,
+      })
+      .catch((error: unknown) => {
+        throw toActionableError(error, "Could not read the content seeder package");
+      });
+    if (reply.error) {
+      throw new ActionableError(`Could not read the content seeder package: ${reply.error}`);
+    }
+    const requested = parseAndroidRuntimePermissions(reply.stdout, PACKAGE)?.requestedPermissions;
+    if (requested === undefined) {
+      logger.warn("[seedContent] dumpsys package listed no content seeder; granting as before");
+      return [];
+    }
+    return SEEDER_PERMISSIONS.filter((permission) => !requested.has(permission));
   }
 
   private async broadcast(

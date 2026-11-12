@@ -96,6 +96,10 @@ replays carry identical guidance. Operator `daemon/cleanupBrokerAvdSnapshots` ma
 refuses new prepare calls with `session_broker_maintenance` and the same retry hints,
 without storing a receipt. Its fence waits for all admitted preparations to settle
 before AVD discovery or snapshot deletion, and releases even when cleanup fails.
+It deletes snapshot directories, `default_boot` included, only for a broker-named AVD
+that no registry assignment or journal entry references and that has no live process
+or serial; the `automobile-broker-baseline-*` snapshot is always kept, and user AVDs
+and whole AVD directories are never touched. A cleaned orphan cold-boots if relaunched.
 Pool drain and idle expiry remain outside this fence.
 
 `session_restart_handoff_pending` and configured-but-unavailable refusals use the

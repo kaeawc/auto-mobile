@@ -459,7 +459,11 @@ describe("session broker daemon handlers", () => {
         result: { reports: names.map((avdName) => ({ avdName })) },
       });
       expect(removed).toEqual(
-        withRegistry ? [join(home, "ambroker-stale.avd", "snapshots", "capture")] : [],
+        withRegistry
+          ? ["capture", "default_boot"].map((snapshot) =>
+              join(home, "ambroker-stale.avd", "snapshots", snapshot),
+            )
+          : [],
       );
     },
   );

@@ -325,10 +325,13 @@ export class PrototypePreviewServer implements PrototypePreviewControl {
     const event = sse("reload", { id, generation: this.generation });
     this.streams.forEach((stream) => {
       const related = this.related(stream.id);
-      if (stream.id === id || stream.watched.has(id) || related.includes(id)) {
+      const sent = stream.id === id || stream.watched.has(id) || related.includes(id);
+      if (sent) {
         stream.response.write(event);
       }
-      stream.watched = new Set(related);
+      // Revision stores update every history before emitting events, so an id already dropped from
+      // related() may still be announced; keep it watched until a reload has been sent.
+      stream.watched = sent ? new Set(related) : new Set([...stream.watched, ...related]);
     });
   }
 

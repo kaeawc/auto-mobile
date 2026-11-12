@@ -126,6 +126,49 @@ jobs:
           path: scratch/docs-site-screenshots
           if-no-files-found: ignore
 
+  # Advisory readability report (#18145): sentence, paragraph and page length
+  # and passive-heavy paragraphs against the per-section budgets in
+  # scripts/docs/readability-budgets.json. Not a required check and always
+  # passes; findings land as warning annotations and in the job summary. It
+  # becomes a gate (`--strict`) once main meets the budgets.
+  readability:
+    name: "Docs Readability Report"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      # The check uses only Bun built-ins, so it needs no dependency install.
+      - name: "Report readability findings"
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          bun scripts/docs/check-readability.ts --github | tee scratch/docs-readability.txt
+          {
+            echo "## Docs readability (advisory)"
+            echo
+            echo '```text'
+            sed -n '/^Docs readability summary/,$p' scratch/docs-readability.txt
+            echo '```'
+            echo
+            echo "<details><summary>All findings</summary>"
+            echo
+            echo '```text'
+            grep -v '^::warning' scratch/docs-readability.txt | sed '/^$/,$d'
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   deploy-docs:
     name: "Deploy Documentation"
     runs-on: ubuntu-latest

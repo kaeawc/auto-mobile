@@ -294,17 +294,7 @@ export class FakeGitMetadataReader implements GitMetadataReader {
   readonly reads: string[] = [];
   readonly inspections: string[] = [];
 
-  constructor(
-    readonly entries: Record<string, string | null> = {},
-    readonly modifiedTimes: Record<string, number> = {},
-  ) {}
-
-  modifiedAtMs(path: string): number | null {
-    const entry = Object.entries(this.modifiedTimes).find(
-      ([key]) => resolve(key) === resolve(path),
-    );
-    return entry?.[1] ?? null;
-  }
+  constructor(readonly entries: Record<string, string | null> = {}) {}
 
   private lookup(path: string): [string, string | null] | undefined {
     return Object.entries(this.entries).find(([key]) => resolve(key) === resolve(path));

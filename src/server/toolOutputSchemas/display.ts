@@ -81,7 +81,7 @@ export const elementBoundsSchema = z
     "Element bounds. Default: positional tuple [left, top, right, bottom]; the " +
       "object {left, top, right, bottom} (+ optional centerX/centerY) is also " +
       "schema-valid. Coordinates share screenSize's current-orientation native space " +
-      "and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
+      "and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion. Exception: space=ornament means visionOS ornament-local bounds; tap by label or identifier, never coordinates.",
   );
 
 /**
@@ -96,7 +96,7 @@ export const screenSizeSchema = z
   })
   .describe(
     "Current-orientation native screen size for observe bounds and absolute tapAt input: " +
-      "Android physical pixels or iOS XCTest logical points. Valid points satisfy " +
+      "Android physical pixels or iOS XCTest logical points. On visionOS this is the app window size in points, excluding ornaments and scroll-content extents. Valid points satisfy " +
       "0 <= x < width and 0 <= y < height. No density, inset, Retina, canonical-pixel, " +
       "or rotation transform applies to an already-native point.",
   );

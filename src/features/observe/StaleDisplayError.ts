@@ -1,6 +1,9 @@
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { displayPinFailure, selectedDisplayPin } from "./SessionDisplayContext";
-import { PinnedDisplayUnavailableError } from "../../models/PinnedDisplayError";
+import {
+  DisplayInventoryUnavailableError,
+  PinnedDisplayUnavailableError,
+} from "../../models/PinnedDisplayError";
 import { ActionableError } from "../../models/ActionableError";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { StaleDisplayDetails } from "../../models/StaleDisplayDetails";
@@ -44,6 +47,9 @@ export function withStaleDisplay<T extends BaseActionResult>(result: T, error: u
   const pinError = displayPinFailure(error);
   if (pinError instanceof PinnedDisplayUnavailableError) {
     return { ...result, error: pinError.message, pinnedDisplay: pinError.details };
+  }
+  if (error instanceof DisplayInventoryUnavailableError) {
+    return { ...result, error: error.message, displayInventory: error.details };
   }
   return error instanceof StaleDisplayError
     ? { ...result, error: error.message, staleDisplay: error.details }

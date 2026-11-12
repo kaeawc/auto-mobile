@@ -9,7 +9,7 @@ import {
   type GitVersionInfo,
   type GitDirtyState,
 } from "./GitMetadataClient";
-import { AMBIENT_ENV, readEnvRaw } from "../config/env";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { logger } from "./logger";
 
@@ -35,6 +35,11 @@ export interface McpVersionDeps {
 export interface McpVersionResolverDeps extends McpVersionDeps {
   timer: Pick<Timer, "setTimeout">;
   readDirtyState: () => Promise<GitDirtyState | null>;
+  /**
+   * Version (with working-tree hash) the launching manager probed from this
+   * checkout just before spawning this process; undefined when none was passed.
+   */
+  readLaunchVersion?: () => string | undefined;
 }
 
 const findPackageJson = (startDir: string): string | null => {
@@ -162,6 +167,44 @@ export const resolveMcpServerVersion = (deps: McpVersionDeps): string => {
   return formatMcpServerVersion(base, deps.readGitVersion());
 };
 
+/**
+ * The settled version once the dirty-state probe has answered. When the probe
+ * timed out or could not hash the diff, the content key the launching manager
+ * probed just before spawning this process stands in, but only when it names
+ * the same release and commit (#18071). Adopting it is conservative: an edit
+ * written between that probe and this process loading its modules makes the
+ * launch key older than the loaded tree, so the next client's fresh key differs
+ * and it restarts this process.
+ */
+const refinedVersion = (
+  base: string,
+  git: GitVersionInfo,
+  state: GitDirtyState | null,
+  readLaunchVersion: (() => string | undefined) | undefined,
+): string => {
+  if (state?.dirty && state.dirtyHash) {
+    return formatMcpServerVersion(base, { ...git, ...state });
+  }
+  const commitVersion = formatMcpServerVersion(base, { ...git, dirty: false });
+  // A tree this process's own probe saw clean needs no stand-in.
+  const launched =
+    state?.dirty === false ? undefined : adoptableLaunchVersion(commitVersion, readLaunchVersion);
+  return (
+    launched ?? (state?.dirty ? formatMcpServerVersion(base, { ...git, ...state }) : commitVersion)
+  );
+};
+
+/** The launch key, when it carries a working-tree hash for exactly this release and commit. */
+const adoptableLaunchVersion = (
+  commitVersion: string,
+  readLaunchVersion: (() => string | undefined) | undefined,
+): string | undefined => {
+  const launched = readLaunchVersion?.()?.trim();
+  return launched && hasWorkingTreeHash(launched) && withoutDirtyStamp(launched) === commitVersion
+    ? launched
+    : undefined;
+};
+
 /** Cache the startup stamp and refine tracked edits once, off the startup path. */
 export const createMcpVersionResolver = (
   deps: McpVersionResolverDeps,
@@ -186,16 +229,14 @@ export const createMcpVersionResolver = (
       cachedVersion = formatMcpServerVersion(base, git);
       if (git) {
         refine = async (): Promise<void> => {
+          let state: GitDirtyState | null = null;
           try {
-            const state = await deps.readDirtyState();
-            if (state?.dirty) {
-              cachedVersion = formatMcpServerVersion(base, { ...git, ...state });
-            }
+            state = await deps.readDirtyState();
           } catch (error) {
             logger.warn("Background git dirty-state resolution failed", error);
-          } finally {
-            refined = true;
           }
+          cachedVersion = refinedVersion(base, git, state, deps.readLaunchVersion);
+          refined = true;
         };
         deps.timer.setTimeout(() => void startRefinement(), 0);
       }
@@ -236,18 +277,16 @@ const defaultResolverDeps = (): McpVersionResolverDeps => ({
   },
 });
 
+// Only this process's own version adopts a launch key; a probe of the checkout never does.
 const getResolver = (): ReturnType<typeof createMcpVersionResolver> =>
-  (resolver ??= createMcpVersionResolver(defaultResolverDeps()));
+  (resolver ??= createMcpVersionResolver({
+    ...defaultResolverDeps(),
+    readLaunchVersion: () => readEnvRaw(ENV.DAEMON_LAUNCH_CHECKOUT_VERSION),
+  }));
 
 /** Probe the version a process started from this checkout right now would report. */
 export const probeCheckoutMcpServerVersion = (): Promise<string> =>
   createMcpVersionResolver(defaultResolverDeps()).resolveSettled();
-
-/** When any tracked file of this checkout was last written; null when unknown. */
-export const probeCheckoutModifiedAt = async (): Promise<number | null> => {
-  const client = testOverrides.gitMetadataClient ?? defaultGitMetadataClient;
-  return (await client.readTrackedModifiedAt?.(moduleDir())) ?? null;
-};
 
 export const getMcpServerVersion = (): string => getResolver().current();
 

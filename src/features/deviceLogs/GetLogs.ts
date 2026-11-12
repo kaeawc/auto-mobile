@@ -23,7 +23,7 @@ export const GET_LOGS_MAX_BYTES = 256 * 1024;
 /** The unified-log levels `log show` accepts (same as the session log resource). */
 export type UnifiedLogLevel = "default" | "info" | "debug";
 
-export type GetLogsSince = "lastAction" | "sessionStart" | { seconds: number };
+export type GetLogsSince = "lastAction" | "sessionStart" | "run-start" | { seconds: number };
 
 export interface GetLogsRequest {
   appId?: string;
@@ -57,6 +57,8 @@ export interface GetLogsResult {
 /** Clock sources `since` resolves against, injected so tests need no daemon. */
 export interface GetLogsClock {
   now(): number;
+  /** Current plan execution start; absent outside executePlan. */
+  planStartMs?(): number | undefined;
   /** Host-clock start of the device's latest control call, if any. */
   lastActionStartMs(deviceId: string): number | undefined;
   /** Host-clock creation of the caller's session, if it has one. */
@@ -89,7 +91,37 @@ function secondsSince(startMs: number, nowMs: number): number {
   return Math.max(1, Math.ceil((nowMs - startMs) / 1000));
 }
 
-/** Resolve `since` into a device-relative window; an unknown anchor falls back with a warning. */
+/**
+ * A `since` that is an absolute host-clock instant rather than a duration. The device-relative
+ * window must be recomputed when the log is actually read, after any awaited probes.
+ */
+function sinceAnchorMs(
+  since: GetLogsSince | undefined,
+  deviceId: string,
+  clock: GetLogsClock,
+): number | undefined {
+  if (since === "run-start") {
+    return clock.planStartMs?.();
+  }
+  if (since === "lastAction") {
+    return clock.lastActionStartMs(deviceId);
+  }
+  return since === "sessionStart" ? clock.sessionStartMs() : undefined;
+}
+
+/** Re-derives an anchored look-back at read time, or undefined when `since` is not anchored. */
+function sinceRefresher(
+  since: GetLogsSince | undefined,
+  deviceId: string,
+  clock: GetLogsClock,
+): (() => number) | undefined {
+  const anchor = sinceAnchorMs(since, deviceId, clock);
+  return anchor === undefined
+    ? undefined
+    : () => Math.min(secondsSince(anchor, clock.now()), GET_LOGS_MAX_SECONDS);
+}
+
+/** Resolve `since` into a device-relative window; run-start requires an executing plan. */
 export function resolveSinceSeconds(
   since: GetLogsSince | undefined,
   deviceId: string,
@@ -97,7 +129,13 @@ export function resolveSinceSeconds(
   warnings: string[],
 ): number {
   let seconds = GET_LOGS_DEFAULT_SECONDS;
-  if (typeof since === "object") {
+  if (since === "run-start") {
+    const anchor = clock.planStartMs?.();
+    if (anchor === undefined) {
+      throw new ActionableError('getLogs since: "run-start" requires an executing plan.');
+    }
+    seconds = secondsSince(anchor, clock.now());
+  } else if (typeof since === "object") {
     seconds = since.seconds;
   } else if (since === "lastAction" || since === "sessionStart") {
     const anchor =
@@ -185,6 +223,8 @@ export function parseUnifiedCompact(text: string): GetLogsLine[] {
 /** The resolved read window shared by the per-platform `getLogs` paths. */
 interface GetLogsWindow {
   sinceSeconds: number;
+  /** The look-back to read with, re-derived from an anchored `since` after any awaited probes. */
+  readSinceSeconds: () => number;
   maxLines: number;
   minPriority: LogcatPriority;
 }
@@ -207,15 +247,25 @@ export class GetLogs {
     );
     const maxLines = Math.min(request.maxLines ?? GET_LOGS_DEFAULT_MAX_LINES, GET_LOGS_MAX_LINES);
     const minPriority = request.minPriority ?? "V";
+    const refreshSinceSeconds = sinceRefresher(request.since, device.deviceId, this.deps.clock);
+    const refresh = refreshSinceSeconds ? { refreshSinceSeconds } : {};
     if (device.platform !== "android") {
       // Every Apple simulator reads its unified log; none falls through to logcat.
-      const window = { platform: device.platform, sinceSeconds, maxLines, minPriority };
+      const readSinceSeconds = refreshSinceSeconds ?? (() => sinceSeconds);
+      const window = {
+        platform: device.platform,
+        sinceSeconds,
+        readSinceSeconds,
+        maxLines,
+        minPriority,
+      };
       return this.ios(request, window, warnings, signal);
     }
     const result = await this.deps.android().read(
       {
         appId: request.appId,
         sinceSeconds,
+        ...refresh,
         tags: request.tags,
         minPriority,
         grep: request.grep,
@@ -243,7 +293,7 @@ export class GetLogs {
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
-    const { platform, sinceSeconds, maxLines, minPriority } = window;
+    const { platform, sinceSeconds, readSinceSeconds, maxLines, minPriority } = window;
     const label = PLATFORM_LABELS[platform];
     if (!request.appId) {
       throw new ActionableError(
@@ -263,7 +313,7 @@ export class GetLogs {
     const processName = await resolveProcessName(source, request.appId, warnings, signal);
     const collected = await source.collect(
       request.appId,
-      sinceSeconds,
+      readSinceSeconds(),
       unifiedLogLevel(minPriority),
       { signal, processName },
     );

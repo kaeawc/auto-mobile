@@ -39,11 +39,45 @@ test.each(TV_REMOTE_BUTTONS)("pressButton routes %s to the tvOS runner", async (
     deps: { pressButtonFactory: (device) => new PressButton(device, null, new FakeTimer()) },
   });
   expect(client.commands).toEqual([{ type: "request_press_button", action: button }]);
+  expect(client.commands[0]).not.toHaveProperty("durationMs");
+  expect(client.requestOptions).toEqual([undefined]);
 });
+
+test.each(TV_REMOTE_BUTTONS)("pressButton holds %s on tvOS", async (button) => {
+  const timer = new FakeTimer();
+  const args = pressButtonTool.schema.parse({ button, durationMs: 800 });
+  const result = await pressButtonHandler(device, args, {
+    deps: { pressButtonFactory: (device) => new PressButton(device, null, timer) },
+  });
+  expect(toolStructured(result)).toMatchObject({ success: true, button, keyCode: 0 });
+  expect(client.commands).toEqual([
+    { type: "request_press_button", action: button, durationMs: 800 },
+  ]);
+  expect(timer.getSleepHistory()).toEqual([]);
+});
+
+test("a ten-second hold gets time to finish and leaves the result shape unchanged", async () => {
+  const result = await new PressButton(device, null, new FakeTimer()).execute("select", {
+    durationMs: 10000,
+  });
+  expect(result).toEqual({ success: true, button: "select", keyCode: 0 });
+  expect(client.requestOptions).toEqual([{ timeoutMs: 15000 }]);
+});
+
+test.each([99, 10001, 100.5])(
+  "rejects invalid tvOS hold duration %s at the schema",
+  (durationMs) => {
+    expect(pressButtonTool.schema.safeParse({ button: "select", durationMs }).success).toBe(false);
+    expect(client.commands).toEqual([]);
+  },
+);
 
 test("refuses unsupported remote options before dispatch", async () => {
   const press = new PressButton(device, null, new FakeTimer());
   await expect(press.execute("right", { steps: 2 })).rejects.toThrow("pressButton");
+  await expect(press.execute("select", { steps: 2, durationMs: 800 })).rejects.toThrow(
+    "pressButton",
+  );
   await expect(press.execute("power")).rejects.toThrow("pressButton");
   expect(client.commands).toEqual([]);
 });

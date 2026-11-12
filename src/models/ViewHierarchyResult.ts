@@ -318,6 +318,8 @@ export type ViewHierarchyNode = {
    * (issue #3206; see `boundsObjectSchema` in `src/server/toolOutputSchemas.ts`).
    */
   bounds?: ElementBounds;
+  space?: "ornament";
+  value?: string;
   recomposition?: RecompositionNodeInfo;
   recompositionMetrics?: RecompositionMetrics;
   occlusionState?: string;

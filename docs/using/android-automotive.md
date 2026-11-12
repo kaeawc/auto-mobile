@@ -196,9 +196,8 @@ unverified.
 
 An app built on the Car App Library (`androidx.car.app`) can report its template stack to `observe`, on a
 phone emulator or on AAOS, without a head unit. The block appears only for a debug build of an app that
-enabled the AutoMobile SDK template route; the app-side setup is in the
-[design doc](../design-docs/plat/android/car-app-templates.md#app-setup). While the foreground app has the
-route on, `observe` carries a `carAppTemplates` block:
+enabled the AutoMobile SDK template route. While the foreground app has the route on, `observe`
+carries a `carAppTemplates` block:
 
 - `sessions[]`: one per screen stack, with `screens[]` listed root first; the top screen has `top: true`.
 - Each screen: `screenClass`, `marker`, and the `template` it last recorded (absent if it never did).
@@ -211,6 +210,49 @@ route on, `observe` carries a `carAppTemplates` block:
 The block reports what the app built, not what the car host rendered; its `note` says so. If the app's
 main thread did not answer in time, the block has `error: "main_thread_timeout"` and no sessions. Apps
 that do not enable the route add nothing to `observe`.
+
+### Adding the SDK template route
+
+The template route is in the AutoMobile SDK, `dev.jasonpearson.auto-mobile:auto-mobile-sdk`. Maven
+Central has the SDK only up to `0.0.67`, which predates the template route, so build a newer release
+from its tag and publish it to your local Maven repository (`~/.m2`). This needs JDK 21 and an
+Android SDK (`ANDROID_HOME` set, or `sdk.dir` in `android/local.properties`):
+
+```bash
+git clone --depth 1 --branch <version> https://github.com/kaeawc/auto-mobile.git
+cd auto-mobile/android
+./gradlew :protocol:publishToMavenLocal :auto-mobile-sdk:publishToMavenLocal -PVERSION_NAME=<version>
+```
+
+Add `mavenLocal()` to the app's repositories and the SDK to the app module. Use `implementation`,
+not `debugImplementation`: the `record` call sits in main source, and `enable` does nothing in a
+non-debuggable build, so a release build carries the SDK with the route off.
+
+```kotlin
+android {
+  compileSdk = 37
+}
+
+dependencies {
+  implementation("dev.jasonpearson.auto-mobile:auto-mobile-sdk:<version>")
+}
+```
+
+The SDK requires `compileSdk` 37 or newer and brings a Kotlin 2.4 standard library, so build the app
+with Kotlin 2.3 or newer. The app already depends on the Car App Library (`androidx.car.app`); the SDK
+does not add it.
+
+Turn the route on once and pass each template through `record` as `onGetTemplate` returns it:
+
+```kotlin
+// Once, e.g. in your CarAppService or Session.
+AutoMobileCarAppTemplates.enable(context)
+
+override fun onGetTemplate(): Template =
+  AutoMobileCarAppTemplates.record(this, ListTemplate.Builder() /* ... */.build())
+```
+
+`enable` returns `false` and does nothing in a non-debuggable build.
 
 ### Back on Car App Library templates
 

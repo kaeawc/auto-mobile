@@ -57,4 +57,6 @@ Database reads through the Android SDK's `DatabaseInspectorProvider`
 **0.0.85 or newer** in the app. A non-owner read probes `getReadOnlyCapability` and
 proceeds only when the provider confirms `readOnlyEnforced: true`; otherwise it
 returns the non-retryable `sdk_too_old` refusal naming the minimum version. Upgrade
-the SDK in the app or ask the holder. The holder's own reads are unchanged.
+the SDK in the app or ask the holder. Maven Central has the SDK only up to `0.0.67`; build a
+newer release from source as in
+[Adding the SDK template route](android-automotive.md#adding-the-sdk-template-route). The holder's own reads are unchanged.

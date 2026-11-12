@@ -60,6 +60,9 @@ EOF
 https://github.com/kaeawc/auto-mobile/releases/download/0.0.1/AutoMobile-0.0.1-macos.dmg
 EOF
   cat > "${TEST_ROOT}/docs/using/ui-tests.md" <<'EOF'
+Maven Central has the AutoMobile Android libraries only up to `0.0.67`.
+git clone --depth 1 --branch 0.0.1 https://github.com/kaeawc/auto-mobile.git
+./gradlew :junit-runner:publishToMavenLocal -PVERSION_NAME=0.0.1
 testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.1")
 .package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.1")
 export AUTOMOBILE_VERSION=0.0.1
@@ -123,6 +126,12 @@ run_bump() {
   grep -Fq ".package(url: \"https://github.com/kaeawc/auto-mobile.git\", from: \"${VERSION}\")" \
     "${TEST_ROOT}/docs/using/ui-tests.md"
   grep -q "AUTOMOBILE_VERSION=${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
+  grep -Fq -- "--branch ${VERSION} https://github.com/kaeawc/auto-mobile.git" \
+    "${TEST_ROOT}/docs/using/ui-tests.md"
+  grep -Fq -- "-PVERSION_NAME=${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
+  # The Maven Central ceiling is not the release version and must not be bumped.
+  grep -Fq 'Maven Central has the AutoMobile Android libraries only up to `0.0.67`.' \
+    "${TEST_ROOT}/docs/using/ui-tests.md"
   grep -q "Replace \`${VERSION}\` with the version used by your test runner dependency" \
     "${TEST_ROOT}/docs/using/ui-tests.md"
   # The Swift constant must be *regenerated* (not regex-edited in place): assert

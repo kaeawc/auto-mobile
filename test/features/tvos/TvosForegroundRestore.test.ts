@@ -238,12 +238,40 @@ test("aborting while the restore waits for the foreground rejects with the abort
   for (let tick = 0; tick < 10 && f.timer.getPendingTimeoutCount() === 0; tick++) {
     await Promise.resolve();
   }
-  expect(f.probes).toEqual([controller.signal]);
+  expect(f.probes).toHaveLength(1);
+  expect(f.probes[0]?.aborted).toBe(false);
   expect(f.timer.getPendingTimeoutCount()).toBe(1);
   const reason = new Error("session released");
   controller.abort(reason);
   expect(await pending).toBe(reason);
   expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("a slow probe is bounded by the time left before the restore's deadline", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const targetApps = new InMemoryVisionosTargetApps();
+  targetApps.launched(DEVICE, APP);
+  const probes: Array<AbortSignal | undefined> = [];
+  const restore = new TargetAppForegroundRestore({
+    targetApps,
+    activate: new RecordingActivator().activate,
+    timer,
+    settleTimeoutMs: 1_000,
+    pollIntervalMs: 250,
+    // A hierarchy read that takes 3 s and ignores its signal, like a stalled runner socket.
+    foreground: async (_deviceId, signal) => {
+      probes.push(signal);
+      await timer.sleep(3_000);
+      return HOST;
+    },
+  });
+  const error = await settle(restore.restore(DEVICE));
+  expect(error).toBeInstanceOf(ActionableError);
+  expect(String(error)).toContain(`${APP} was not in front within 1000 ms`);
+  expect(timer.now()).toBe(1_000);
+  expect(probes).toHaveLength(1);
+  expect(probes[0]?.aborted).toBe(true);
 });
 
 test("start reports a restore that did not settle, and keeps the runner", async () => {

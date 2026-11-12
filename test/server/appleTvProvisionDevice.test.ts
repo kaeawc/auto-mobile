@@ -808,6 +808,64 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(launcher.launches).toEqual([]);
   });
 
+  test("readiness automation bounds runner startup by what is left of timeoutMs", async () => {
+    const { artifacts, launcher, timer } = await arrange();
+    const reachedRunner = Promise.withResolvers<void>();
+    let artifactSignal: AbortSignal | undefined;
+    // Resolving the runner artifacts stalls until its signal aborts, like a slow download.
+    artifacts.resolve = async (signal?: AbortSignal) => {
+      artifactSignal = signal;
+      reachedRunner.resolve();
+      return await new Promise<string>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    const pending = provision({ device: TV, readiness: "automation", timeoutMs: 2_000 });
+    await reachedRunner.promise;
+    timer.advanceTime(2_000);
+
+    const result = toolJson(await pending);
+
+    expect(sessionSchema.safeParse(result).success).toBe(true);
+    expect(result).toMatchObject({
+      lifecycleState: "ready",
+      readiness: { mode: "automation", status: "runner_unavailable" },
+    });
+    expect(String(result.message)).toContain("left of the provisionDevice timeoutMs");
+    expect(artifactSignal?.aborted).toBe(true);
+    expect(launcher.launches).toEqual([]);
+  });
+
+  test("readiness automation stops the runner when the request aborts after attach", async () => {
+    const { launcher, sessions } = await arrange();
+    const request = new AbortController();
+    const owner = tvosRunner!;
+    const attach = owner.attach.bind(owner);
+    owner.attach = (attachRequest) => {
+      const attached = attach(attachRequest);
+      request.abort(new Error("client cancelled after attach"));
+      return attached;
+    };
+
+    // Called directly, so no tool-layer rollback releases the bound session on the abort.
+    const error = await failure(
+      withWireConnection(
+        { __mcpSessionId: "client-a", device: TV, readiness: "automation" },
+        (wireArgs) => provisionAppleTvDevice(wireArgs, bindBootedDeviceSession, request.signal),
+      ),
+    );
+    const [session] = sessions.getAllSessions();
+
+    expect(String(error)).toContain("cancelled");
+    expect(launcher.launches).toHaveLength(1);
+    expect(launcher.stops).toBe(1);
+    expect(tvosRunners.get(launcher.launches[0]!.deviceId)).toBeUndefined();
+    expect(owner.ownsRunner(launcher.launches[0]!.deviceId)).toBe(false);
+    if (session) {
+      await sessions.releaseSession(session.sessionId, "explicit-release");
+    }
+  });
+
   test("accepts enableTools with boot and binds a session for the grant", async () => {
     const { pool } = await arrange();
 

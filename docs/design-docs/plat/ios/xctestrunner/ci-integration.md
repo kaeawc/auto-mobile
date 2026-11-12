@@ -10,6 +10,11 @@ AutoMobile tests need a pre-built `.xctestrun` containing the `YourAppAutoMobile
 booted iOS Simulator, a running AutoMobile daemon reachable over the Unix socket, and the CtrlProxy
 iOS app installed in the simulator.
 
+The iOS Simulator test bundle supports plan execution without AI-assisted recovery. The
+`XCTestRunner` target links Tachikoma only on macOS, and its executor leaves the recovery handler
+nil on iOS unless a caller injects one. Built-in AI recovery requires a macOS test bundle driving
+the device through the daemon; running an iOS test bundle on a macOS CI host does not enable it.
+
 > [!NOTE]
 > **No cloud device service required.** Unlike Android — which uses
 > [emulator.wtf](https://emulator.wtf) to provision managed cloud emulators — iOS

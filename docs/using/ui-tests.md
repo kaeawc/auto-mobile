@@ -67,7 +67,7 @@ For a Swift package manifest, use the released package:
 .package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.94")
 ```
 
-`from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
+`from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6 and supports macOS 15 or iOS 17 test bundles. AI-assisted recovery runs only in a macOS test bundle; it is unavailable in an iOS Simulator test bundle.
 
 </div>
 
@@ -334,7 +334,7 @@ AutoMobilePlan("test-plans/login.yaml") { "apiToken" to token }
     .execute(AutoMobilePlanExecutionOptions(secretParameterKeys = setOf("apiToken")))
 ```
 
-iOS — set `secretParameterKeys` on `AutoMobilePlanExecutor.Configuration`. The
+For a macOS test bundle driving iOS, set `secretParameterKeys` on `AutoMobilePlanExecutor.Configuration`. The
 plan-declared and runner-supplied sets are unioned, so either source (or both)
 protects the value. Recovery stays opt-in; this only changes what recovery may
 disclose.

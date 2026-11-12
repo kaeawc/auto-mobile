@@ -1,7 +1,11 @@
 import { shellQuote } from "../../utils/shellQuote";
 import { releaseVersion } from "../../utils/mcpVersion";
 import { DaemonUnavailableError } from "../client/client";
-import { type BuildIdentity, describeBuildIdentity } from "../wire/buildIdentity";
+import {
+  type BuildIdentity,
+  buildIdentitiesMatch,
+  describeBuildIdentity,
+} from "../wire/buildIdentity";
 
 export type VersionMismatchReason =
   | "autoStartDisabled"
@@ -57,10 +61,18 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
     const sameRelease =
       releaseVersion(params.daemonVersion) === releaseVersion(params.clientVersion) &&
       params.daemonVersion !== params.clientVersion;
+    // Only call it a build mismatch when the builds actually differ; identical
+    // builds with different version stamps would otherwise read "build X != build X"
+    // (#18090), hiding the version difference that triggered the refusal.
+    const { clientBuild, daemonBuild } = params;
     const mismatchMessage =
-      params.reason !== "staleClient" && sameRelease && params.clientBuild && params.daemonBuild
-        ? `AutoMobile daemon build mismatch: daemon build ${describeBuildIdentity(params.daemonBuild)} != ` +
-          `client build ${describeBuildIdentity(params.clientBuild)} (${params.detail}).${retryGuidance}`
+      params.reason !== "staleClient" &&
+      sameRelease &&
+      clientBuild &&
+      daemonBuild &&
+      !buildIdentitiesMatch(clientBuild, daemonBuild)
+        ? `AutoMobile daemon build mismatch: daemon build ${describeBuildIdentity(daemonBuild)} != ` +
+          `client build ${describeBuildIdentity(clientBuild)} (${params.detail}).${retryGuidance}`
         : `AutoMobile daemon version mismatch: daemon=${params.daemonVersion}, client=${params.clientVersion} ` +
           `(${params.detail}).${retryGuidance}`;
     super(mismatchMessage);

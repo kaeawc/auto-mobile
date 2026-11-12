@@ -152,6 +152,7 @@ nav:
       - "Dynamic Tools": using/dynamic-tools.md
       - "tapAt": using/tap-at.md
       - "swipeOn": using/swipe-on.md
+      - "observe": using/observe.md
       - "Navigation graph": using/navigation-graph.md
       - "Device condition fixtures": using/device-condition.md
       - "Android Automotive OS": using/android-automotive.md

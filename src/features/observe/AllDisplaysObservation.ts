@@ -83,6 +83,7 @@ export class AllDisplaysObservation {
       const {
         display,
         screenSize,
+        xrPanelSpace,
         viewHierarchy,
         elements,
         screenshotPath,
@@ -94,6 +95,7 @@ export class AllDisplaysObservation {
       displays.push({
         display: { ...display, key: panel.key, role: panel.role },
         screenSize,
+        ...(xrPanelSpace ? { xrPanelSpace } : {}),
         viewHierarchy,
         elements,
         screenshotPath,

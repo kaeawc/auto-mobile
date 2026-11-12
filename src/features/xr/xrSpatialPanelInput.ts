@@ -30,8 +30,16 @@ export function isXrSpatialPanelApp(
   observation: Pick<ObserveResult, "activeWindow" | "backStack" | "viewHierarchy">,
   androidXr: boolean,
 ): boolean {
+  return Boolean(findXrSpatialPanelWindow(observation, androidXr));
+}
+
+/** Shared geometry evidence for input refusal and output-only coordinate declarations. */
+export function findXrSpatialPanelWindow(
+  observation: Pick<ObserveResult, "activeWindow" | "backStack" | "viewHierarchy">,
+  androidXr: boolean,
+) {
   if (!androidXr) {
-    return false;
+    return undefined;
   }
   const hierarchy = resolveViewHierarchyForSearch(observation.viewHierarchy);
   const packageName = xrForegroundApp(observation);
@@ -43,9 +51,9 @@ export function isXrSpatialPanelApp(
     ) ?? observation.backStack?.tasks.find((candidate) => candidate.packageName === packageName);
   const taskBounds = parseBounds(task?.bounds);
   if (!packageName || packageName.startsWith("com.android.systemui") || !taskBounds) {
-    return false;
+    return undefined;
   }
-  const embeddedPanel = hierarchy?.windows?.some((window) => {
+  return hierarchy?.windows?.find((window) => {
     if (window.type !== 1 || window.packageName !== packageName) {
       return false;
     }
@@ -58,7 +66,6 @@ export function isXrSpatialPanelApp(
         bounds.bottom > taskBounds.bottom)
     );
   });
-  return embeddedPanel === true;
 }
 
 /** Swipe containers still inject display input unless a semantic node action succeeds. */

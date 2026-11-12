@@ -67,6 +67,7 @@ export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "activeWindow",
   "freshness",
   "screenSize",
+  "xrPanelSpace",
   "observationId",
   "deviceId",
   "display",

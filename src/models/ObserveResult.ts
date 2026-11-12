@@ -1,5 +1,6 @@
 import type { DeviceLockUnknown } from "./DeviceLockState";
 import { Element } from "./Element";
+import type { ElementBounds } from "./ElementBounds";
 import { DeviceLockState } from "./DeviceLockState";
 import { ScreenSize } from "./ScreenSize";
 import { SystemInsets } from "./SystemInsets";
@@ -117,6 +118,8 @@ export interface SkeletonElement {
   semanticLinks?: SemanticLink[];
   /** Compact bounds tuple `[left, top, right, bottom]`. */
   bounds: [number, number, number, number];
+  /** Android XR SpatialPanel observations only; panel bounds are not screen coordinates. */
+  boundsSpace?: "panel" | "window";
   /** visionOS ornament-local bounds: tap by label/identifier, never coordinates. */
   space?: "ornament";
   /** Actionable affordances, in canonical order tap, long-press, input, scroll, toggle. */
@@ -286,6 +289,8 @@ export type ObserveResult = {
 
   /** Screen dimensions in the coordinate space identified by `units` when present. */
   screenSize: ScreenSizeWithUnits;
+  /** Android XR embedded panel window; panel-marked row bounds are relative to this window. */
+  xrPanelSpace?: { windowId: number; bounds: ElementBounds };
 
   /**
    * Wear OS: the default display is round, so its corners are cut off (#14948). Read from
@@ -722,6 +727,7 @@ export type DisplayObservation = Pick<ObserveResult, "display" | "screenSize"> &
   Pick<
     ObserveResult,
     | "viewHierarchy"
+    | "xrPanelSpace"
     | "importedPrototypeContent"
     | "skeleton"
     | "context"

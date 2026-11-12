@@ -81,7 +81,7 @@ export const elementBoundsSchema = z
     "Element bounds. Default: positional tuple [left, top, right, bottom]; the " +
       "object {left, top, right, bottom} (+ optional centerX/centerY) is also " +
       "schema-valid. Coordinates share screenSize's current-orientation native space " +
-      "and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion. Exception: space=ornament means visionOS ornament-local bounds; tap by label or identifier, never coordinates.",
+      "and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion. Exceptions: boundsSpace=panel/window identifies Android XR panel/owning-window coordinates, not screen coordinates; space=ornament means visionOS ornament-local bounds. Tap those elements by label or identifier, never coordinates.",
   );
 
 /**

@@ -67,6 +67,15 @@ function build(overrides: Partial<AllDisplaysObservationDependencies> = {}) {
 }
 
 describe("AllDisplaysObservation", () => {
+  test("preserves XR coordinate declarations for each captured display", async () => {
+    const xrPanelSpace = { windowId: 93, bounds: { left: 0, top: 0, right: 2768, bottom: 2400 } };
+    const { observation } = build({
+      executeSingleDisplay: async () => ({ ...baseResult(), xrPanelSpace }),
+    });
+    const result = await observation.execute();
+    expect(result.xrPanelSpace).toEqual(xrPanelSpace);
+    expect(result.displays?.every((display) => display.xrPanelSpace === xrPanelSpace)).toBe(true);
+  });
   test("reads the active panel once and the remaining panels without screenshots", async () => {
     const { observation, calls } = build();
     const result = await observation.execute();

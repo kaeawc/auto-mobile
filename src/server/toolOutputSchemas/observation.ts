@@ -22,6 +22,7 @@ import {
   systemInsetsSchema,
   observationInsetsSchema,
   layoutWarningSchema,
+  elementBoundsSchema,
 } from "./display";
 import {
   selectedElementSchema,
@@ -44,6 +45,16 @@ import {
   perfSnapshotSchema,
 } from "./observationMetadata";
 import { accessibilityStateSchema } from "./accessibility";
+
+const xrPanelSpaceSchema = z
+  .object({
+    windowId: z.number().int(),
+    bounds: elementBoundsSchema,
+  })
+  .optional()
+  .describe(
+    "Android XR embedded SpatialPanel window. Row bounds marked boundsSpace: panel are relative to this window and are not screen coordinates: do not feed them to tapAt. Rows marked window use their own window's space. Omitted without an identified embedded panel.",
+  );
 
 const hierarchyBundleIdSchema = z
   .string()
@@ -105,6 +116,7 @@ export const observationSummarySchema = z
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
     display: observationDisplaySchema,
+    xrPanelSpace: xrPanelSpaceSchema,
     otherDisplays: otherDisplaysSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     snapshotReference: snapshotReferenceSchema,
@@ -274,6 +286,7 @@ export const observeDiffNodeChangeSchema = z
  */
 export const observeDiffSchema = z
   .object({
+    xrPanelSpace: xrPanelSpaceSchema,
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     isDiff: z.literal(true),
     observationId: observationIdSchema,
@@ -421,6 +434,7 @@ export const observationOutputSchema = z.union([
 
 export const displayObservationSchema = z.object({
   display: observationDisplaySchema.nonoptional(),
+  xrPanelSpace: xrPanelSpaceSchema,
   screenSize: screenSizeSchema,
   viewHierarchy: viewHierarchyResultSchema.optional(),
   skeleton: z.array(skeletonElementSchema).optional(),
@@ -457,6 +471,7 @@ export const observeResultSchema = z
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
     display: observationDisplaySchema,
+    xrPanelSpace: xrPanelSpaceSchema,
     otherDisplays: otherDisplaysSchema,
     displays: z
       .array(displayObservationSchema)

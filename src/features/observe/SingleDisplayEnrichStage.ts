@@ -19,6 +19,8 @@ import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import { SafeAreaAuditor } from "./audits/SafeAreaAuditor";
 import { wearSurfaceKind } from "../wear/wearSurfaceKind";
 import type { ScreenRoundReader } from "../wear/screenRound";
+import { findXrSpatialPanelWindow } from "../xr/xrSpatialPanelInput";
+import { parseBounds } from "../../utils/bounds";
 
 /** Stages 3 and 5 of one single-display observation: derive elements, start screenshots, run audits and predictions, then attach timings and protect the screenshot. */
 export interface SingleDisplayEnrichStageDependencies {
@@ -63,6 +65,13 @@ export class SingleDisplayEnrichStage {
     if (result.viewHierarchy) {
       const device = this.d.device();
       const androidXr = device.platform === "android" && (this.d.isAndroidXr?.() ?? false);
+      const panel = findXrSpatialPanelWindow(result, androidXr);
+      const bounds = parseBounds(panel?.bounds);
+      if (panel?.id !== undefined && Number.isInteger(panel.id) && bounds) {
+        result.xrPanelSpace = { windowId: panel.id, bounds };
+      } else {
+        delete result.xrPanelSpace;
+      }
       result.elements = this.d
         .elementsBuilder()
         .build(

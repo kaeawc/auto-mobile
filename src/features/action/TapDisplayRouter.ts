@@ -444,7 +444,7 @@ export class TapDisplayRouter {
         },
         {
           ...OBSERVED_INTERACTION_PROFILES.rawCoordinateGesture,
-          display: target.observation.display.key,
+          display: target.followUpDisplay,
           previousObservation: target.observation,
           signal,
           ...(options.ensureChecked !== undefined

@@ -67,6 +67,7 @@ export interface InternalToolCallOptions {
   tapAtPlanContext?: TapAtPlanContext;
   /** A plan step's lock namespace, for this one call (#15663). */
   planLockNamespace?: string;
+  planStartMs?: number;
   sessionUuid?: string;
   targetDevice?: BootedDevice;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
@@ -89,6 +90,7 @@ export interface InternalToolInvocationContext {
   tapAtPlanContext: TapAtPlanContext | undefined;
   /** Always present, so a nested call never inherits a step's lock namespace. */
   planLockNamespace: string | undefined;
+  planStartMs?: number;
   routingSessionUuid?: string;
   toolSelectionProfileUuid?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
@@ -128,6 +130,11 @@ export interface ToolRegistrationOptions {
   deviceReadOnlyArgs?: readonly DeviceReadOnlyArgShape[];
   /** Built-in session default before startup or persisted exact-tool overrides. */
   defaultEnabled?: boolean;
+  /**
+   * Listed for a session whose acquired device is a TV even when `defaultEnabled` is false
+   * (#18029): the tool is how a touchless TV is driven. Startup and session choices still win.
+   */
+  defaultEnabledOnTv?: boolean;
   supportsProgress?: boolean;
   /** Loopback closure recovery: connect only, or replay after ambiguous delivery. */
   transportRecovery?: ToolTransportRecovery;
@@ -377,6 +384,8 @@ export interface RegisteredTool extends ToolTraits {
   handler: ToolHandler;
   defaultEnabled: boolean;
   defaultDeclared: boolean;
+  /** See {@link ToolRegistrationOptions.defaultEnabledOnTv}. */
+  defaultEnabledOnTv?: boolean;
   supportsProgress?: boolean;
   transportRecovery?: ToolTransportRecovery;
   requiresDevice?: boolean;

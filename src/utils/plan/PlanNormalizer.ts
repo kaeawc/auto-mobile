@@ -34,6 +34,7 @@ export class PlanNormalizer {
         key !== "params" &&
         key !== "optional" &&
         key !== "expectations" &&
+        key !== "expect" &&
         key !== "geometry"
       ) {
         inlineParams[key] = step[key];
@@ -67,6 +68,10 @@ export class PlanNormalizer {
       tool: toolName,
       params: parts.params,
     };
+
+    if (step.expect !== undefined) {
+      normalizedStep.expect = step.expect;
+    }
 
     if (step.geometry !== undefined) {
       normalizedStep.geometry = step.geometry;

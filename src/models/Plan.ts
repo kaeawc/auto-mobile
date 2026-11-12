@@ -31,6 +31,8 @@ export interface PlanStep {
    * and fails (or, when `optional`, skips) the step on the first that does not hold (#16817).
    */
   expectations?: unknown[];
+  /** Case-sensitive literal checks on the returned payload, without another tool call. */
+  expect?: { contains?: string; notContains?: string };
 }
 
 export interface PlanDeviceDefinition {
@@ -43,7 +45,7 @@ export interface PlanDeviceDefinition {
 export type PlanDevice = string | PlanDeviceDefinition;
 
 /** Platforms a plan's top-level `platform` hint accepts (test-plan schema enum). */
-export type PlanTopLevelPlatform = "android" | "ios" | "tvos";
+export type PlanTopLevelPlatform = "android" | "ios" | "tvos" | "visionos" | "watchos";
 
 export interface Plan {
   name: string;

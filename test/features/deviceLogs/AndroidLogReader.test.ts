@@ -48,6 +48,31 @@ const request = {
 };
 
 describe("AndroidLogReader (#14082)", () => {
+  test("recomputes an anchored look-back after the async probes", async () => {
+    const timer = { now: 10_000 };
+    const adb = new ScriptedAdb([
+      ["getprop ro.build.version.sdk", "34\n"],
+      ["pm list packages -U", `package:${APP} uid:10123\n`],
+      ["logcat", FIXTURE],
+    ]);
+    const probing = adb.executeCommand.bind(adb);
+    // Each probe takes 3 fake seconds, as a slow device would.
+    adb.executeCommand = async (command: string) => {
+      if (!command.startsWith("shell logcat")) {
+        timer.now += 1_500;
+      }
+      return probing(command);
+    };
+    const anchor = 0;
+    await new AndroidLogReader(adb).read({
+      ...request,
+      sinceSeconds: Math.ceil((timer.now - anchor) / 1000),
+      refreshSinceSeconds: () => Math.ceil((timer.now - anchor) / 1000),
+    });
+    // 10s at request time plus 3s of probes: the cutoff must cover the whole 13s.
+    expect(adb.commands.at(-1)).toContain("- 13 ))");
+  });
+
   test("on Android 11+ filters by uid, so the crashed process's lines survive its death", async () => {
     const adb = new ScriptedAdb([
       ["getprop ro.build.version.sdk", "34\n"],

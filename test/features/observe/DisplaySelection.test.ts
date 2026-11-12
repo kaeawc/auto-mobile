@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DisplaySelectionError,
+  resolveDeviceTargetDisplay,
   resolveTargetDisplay,
   validateDisplayPin,
 } from "../../../src/features/observe/DisplaySelection";
 import { isPhysicalPanel, type DeviceDisplays } from "../../../src/models/DisplayPanel";
+import { displayInventoryOutcome, type BootedDevice } from "../../../src/models/DeviceInfo";
+import { DisplayInventoryUnavailableError } from "../../../src/models/DisplayInventoryUnavailableError";
 
 const displays: DeviceDisplays = {
   panels: [
@@ -14,6 +18,59 @@ const displays: DeviceDisplays = {
   ],
   postures: ["closed", "opened", "rear_display"],
 };
+
+describe("resolveDeviceTargetDisplay", () => {
+  const unreadable: Pick<BootedDevice, "displays" | typeof displayInventoryOutcome> = {
+    [displayInventoryOutcome]: { kind: "unreadable", reason: "dumpsys display timed out" },
+  };
+
+  test.each(["4619827551948147201", "inner", "0"])(
+    "unreadable inventory rejects explicit selector %s with a retryable error",
+    (request) => {
+      let failure: unknown;
+      try {
+        resolveDeviceTargetDisplay(unreadable, request, {});
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(DisplayInventoryUnavailableError);
+      expect(failure).toMatchObject({ details: { retryable: true } });
+    },
+  );
+
+  test("unreadable outcome takes precedence over an attached inventory", () => {
+    expect(() => resolveDeviceTargetDisplay({ ...unreadable, displays }, "inner", {})).toThrow(
+      DisplayInventoryUnavailableError,
+    );
+  });
+
+  test.each([undefined, "active"])("unreadable inventory preserves %s fallback", (request) => {
+    expect(resolveDeviceTargetDisplay(unreadable, request, {})).toEqual(
+      resolveTargetDisplay(undefined, request, {}),
+    );
+    expect(
+      resolveDeviceTargetDisplay({ ...unreadable, displays }, request, {
+        focusedPanelKey: "cover-id",
+      }).key,
+    ).toBe("cover-id");
+  });
+
+  test("readable inventory still rejects a wrong key with the real panels", () => {
+    const readable = { displays, [displayInventoryOutcome]: { kind: "multi" as const } };
+    const resolve = () => resolveDeviceTargetDisplay(readable, "missing", {});
+    expect(resolve).toThrow(DisplaySelectionError);
+    expect(resolve).toThrow(
+      'Unknown or unavailable display "missing". Available panels: inner-id (inner), cover-id (cover), rear-id (rear), external-id (external)',
+    );
+  });
+
+  test("absent outcome and successful single-display reads preserve explicit zero", () => {
+    for (const device of [{}, { [displayInventoryOutcome]: { kind: "single" as const } }]) {
+      expect(resolveDeviceTargetDisplay(device, "0", {}).key).toBe("0");
+    }
+    expect(resolveDeviceTargetDisplay({ displays }, "inner", {}).key).toBe("inner-id");
+  });
+});
 
 describe("resolveTargetDisplay", () => {
   test("explicit key or role takes precedence over focus and posture", () => {

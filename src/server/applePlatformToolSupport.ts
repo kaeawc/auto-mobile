@@ -15,6 +15,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   Record<NonIosApplePlatform, ReadonlySet<string>>
 > = {
   watchos: new Set<string>([
+    // Steps replay through this same gate, so a plan runs only watch-supported tools (#18051).
+    "executePlan",
     "sendKeys",
     "postNotification",
     "rotateCrown",
@@ -27,6 +29,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "listApps",
     "launchApp",
     "terminateApp",
+    // The iOS simulator launchctl SIGABRT path in the watch's system domain (#18052).
+    "crashApp",
     "observe",
     // simctl spawn <udid> log show, as on an iOS simulator (#17547).
     "getLogs",
@@ -65,6 +69,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   ]),
   // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
   visionos: new Set<string>([
+    "executePlan",
     // simctl spawn <udid> log show, as on an iOS simulator (#18011).
     "getLogs",
     "installApp",

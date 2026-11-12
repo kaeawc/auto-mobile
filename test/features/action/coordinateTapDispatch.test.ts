@@ -241,6 +241,7 @@ describe("androidDisplayTapDispatch", () => {
       display: { key: "inner", role: "inner", posture: "opened", generation: 7 } as const,
     },
     displayId: 2,
+    followUpDisplay: "inner",
     assertCurrent: () => {},
   };
 
@@ -742,6 +743,7 @@ describe("androidDisplayTapDispatch with TalkBack on (#9905)", () => {
       display: { key: "inner", role: "inner", posture: "opened", generation: 7 } as const,
     },
     displayId,
+    followUpDisplay: "inner",
     assertCurrent: () => {},
   });
   const rawClient = () => {

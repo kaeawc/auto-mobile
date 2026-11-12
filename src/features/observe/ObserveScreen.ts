@@ -109,7 +109,7 @@ import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDi
 import { displayTransitions } from "./DisplayTransition";
 import { AdbScreenRoundReader, type ScreenRoundReader } from "../wear/screenRound";
 import { selectedDisplayPin } from "./SessionDisplayContext";
-import { resolveTargetDisplay } from "./DisplaySelection";
+import { assertDisplayInventoryAvailable, resolveDeviceTargetDisplay } from "./DisplaySelection";
 export { resolveMissingForegroundWindow } from "./observationVerdict";
 import type { ScreenshotEvidenceFiles } from "./screenshot/observationScreenshotEvidence";
 import { stampAsyncScreenshotCapturedAt } from "./screenshot/asyncScreenshotCapturedAt";
@@ -551,7 +551,7 @@ export class RealObserveScreen implements ObserveScreen {
           ? (await this.observedAndroidDisplayCache.resolve(this.device, this.adb)).display
           : observedIosDisplay(this.device, stored.viewHierarchy);
     const { key: activePanelKey, posture } = activeDisplay ?? {};
-    const panel = resolveTargetDisplay(this.device.displays, this.requestedDisplay, {
+    const panel = resolveDeviceTargetDisplay(this.device, this.requestedDisplay, {
       focusedPanelKey: focusedPanel?.key,
       activePanelKey,
       posture,
@@ -566,6 +566,7 @@ export class RealObserveScreen implements ObserveScreen {
    * Get the most recent cached observe result from memory or disk cache.
    */
   async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
+    assertDisplayInventoryAvailable(this.device, this.requestedDisplay);
     const startTime = this.timer.now();
     try {
       logger.debug("[OBSERVE_CACHE] Getting most recent cached observe result");
@@ -730,7 +731,7 @@ export class RealObserveScreen implements ObserveScreen {
       return undefined;
     }
     try {
-      const panel = resolveTargetDisplay(this.device.displays, display, {});
+      const panel = resolveDeviceTargetDisplay(this.device, display, {});
       const displayId = await this.observedAndroidDisplayCache.logicalIdForPanel(
         this.device,
         this.adb,
@@ -919,6 +920,12 @@ export class RealObserveScreen implements ObserveScreen {
       needsBackStackActivityReconciliation(observation, activeWindow, attribution),
     );
     scopeActiveWindowToBackStack(observation);
+    // The polls skipped the stack, so the blocker was not detectable when automotive state was
+    // sampled; re-derive it now that the stack is attached.
+    await this.deviceStateCollector.refreshAutomotiveForegroundActivity(
+      observation,
+      options.signal,
+    );
     return disagrees;
   }
 

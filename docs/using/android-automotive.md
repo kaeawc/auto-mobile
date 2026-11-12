@@ -100,7 +100,9 @@ On automotive devices, `observe.automotive` reports `drivingState` (`parked`, `i
 `uxRestrictions.requiresDistractionOptimization`, the numeric `uxRestrictions.activeRestrictions`
 bitmask for the observed display, and `foregroundActivity.distractionOptimized` when the foreground
 activity and its DO status are known. `blocked` is true when distraction optimization is required and
-the known foreground activity is not distraction optimized. Unavailable service reads omit the affected
+the known foreground activity is not distraction optimized, or when the car's blocking screen ("You can’t
+use this feature while driving") is in front. In the second case `blockedBy` names the car's blocking
+activity and `blockedActivity` names your activity that it covers. Unavailable service reads omit the affected
 fields; `blocked: false` alone does not establish that the app is usable. Other device types omit the
 entire `automotive` block.
 
@@ -143,6 +145,8 @@ by default; see [Device condition fixtures](device-condition.md). The `vehicle` 
 - `vehicle.motion`: `parked` or `driving` (gear, speed and parking brake are set together), or `unset`.
 - `vehicle.nightMode`: `on`, `off`, or `unset`.
 
+A test plan step takes the same object: `tool: setDeviceState` with `params.deviceCondition.vehicle`.
+
 `vehicle.motion` needs a non-user image (userdebug or eng, such as `android-automotive` API 34 ext9); on a `user` build such as the Play Store AAOS image it returns `unsupported`; `vehicle.nightMode` works on both.
 
 To check before calling, read `vehicle` in a device's `listDevices` or `getAndroid` description, or
@@ -158,6 +162,12 @@ Motion uses gear and parking-brake events with continuous speed events that rene
 active. The result includes `Current Driving State`: driving must remain MOVING (2) for two seconds;
 parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/night override and checks
 the effective UI night mode. A state that cannot be confirmed returns `unsupported`.
+
+While driving, `launchApp` of an activity that is not distraction optimized fails right away with an
+error containing `blocked_by_driving_restrictions` that names the blocked activity and the car's
+blocking activity. Park with
+`{ "deviceCondition": { "vehicle": { "motion": "parked" } } }` and launch again, or launch an activity
+declared `distractionOptimized`.
 
 When you `unset`, call `reset`, release the session or the lease expires, motion returns to the values
 before the first change and night mode returns to automatic sensor control without preserving a prior

@@ -60,7 +60,7 @@ auto-mobile --cli getLogs --platform visionos --sessionUuid "$SESSION_ID" \
   --appId com.example.yourapp --grep "detail opened"
 ```
 
-`getLogs` reads the simulator's unified log for the app: lines from its `os.Logger` subsystem (`com.example.yourapp` or `com.example.yourapp.*`) or from its process. `appId` is required. `since` takes `"lastAction"`, `"sessionStart"` or `{"seconds": N}` (default the last 300 seconds). `minPriority` ranks unified-log levels as `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, and `F` fault only. `tags`, `buffers` and `includeSystem` are Android-only and are ignored with a warning. `getLogs` is not listed by default; enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
+`getLogs` reads the simulator's unified log for the app: lines from its `os.Logger` subsystem (`com.example.yourapp` or `com.example.yourapp.*`) or from its process. `appId` is required. `since` takes `"lastAction"`, `"sessionStart"`, `"run-start"` (during plan execution only) or `{"seconds": N}` (default the last 300 seconds). `minPriority` ranks unified-log levels as `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, and `F` fault only. `tags`, `buffers` and `includeSystem` are Android-only and are ignored with a warning. `getLogs` is not listed by default; enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
 
 ## List, stop and uninstall apps
 

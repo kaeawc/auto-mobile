@@ -145,7 +145,7 @@ export const pressButtonInput = z.object({
     .max(PRESS_HOLD_MAX_MS)
     .optional()
     .describe(
-      `Hold select (D-pad center) down this long in ms (${PRESS_HOLD_MIN_MS}-${PRESS_HOLD_MAX_MS}) for a long press; Android API 35+ only.`,
+      `Long press in ms (${PRESS_HOLD_MIN_MS}-${PRESS_HOLD_MAX_MS}): any remote button on tvOS (steps are unsupported), or select (D-pad center) on Android API 35+.`,
     ),
   display: z
     .string()

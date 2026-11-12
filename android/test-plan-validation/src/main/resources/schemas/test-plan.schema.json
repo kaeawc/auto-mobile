@@ -18,7 +18,7 @@
     },
     "platform": {
       "type": "string",
-      "enum": ["android", "ios", "tvos"],
+      "enum": ["android", "ios", "tvos", "visionos", "watchos"],
       "description": "Optional platform hint for plan execution"
     },
     "devices": {
@@ -149,7 +149,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"],
+          "enum": ["android", "ios", "tvos", "visionos", "watchos"],
           "description": "Target platform for this device"
         },
         "simulatorType": {
@@ -221,6 +221,16 @@
         "description": {
           "type": "string",
           "description": "DEPRECATED: Use 'label' instead (legacy field)"
+        },
+        "expect": {
+          "type": "object",
+          "description": "Case-sensitive literal assertions on returned getLogs message text, or the serialized JSON payload of other tools. Both checks must hold. No extra observation or polling.",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "contains": { "type": "string", "minLength": 1 },
+            "notContains": { "type": "string", "minLength": 1 }
+          }
         },
         "expectations": {
           "type": "array",
@@ -1903,121 +1913,599 @@
           "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Sent in its own setDeviceState call.",
           "type": "object",
           "properties": {
-            "version": { "type": "number", "const": 1 },
-            "rootState": { "type": "string", "enum": ["rooted-detectable", "unset"] },
-            "integrityState": { "type": "string", "const": "unset" },
+            "exportAttestation": {
+              "type": "boolean",
+              "const": true,
+              "description": "Export public Android KeyStore attestation certificates and parsed fields for a test backend. Send alone; temporary key is deleted. No trust verdict."
+            },
+            "version": {
+              "type": "number",
+              "const": 1,
+              "description": "Request shape version; only 1 exists."
+            },
+            "rootState": {
+              "type": "string",
+              "enum": [
+                "rooted-detectable",
+                "unset"
+              ],
+              "description": "Root fixture: 'rooted-detectable' plants inert su/busybox stubs and sets SELinux permissive so root-detection checks trip (Android, non-Play image, needs a writable /system); 'unset' restores."
+            },
+            "integrityState": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "maximally-detectable",
+                    "minimally-detectable",
+                    "unset"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "preset": {
+                      "type": "string",
+                      "enum": [
+                        "maximally-detectable",
+                        "minimally-detectable"
+                      ]
+                    },
+                    "signals": {
+                      "type": "object",
+                      "properties": {
+                        "su-binary": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "superuser-apk": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "selinux-permissive": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "debuggable-build": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "insecure-build": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "test-keys": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "missing-otacerts": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "qemu-props": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "emulator-hardware": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "qemu-pipe": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        },
+                        "emulator-build-fields": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "off"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Integrity signals (Android): maximally-detectable enables su-binary, superuser-apk and selinux-permissive; minimally-detectable disables them. Or { preset?, signals?: { <signal-id>: 'on' | 'off' } }, with at least one field and signals overriding the preset. Needs root and writable /system for files. Image-fixed signals and missing-otacerts report unsupported. Results include per-signal status and post-apply active readings. 'unset' restores prior state; existing image/rootState files are never removed."
+            },
+            "statusBar": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "time": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
+                    },
+                    "batteryLevel": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "batteryState": {
+                      "type": "string",
+                      "enum": [
+                        "charging",
+                        "charged",
+                        "discharging"
+                      ]
+                    },
+                    "cellularBars": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4
+                    },
+                    "wifiBars": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "dataNetwork": {
+                      "type": "string",
+                      "enum": [
+                        "wifi",
+                        "5g",
+                        "lte",
+                        "4g",
+                        "3g",
+                        "hide"
+                      ]
+                    },
+                    "operatorName": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Override the status bar ({ time?, batteryLevel?, batteryState?, cellularBars?, wifiBars?, dataNetwork?, operatorName? }, at least one). iOS Simulator only so far; reset clears every override. Or unset."
+            },
+            "privacy": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "appId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)+$"
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "calendar",
+                        "contacts-limited",
+                        "contacts",
+                        "location",
+                        "location-always",
+                        "photos-add",
+                        "photos",
+                        "media-library",
+                        "microphone",
+                        "motion",
+                        "reminders",
+                        "siri"
+                      ]
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "grant",
+                        "revoke"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "appId",
+                    "service",
+                    "action"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Grant or revoke one privacy service for an installed app ({ appId, service, action }). iOS Simulator only so far; reset restores the app's earlier decisions for that service and its pair (photos/photos-add, location/location-always, contacts/contacts-limited): granted, denied, or not yet asked. Refused when that decision cannot be restored, such as limited Photos access. Or unset."
+            },
+            "location": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "latitude": {
+                      "type": "number",
+                      "minimum": -90,
+                      "maximum": 90
+                    },
+                    "longitude": {
+                      "type": "number",
+                      "minimum": -180,
+                      "maximum": 180
+                    }
+                  },
+                  "required": [
+                    "latitude",
+                    "longitude"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Simulate the device location ({ latitude, longitude }). iOS Simulator only so far; reset clears the simulated location. Or unset."
+            },
             "faults": {
               "type": "object",
               "properties": {
-                "battery": { "type": "string", "enum": ["unplug", "low", "full", "unset"] },
-                "lowPower": { "type": "string", "enum": ["on", "unset"] },
-                "doze": { "type": "string", "enum": ["on", "unset"] },
-                "thermal": { "type": "string", "enum": ["throttling", "critical", "unset"] },
-                "storage": { "type": "string", "enum": ["low", "full", "unset"] },
-                "dontKeepActivities": { "type": "string", "enum": ["on", "unset"] },
-                "memoryPressure": { "type": "string", "enum": ["on", "unset"] },
-                "readOnlyFilesystem": { "type": "string", "enum": ["on", "unset"] },
-                "revokePermission": {
-                  "oneOf": [
-                    { "type": "string", "const": "unset" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
-                        "permission": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]*$" }
-                      },
-                      "required": ["package", "permission"],
-                      "additionalProperties": false
-                    }
-                  ]
+                "battery": {
+                  "type": "string",
+                  "enum": [
+                    "unplug",
+                    "low",
+                    "full",
+                    "unset"
+                  ],
+                  "description": "Battery fault via `dumpsys battery` (unplug / low 15% / full), or unset."
                 },
-                "disablePackage": {
-                  "oneOf": [
-                    { "type": "string", "const": "unset" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" }
-                      },
-                      "required": ["package"],
-                      "additionalProperties": false
-                    }
-                  ]
+                "memoryPressure": {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "unset"
+                  ],
+                  "description": "Hold anonymous memory until Android lmkd kills background apps. Unsupported if no kill follows. Uses a local build or AUTOMOBILE_LMK_PRESSURE_DIR, else downloads the checksum-verified release binary; reset stops the payload and removes its files. Or unset."
+                },
+                "lowPower": {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "unset"
+                  ],
+                  "description": "Toggle `settings global low_power`, restored to its prior value, or unset."
+                },
+                "doze": {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "unset"
+                  ],
+                  "description": "Force deep Doze via `dumpsys deviceidle force-idle`, or unset."
+                },
+                "thermal": {
+                  "type": "string",
+                  "enum": [
+                    "throttling",
+                    "critical",
+                    "unset"
+                  ],
+                  "description": "Override thermal status via `cmd thermalservice override-status`, or unset."
+                },
+                "dontKeepActivities": {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "unset"
+                  ],
+                  "description": "Developer options 'Don't keep activities' via `settings global always_finish_activities`, restored to its prior value, or unset. Applies to activities left after the change."
+                },
+                "readOnlyFilesystem": {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "unset"
+                  ],
+                  "description": "Make shared external storage /sdcard read-only for every app (device-wide EROFS). Rootable Android emulators only; reset restores writes. Or unset."
+                },
+                "storage": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "full",
+                    "unset"
+                  ],
+                  "description": "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset."
                 },
                 "corruptAppFile": {
-                  "oneOf": [
-                    { "type": "string", "const": "unset" },
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
                     {
                       "type": "object",
                       "properties": {
-                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
-                        "path": { "type": "string", "pattern": "^(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+)*$" },
-                        "mode": { "type": "string", "enum": ["overwrite", "truncate"] }
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^(?!\\.{1,2}(?:\\/|$))[A-Za-z0-9_.-]+(?:\\/(?!\\.{1,2}(?:\\/|$))[A-Za-z0-9_.-]+)*$"
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "overwrite",
+                            "truncate"
+                          ]
+                        }
                       },
-                      "required": ["package", "path", "mode"],
+                      "required": [
+                        "package",
+                        "path",
+                        "mode"
+                      ],
                       "additionalProperties": false
                     }
-                  ]
+                  ],
+                  "description": "Damage one file in a debuggable app's data directory ({ package, path, mode }), e.g. a SQLite database or SharedPreferences XML. 'overwrite' zeroes its first 256 bytes, 'truncate' cuts it in half. Needs a debuggable app (run-as), force-stops the app, and keeps a copy that reset restores and verifies by checksum. Or unset."
+                },
+                "revokePermission": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "permission": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_.]*$"
+                        }
+                      },
+                      "required": [
+                        "package",
+                        "permission"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Revoke one runtime permission from an installed app with `pm revoke` ({ package, permission }); reset re-grants it. Revoking kills the app's process, so it also restarts the app. Or unset."
+                },
+                "lockScreen": {
+                  "type": "string",
+                  "enum": [
+                    "pin",
+                    "none",
+                    "unset"
+                  ],
+                  "description": "Sets an AutoMobile test PIN, or removes the PIN; reset restores no lock screen. Keys bound to the lock screen are invalidated by a removal. 'unset' restores."
+                },
+                "biometricEnrollment": {
+                  "type": "string",
+                  "enum": [
+                    "add",
+                    "none",
+                    "unset"
+                  ],
+                  "description": "Android emulators only: 'add' enrolls one more fingerprint through Settings and the emulator console (`adb emu finger touch`), which invalidates keys created with setInvalidatedByBiometricEnrollment(true). The first add needs a device with no lock screen and sets the AutoMobile test PIN. 'none' removes every fingerprint by clearing that PIN. Reset or 'unset' restores no lock screen and no fingerprints. Refused on physical devices and when the console is unavailable."
+                },
+                "disablePackage": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": [
+                        "package"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Disable an installed app for the current user with `pm disable-user` ({ package }); reset runs `pm enable`. Or unset."
                 },
                 "killApp": {
-                  "oneOf": [
-                    { "type": "string", "const": "unset" },
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
                     {
                       "type": "object",
                       "properties": {
-                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
-                        "mode": { "type": "string", "enum": ["background", "forceStop"] }
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "background",
+                            "forceStop"
+                          ]
+                        }
                       },
-                      "required": ["package", "mode"],
+                      "required": [
+                        "package",
+                        "mode"
+                      ],
                       "additionalProperties": false
                     }
-                  ]
+                  ],
+                  "description": "End an app's process once ({ package, mode }): 'background' is `am kill`, which only ends a process the system could reclaim and leaves the foreground app running; 'forceStop' is `am force-stop`, the user's Force stop. Nothing to reset; 'unset' is a no-op."
                 },
                 "trimMemory": {
-                  "oneOf": [
-                    { "type": "string", "const": "unset" },
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
                     {
                       "type": "object",
                       "properties": {
-                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
-                        "level": { "type": "string", "enum": ["HIDDEN", "RUNNING_MODERATE", "BACKGROUND", "RUNNING_LOW", "MODERATE", "RUNNING_CRITICAL", "COMPLETE"] }
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "level": {
+                          "type": "string",
+                          "enum": [
+                            "HIDDEN",
+                            "RUNNING_MODERATE",
+                            "BACKGROUND",
+                            "RUNNING_LOW",
+                            "MODERATE",
+                            "RUNNING_CRITICAL",
+                            "COMPLETE"
+                          ]
+                        }
                       },
-                      "required": ["package", "level"],
+                      "required": [
+                        "package",
+                        "level"
+                      ],
                       "additionalProperties": false
                     }
-                  ]
+                  ],
+                  "description": "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running; a foreground app must get a RUNNING_* level (RUNNING_MODERATE, RUNNING_LOW, RUNNING_CRITICAL) because Android refuses HIDDEN, BACKGROUND, MODERATE and COMPLETE for a foreground app. Nothing to reset; 'unset' is a no-op."
                 },
                 "clearPackageData": {
-                  "oneOf": [
-                    { "type": "string", "const": "unset" },
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
                     {
                       "type": "object",
                       "properties": {
-                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" }
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
                       },
-                      "required": ["package"],
+                      "required": [
+                        "package"
+                      ],
                       "additionalProperties": false
                     }
-                  ]
+                  ],
+                  "description": "Clear an installed app's data with `pm clear` ({ package }). One-shot: it kills the app's process and cannot be undone, so there is nothing to reset. 'unset' is a no-op."
                 },
                 "clockSkew": {
-                  "oneOf": [
-                    { "type": "string", "const": "unset" },
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
                     {
                       "type": "object",
                       "properties": {
-                        "offsetSeconds": { "type": "integer", "minimum": -315360000, "maximum": 315360000, "anyOf": [{ "minimum": 3 }, { "maximum": -3 }] }
+                        "offsetSeconds": {
+                          "type": "integer",
+                          "minimum": -315360000,
+                          "maximum": 315360000,
+                          "anyOf": [
+                            {
+                              "minimum": 3
+                            },
+                            {
+                              "maximum": -3
+                            }
+                          ]
+                        }
                       },
-                      "required": ["offsetSeconds"],
+                      "required": [
+                        "offsetSeconds"
+                      ],
                       "additionalProperties": false
                     }
-                  ]
+                  ],
+                  "description": "Set the device clock offsetSeconds ahead of (positive) or behind (negative) real time ({ offsetSeconds }), 3 seconds to 10 years either way, with automatic time off. Reset restores real time and the original automatic-time setting and verifies them. Rootable Android emulators only (needs adb root, which restarts adbd). Shares the device clock with setDeviceState.clock: a reset from either restores real time. Or unset."
                 }
               },
-              "additionalProperties": false
+              "additionalProperties": false,
+              "description": "Power and lifecycle fault injectors (Android only, behind the feature flag)."
             },
-            "expiresInSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
-            "reset": { "type": "boolean", "const": true }
+            "vehicle": {
+              "type": "object",
+              "properties": {
+                "motion": {
+                  "type": "string",
+                  "enum": [
+                    "parked",
+                    "driving",
+                    "unset"
+                  ],
+                  "description": "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset."
+                },
+                "nightMode": {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "off",
+                    "unset"
+                  ],
+                  "description": "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override."
+                }
+              },
+              "additionalProperties": false,
+              "description": "Vehicle state (Android Automotive emulators only; 'unsupported' elsewhere), via `cmd car_service inject-vhal-event`."
+            },
+            "expiresInSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400,
+              "description": "Lease: restore every applied condition after this many seconds unless a later deviceCondition call renews it. Session-bound calls only."
+            },
+            "reset": {
+              "type": "boolean",
+              "const": true,
+              "description": "Restore every condition applied on this device and verify a clean read."
+            }
           },
           "additionalProperties": false
         }

@@ -63,6 +63,16 @@ describe("DefaultGitMetadataClient", () => {
     expect(calls).toEqual([]);
   });
 
+  test("a repository with no commits yet has no version stamp, so no content key (#18071)", () => {
+    const unborn = new FakeGitMetadataReader({
+      [`${ROOT}/.git`]: null,
+      [`${ROOT}/.git/HEAD`]: "ref: refs/heads/main\n",
+    });
+    const { read, calls } = fixture(unborn, { sha: null });
+    expect(read()).toBeNull();
+    expect(calls.map(({ args }) => args)).toEqual([["rev-parse", "HEAD"]]);
+  });
+
   test.each([false, true])("readVersion never spawns status/diff (dirty: %s)", (dirty) => {
     const { read, calls } = fixture(plainRepo(), {
       status: dirty ? " M src/index.ts" : "",

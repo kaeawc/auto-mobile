@@ -37,17 +37,43 @@ const PACKAGE = "dev.jasonpearson.automobile.contentseeder";
 const date = "2026-11-11T10:00:00-06:00";
 const success = (inserted = 1, removed = 0) =>
   `Broadcast completed: result=-1, data="${JSON.stringify({ inserted, removed })}"`;
+const SEEDER_PERMISSIONS = [
+  "READ_CALENDAR",
+  "WRITE_CALENDAR",
+  "READ_SMS",
+  "READ_CONTACTS",
+  "WRITE_CONTACTS",
+].map((name) => `android.permission.${name}`);
+/** The shape of `dumpsys package` around the requested permissions section. */
+const packageDump = (requested: readonly string[]) =>
+  [
+    "Packages:",
+    `  Package [${PACKAGE}] (1a2b3c):`,
+    "    versionCode=1 minSdk=26 targetSdk=35",
+    "    requested permissions:",
+    ...requested.map((permission) => `      ${permission}`),
+    "    install permissions:",
+    "      android.permission.INTERNET: granted=true",
+  ].join("\n");
 class FakeAdb implements Pick<AdbExecutor, "execute"> {
   calls: string[][] = [];
   options: (AdbExecuteOptions | undefined)[] = [];
   installed = true;
+  /** Permissions the installed seeder's manifest requests; an install brings `upgradeRequests`. */
+  requested = SEEDER_PERMISSIONS;
+  upgradeRequests = SEEDER_PERMISSIONS;
   rows = { contacts: 2, calls: 2 };
   accountName = "automobile.ns1";
   reply?: (args: string[]) => string | undefined;
   private respond(args: string[]): string {
     const command = args.join(" ");
     if (args[0] === "install") {
+      this.installed = true;
+      this.requested = this.upgradeRequests;
       return "Success";
+    }
+    if (command.includes("dumpsys package")) {
+      return packageDump(this.requested);
     }
     if (command.includes("pm list packages")) {
       return this.installed ? `package:${PACKAGE}` : "";
@@ -412,6 +438,43 @@ describe("seedContent", () => {
     expect(grants.indexOf("WRITE_CALENDAR")).toBeLessThan(grants.indexOf("READ_SMS"));
     expect(adb.calls.filter((args) => args[1]?.includes("am broadcast"))).toHaveLength(2);
     expect(adb.calls.at(-1)![1]).toContain('"read":true');
+  });
+
+  test("upgrades an installed seeder that predates the Contacts permissions before granting (#18078)", async () => {
+    const adb = new FakeAdb();
+    const old = SEEDER_PERMISSIONS.filter((permission) => !permission.includes("CONTACTS"));
+    adb.requested = old;
+    const apk = "/tmp/seeder.apk";
+    await new SeedContent({ adb, apkPath: apk, exists: async () => true }).seed({
+      namespace: "ns1",
+      calendarEvents: [{ title: "a", start: date, end: "2026-11-11T11:00:00-06:00" }],
+    });
+    const commands = adb.calls.map((args) => args.join(" "));
+    const install = commands.indexOf(`install -r -t ${apk}`);
+    const grants = commands.findIndex((command) => command.includes("pm grant"));
+    expect(install).toBeGreaterThan(commands.findIndex((c) => c.includes("dumpsys package")));
+    expect(install).toBeGreaterThan(-1);
+    expect(grants).toBeGreaterThan(install);
+    expect(commands[grants]).toContain("android.permission.WRITE_CONTACTS");
+  });
+
+  test("a current installed seeder is not reinstalled; an upgrade that still lacks a permission is refused (#18078)", async () => {
+    const current = new FakeAdb();
+    await client(current).seed({ namespace: "ns1", smsInbox: [{ address: "5", body: "b", date }] });
+    expect(current.calls.some((args) => args[0] === "install")).toBe(false);
+
+    const stale = new FakeAdb();
+    stale.requested = SEEDER_PERMISSIONS.slice(0, 3);
+    stale.upgradeRequests = stale.requested;
+    await expect(
+      new SeedContent({ adb: stale, apkPath: "/tmp/old.apk", exists: async () => true }).seed({
+        namespace: "ns1",
+        smsInbox: [{ address: "5", body: "b", date }],
+      }),
+    ).rejects.toThrow(
+      "does not request android.permission.READ_CONTACTS, android.permission.WRITE_CONTACTS",
+    );
+    expect(stale.calls.some((args) => args.join(" ").includes("pm grant"))).toBe(false);
   });
 
   test("each kind-specific reset preserves the shared account, including explicitly supplied all-kind arrays", async () => {

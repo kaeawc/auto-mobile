@@ -1110,7 +1110,7 @@ describe("ScrollUntilVisible search progress", () => {
       reachedEnd: true,
       movedSwipes: 0,
       error:
-        'Scroll reached end of container in both directions (up and down; no change after 2 consecutive swipes each way). text "Skills" not found. 0 swipes moved the screen.',
+        'Scroll reached end of container in both directions (up and down; no change after 2 consecutive swipes each way). text "Skills" not found. 0 swipes moved the screen. The item may be absent from this container, or the swipe direction may be wrong.',
     });
     expect(talkBackExecutor.getDirections()).toEqual(["up", "up", "down", "down"]);
   });

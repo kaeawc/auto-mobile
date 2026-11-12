@@ -21690,7 +21690,16 @@
           "properties": {
             "for": {
               "type": "string",
-              "enum": ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"]
+              "enum": [
+                "appear",
+                "disappear",
+                "clickable",
+                "textEquals",
+                "countStable",
+                "focused",
+                "stable"
+              ],
+              "description": "Declarative condition to wait for. \"focused\" (tvOS only): wait until an element holds focus, the one matching elementId/text when given"
             },
             "pollMs": {
               "type": "number"
@@ -21844,6 +21853,16 @@
               "properties": {
                 "for": {
                   "const": "stable"
+                },
+                "container": false,
+                "selectionStrategy": false
+              },
+              "required": ["for"]
+            },
+            {
+              "properties": {
+                "for": {
+                  "const": "focused"
                 },
                 "container": false,
                 "selectionStrategy": false
@@ -25929,7 +25948,16 @@
           "properties": {
             "for": {
               "type": "string",
-              "enum": ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"]
+              "enum": [
+                "appear",
+                "disappear",
+                "clickable",
+                "textEquals",
+                "countStable",
+                "focused",
+                "stable"
+              ],
+              "description": "Declarative condition to wait for. \"focused\" (tvOS only): wait until an element holds focus, the one matching elementId/text when given"
             },
             "pollMs": {
               "type": "number"
@@ -26083,6 +26111,16 @@
               "properties": {
                 "for": {
                   "const": "stable"
+                },
+                "container": false,
+                "selectionStrategy": false
+              },
+              "required": ["for"]
+            },
+            {
+              "properties": {
+                "for": {
+                  "const": "focused"
                 },
                 "container": false,
                 "selectionStrategy": false

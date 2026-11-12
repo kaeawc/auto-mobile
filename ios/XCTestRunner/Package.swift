@@ -2,8 +2,8 @@
 import PackageDescription
 
 // XCTestRunner is a Swift-6 strict-concurrency package (language mode v6 by default under
-// swift-tools-version 6.3). It depends on Tachikoma for AI-assisted failure recovery
-// (see AutoMobileRecovery.swift / TachikomaPlanRecoveryHandler.swift), which requires iOS 17 / macOS 15.
+// swift-tools-version 6.3). Plan execution supports iOS 17 / macOS 15. Tachikoma provides
+// AI-assisted failure recovery only in macOS test bundles; iOS test bundles omit it.
 let package = Package(
     name: "XCTestRunner",
     platforms: [
@@ -27,7 +27,7 @@ let package = Package(
         .target(
             name: "XCTestRunner",
             dependencies: [
-                .product(name: "Tachikoma", package: "Tachikoma"),
+                .product(name: "Tachikoma", package: "Tachikoma", condition: .when(platforms: [.macOS])),
                 .product(name: "Yams", package: "Yams"),
             ]
         ),

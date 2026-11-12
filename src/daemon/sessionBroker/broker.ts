@@ -11,9 +11,11 @@ import {
   preparationFailureError,
   sameProcess,
   brokerResult,
+  foreignOwnerRefusal,
 } from "./brokerSupport";
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
+import { SessionRequestForeignOwnerError } from "./SessionRequestForeignOwnerError";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { DestructionQueue, type SessionBrokerPoolDrainResult } from "./destructionQueue";
 import { IdlePoolExpiry } from "./idlePoolExpiry";
@@ -489,7 +491,7 @@ export class SessionBroker {
     if (!request) {
       return undefined;
     }
-    this.assertConsumerOwner(request, ownerToken);
+    await this.assertConsumerOwner(request, ownerToken);
     return this.result(request);
   }
 
@@ -497,7 +499,7 @@ export class SessionBroker {
     if (this.stopping) {
       throw new SessionBrokerStoppingError();
     }
-    const abandonment = await this.options.store.abandon(requestId, this.options.owner, ownerToken);
+    const abandonment = await this.abandonInStore(requestId, ownerToken);
     for (const preparation of this.preparationOwners.values()) {
       if (preparation.requestId === requestId) {
         preparation.controller.abort(
@@ -520,9 +522,25 @@ export class SessionBroker {
   ): Promise<BrokerRequestRecord | undefined> {
     const request = await this.options.store.getSession(sessionUuid);
     if (request) {
-      this.assertConsumerOwner(request, ownerToken);
+      await this.assertConsumerOwner(request, ownerToken);
     }
     return request;
+  }
+
+  /**
+   * The store judges ownership from durable state alone; a foreign-owner refusal is re-derived
+   * here so `terminal` also counts an abandoned preparation this process is still unwinding.
+   */
+  private async abandonInStore(requestId: string, ownerToken: string) {
+    try {
+      return await this.options.store.abandon(requestId, this.options.owner, ownerToken);
+    } catch (error) {
+      if (!(error instanceof SessionRequestForeignOwnerError)) {
+        throw error;
+      }
+      const request = await this.options.store.getRequest(requestId);
+      throw request ? await this.foreignOwnerRefusal(request) : error;
+    }
   }
 
   /** Admission check only. Releasing, failed, stale-owner and terminal receipts grant no control. */
@@ -571,10 +589,23 @@ export class SessionBroker {
     return { record, request };
   }
 
-  private assertConsumerOwner(request: BrokerRequestRecord, ownerToken: string): void {
+  private async assertConsumerOwner(
+    request: BrokerRequestRecord,
+    ownerToken: string,
+  ): Promise<void> {
     if (!this.consumerOwns(request, ownerToken)) {
-      throw new ActionableError("Session request belongs to another liveness owner");
+      throw await this.foreignOwnerRefusal(request);
     }
+  }
+
+  private async foreignOwnerRefusal(
+    request: BrokerRequestRecord,
+  ): Promise<SessionRequestForeignOwnerError> {
+    return foreignOwnerRefusal(
+      request,
+      await this.requestResource(request),
+      this.hasPendingPreparation(request.requestId),
+    );
   }
 
   private consumerOwns(request: BrokerRequestRecord, ownerToken: string): boolean {

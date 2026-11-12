@@ -2,7 +2,17 @@
 
 Every tool works from the **CLI** (`bunx @kaeawc/auto-mobile --cli <tool>`), **MCP**, or the **daemon** HTTP endpoint — same names, same arguments.
 
-📖 Full arguments: the registered schema ([`schemas/tool-definitions.json`](https://github.com/kaeawc/auto-mobile/blob/main/schemas/tool-definitions.json)) or `automobile:tools`. Availability varies by platform and feature gates.
+📖 Full arguments: the registered schema ([`schemas/tool-definitions.json`](https://github.com/kaeawc/auto-mobile/blob/main/schemas/tool-definitions.json)) or `automobile:tools`. Availability varies by platform and feature gates: see the **Requires** column.
+
+## 🔐 Requires column
+
+Each tool's `_meta["automobile/requires"]` list, shown in the tables below:
+
+- `sdkEmbed` — start the daemon with `--embedded-sdk`.
+- `debugBuild` — start the daemon with `--debug` (the `debug` feature flag).
+- `featureFlag:<key>` — some or all calls are refused while that feature flag is off; enable it with `auto-mobile --daemon set-feature-flag <key> true`.
+- Platforms — a device tool drives Android and iOS unless the cell lists other platforms (watchOS, tvOS, visionOS). A tool may still answer `unsupported` for an action its description limits to one platform.
+- A `—` cell: nothing beyond a device, or no device at all.
 
 ## 🏷️ Tool discovery metadata
 
@@ -31,160 +41,160 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## 👀 Observe & navigate
 
-| Tool                                                     | What it does                                             |
-| -------------------------------------------------------- | -------------------------------------------------------- |
-| 📸 <code>snapshotOf</code>                               | Save a PNG crop of an element or screen rectangle        |
-| 🆚 <code>compareScreenshot</code>                        | Record or compare a named screenshot baseline            |
-| 👁️ [<code>observe</code>](using/observe.md)              | Read the current screen, hierarchy, and screenshot       |
-| 🎯 <code>hitTest</code>                                  | Preview what a tap at a point would hit, without tapping |
-| 🧭 <code>explore</code>                                  | Explore the app to learn screens and transitions         |
-| 🗺️ <code>navigateTo</code>                               | Replay learned transitions to reach a screen             |
-| 🕸️ <code>getNavigationGraph</code>                       | List learned screens and transitions                     |
-| 🔎 <code>identifyInteractions</code>                     | Suggest likely interactions                              |
-| 🧪 <code>prototype</code>                                | Show agent-authored UI on the device                     |
-| 💻 <code>exportPrototypeWeb</code>                       | Write a shown prototype's web preview to an HTML file    |
-| 📡 [<code>blePeripheral</code>](using/ble-peripheral.md) | Advertise and notify a session-owned virtual BLE device  |
-| 🔦 <code>highlight</code>                                | Draw a red hand-drawn circle around a UI element         |
+| Tool                                                     | What it does                                             | Requires                                   |
+| -------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------ |
+| 📸 <code>snapshotOf</code>                               | Save a PNG crop of an element or screen rectangle        | —                                          |
+| 🆚 <code>compareScreenshot</code>                        | Record or compare a named screenshot baseline            | Android, iOS, tvOS                         |
+| 👁️ [<code>observe</code>](using/observe.md)              | Read the current screen, hierarchy, and screenshot       | Android, iOS, watchOS, tvOS, visionOS      |
+| 🎯 <code>hitTest</code>                                  | Preview what a tap at a point would hit, without tapping | —                                          |
+| 🧭 <code>explore</code>                                  | Explore the app to learn screens and transitions         | <code>sdkEmbed</code> · Android, iOS, tvOS |
+| 🗺️ <code>navigateTo</code>                               | Replay learned transitions to reach a screen             | <code>sdkEmbed</code>                      |
+| 🕸️ <code>getNavigationGraph</code>                       | List learned screens and transitions                     | <code>sdkEmbed</code>                      |
+| 🔎 <code>identifyInteractions</code>                     | Suggest likely interactions                              | <code>debugBuild</code>                    |
+| 🧪 <code>prototype</code>                                | Show agent-authored UI on the device                     | —                                          |
+| 💻 <code>exportPrototypeWeb</code>                       | Write a shown prototype's web preview to an HTML file    | —                                          |
+| 📡 [<code>blePeripheral</code>](using/ble-peripheral.md) | Advertise and notify a session-owned virtual BLE device  | —                                          |
+| 🔦 <code>highlight</code>                                | Draw a red hand-drawn circle around a UI element         | —                                          |
 
 ## 👆 Interact
 
-| Tool                                         | What it does                                                                                                                                                                        |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 📍 [<code>tapAt</code>](using/tap-at.md)     | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units                                                                                        |
-| 👆 <code>tapOn</code>                        | Tap an element by text, id, or test tag                                                                                                                                             |
-| 🤏 <code>tapAny</code>                       | Tap any clickable element; scope with container or scrollableContainer                                                                                                              |
-| 👉 [<code>swipeOn</code>](using/swipe-on.md) | Swipe/scroll on screen or elements                                                                                                                                                  |
-| ↔️ <code>swipeAt</code>                      | Swipe between two screen points                                                                                                                                                     |
-| 🫳 <code>dragAndDrop</code>                  | Drag and drop element                                                                                                                                                               |
-| 〰️ <code>dragPath</code>                     | Drag a finger along a timed path                                                                                                                                                    |
-| 🖱️ <code>hoverAt</code>                      | Hover a stylus or mouse over a path with no contact (Android)                                                                                                                       |
-| 🤌 <code>pinchOn</code>                      | Pinch to zoom                                                                                                                                                                       |
-| 🖐️ <code>multiTouch</code>                   | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                                                                                                                 |
-| 🔤 <code>sendKeys</code>                     | Execute ordered typing, clear, raw-key, and semantic IME commands                                                                                                                   |
-| 🕹️ <code>focusNavigate</code>                | Move D-pad focus to an element on Android TV or Apple TV; stops `focused`, `max_steps` or `stuck`                                                                                   |
-| ☑️ <code>setUIState</code>                   | Set multiple form fields by desired state                                                                                                                                           |
-| 📝 <code>selectAllText</code>                | Select all text in focused input                                                                                                                                                    |
-| 🔘 <code>pressButton</code>                  | Press a device or navigation button                                                                                                                                                 |
-| ⌨️ <code>keyboard</code>                     | Open, close, detect, or switch the keyboard / IME                                                                                                                                   |
-| 📋 <code>clipboard</code>                    | Clipboard operations (copy/paste/clear/get)                                                                                                                                         |
-| 🗣️ <code>siri</code>                         | iOS: activate Siri with a phrase (off by default: setToolEnabled; needs the siriAndAppIntents service) (e.g. an App Shortcut), returns the observation; Android returns unsupported |
+| Tool                                         | What it does                                                                                                                                                                        | Requires                              |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 📍 [<code>tapAt</code>](using/tap-at.md)     | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units                                                                                        | Android, iOS, watchOS                 |
+| 👆 <code>tapOn</code>                        | Tap an element by text, id, or test tag                                                                                                                                             | Android, iOS, watchOS, tvOS, visionOS |
+| 🤏 <code>tapAny</code>                       | Tap any clickable element; scope with container or scrollableContainer                                                                                                              | —                                     |
+| 👉 [<code>swipeOn</code>](using/swipe-on.md) | Swipe/scroll on screen or elements                                                                                                                                                  | Android, iOS, watchOS                 |
+| ↔️ <code>swipeAt</code>                      | Swipe between two screen points                                                                                                                                                     | —                                     |
+| 🫳 <code>dragAndDrop</code>                  | Drag and drop element                                                                                                                                                               | —                                     |
+| 〰️ <code>dragPath</code>                     | Drag a finger along a timed path                                                                                                                                                    | —                                     |
+| 🖱️ <code>hoverAt</code>                      | Hover a stylus or mouse over a path with no contact (Android)                                                                                                                       | —                                     |
+| 🤌 <code>pinchOn</code>                      | Pinch to zoom                                                                                                                                                                       | —                                     |
+| 🖐️ <code>multiTouch</code>                   | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                                                                                                                 | —                                     |
+| 🔤 <code>sendKeys</code>                     | Execute ordered typing, clear, raw-key, and semantic IME commands                                                                                                                   | Android, iOS, watchOS, tvOS, visionOS |
+| 🕹️ <code>focusNavigate</code>                | Move D-pad focus to an element on Android TV or Apple TV; stops `focused`, `max_steps` or `stuck`                                                                                   | Android, iOS, tvOS                    |
+| ☑️ <code>setUIState</code>                   | Set multiple form fields by desired state                                                                                                                                           | <code>debugBuild</code>               |
+| 📝 <code>selectAllText</code>                | Select all text in focused input                                                                                                                                                    | —                                     |
+| 🔘 <code>pressButton</code>                  | Press a device or navigation button                                                                                                                                                 | Android, iOS, watchOS, tvOS           |
+| ⌨️ <code>keyboard</code>                     | Open, close, detect, or switch the keyboard / IME                                                                                                                                   | —                                     |
+| 📋 <code>clipboard</code>                    | Clipboard operations (copy/paste/clear/get)                                                                                                                                         | —                                     |
+| 🗣️ <code>siri</code>                         | iOS: activate Siri with a phrase (off by default: setToolEnabled; needs the siriAndAppIntents service) (e.g. an App Shortcut), returns the observation; Android returns unsupported | —                                     |
 
 ## 📦 Apps, files & data
 
-| Tool                                                | What it does                                                                                   |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 🗂️ <code>listApps</code>                            | List installed apps                                                                            |
-| 🚀 <code>launchApp</code>                           | Launch app by package name                                                                     |
-| 🛑 <code>terminateApp</code>                        | Terminate app by package name                                                                  |
-| 💥 <code>crashApp</code>                            | Intentionally crash a running app through the platform crash path                              |
-| 🔄 <code>appLifecycle</code>                        | Background-kill an app to test state restoration (Android; iOS background and SIGKILL)         |
-| 📲 <code>installApp</code>                          | Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)                           |
-| 🗑️ <code>uninstallApp</code>                        | Uninstall app by package name or bundle identifier                                             |
-| 🔏 <code>inspectPackageSigning</code>               | Fresh read of one app's presence (installed/absent/unknown) and signing                        |
-| 🔗 <code>getDeepLinks</code>                        | Query app deep links                                                                           |
-| 📥 <code>putAppFile</code>                          | Write files into a bounded logical storage target                                              |
-| 🧹 <code>resetAppLogs</code>                        | Reset named app log files                                                                      |
-| ⚙️ <code>getPreference</code>                       | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key        |
-| 🔧 <code>setPreference</code>                       | Write a system property, SharedPreferences, or UserDefaults key                                |
-| 🗝️ <code>deleteKeychainItem</code>                  | Delete one allowlisted app-owned iOS Keychain item (SDK opt-in, requires confirm)              |
-| 🔑 <code>setKeyValue</code>                         | Set app key-value storage entry                                                                |
-| ❌ <code>removeKeyValue</code>                      | Remove app key-value storage entry                                                             |
-| 🧼 <code>clearKeyValueFile</code>                   | Clear app key-value storage file                                                               |
-| 🗄️ <code>listDataStores</code>                      | List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter)                |
-| 🗃️ <code>getDataStore</code>                        | Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter) |
-| 🧮 <code>sqlQuery</code>                            | Execute SQL on app SQLite database                                                             |
-| 🔐 <code>resetKeychain</code>                       | Reset declared Android scope/alias; iOS Simulator clears all apps with confirm:true            |
-| 🖇️ <code>setAppLinks</code>                         | Android 12+: change an app's App Links state so https links open the app directly (or not)     |
-| 🚦 [<code>performanceAudit</code>](using/audits.md) | Android: pass/fail jank, touch latency and memory checks with failOn                           |
-| ⏱️ <code>measureStartup</code>                      | Measure cold/warm/hot app startup                                                              |
-| 📜 <code>getLogs</code>                             | Read device logs with filters                                                                  |
-| 📻 <code>sendBroadcast</code>                       | Send an Android broadcast to the app under test                                                |
-| 🛠️ <code>backgroundWork</code>                      | Android: read and trigger an app's background work without waiting hours                       |
+| Tool                                                | What it does                                                                                     | Requires                              |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| 🗂️ <code>listApps</code>                            | List installed apps                                                                              | Android, iOS, watchOS, tvOS, visionOS |
+| 🚀 <code>launchApp</code>                           | Launch app by package name                                                                       | Android, iOS, watchOS, tvOS, visionOS |
+| 🛑 <code>terminateApp</code>                        | Terminate app by package name                                                                    | Android, iOS, watchOS, tvOS, visionOS |
+| 💥 <code>crashApp</code>                            | Intentionally crash a running app through the platform crash path                                | Android, iOS, watchOS, tvOS           |
+| 🔄 <code>appLifecycle</code>                        | Background-kill an app to test state restoration (Android; iOS background and SIGKILL)           | —                                     |
+| 📲 <code>installApp</code>                          | Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)                             | Android, iOS, watchOS, tvOS, visionOS |
+| 🗑️ <code>uninstallApp</code>                        | Uninstall app by package name or bundle identifier                                               | Android, iOS, watchOS, tvOS, visionOS |
+| 🔏 <code>inspectPackageSigning</code>               | Fresh read of one app's presence (installed/absent/unknown) and signing                          | —                                     |
+| 🔗 <code>getDeepLinks</code>                        | Query app deep links                                                                             | Android, iOS, tvOS                    |
+| 📥 <code>putAppFile</code>                          | Write files into a bounded logical storage target                                                | —                                     |
+| 🧹 <code>resetAppLogs</code>                        | Reset named app log files                                                                        | —                                     |
+| ⚙️ <code>getPreference</code>                       | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key          | —                                     |
+| 🔧 <code>setPreference</code>                       | Write a system property, SharedPreferences, or UserDefaults key                                  | —                                     |
+| 🗝️ <code>deleteKeychainItem</code>                  | Delete one allowlisted app-owned iOS Keychain item (SDK opt-in, requires confirm)                | <code>sdkEmbed</code>                 |
+| 🔑 <code>setKeyValue</code>                         | Set app key-value storage entry                                                                  | <code>sdkEmbed</code>                 |
+| ❌ <code>removeKeyValue</code>                      | Remove app key-value storage entry                                                               | <code>sdkEmbed</code>                 |
+| 🧼 <code>clearKeyValueFile</code>                   | Clear app key-value storage file                                                                 | <code>sdkEmbed</code>                 |
+| 🗄️ <code>listDataStores</code>                      | List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter)                  | <code>sdkEmbed</code>                 |
+| 🗃️ <code>getDataStore</code>                        | Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter)   | <code>sdkEmbed</code>                 |
+| 🧮 <code>sqlQuery</code>                            | Execute SQL on app SQLite database                                                               | <code>sdkEmbed</code>                 |
+| 🔐 <code>resetKeychain</code>                       | Reset declared Android scope/alias; iOS Simulator clears all apps with confirm:true              | —                                     |
+| 🖇️ <code>setAppLinks</code>                         | Android 12+: change an app's App Links state so https links open the app directly (or not)       | —                                     |
+| 🚦 [<code>performanceAudit</code>](using/audits.md) | Android: pass/fail jank, touch latency and memory checks with failOn ([audits](using/audits.md)) | —                                     |
+| ⏱️ <code>measureStartup</code>                      | Measure cold/warm/hot app startup                                                                | —                                     |
+| 📜 <code>getLogs</code>                             | Read device logs with filters                                                                    | Android, iOS, watchOS, tvOS, visionOS |
+| 📻 <code>sendBroadcast</code>                       | Send an Android broadcast to the app under test                                                  | —                                     |
+| 🛠️ <code>backgroundWork</code>                      | Android: read and trigger an app's background work without waiting hours                         | —                                     |
 
 ## 📱 Devices & system
 
-| Tool                                                         | What it does                                                                            |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| 📃 <code>listDevices</code>                                  | List booted devices                                                                     |
-| 💿 [<code>listDeviceImages</code>](using/device-images.md)   | List device images                                                                      |
-| 🤖 <code>getAndroid</code>                                   | Find or recover an Android AVD and prepare it for automation                            |
-| 🍎 <code>getApple</code>                                     | Find or recover an iOS Simulator and prepare it for automation                          |
-| 🏗️ <code>provisionDevice</code>                              | Provision exact virtual device                                                          |
-| 🧰 <code>setDeviceResources</code>                           | Set selected device resources and verify native state                                   |
-| ⚖️ <code>reconcileDeviceResources</code>                     | Compare a simulator to a requested resource map                                         |
-| 📌 <code>setActiveDevice</code>                              | Pick the active device for this connection                                              |
-| 🔌 <code>killDevice</code>                                   | Kill device                                                                             |
-| ⚰️ <code>deleteDevice</code>                                 | Stop and permanently delete a device, with verified platform-inventory absence          |
-| 💾 <code>deviceSnapshot</code>                               | Capture or restore device snapshot                                                      |
-| 🔃 <code>rotate</code>                                       | Rotate device orientation                                                               |
-| 🔁 <code>portReverse</code>                                  | Android: own `adb reverse` so the device reaches a host server at `localhost:<port>`    |
-| 📐 <code>setPosture</code>                                   | Set foldable / Duo posture                                                              |
-| 🔋 <code>statusBar</code>                                    | Pin status-bar time, battery, and signal for clean screenshots                          |
-| 🪟 <code>windowMode</code>                                   | Fullscreen, PiP, or split-screen an Android task                                        |
-| 🎛️ <code>rotaryScroll</code>                                 | Wear OS crown scroll with read-back; reports every attempted method                     |
-| 🥽 <code>glassesInput</code>                                 | Android XR glasses touchpad tap and forward/back swipe as focus input; no read-back     |
-| 🌙 <code>ambient</code>                                      | Wear OS sleep/wake power-state change; wakefulness readback does not prove ambient mode |
-| ⌚ <code>wearSurface</code>                                  | Wear OS tiles, watch faces, complications: list, add, show, read, set; changes verified |
-| 👑 <code>rotateCrown</code>                                  | watchOS: rotate the Digital Crown by a signed delta with optional velocity              |
-| 🌍 <code>openLink</code>                                     | Open URL in browser                                                                     |
-| 🏠 <code>homeScreen</code>                                   | Go to home screen                                                                       |
-| 🕘 <code>recentApps</code>                                   | Open recent apps                                                                        |
-| 🔔 <code>systemTray</code>                                   | System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)       |
-| 🔓 <code>wakeAndUnlock</code>                                | Wake a device and unlock its keyguard                                                   |
-| 🌐 <code>changeLocalization</code>                           | Change locale, time zone, text direction, time format, and calendar system              |
-| 🩺 <code>getDeviceState</code>                               | Read clock, DND, connectivity, and other device state                                   |
-| 🎚️ <code>setDeviceState</code>                               | Set DND, airplane mode, and other device state                                          |
-| 🖥️ <code>displayConfig</code>                                | Read or set font scale, density, and display size                                       |
-| 🎨 <code>displayProfile</code>                               | Apply an OEM-style display profile (Android)                                            |
-| 🍏 <code>getIosSimulatorCapabilities</code>                  | Discover biometric capabilities for a selected iOS Simulator device type and runtime    |
-| 🪪 <code>biometricAuth</code>                                | Simulate biometric success or failure                                                   |
-| 📳 <code>shake</code>                                        | Shake the device (simulator/emulator)                                                   |
-| 🧲 <code>setSensor</code>                                    | Set an emulator sensor (accelerometer, gyro, …)                                         |
-| 🎙️ <code>injectAudioInput</code>                             | Emulator or simulator: play a WAV file or tone into the microphone. Off by default      |
-| ⏹️ <code>stopAudioInput</code>                               | Stop an audio injection. Off by default                                                 |
-| 🔊 <code>captureAudio</code>                                 | Emulator or simulator: record audio output and report its level. Off by default         |
-| 📞 <code>phoneCall</code>                                    | Simulate an incoming phone call (iOS Simulator: accept/hold are partial)                |
-| 💬 <code>sendSms</code>                                      | Simulate an incoming SMS                                                                |
-| 🌱 [<code>seedContent</code>](using/seed-content.md)         | Seed Android contacts, calendars, calls and SMS                                         |
-| 🎵 <code>mediaSession</code>                                 | Read or control Android media sessions                                                  |
-| 📣 <code>postNotification</code>                             | Post notification via Android SDK hooks or iOS Simulator simctl push                    |
-| 🔕 <code>getNotificationPolicy</code>                        | Read app notification/DND policy state                                                  |
-| 🤫 <code>setNotificationPolicy</code>                        | Set app notification/DND policy state                                                   |
-| 🛂 <code>getAppPermissions</code>                            | Read app permission state                                                               |
-| 🎫 <code>setAppPermissions</code>                            | userId grant/revoke; device-wide reset ['all']; Android notification state              |
-| ☠️ [<code>killProfile</code>](using/kill-profiles.md)        | Simulate an OEM background-kill policy (Android)                                        |
-| 🏭 [<code>manufacturerProfile</code>](using/oem-personas.md) | Approximate an OEM device (Android)                                                     |
-| ⚠️ <code>systemAlerts</code>                                 | Auto-answer OS permission and system alerts                                             |
+| Tool                                                         | What it does                                                                            | Requires                                  |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------- |
+| 📃 <code>listDevices</code>                                  | List booted devices                                                                     | —                                         |
+| 💿 [<code>listDeviceImages</code>](using/device-images.md)   | List device images                                                                      | —                                         |
+| 🤖 <code>getAndroid</code>                                   | Find or recover an Android AVD and prepare it for automation                            | —                                         |
+| 🍎 <code>getApple</code>                                     | Find or recover an iOS Simulator and prepare it for automation                          | —                                         |
+| 🏗️ <code>provisionDevice</code>                              | Provision exact virtual device                                                          | —                                         |
+| 🧰 <code>setDeviceResources</code>                           | Set selected device resources and verify native state                                   | —                                         |
+| ⚖️ <code>reconcileDeviceResources</code>                     | Compare a simulator to a requested resource map                                         | —                                         |
+| 📌 <code>setActiveDevice</code>                              | Pick the active device for this connection                                              | —                                         |
+| 🔌 <code>killDevice</code>                                   | Kill device                                                                             | —                                         |
+| ⚰️ <code>deleteDevice</code>                                 | Stop and permanently delete a device, with verified platform-inventory absence          | —                                         |
+| 💾 <code>deviceSnapshot</code>                               | Capture or restore device snapshot                                                      | —                                         |
+| 🔃 <code>rotate</code>                                       | Rotate device orientation                                                               | —                                         |
+| 🔁 <code>portReverse</code>                                  | Android: own `adb reverse` so the device reaches a host server at `localhost:<port>`    | —                                         |
+| 📐 <code>setPosture</code>                                   | Set foldable / Duo posture                                                              | —                                         |
+| 🔋 <code>statusBar</code>                                    | Pin status-bar time, battery, and signal for clean screenshots                          | —                                         |
+| 🪟 <code>windowMode</code>                                   | Fullscreen, PiP, or split-screen an Android task                                        | —                                         |
+| 🎛️ <code>rotaryScroll</code>                                 | Wear OS crown scroll with read-back; reports every attempted method                     | —                                         |
+| 🥽 <code>glassesInput</code>                                 | Android XR glasses touchpad tap and forward/back swipe as focus input; no read-back     | —                                         |
+| 🌙 <code>ambient</code>                                      | Wear OS sleep/wake power-state change; wakefulness readback does not prove ambient mode | —                                         |
+| ⌚ <code>wearSurface</code>                                  | Wear OS tiles, watch faces, complications: list, add, show, read, set; changes verified | —                                         |
+| 👑 <code>rotateCrown</code>                                  | watchOS: rotate the Digital Crown by a signed delta with optional velocity              | watchOS                                   |
+| 🌍 <code>openLink</code>                                     | Open URL in browser                                                                     | Android, iOS, tvOS                        |
+| 🏠 <code>homeScreen</code>                                   | Go to home screen                                                                       | Android, iOS, tvOS                        |
+| 🕘 <code>recentApps</code>                                   | Open recent apps                                                                        | —                                         |
+| 🔔 <code>systemTray</code>                                   | System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)       | —                                         |
+| 🔓 <code>wakeAndUnlock</code>                                | Wake a device and unlock its keyguard                                                   | —                                         |
+| 🌐 <code>changeLocalization</code>                           | Change locale, time zone, text direction, time format, and calendar system              | —                                         |
+| 🩺 <code>getDeviceState</code>                               | Read clock, DND, connectivity, and other device state                                   | —                                         |
+| 🎚️ <code>setDeviceState</code>                               | Set DND, airplane mode, and other device state                                          | <code>featureFlag:device-condition</code> |
+| 🖥️ <code>displayConfig</code>                                | Read or set font scale, density, and display size                                       | —                                         |
+| 🎨 <code>displayProfile</code>                               | Apply an OEM-style display profile (Android)                                            | —                                         |
+| 🍏 <code>getIosSimulatorCapabilities</code>                  | Discover biometric capabilities for a selected iOS Simulator device type and runtime    | —                                         |
+| 🪪 <code>biometricAuth</code>                                | Simulate biometric success or failure                                                   | —                                         |
+| 📳 <code>shake</code>                                        | Shake the device (simulator/emulator)                                                   | —                                         |
+| 🧲 <code>setSensor</code>                                    | Set an emulator sensor (accelerometer, gyro, …)                                         | —                                         |
+| 🎙️ <code>injectAudioInput</code>                             | Emulator or simulator: play a WAV file or tone into the microphone. Off by default      | —                                         |
+| ⏹️ <code>stopAudioInput</code>                               | Stop an audio injection. Off by default                                                 | —                                         |
+| 🔊 <code>captureAudio</code>                                 | Emulator or simulator: record audio output and report its level. Off by default         | —                                         |
+| 📞 <code>phoneCall</code>                                    | Simulate an incoming phone call (iOS Simulator: accept/hold are partial)                | —                                         |
+| 💬 <code>sendSms</code>                                      | Simulate an incoming SMS                                                                | —                                         |
+| 🌱 [<code>seedContent</code>](using/seed-content.md)         | [Seed Android contacts, calendars, calls and SMS](using/seed-content.md)                | —                                         |
+| 🎵 <code>mediaSession</code>                                 | Read or control Android media sessions                                                  | —                                         |
+| 📣 <code>postNotification</code>                             | Post notification via Android SDK hooks or iOS Simulator simctl push                    | Android, iOS, watchOS, tvOS               |
+| 🔕 <code>getNotificationPolicy</code>                        | Read app notification/DND policy state                                                  | —                                         |
+| 🤫 <code>setNotificationPolicy</code>                        | Set app notification/DND policy state                                                   | —                                         |
+| 🛂 <code>getAppPermissions</code>                            | Read app permission state                                                               | —                                         |
+| 🎫 <code>setAppPermissions</code>                            | userId grant/revoke; device-wide reset ['all']; Android notification state              | Android, iOS, tvOS                        |
+| ☠️ [<code>killProfile</code>](using/kill-profiles.md)        | Simulate an OEM background-kill policy (Android)                                        | —                                         |
+| 🏭 [<code>manufacturerProfile</code>](using/oem-personas.md) | Approximate an OEM device (Android)                                                     | —                                         |
+| ⚠️ <code>systemAlerts</code>                                 | Auto-answer OS permission and system alerts                                             | —                                         |
 
 ## 🌐 Network, plans & recording
 
-| Tool                                                           | What it does                                                                                                                                                                      |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 📶 <code>network</code>                                        | Control network capture and error simulation                                                                                                                                      |
-| 🎭 <code>mockNetwork</code>                                    | Add mock network response rule                                                                                                                                                    |
-| 🧽 <code>clearMockNetwork</code>                               | Clear mock network response rules                                                                                                                                                 |
-| 📊 <code>getNetworkGraph</code>                                | Get aggregate captured network graph                                                                                                                                              |
-| ▶️ <code>executePlan</code>                                    | Execute YAML plan steps; stops on first failed step                                                                                                                               |
-| 🔒 <code>criticalSection</code>                                | Synchronize multiple devices at a barrier, then run steps serially                                                                                                                |
-| 🚧 <code>barrier</code>                                        | Sync multiple devices at a point in a plan                                                                                                                                        |
-| ⏺️ <code>recordToolCalls</code>                                | Record MCP tool calls to YAML                                                                                                                                                     |
-| 🎬 <code>recordDeviceGestures</code>                           | Start recording on-device user input (not tool calls) for exportPlan                                                                                                              |
-| 📤 <code>exportPlan</code>                                     | Stop the active recordDeviceGestures or recordToolCalls recording and export a YAML plan                                                                                          |
-| 🎥 <code>videoRecording</code>                                 | Start or stop device video recording                                                                                                                                              |
-| 📈 [<code>performanceTrace</code>](using/performance-trace.md) | Record an xctrace / Perfetto trace; read it back at <code>automobile:device-session/{sessionUuid}/performance-traces/{traceId}{?offset,maxBytes}</code>                           |
-| 🔬 <code>captureTrace</code>                                   | Android: record a Perfetto trace from typed categories (`sched`, `gfx`, `view`, `am`, `wm`, `binder_driver`, `memory`, `app`); `stop` pulls the `.perfetto-trace`. Off by default |
-| 🧠 <code>heapDump</code>                                       | Android: dump a debuggable or profileable app's heap to a host `.hprof` (`heap_dump_not_debuggable` otherwise). Off by default                                                    |
+| Tool                                                           | What it does                                                                                                                                                                      | Requires                                     |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 📶 <code>network</code>                                        | Control network capture and error simulation                                                                                                                                      | <code>sdkEmbed</code>                        |
+| 🎭 <code>mockNetwork</code>                                    | Add mock network response rule                                                                                                                                                    | <code>sdkEmbed</code>                        |
+| 🧽 <code>clearMockNetwork</code>                               | Clear mock network response rules                                                                                                                                                 | <code>sdkEmbed</code>                        |
+| 📊 <code>getNetworkGraph</code>                                | Get aggregate captured network graph                                                                                                                                              | <code>sdkEmbed</code>                        |
+| ▶️ <code>executePlan</code>                                    | Execute YAML plan steps; stops on first failed step                                                                                                                               | Android, iOS, watchOS, tvOS, visionOS        |
+| 🔒 <code>criticalSection</code>                                | Synchronize multiple devices at a barrier, then run steps serially                                                                                                                | —                                            |
+| 🚧 <code>barrier</code>                                        | Sync multiple devices at a point in a plan                                                                                                                                        | —                                            |
+| ⏺️ <code>recordToolCalls</code>                                | Record MCP tool calls to YAML                                                                                                                                                     | <code>featureFlag:tool-call-recording</code> |
+| 🎬 <code>recordDeviceGestures</code>                           | Start recording on-device user input (not tool calls) for exportPlan                                                                                                              | —                                            |
+| 📤 <code>exportPlan</code>                                     | Stop the active recordDeviceGestures or recordToolCalls recording and export a YAML plan                                                                                          | —                                            |
+| 🎥 <code>videoRecording</code>                                 | Start or stop device video recording                                                                                                                                              | Android, iOS, tvOS                           |
+| 📈 [<code>performanceTrace</code>](using/performance-trace.md) | Record an xctrace / Perfetto trace; read it back at <code>automobile:device-session/{sessionUuid}/performance-traces/{traceId}{?offset,maxBytes}</code>                           | —                                            |
+| 🔬 <code>captureTrace</code>                                   | Android: record a Perfetto trace from typed categories (`sched`, `gfx`, `view`, `am`, `wm`, `binder_driver`, `memory`, `app`); `stop` pulls the `.perfetto-trace`. Off by default | —                                            |
+| 🧠 <code>heapDump</code>                                       | Android: dump a debuggable or profileable app's heap to a host `.hprof` (`heap_dump_not_debuggable` otherwise). Off by default                                                    | —                                            |
 
 ## ♿ Accessibility & tooling
 
-| Tool                                                  | What it does                                                                                                             |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| 🦮 <code>accessibility</code>                         | Check or control accessibility services                                                                                  |
-| 🔲 <code>accessibilityFocus</code>                    | Set or clear Android TalkBack focus by resourceId, text, or contentDesc                                                  |
-| 🫶 <code>accessibilityAction</code>                   | Perform a TalkBack-style accessibility action (Android)                                                                  |
-| ✅ [<code>accessibilityAudit</code>](using/audits.md) | Audit accessibility: WCAG checks (Android default) or the platform engine (iOS default), with scope, baseline and failOn |
-| 🧾 <code>audit</code>                                 | Deprecated: use accessibilityAudit and performanceAudit                                                                  |
-| 🧩 <code>setToolEnabled</code>                        | Show or hide tools in discovery                                                                                          |
+| Tool                                                  | What it does                                                                                                                                         | Requires                |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| 🦮 <code>accessibility</code>                         | Check or control accessibility services                                                                                                              | —                       |
+| 🔲 <code>accessibilityFocus</code>                    | Set or clear Android TalkBack focus by resourceId, text, or contentDesc                                                                              | <code>debugBuild</code> |
+| 🫶 <code>accessibilityAction</code>                   | Perform a TalkBack-style accessibility action (Android)                                                                                              | —                       |
+| ✅ [<code>accessibilityAudit</code>](using/audits.md) | Audit accessibility: WCAG checks (Android default) or the platform engine (iOS default), with scope, baseline and failOn ([audits](using/audits.md)) | —                       |
+| 🧾 <code>audit</code>                                 | Deprecated: use accessibilityAudit and performanceAudit                                                                                              | —                       |
+| 🧩 <code>setToolEnabled</code>                        | Show or hide tools in discovery                                                                                                                      | —                       |
 
 ## 📺 TV focus navigation
 

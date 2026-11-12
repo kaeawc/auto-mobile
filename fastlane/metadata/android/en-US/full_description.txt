@@ -10,7 +10,7 @@ What you can do
 
 Works on its own
 
-A bundled sample gallery gives you something to open on the first launch, so ProtoViewer is useful before you connect anything. Prototypes are declarative documents, not programs: the renderer's features are fixed in the app, and a prototype cannot install or run code.
+The library starts empty. Import a .automobile-proto file from Files or the share sheet and it opens right away, with no other app, account or connection on your phone. Prototypes are declarative documents, not programs: the renderer's features are fixed in the app, and a prototype cannot install or run code.
 
 Private by default
 

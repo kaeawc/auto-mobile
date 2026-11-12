@@ -138,7 +138,7 @@ tool_definitions_drift_guard() {
   if bun scripts/generate-tool-definitions.ts --check; then
     return 0
   fi
-  echo "Regenerate with: bun scripts/generate-tool-definitions.ts && bunx oxfmt schemas/tool-definitions.json" >&2
+  echo "Regenerate with: bash scripts/update-tool-definitions.sh --no-stage" >&2
   return 1
 }
 

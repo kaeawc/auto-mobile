@@ -5,7 +5,7 @@
 # (deliberate independence from the CtrlProxy UI test that precedes them). But a bare
 # `!cancelled()` also bypasses a
 # SHARED-prerequisite failure (XcodeGen drift check / CtrlProxy build), so the
-# 26.5 block ran on a broken build and emitted misleading secondary failures
+# 26.6 block ran on a broken build and emitted misleading secondary failures
 # (e.g. a spurious downstream simulator-test failure whose
 # real cause was the drift check).
 #
@@ -15,7 +15,7 @@
 WORKFLOW=".github/workflows/xctestrunner-simulator-tests.yml"
 
 @test "the shared CtrlProxy build step carries the build-ctrlproxy id" {
-  # The step the 26.5 leg keys off of must exist and be identified.
+  # The step the 26.6 leg keys off of must exist and be identified.
   run grep -A1 'name: "Build CtrlProxy iOS for Testing"' "$WORKFLOW"
   [ "$status" -eq 0 ]
   [[ "$output" == *"id: build-ctrlproxy"* ]]
@@ -35,8 +35,8 @@ WORKFLOW=".github/workflows/xctestrunner-simulator-tests.yml"
 
 # Print the active `if:` value for a named step, or nothing when the step has none.
 #
-# No positional anchor: #4114 removed the leg's redundant "Select Xcode 26.5" and
-# "Ensure iOS Simulator runtime (Xcode 26.5)", which were the only duplicated step
+# No positional anchor: #4114 removed the leg's redundant "Select Xcode 26.6" and
+# "Ensure iOS Simulator runtime (Xcode 26.6)", which were the only duplicated step
 # names in this job. Every step name is now unique, so a plain by-name lookup
 # cannot match the wrong occurrence. The uniqueness test below is what keeps that
 # true -- if a duplicate is ever reintroduced, this lookup would silently resolve
@@ -64,15 +64,15 @@ step_if_condition() {
 # array rather than a process substitution: BATS' parallel runner can otherwise
 # terminate the short-lived producer while cleaning up the test process group.
 xcode_265_leg_steps=(
-  "Ensure AutoMobile daemon ready (Xcode 26.5)"
-  "Warm up iOS CtrlProxy (Xcode 26.5)"
+  "Ensure AutoMobile daemon ready (Xcode 26.6)"
+  "Warm up iOS CtrlProxy (Xcode 26.6)"
   "Run iOS navigation graph Simulator workflow"
 )
 
 @test "no step name is duplicated in the XCTestRunner job" {
   # The by-name lookup above is only safe while names are unique. A duplicate
   # would resolve to the FIRST occurrence -- historically the job-initial,
-  # unguarded "Select Xcode 26.5" -- and silently assert against the wrong step.
+  # unguarded "Select Xcode 26.6" -- and silently assert against the wrong step.
   # This replaces the old anchor-uniqueness guard (#4115): the anchor existed
   # solely to work around the duplication that #4114 removed.
   dupes="$(awk '
@@ -88,7 +88,7 @@ xcode_265_leg_steps=(
   [ -z "$dupes" ]
 }
 
-@test "every 26.5-leg step individually gates on steps.build-ctrlproxy.outcome == success" {
+@test "every 26.6-leg step individually gates on steps.build-ctrlproxy.outcome == success" {
   local offenders=""
   for step in "${xcode_265_leg_steps[@]}"; do
     condition="$(step_if_condition "$step")"
@@ -100,13 +100,13 @@ xcode_265_leg_steps=(
   done
 
   if [ -n "$offenders" ]; then
-    echo "26.5-leg steps missing the shared-build guard:" >&2
+    echo "26.6-leg steps missing the shared-build guard:" >&2
     echo "$offenders" >&2
   fi
   [ -z "$offenders" ]
 }
 
-@test "every 26.5-leg step still respects cancellation" {
+@test "every 26.6-leg step still respects cancellation" {
   # The other half of the condition: a cancelled workflow must skip these steps.
   local offenders=""
   for step in "${xcode_265_leg_steps[@]}"; do
@@ -117,7 +117,7 @@ xcode_265_leg_steps=(
   done
 
   if [ -n "$offenders" ]; then
-    echo "26.5-leg steps that do not skip on cancellation:" >&2
+    echo "26.6-leg steps that do not skip on cancellation:" >&2
     echo "$offenders" >&2
   fi
   [ -z "$offenders" ]

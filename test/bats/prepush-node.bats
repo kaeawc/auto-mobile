@@ -193,7 +193,7 @@ SCRIPT
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"FAIL"*"tool definitions drift"* ]]
-  [[ "$output" == *"bun scripts/generate-tool-definitions.ts && bunx oxfmt schemas/tool-definitions.json"* ]]
+  [[ "$output" == *"bash scripts/update-tool-definitions.sh --no-stage"* ]]
   ! grep -F 'bun test test/lint/' "$COMMAND_LOG"
   ! grep -F 'bun scripts/lib/affectedTests.ts ' "$COMMAND_LOG"
 }

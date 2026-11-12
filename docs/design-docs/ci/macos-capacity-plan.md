@@ -73,8 +73,6 @@ order with `terminal` requirements so a failure never skips later jobs:
 6. macOS BATS Shell Tests
 7. macOS BATS Integration Tests
 8. XCTestRunner Thread Sanitizer
-9. Swift Packages Sweep (Xcode 26.5)
-10. Build Xcode Projects Sweep (Xcode 26.5)
 
 CircleCI posts no commit status for the scheduled pipeline (#11615), so
 `.github/workflows/circleci-nightly-visibility.yml` (ubuntu, daily 10:40 UTC, not a
@@ -84,7 +82,7 @@ updates one `circleci-nightly-macos` issue naming each red job, its job URL and 
 artifact names (for example `bats-unit-joblog/bats-unit-joblog-durations.tsv`).
 Without the secret, or if CircleCI refuses it, the run skips with a notice.
 
-The Xcode 26.5 sweeps run last because every iOS PR already builds on 26.5. The
+The
 nightly sweeps build unsigned (the CircleCI executor pins signing off); the
 GitHub sweeps signed when certificates were configured. Release and signing
 workflows (`build-ctrl-proxy-ios-ipa`, `build-network-filter-probe`,
@@ -254,7 +252,7 @@ ports, so use that fallback only with the heavy runner under a dedicated user.
 | SwiftLint                                                                      | `ubuntu-24.04`                             | `ubuntu-24.04` |
 | Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest` |
-| Swift Packages (Xcode 26.5)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
+| Swift Packages (Xcode 26.6)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`     |
 | Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
@@ -296,8 +294,8 @@ the Mac as the user that owns `~/actions-runner`:
    next to Xcode 27.1 beta) with its iOS platform
    (`xcodebuild -downloadPlatform iOS`). Swift Packages, Build Root SPM Package,
    Build Xcode Projects, the Playground fallback and Prototype Simulator request
-   26.5; `bash scripts/ci/select-self-hosted-xcode.sh 26.5` uses 26.5 when
-   installed and otherwise the newest installed 26.x at or above it (26.6 today),
+   26.6; `bash scripts/ci/select-self-hosted-xcode.sh 26.6` uses 26.6 when
+   installed and otherwise the newest installed 26.x at or above it,
    printing which it chose (#11422). It never selects Xcode 27.
 2. Get a registration token (valid for one hour):
 

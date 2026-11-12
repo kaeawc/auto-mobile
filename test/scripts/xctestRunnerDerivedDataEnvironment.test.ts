@@ -26,7 +26,7 @@ describe("#4966 XCTestRunner source-built CtrlProxy artifacts", () => {
       indexOfNamed(steps, "Pin Source-Built CtrlProxy Runner Integrity"),
     );
     expect(indexOfNamed(steps, "Pin Source-Built CtrlProxy Runner Integrity")).toBeLessThan(
-      indexOfNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)"),
+      indexOfNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.6)"),
     );
   });
 });

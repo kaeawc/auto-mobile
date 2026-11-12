@@ -37,6 +37,7 @@ import type { PrototypeEventLifecycle } from "../prototypeLifecycle";
 import type { IosSavedPrototypeInstaller } from "../prototypeSavedActions";
 import type { prototypeOutputSchema } from "./schemas";
 import type { ScreenRoundReaderFactory } from "./screenShape";
+import type { PrototypePreviewBinding } from "./preview";
 import type { DeviceAwareToolHandler } from "../toolRegistryTypes";
 
 export type PrototypeClient = AndroidPrototypeClient;
@@ -90,6 +91,8 @@ export interface PrototypeToolDependencies {
   anchorHierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
   /** Reads whether a watch display is round for the show result; tests inject a fake. */
   screenRoundFactory?: ScreenRoundReaderFactory;
+  /** The live preview server serve, stop and status use (#17975); defaults to the daemon's. */
+  preview?: PrototypePreviewBinding;
 }
 
 export interface AnchorStage {

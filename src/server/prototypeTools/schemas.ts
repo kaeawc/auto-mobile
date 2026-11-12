@@ -20,6 +20,10 @@ import {
   MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
 } from "../../features/prototype/prototypeEventTimeout";
 import { MAX_PROTOTYPE_PATCH_OPS } from "../../features/prototype/prototypePatch";
+import {
+  DEFAULT_PROTOTYPE_PREVIEW_IDLE_TIMEOUT_MS,
+  MAX_PROTOTYPE_PREVIEW_IDLE_TIMEOUT_MS,
+} from "../../features/prototype/preview/prototypePreviewLimits";
 import {} from "../../features/prototype/prototypeAccessibilityLint";
 import {} from "../../features/prototype/prototypePlaceholderLint";
 import {
@@ -182,11 +186,13 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "clearBackend",
           "backendLog",
           "publish",
+          "serve",
+          "stop",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; ProtoViewer link: share; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend, backendLog or publish; host-only: screenMap",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; ProtoViewer link: share; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend, backendLog or publish; preview server: serve or stop; host-only: screenMap",
         },
       ),
       goal: z
@@ -440,6 +446,30 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .max(Number.MAX_SAFE_INTEGER)
         .optional()
         .describe("awaitEvent only: return a sequence strictly above this cursor"),
+      port: z
+        .number()
+        .int()
+        .min(0)
+        .max(65535)
+        .optional()
+        .describe(
+          "serve only: the preview server's TCP port; 0 or absent picks a free one. A different port restarts a running server",
+        ),
+      remote: z
+        .boolean()
+        .optional()
+        .describe(
+          "serve only: true binds every network interface so other machines can open the preview (anyone who can reach the port sees every shown prototype); default false binds 127.0.0.1 only",
+        ),
+      idleTimeoutMs: z
+        .number()
+        .int()
+        .min(1000)
+        .max(MAX_PROTOTYPE_PREVIEW_IDLE_TIMEOUT_MS)
+        .optional()
+        .describe(
+          `serve only: stop the server after this long with no open preview page, request, show or patch; default ${DEFAULT_PROTOTYPE_PREVIEW_IDLE_TIMEOUT_MS} ms`,
+        ),
       timeoutMs: z
         .number()
         .int()
@@ -487,6 +517,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "mock",
     "mockPath",
     "url",
+    "port",
+    "remote",
+    "idleTimeoutMs",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -523,6 +556,8 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     inspect: [],
     screenMap: ["spec", "specPath"],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
+    serve: ["id", "port", "remote", "idleTimeoutMs"],
+    stop: [],
   };
   for (const field of fields) {
     if (value[field] !== undefined && !allowed[value.action].includes(field)) {
@@ -681,6 +716,8 @@ export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
   "clearBackend",
   "backendLog",
   "publish",
+  "serve",
+  "stop",
 ];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {

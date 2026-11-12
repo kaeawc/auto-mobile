@@ -207,6 +207,26 @@ describe("findBannedPhrases source lines", () => {
     ]);
   });
 
+  test("skips a reference definition whose title spans four or more lines", () => {
+    const source = ["[ref]: /url 'one", "two", "three", "robust'", "", "robust", ""].join("\n");
+    expect(linesOf(source)).toEqual([["robust", 6]]);
+  });
+
+  test("a newline inside link syntax is not a prose break", () => {
+    // md4c renders "It's worthnoting.": the newline sits in the destination.
+    expect(linesOf("It's [worth](\n/url)noting.\n")).toEqual([]);
+    expect(linesOf("It's [worth](/url\n'title')noting.\n")).toEqual([]);
+    expect(linesOf("It's [worth](/url)\nnoting.\n")).toEqual([["worth-noting", 1]]);
+  });
+
+  test("does not locate prose inside an inline link destination or title", () => {
+    expect(linesOf("[ok](/robust)\nrobust\n")).toEqual([["robust", 2]]);
+    expect(linesOf('[ok](</a (robust)> "robust")\nrobust\n')).toEqual([["robust", 2]]);
+    expect(linesOf("[**ok**](/robust)\nrobust\n")).toEqual([["robust", 2]]);
+    expect(linesOf("![ok](/robust.png)\nrobust\n")).toEqual([["robust", 2]]);
+    expect(linesOf("[ok][ref] robust\n\n[ref]: /url\n")).toEqual([["robust", 1]]);
+  });
+
   test("locates front matter prose and the body after it", () => {
     expect(linesOf("---\ntitle: robust\n---\n\nrobust\n")).toEqual([
       ["robust", 2],

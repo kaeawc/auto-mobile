@@ -20,6 +20,16 @@ function assertDisplayInputSupported(
   androidXr: boolean,
   message: string,
 ): void {
+  if (findXrSpatialPanelWindow(observation, androidXr)) {
+    throw new ActionableError(message);
+  }
+}
+
+/** Shared geometry evidence for input refusal and output-only coordinate declarations. */
+export function findXrSpatialPanelWindow(
+  observation: Pick<ObserveResult, "activeWindow" | "backStack" | "viewHierarchy">,
+  androidXr: boolean,
+) {
   if (!androidXr) {
     return;
   }
@@ -35,7 +45,7 @@ function assertDisplayInputSupported(
   if (!packageName || packageName.startsWith("com.android.systemui") || !taskBounds) {
     return;
   }
-  const embeddedPanel = hierarchy?.windows?.some((window) => {
+  return hierarchy?.windows?.find((window) => {
     if (window.type !== 1 || window.packageName !== packageName) {
       return false;
     }
@@ -48,9 +58,6 @@ function assertDisplayInputSupported(
         bounds.bottom > taskBounds.bottom)
     );
   });
-  if (embeddedPanel) {
-    throw new ActionableError(message);
-  }
 }
 
 /** Swipe containers still inject display input unless a semantic node action succeeds. */

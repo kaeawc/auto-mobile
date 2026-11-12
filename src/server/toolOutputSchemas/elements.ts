@@ -10,6 +10,13 @@ import {
 // This schema accepts both for compatibility
 const booleanOrString = z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional();
 
+const boundsSpaceSchema = z
+  .enum(["panel", "window"])
+  .optional()
+  .describe(
+    "Android XR embedded SpatialPanel observations only: panel means bounds relative to xrPanelSpace's window, not screen coordinates; window means another owning window's space, not comparable across windows or with the panel.",
+  );
+
 const elementSpaceSchema = z
   .literal("ornament")
   .optional()
@@ -27,6 +34,7 @@ const semanticLinkSchema = z.object({
 export const elementSchema = z
   .object({
     bounds: elementBoundsSchema,
+    boundsSpace: boundsSpaceSchema,
     space: elementSpaceSchema,
     value: z.string().optional(),
     text: z.string().optional(),
@@ -234,6 +242,7 @@ export const viewHierarchyResultSchema = z
 const observeMediaSchema = z
   .object({
     bounds: elementBoundsSchema.optional(),
+    boundsSpace: boundsSpaceSchema,
   })
   .passthrough();
 
@@ -269,13 +278,14 @@ export const skeletonElementSchema = z
         "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
       ),
     space: elementSpaceSchema,
+    boundsSpace: boundsSpaceSchema,
     label: z.string().optional(),
     sublabel: z.string().optional(),
     testTag: z.string().optional(),
     semanticLinks: z.array(semanticLinkSchema).optional(),
     bounds: compactBoundsTupleSchema.describe(
       "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
-        "for skeleton entries, in the same current-orientation native space as screenSize and tapAt unless space is ornament.",
+        "for skeleton entries. boundsSpace identifies Android XR panel/owning-window coordinates; space identifies visionOS ornament coordinates. Neither is screen space.",
     ),
     affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
     occluded: z

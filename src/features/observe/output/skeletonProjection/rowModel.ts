@@ -54,6 +54,7 @@ export interface SkeletonAccumulator {
   semanticLinks?: SkeletonElement["semanticLinks"];
   bounds: SkeletonElement["bounds"];
   space?: "ornament";
+  boundsSpace?: "panel" | "window";
   affordances: Set<Affordance>;
   checked?: boolean;
   /** AutoMobile prototype rows only: the selected tab or option, and the node's state description. */

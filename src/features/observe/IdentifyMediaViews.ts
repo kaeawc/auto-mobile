@@ -130,6 +130,9 @@ export class IdentifyMediaViews {
       mediaType,
       bounds: el.bounds,
     };
+    if (el.boundsSpace) {
+      view.boundsSpace = el.boundsSpace;
+    }
 
     const viewId = (el["view-id"] ?? el["viewId"]) as string | undefined;
     if (viewId) {

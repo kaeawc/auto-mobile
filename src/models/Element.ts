@@ -12,6 +12,8 @@ export const VALUE_REDACTED_ATTRIBUTE = "value-redacted";
  */
 export interface Element {
   bounds: ElementBounds;
+  /** Android XR SpatialPanel observations only: panel-window or other owning-window bounds. */
+  boundsSpace?: "panel" | "window";
   /** visionOS ornament-local bounds: tap by label/identifier, never coordinates. */
   space?: "ornament";
   value?: string;

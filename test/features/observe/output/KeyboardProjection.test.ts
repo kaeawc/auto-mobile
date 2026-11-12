@@ -98,6 +98,17 @@ describe("Android keyboard output projection", () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 
+  test("the folded XR keyboard keeps its owning-window bounds declaration", () => {
+    const source = observation();
+    for (const element of Object.values(source.elements!).flat()) {
+      element.boundsSpace = "window";
+    }
+    const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
+    expect(
+      result.skeleton?.find((row) => row.label === "Keyboard (example.keyboard)"),
+    ).toMatchObject({ boundsSpace: "window" });
+  });
+
   test("full output retains every keyboard node", () => {
     const source = observation();
     const result = sanitizeObserveResult(source, { dropElements: false, project: "full" });

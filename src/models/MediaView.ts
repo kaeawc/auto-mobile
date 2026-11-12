@@ -7,6 +7,7 @@ export interface MediaView {
   className: string;
   mediaType: MediaType;
   bounds: ElementBounds;
+  boundsSpace?: "panel" | "window";
   contentDescription?: string;
   resourceId?: string;
   sourceUrl?: string;

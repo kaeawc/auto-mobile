@@ -61,7 +61,7 @@ test("observations advertise and validate the optional visionOS hierarchyBundleI
   const hierarchyBundleId = "com.apple.mobileslideshow";
   for (const schema of [observeResultSchema, observationSummarySchema]) {
     const advertised = toJSONSchema(schema);
-    expect(advertised.properties?.hierarchyBundleId).toMatchObject({
+    expect(structuredClone(advertised.properties?.hierarchyBundleId)).toMatchObject({
       type: "string",
       description: expect.stringContaining(
         "window app the runner that returned the hierarchy was started for",
@@ -73,7 +73,7 @@ test("observations advertise and validate the optional visionOS hierarchyBundleI
     expect(schema.parse({})).not.toHaveProperty("hierarchyBundleId");
   }
   const observe = generatedDefinitions.find((definition) => definition.name === "observe")!;
-  expect(observe.outputSchema?.properties.hierarchyBundleId).toMatchObject({
+  expect(structuredClone(observe.outputSchema?.properties.hierarchyBundleId)).toMatchObject({
     type: "string",
     description: expect.stringContaining(
       "window app the runner that returned the hierarchy was started for",

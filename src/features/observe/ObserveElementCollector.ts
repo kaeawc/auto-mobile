@@ -1,4 +1,5 @@
 import { xrVisibleElements } from "./xrVisibleElements";
+import { findXrSpatialPanelWindow } from "../xr/xrSpatialPanelInput";
 import { boundsArea, intersectBounds, parseBounds } from "../../utils/bounds";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import type { ElementBounds } from "../../models/ElementBounds";
@@ -60,6 +61,11 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     const rootGroups = new Map<number, SearchableEntry[]>();
     const seen = new Set<SearchableEntry["source"]>();
     const entries = this.searchableHierarchy.project(viewHierarchy);
+    const boundsSpaces = this.xrBoundsSpaces(entries, viewHierarchy, {
+      platform,
+      androidXr,
+      foreground,
+    });
     const projected = xrVisibleElements(entries, viewHierarchy, this.parser, {
       platform,
       androidXr,
@@ -98,6 +104,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       keyboardPackage =
         this.collectFromRoot(entries, group, platform, {
           provenanceState,
+          boundsSpaces,
           collections: {
             keyboardWindows,
             clickable,
@@ -128,6 +135,53 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       setUncollectedWrappers(elements, uncollectedWrappers);
     }
     return elements;
+  }
+
+  private xrBoundsSpaces(
+    entries: readonly SearchableEntry[],
+    viewHierarchy: ViewHierarchyResult,
+    {
+      platform,
+      androidXr,
+      foreground,
+    }: {
+      platform: "android" | "ios";
+      androidXr?: boolean;
+      foreground?: Pick<ObserveResult, "activeWindow" | "backStack">;
+    },
+  ): ReadonlyMap<SearchableEntry["source"], "panel" | "window"> {
+    const panel = findXrSpatialPanelWindow(
+      { ...foreground, viewHierarchy },
+      platform === "android" && androidXr === true,
+    );
+    const panelId = panel?.id;
+    const boundsSpaces = new Map<SearchableEntry["source"], "panel" | "window">();
+    if (panelId !== undefined && Number.isInteger(panelId)) {
+      const owners = new Map<number, number | undefined>();
+      // Window projection unwraps the stamped root to its immediate children.
+      const panelRoots = new Set(
+        this.parser
+          .extractWindowRootGroups({
+            hierarchy: {},
+            windows: [panel!],
+          })
+          .flat(),
+      );
+      // The indexed parent graph already follows each window root, including the
+      // canonical merged tree. Keep this output-only; action entries stay untouched.
+      for (const entry of entries) {
+        const owner = Number.isInteger(entry.properties.windowId)
+          ? entry.properties.windowId
+          : panelRoots.has(entry.source)
+            ? panelId
+            : entry.parentIndex === undefined
+              ? undefined
+              : owners.get(entry.parentIndex);
+        owners.set(entry.index, owner);
+        boundsSpaces.set(entry.source, owner === panelId ? "panel" : "window");
+      }
+    }
+    return boundsSpaces;
   }
 
   private keyboardWindowBounds(
@@ -170,9 +224,11 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     platform: "android" | "ios",
     {
       provenanceState,
+      boundsSpaces,
       collections,
     }: {
       provenanceState: ProvenanceState;
+      boundsSpaces: ReadonlyMap<SearchableEntry["source"], "panel" | "window">;
       collections: {
         /** Keyboard window frames by window rank; read-only context, not a collection. */
         keyboardWindows: ReadonlyMap<number, ElementBounds>;
@@ -195,10 +251,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     for (const searchable of entries) {
       const { properties: nodeProperties, depth } = searchable;
       // Public observe descriptors remain independently owned by each collection.
-      const parsedNode = searchable.element ? structuredClone(searchable.element) : undefined;
-      if (parsedNode) {
-        setHierarchyNodeSource(parsedNode, searchable.source);
-      }
+      const parsedNode = this.cloneOutputElement(searchable, boundsSpaces);
       keyboardRoot = nextKeyboardRoot(
         keyboardRoot,
         nodeProperties.extras?.["automobile:imePackage"],
@@ -247,6 +300,23 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       }
     }
     return capturedKeyboardPackage;
+  }
+
+  /** Own public descriptors independently of the raw hierarchy and action entries. */
+  private cloneOutputElement(
+    searchable: SearchableEntry,
+    boundsSpaces: ReadonlyMap<SearchableEntry["source"], "panel" | "window">,
+  ): Element | undefined {
+    if (!searchable.element) {
+      return undefined;
+    }
+    const element = structuredClone(searchable.element);
+    setHierarchyNodeSource(element, searchable.source);
+    const boundsSpace = boundsSpaces.get(searchable.source);
+    if (boundsSpace) {
+      element.boundsSpace = boundsSpace;
+    }
+    return element;
   }
 }
 

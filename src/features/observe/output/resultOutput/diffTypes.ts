@@ -185,6 +185,7 @@ export interface ObserveDiff {
    * the same coordinate space.
    */
   screenSize?: ObserveResult["screenSize"];
+  xrPanelSpace?: ObserveResult["xrPanelSpace"];
   /**
    * Why the accessibility audit did not run for this capture (issue #6926).
    * Populated by the `finalizeToolResponse` call site from the post-action

@@ -405,6 +405,7 @@ function skeletonSourceForProjection(source: ObserveResult): ObserveResult {
     source.viewHierarchy,
     searchHierarchy === source.viewHierarchy ? undefined : searchHierarchy,
     platform,
+    source.xrPanelSpace,
   ]);
   const validation = skeletonValidationByElements.get(elements);
   if (validation?.inputs === inputs) {
@@ -434,14 +435,18 @@ function recollectMatchingElements(
   elements: NonNullable<ObserveResult["elements"]>,
   hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
   platform: "android" | "ios",
-  foreground: Pick<ObserveResult, "activeWindow" | "backStack">,
+  foreground: Pick<ObserveResult, "activeWindow" | "backStack" | "xrPanelSpace">,
 ): ObserveResult["elements"] {
   const collector = new DefaultObserveElementCollector();
   const expected = skeletonElementShape(elements);
   const matches = (collected: ObserveResult["elements"]) =>
     isDeepStrictEqual(expected, skeletonElementShape(collected)) ? collected : undefined;
   const plain = matches(collector.collect(hierarchy, platform));
-  if (plain || platform !== "android" || !hasSystemUiWindow(hierarchy)) {
+  if (
+    plain ||
+    platform !== "android" ||
+    (!foreground.xrPanelSpace && !hasSystemUiWindow(hierarchy))
+  ) {
     return plain;
   }
   return matches(collector.collect(hierarchy, platform, true, foreground));

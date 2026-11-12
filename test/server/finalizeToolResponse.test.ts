@@ -1888,6 +1888,7 @@ describe("finalizeToolResponse", () => {
         backend: "xctest",
         fallbackReason: "unavailable",
         observationId: "passthrough-observation",
+        xrPanelSpace: { windowId: 93, bounds: { left: 0, top: 0, right: 2768, bottom: 2400 } },
         deviceId: "emulator-5554",
         display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
         freshness,

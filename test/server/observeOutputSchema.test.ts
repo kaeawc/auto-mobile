@@ -897,6 +897,33 @@ describe("elementSchema: occlusion link fields", () => {
   });
 });
 
+test("observe advertises XR panel-window bounds in element and skeleton contracts", () => {
+  for (const boundsSpace of ["panel", "window"] as const) {
+    expect(elementSchema.parse({ bounds: [0, 0, 10, 10], boundsSpace }).boundsSpace).toBe(
+      boundsSpace,
+    );
+    expect(
+      skeletonElementSchema.parse({ bounds: [0, 0, 10, 10], affordances: [], boundsSpace })
+        .boundsSpace,
+    ).toBe(boundsSpace);
+  }
+  expect(elementSchema.safeParse({ bounds: [0, 0, 10, 10], boundsSpace: "screen" }).success).toBe(
+    false,
+  );
+  for (const bounds of [[0, 0, 2768, 2400], { left: 0, top: 0, right: 2768, bottom: 2400 }]) {
+    expect(observeResultSchema.parse({ xrPanelSpace: { windowId: 93, bounds } })).toMatchObject({
+      xrPanelSpace: { windowId: 93, bounds },
+    });
+  }
+  expect(observeResultSchema.safeParse({ xrPanelSpace: { bounds: [0, 0, 10, 10] } }).success).toBe(
+    false,
+  );
+  const published = JSON.stringify(publishedObserveOutputSchema());
+  expect(published).toContain('"boundsSpace"');
+  expect(published).toContain('"xrPanelSpace"');
+  expect(published).toContain("not screen coordinates");
+});
+
 describe("observeResultSchema: every bounds site is the advertised union (#3025)", () => {
   const observeJson = () => flattenTopLevelUnion(toJSONSchema(observeResultSchema));
 

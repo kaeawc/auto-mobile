@@ -136,9 +136,12 @@ function deriveSublabel(el: Element, label: string | undefined): string | undefi
 
 /** Preserve coordinate space and explicit disabled state on a row or its accumulator. */
 function copyElementState(
-  element: Pick<Element, "enabled" | "space">,
-  row: Pick<SkeletonElement, "enabled" | "space">,
+  element: Pick<Element, "enabled" | "space" | "boundsSpace">,
+  row: Pick<SkeletonElement, "enabled" | "space" | "boundsSpace">,
 ): void {
+  if (element.boundsSpace) {
+    row.boundsSpace = element.boundsSpace;
+  }
   if (element.space === "ornament") {
     row.space = element.space;
   }
@@ -258,7 +261,7 @@ function accumulateByIdentity(
     }
     const searchable = toSkeletonSearchable(el);
     const { elementId, label, affordances } = searchable;
-    const key = JSON.stringify([el.space, identityKey(elementId, label, bounds)]);
+    const key = JSON.stringify([el.space, el.boundsSpace, identityKey(elementId, label, bounds)]);
 
     let acc = byIdentity.get(key);
     if (!acc) {
@@ -299,7 +302,7 @@ function containerEnclosesText(
   container: SkeletonAccumulator,
   inner: SkeletonAccumulator,
 ): boolean {
-  if (container.space !== inner.space) {
+  if (container.space !== inner.space || container.boundsSpace !== inner.boundsSpace) {
     return false;
   }
   if (container.provenance && inner.provenance) {
@@ -596,6 +599,9 @@ function collapseSystemUiBlock(nonActionable: SkeletonAccumulator[]): SkeletonAc
     bounds: unionBounds(systemUiEntries.map((entry) => entry.bounds)),
     affordances: new Set<Affordance>(),
   };
+  if (systemUiEntries[0].boundsSpace) {
+    summary.boundsSpace = systemUiEntries[0].boundsSpace;
+  }
   return [...other, summary];
 }
 
@@ -783,6 +789,7 @@ function iosRowRefusedByTap(
 function sameTarget(a: SkeletonAccumulator, b: SkeletonAccumulator): boolean {
   return (
     a.space === b.space &&
+    a.boundsSpace === b.boundsSpace &&
     a.bounds.every((edge, index) => edge === b.bounds[index]) &&
     a.provenance?.group === b.provenance?.group &&
     a.enabled === b.enabled &&

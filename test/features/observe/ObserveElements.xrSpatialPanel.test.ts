@@ -12,11 +12,128 @@ import { sanitizeObserveResult } from "../../../src/features/observe/output/Obse
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { spatialPanelObservation } from "../../helpers/xrSpatialPanelFixture";
-import type { ObserveResult } from "../../../src/models";
+import type { ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { buildObserveResult } from "../../helpers/observeFixture";
 
 function unused(): never {
   throw new Error("Unexpected stage dependency");
 }
+
+test.each([
+  [false, 93],
+  ["host-missing", 105],
+  [true, 98],
+] as const)("XR panel coordinates are declared (capture=%s)", async (capture, windowId) => {
+  const observation = spatialPanelObservation(capture);
+  const raw = structuredClone(observation.viewHierarchy);
+  await enrich(observation, true);
+  expect(observation).toMatchObject({
+    xrPanelSpace: { windowId, bounds: { left: 0, top: 0, right: 2768, bottom: 2400 } },
+  });
+  const appRows = observation.elements!.text.filter((row) =>
+    ["Settings", "Item 1", "Notifications"].includes(row.text ?? ""),
+  );
+  expect(appRows.length).toBeGreaterThan(0);
+  expect(appRows.every((row) => row.boundsSpace === "panel")).toBe(true);
+  const captions = observation.elements!.clickable.filter((row) =>
+    ["Minimize the current window", "Close"].includes(row["content-desc"] ?? ""),
+  );
+  expect(captions.length).toBeGreaterThan(0);
+  expect(captions.every((row) => row.boundsSpace === "window")).toBe(true);
+  const elements = Object.values(observation.elements!).flat();
+  expect(elements.every((row) => row.boundsSpace !== undefined)).toBe(true);
+  const statusRows = elements.filter((row) => row.bounds.top === 0 && row.bounds.bottom === 48);
+  expect(statusRows.length).toBeGreaterThan(0);
+  expect(statusRows.every((row) => row.boundsSpace === "window")).toBe(true);
+  for (const project of ["full", "skeleton"] as const) {
+    const output = sanitizeObserveResult(observation, {
+      dropElements: false,
+      compact: true,
+      project,
+    });
+    expect(output).toMatchObject({ xrPanelSpace: { windowId, bounds: [0, 0, 2768, 2400] } });
+    if (project === "skeleton") {
+      const rows = [...output.skeleton!, ...(output.context ?? [])];
+      expect(rows.find((row) => row.label === "Settings")).toMatchObject({ boundsSpace: "panel" });
+      expect(rows.find((row) => row.label === "Close")).toMatchObject({ boundsSpace: "window" });
+      expect(rows.every((row) => row.boundsSpace !== undefined)).toBe(true);
+    }
+    expect(
+      sanitizeObserveResult(structuredClone(observation), {
+        dropElements: false,
+        compact: true,
+        project,
+      }),
+    ).toEqual(output);
+  }
+  expect(observation.viewHierarchy).toEqual(raw);
+});
+
+test("non-XR full and skeleton output stay byte-identical", () => {
+  const observation = spatialPanelObservation();
+  observation.elements = new ObserveElementsBuilder().build(
+    observation.viewHierarchy!,
+    "android",
+    false,
+    observation,
+  );
+  for (const [project, digest] of [
+    ["full", "5076eef69a06ddd1de991084ab8bb3b37ec2bce8697b0d8cc546966965d3e779"],
+    ["skeleton", "a870556b6f4c3ea679320ebdef816263ba97a442feb096f0891be2566f904593"],
+  ] as const) {
+    const serialized = JSON.stringify(
+      sanitizeObserveResult(observation, { dropElements: false, compact: true, project }),
+    );
+    expect(serialized).not.toContain("boundsSpace");
+    expect(serialized).not.toContain("xrPanelSpace");
+    expect(createHash("sha256").update(serialized).digest("hex")).toBe(digest);
+  }
+});
+
+test("a panel without a window id cannot declare a coordinate space", async () => {
+  const observation = spatialPanelObservation();
+  delete observation.viewHierarchy!.windows!.find((window) => window.id === 93)!.id;
+  await enrich(observation, true);
+  expect(observation.xrPanelSpace).toBeUndefined();
+  expect(JSON.stringify(observation.elements)).not.toContain("boundsSpace");
+});
+
+test("task-aligned stock XR app has no coordinate-space fields", async () => {
+  const capture: Pick<ViewHierarchyResult, "windows"> = JSON.parse(
+    readFileSync(
+      new URL("../../fixtures/android-xr/observe-settings-panel-children.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const observation = buildObserveResult({
+    updatedAt: 0,
+    screenSize: { width: 2560, height: 2558 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: { hierarchy: {}, windows: capture.windows },
+    activeWindow: { appId: "com.android.settings", activityName: ".Settings", layoutSeqSum: 0 },
+    backStack: {
+      currentTaskId: 1,
+      depth: 1,
+      activities: [],
+      tasks: [
+        {
+          id: 1,
+          packageName: "com.android.settings",
+          bounds: { left: 0, top: 48, right: 2048, bottom: 1328 },
+        },
+      ],
+    },
+  });
+  await enrich(observation, true);
+  const output = JSON.stringify(
+    sanitizeObserveResult(observation, { dropElements: false, compact: true, project: "skeleton" }),
+  );
+  expect(output).toContain("Connected devices");
+  expect(output).not.toContain("boundsSpace");
+  expect(output).not.toContain("xrPanelSpace");
+});
 async function enrich(result: ObserveResult, xr: boolean, platform: "android" | "ios" = "android") {
   const timer = new FakeTimer();
   const detector = new FakeAndroidXrDetector(xr);
@@ -199,6 +316,7 @@ test("XR filtering uses the current task when activeWindow is absent", async () 
   await enrich(observation, true);
   expect(JSON.stringify(observation.elements)).not.toContain('"Confirm"');
   expect(JSON.stringify(observation.elements)).toContain('"Settings"');
+  expect(observation.xrPanelSpace?.windowId).toBe(105);
 });
 
 test("XR output preserves visible captions", async () => {
@@ -238,6 +356,8 @@ test.each(["no-foreground", "systemui-active", "non-XR"] as const)(
     }
     await enrich(observation, kind !== "non-XR");
     expect(JSON.stringify(observation.elements)).toContain("Unbind Controllers");
+    expect(observation.xrPanelSpace).toBeUndefined();
+    expect(JSON.stringify(observation.elements)).not.toContain("boundsSpace");
   },
 );
 

@@ -571,12 +571,16 @@ export function imeAccumulator(
   if (boxes.length === 0) {
     return undefined;
   }
-  return {
+  const row: SkeletonAccumulator = {
     elementId: IME_ELEMENT_ID,
     label: `Keyboard (${ime.package})`,
     bounds: unionBounds(boxes),
     affordances: new Set<Affordance>(["input"]),
   };
+  if (allElements(elements).some((element) => element.boundsSpace !== undefined)) {
+    row.boundsSpace = "window";
+  }
+  return row;
 }
 
 const IOS_KEYBOARD_PACKAGE = "com.apple.keyboard";

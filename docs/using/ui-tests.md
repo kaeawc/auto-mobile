@@ -216,6 +216,25 @@ not match rows; its `textMatch: "exact"` comparison is case-sensitive. The top-l
 
 </div>
 
+### Export a recording as an XCTest
+
+`exportPlan` and `recordToolCalls` with `action: "end"` return the recorded plan
+YAML in `planContent`. Pass `format: "xctest"` to also get an `xctest` object for
+an iOS test target (the default, `format: "yaml"`, returns the plan only):
+
+| Field              | Use                                                                        |
+| ------------------ | -------------------------------------------------------------------------- |
+| `planFileName`     | Save `planContent` under this name, for example `save-note.yaml`           |
+| `planResourcePath` | Where the plan must sit in the test bundle, `test-plans/<planFileName>`    |
+| `swiftFileName`    | Save `swiftSource` under this name in the test target                      |
+| `swiftSource`      | An `AutoMobileTestCase` subclass whose `planPath` is `planResourcePath`    |
+| `className`        | The class name, derived from the plan name (`save-note` → `SaveNoteTests`) |
+
+To wire it up, add a `test-plans` folder to the test target as a folder
+reference (in Xcode, **Add Files…** with **Create folder references**), so the
+bundle keeps the `test-plans/` prefix, and save the plan file in it. Then add the Swift file to the same target and run it as in
+[Consume the plan](#3-consume-the-plan).
+
 ### Step expectations
 
 A step can check the screen after its tool succeeds. Each entry in

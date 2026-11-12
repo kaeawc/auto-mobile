@@ -17,6 +17,12 @@ import {
   currentOneShotCli,
 } from "../features/toolSelection/toolSelectionContext";
 import { ActionableError } from "../models/ActionableError";
+import {
+  planExportFormatField,
+  xcTestScaffoldField,
+  xcTestScaffoldSchema,
+  type PlanExportFormat,
+} from "../features/record/swiftTestScaffold";
 
 // ============================================================================
 // Tool Call Recording — "recordToolCalls" tool
@@ -45,6 +51,9 @@ const recordToolCallsSchema = addSessionUuidToSchema(
         .describe(
           "Plan name: on begin, the exported plan's name; on end, overrides the begin name",
         ),
+      format: planExportFormatField().describe(
+        'action=end only: yaml (default) returns the plan only; xctest also returns an AutoMobileTestCase Swift subclass and the plan\'s test-bundle resource path in "xctest"',
+      ),
     })
     .strict(),
 );
@@ -76,6 +85,7 @@ const recordToolCallsResultSchema = z.object({
     .describe(
       "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",
     ),
+  xctest: xcTestScaffoldSchema,
   error: z.string().optional(),
 });
 
@@ -117,7 +127,11 @@ const recordingBeginResponse = (connectionId: RecordingConnectionId, planName?: 
   });
 };
 
-const recordingEndResponse = (connectionId: RecordingConnectionId, planName?: string) => {
+const recordingEndResponse = (
+  connectionId: RecordingConnectionId,
+  planName?: string,
+  format?: PlanExportFormat,
+) => {
   const result = stopToolCallRecording({ connectionId, planName });
   return createStructuredToolResponse({
     success: true,
@@ -129,12 +143,14 @@ const recordingEndResponse = (connectionId: RecordingConnectionId, planName?: st
     ...(result.warnings.length > 0 && { warnings: result.warnings }),
     ...(result.platform && { platform: result.platform }),
     ...(result.platformNote && { platformNote: result.platformNote }),
+    ...xcTestScaffoldField(format, result.planName),
   });
 };
 
 const recordToolCallsTool = async (params: {
   action: "begin" | "end" | "status";
   planName?: string;
+  format?: PlanExportFormat;
 }): Promise<any> => {
   const connectionId = currentAutolockMcpSessionId();
   // Status is always allowed — lets agents probe recording state even when the flag is off.
@@ -156,7 +172,7 @@ const recordToolCallsTool = async (params: {
     if (params.action === "begin") {
       return recordingBeginResponse(connectionId, params.planName);
     }
-    return recordingEndResponse(connectionId, params.planName);
+    return recordingEndResponse(connectionId, params.planName, params.format);
   } catch (error) {
     logger.error(`[recordToolCalls] Failed: ${errorMessage(error)}`);
     return withIsErrorOnFailure(

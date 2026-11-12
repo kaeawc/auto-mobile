@@ -5,7 +5,7 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { compareSelectionRank, selectableCandidates } from "../utility/selectionRank";
 import { normalizeTvosHierarchy } from "./TvosHierarchy";
 import type { TvosRunnerClient } from "./TvosRunnerClient";
-import { tvosRunners } from "./TvosRunnerRegistry";
+import { requireTvosRunner } from "./TvosRunnerRecovery";
 
 type Direction = "up" | "down" | "left" | "right";
 
@@ -316,7 +316,7 @@ export async function tvosTapOn(
 ): Promise<TapOnElementResult> {
   const { maxMoves, maxSearchMoves } = validateOptions(options, budgets);
   signal?.throwIfAborted();
-  const lookup: Lookup = { client: tvosRunners.require(deviceId), options, signal };
+  const lookup: Lookup = { client: await requireTvosRunner(deviceId, signal), options, signal };
   const { client } = lookup;
   const blocked = new Map<string, Set<Direction>>();
   let previous: { signature: string; direction: Direction } | undefined;

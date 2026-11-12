@@ -100,3 +100,25 @@ export function resolveIosCrashBackend(
       )
     : new PhysicalIosCrashBackend();
 }
+
+export interface IosSimulatorAppProcess {
+  pid: number;
+  serviceLabel: string;
+}
+
+export function findIosSimulatorAppProcess(
+  processList: string,
+  appId: string,
+): IosSimulatorAppProcess | null {
+  for (const line of processList.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+\S+\s+(UIKitApplication:(.+?)\[[^\]]+\]\[[^\]]+\])$/);
+    if (match?.[3] === appId) {
+      return { pid: Number(match[1]), serviceLabel: match[2] };
+    }
+  }
+  return null;
+}
+
+export function findIosSimulatorAppProcessId(processList: string, appId: string): number | null {
+  return findIosSimulatorAppProcess(processList, appId)?.pid ?? null;
+}

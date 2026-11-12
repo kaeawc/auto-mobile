@@ -170,11 +170,22 @@ function parkedOutOfSight(node: SearchableEntry, nodes: readonly SearchableEntry
     entry?.bounds && boundsArea(entry.bounds) > 0 ? entry.bounds : undefined;
   const parentOf = (entry: SearchableEntry) =>
     entry.parentIndex === undefined ? undefined : nodes[entry.parentIndex];
+  // `parentIndex` addresses `nodes`; a list that does not match those indexes can
+  // form a cycle, and this synchronous walk must never spin on one (#18084).
+  const visited = new Set<SearchableEntry>([node]);
+  const next = (entry: SearchableEntry) => {
+    const parent = parentOf(entry);
+    if (!parent || visited.has(parent)) {
+      return undefined;
+    }
+    visited.add(parent);
+    return parent;
+  };
   let current: SearchableEntry | undefined = node;
   while (current) {
-    let ancestor = parentOf(current);
+    let ancestor = next(current);
     while (ancestor && !sized(ancestor)) {
-      ancestor = parentOf(ancestor);
+      ancestor = next(ancestor);
     }
     const own = sized(current);
     const outer = sized(ancestor);

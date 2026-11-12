@@ -258,3 +258,29 @@ test("hierarchy identity alone does not enable foreground XR filtering", () => {
   );
   expect(JSON.stringify(observation.elements)).toContain("Unbind Controllers");
 });
+
+test("a cached XR clone restores provenance and keeps the live skeleton labels (#18084)", async () => {
+  const observation = spatialPanelObservation();
+  // A text descendant that exactly fills its clickable owner keeps its label only
+  // when recollection reproduces the live XR visibility policy.
+  const entries = new SearchableHierarchy().project(observation.viewHierarchy!);
+  const leaves = entries.filter((entry) => entry.properties.text === "Item 1");
+  expect(leaves.length).toBeGreaterThan(0);
+  for (const leaf of leaves) {
+    let owner = leaf.parentIndex === undefined ? undefined : entries[leaf.parentIndex];
+    while (owner && !owner.affordances.includes("tap")) {
+      owner = owner.parentIndex === undefined ? undefined : entries[owner.parentIndex];
+    }
+    expect(owner).toBeDefined();
+    Object.assign(leaf.source, { bounds: structuredClone(owner!.source.bounds) });
+  }
+  await enrich(observation, true);
+  const options = { dropElements: true, compact: true, project: "skeleton" } as const;
+  // Cache returns are structured clones, which drop the collector's provenance.
+  const clone = structuredClone(observation);
+  expect(getSearchableEntries(clone.elements!)).toBeUndefined();
+  const live = sanitizeObserveResult(observation, options);
+  const cloned = sanitizeObserveResult(clone, options);
+  expect(JSON.stringify(live)).toContain('"label":"Item 1"');
+  expect(cloned).toEqual(live);
+});

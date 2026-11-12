@@ -5,6 +5,7 @@ import Foundation
 enum SimulatorDetection {
     /// Check if any iOS simulator is currently booted (fast check)
     static func hasBootedSimulator() -> Bool {
+        #if os(macOS)
         PerfTimer.log("hasBootedSimulator: starting xcrun simctl")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
@@ -47,5 +48,8 @@ enum SimulatorDetection {
             PerfTimer.log("hasBootedSimulator: ERROR - \(error)")
             return false
         }
+        #else
+        return false
+        #endif
     }
 }

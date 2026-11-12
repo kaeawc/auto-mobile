@@ -9,6 +9,7 @@ struct SystemDaemonSubcommandLauncher: DaemonSubcommandLauncher, Sendable {
         environment: [String: String],
         timeoutSeconds: TimeInterval
     ) -> DaemonSubcommandOutcome {
+        #if os(macOS)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -34,5 +35,10 @@ struct SystemDaemonSubcommandLauncher: DaemonSubcommandLauncher, Sendable {
             PerfTimer.log("runDaemonSubcommand: ERROR - failed to run process: \(error)")
             return .failed(stderr: error.localizedDescription)
         }
+        #else
+        let message = "starting the AutoMobile daemon from an iOS test host is unsupported; start it on the host first"
+        PerfTimer.log("runDaemonSubcommand: \(message)")
+        return .failed(stderr: message)
+        #endif
     }
 }

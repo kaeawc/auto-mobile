@@ -198,6 +198,7 @@ extension DaemonManager {
         for path in commonPaths where FileManager.default.isExecutableFile(atPath: path) {
             return path
         }
+        #if os(macOS)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
         process.arguments = [name]
@@ -215,7 +216,11 @@ extension DaemonManager {
                     return path
                 }
             }
-        } catch {}
+        } catch {
+            // PATH lookup is optional; callers report when no compatible executable is found.
+            PerfTimer.log("findExecutable: which lookup failed: \(error)")
+        }
+        #endif
         return nil
     }
 }

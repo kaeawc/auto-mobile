@@ -9610,6 +9610,11 @@
           "description": "Plan name",
           "type": "string"
         },
+        "format": {
+          "description": "yaml (default) returns the plan only; xctest also returns an AutoMobileTestCase Swift subclass and the plan's test-bundle resource path in \"xctest\"",
+          "type": "string",
+          "enum": ["yaml", "xctest"]
+        },
         "resourceLink": {
           "description": "Return the complete result as an automobile:tool-output resource and a resource_link block instead of inline (default off). Only the headline fields stay inline; read the link to get the rest.",
           "type": "boolean"
@@ -9656,6 +9661,39 @@
           "items": {
             "type": "string"
           }
+        },
+        "xctest": {
+          "description": "format \"xctest\" only: Swift test class and plan resource path for the test bundle",
+          "type": "object",
+          "properties": {
+            "className": {
+              "type": "string"
+            },
+            "swiftFileName": {
+              "description": "File to add to the XCTest target",
+              "type": "string"
+            },
+            "swiftSource": {
+              "description": "AutoMobileTestCase subclass that runs the plan",
+              "type": "string"
+            },
+            "planFileName": {
+              "description": "File name to save planContent as",
+              "type": "string"
+            },
+            "planResourcePath": {
+              "description": "Path of the plan inside the test bundle's resources; the class's planPath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "className",
+            "swiftFileName",
+            "swiftSource",
+            "planFileName",
+            "planResourcePath"
+          ],
+          "additionalProperties": false
         },
         "error": {
           "type": "string"
@@ -38425,6 +38463,11 @@
           "description": "Plan name: on begin, the exported plan's name; on end, overrides the begin name",
           "type": "string"
         },
+        "format": {
+          "description": "action=end only: yaml (default) returns the plan only; xctest also returns an AutoMobileTestCase Swift subclass and the plan's test-bundle resource path in \"xctest\"",
+          "type": "string",
+          "enum": ["yaml", "xctest"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -38486,6 +38529,39 @@
         "platformNote": {
           "description": "action=end only: why the plan has no top-level platform (recorded calls on mixed or unknown platforms)",
           "type": "string"
+        },
+        "xctest": {
+          "description": "format \"xctest\" only: Swift test class and plan resource path for the test bundle",
+          "type": "object",
+          "properties": {
+            "className": {
+              "type": "string"
+            },
+            "swiftFileName": {
+              "description": "File to add to the XCTest target",
+              "type": "string"
+            },
+            "swiftSource": {
+              "description": "AutoMobileTestCase subclass that runs the plan",
+              "type": "string"
+            },
+            "planFileName": {
+              "description": "File name to save planContent as",
+              "type": "string"
+            },
+            "planResourcePath": {
+              "description": "Path of the plan inside the test bundle's resources; the class's planPath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "className",
+            "swiftFileName",
+            "swiftSource",
+            "planFileName",
+            "planResourcePath"
+          ],
+          "additionalProperties": false
         },
         "error": {
           "type": "string"

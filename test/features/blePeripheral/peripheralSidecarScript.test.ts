@@ -15,7 +15,8 @@ describe("BLE sidecar script", () => {
     expect(script).toContain(
       'raise TimeoutError(f"Timed out after {timeout_s} s opening BLE transport {spec}")',
     );
-    expect(script).toContain("OPEN_TRANSPORT_TIMEOUT_S = 20\n");
+    // Windows checkouts use CRLF, so anchor on the line rather than a literal newline.
+    expect(script).toMatch(/^OPEN_TRANSPORT_TIMEOUT_S = 20\r?$/m);
     expect(script).toContain(
       'transport = await open_transport_bounded(open_transport, config["transport"])',
     );

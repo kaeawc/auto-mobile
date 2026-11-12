@@ -29,6 +29,22 @@ interface Peripheral {
   cleanupFailed?: boolean;
 }
 
+/** Warning carried by results whose transport is the host-wide netsim every emulator shares. */
+export const SHARED_TRANSPORT_WARNING =
+  "Shared netsim: every emulator on this host can see this peripheral. Set AUTOMOBILE_EMULATOR_NETSIM_ISOLATION=true and relaunch the emulator for a private netsim.";
+
+/** Builds a tool result; only the plain `android-netsim` transport is the shared instance. */
+function peripheralResult(handle: string, config: BlePeripheralConfig, status: BleSidecarStatus) {
+  const transportShared = config.transport === "android-netsim";
+  return {
+    handle,
+    ...config,
+    ...status,
+    transportShared,
+    ...(transportShared ? { warning: SHARED_TRANSPORT_WARNING } : {}),
+  };
+}
+
 /** Released-session tombstones only fence calls racing the release; the oldest are dropped past this bound. */
 export const MAX_ENDED_SESSIONS = 256;
 
@@ -73,12 +89,12 @@ export class BlePeripheralManager {
       await peripheral.sidecar.stop();
       const status = await peripheral.sidecar.status();
       this.peripherals.delete(args.handle!);
-      return { handle: args.handle!, ...peripheral.config, ...status };
+      return peripheralResult(args.handle!, peripheral.config, status);
     }
     if (args.action === "notify") {
       await peripheral.sidecar.notify(args);
     }
-    return { handle: args.handle!, ...peripheral.config, ...(await peripheral.sidecar.status()) };
+    return peripheralResult(args.handle!, peripheral.config, await peripheral.sidecar.status());
   }
 
   private async start(owner: string, args: BlePeripheralArgs, signal?: AbortSignal) {
@@ -113,7 +129,7 @@ export class BlePeripheralManager {
           "BLE sidecar stopped during startup; check the transport and start again.",
         );
       }
-      return { handle, ...config, ...status };
+      return peripheralResult(handle, config, status);
     } catch (error) {
       try {
         await peripheral.sidecar.stop();

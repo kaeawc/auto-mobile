@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_ENDED_SESSIONS } from "../../../src/features/blePeripheral/BlePeripheralManager";
+import {
+  MAX_ENDED_SESSIONS,
+  SHARED_TRANSPORT_WARNING,
+} from "../../../src/features/blePeripheral/BlePeripheralManager";
 import { blePeripheralSchema } from "../../../src/features/blePeripheral/blePeripheralSchema";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { blePeripheralFixture, bleStartArgs } from "../../helpers/blePeripheralFixture";
@@ -44,6 +47,39 @@ describe("session-owned BLE peripherals", () => {
     // The stopped handle is gone, so releasing the session has nothing left to kill.
     await manager.releaseSession("s1");
     expect(sidecars.created[0].stops).toBe(1);
+  });
+
+  test("start and status flag the shared netsim with a warning", async () => {
+    const { manager } = blePeripheralFixture();
+    const started = await manager.run("s1", bleStartArgs());
+    expect(started).toMatchObject({
+      transport: "android-netsim",
+      transportShared: true,
+      warning: SHARED_TRANSPORT_WARNING,
+    });
+    expect(started.warning).toContain("AUTOMOBILE_EMULATOR_NETSIM_ISOLATION=true");
+    const status = await manager.run(
+      "s1",
+      blePeripheralSchema.parse({ action: "status", handle: started.handle }),
+    );
+    expect(status).toMatchObject({ transportShared: true, warning: SHARED_TRANSPORT_WARNING });
+  });
+
+  test("a private netsim endpoint is not shared and carries no warning", async () => {
+    const { manager, transports } = blePeripheralFixture();
+    transports.result = "android-netsim:localhost:8877";
+    const started = await manager.run("s1", bleStartArgs());
+    expect(started).toMatchObject({
+      transport: "android-netsim:localhost:8877",
+      transportShared: false,
+    });
+    expect("warning" in started).toBe(false);
+    const status = await manager.run(
+      "s1",
+      blePeripheralSchema.parse({ action: "status", handle: started.handle }),
+    );
+    expect(status.transportShared).toBe(false);
+    expect("warning" in status).toBe(false);
   });
 
   test("a failed stop keeps the handle so stop can be retried", async () => {

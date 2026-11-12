@@ -173,4 +173,8 @@ export const blePeripheralOutputSchema = bleSidecarStatusSchema.extend({
   address: z.string(),
   presets: z.array(z.enum(["battery", "heartRate", "custom"])),
   transport: z.string(),
+  transportShared: z
+    .boolean()
+    .describe("True when transport is the host-wide netsim that every emulator can see"),
+  warning: z.string().optional().describe("Present when transportShared is true"),
 });

@@ -102,3 +102,44 @@ test("itemsStayed tells reused-ID form rows apart by their editable value", () =
   expect(itemsStayed(previous, formObservation(["Cy", "Di"]))).toBe(false);
   expect(itemsStayed(previous, formObservation(["Ann", "Bob"]))).toBe(true);
 });
+
+function fieldsObservation(fields: Array<Record<string, string>>): ObserveResult {
+  const page = observation([]);
+  const root = page.viewHierarchy?.hierarchy.node as Element & { node?: unknown };
+  root.node = fields.map((field, i) => ({
+    ...field,
+    bounds: { left: 0, top: i * 100, right: 400, bottom: (i + 1) * 100 },
+  }));
+  return page;
+}
+
+test("itemsStayed tells reused-ID iOS fields apart by their placeholder", () => {
+  const field = (hint: string) => ({
+    "resource-id": "field",
+    "ios-accessibility-label": "Field",
+    class: "UITextField",
+    value: "",
+    "hint-text": hint,
+  });
+  const previous = {
+    container,
+    signature: containerContentSignature(
+      fieldsObservation([field("First name"), field("Last name")]),
+      container,
+    ),
+  };
+  expect(itemsStayed(previous, fieldsObservation([field("Street"), field("City")]))).toBe(false);
+  expect(itemsStayed(previous, fieldsObservation([field("First name"), field("Last name")]))).toBe(
+    true,
+  );
+});
+
+test("value-only editable rows reach the signature but not the overlap keys", () => {
+  const field = (value: string) => ({ class: "android.widget.EditText", value });
+  const page = fieldsObservation([field("Ann"), field("Bob")]);
+  const previous = { container, signature: containerContentSignature(page, container) };
+  expect(previous.signature).not.toBe("");
+  expect(visibleScrollKeys(page, container).size).toBe(0);
+  expect(itemsStayed(previous, fieldsObservation([field("Cy"), field("Di")]))).toBe(false);
+  expect(itemsStayed(previous, fieldsObservation([field("Ann"), field("Bob")]))).toBe(true);
+});

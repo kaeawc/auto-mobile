@@ -188,6 +188,7 @@ class CtrlProxyMessageHandler(
               contentDesc = request.identityContentDesc,
               labelText = request.identityLabelText,
               labelContentDesc = request.identityLabelContentDesc,
+              checkable = request.identityCheckable,
             )
             .takeUnless { it == NodeIdentityHints() },
           request.allowInvisible,

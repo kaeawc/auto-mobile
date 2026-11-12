@@ -20,8 +20,18 @@ function assertDisplayInputSupported(
   androidXr: boolean,
   message: string,
 ): void {
+  if (isXrSpatialPanelApp(observation, androidXr)) {
+    throw new ActionableError(message);
+  }
+}
+
+/** Whether the foreground app embeds content outside its task's display-input surface. */
+export function isXrSpatialPanelApp(
+  observation: Pick<ObserveResult, "activeWindow" | "backStack" | "viewHierarchy">,
+  androidXr: boolean,
+): boolean {
   if (!androidXr) {
-    return;
+    return false;
   }
   const hierarchy = resolveViewHierarchyForSearch(observation.viewHierarchy);
   const packageName = xrForegroundApp(observation);
@@ -33,7 +43,7 @@ function assertDisplayInputSupported(
     ) ?? observation.backStack?.tasks.find((candidate) => candidate.packageName === packageName);
   const taskBounds = parseBounds(task?.bounds);
   if (!packageName || packageName.startsWith("com.android.systemui") || !taskBounds) {
-    return;
+    return false;
   }
   const embeddedPanel = hierarchy?.windows?.some((window) => {
     if (window.type !== 1 || window.packageName !== packageName) {
@@ -48,9 +58,7 @@ function assertDisplayInputSupported(
         bounds.bottom > taskBounds.bottom)
     );
   });
-  if (embeddedPanel) {
-    throw new ActionableError(message);
-  }
+  return embeddedPanel === true;
 }
 
 /** Swipe containers still inject display input unless a semantic node action succeeds. */

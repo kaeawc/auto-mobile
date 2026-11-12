@@ -23,7 +23,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { assertXrDisplayInputSupported } from "../../../src/features/xr/xrSpatialPanelInput";
 
 const device = { name: "fake", platform: "android", deviceId: "fake-spatial" } as const;
-function setup(capture: boolean | "host-missing" = false) {
+function setup(capture: boolean | "host-missing" | "switch-scroll" = false) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const adb = new FakeAdbClient();
@@ -169,7 +169,7 @@ test.each([false, true, "host-missing"] as const)(
 
 for (const capture of [false, true, "host-missing"] as const) {
   test.each([undefined, "0"])(
-    `swipeOn screen target refuses SpatialPanel input (display=%s, capture=${capture})`,
+    `swipeOn screen target uses a panel node scroll when available (display=%s, capture=${capture})`,
     async (display) => {
       const { observation, timer, adb, xrDetector, service } = setup(capture);
       const gesture = new FakeGestureExecutor();
@@ -188,10 +188,14 @@ for (const capture of [false, true, "host-missing"] as const) {
         observation,
       });
       const result = await swipe.execute({ direction: "up", autoTarget: false, display });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain(
-        "display-input swipe scrolling is unsupported on XR spatial panels",
-      );
+      expect(result.success).toBe(capture !== true);
+      if (capture === true) {
+        expect(result.error).toContain(
+          "display-input swipe scrolling is unsupported on XR spatial panels",
+        );
+      } else {
+        expect(service.getNodeActionHistory().length).toBeGreaterThan(0);
+      }
       expect(gesture.getSwipeCalls()).toEqual([]);
       expect(adb.getAllCommands()).toEqual([]);
     },
@@ -303,4 +307,21 @@ test("XR home space with no foreground app permits display input", () => {
   delete observation.activeWindow;
   delete observation.backStack;
   expect(() => assertXrDisplayInputSupported(observation, true)).not.toThrow();
+});
+
+test("tapOn elementId clicks the captured unlabeled checkable panel switch", async () => {
+  const { tap, service, adb } = setup("switch-scroll");
+  const result = await tap.execute({ action: "tap", elementId: "s2-54a37556722ca76a" });
+  expect(result.success).toBe(true);
+  expect(service.getNodeActionHistory()).toMatchObject([
+    {
+      action: "click",
+      selector: undefined,
+      expectedBounds: { left: 32, top: 65, right: 136, bottom: 161 },
+      identityHints: { checkable: true },
+    },
+  ]);
+  expect(service.getNodeActionHistory()).toHaveLength(1);
+  expect(service.getTapHistory()).toEqual([]);
+  expect(adb.getAllCommands()).toEqual([]);
 });

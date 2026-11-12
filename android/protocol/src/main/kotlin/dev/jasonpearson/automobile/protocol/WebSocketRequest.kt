@@ -322,6 +322,7 @@ data class RequestAction(
   val identityContentDesc: String? = null,
   val identityLabelText: String? = null,
   val identityLabelContentDesc: String? = null,
+  val identityCheckable: Boolean? = null,
   /** Selector clicks may opt into nonempty invisible nodes at exact expected bounds. */
   val allowInvisible: Boolean = false,
   /** For action `custom`: the label of the app-defined accessibility action to perform. */

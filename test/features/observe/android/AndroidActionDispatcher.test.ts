@@ -225,3 +225,50 @@ describe("AndroidActionDispatcher", () => {
     expect(await pending).toMatchObject({ success: false, error: "rejected" });
   });
 });
+
+for (const action of ["scroll_forward", "scroll_backward", "click"] as const) {
+  for (const v2 of [false, true]) {
+    test(`${action} new bounds semantics require v2=${v2}`, async () => {
+      const sent: string[] = [];
+      const { dispatcher } = harness({
+        connected: true,
+        sent,
+        supported: [
+          "node_selector_actions",
+          "node_selector_bounds_v1",
+          ...(v2 ? ["node_selector_bounds_v2"] : []),
+        ],
+      });
+      const request = dispatcher.requestNodeAction(action, undefined, {
+        expectedBounds: { left: 32, top: 65, right: 136, bottom: 161 },
+        ...(action === "click" ? { identityHints: { checkable: true } } : {}),
+      });
+      if (!v2) {
+        await expect(request).rejects.toThrow("Update CtrlProxy");
+        expect(sent).toEqual([]);
+      } else {
+        expect((await request).success).toBe(true);
+        expect(JSON.parse(sent[0]!)).toMatchObject({
+          action,
+          boundsLeft: 32,
+          ...(action === "click" ? { identityCheckable: true } : {}),
+        });
+        expect(JSON.parse(sent[0]!)).not.toHaveProperty("selector");
+      }
+    });
+  }
+}
+
+test("checkable false is preserved on the request wire", async () => {
+  const sent: string[] = [];
+  const { dispatcher } = harness({
+    connected: true,
+    sent,
+    supported: ["node_selector_actions", "node_selector_bounds_v1", "node_selector_bounds_v2"],
+  });
+  await dispatcher.requestNodeAction("click", undefined, {
+    expectedBounds: { left: 1, top: 2, right: 3, bottom: 4 },
+    identityHints: { checkable: false },
+  });
+  expect(JSON.parse(sent[0]!)).toHaveProperty("identityCheckable", false);
+});

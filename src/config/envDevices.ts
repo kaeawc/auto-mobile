@@ -275,6 +275,12 @@ export const DEVICES_ENV = {
     default: "unset",
     doc: "Directory where the iOS client records CtrlProxy exchanges.",
   },
+  HEADLESS: {
+    name: "AUTOMOBILE_HEADLESS",
+    kind: "bool",
+    default: "unset",
+    doc: "1/true runs prototype calls on the in-memory virtual device instead of a real device (same as --headless).",
+  },
   IOS_HEADLESS: {
     name: "AUTOMOBILE_IOS_HEADLESS",
     kind: "string",

@@ -202,6 +202,16 @@ const prototypeDeviceStatusReadingSchema = z.object({
   simulated: z.literal(true).optional(),
 });
 export const prototypeOutputSchema = z.object({
+  virtualDevice: z
+    .object({
+      deviceId: z.string(),
+      renderer: z.literal("web"),
+      unsupportedCapabilities: z.array(z.string()),
+    })
+    .optional()
+    .describe(
+      "Headless mode only (AUTOMOBILE_HEADLESS=1 or --headless): the call ran on the in-memory virtual device, not a real device; the prototype renders only as automobile:prototype/<id>/web, and specs or actions needing an unsupportedCapabilities entry are refused",
+    ),
   screenMap: z
     .object({
       nodes: z.array(

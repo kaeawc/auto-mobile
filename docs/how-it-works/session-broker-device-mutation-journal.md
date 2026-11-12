@@ -40,7 +40,7 @@ it. Fallback-prefixed opaque rows force baseline fallback. Unrevertible journal
 rows also force fallback unless baseline cleaning already restores their effects.
 On Android this covers packages, clipboard, rotation, screen reader, keep-awake,
 raw global/system/secure settings, verified display rows (`density`, `nightMode` and `display:*`),
-opened URLs and launched preinstalled apps (below), and screen state via the next wakeAndUnlock.
+opened URLs and launched preinstalled apps (below), and screen state via the next `wakeAndUnlock`.
 
 Package cleaning lists only `pm list packages -3`, so a preinstalled app keeps its data
 across a plain clean. Android `launchApp` and `measureStartup` therefore journal a
@@ -68,7 +68,7 @@ deleting) their raw settings rows when the journaled prior is readable. The Andr
 `textDirection` prior is the raw `global:debug.force_rtl` and `global:force_rtl` rows.
 `calendarSystem` forces fallback: its prior is the derived calendar (the locale's, or
 `gregory` for an unset `calendar_type` row), which device-setting defaults also read, so
-it does not say what the row held. changeLocalization's
+it does not say what the row held. `changeLocalization`'s
 per-app locale row (`["app-locale", appId]`) journals `{ userId, locales }`, read with
 `cmd locale get-app-locales` for the user the tool resolves; the port writes the list
 back with `set-app-locales` (an empty list clears the override) and reads it back. Below
@@ -91,7 +91,7 @@ Android cleaning ends by comparing three baseline observations the session may c
 outside the journal. The time zone (`persist.sys.timezone`) is restored in place with the
 `clock:timezone` revert, `cmd alarm set-timezone` followed by a property read-back that
 must match; a baseline without a zone, or a failed read-back, fails cleaning. The same
-verified revert replays a journaled `clock:timezone` row (changeLocalization `timeZone`)
+verified revert replays a journaled `clock:timezone` row (`changeLocalization` `timeZone`)
 whose prior was readable. The device locale (`persist.sys.locale`) has no in-place restore
 (cleaning a raw `system_locales` row does not apply it), so any difference fails cleaning.
 AccountManager accounts are observed per user as a SHA-256 of the sorted `Account {...}`

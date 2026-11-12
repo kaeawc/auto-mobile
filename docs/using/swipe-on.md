@@ -1,4 +1,4 @@
-# swipeOn
+# `swipeOn`
 
 `swipeOn` swipes in a `direction` on the screen or a selected `container`.
 On iOS, a container thinner than 48 pt along the swipe axis (such as a sheet

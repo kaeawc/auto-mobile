@@ -16,7 +16,7 @@ export type {
 /** #15097 checked the driving surface; combination hazards are reported separately. */
 export const coreDrivingImpact: ImpactItem = {
   description:
-    "Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected.",
+    "Core driving (`startDevice` runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected.",
   confidence: "verified",
   evidence:
     "#15097: driving surface passed on iOS 27.0; see unsafeWith / #15218 for combinations that spin the CPU",

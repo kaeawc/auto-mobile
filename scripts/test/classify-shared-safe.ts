@@ -4,7 +4,7 @@
  *
  * `scripts/test-ts.sh unit` runs every unit file under `bun test --isolate`,
  * which re-creates a realm and re-imports the module graph per file. The study
- * in docs/design-docs/ci/unit-lane-scaling.md measured that as 83% of the
+ * in docs/how-it-works/ci/unit-lane-scaling.md measured that as 83% of the
  * lane's wall time. The owner decision on #10583 is to run "tier C" files, the
  * ones with no static shared-state signal, together in shared (non-isolated)
  * processes, and keep everything else isolated.
@@ -944,7 +944,7 @@ const ALLOWLIST_HEADER = [
   "# spies qualify only in tests/beforeEach with every restore proven (#13568).",
   "# Losing proof reports file:line:reason. beforeAll spies always stay isolated.",
   "# Regenerate to move it back to the isolated group. New files run isolated",
-  "# until the list is regenerated. See docs/design-docs/ci/unit-lane-scaling.md.",
+  "# until the list is regenerated. See docs/how-it-works/ci/unit-lane-scaling.md.",
 ];
 
 export function renderAllowlist(paths: readonly string[]): string {

@@ -123,7 +123,7 @@ export function loadAndroidRawTrimCandidatesObserve(): ObserveResult {
 /**
  * Real-device before/after observation pairs captured for the `--actions-diff-observe`
  * sign-off (issue #3051; see
- * `docs/design-docs/plat/android/actions-diff-observe-signoff.md`). Each file is a
+ * `docs/how-it-works/plat/android/actions-diff-observe-signoff.md`). Each file is a
  * genuine emulator capture of the AutoMobile Playground app, in the *post-sanitize*
  * form `finalizeToolResponse` diffs (`sanitizeObserveResult(obs, {dropElements:true})`),
  * with diff-irrelevant heavy fields (`elements`, `performanceAudit`, `perfTiming`,

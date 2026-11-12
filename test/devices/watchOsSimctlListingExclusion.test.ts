@@ -8,7 +8,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 // `simctl list devices --json` groups every simulator by runtime, Apple Watch ones included. The
 // iOS listing must never publish a watch as `platform: "ios"`, or readiness, pools and iOS-only
-// tools would drive it as an iPhone (#14901, docs/decisions/watchos-platform.md).
+// tools would drive it as an iPhone (#14901, docs/devlog/2026-10-28-watchos-platform.md).
 
 const IOS_RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-18-6";
 const WATCH_RUNTIME = "com.apple.CoreSimulator.SimRuntime.watchOS-11-0";

@@ -1,7 +1,7 @@
 # Keep each exception tied to a specific review decision.
 scripts/act/apply_act.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
 scripts/android/generate-dokka.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
-scripts/android/put-app-file-picker-smoke.sh  # docs/decisions/ios-user-files-provider.md documents the ios/ path, not this android/ path
+scripts/android/put-app-file-picker-smoke.sh  # docs/devlog/2026-08-28-ios-user-files-provider.md documents the ios/ path, not this android/ path
 scripts/ios/ctrl-proxy-uninstall.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
 scripts/ios/generate-docc.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
 scripts/ios/kill-all-simulators.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending

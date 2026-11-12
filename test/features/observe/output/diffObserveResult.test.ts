@@ -2048,7 +2048,7 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
 
 // --- Volatile `extras` a11y metadata exclusion (issue #3051 real-device sign-off)
 //
-// The real-device sign-off (docs/design-docs/plat/android/actions-diff-observe-signoff.md)
+// The real-device sign-off (docs/how-it-works/plat/android/actions-diff-observe-signoff.md)
 // found that the `extras` node attribute — a bag of AccessibilityNodeInfo SDK
 // metadata (`AccessibilityNodeInfoCompat.SPANS_START_KEY`,
 // `EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL`, `AccessibilityNodeInfo.roleDescription`)

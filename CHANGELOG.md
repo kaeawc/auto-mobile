@@ -1576,7 +1576,7 @@
 - audit (Android): contrast check samples the background as text colour, reporting ~1.16:1 on high-contrast Settings titles ([#14738](https://github.com/kaeawc/auto-mobile/issues/14738)) (android, a11y)
 - performanceTrace: 0-byte Perfetto trace on Android (pulled before flush); malformed xctrace and 90 s stop on iOS Simulator ([#14737](https://github.com/kaeawc/auto-mobile/issues/14737)) (android, ios, performance)
 - displayConfig iOS Simulator: boldText fails when the accessibility key is absent; fontScale 0.8 (extra-Small) poisons later calls ([#14736](https://github.com/kaeawc/auto-mobile/issues/14736)) (ios, a11y)
-- main red: validateMarkdownRepoPaths flags docs/design-docs/atc-build-integration.md -> src/cli.mjs ([#14723](https://github.com/kaeawc/auto-mobile/issues/14723)) (documentation, ci)
+- main red: validateMarkdownRepoPaths flags docs/how-it-works/atc-build-integration.md -> src/cli.mjs ([#14723](https://github.com/kaeawc/auto-mobile/issues/14723)) (documentation, ci)
 - Local gates fail on pristine main in the sandbox: validateMarkdownRepoPaths, fastValidationRegistryCoverage, oxlintConfigScoping.integration, integrationSafeTier, appFileService rollback ([#14717](https://github.com/kaeawc/auto-mobile/issues/14717)) (ci, devxp)
 - main red: :protocol:detektMain CyclomaticComplexMethod in PrototypeObjectRules.visitObject (15 > 14) ([#14716](https://github.com/kaeawc/auto-mobile/issues/14716)) (android, ci)
 - main red on macOS: IosCtrlProxyBuilder 'codesign require flag yes' expects false after #14354 made yes truthy ([#14686](https://github.com/kaeawc/auto-mobile/issues/14686)) (ios, ci)

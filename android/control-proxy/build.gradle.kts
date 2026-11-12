@@ -180,7 +180,7 @@ dependencies {
   implementation(libs.ktor.serialization.kotlinx.json)
   implementation(libs.okhttp)
   implementation(libs.okhttp.sse)
-  // Typed device client for prototype request actions (no converters; see docs/decisions)
+  // Typed device client for prototype request actions (no converters; see docs/devlog)
   implementation(libs.retrofit)
 
   // Test dependencies

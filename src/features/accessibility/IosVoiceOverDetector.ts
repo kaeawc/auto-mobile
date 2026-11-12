@@ -11,7 +11,7 @@ import { TTLCache } from "../../utils/cache/Cache";
  * DefaultIosVoiceOverDetector handles detection of VoiceOver on iOS devices
  * via CtrlProxy WebSocket, with caching to minimize performance impact.
  *
- * Design: As per docs/design-docs/mcp/a11y/talkback-voiceover.md Phase 1
+ * Design: As per docs/how-it-works/mcp/a11y/talkback-voiceover.md Phase 1
  * - Queries UIAccessibility.isVoiceOverRunning via CtrlProxy WebSocket
  * - Caches results with 60-second TTL
  * - Supports feature flag overrides for testing

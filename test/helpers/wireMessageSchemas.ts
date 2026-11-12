@@ -126,7 +126,14 @@ export const screenshotFrameSchema = z.looseObject({
   screenshotFormat: z.string().optional(),
   screenshotCaptureSource: z.string().optional(),
   screenshotFallback: z.boolean().optional(),
-  screenshotFallbackReason: z.string().optional(),
+  screenshotFallbackReason: z.string().nullable().optional(),
+  screenshotStageDurationsMs: z
+    .object({
+      ctrlProxyMs: z.number().optional(),
+      adbMs: z.number().optional(),
+      totalMs: z.number(),
+    })
+    .optional(),
   screenshotCaptureDurationMs: z.number().optional(),
   screenshotEncodeDurationMs: z.number().optional(),
   screenshotByteLength: z.number().optional(),

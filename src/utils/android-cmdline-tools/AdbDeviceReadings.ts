@@ -124,7 +124,7 @@ export class AdbDeviceReadings {
    *
    * Keyguard interaction has a hard ~7s budget (`config_lockScreenDisplayTimeout`,
    * a baked framework resource, not a settable key) and a documented key-event
-   * unlock recipe; see docs/design-docs/plat/android/keyguard.md before building
+   * unlock recipe; see docs/how-it-works/plat/android/keyguard.md before building
    * anything that drives a locked device.
    */
   async getDeviceLock(signal?: AbortSignal): Promise<DeviceLockState | null> {

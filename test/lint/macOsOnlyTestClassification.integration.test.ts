@@ -17,7 +17,7 @@ const testFiles = discoverTestFiles(ROOT);
 /**
  * Owner rule (2026-10-23): iOS tests never run on Linux or Windows. A path with an iOS
  * token is skipped off macOS automatically; this guard covers the two ways a test can
- * escape that rule or be skipped by accident (docs/design-docs/ci/macos-only-tests.md).
+ * escape that rule or be skipped by accident (docs/how-it-works/ci/macos-only-tests.md).
  */
 /**
  * Each test walks the import graph of every test file (about 5 s on an idle machine, over 20 s

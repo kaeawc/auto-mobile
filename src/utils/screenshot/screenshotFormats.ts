@@ -1,3 +1,4 @@
+import path from "node:path";
 import { createHash } from "node:crypto";
 
 /**
@@ -20,6 +21,11 @@ export type ScreenshotFormat = "jpeg" | "png" | "webp";
  */
 export function screenshotExtensionForFormat(format: ScreenshotFormat): string {
   return format === "jpeg" ? "jpg" : format;
+}
+
+export function replaceScreenshotExtension(filePath: string, extension: string): string {
+  const oldExtension = path.extname(filePath);
+  return `${filePath.slice(0, filePath.length - oldExtension.length)}.${extension}`;
 }
 
 /** Every extension a screenshot file in the cache directory can carry. */

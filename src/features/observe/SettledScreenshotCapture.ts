@@ -76,7 +76,16 @@ export class SettledScreenshotCapture {
         timer: this.timer,
         protection: this.pathProtection,
       });
-      Object.assign(observation, screenshotEvidence);
+      const metadata = getScreenshotStateStore().getMetadataForObservation(
+        this.device.deviceId,
+        observation.observationId,
+        path,
+      );
+      Object.assign(observation, screenshotEvidence, {
+        screenshotFallback: metadata?.screenshotFallback,
+        screenshotFallbackReason: metadata?.screenshotFallbackReason,
+        screenshotStageDurationsMs: metadata?.screenshotStageDurationsMs,
+      });
       const imageSize = getScreenshotStateStore().getImageSizeForObservation(
         this.device.deviceId,
         observation.observationId,

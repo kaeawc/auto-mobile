@@ -1,7 +1,7 @@
 import Foundation
 
 // `window.backdrop` (#15126, `prototype_backdrop_v1`): blurs what is behind the prototype window.
-// Contract and Android renderer: docs/design-docs/plat/android/prototype-ux.md ("Frosted backdrop").
+// Contract and Android renderer: docs/how-it-works/plat/android/prototype-ux.md ("Frosted backdrop").
 // Every decision here is pure so it is testable without UIKit; PrototypeLayers draws the plan.
 
 /// The spec's `window.backdrop`. The strict validator has already checked the closed material list,

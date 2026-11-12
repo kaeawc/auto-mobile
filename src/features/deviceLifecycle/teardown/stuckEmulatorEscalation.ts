@@ -104,13 +104,11 @@ export async function waitForEmulatorShutdownWithEscalation(
   for (;;) {
     try {
       return await waitForDeviceShutdown(
-        {
-          ...context,
-          deadlineMs: Math.max(
-            timer.now() + 1,
-            Math.min(softDeadlineMs, timer.now() + attemptWindowMs),
-          ),
-        },
+        waitContext(
+          context,
+          startedAt,
+          Math.max(timer.now() + 1, Math.min(softDeadlineMs, timer.now() + attemptWindowMs)),
+        ),
         skipAndroidNameEnrichment,
       );
     } catch (error) {
@@ -128,7 +126,20 @@ export async function waitForEmulatorShutdownWithEscalation(
     softAttempts++;
     await redispatch(input, softDeadlineMs);
   }
-  return await escalateToProcessStop(input, softAttempts, lastTimeout);
+  return await escalateToProcessStop(input, softAttempts, { startedAt, lastTimeout });
+}
+
+/**
+ * A disappearance wait ending at `deadlineMs`. Its timeout message quotes the time actually
+ * spent waiting since the escalation began, not the caller's whole shutdown budget: a soft
+ * window or final check that gives up after 10 s must not claim 30000ms elapsed (#17957).
+ */
+function waitContext(
+  context: ShutdownDiscoveryContext,
+  startedAt: number,
+  deadlineMs: number,
+): ShutdownDiscoveryContext {
+  return { ...context, deadlineMs, timeoutMs: Math.max(0, deadlineMs - startedAt) };
 }
 
 async function redispatch(input: StuckEmulatorEscalationInput, softDeadlineMs: number) {
@@ -151,7 +162,7 @@ async function redispatch(input: StuckEmulatorEscalationInput, softDeadlineMs: n
 async function escalateToProcessStop(
   input: StuckEmulatorEscalationInput,
   softAttempts: number,
-  softWindowTimeout: unknown,
+  { startedAt, lastTimeout }: { startedAt: number; lastTimeout: unknown },
 ): Promise<BootedDevice | undefined> {
   const { context, stopper, avdName } = input;
   const serial = context.device.deviceId;
@@ -173,13 +184,23 @@ async function escalateToProcessStop(
     { deadlineMs: context.deadlineMs, signal: context.requestAbortSignal },
   );
   if (outcome.kind === "stopped") {
-    return await verifyGoneAfterStop(input, softAttempts, outcome.pid);
+    return await verifyGoneAfterStop(input, softAttempts, outcome.pid, startedAt);
   }
   if (isProcessGone(outcome)) {
-    // No emulator process remains to signal, yet the last poll still listed the serial: adb's
-    // registration is stale or the exit is racing the poll. That is the plain retryable
-    // shutdown timeout, not a failed stop.
-    throw softWindowTimeout;
+    // No emulator process remains to signal, yet the last poll still listed the serial: the
+    // emulator exited (a soft kill or a re-kill's own stop took effect) and adb has not dropped
+    // the serial yet. Keep confirming for the rest of the budget the escalation reserved rather
+    // than reporting the stale soft-window timeout while the device is going away (#17957). A
+    // serial that never leaves stays the plain retryable shutdown timeout, not a failed stop.
+    // Nothing was signalled here, so unlike a stop's verification it gets no grace past the
+    // caller's deadline; with none left, the last soft window's observation stands.
+    if (context.timer.now() >= context.deadlineMs) {
+      throw lastTimeout;
+    }
+    return await waitForDeviceShutdown(
+      waitContext(context, startedAt, context.deadlineMs),
+      input.skipAndroidNameEnrichment,
+    );
   }
   throw failureForOutcome(outcome, serial, avdName, softAttempts);
 }
@@ -196,14 +217,16 @@ async function verifyGoneAfterStop(
   input: StuckEmulatorEscalationInput,
   softAttempts: number,
   pid: number | undefined,
+  startedAt: number,
 ): Promise<BootedDevice | undefined> {
   const { context } = input;
   try {
     return await waitForDeviceShutdown(
-      {
-        ...context,
-        deadlineMs: Math.max(context.deadlineMs, context.timer.now() + FINAL_VERIFICATION_MS),
-      },
+      waitContext(
+        context,
+        startedAt,
+        Math.max(context.deadlineMs, context.timer.now() + FINAL_VERIFICATION_MS),
+      ),
       input.skipAndroidNameEnrichment,
     );
   } catch (error) {

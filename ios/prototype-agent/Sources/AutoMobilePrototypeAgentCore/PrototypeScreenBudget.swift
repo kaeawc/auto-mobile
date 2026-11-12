@@ -36,6 +36,10 @@ struct PrototypeScreenBudget {
         static func + (lhs: Counts, rhs: Counts) -> Counts {
             Counts(nodes: lhs.nodes + rhs.nodes, images: lhs.images + rhs.images)
         }
+
+        static func += (lhs: inout Counts, rhs: Counts) {
+            lhs = lhs + rhs
+        }
     }
 
     private struct Scope {
@@ -85,7 +89,7 @@ struct PrototypeScreenBudget {
     mutating func exitStack() {
         let stack = stacks.removeLast()
         let last = scopes.count - 1
-        scopes[last].children = scopes[last].children + stack
+        scopes[last].children += stack
     }
 
     /// Charges nodes and images to the open screen; returns the first bound crossed.

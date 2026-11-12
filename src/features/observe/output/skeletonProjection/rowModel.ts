@@ -53,6 +53,7 @@ export interface SkeletonAccumulator {
   testTag?: string;
   semanticLinks?: SkeletonElement["semanticLinks"];
   bounds: SkeletonElement["bounds"];
+  space?: "ornament";
   affordances: Set<Affordance>;
   checked?: boolean;
   /** AutoMobile prototype rows only: the selected tab or option, and the node's state description. */

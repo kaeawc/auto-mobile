@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   CachedTouchscreenFeature,
+  defaultTouchscreenFeature,
+  forgetTouchscreenFeature,
   parseFailedHasFeature,
   parseHasFeature,
   TOUCHSCREEN_FEATURE_CACHE_TTL_MS,
 } from "../../../src/utils/android-cmdline-tools/touchscreenFeature";
+import { getDeviceIncarnationListeners } from "../../../src/utils/deviceIncarnation";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -147,5 +150,64 @@ describe("CachedTouchscreenFeature", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(feature.hasTouchscreen(adb, "tv", controller.signal)).rejects.toThrow();
+  });
+});
+
+// mt0093d (#18091): a TV emulator replaced by a phone on emulator-5560 kept the TV's cached
+// answer, so taps went down the D-pad path until the five-minute expiry.
+describe("CachedTouchscreenFeature across device replacement on one serial", () => {
+  test("a new pool incarnation of the serial is probed again inside the TTL", async () => {
+    let incarnation = "1";
+    const feature = new CachedTouchscreenFeature(
+      new FakeTimer(),
+      TOUCHSCREEN_FEATURE_CACHE_TTL_MS,
+      () => incarnation,
+    );
+    const tv = adbAnswering("false\n");
+    expect(await feature.hasTouchscreen(tv, "emulator-5560")).toBe(false);
+
+    incarnation = "2";
+    const phone = adbAnswering("true\n");
+    phone.setCommandError(LEANBACK, missingFeature());
+    phone.setCommandError(TELEVISION, missingFeature());
+    expect(await feature.hasTouchscreen(phone, "emulator-5560")).toBe(true);
+    expect(await feature.hasTouchscreen(phone, "emulator-5560")).toBe(true);
+    expect(probes(phone)).toBe(1);
+  });
+
+  test("forget drops the answer so the next call probes", async () => {
+    const feature = new CachedTouchscreenFeature(
+      new FakeTimer(),
+      TOUCHSCREEN_FEATURE_CACHE_TTL_MS,
+      () => undefined,
+    );
+    const adb = adbAnswering("false\n");
+    expect(await feature.hasTouchscreen(adb, "emulator-5560")).toBe(false);
+    feature.forget("emulator-5560");
+    expect(await feature.hasTouchscreen(adb, "emulator-5560")).toBe(false);
+    expect(probes(adb)).toBe(2);
+  });
+
+  test("the process-wide cache forgets a serial on identity replacement, incarnation change and kill", async () => {
+    const listener = getDeviceIncarnationListeners().find(
+      (entry) => entry.name === "android-touchscreen-feature",
+    );
+    if (!listener?.onDeviceIdentityReplaced) {
+      throw new Error("Expected the touchscreen cache to register an identity listener");
+    }
+    const serial = "emulator-18091";
+    const adb = adbAnswering("false\n");
+    const forgetters: Array<(deviceId: string) => unknown> = [
+      listener.onDeviceIdentityReplaced,
+      listener.onDeviceIncarnationChanged,
+      forgetTouchscreenFeature,
+    ];
+    await defaultTouchscreenFeature.hasTouchscreen(adb, serial);
+    for (const forget of forgetters) {
+      await forget(serial);
+      await defaultTouchscreenFeature.hasTouchscreen(adb, serial);
+    }
+    expect(probes(adb)).toBe(1 + forgetters.length);
+    forgetTouchscreenFeature(serial);
   });
 });

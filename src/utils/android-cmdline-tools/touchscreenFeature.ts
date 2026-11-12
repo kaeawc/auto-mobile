@@ -3,6 +3,7 @@ import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
 import { adbFailureOutput } from "./adbFailureOutput";
+import { deviceIncarnationToken, registerDeviceIncarnationListener } from "../deviceIncarnation";
 
 /** The package-manager feature a device declares when it has a touchscreen. */
 export const TOUCHSCREEN_FEATURE = "android.hardware.touchscreen";
@@ -14,8 +15,10 @@ export const TOUCHSCREEN_FEATURE = "android.hardware.touchscreen";
 export const TV_FEATURES = ["android.software.leanback", "android.hardware.type.television"];
 
 /**
- * Hardware features do not change while a device is up; the expiry only guards a serial that a
- * pool reuses for a different AVD (a phone replaced by a TV on emulator-5554).
+ * Hardware features do not change while a device is up. An answer is also tied to the pool
+ * incarnation of the serial and forgotten on identity replacement and killDevice, so a different
+ * AVD booted on a reused serial is probed again (#18091); the expiry is the backstop where no
+ * incarnation is known.
  */
 export const TOUCHSCREEN_FEATURE_CACHE_TTL_MS = 5 * 60_000;
 
@@ -62,7 +65,12 @@ export interface TouchscreenFeature {
 interface CacheEntry {
   readAt: number;
   value: boolean;
+  /** Pool incarnation of the serial when the answer was read; undefined outside a pool. */
+  incarnation: string | undefined;
 }
+
+/** The connection-epoch token of a serial, or undefined when none is known. */
+export type DeviceIncarnationOf = (deviceId: string) => string | undefined;
 
 type FeatureAnswer = boolean | null;
 
@@ -76,7 +84,13 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
   constructor(
     private readonly timer: Timer = defaultTimer,
     private readonly ttlMs: number = TOUCHSCREEN_FEATURE_CACHE_TTL_MS,
+    private readonly incarnationOf: DeviceIncarnationOf = deviceIncarnationToken,
   ) {}
+
+  /** Drop the answer for a serial whose device was killed or replaced. */
+  forget(deviceId: string): void {
+    this.cache.delete(deviceId);
+  }
 
   async hasTouchscreen(
     adb: AdbCommandRunner,
@@ -84,7 +98,11 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
     signal?: AbortSignal,
   ): Promise<boolean | null> {
     const cached = this.cache.get(deviceId);
-    if (cached && this.timer.now() - cached.readAt < this.ttlMs) {
+    if (
+      cached &&
+      cached.incarnation === this.incarnationOf(deviceId) &&
+      this.timer.now() - cached.readAt < this.ttlMs
+    ) {
       return cached.value;
     }
     const touchscreen = await probeFeature(adb, deviceId, TOUCHSCREEN_FEATURE, { signal });
@@ -110,7 +128,11 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
   }
 
   private remember(deviceId: string, value: boolean): boolean {
-    this.cache.set(deviceId, { readAt: this.timer.now(), value });
+    this.cache.set(deviceId, {
+      readAt: this.timer.now(),
+      value,
+      incarnation: this.incarnationOf(deviceId),
+    });
     return value;
   }
 }
@@ -149,5 +171,18 @@ export async function probeFeature(
   return value;
 }
 
-/** Process-wide probe, so each device is asked once per TTL. */
-export const defaultTouchscreenFeature: TouchscreenFeature = new CachedTouchscreenFeature();
+const processTouchscreenFeature = new CachedTouchscreenFeature();
+
+/** Process-wide probe, so each device incarnation is asked once per TTL. */
+export const defaultTouchscreenFeature: TouchscreenFeature = processTouchscreenFeature;
+
+/** Forget the process-wide answer for a serial whose device was stopped (killDevice). */
+export function forgetTouchscreenFeature(deviceId: string): void {
+  processTouchscreenFeature.forget(deviceId);
+}
+
+registerDeviceIncarnationListener({
+  name: "android-touchscreen-feature",
+  onDeviceIdentityReplaced: forgetTouchscreenFeature,
+  onDeviceIncarnationChanged: forgetTouchscreenFeature,
+});

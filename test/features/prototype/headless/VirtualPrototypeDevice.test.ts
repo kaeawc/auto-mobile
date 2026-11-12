@@ -362,6 +362,49 @@ describe("VirtualPrototypeDevice (#17974)", () => {
     });
   });
 
+  test("stack and pager ids that name Object.prototype members start fresh (#18085)", async () => {
+    for (const id of ["constructor", "toString", "hasOwnProperty"]) {
+      const virtual = device();
+      const stack = await virtual.requestShowPrototype(
+        spec("nav", {
+          root: { type: "stack", id, start: "home", screens: { home: text("Home") } },
+        }),
+      );
+      expect(stack.success).toBe(true);
+      expect((await virtual.requestInspectPrototypes()).stacks?.[id]).toEqual({
+        path: ["home"],
+        depth: 1,
+      });
+      const paged = await virtual.requestShowPrototype(
+        spec("tabs", { root: { type: "pager", id, children: [text("A"), text("B")] } }),
+      );
+      expect(paged.success).toBe(true);
+      const inspected = await virtual.requestInspectPrototypes();
+      const tabs = inspected.prototypes?.find((entry) => entry.id === "tabs");
+      expect(tabs?.pages?.[id]).toBe(0);
+    }
+  });
+
+  test("an in-place show drops a retained entry whose route now needs params (#18085)", async () => {
+    const virtual = device();
+    await showOnHome(virtual);
+    await virtual.requestShowPrototype(
+      spec("nav", {
+        root: {
+          type: "stack",
+          id: "main",
+          start: "detail",
+          screens: { home: text("Home"), detail: text("Detail") },
+          routes: { home: { params: { userId: "string" } } },
+        },
+      }),
+    );
+    expect((await virtual.requestInspectPrototypes()).stacks?.main).toEqual({
+      path: ["detail"],
+      depth: 1,
+    });
+  });
+
   test("show and patch write a clamped pager position back into state (#18076)", async () => {
     const virtual = device();
     await virtual.requestShowPrototype(

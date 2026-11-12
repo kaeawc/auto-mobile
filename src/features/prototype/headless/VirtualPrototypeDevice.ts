@@ -19,6 +19,7 @@ import type { PrototypeAssetUpload } from "../prototypeAssets";
 import type { PrototypeData, PrototypeJson, PrototypeSpec } from "../prototypeSpec";
 import type { PrototypeShowOverrides } from "../PrototypeTransport";
 import { VIRTUAL_PROTOTYPE_CAPABILITIES } from "./headlessPrototypeMode";
+import contract from "../../../../schemas/prototype-spec-contract.json";
 
 /** Per-id counters survive dismissal and replacement, as the controller ledger does. */
 interface PrototypeLedger {
@@ -135,18 +136,22 @@ function boundPages(
     }
     const last = Math.max(0, (Array.isArray(node.children) ? node.children.length : 0) - 1);
     const bound = typeof node.stateKey === "string" ? state[node.stateKey] : undefined;
-    const position = typeof bound === "number" ? Math.trunc(bound) : (previous[node.id] ?? 0);
+    // An own-property read: a pager id such as `constructor` must not find Object.prototype's.
+    const kept = Object.hasOwn(previous, node.id) ? previous[node.id] : undefined;
+    const position = typeof bound === "number" ? Math.trunc(bound) : (kept ?? 0);
     pages[node.id] = Math.min(Math.max(position, 0), last);
   });
   return pages;
 }
 
 type PrototypeStacks = NonNullable<PrototypeEvent["stacks"]>;
+type PrototypeStackSnapshot = PrototypeStacks[string];
+type RouteParams = NonNullable<PrototypeStackSnapshot["params"]>[number];
 
 /**
- * Each stack's navigation. A same-id show or patch keeps the previous snapshot whose screens all
- * still exist, as `PrototypeRuntime.retainedStack` does; any other stack starts at `start`. Route
- * declarations describe types, not parameter values.
+ * Each stack's navigation. A same-id show or patch keeps the previous entries whose screen still
+ * exists with params that still fit its route, as `PrototypeRuntime.retainedStack` does; a stack
+ * with none starts at `start`. Route declarations describe types, not parameter values.
  */
 function boundStacks(
   spec: Record<string, unknown>,
@@ -157,17 +162,14 @@ function boundStacks(
     if (node.type !== "stack" || typeof node.id !== "string" || typeof node.start !== "string") {
       return;
     }
-    const screens = record(node.screens) ?? {};
-    const kept = previous[node.id];
-    if (
-      kept !== undefined &&
-      kept.path.length > 0 &&
-      kept.path.every((screen) => screen in screens)
-    ) {
-      stacks[node.id] = structuredClone(kept);
+    // An own-property read: a stack id such as `constructor` must not find Object.prototype's.
+    const kept = Object.hasOwn(previous, node.id) ? previous[node.id] : undefined;
+    const retained = kept === undefined ? undefined : retainedStack(node, kept);
+    if (retained) {
+      stacks[node.id] = retained;
       return;
     }
-    const route = record(record(node.routes)?.[node.start]);
+    const route = record(routeOf(node, node.start));
     stacks[node.id] = {
       path: [node.start],
       depth: 1,
@@ -176,6 +178,67 @@ function boundStacks(
     };
   });
   return stacks;
+}
+
+/**
+ * The entries of `previous` that `node` keeps, as `PrototypeRuntime.retainedStack`: each whose
+ * screen still exists with params that fit its route (`PrototypeRouteRuntime.fits`), at most
+ * `MAX_PROTOTYPE_STACK_DEPTH`; undefined when none do. Params are dropped when all are empty.
+ */
+function retainedStack(
+  node: Record<string, unknown>,
+  previous: PrototypeStackSnapshot,
+): PrototypeStackSnapshot | undefined {
+  const kept = previous.path
+    .map((screen, index) => ({ screen, params: previous.params?.[index] ?? {} }))
+    .filter(({ screen, params }) => routeParamsFit(node, screen, params))
+    .slice(0, contract.limits.MAX_PROTOTYPE_STACK_DEPTH);
+  if (kept.length === 0) {
+    return undefined;
+  }
+  const params = kept.map((entry) => structuredClone(entry.params));
+  return {
+    path: kept.map((entry) => entry.screen),
+    depth: kept.length,
+    ...(params.some((entry) => Object.keys(entry).length > 0) ? { params } : {}),
+  };
+}
+
+/** The route `node` declares for `screen`, read as an own property. */
+function routeOf(node: Record<string, unknown>, screen: string): unknown {
+  const routes = record(node.routes);
+  return routes && Object.hasOwn(routes, screen) ? routes[screen] : undefined;
+}
+
+/** `PrototypeRouteRuntime.fits`: `params` holds exactly the params `screen` declares, each well typed. */
+function routeParamsFit(
+  node: Record<string, unknown>,
+  screen: string,
+  params: RouteParams,
+): boolean {
+  const screens = record(node.screens);
+  if (!screens || !Object.hasOwn(screens, screen)) {
+    return false;
+  }
+  const declared = record(record(routeOf(node, screen))?.params) ?? {};
+  const names = Object.keys(params);
+  return (
+    names.length === Object.keys(declared).length &&
+    names.every(
+      (name) => Object.hasOwn(declared, name) && declared[name] === routeParamType(params[name]),
+    )
+  );
+}
+
+/** The declared type name of a scalar route param value, as `PrototypeRouteRuntime.typeOf`. */
+function routeParamType(value: unknown): "string" | "number" | "boolean" | undefined {
+  if (typeof value === "string") {
+    return "string";
+  }
+  if (typeof value === "boolean") {
+    return "boolean";
+  }
+  return typeof value === "number" && Number.isFinite(value) ? "number" : undefined;
 }
 
 /**

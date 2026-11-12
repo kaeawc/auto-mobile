@@ -4,11 +4,12 @@ import type { BootedDevice } from "../../models/DeviceInfo";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { TapOnSelectedElement } from "../../models/TapOnElementResult";
 
-type CountedEntry = Pick<SearchableEntry, "affordances" | "bounds" | "label">;
+type CountedEntry = Pick<SearchableEntry, "affordances" | "bounds" | "label" | "sublabel">;
 
 interface TappableTarget {
   bounds: ElementBounds;
   label: string;
+  sublabel: string;
 }
 
 const TAPPABLE_AFFORDANCES = new Set<SearchableEntry["affordances"][number]>([
@@ -33,13 +34,22 @@ function tappableTarget(candidate: CountedEntry): TappableTarget | null {
   ) {
     return null;
   }
-  return { bounds: candidate.bounds, label: candidate.label?.trim().toLowerCase() ?? "" };
+  return {
+    bounds: candidate.bounds,
+    label: candidate.label?.trim().toLowerCase() ?? "",
+    sublabel: candidate.sublabel?.toLowerCase() ?? "",
+  };
 }
 
-/** Whether `inner` is the same control as `outer`: same label, inside its bounds. */
-function collapsesInto(inner: TappableTarget, outer: TappableTarget): boolean {
+/** Same-label controls fold into their container; announcing containers fold into their child. */
+function collapsesInto(target: TappableTarget, other: TappableTarget): boolean {
+  if (target.label === other.label) {
+    return target.label.length > 0 && contains(other.bounds, target.bounds);
+  }
   return (
-    inner.label.length > 0 && inner.label === outer.label && contains(outer.bounds, inner.bounds)
+    other.label.length > 0 &&
+    target.sublabel.includes(other.label) &&
+    contains(target.bounds, other.bounds)
   );
 }
 
@@ -47,20 +57,21 @@ function collapsesInto(inner: TappableTarget, outer: TappableTarget): boolean {
  * How many distinct tappable targets a tap selector's candidates name (#17939). A candidate
  * with no tap/toggle/long-press affordance (an iOS `context` label) is not counted, and a
  * tappable candidate whose bounds lie inside another tappable candidate with the same label
- * (an iOS settings row and its switch) counts once with its container.
+ * (an iOS settings row and its switch) counts once with its container. A differently labelled
+ * container announcing a contained target in its sublabel counts once with that target.
  */
 export function countTappableMatches(candidates: readonly CountedEntry[]): number {
   const tappable = candidates
     .map(tappableTarget)
     .filter((target): target is TappableTarget => target !== null);
-  // A target with identical bounds to an earlier one collapses into it, so the pair counts once.
+  // If both targets fold into each other, keep the earlier one so the pair still counts once.
   return tappable.filter(
     (target, index) =>
       !tappable.some(
         (other, otherIndex) =>
           otherIndex !== index &&
           collapsesInto(target, other) &&
-          (!contains(target.bounds, other.bounds) || otherIndex < index),
+          (!collapsesInto(other, target) || otherIndex < index),
       ),
   ).length;
 }

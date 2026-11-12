@@ -1,0 +1,658 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": "Playground",
+        "class": "XCUIApplication",
+        "bounds": [
+          0,
+          0,
+          402,
+          874
+        ],
+        "view-id": "s2-c125f9a75b198eec"
+      },
+      "node": [
+        {
+          "$": {
+            "text": "Files picker probe",
+            "class": "UILabel",
+            "bounds": [
+              75,
+              333,
+              326,
+              371
+            ],
+            "role": "text",
+            "view-id": "s2-61082f55581cac43"
+          }
+        },
+        {
+          "$": {
+            "text": "The #5806 smoke stages fixtures only in this app's bounded Documents namespace.",
+            "class": "UILabel",
+            "bounds": [
+              19,
+              387,
+              382,
+              430
+            ],
+            "role": "text",
+            "view-id": "s2-66b313bda7cff6e7"
+          }
+        },
+        {
+          "$": {
+            "text": "Open document picker",
+            "resource-id": "open-document-picker",
+            "class": "UIButton",
+            "bounds": [
+              103,
+              446,
+              299,
+              482
+            ],
+            "clickable": "true",
+            "role": "button",
+            "view-id": "open-document-picker"
+          }
+        },
+        {
+          "$": {
+            "text": "No fixture selected",
+            "resource-id": "selected-document",
+            "class": "UILabel",
+            "bounds": [
+              127,
+              497,
+              274,
+              519
+            ],
+            "role": "text",
+            "view-id": "selected-document"
+          }
+        },
+        {
+          "$": {
+            "text": "Tab Bar",
+            "class": "UITabBar",
+            "bounds": [
+              0,
+              791,
+              402,
+              874
+            ],
+            "clickable": "true",
+            "view-id": "s2-73cac3b5235bb505"
+          },
+          "node": [
+            {
+              "$": {
+                "text": "Discover",
+                "resource-id": "magnifyingglass",
+                "class": "UIButton",
+                "bounds": [
+                  25,
+                  795,
+                  120,
+                  849
+                ],
+                "clickable": "true",
+                "role": "button",
+                "view-id": "magnifyingglass"
+              },
+              "node": {
+                "$": {
+                  "text": "Search",
+                  "resource-id": "magnifyingglass",
+                  "class": "UIImageView",
+                  "bounds": [
+                    59,
+                    801,
+                    86,
+                    828
+                  ],
+                  "clickable": "true",
+                  "role": "image",
+                  "view-id": "magnifyingglass"
+                }
+              }
+            },
+            {
+              "$": {
+                "text": "Demos",
+                "resource-id": "play.fill",
+                "class": "UIButton",
+                "bounds": [
+                  110,
+                  795,
+                  205,
+                  849
+                ],
+                "clickable": "true",
+                "role": "button",
+                "view-id": "play.fill"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "play",
+                    "resource-id": "play.fill",
+                    "class": "UIImageView",
+                    "bounds": [
+                      147,
+                      803,
+                      168,
+                      826
+                    ],
+                    "clickable": "true",
+                    "role": "image",
+                    "view-id": "play.fill"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Demos",
+                    "class": "Label",
+                    "bounds": [
+                      141,
+                      830,
+                      175,
+                      842
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "text": "Files",
+                "resource-id": "folder",
+                "class": "UIButton",
+                "bounds": [
+                  196,
+                  795,
+                  291,
+                  849
+                ],
+                "clickable": "true",
+                "selected": "true",
+                "role": "button",
+                "view-id": "folder"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "move",
+                    "resource-id": "folder.fill",
+                    "class": "UIImageView",
+                    "bounds": [
+                      228,
+                      802,
+                      260,
+                      827
+                    ],
+                    "clickable": "true",
+                    "role": "image",
+                    "view-id": "folder.fill"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Files",
+                    "class": "Label",
+                    "bounds": [
+                      232,
+                      830,
+                      255,
+                      842
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "text": "Settings",
+                "resource-id": "gearshape.fill",
+                "class": "UIButton",
+                "bounds": [
+                  282,
+                  795,
+                  377,
+                  849
+                ],
+                "clickable": "true",
+                "role": "button",
+                "view-id": "gearshape.fill"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "gearshape.fill",
+                    "resource-id": "gearshape.fill",
+                    "class": "UIImageView",
+                    "bounds": [
+                      316,
+                      801,
+                      344,
+                      829
+                    ],
+                    "clickable": "true",
+                    "role": "image",
+                    "view-id": "gearshape.fill"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Settings",
+                    "class": "Label",
+                    "bounds": [
+                      309,
+                      830,
+                      350,
+                      842
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "class": "_UITabBarPlatterView",
+                "bounds": [
+                  21,
+                  791,
+                  381,
+                  853
+                ]
+              },
+              "node": {
+                "$": {
+                  "class": "SelectedContentView",
+                  "bounds": [
+                    21,
+                    791,
+                    381,
+                    853
+                  ]
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Discover",
+                      "class": "_UITabButton",
+                      "bounds": [
+                        25,
+                        795,
+                        120,
+                        849
+                      ]
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Demos",
+                      "class": "_UITabButton",
+                      "bounds": [
+                        111,
+                        795,
+                        206,
+                        849
+                      ]
+                    },
+                    "node": {
+                      "$": {
+                        "text": "Demos",
+                        "class": "Label",
+                        "bounds": [
+                          141,
+                          830,
+                          176,
+                          842
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Files",
+                      "class": "_UITabButton",
+                      "bounds": [
+                        196,
+                        795,
+                        291,
+                        849
+                      ]
+                    },
+                    "node": {
+                      "$": {
+                        "text": "Files",
+                        "class": "Label",
+                        "bounds": [
+                          232,
+                          830,
+                          256,
+                          842
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Settings",
+                      "class": "_UITabButton",
+                      "bounds": [
+                        282,
+                        795,
+                        377,
+                        849
+                      ]
+                    },
+                    "node": {
+                      "$": {
+                        "text": "Settings",
+                        "class": "Label",
+                        "bounds": [
+                          308,
+                          830,
+                          350,
+                          842
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "$": {
+            "class": "UITransitionView",
+            "bounds": [
+              0,
+              0,
+              402,
+              874
+            ]
+          },
+          "node": [
+            {
+              "$": {
+                "class": "UIDropShadowView",
+                "bounds": [
+                  0,
+                  0,
+                  402,
+                  874
+                ]
+              },
+              "node": {
+                "$": {
+                  "class": "_UIHostingView<ModifiedContent<AnyView, RootModifier>>",
+                  "bounds": [
+                    0,
+                    0,
+                    402,
+                    874
+                  ]
+                },
+                "node": {
+                  "$": {
+                    "class": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<UIKitAdaptableTabView>>",
+                    "bounds": [
+                      0,
+                      0,
+                      402,
+                      874
+                    ]
+                  },
+                  "node": {
+                    "$": {
+                      "class": "UILayoutContainerView",
+                      "bounds": [
+                        0,
+                        0,
+                        402,
+                        874
+                      ]
+                    },
+                    "node": {
+                      "$": {
+                        "class": "_UIMultiLayer",
+                        "bounds": [
+                          0,
+                          791,
+                          402,
+                          874
+                        ]
+                      },
+                      "node": {
+                        "$": {
+                          "class": "CALayer",
+                          "bounds": [
+                            0,
+                            791,
+                            402,
+                            874
+                          ]
+                        },
+                        "node": {
+                          "$": {
+                            "class": "CALayer",
+                            "bounds": [
+                              0,
+                              791,
+                              402,
+                              874
+                            ]
+                          },
+                          "node": {
+                            "$": {
+                              "resource-id": "MaterialProvider",
+                              "class": "CALayer",
+                              "bounds": [
+                                0,
+                                791,
+                                402,
+                                874
+                              ]
+                            },
+                            "node": [
+                              {
+                                "$": {
+                                  "class": "CABackdropLayer",
+                                  "bounds": [
+                                    0,
+                                    791,
+                                    402,
+                                    874
+                                  ]
+                                },
+                                "node": {
+                                  "$": {
+                                    "resource-id": "@0",
+                                    "class": "CASDFLayer",
+                                    "bounds": [
+                                      0,
+                                      791,
+                                      402,
+                                      874
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "$": {
+                                  "resource-id": "SDF",
+                                  "class": "CASDFLayer",
+                                  "bounds": [
+                                    0,
+                                    791,
+                                    402,
+                                    874
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "$": {
+                "class": "_UIMultiLayer",
+                "bounds": [
+                  0,
+                  0,
+                  402,
+                  874
+                ]
+              },
+              "node": {
+                "$": {
+                  "class": "CALayer",
+                  "bounds": [
+                    0,
+                    0,
+                    402,
+                    874
+                  ]
+                },
+                "node": {
+                  "$": {
+                    "resource-id": "_TtGC7SwiftUI14_UIHostingViewGVS_15ModifiedContentVS_7AnyViewVS_12RootModifier__ (_TtGC7SwiftUI19UIHostingControllerGVS_15ModifiedContentVS_7AnyViewVS_12RootModifier__)",
+                    "class": "CALayer",
+                    "bounds": [
+                      0,
+                      0,
+                      402,
+                      874
+                    ]
+                  },
+                  "node": {
+                    "$": {
+                      "class": "CALayer",
+                      "bounds": [
+                        0,
+                        0,
+                        402,
+                        874
+                      ]
+                    },
+                    "node": {
+                      "$": {
+                        "resource-id": "UILayoutContainerView (SwiftUI.UIKitTabBarController)",
+                        "class": "CALayer",
+                        "bounds": [
+                          0,
+                          0,
+                          402,
+                          874
+                        ]
+                      },
+                      "node": {
+                        "$": {
+                          "class": "CALayer",
+                          "bounds": [
+                            0,
+                            0,
+                            402,
+                            874
+                          ]
+                        },
+                        "node": {
+                          "$": {
+                            "class": "CALayer",
+                            "bounds": [
+                              0,
+                              0,
+                              402,
+                              874
+                            ]
+                          },
+                          "node": {
+                            "$": {
+                              "resource-id": "_TtCC7SwiftUI20TabHostingControllerP33_E387C3C47C0D2A0931533D8490A5A8B711HostingView (SwiftUI.TabHostingController)",
+                              "class": "CALayer",
+                              "bounds": [
+                                0,
+                                0,
+                                402,
+                                874
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "packageName": "dev.jasonpearson.automobile.Playground",
+  "updatedAt": 1794451305650,
+  "windows": [
+    {
+      "bounds": [
+        0,
+        0,
+        402,
+        874
+      ],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "screenScale": 3,
+  "screenWidth": 402,
+  "screenHeight": 874,
+  "nativeScale": 3,
+  "pixelWidth": 1206,
+  "pixelHeight": 2622,
+  "systemInsets": {
+    "bottom": 34,
+    "left": 0,
+    "right": 0,
+    "top": 62
+  },
+  "insets": {
+    "available": true,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "safeArea": {
+      "bottom": 34,
+      "left": 0,
+      "right": 0,
+      "top": 62
+    },
+    "source": "ios-sdk-safe-area",
+    "systemChrome": {
+      "homeIndicatorAutoHideRequested": false,
+      "source": "ios-status-bar-manager",
+      "statusBar": "visible",
+      "visibility": "visible"
+    },
+    "units": "points"
+  },
+  "receivedAt": 1794451305663,
+  "fresh": true,
+  "frameContext": "78B96559-22E6-4E9F-94E3-01A9D33AFF58:1:d32ff7e587fb40e9",
+  "projectedScreenSize": {
+    "width": 402,
+    "height": 874
+  }
+}

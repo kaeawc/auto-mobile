@@ -181,7 +181,7 @@ public sealed interface DeviceKeyboardDecision {
  * keystrokes reach the device at all* is entirely the client's job. This object is that decision,
  * expressed purely so any daemon client — the desktop app or a third party embedding control mode
  * in some other host — converges on the same behavior instead of inventing one. The rules are
- * documented for porting in `docs/design-docs/mcp/daemon/screen-control-mapping.md`.
+ * documented for porting in `docs/how-it-works/mcp/daemon/screen-control-mapping.md`.
  *
  * Four rules, in the order they are applied:
  * 1. **Modifier-bearing chords stay with the host.** Any keystroke with Ctrl, Alt or Meta held is

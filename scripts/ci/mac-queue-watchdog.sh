@@ -34,7 +34,7 @@ deadline=$((start + threshold + 2 * interval))
 first=1
 started='[]'
 endpoint="/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/${GITHUB_RUN_ATTEMPT:-1}/jobs?per_page=100"
-remedy='No runner in that pool is online or the pool is saturated. Mac Pool Routing sends an offline pool to hosted macOS unless it failed open (see its summary) or the pool went offline after it ran; to force hosted macOS, set the repository variable AUTOMOBILE_MAC_POOLS_ENABLED to any value other than true and re-run the workflow to move every Mac job to GitHub-hosted macOS (see docs/design-docs/ci/macos-capacity-plan.md).'
+remedy='No runner in that pool is online or the pool is saturated. Mac Pool Routing sends an offline pool to hosted macOS unless it failed open (see its summary) or the pool went offline after it ran; to force hosted macOS, set the repository variable AUTOMOBILE_MAC_POOLS_ENABLED to any value other than true and re-run the workflow to move every Mac job to GitHub-hosted macOS (see docs/how-it-works/ci/macos-capacity-plan.md).'
 
 while :; do
   now="$("$now_cmd" +%s)"

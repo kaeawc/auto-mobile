@@ -8,7 +8,7 @@ export const ATTESTATION_ENVELOPE_VERSION = 1 as const;
 export const TREE_INPUT_HASH_ALGORITHM = "tree-entries-sha256-v0-placeholder";
 // The signature algorithms an envelope may carry (#11974, owner decision on #11972). Anything else,
 // including an unsigned envelope's absence of one, is ignored: the job runs for real. Keep this list
-// to algorithms specified in docs/design-docs/ci/attestation-envelope.md.
+// to algorithms specified in docs/how-it-works/ci/attestation-envelope.md.
 export const SUPPORTED_SIGNATURE_ALGORITHMS: readonly string[] = Object.freeze(["ed25519-v1"]);
 export type AttestationVerdict = "skip" | "advisory" | "ignore";
 /** Epoch milliseconds, adapted from the shared Timer at composition boundaries. */

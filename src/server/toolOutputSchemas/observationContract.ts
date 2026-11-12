@@ -123,6 +123,27 @@ export const observationScreenshotOutputFields = {
   screenshotExpiresAt: z.number().optional(),
   screenshotSource: z.enum(["fresh", "cached"]).optional(),
   screenshotCaptureSource: z.enum(["device", "observation-cache"]).optional(),
+  screenshotFallback: z.boolean().optional(),
+  screenshotFallbackReason: z
+    .enum([
+      "a11y_screenshot_unsupported",
+      "websocket_unavailable",
+      "ctrlproxy_failed",
+      "ctrlproxy_rate_limited",
+      "ctrlproxy_timeout",
+      "ctrlproxy_exception",
+      "ctrlproxy_recent_failure",
+    ])
+    .nullable()
+    .optional(),
+  screenshotStageDurationsMs: z
+    .object({
+      ctrlProxyMs: z.number().nonnegative().optional(),
+      adbMs: z.number().nonnegative().optional(),
+      totalMs: z.number().nonnegative(),
+    })
+    .strict()
+    .optional(),
   screenshotCapturedAt: z.string().optional(),
   screenshotAgeMs: z.number().optional(),
   screenshotHierarchyLagMs: z.number().optional(),

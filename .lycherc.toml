@@ -17,7 +17,7 @@ exclude = [
   # include_verbatim times out on it.
   "^https?://192\\.168\\.1\\.10([:/?#]|$)",
   # `https://host[:port]` is the origin-shape placeholder in the prototype webView
-  # allowedOrigins rule (docs/design-docs/plat/android/prototype-ux.md); `host` is
+  # allowedOrigins rule (docs/how-it-works/plat/android/prototype-ux.md); `host` is
   # not a resolvable name, so include_verbatim's fetch fails with a network error.
   "^https?://host([:/?#\\[]|$)",
   # Ignore RFC 2606 reserved example domains and any subdomain of them. Bare
@@ -89,7 +89,6 @@ exclude_path = [
   # Redirect shims target MkDocs' generated directory URLs (`../foo/`), which do
   # not exist in the source tree. validate_lychee.sh checks the built copies of
   # these pages (targets and fragments) in its offline built-site pass instead.
-  "^docs/design-docs/mcp/tool-registration/index\\.html$",
   "^docs/install/index\\.html$",
   "^docs/metrics/downloads/index\\.html$",
   "^docs/using/a11y/index\\.html$",

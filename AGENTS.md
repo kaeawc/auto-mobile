@@ -5,7 +5,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 ## Key Rules
 
 - TypeScript only (no JavaScript)
-- Docs have two audiences, and neither is a changelog. `docs/using/` is for end users only: what to call, parameters, results, errors and what to do — no source paths, class names, issue-number rationale, or AutoMobile's own CI/test harness. `docs/design-docs/` holds technical internals: architecture, contracts, invariants, failure modes and why a choice was made. Keep both concise and current-state: do not add progress logs, status checklists, dated history, per-PR/issue narration, or pasted run output to either; that belongs in the PR description, commit message, or issue. Update a doc only when the behavior it describes changes, by editing the existing statement in place.
+- Docs have three sections. `docs/using/` is for end users only: what to call, parameters, results, errors and what to do — no source paths, class names, issue-number rationale, or AutoMobile's own CI/test harness. `docs/how-it-works/` is for contributors and operators: how a part works (architecture, contracts, invariants, failure modes) and how to do X with it. Keep both concise and current-state: no rationale essays, rejected options, progress logs, status checklists, dated history, per-PR/issue narration, or pasted run output. The why goes in `docs/devlog/`: one dated `YYYY-MM-DD-slug.md` entry per decision record (context, options, decision, consequences), concept or idea, citing its source issue, PR or moved page, and listed in its index and the `mkdocs.yml` nav (`docs/devlog/template.md`). How-it-works pages link to the entries behind them. Update a how-it-works or using page only when the behavior it describes changes, by editing the existing statement in place.
 - Write GitHub issue and pull request references as clickable Markdown links only
   in AI-authored prose a human reads directly — issue and PR bodies, review
   comments, commit messages, and assistant chat responses — where a clickable
@@ -29,7 +29,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail. CI enforces this per test from the JUnit reporter's time (which excludes `beforeAll`); a test over budget is re-run in isolation and only its MEDIAN is failed, so a genuine breach must be fixed in the test, never by raising `BUN_TEST_MAX_MS`.
 - For Swift, prefer an existing standard-library or Foundation API before adding an extension, helper, or package. Use `URLComponents` plus `URLQueryItem` for query values and `Codable` for AutoMobile-owned stable schemas. Keep `JSONSerialization` only at documented dynamic/bridge boundaries. A convenience dependency requires a stated platform-API gap, deployment-target check, and tests using interfaces/fakes.
-- For TypeScript changes, prefer the JavaScript/Node standard library, then an existing AutoMobile seam, before adding a local generic helper or direct dependency. Keep time, randomness, I/O, concurrency, and process access injectable when tests need control; justify any new direct dependency in `docs/decisions/`.
+- For TypeScript changes, prefer the JavaScript/Node standard library, then an existing AutoMobile seam, before adding a local generic helper or direct dependency. Keep time, randomness, I/O, concurrency, and process access injectable when tests need control; justify any new direct dependency in `docs/devlog/`.
 - For Kotlin changes, check the Kotlin stdlib, JDK/AndroidX, the module's existing dependencies, and dependency-compatible AutoMobile modules before adding a helper, wrapper, `*Util` file, or dependency. Prefer the narrowest existing solution; keep one-off helpers private and adjacent to their consumer. Extract shared code only for two or more real consumers, and state any intentional exception (semantics, performance, API level, compatibility, testability, or readability) in the PR summary.
 
 # Project Structure
@@ -120,7 +120,7 @@ Tapping a notification inside a collapsed group opens the app generically
 instead of triggering the notification's deep-link intent.
 
 The `systemTray` tool handles this automatically. See
-`docs/design-docs/plat/android/system-tray-lookfor.md` for full details.
+`docs/how-it-works/plat/android/system-tray-lookfor.md` for full details.
 
 ## What does NOT work (do not retry these approaches)
 

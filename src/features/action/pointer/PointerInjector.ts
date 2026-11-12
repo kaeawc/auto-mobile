@@ -1,6 +1,6 @@
 /**
  * Pointer injection routes (#13098, follow-up 3 of the #12539 spike in
- * `docs/design-docs/mcp/stylus-pressure-hover-injection.md`).
+ * `docs/how-it-works/mcp/stylus-pressure-hover-injection.md`).
  *
  * Accessibility `dispatchGesture` can only produce a finger touch, so a stylus or a hover must go
  * through another route. Each route says, from the device's facts, whether it can honour a set of

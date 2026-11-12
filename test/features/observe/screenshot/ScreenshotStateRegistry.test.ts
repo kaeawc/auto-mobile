@@ -18,6 +18,10 @@ describe("InMemoryScreenshotStateStore", () => {
     store.updateForObservation("device", "observation", {
       path: "/fake/small.png",
       imageSize: size,
+      metadata: {
+        screenshotFallbackReason: "ctrlproxy_recent_failure",
+        screenshotStageDurationsMs: { adbMs: 200, totalMs: 200 },
+      },
     });
     expect(store.getImageSizeForObservation("device", "observation", "/fake/small.png")).toEqual(
       size,
@@ -25,7 +29,19 @@ describe("InMemoryScreenshotStateStore", () => {
     expect(
       store.getImageSizeForObservation("device", "observation", "/fake/other.png"),
     ).toBeUndefined();
+    expect(
+      store.getMetadataForObservation("device", "observation", "/fake/small.png"),
+    ).toMatchObject({
+      screenshotFallbackReason: "ctrlproxy_recent_failure",
+      screenshotStageDurationsMs: { adbMs: 200, totalMs: 200 },
+    });
+    expect(
+      store.getMetadataForObservation("device", "observation", "/fake/other.png"),
+    ).toBeUndefined();
     timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
+    expect(
+      store.getMetadataForObservation("device", "observation", "/fake/small.png"),
+    ).toBeUndefined();
     expect(
       store.getImageSizeForObservation("device", "observation", "/fake/small.png"),
     ).toBeUndefined();

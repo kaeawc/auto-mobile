@@ -115,7 +115,7 @@ const sourceSchema = z
   .strict();
 
 /**
- * Frame schema v2 (#16444, docs/design-docs/prototype-web-frames-v2.md). The top-level screen
+ * Frame schema v2 (#16444, docs/how-it-works/prototype-web-frames-v2.md). The top-level screen
  * fields are the `inner` panel, so every v1 entry is a v2 frame with one panel. `panels` in JSON
  * lists the other panels; the parsed frame's `panels` starts with the `inner` one.
  */

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 
-/** Budget from docs/design-docs/prototype-web-library.md for the core entry. */
+/** Budget from docs/how-it-works/prototype-web-library.md for the core entry. */
 // Owner set one 0.5 MB budget for the export's HTML, JS and CSS counted together, minified, in
 // place of the separate minified and gzip limits that were raised per merge.
 const MAX_EXPORT_BYTES = 500_000;

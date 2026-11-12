@@ -94,7 +94,7 @@ unchanged: on an API 34 `android-automotive` emulator `observe`, screenshots, `t
 `launchApp`, `listApps`, `pressButton` `home` and `performanceTrace` all pass. Layout is wide and landscape.
 Behaviour on the cluster and passenger displays is unchecked. The full pass/fail matrix,
 including which car-service commands each image accepts, is in
-[Android form factors](../design-docs/plat/android/form-factors.md#automotive-baseline-on-an-emulator).
+[Android form factors](../how-it-works/plat/android/form-factors.md#automotive-baseline-on-an-emulator).
 
 On automotive devices, `observe.automotive` reports `drivingState` (`parked`, `idling`, or `moving`),
 `uxRestrictions.requiresDistractionOptimization`, the numeric `uxRestrictions.activeRestrictions`

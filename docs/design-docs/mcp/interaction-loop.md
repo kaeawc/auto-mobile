@@ -189,7 +189,25 @@ when no receipt time exists; an Android tree without one gets no lag. Above
 500 ms (`SCREENSHOT_HIERARCHY_LAG_THRESHOLD_MS`, injectable through the settle
 context) it also carries `screenshotHierarchyMismatch: true` and a
 `freshness.warning`. A negative lag (screenshot captured before the tree
-arrived) is never marked.
+arrived) is never marked. Android one-shot native captures without prototype hiding
+bound the CtrlProxy request at `ANDROID_CTRLPROXY_CAPTURE_TIMEOUT_MS` (3000 ms)
+before ADB fallback. `CtrlProxyCaptureCooldown` shares per-device failures across
+`TakeScreenshot` instances for 60,000 ms, matching the observation-stream reprobe
+interval. Timeouts and capture failures arm it; caller cancellation and the
+rate-limit result do not. Captures during the cooldown skip CtrlProxy and report
+`ctrlproxy_recent_failure`; the first capture at expiry probes again, a failed
+probe re-arms the cooldown, and success clears it. Explicit display captures
+retain their CtrlProxy error instead of falling back, including during cooldown.
+Prototype-hidden captures bypass this cooldown, retain the 10,000 ms timeout,
+and never fall back to ADB. Successful one-shot Android results carry
+`screenshotCaptureSource`, `screenshotFallback`, optional `screenshotFallbackReason`
+and `screenshotStageDurationsMs` (`ctrlProxyMs?`, `adbMs?`, `totalMs`), measured
+with the injected host timer through encoding and persistence. Omitted stages
+were not attempted. Observation-scoped state retains those diagnostics only for
+the matching screenshot path; observe preserves its existing freshness meaning
+of `screenshotCaptureSource`. Stream screenshot updates forward the same optional
+stage timings alongside their backend source and fallback fields. Each one-shot
+capture logs its source, fallback reason and stage durations.
 
 ## Default compact action metadata
 

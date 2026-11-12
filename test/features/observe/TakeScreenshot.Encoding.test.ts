@@ -1,3 +1,4 @@
+import { FakeCtrlProxyCaptureCooldown } from "../../fakes/FakeCtrlProxyCaptureCooldown";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { beforeAll, describe, expect, test, spyOn } from "bun:test";
@@ -55,6 +56,7 @@ describe("screenshot encoding and truthful metadata", () => {
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const shot = new TakeScreenshot(mockDevice, {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(adb),
         timer: new FakeTimer(),
         idGenerator: new CountingIdGenerator("shot"),
@@ -87,6 +89,7 @@ describe("screenshot encoding and truthful metadata", () => {
       directAdb.setDefaultResponse(createExecResult(png.toString("base64"), ""));
       const directWriter = new RecordingWriter();
       const direct = new TakeScreenshot(mockDevice, {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(directAdb),
         timer: new FakeTimer(),
         idGenerator: new CountingIdGenerator("direct"),
@@ -103,6 +106,7 @@ describe("screenshot encoding and truthful metadata", () => {
 
       const noArgWriter = new RecordingWriter();
       const noArg = new TakeScreenshot(mockDevice, {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(directAdb),
         timer: new FakeTimer(),
         idGenerator: new CountingIdGenerator("noarg"),
@@ -121,6 +125,7 @@ describe("screenshot encoding and truthful metadata", () => {
       const fileSystem = new FakeFileSystem();
       const pullWriter = new RecordingWriter();
       const pull = new TakeScreenshot(mockDevice, {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(pullAdb),
         timer: new FakeTimer(),
         idGenerator: new CountingIdGenerator("pull"),
@@ -156,6 +161,7 @@ describe("screenshot encoding and truthful metadata", () => {
       });
     try {
       const shot = new TakeScreenshot(iosDevice("ios-raw"), {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
         timer: new FakeTimer(),
         idGenerator: new CountingIdGenerator("shot"),
@@ -178,6 +184,7 @@ describe("screenshot encoding and truthful metadata", () => {
   test("rejects contradictory options before any device request", async () => {
     const adb = new FakeAdbExecutor();
     const shot = new TakeScreenshot(mockDevice, {
+      ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
       adbFactory: new FakeAdbClientFactory(adb),
       pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
     });
@@ -196,6 +203,7 @@ describe("screenshot encoding and truthful metadata", () => {
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const shot = new TakeScreenshot(mockDevice, {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(adb),
         timer: new FakeTimer(),
         idGenerator: new CountingIdGenerator("shot"),
@@ -229,6 +237,7 @@ describe("screenshot encoding and truthful metadata", () => {
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const shot = new TakeScreenshot(mockDevice, {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
         timer: new FakeTimer(),
         idGenerator: new CountingIdGenerator("shot"),
@@ -256,6 +265,7 @@ describe("screenshot encoding and truthful metadata", () => {
       });
     try {
       const shot = new TakeScreenshot(iosDevice("ios-encoding"), {
+        ctrlProxyCaptureCooldown: new FakeCtrlProxyCaptureCooldown(),
         adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
         timer: new FakeTimer(),
         idGenerator: new CountingIdGenerator("shot"),

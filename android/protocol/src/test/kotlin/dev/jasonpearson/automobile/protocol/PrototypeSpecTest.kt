@@ -164,7 +164,7 @@ class PrototypeSpecTest {
   fun `stack screen count and repeat refusal match canonical paths`() {
     fun spec(screens: String, start: String = "home") =
       """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{"type":"stack","id":"nav","start":"$start","screens":$screens}}"""
-    for (count in listOf(0, 33)) {
+    for (count in listOf(0, PrototypeSpecValidator.MAX_PROTOTYPE_STACK_SCREENS + 1)) {
       val screens = (0 until count).joinToString(",", "{", "}") { "\"$it\":{\"type\":\"spacer\"}" }
       val result = PrototypeSpecValidator.validate(spec(screens)) as PrototypeSpecValidation.Failure
       assertEquals("root.screens", result.error.path)

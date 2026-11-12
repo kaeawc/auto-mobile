@@ -203,7 +203,8 @@ internal object PrototypeStateChecks {
           .groupBy({ it.first }, { it.second })
     }
 
-    var images = 0
+    /** Node and image budgets per stack screen and for the whole spec (#14213). */
+    val screens = PrototypeScreenBudget()
     var effects = 0
     var animatedEffects = 0
     var loopNodes = 0

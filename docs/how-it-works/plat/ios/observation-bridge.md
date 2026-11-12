@@ -179,7 +179,7 @@ The tap-time fresh read merges the bridge and the web views the same way, so a r
 keeps its bridge or web identity. Cached hierarchy reads outside observe are XCTest-only: a target resolved from one has no
 bridge identity and taps through XCTest.
 
-**tapOn.** A target that carries a bridge identity is tapped through the bridge, naming the
+**`tapOn`.** A target that carries a bridge identity is tapped through the bridge, naming the
 observation it came from: `tap` maps to the bridge's tap and `longPress` to its long press with the
 press duration. The result reports `backend: sdk`, and an accepted tap is never repeated through
 XCTest by the retry-if-no-change path. XCTest stands in only when the bridge is unavailable
@@ -190,7 +190,7 @@ bridge's reason: `stale_observation`, `unknown_element`, `element_not_actionable
 and a timeout after the action may have run. Tapping whatever XCTest now finds at those
 coordinates could act on a different element.
 
-**tapOn on a DOM element.** A target that carries a web identity is clicked through its web view:
+**`tapOn` on a DOM element.** A target that carries a web identity is clicked through its web view:
 `tap` maps to `click`, naming the snapshot the element came from (5 s budget). A long press or a
 double tap has no web form: XCTest runs it and reports `fallbackReason: unsupported`. XCTest also
 stands in when the web view bridge is unavailable (`fallbackReason: unavailable`). Every web
@@ -199,7 +199,7 @@ rejection fails closed with its reason (`stale_snapshot`, `element_not_actionabl
 including a timeout after the click may have run. A `sendKeys` focus tap on a DOM element stays on
 XCTest.
 
-**sendKeys.** When the field `sendKeys` focused is a bridge node, its text entry goes through the
+**`sendKeys`.** When the field `sendKeys` focused is a bridge node, its text entry goes through the
 bridge's `insertText` and its clear (the `clear` command and the clear before a replace) through
 `clearText`, under the same fallback and fail-closed rules as `tapOn`. Each command result reports
 `backend` and, for an XCTest stand-in, `fallbackReason`; a command that used both reports the
@@ -227,11 +227,11 @@ which can move focus or leave the page, the command forgets the field (native or
 text actions follow keyboard focus through XCTest.
 
 Any capture moves the bridge's current observation, and the bridge rejects an action naming an older
-one. So sendKeys keeps the field's element id, takes the capture identity of every observation it
+one. So `sendKeys` keeps the field's element id, takes the capture identity of every observation it
 reads and of every accepted action, and reads the screen once before its first bridge action if
 nothing has been read since focus.
 
-**swipeOn.** A container (named or auto-targeted) that is a bridge node scrolls through the
+**`swipeOn`.** A container (named or auto-targeted) that is a bridge node scrolls through the
 bridge's `scroll` with `delta` set to the change in content offset, in points: start minus end of
 the stroke XCTest would have run, so swiping up gives a positive `y`. A screen swipe on a screen
 that carries bridge nodes goes through the bridge's `swipe` with the same start, end and duration,

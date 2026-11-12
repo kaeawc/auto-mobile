@@ -34,26 +34,38 @@ keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
 Prototype IDs, pager IDs, tags, event names, and asset IDs are opaque nonempty
 strings; they do not share the state-key restriction.
 
-| Constant                             | Value           | Counting rule                                                                                                                                                                                           |
-| ------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MAX_PROTOTYPE_NODES`                | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance, except lazy `list` row templates, which count once (including when empty); list headers/footers count once. |
-| `MAX_PROTOTYPE_LIST_ITEMS`           | 2000            | Maximum rows per lazy list, read from its data path; ordinary path repeats remain capped at 128.                                                                                                        |
-| `MAX_PROTOTYPE_DEPTH`                | 24              | Root has depth 1; only node nesting counts.                                                                                                                                                             |
-| `MAX_PROTOTYPE_IMAGES`               | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again; lazy list row templates, headers and footers count once.                                             |
-| `MAX_PROTOTYPE_SPEC_BYTES`           | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                                                                                                                          |
-| `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                                                                                                                                |
-| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`   | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.                                                                                                                  |
+| Constant                             | Value           | Counting rule                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------ | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_NODES`                | 2000            | Per stack screen: the screen's subtree plus everything drawn with it (content outside the stack, a nested stack's largest screen); sibling screens never add up. Without a stack, the whole tree. `repeat` templates count once per instance, except lazy `list` row templates, which count once (including when empty); list headers/footers count once. |
+| `MAX_PROTOTYPE_SPEC_NODES`           | 10000           | Nodes across the whole spec, every stack screen included (5x `MAX_PROTOTYPE_NODES`).                                                                                                                                                                                                                                                                      |
+| `MAX_PROTOTYPE_LIST_ITEMS`           | 2000            | Maximum rows per lazy list, read from its data path; ordinary path repeats remain capped at 128.                                                                                                                                                                                                                                                          |
+| `MAX_PROTOTYPE_DEPTH`                | 24              | Root has depth 1; only node nesting counts.                                                                                                                                                                                                                                                                                                               |
+| `MAX_PROTOTYPE_IMAGES`               | 32              | Per stack screen, counted like `MAX_PROTOTYPE_NODES`. Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again; lazy list row templates, headers and footers count once.                                                                                                                                         |
+| `MAX_PROTOTYPE_SPEC_IMAGES`          | 160             | Image uses across the whole spec, every stack screen included (5x `MAX_PROTOTYPE_IMAGES`).                                                                                                                                                                                                                                                                |
+| `MAX_PROTOTYPE_SPEC_BYTES`           | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                                                                                                                                                                                                                                                                            |
+| `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                                                                                                                                                                                                                                                                                  |
+| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`   | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.                                                                                                                                                                                                                                                                    |
 
 Feed-scale budgets (#14183). Lazy-list rows live in `/data`, so `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` never sits
 below `MAX_PROTOTYPE_LIST_ITEMS`, and `list.maxItems` shares the list cap. Data may use
 `MAX_PROTOTYPE_DATA_BYTES` (786432) of the spec, which stays below `MAX_PROTOTYPE_SPEC_BYTES` so the node
 tree keeps room. `MAX_PROTOTYPE_DATA_WRITE_BYTES` equals it: later host patches re-validate the whole spec
 against the data cap, so a write cap above it would let paging grow data that no patch could survive. The
-response cap (256 KiB) stays below both. The whole-spec byte, node, depth, image, storage and in-flight limits
+response cap (256 KiB) stays below both. The byte, node, depth, image, storage and in-flight limits
 are independent of row count: they bound frame size, memory and tree cost, and none of them grows with lazy
 rows. A row carries at most `MAX_PROTOTYPE_REPEAT_PATH_CELLS` / `MAX_PROTOTYPE_LIST_ITEMS` (32) scalar fields
 across a full list. Host validation is linear in rows (`benchmark/prototype-feed-limits.ts`). Feeds beyond these caps page or trim with `maxItems`; per-runtime
 budgets and multi-spec apps are not part of the contract.
+
+Stack-screen budgets (#14213). Renderers draw only a stack's top screen, so node and image bounds
+apply per screen rather than to every screen at once, and `MAX_PROTOTYPE_SPEC_NODES` /
+`MAX_PROTOTYPE_SPEC_IMAGES` (5x one screen) bound validation and wire cost for the whole spec. The
+rule is static and identical in the host, Kotlin and Swift validators: a push cannot be refused on
+the device, so no runtime "active path" is counted. Two stacks drawn side by side add their largest
+screens. A screen over its bound fails at the crossing node with `Node limit exceeded` or `Image
+limit exceeded`; the whole-spec ceiling fails with `Spec node limit exceeded` or `Spec image limit
+exceeded` (`Expanded …` inside `repeat`). The other whole-spec budgets (effects, keyframe nodes,
+loops, video nodes) still count every screen.
 
 Navigation item `image` uses count toward `MAX_PROTOTYPE_IMAGES`. Assets have separate transport and
 decoded-memory limits (Asset transport). Emit payload nesting is bounded by
@@ -931,7 +943,7 @@ horizontal scroll".
 Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
-stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Dot indicators are the pager `indicator` field (see Carousel and pager indicator). On iOS dp means points.
+stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and `tapOn`; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Dot indicators are the pager `indicator` field (see Carousel and pager indicator). On iOS dp means points.
 
 ## Icon effects
 
@@ -2810,8 +2822,8 @@ per item without writing every row out. The container's `children` are the
 template: they are instantiated once per entry of `items`, in item order, as
 siblings inside the same container (the container itself is not repeated, so a
 list is a `column` with `repeat` whose single child is the row template).
-`items` holds 1–128 entries, and the expanded tree still counts against
-`MAX_PROTOTYPE_NODES`.
+`items` holds 1–128 entries, and the expanded tree still counts against the node
+limits.
 
 ```json
 {
@@ -2874,7 +2886,7 @@ list is a `column` with `repeat` whose single child is the row template).
   repeat template`). A bound key missing from `state` behaves exactly like a literal
   missing key: the type checks run once per item and fail at the key, naming the item
   (`Toggle requires a boolean state key (repeat item 1)`).
-- Limits count the expanded tree. `MAX_PROTOTYPE_NODES` and `MAX_PROTOTYPE_IMAGES` are
+- Limits count the expanded tree. The per-screen and whole-spec node and image limits are
   checked against every instance, and an overflow fails at the container's
   `repeat` (for example `root.children[2].repeat`, `Expanded node limit exceeded`).
   `MAX_PROTOTYPE_DEPTH` is unaffected by design: instances are siblings, so a
@@ -2941,7 +2953,7 @@ written once.
   (`.component`, message `Component cycle: a → b → a`), and `use` nesting deeper
   than 8. Unused components are allowed.
 - Limits apply to the expanded tree: nodes, depth and images as usual (expansion
-  itself stops at `MAX_PROTOTYPE_NODES`), and the byte limit applies to both the
+  itself stops at `MAX_PROTOTYPE_SPEC_NODES`), and the byte limit applies to both the
   authored and the expanded spec (`Expanded spec byte limit exceeded`), because the
   device re-validates bytes.
 - An error inside an expansion names each `use` it went through, for example
@@ -4155,7 +4167,7 @@ Spans do not count as nodes and require `prototype_rich_text_v1`; older devices 
 A tappable span is part of the text node, not a separate accessibility node, and runs actions without opening URLs.
 On Android, activate it with `tapOn {accessibilityLink:"<span text>"}` or
 `tapOn {text:"<full plain text>", subtext:{text:"<span text>"}}` without `layer`:
-these selectors act across windows because tapOn refuses layer with accessibilityLink/subtext (#9305).
+these selectors act across windows because `tapOn` refuses layer with accessibilityLink/subtext (#9305).
 Use `tapAt` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
 `rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.

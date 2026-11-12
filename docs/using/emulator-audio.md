@@ -44,7 +44,7 @@ AutoMobile starts each emulator it boots with a gRPC port (`-grpc`) on a free ho
 to 8653, held while that emulator runs, so no extra launch flags are needed. A `-grpc` flag you
 pass in `AUTOMOBILE_EMULATOR_ARGS` or in the launch's extra arguments is used as given.
 
-## injectAudioInput
+## `injectAudioInput`
 
 Plays audio into the microphone and returns as soon as streaming starts. On Android, the
 AutoMobile app on the emulator records the guest microphone, so the receiving app need not
@@ -83,7 +83,7 @@ later `stopAudioInput`. In a session,
 releasing the session stops the injection. Without a session, the injection stops when a session
 takes the device. A relative `file` path is relative to the directory the server was started in.
 
-## stopAudioInput
+## `stopAudioInput`
 
 Stops an injection by `injectionId`, on the device it was started on. Stopping one that already
 ended is not an error: you get its result again, with `framesQueued`, `framesPlayed` and `reason` (`completed`,
@@ -91,7 +91,7 @@ ended is not an error: you get its result again, with `framesQueued`, `framesPla
 id after a server restart, is an error. If the emulator exited during injection, stopping reports
 `[audio_emulator_exited]` with the device name; restart the emulator before injecting again.
 
-## captureAudio
+## `captureAudio`
 
 Records the device's audio output for `seconds` (at most 20) and reports:
 

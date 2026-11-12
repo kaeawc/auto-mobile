@@ -199,7 +199,7 @@ then a series of patches, so small models are never asked to produce 1 MiB of JS
 
 #### 4.3 Context budget
 
-The full spec limits (1 MiB, 2000 nodes, depth 24) are far beyond a small model's context. The
+The full spec limits (1 MiB, 2000 nodes per stack screen, depth 24) are far beyond a small model's context. The
 agent never puts the whole spec in context:
 
 - `outline` is the default view; `readNode` loads only the subtree it needs.

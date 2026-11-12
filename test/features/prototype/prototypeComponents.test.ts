@@ -127,12 +127,13 @@ describe("expandPrototypeComponents", () => {
   });
 
   test("a component used many times stops at the node limit instead of growing", () => {
-    // 50 uses of a 50-node block is 2500 nodes if expanded naively, past the 2000-node limit.
+    // 50 uses of a 210-node block is 10500 nodes if expanded naively, past the 10000-node
+    // whole-spec ceiling (#14213).
     // Few `use` expansions with wide roots keep this inside the unit-test budget: locating the
     // authored path of every `use` scans all earlier ones, so many tiny uses are quadratic.
     const components = {
       block: {
-        root: { type: "row", children: Array.from({ length: 49 }, () => ({ type: "spacer" })) },
+        root: { type: "row", children: Array.from({ length: 209 }, () => ({ type: "spacer" })) },
       },
     };
     const root = {

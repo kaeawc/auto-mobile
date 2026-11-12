@@ -124,7 +124,7 @@ accessibility services; concurrent runs crash and leave the same state.
 | Cold start and per-event latency                                                                                   | Each call starts instrumentation; the host timeout allows twice the planned time plus 15 s. Cold start dominates, and event delivery can lag the plan by up to about 2x on a loaded host. There is no latency budget.                                                                                                                                             |
 | Stuck down pointer after a killed or concurrent run                                                                | Device `-1` retains a down pointer; later injections are refused until a stylus CANCEL. The host serialises runs per device. A run that ends without a report (crashed, killed, timed out or aborted by the caller) gets a stylus CANCEL before the lock admits the next run, sent without the caller's signal; a zero-event refusal gets a CANCEL and one retry. |
 
-## Rich stylus on tapAt, swipeAt and dragPath (#13099)
+## Rich stylus on `tapAt`, `swipeAt` and `dragPath` (#13099)
 
 The nested `pointer` option keeps its shape and gains `tilt`, `orientation` (radians) and `buttons`
 (`primary`, `secondary`); `pressure` may be any 0..1. A plain stylus (`pressure` omitted or 1) still uses

@@ -43,6 +43,7 @@ extension PrototypeContractValidator {
         if kind == "record", Double(fields.count) > (rule["maxEntries"]?.numberValue ?? .infinity) {
             throw Self.invalid(path, "Record entry limit exceeded")
         }
+        if kind == "screenMap" { budget.enterStack() }
         for key in Self.sorted(fields.keys) {
             let childPath = kind == "screenMap" ? "\(path)[\(Self.quoted(key))]" : Self.keyPath(path, key)
             if kind == "map", !PrototypeRepeat.isFieldName(key) {
@@ -54,8 +55,11 @@ extension PrototypeContractValidator {
             if let pattern = rule["keyPattern"]?.stringValue, !Self.matches(pattern, key) {
                 throw Self.invalid(childPath, "Invalid record key")
             }
+            if kind == "screenMap" { budget.enterScreen() }
             if let child = fields[key] { try walk(child, rule: itemRule, path: childPath, depth: depth) }
+            if kind == "screenMap" { budget.exitScreen() }
         }
+        if kind == "screenMap" { budget.exitStack() }
     }
 
     mutating func choice(_ value: JSONValue, rule: [String: JSONValue], path: String, depth: Int) throws {

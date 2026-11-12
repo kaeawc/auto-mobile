@@ -6,7 +6,9 @@ extension DaemonManager {
         repoRoot: String? = nil,
         timeoutSeconds: TimeInterval = 15,
         launcher: DaemonSubcommandLauncher = SystemDaemonSubcommandLauncher()
-    ) -> DaemonSubcommandOutcome {
+    )
+        -> DaemonSubcommandOutcome
+    {
         // When a repo root with a built entrypoint is provided, launch *that* checkout's daemon
         // (`<repoRoot>/dist/src/index.js`) rather than whatever `auto-mobile` is on PATH — so a
         // caller that knows its source build gets a version/build-matched daemon (#2744) instead of
@@ -69,7 +71,9 @@ extension DaemonManager {
     static func daemonLaunchEnvironment(
         executable: String,
         environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> [String: String] {
+    )
+        -> [String: String]
+    {
         var environment = environment
         let existingPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
         let requiredPaths = [
@@ -89,10 +93,12 @@ extension DaemonManager {
         subcommand: String,
         readinessTimeoutSeconds: TimeInterval,
         environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> TimeInterval {
+    )
+        -> TimeInterval
+    {
         let configuredStartupMilliseconds = Int(environment["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
             ?? Int(environment["AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
-            ?? 30_000
+            ?? 30000
         let startupSeconds = configuredStartupMilliseconds > 0
             ? TimeInterval(configuredStartupMilliseconds) / 1000
             : 30
@@ -112,7 +118,9 @@ extension DaemonManager {
         environment: [String: String],
         timeoutSeconds: TimeInterval,
         launcher: DaemonSubcommandLauncher
-    ) -> DaemonSubcommandOutcome {
+    )
+        -> DaemonSubcommandOutcome
+    {
         PerfTimer.log("runDaemonSubcommand: launching process with args: \(arguments)")
         return launcher.launch(
             executable: executable,
@@ -129,7 +137,9 @@ extension DaemonManager {
         packageRunner: String?,
         autoMobilePath: String?,
         packageVersion: String? = resolveDaemonPackageVersion()
-    ) -> DaemonLaunch {
+    )
+        -> DaemonLaunch
+    {
         if let localEntry, let runtime {
             PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching local build at \(localEntry)")
             return .process(executable: runtime, arguments: [localEntry, "--daemon", subcommand])
@@ -164,7 +174,9 @@ extension DaemonManager {
         packageRunner: String,
         subcommand: String,
         packageVersion: String? = resolveDaemonPackageVersion()
-    ) -> [String]? {
+    )
+        -> [String]?
+    {
         guard let packageSpecifier = resolveDaemonPackageSpecifier(packageVersion) else {
             return nil
         }
@@ -180,7 +192,9 @@ extension DaemonManager {
         packageRunner: String,
         packageSpecifier: String,
         subcommand: String
-    ) -> [String] {
+    )
+        -> [String]
+    {
         let prefix = URL(fileURLWithPath: packageRunner).deletingPathExtension().lastPathComponent == "npx"
             ? ["-y"]
             : []
@@ -199,27 +213,27 @@ extension DaemonManager {
             return path
         }
         #if os(macOS)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [name]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            if process.terminationStatus == 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !path.isEmpty
-                {
-                    return path
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+            process.arguments = [name]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus == 0 {
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !path.isEmpty
+                    {
+                        return path
+                    }
                 }
+            } catch {
+                // PATH lookup is optional; callers report when no compatible executable is found.
+                PerfTimer.log("findExecutable: which lookup failed: \(error)")
             }
-        } catch {
-            // PATH lookup is optional; callers report when no compatible executable is found.
-            PerfTimer.log("findExecutable: which lookup failed: \(error)")
-        }
         #endif
         return nil
     }

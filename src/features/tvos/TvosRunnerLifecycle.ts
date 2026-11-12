@@ -312,7 +312,8 @@ export function getTvosRunnerLifecycle(): TvosRunnerLifecycle {
       }),
       foreground: new TargetAppForegroundRestore({
         targetApps: tvosTargetApps,
-        activate: (deviceId, bundleId) => new SimCtlClient().launchApp(bundleId, {}, deviceId),
+        activate: (deviceId, bundleId, signal) =>
+          new SimCtlClient().launchApp(bundleId, { signal }, deviceId),
       }),
       launcher: new XcodebuildTvosRunnerLauncher({
         writeRunnerEnvironment: (file, env, deviceId) =>

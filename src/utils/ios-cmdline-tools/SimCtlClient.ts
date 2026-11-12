@@ -804,7 +804,11 @@ export class SimCtlClient implements SimCtl {
         launchArgs,
         DEFAULT_DEVICE_READY_TIMEOUT_MS,
         `launch ${targetDevice} ${bundleId} [app arguments redacted]`,
-        { waitForTimedOutCommandSettlement: false, env: launchEnvironment(options?.environment) },
+        {
+          waitForTimedOutCommandSettlement: false,
+          env: launchEnvironment(options?.environment),
+          signal: options?.signal,
+        },
       );
 
       // Parse the output to extract PID if available

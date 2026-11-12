@@ -711,7 +711,8 @@ function refineWatchProvisionOptions(
 
 /**
  * The options an Apple TV or Vision Pro cannot honour. Resource settings need the automation
- * runner on both; a tvOS boot binds a session, so its tool grants apply as on iOS (#18020).
+ * runner on both; a tvOS boot binds a session, so its tool grants and readiness "automation"
+ * apply as on iOS (#18020).
  */
 function refineAppleTvProvisionOptions(
   args: ProvisionDeviceRefinable,
@@ -733,14 +734,20 @@ function refineAppleTvProvisionOptions(
       });
     }
   }
-  if (args.readiness === "automation") {
+  // tvOS readiness "automation" starts the runner, as on iOS (#18020); visionOS starts it on demand.
+  if (args.readiness === "automation" && args.device.platform === "visionos") {
     context.addIssue({
       code: "custom",
       path: ["readiness"],
       message:
-        args.device.platform === "visionos"
-          ? 'visionOS provisioning accepts only readiness "none"; observe, tapOn and sendKeys prepare the window-app runner on demand.'
-          : 'tvOS provisioning accepts only readiness "none"; call startDevice afterward to prepare automation.',
+        'visionOS provisioning accepts only readiness "none"; observe, tapOn and sendKeys prepare the window-app runner on demand.',
+    });
+  }
+  if (args.readiness === "automation" && args.device.platform === "tvos" && args.boot === false) {
+    context.addIssue({
+      code: "custom",
+      path: ["readiness"],
+      message: 'tvOS readiness "automation" starts the runner and requires boot=true.',
     });
   }
 }
@@ -768,7 +775,7 @@ export const provisionDeviceRegistrationSchema = z
       .enum(["automation", "none"])
       .optional()
       .describe(
-        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS and tvOS provisioning take only "none" (their default); visionOS also takes only "none" and prepares its window-app runner on the first observe, tapOn or sendKeys; startDevice prepares watchOS/tvOS runners',
+        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); tvOS defaults to "none" and starts its runner with "automation" (or startDevice); watchOS takes only "none" (startDevice prepares its runner); visionOS also takes only "none" and prepares its window-app runner on the first observe, tapOn or sendKeys',
       ),
   })
   .strict()

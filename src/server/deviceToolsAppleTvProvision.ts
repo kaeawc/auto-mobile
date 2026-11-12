@@ -37,6 +37,7 @@ import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
 import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { formatToolParamError } from "./toolParamError";
+import { getTvosRunnerLifecycle } from "../features/tvos/TvosRunnerLifecycle";
 import { stripInternalToolParams } from "./internalToolParams";
 
 type AppleTvProvisioner = ReturnType<
@@ -52,8 +53,8 @@ export function isAppleTvProvisionRequest(rawArgs: object): boolean {
  * provisionDevice for an Apple TV simulator (#15889). Under a lifecycle lease on the requested
  * name (rebound to the TV's UDID once resolved), adopt the exact TV or create it with
  * `simctl create`; with `boot` (the default) boot it and bind a session at readiness `booted`, as
- * startDevice does. A TV this call created is deleted again if its boot or bind fails. No
- * resources, tool grants or automation runner apply to a TV.
+ * startDevice does. A TV this call created is deleted again if its boot or bind fails. readiness
+ * "automation" also starts the runner for that session; resources do not apply to a TV.
  */
 export async function provisionAppleTvDevice(
   rawArgs: object,
@@ -160,8 +161,15 @@ export async function provisionAppleTvDevice(
               deadlineMs,
               { signal: requestSignal, stage },
             );
+            const runner =
+              args.readiness === "automation"
+                ? await startProvisionedTvRunner(tv.deviceId, booted.sessionId, deps, {
+                    signal: requestSignal,
+                    stage,
+                  })
+                : undefined;
             notifyAfterAppleSimulatorProvision(`tvOS simulator ${tv.deviceId}`, created, booted);
-            return tvProvisionResponse(args, tv, created, booted);
+            return tvProvisionResponse(args, tv, created, runner ? { ...booted, runner } : booted);
           } finally {
             leaseReleased = true;
             lease.release();
@@ -226,6 +234,37 @@ async function bootAndBind(
   }
 }
 
+/**
+ * readiness "automation" starts the runner for the bound session, as startDevice does (#18020).
+ * As there, a runner that cannot start leaves the booted session and the result says why.
+ */
+async function startProvisionedTvRunner(
+  deviceId: string,
+  sessionId: string,
+  deps: DeviceToolsDependencies,
+  { signal, stage }: { signal: AbortSignal; stage: { current: string } },
+): Promise<{ runnerUnavailable?: string }> {
+  stage.current = "starting the Apple TV automation runner";
+  let runnerUnavailable: string | undefined;
+  try {
+    if (!deps.daemonState.isInitialized()) {
+      throw new ActionableError(
+        "tvOS runner ownership requires a daemon-managed session; start the daemon and call startDevice.",
+      );
+    }
+    const sessions = deps.daemonState.getSessionManager();
+    const runner = (deps.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)();
+    const started = await runner.start({ deviceId, sessions, signal });
+    runnerUnavailable =
+      runner.attach({ deviceId, ownerSession: sessionId, sessions }) ?? started.runnerUnavailable;
+  } catch (error) {
+    runnerUnavailable = errorMessage(error);
+    logger.warn(`[TvosRunner] Runner unavailable for ${deviceId}: ${runnerUnavailable}`, error);
+  }
+  signal.throwIfAborted();
+  return runnerUnavailable === undefined ? {} : { runnerUnavailable };
+}
+
 /** The canonical lease owns the UDID; only boot may reuse the caller's own pool holder. */
 export function assertTvUnclaimed(
   udid: string,
@@ -288,11 +327,34 @@ function discardMessage(discarded: AppleTvDiscardResult): string {
     : `deleting it again failed (${discarded.error}); delete it with deleteDevice`;
 }
 
+interface ProvisionedTvBoot {
+  boot: AppleTvBootResult;
+  sessionId: string;
+  /** Present when readiness "automation" started the runner. */
+  runner?: { runnerUnavailable?: string };
+}
+
+function runnerNote(runner: ProvisionedTvBoot["runner"]): string {
+  return runner?.runnerUnavailable
+    ? `; tvOS runner unavailable: ${runner.runnerUnavailable}. Call startDevice after fixing it.`
+    : "";
+}
+
+function tvProvisionReadiness(booted: ProvisionedTvBoot | undefined) {
+  if (booted?.runner) {
+    return {
+      mode: "automation" as const,
+      status: booted.runner.runnerUnavailable ? "runner_unavailable" : "automation_ready",
+    };
+  }
+  return { mode: "none" as const, status: booted ? "device_ready" : "not_requested" };
+}
+
 function tvProvisionResponse(
   args: AppleTvProvisionDeviceRequest,
   tv: ListedAppleTv,
   created: boolean,
-  booted: { boot: AppleTvBootResult; sessionId: string } | undefined,
+  booted: ProvisionedTvBoot | undefined,
 ) {
   const resolvedSpec = { ...args.device.spec, displayCutout: "unknown" as const };
   const description = describeDevice({
@@ -305,7 +367,7 @@ function tvProvisionResponse(
   });
   const lifecycleState = booted ? "ready" : created ? "created" : "adopted";
   return createStructuredToolResponse({
-    message: `tvos '${tv.name}' provisioned (${lifecycleState})`,
+    message: `tvos '${tv.name}' provisioned (${lifecycleState})` + runnerNote(booted?.runner),
     device: projectProvisionedDevice(description),
     requestedSpec: args.device.spec,
     resolvedSpec,
@@ -313,7 +375,7 @@ function tvProvisionResponse(
     created,
     adopted: !created,
     lifecycleState,
-    readiness: { mode: "none", status: booted ? "device_ready" : "not_requested" },
+    readiness: tvProvisionReadiness(booted),
     ...(booted ? { sessionId: booted.sessionId, acquisition: booted.boot.acquisition } : {}),
     timing: {},
   });

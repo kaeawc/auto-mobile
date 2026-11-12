@@ -107,6 +107,7 @@ export async function startAppleTvDevice(
             lifecycleSignal.throwIfAborted();
             stage.current = "starting the Apple TV automation runner";
             let runnerUnavailable: string | undefined;
+            let foregroundRestore: string | undefined;
             let runner: Pick<TvosRunnerLifecycle, "start" | "attach" | "stop"> | undefined;
             const sessions = deps.daemonState.isInitialized()
               ? deps.daemonState.getSessionManager()
@@ -124,6 +125,7 @@ export async function startAppleTvDevice(
                 signal: lifecycleSignal,
               });
               runnerUnavailable = started.runnerUnavailable;
+              foregroundRestore = started.foregroundRestore;
               stopLaunchedRunner = started.stop;
             } catch (error) {
               runnerUnavailable = errorMessage(error);
@@ -150,7 +152,7 @@ export async function startAppleTvDevice(
             lifecycleSignal.throwIfAborted();
             completed = true;
             return createStructuredToolResponse({
-              message: bootedTvMessage(boot.device.name, runnerUnavailable),
+              message: bootedTvMessage(boot.device.name, runnerUnavailable, foregroundRestore),
               ...projectBootedDevice(
                 describeDevice({
                   kind: "booted",
@@ -206,10 +208,15 @@ function reusableTvSessionId(
       );
 }
 
-function bootedTvMessage(name: string, runnerUnavailable: string | undefined): string {
+function bootedTvMessage(
+  name: string,
+  runnerUnavailable: string | undefined,
+  foregroundRestore?: string,
+): string {
   return (
     `tvos '${name}' is booted` +
-    (runnerUnavailable ? `; tvOS runner unavailable: ${runnerUnavailable}` : "")
+    (runnerUnavailable ? `; tvOS runner unavailable: ${runnerUnavailable}` : "") +
+    (foregroundRestore ? `; app under test may not be in front: ${foregroundRestore}` : "")
   );
 }
 

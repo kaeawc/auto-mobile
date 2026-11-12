@@ -330,6 +330,32 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(result.readiness).toMatchObject({ level: "booted" });
   });
 
+  test("startDevice says when the app under test may not be in front yet", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { launcher } = await arrange([tv]);
+    tvosRunner = new TvosRunnerLifecycle({
+      artifacts: { resolve: async () => "/products/TV.xctestrun" },
+      launcher,
+      ports: { allocate: () => 9012, release: () => {} },
+      foreground: {
+        restore: async () => {
+          throw new ActionableError("dev.example.tvapp was not in front within 5000 ms");
+        },
+      },
+    });
+    const result = toolJson(
+      await call("startDevice", {
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    expect(result.message).toContain(
+      "app under test may not be in front: dev.example.tvapp was not in front within 5000 ms",
+    );
+    expect(tvosRunners.get(tv.udid)).toBe(launcher.client);
+  });
+
   test("startDevice adopts an already booted TV by exact name without another boot", async () => {
     const { simctl, timer } = await arrange([tvDevice({ name: NAME, state: "Booted" })]);
     const result = toolJson(
@@ -720,10 +746,12 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(provisionDeviceOutputSchema.safeParse(result).success).toBe(true);
   });
 
-  test("refuses readiness automation, resources and enableTools without boot before any simctl call", async () => {
+  test("refuses readiness automation and enableTools without boot, and resources, before any simctl call", async () => {
     const { simctl } = await arrange();
 
-    const readiness = await failure(provision({ device: TV, readiness: "automation" }));
+    const readiness = await failure(
+      provision({ device: TV, boot: false, readiness: "automation" }),
+    );
     const resources = await failure(
       provision({ device: TV, resources: { animations: "disabled" } }),
     );
@@ -732,10 +760,52 @@ describe("provisionDevice on an Apple TV simulator", () => {
     );
 
     expect(readiness).toBeInstanceOf(ActionableError);
-    expect(String(readiness)).toContain("tvOS provisioning accepts only readiness");
+    expect(String(readiness)).toContain(
+      'readiness "automation" starts the runner and requires boot=true',
+    );
     expect(String(resources)).toContain("resources is not supported on tvOS");
     expect(String(unbooted)).toContain("requires boot=true");
     expect(simctl.commands).toEqual([]);
+  });
+
+  test("readiness automation starts the runner for the bound session, as on iOS", async () => {
+    const { launcher, sessions, runnerCalls } = await arrange();
+
+    const result = toolJson(await provision({ device: TV, readiness: "automation" }));
+
+    const { sessionId } = sessionSchema.parse(result);
+    expect(result).toMatchObject({
+      lifecycleState: "ready",
+      readiness: { mode: "automation", status: "automation_ready" },
+    });
+    expect(provisionDeviceOutputSchema.safeParse(result).success).toBe(true);
+    // The tvOS runner starts, not the iOS CtrlProxy readiness path.
+    expect(runnerCalls).toEqual([]);
+    expect(launcher.launches).toHaveLength(1);
+    const udid = launcher.launches[0]!.deviceId;
+    expect(tvosRunners.get(udid)).toBe(launcher.client);
+    await sessions.releaseSession(sessionId, "explicit-release");
+    expect(launcher.stops).toBe(1);
+    expect(tvosRunners.get(udid)).toBeUndefined();
+  });
+
+  test("readiness automation keeps the booted session when the runner cannot start", async () => {
+    const { artifacts, launcher } = await arrange();
+    artifacts.resolve = async () => {
+      throw new Error("set AUTOMOBILE_TVOS_RUNNER_XCTESTRUN");
+    };
+
+    const result = toolJson(await provision({ device: TV, readiness: "automation" }));
+
+    expect(sessionSchema.safeParse(result).success).toBe(true);
+    expect(result).toMatchObject({
+      lifecycleState: "ready",
+      readiness: { mode: "automation", status: "runner_unavailable" },
+    });
+    expect(String(result.message)).toContain(
+      "tvOS runner unavailable: set AUTOMOBILE_TVOS_RUNNER_XCTESTRUN",
+    );
+    expect(launcher.launches).toEqual([]);
   });
 
   test("accepts enableTools with boot and binds a session for the grant", async () => {

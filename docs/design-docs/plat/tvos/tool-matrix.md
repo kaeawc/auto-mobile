@@ -28,6 +28,10 @@ runner withholds values for its first window. Any failed hierarchy, append-text 
 post-press snapshot stamps the current uptime conservatively before returning.
 Hierarchy and append-text propagate the snapshot error; a successful press still succeeds.
 Hierarchy, append-text and press requests carry the daemon's foreground-app hint.
+After the runner starts, the foreground restore re-launches that app and then polls the
+hierarchy's `packageName` (250 ms interval, 5 s bound) until it names that app, since
+`simctl launch` returns before tvOS finishes the transition; the restore stays best-effort and
+cancellable, and a bound that expires is reported in the start result's message.
 Append-text stamps the known keyboard-present tree again after typing completes.
 A type-19 keyboard node anywhere in a snapshot updates that timestamp and
 withholds every text-input value (types 45, 49, 50 and 52), regardless of focus
@@ -140,7 +144,7 @@ fields identified by secure metadata, always redact their values.
 | `postNotification`            | pass              | `simctl push` to the app named by `appId` (required).                                                                                            |
 | `pressButton`                 | pass              | Any remote button long-presses with `durationMs` (100–10000 ms) if the runner lists `press_button_hold`. No `steps` or touch-surface swipes.     |
 | `prototype`                   | not-supported     |                                                                                                                                                  |
-| `provisionDevice`             | pass              | Boots with readiness `none`.                                                                                                                     |
+| `provisionDevice`             | pass              | Boots with readiness `none`; readiness `automation` also starts the runner, as `startDevice` does.                                               |
 | `putAppFile`                  | not-supported     |                                                                                                                                                  |
 | `recentApps`                  | not-supported     |                                                                                                                                                  |
 | `reconcileDeviceResources`    | not-supported     |                                                                                                                                                  |

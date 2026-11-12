@@ -28,6 +28,12 @@ interface OwnedRunner {
   stop?: () => void;
   port?: number;
 }
+interface TvosRunnerStartResult {
+  runnerUnavailable?: string;
+  /** Why the app under test may not be in front yet; the runner itself is usable (#18020). */
+  foregroundRestore?: string;
+  stop?: () => void;
+}
 interface TvosRunnerRestartResult {
   runnerUnavailable?: string;
   unownedRunner?: TvosRunnerClient;
@@ -65,7 +71,7 @@ export class TvosRunnerLifecycle {
     deviceId: string;
     sessions?: TvosRunnerSessions;
     signal?: AbortSignal;
-  }): Promise<{ runnerUnavailable?: string; stop?: () => void }> {
+  }): Promise<TvosRunnerStartResult> {
     return this.startOwned(request);
   }
 
@@ -131,7 +137,7 @@ export class TvosRunnerLifecycle {
       signal?: AbortSignal;
     },
     ownerSession?: string,
-  ): Promise<{ runnerUnavailable?: string; stop?: () => void }> {
+  ): Promise<TvosRunnerStartResult> {
     const { deviceId, sessions } = request;
     if (sessions) {
       this.observeSessions(sessions);
@@ -167,11 +173,12 @@ export class TvosRunnerLifecycle {
         }
         throw new ActionableError("the tvos session ended during runner startup");
       }
-      await this.restoreForeground(deviceId, signal);
+      const foregroundRestore = await this.restoreForeground(deviceId, signal);
       if (signal.aborted || this.runners.get(deviceId) !== entry) {
         throw new ActionableError("the tvos session ended during runner startup");
       }
       return {
+        ...(foregroundRestore === undefined ? {} : { foregroundRestore }),
         stop: () => {
           if (this.runners.get(deviceId) === entry) {
             this.stop(deviceId);
@@ -190,16 +197,24 @@ export class TvosRunnerLifecycle {
     }
   }
 
-  /** A failed restore leaves the runner usable; the app under test can still be launched. */
-  private async restoreForeground(deviceId: string, signal: AbortSignal): Promise<void> {
+  /**
+   * A failed restore leaves the runner usable; the app under test can still be launched. Returns
+   * the reason it may not be in front, for the caller's result.
+   */
+  private async restoreForeground(
+    deviceId: string,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
     try {
       await this.dependencies.foreground?.restore(deviceId, signal);
+      return undefined;
     } catch (error) {
       signal.throwIfAborted();
       logger.warn(
         `[TvosRunner] App under test not restored to the foreground on ${deviceId}: ${errorMessage(error)}`,
         error,
       );
+      return errorMessage(error);
     }
   }
 
@@ -314,6 +329,8 @@ export function getTvosRunnerLifecycle(): TvosRunnerLifecycle {
         targetApps: tvosTargetApps,
         activate: (deviceId, bundleId, signal) =>
           new SimCtlClient().launchApp(bundleId, { signal }, deviceId),
+        foreground: async (deviceId, signal) =>
+          (await tvosRunners.get(deviceId)?.hierarchy(signal))?.packageName,
       }),
       launcher: new XcodebuildTvosRunnerLauncher({
         writeRunnerEnvironment: (file, env, deviceId) =>

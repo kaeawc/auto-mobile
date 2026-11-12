@@ -92,15 +92,19 @@ runtime and device type identifiers from `automobile:devices/images/tvos`:
   the error says so and tells you to delete it with `deleteDevice`.
 - `boot: false` creates or adopts the simulator without a session.
 - `enableTools` enables the named tools for the new session, as on iOS; it requires `boot`.
-- `resources` and `readiness: "automation"` are refused.
+- `readiness: "automation"` (with `boot`) also starts the automation runner, as `startDevice` does;
+  the result's `readiness` is `automation_ready`, or `runner_unavailable` with the reason in
+  `message`. The default, `none`, starts no runner.
+- `resources` are refused.
 
 `startDevice { platform: "tvos", name: "tv-4k" }` boots an existing simulator, starts its automation
 runner and binds a session. It accepts `enableTools` too. It never creates a simulator; a name or
 `deviceId` that matches none, or more than one, fails and asks for an exact `deviceId`. Starting the
 runner brings its own host app to the front, so an app you launched with `launchApp` before is
-brought back to the foreground once the runner is up, including after an automatic restart. If the
-restore fails, the runner still works and the host app stays in front. Call `launchApp` again to bring
-the app back.
+brought back to the foreground once the runner is up, including after an automatic restart.
+`startDevice` returns once the runner sees that app in front, waiting up to 5 seconds. If the
+restore fails or does not finish in time, the runner still works, `message` says the app may not be
+in front, and the host app may stay in front. Call `observe` again, or `launchApp` to bring the app back.
 
 On first tvOS use, AutoMobile downloads and verifies the release’s prebuilt runner; no source
 checkout is needed. `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` selects an explicit `.xctestrun` instead.
@@ -145,8 +149,8 @@ state when available, including when focus belongs to the row containing the tog
 `checked` means its state is unknown. The hierarchy describes the app in front: the app
 you last started with `launchApp`, Settings or another Apple app, or the home screen.
 
-Without a runner it returns a screenshot with `hierarchyUnavailable`; call `startDevice` to
-prepare automation. A runner that does not answer a command within 5 seconds is disconnected.
+Without a runner it returns a screenshot with `hierarchyUnavailable`; call `startDevice` (or
+`provisionDevice` with `readiness: "automation"`) to prepare automation. A runner that does not answer a command within 5 seconds is disconnected.
 An app crash is reported as an app exit. After a disconnect or crash, the next call automatically
 restarts a runner AutoMobile started for the session. If recovery fails, `observe` returns a
 screenshot with `hierarchyUnavailable` and the recovery error in its `message` (`project` and

@@ -48,7 +48,8 @@ final class AsyncHTTPTransportTests: XCTestCase {
         performer.reply(
             1,
             data: Data(
-                #"{"jsonrpc":"2.0","id":\#(id),"result":{"isError":true,"content":[{"type":"text","text":"Session is not active"}]}}"#.utf8
+                #"{"jsonrpc":"2.0","id":\#(id),"result":{"isError":true,"content":[{"type":"text","text":"Session is not active"}]}}"#
+                    .utf8
             ),
             headers: ["Content-Type": "application/json"]
         )

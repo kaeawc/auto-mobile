@@ -9,7 +9,7 @@ final class SessionAcquisitionTests: XCTestCase {
 
     func testAcquiresCapturedAppleSessionWithConfiguredUdidBeforeEnablingAndExecuting() async throws {
         let client = AcquisitionMCPClient()
-        client.replies["getApple"] = [try capturedAppleResponse()]
+        client.replies["getApple"] = try [capturedAppleResponse()]
         let executor = makeExecutor(client: client, deviceId: "1AE70165-A725-4868-B2EF-FAB7AB66868F")
 
         _ = try await executor.execute()
@@ -115,12 +115,12 @@ final class SessionAcquisitionTests: XCTestCase {
 
     func testAcquisitionRefusalUsesDeviceWaitWithoutSpendingARetry() async throws {
         let client = AcquisitionMCPClient()
-        client.replies["getApple"] = [
+        client.replies["getApple"] = try [
             MCPToolResponse(
                 text: #"{"success":false,"error":"device busy","code":"device_owned_by_other_session","retryAfterMs":500}"#,
                 isError: true
             ),
-            try capturedAppleResponse(),
+            capturedAppleResponse(),
         ]
         let scheduler = VirtualDeadlineScheduler()
         let executor = makeExecutor(client: client, scheduler: scheduler)
@@ -130,7 +130,10 @@ final class SessionAcquisitionTests: XCTestCase {
         scheduler.advance(by: 0.5)
         let result = try await task.value
         XCTAssertTrue(result.success)
-        XCTAssertEqual(client.events, ["initialize", "getApple", "initialize", "getApple", "setToolEnabled", "executePlan"])
+        XCTAssertEqual(
+            client.events,
+            ["initialize", "getApple", "initialize", "getApple", "setToolEnabled", "executePlan"]
+        )
         XCTAssertEqual(client.calls.last?.arguments["sessionUuid"] as? String, capturedSession)
         XCTAssertEqual(scheduler.requestedDelays, [0.5])
     }
@@ -270,8 +273,10 @@ private final class AcquisitionMCPClient: AutoMobileMCPClient, @unchecked Sendab
             throw MCPClientError.invalidResponse("Unexpected tool: \(name)")
         }
     }
+
     func readResource(uri _: String, timeout _: TimeInterval) async throws -> MCPResourceResponse {
         throw MCPClientError.invalidResponse("Unexpected resource read")
     }
+
     func resetSession() {}
 }

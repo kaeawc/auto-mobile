@@ -35,7 +35,8 @@ final class AsyncDaemonTransportTests: XCTestCase {
         try await connection.receives.wait(for: 1)
         let id = AsyncFakeDaemonConnection.requestId(connection.sent[0])
         connection.deliver(Data(
-            #"{"id":"\#(id)","type":"mcp_response","success":true,"result":{"isError":true,"content":[{"type":"text","text":"Session is not active"}]}}"#.utf8
+            #"{"id":"\#(id)","type":"mcp_response","success":true,"result":{"isError":true,"content":[{"type":"text","text":"Session is not active"}]}}"#
+                .utf8
         ))
         let response = try await task.value
         XCTAssertTrue(response.isError)

@@ -59,6 +59,9 @@ export type WatchObservation<P extends AppleScreenshotOnlyPlatform = AppleScreen
     | "screenshotOrientation"
     | "screenshotSource"
     | "screenshotCaptureSource"
+    | "screenshotFallback"
+    | "screenshotFallbackReason"
+    | "screenshotStageDurationsMs"
     | "screenshotCapturedAt"
     | "screenshotImage"
   > & { hierarchyUnavailable: WatchHierarchyUnavailable<P> };

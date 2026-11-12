@@ -13,9 +13,18 @@ export type ScreenshotFallbackReason =
   | "ctrlproxy_failed"
   | "ctrlproxy_rate_limited"
   | "ctrlproxy_timeout"
+  | "ctrlproxy_recent_failure"
   | "ctrlproxy_exception";
 
+/** Host elapsed times, including encoding and persistence in each backend stage. */
+export interface ScreenshotStageDurationsMs {
+  ctrlProxyMs?: number;
+  adbMs?: number;
+  totalMs: number;
+}
+
 export interface ScreenshotPerformanceMetadata {
+  screenshotStageDurationsMs?: ScreenshotStageDurationsMs;
   screenshotCaptureDurationMs?: number;
   screenshotEncodeDurationMs?: number;
   screenshotByteLength?: number;
@@ -100,6 +109,9 @@ export function pickScreenshotMetadata(metadata: ScreenshotMetadata): Screenshot
   }
   if (metadata.screenshotFallbackReason !== undefined) {
     pickedMetadata.screenshotFallbackReason = metadata.screenshotFallbackReason;
+  }
+  if (metadata.screenshotStageDurationsMs !== undefined) {
+    pickedMetadata.screenshotStageDurationsMs = metadata.screenshotStageDurationsMs;
   }
   if (metadata.screenshotCaptureDurationMs !== undefined) {
     pickedMetadata.screenshotCaptureDurationMs = metadata.screenshotCaptureDurationMs;

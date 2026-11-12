@@ -206,6 +206,9 @@ export async function captureChosenTerminalScreenshot(
       delete observation.screenshotMimeType;
       delete observation.screenshotImage;
       delete observation.screenshotCaptureSource;
+      delete observation.screenshotFallback;
+      delete observation.screenshotFallbackReason;
+      delete observation.screenshotStageDurationsMs;
       delete observation.observationScreenshotResourceUri;
       delete observation.accessibilityAudit;
       logger.warn(`[PostActionCapture] terminal screenshot failed: ${errorMessage(error)}`, error);

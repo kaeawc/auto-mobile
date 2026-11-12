@@ -53,6 +53,7 @@ export function screenshotPerformanceMetadataFrom(
   metadata: ScreenshotPerformanceMetadata,
 ): ScreenshotPerformanceMetadata {
   return {
+    screenshotStageDurationsMs: metadata.screenshotStageDurationsMs,
     screenshotCaptureDurationMs: metadata.screenshotCaptureDurationMs,
     screenshotEncodeDurationMs: metadata.screenshotEncodeDurationMs,
     screenshotByteLength: metadata.screenshotByteLength,

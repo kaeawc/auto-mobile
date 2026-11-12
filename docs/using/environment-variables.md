@@ -277,7 +277,17 @@ An action observation with a screenshot reports `screenshotHierarchyLagMs`, the
 milliseconds between its hierarchy and its screenshot. If the screenshot is more
 than 500 ms later, the observation also has `screenshotHierarchyMismatch: true`
 and a `freshness.warning`: the image may show a later screen than the hierarchy,
-so trust the hierarchy and call `observe` for a matching screenshot.
+so trust the hierarchy and call `observe` for a matching screenshot. Android captures
+that try CtrlProxy before ADB wait at most three seconds for CtrlProxy; a recent
+failure sends subsequent captures straight to ADB for 60 seconds before retrying.
+When capture diagnostics are available, `screenshotFallback` indicates ADB capture,
+`screenshotFallbackReason` explains the switch (`ctrlproxy_timeout` for a timeout,
+`ctrlproxy_recent_failure` for the cooldown), and `screenshotStageDurationsMs`
+contains `totalMs` plus `ctrlProxyMs` and/or `adbMs` for the stages attempted,
+including encoding and saving the image. `screenshotCaptureSource` on observe
+continues to distinguish `device` from `observation-cache`; on screenshot stream
+frames it identifies the capture backend. Prototype-hidden captures fail if
+CtrlProxy cannot capture them; they never switch to ADB.
 
 Settled mode costs roughly 170 ms per Android observation and 20-70 ms per iOS
 observation over async. When only one call needs a matching screenshot, pass

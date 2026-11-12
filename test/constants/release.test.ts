@@ -7,6 +7,12 @@ import {
   TVOS_RUNNER_ARCHIVE_FILENAME,
   resolveTvosRunnerUrl,
   resolveTvosRunnerChecksum,
+  VISIONOS_RUNNER_ARCHIVE_FILENAME,
+  WATCHOS_RUNNER_ARCHIVE_FILENAME,
+  resolveVisionosRunnerChecksum,
+  resolveVisionosRunnerUrl,
+  resolveWatchosRunnerChecksum,
+  resolveWatchosRunnerUrl,
   AUDIO_LOOPBACK_HELPER_SHA256_CHECKSUM,
   resolveAudioLoopbackHelperChecksum,
   resolveAudioLoopbackHelperUrl,
@@ -966,6 +972,65 @@ describe("tvOS runner release delivery", () => {
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const checksum = entry.tvosRunnerSha256 ?? "";
       expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
+    }
+  });
+});
+
+describe.each([
+  {
+    name: "watchOS",
+    filename: WATCHOS_RUNNER_ARCHIVE_FILENAME,
+    asset: "watchos-runner-macos.zip",
+    field: "watchosRunnerSha256",
+    url: resolveWatchosRunnerUrl,
+    checksum: resolveWatchosRunnerChecksum,
+  },
+  {
+    name: "visionOS",
+    filename: VISIONOS_RUNNER_ARCHIVE_FILENAME,
+    asset: "visionos-runner-macos.zip",
+    field: "visionosRunnerSha256",
+    url: resolveVisionosRunnerUrl,
+    checksum: resolveVisionosRunnerChecksum,
+  },
+] as const)("$name runner release delivery", (platform) => {
+  const sha = "c".repeat(64);
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "1.0.0",
+      apkSha256: "apk",
+      ipaSha256: "ipa",
+      runnerSha256: "runner",
+      [platform.field]: sha,
+    },
+    { version: "0.9.0", apkSha256: "apk", ipaSha256: "ipa", runnerSha256: "runner" },
+  ];
+
+  test("uses its own archive with the selected version and asset mirror", () => {
+    expect(platform.filename).toBe(platform.asset);
+    expect(platform.url({}, registry)).toBe(`${DEFAULT_ASSET_BASE_URL}/1.0.0/${platform.asset}`);
+    expect(
+      platform.url(
+        {
+          AUTOMOBILE_VERSION: "0.9.0",
+          AUTOMOBILE_ASSET_BASE_URL: "https://mirror.example/releases",
+        },
+        registry,
+      ),
+    ).toBe(`https://mirror.example/releases/0.9.0/${platform.asset}`);
+  });
+
+  test("selects the pinned checksum and is empty for releases that predate it", () => {
+    expect(platform.checksum({}, registry)).toBe(sha);
+    expect(platform.checksum({ AUTOMOBILE_VERSION: "0.9.0" }, registry)).toBe("");
+    expect(platform.checksum({ AUTOMOBILE_VERSION: "9.0.0" }, registry)).toBe("");
+    expect(platform.checksum({}, [])).toBe("");
+  });
+
+  test("committed pins are empty or SHA-256 values", () => {
+    for (const entry of [...RELEASE_CHECKSUM_REGISTRY, NIGHTLY_CHECKSUM_ENTRY]) {
+      const value = entry[platform.field] ?? "";
+      expect(value === "" || /^[a-f0-9]{64}$/.test(value)).toBe(true);
     }
   });
 });

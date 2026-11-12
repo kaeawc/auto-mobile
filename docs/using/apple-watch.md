@@ -73,11 +73,14 @@ Deleting a watch automatically unpairs only pairs created by the current daemon.
 
 `startDevice` also starts the watch automation runner. If the runner cannot start, the session is
 still bound at readiness `booted`, the response message says why, and `observe` returns a
-screenshot only. From an AutoMobile checkout, `startDevice` builds the runner itself when the
+screenshot only. On first use AutoMobile downloads and verifies the release's prebuilt runner, so
+no source checkout is needed; existing local build products take precedence over the download.
+When the selected release has no watch runner checksum, from an AutoMobile checkout
+`startDevice` builds the runner itself when the
 checkout is the directory AutoMobile was started from, or is named by `AUTOMOBILE_PROJECT_ROOT`;
 the response message lists every location checked and the build command when it cannot find the
-project. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt runner when using the published
-package (see [Environment variables](environment-variables.md)).
+project. `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` selects an explicit prebuilt runner instead (see
+[Environment variables](environment-variables.md)).
 
 To pick a watch for a connection without a session, call `setActiveDevice` with
 `platform: "watchos"`. A call that does not name `watchos` never reaches a watch.

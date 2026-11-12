@@ -431,3 +431,63 @@ TS
   [ "$status" -ne 0 ]
   [[ "$output" == *"SHA256 mismatch"* ]]
 }
+
+# --- watchOS and visionOS runners (#18136) ---
+
+# Writes registry[0] with the watchOS ($1) and visionOS ($2) runner checksums; an
+# empty argument leaves that field out.
+write_runner_release_ts() {
+  local watch_line="" vision_line=""
+  if [ -n "$1" ]; then
+    watch_line="
+    watchosRunnerSha256: \"$1\","
+  fi
+  if [ -n "$2" ]; then
+    vision_line="
+    visionosRunnerSha256: \"$2\","
+  fi
+  cat > "$PROJECT/src/constants/release.ts" <<TS
+export interface ReleaseChecksumEntry {
+  version: string;
+  watchosRunnerSha256?: string;
+  visionosRunnerSha256?: string;
+}
+
+export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
+  {
+    version: "9.9.9",
+    apkSha256: "",
+    ipaSha256: "",${watch_line}${vision_line}
+  },
+];
+TS
+}
+
+@test "matching watchOS and visionOS runner checksums verify against their own fields" {
+  local other="0000000000000000000000000000000000000000000000000000000000000000"
+  write_runner_release_ts "$ART_SHA" "$other"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" watchosrunner
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+  run bash "$ABS_SCRIPT" "$ARTIFACT" visionosrunner
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch for visionosRunnerSha256"* ]]
+
+  write_runner_release_ts "$other" "$ART_SHA"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" visionosrunner
+  [ "$status" -eq 0 ]
+  run bash "$ABS_SCRIPT" "$ARTIFACT" watchosrunner
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch for watchosRunnerSha256"* ]]
+}
+
+@test "absent watchOS and visionOS runner checksums report no checksum" {
+  write_runner_release_ts "" ""
+  cd "$PROJECT"
+  for platform in watchosrunner:watchosRunnerSha256 visionosrunner:visionosRunnerSha256; do
+    run bash "$ABS_SCRIPT" "$ARTIFACT" "${platform%%:*}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"No SHA256 checksum found for ${platform##*:}"* ]]
+  done
+}

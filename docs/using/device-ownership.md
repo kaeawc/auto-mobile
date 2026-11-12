@@ -410,7 +410,7 @@ watch, even after one was selected.
   the call fails; retry `startDevice`. A second start reuses a connected runner. If the
   runner cannot start, the call still returns a booted session and explains why
   in `message`. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt watch runner
-  artifact if automatic discovery or building is unavailable, then retry.
+  artifact if automatic discovery, download or building is unavailable, then retry.
 - With its runner connected, `observe` returns the watch hierarchy and screenshot;
   `tapOn`, `tapAt`, directional `swipeOn` and `pressButton` with home are available.
   Without a runner, observation returns a fresh screenshot (`screenshotPath`,

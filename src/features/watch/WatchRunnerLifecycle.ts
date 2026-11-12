@@ -7,6 +7,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../utils/PortManager";
 import { WatchRunnerArtifacts } from "./WatchRunnerArtifacts";
+import { WatchRunnerReleaseProvider } from "./WatchRunnerReleaseProvider";
 import { XcodebuildWatchRunnerLauncher, type WatchRunnerLauncher } from "./WatchRunnerLauncher";
 import { watchRunners } from "./WatchRunnerRegistry";
 
@@ -246,6 +247,7 @@ export function getWatchRunnerLifecycle(): WatchRunnerLifecycle {
   if (!defaultLifecycle) {
     defaultLifecycle = new WatchRunnerLifecycle({
       artifacts: new WatchRunnerArtifacts({
+        release: new WatchRunnerReleaseProvider(),
         builder: {
           getXctestrunPath: (platform) => getDefaultBuilder().getXctestrunPath(platform),
           getConfig: () => getDefaultBuilder().getConfig(),

@@ -14,7 +14,7 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/working
 
 const WATCH_SCHEME = "CtrlProxyWatch";
 
-/** Finds local watch artifacts, building the checked-in watch scheme when necessary. */
+/** Resolves overrides, local products, and released watch runners before building from source. */
 export class WatchRunnerArtifacts {
   private readonly builds = new SingleFlight<string, string>();
   constructor(
@@ -26,6 +26,7 @@ export class WatchRunnerArtifacts {
             "projectRoot" | "derivedDataPath"
           >;
         };
+      release?: { ensure(signal?: AbortSignal): Promise<string | null> };
       xcodebuild?: Pick<Xcodebuild, "executeCommand">;
       override?: () => string | undefined;
       access?: (file: string) => Promise<unknown>;
@@ -47,6 +48,11 @@ export class WatchRunnerArtifacts {
     const existing = await builder.getXctestrunPath("watchSimulator");
     if (existing) {
       return existing;
+    }
+    const released = await this.dependencies.release?.ensure(signal);
+    signal?.throwIfAborted();
+    if (released) {
+      return released;
     }
     const paths = builder.getConfig();
     return await this.builds.run(
@@ -107,7 +113,7 @@ function missingProjectError(checked: string[], derivedDataPath: string): Action
       `The ${WATCH_SCHEME} watch runner is not built in ${derivedDataPath} and ${CTRL_PROXY_PROJECT_RELATIVE_PATH} was not found at: ${checked.join(", ")}.`,
       `From an AutoMobile checkout, set ${ENV.PROJECT_ROOT.name} to the checkout root and retry startDevice to build it automatically,`,
       `or build it yourself: ${buildCommand(`<checkout>/${CTRL_PROXY_PROJECT_RELATIVE_PATH}`, derivedDataPath)}.`,
-      `The published package does not include the watch project; there, set ${ENV.WATCH_RUNNER_XCTESTRUN.name} to a prebuilt watch runner xctestrun.`,
+      `This release has no published watchOS runner, and the published package does not include the watch project; there, set ${ENV.WATCH_RUNNER_XCTESTRUN.name} to a prebuilt watch runner xctestrun.`,
     ].join(" "),
   );
 }

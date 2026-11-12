@@ -9,7 +9,10 @@ AutoMobile models Vision Pro simulators as platform `visionos`, form factor
 `listDeviceImages`, `provisionDevice`, `deleteDevice`, `startDevice`, `setActiveDevice`
 and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
 `observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner
-on demand. Provisioning still accepts only readiness `none`. The runner reports
+on demand. Its xrsimulator xctestrun comes from `AUTOMOBILE_VISIONOS_RUNNER_XCTESTRUN`, then local
+`AutoMobileVisionTest` products, then the release's pinned `visionos-runner-macos.zip` through
+`VisionosRunnerReleaseProvider` (the tvOS `SimulatorRunnerReleaseProvider` contract), then a
+source build. The iOS runner is not reused: visionOS is its own scheme and SDK. Provisioning still accepts only readiness `none`. The runner reports
 hierarchy and focus for the window app last launched with `launchApp`. The observation
 exposes the bundle ID of the window app the runner automates as `hierarchyBundleId`
 with every projection, including the default. It is the target the runner that

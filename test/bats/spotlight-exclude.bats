@@ -91,6 +91,7 @@ ios/build-prototype-viewer-release.sh
 ios/build-screen-capture-helper-release.sh
 ios/build-audio-loopback-helper-release.sh
 ios/build-tvos-runner-release.sh
+ios/build-simulator-runner-release.sh
 ios/build-network-filter-probe.sh
 lib/host-slots.sh
 lib/bun-unit-chunks.sh

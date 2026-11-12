@@ -83,7 +83,7 @@
   [ "$status" -eq 0 ]
 
   local artifact_name
-  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar lmk-pressure screen-capture-helper audio-loopback-helper tvos-runner prototype-agent prototype-viewer network-filter; do
+  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar lmk-pressure screen-capture-helper audio-loopback-helper tvos-runner watchos-runner visionos-runner prototype-agent prototype-viewer network-filter; do
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -314,6 +314,8 @@
     .github/workflows/build-screen-capture-helper.yml \
     .github/workflows/build-audio-loopback-helper.yml \
     .github/workflows/build-tvos-runner.yml \
+    .github/workflows/build-watchos-runner.yml \
+    .github/workflows/build-visionos-runner.yml \
     .github/workflows/build-prototype-agent.yml \
     .github/workflows/build-prototype-viewer.yml; do
     run yq -r '.on.workflow_call.inputs."artifact-retention-days".default' "$workflow"
@@ -1184,4 +1186,34 @@ load yq-helpers
   grep -Fq "build-tvos-runner-release.sh" "$builder"
   grep -Fq "name: tvos-runner" "$builder"
   grep -Fq "path: /tmp/tvos-runner-macos.zip" "$builder"
+}
+
+@test "watchOS and visionOS runners are built, pinned, verified and published from prepared artifacts (#18136)" {
+  local prepare=".github/workflows/prepare-release.yml"
+  local release=".github/workflows/release.yml"
+  local spec platform label upper builder
+  for spec in watchos:watchOS:WATCHOS visionos:visionOS:VISIONOS; do
+    IFS=: read -r platform label upper <<<"$spec"
+    builder=".github/workflows/build-${platform}-runner.yml"
+    grep -Fq "uses: ./.github/workflows/build-${platform}-runner.yml" "$prepare"
+    grep -Fq "${upper}_RUNNER_SHA256: \${{ needs.build-candidate-${platform}-runner.outputs.sha256 }}" "$prepare"
+    grep -Fq "verify-artifact-sha256.sh /tmp/${platform}-runner-macos.zip ${platform}runner" "$prepare"
+    grep -Fq '"'"${platform}-runner"'"' "$prepare"
+    grep -Fq '"'"${platform}-runner"'"' "$release"
+    run grep -Fq "uses: ./.github/workflows/build-${platform}-runner.yml" "$release"
+    [ "$status" -ne 0 ]
+    grep -Fq "entry.${platform}RunnerSha256" "$release"
+    grep -Fxq "            /tmp/${platform}-runner-macos.zip" "$release"
+    run grep -Fq "secrets:" "$builder"
+    [ "$status" -ne 0 ]
+    grep -Fq "xcodebuild -downloadPlatform ${label}" "$builder"
+    grep -Fq "scripts/ios/install-xcodegen.sh" "$builder"
+    grep -Fq "build-simulator-runner-release.sh --platform ${platform} --output /tmp/${platform}-runner-macos.zip" "$builder"
+    grep -Fq "name: ${platform}-runner" "$builder"
+    grep -Fq "path: /tmp/${platform}-runner-macos.zip" "$builder"
+    # Builders are reusable only: they never run on pull requests or pushes.
+    grep -Fxq "  workflow_call:" "$builder"
+    run grep -Eq '^  (pull_request|pull_request_target|push|schedule|workflow_dispatch):' "$builder"
+    [ "$status" -ne 0 ]
+  done
 }

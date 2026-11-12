@@ -98,6 +98,7 @@ describe("PostNotification - iOS Simulator", () => {
     expect(result.appId).toBe("com.x");
     expect(pushCalls()).toHaveLength(shouldPost ? 1 : 0);
     expect(readCalls).toEqual(shouldRead ? [[SIM_UDID, "com.x"]] : []);
+    expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(0);
     if (shouldPost) {
       expect(result.method).toBe("simctlPush");
     } else {

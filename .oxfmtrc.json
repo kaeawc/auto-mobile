@@ -37,6 +37,7 @@
     "test/fixtures/android-install/*.txt",
     "test/fixtures/android-protoviewer/*",
     "test/fixtures/ios-sdk-network/*.json",
+    "test/fixtures/ios/watch-log-saving-notification.txt",
     "test/fixtures/ios-lock-state/**",
     "test/fixtures/ios-notification-center/*.json",
     "test/fixtures/ios-typed-text/*.json",

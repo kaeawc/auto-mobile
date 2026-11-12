@@ -919,6 +919,26 @@ export class SimCtlClient implements SimCtl {
     await this.executeCommandArgs(["ui", targetDevice, "appearance", mode]);
   }
 
+  /** Best-effort callers inspect the watch notification pipeline after a successful push. */
+  async readNotificationDeliveryLog(deviceId: string): Promise<string> {
+    const result = await this.executeCommandArgs(
+      [
+        "spawn",
+        deviceId,
+        "log",
+        "show",
+        "--last",
+        "10s",
+        "--style",
+        "compact",
+        "--predicate",
+        'eventMessage CONTAINS "Saving notification"',
+      ],
+      2000,
+    );
+    return result.stdout;
+  }
+
   /**
    * Deliver a simulated remote push to a booted simulator via `simctl push`.
    * Writes the payload to a temp .apns file because executeCommand cannot stream stdin.

@@ -20,6 +20,32 @@ func watchTapRoute(
     return .clockface(try watchTapNormalizedOffset(x: x, y: y, frame: clockfaceFrame()))
 }
 
+/// Alerts retain the app's gesture path so permission sheets keep their scroll behavior.
+enum WatchSwipeRoute: Equatable {
+    case app
+    case systemAlert
+    case clockface
+    case system
+}
+
+/// Route swipes without querying XCTest or touching a backgrounded app.
+func watchSwipeRoute(hasAlerts: Bool, appForeground: Bool, clockfaceForeground: Bool) -> WatchSwipeRoute {
+    if hasAlerts { return .systemAlert }
+    if appForeground { return .app }
+    return clockfaceForeground ? .clockface : .system
+}
+
+/// Center a directional drag, defaulting to travel across 60% of the screen.
+func watchSwipeVectors(direction: WatchSwipeDirection, distance: Double?) -> (from: CGVector, to: CGVector) {
+    let half = (distance ?? 0.6) / 2
+    return switch direction {
+    case .up: (CGVector(dx: 0.5, dy: 0.5 + half), CGVector(dx: 0.5, dy: 0.5 - half))
+    case .down: (CGVector(dx: 0.5, dy: 0.5 - half), CGVector(dx: 0.5, dy: 0.5 + half))
+    case .left: (CGVector(dx: 0.5 + half, dy: 0.5), CGVector(dx: 0.5 - half, dy: 0.5))
+    case .right: (CGVector(dx: 0.5 - half, dy: 0.5), CGVector(dx: 0.5 + half, dy: 0.5))
+    }
+}
+
 /// Convert screen points to the clockface coordinate space without querying XCTest.
 func watchTapNormalizedOffset(x: Double, y: Double, frame: CGRect) throws -> CGVector {
     let originX = Double(frame.origin.x)

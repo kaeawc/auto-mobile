@@ -44,10 +44,18 @@ function simctlWithPushResult(push: () => ReturnType<typeof createExecResult>) {
     if (args.join(" ") === "simctl --version") {
       return createExecResult("simctl version 1.0.0", "");
     }
+    if (args.includes("log")) {
+      throw new Error("tvOS must not read notification delivery logs");
+    }
     return args[1] === "push" ? push() : createExecResult("", "");
   };
   const simctl = new SimCtlClient(tv, execAsync, { fileSystem, platform: "darwin" });
-  return { simctl, fileSystem, pushCalls: () => calls.filter(({ args }) => args[1] === "push") };
+  return {
+    simctl,
+    fileSystem,
+    logCalls: () => calls.filter(({ args }) => args.includes("log")),
+    pushCalls: () => calls.filter(({ args }) => args[1] === "push"),
+  };
 }
 
 describe("postNotification on an Apple TV simulator (#17526)", () => {
@@ -61,7 +69,7 @@ describe("postNotification on an Apple TV simulator (#17526)", () => {
   });
 
   test("pushes the APNs payload with simctl push and reports the captured delivery", async () => {
-    const { simctl, fileSystem, pushCalls } = simctlWithPushResult(() =>
+    const { simctl, fileSystem, pushCalls, logCalls } = simctlWithPushResult(() =>
       createExecResult(capture.stdout, capture.stderr),
     );
     const notificationAuthorization = {
@@ -87,6 +95,7 @@ describe("postNotification on an Apple TV simulator (#17526)", () => {
       warning: undefined,
     });
     expect(pushCalls()).toHaveLength(1);
+    expect(logCalls()).toHaveLength(0);
     const { file, args } = pushCalls()[0];
     const payloadPath = args[4];
     // The capture used stdin ("-"); production supplies the equivalent APNs file.

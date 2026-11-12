@@ -40,6 +40,7 @@ import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { formatToolParamError } from "./toolParamError";
 import { getTvosRunnerLifecycle } from "../features/tvos/TvosRunnerLifecycle";
 import { stripInternalToolParams } from "./internalToolParams";
+import { whileHoldingProvisionedSession } from "./provisioning/provisioningSession";
 
 type AppleTvProvisioner = ReturnType<
   NonNullable<DeviceToolsDependencies["appleTvSimulatorProvisionerFactory"]>
@@ -164,11 +165,17 @@ export async function provisionAppleTvDevice(
             );
             const runner =
               args.readiness === "automation"
-                ? await startProvisionedTvRunner(tv.deviceId, booted.sessionId, deps, {
-                    deadlineMs,
-                    signal: requestSignal,
-                    stage,
-                  })
+                ? await whileHoldingProvisionedSession(
+                    deps,
+                    { sessionUuid: booted.sessionId, deadlineMs },
+                    async (holdSignal) =>
+                      await startProvisionedTvRunner(tv.deviceId, booted.sessionId, deps, {
+                        deadlineMs,
+                        signal: requestSignal,
+                        holdSignal,
+                        stage,
+                      }),
+                  )
                 : undefined;
             notifyAfterAppleSimulatorProvision(`tvOS simulator ${tv.deviceId}`, created, booted);
             return tvProvisionResponse(args, tv, created, runner ? { ...booted, runner } : booted);
@@ -242,6 +249,10 @@ async function bootAndBind(
  * Startup gets only what is left of the provisionDevice budget, so a slow runner is reported
  * unavailable instead of overrunning `timeoutMs` (#18123). A runner started here is stopped when
  * the request aborts after attach, so a rejected provisionDevice does not leave it bound.
+ * The caller holds the bound session meanwhile (#18020): its id is returned only when this ends,
+ * so nothing heartbeats it, and without the hold a runner start longer than the
+ * pre-first-heartbeat grace lost the session. `holdSignal` aborts when the daemon cancels the
+ * session's work; that stops startup and any started runner like a request abort.
  */
 async function startProvisionedTvRunner(
   deviceId: string,
@@ -249,10 +260,17 @@ async function startProvisionedTvRunner(
   deps: DeviceToolsDependencies,
   {
     deadlineMs,
-    signal,
+    signal: requestSignal,
+    holdSignal,
     stage,
-  }: { deadlineMs: number; signal: AbortSignal; stage: { current: string } },
+  }: {
+    deadlineMs: number;
+    signal: AbortSignal;
+    holdSignal: AbortSignal;
+    stage: { current: string };
+  },
 ): Promise<{ runnerUnavailable?: string }> {
+  const signal = combineAbortSignals(requestSignal, holdSignal)!;
   stage.current = "starting the Apple TV automation runner";
   let runnerUnavailable: string | undefined;
   let stopStartedRunner: (() => void) | undefined;

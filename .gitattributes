@@ -4,6 +4,7 @@ test/fixtures/xr-headset/*.json text eol=lf
 test/fixtures/android-xr/observe-spatial-panel-full-space-18022.json text eol=lf
 test/fixtures/android-xr/observe-spatial-panel-no-focus-18025.json text eol=lf
 test/fixtures/android-xr/observe-spatial-panel-host-window-missing-18022.json text eol=lf
+test/fixtures/android-xr/observe-settings-subsettings-apps-two-pane-17915.json text eol=lf
 test/fixtures/android-xr/*.txt text eol=lf
 ios/CameraPosterInjection/fixtures/*.json text eol=lf
 test/fixtures/xr/systemui-hidden-chrome.json text eol=lf

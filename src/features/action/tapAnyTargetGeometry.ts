@@ -55,30 +55,91 @@ export function findTapAnyClickableElement(
     iosMultiPanel: context.iosMultiPanel,
   };
   const effectiveScreenSize = screenSizeForOffscreenCheck(viewHierarchy, screenSizeOptions);
-  const selection = context.elementSelector.select(
-    viewHierarchy,
-    {},
-    {
-      readingOrder: context.xr,
-      screenSizeOptions,
-      container: options.container,
-      strategy: options.selectionStrategy,
-      intentAction: options.action === "longPress" ? "long-press" : "tap",
-      scrollableContainer: options.scrollableContainer,
-    },
-  );
-  if (context.xr && !selection.element && options.container) {
-    selection.element = xrContainerOwner(
+  const select = (container: TapAnyElementOptions["container"]) => {
+    const selection = context.elementSelector.select(
+      viewHierarchy,
+      {},
+      {
+        readingOrder: context.xr,
+        screenSizeOptions,
+        container,
+        strategy: options.selectionStrategy,
+        intentAction: options.action === "longPress" ? "long-press" : "tap",
+        scrollableContainer: options.scrollableContainer,
+      },
+    );
+    return (
+      selection.element ??
+      (context.xr && container
+        ? xrContainerOwner(
+            context.elementSelector,
+            viewHierarchy,
+            { ...options, container },
+            effectiveScreenSize,
+          )
+        : null)
+    );
+  };
+  let element = select(options.container);
+  if (!element && context.xr) {
+    // A two-pane heading can match before the actionable row carrying the same text (#17915).
+    // Keep the first scope's behavior, then try the remaining scopes in XR reading order.
+    for (const alternative of xrTextContainerAlternatives(
       context.elementSelector,
       viewHierarchy,
       options,
-      effectiveScreenSize,
-    );
+    )) {
+      element = select(alternative);
+      if (element) {
+        break;
+      }
+    }
   }
-  if (selection.element && !hasVisibleScreenPart(selection.element.bounds, effectiveScreenSize)) {
+  if (element && !hasVisibleScreenPart(element.bounds, effectiveScreenSize)) {
     return { element: null, containerFound };
   }
-  return { element: selection.element, containerFound };
+  return { element, containerFound };
+}
+
+function xrTextContainerAlternatives(
+  selector: ElementSelector,
+  hierarchy: ViewHierarchyResult,
+  options: TapAnyElementOptions,
+): ElementContainerSelector[] {
+  const container = options.container;
+  if (
+    container?.text === undefined ||
+    container.index !== undefined ||
+    (container.selectionStrategy ?? "first") !== "first" ||
+    (options.selectionStrategy ?? "first") !== "first"
+  ) {
+    return [];
+  }
+  const nodes = uniqueBySource(new SearchableHierarchy().project(hierarchy));
+  const candidates: { node: SearchableEntry; container: ElementContainerSelector }[] = [];
+  const boundary = resolvedSource(selector, hierarchy, container.container);
+  // The existing indexed resolver retains text-match policy, innermost scope, and nested bounds.
+  for (let index = 1; index < nodes.length; index++) {
+    const indexed = { ...container, index };
+    const source = resolvedSource(selector, hierarchy, indexed);
+    // A missing nested match can report its outer scope; it is never an alternative match.
+    if (!source || source === boundary) {
+      break;
+    }
+    const node = nodes.find((entry) => entry.source === source);
+    if (node) {
+      candidates.push({ node, container: indexed });
+    }
+  }
+  return candidates
+    .sort(
+      (a, b) =>
+        a.node.windowRank - b.node.windowRank ||
+        (a.node.bounds?.top ?? Infinity) - (b.node.bounds?.top ?? Infinity) ||
+        (a.node.bounds?.left ?? Infinity) - (b.node.bounds?.left ?? Infinity) ||
+        a.node.index - b.node.index,
+    )
+    .map(({ container }) => container);
 }
 
 export function resolveTapAnyPoint(

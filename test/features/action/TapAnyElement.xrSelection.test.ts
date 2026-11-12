@@ -19,6 +19,7 @@ import type {
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { childrenOf, nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { getHierarchyNodeSource } from "../../../src/features/observe/output/elementProvenance";
 
 const capture: {
   viewHierarchy: ViewHierarchyResult;
@@ -36,11 +37,27 @@ const hierarchy = identifyObservedHierarchy("android", capture.viewHierarchy, "c
   timer: new FakeTimer(),
 }).hierarchy;
 const selector = new ResolverElementSelector();
+const twoPaneCapture: typeof capture = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-xr/observe-settings-subsettings-apps-two-pane-17915.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+const twoPaneHierarchy = identifyObservedHierarchy(
+  "android",
+  twoPaneCapture.viewHierarchy,
+  "cached-ok",
+  { timer: new FakeTimer() },
+).hierarchy;
 function select(
   xr: boolean,
   container?: TapAnyElementOptions["container"],
   tree = hierarchy,
   scrollableContainer?: boolean,
+  selectionStrategy?: TapAnyElementOptions["selectionStrategy"],
 ) {
   return findTapAnyClickableElement(
     {
@@ -50,11 +67,41 @@ function select(
       iosMultiPanel: false,
       xr,
     },
-    { action: "tap", container, scrollableContainer },
+    { action: "tap", container, scrollableContainer, selectionStrategy },
     tree,
     { observationScreenSize: capture.screenSize },
   ).element;
 }
+
+test("XR Apps container skips the inert SubSettings toolbar and returns the left row owner", () => {
+  const selected = select(true, { text: "Apps" }, twoPaneHierarchy);
+  expect(selected?.bounds).toEqual({ left: 48, top: 548, right: 696, bottom: 724 });
+  const owner = getHierarchyNodeSource(selected!);
+  expect(owner).toBeDefined();
+  expect(nodeAttributes(owner!).clickable).toBe("true");
+  expect(nodeAttributes(owner!)["collection-row-index"]).toBe(2);
+  expect(nodeAttributes(owner!)["view-id"]).toBe("s2-2af87c3887f372cd~bfcaf55f");
+});
+
+test("two-pane Settings keeps the homepage ID container and non-XR text behavior", () => {
+  expect(
+    select(true, { elementId: "com.android.settings:id/homepage_container" }, twoPaneHierarchy)
+      ?.bounds,
+  ).toEqual({ left: 48, top: 196, right: 696, bottom: 372 });
+  expect(select(false, { text: "Apps" }, twoPaneHierarchy)).toBeNull();
+});
+
+test.each([
+  [{ text: "Apps", selectionStrategy: "unique" }, undefined],
+  [{ text: "Apps" }, "unique"],
+] as const)("two-pane Apps container preserves unique ambiguity: %j, %s", (container, strategy) => {
+  expect(() => select(true, container, twoPaneHierarchy, undefined, strategy)).toThrow("ambiguous");
+});
+
+test("two-pane Apps container preserves an explicit inert index and missing-container result", () => {
+  expect(select(true, { text: "Apps", index: 0 }, twoPaneHierarchy)).toBeNull();
+  expect(select(true, { text: "Missing container" }, twoPaneHierarchy)).toBeNull();
+});
 
 test.each([
   [undefined, { left: 48, top: 60, right: 568, bottom: 164 }],
@@ -128,6 +175,48 @@ function settingsControl(text: string, top: number) {
     bounds: { left: 48, top, right: 696, bottom: top + 100 },
   };
 }
+
+test.each([true, false])(
+  "XR text fallback tries remaining scopes in reading order (owners=%s)",
+  (clickable) => {
+    const label = (top: number, width: number) => ({
+      ...settingsControl("Apps", top),
+      clickable: false,
+      bounds: { left: 96, top, right: 96 + width, bottom: top + 1 },
+    });
+    const app = capture.viewHierarchy.windows!.find((window) => window.id === 38)!;
+    const tree = {
+      ...capture.viewHierarchy,
+      hierarchy: {},
+      windows: [
+        {
+          ...app,
+          hierarchy: {
+            node: [
+              {
+                ...settingsControl("Root", 48),
+                clickable: false,
+                bounds: { left: 0, top: 48, right: 744, bottom: 1328 },
+                node: [
+                  label(100, 1), // The smallest match wins initial container resolution and has no owner.
+                  { ...settingsControl("Later", 600), clickable, node: [label(620, 3)] },
+                  { ...settingsControl("Earlier", 300), clickable, node: [label(320, 4)] },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const selected = select(true, { text: "Apps", selectionStrategy: "first" }, tree);
+    if (clickable) {
+      expect(selected?.text).toBe("Earlier");
+      expect(selected?.bounds).toEqual({ left: 48, top: 300, right: 696, bottom: 400 });
+    } else {
+      expect(selected).toBeNull();
+    }
+  },
+);
 
 test.each([false, true])("topmost same-app window wins before reading order (XR=%s)", (xr) => {
   const app = capture.viewHierarchy.windows!.find((window) => window.id === 38)!;

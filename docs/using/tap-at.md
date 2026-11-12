@@ -6,8 +6,8 @@ uses 0–100. Alternatively, pass `image` with a screenshot-relative point and i
 image metadata.
 
 On an Android XR headset in home space, coordinates are screenshot pixels.
-Choose a point inside the topmost app panel in the screenshot. Normalized,
-percent, and image inputs resolve to the same screenshot space. The result's
+For a standard (task-aligned) app panel, choose a point inside the topmost app
+panel in the screenshot. Normalized, percent, and image inputs resolve to the same screenshot space. The result's
 `xrPanel` identifies the app and task and reports `displayX`, `displayY`, the
 mapped display pixels used for input; `x`, `y` also report that dispatched point.
 
@@ -23,3 +23,9 @@ reopen the app), observe again, and retry. When more than one app panel is
 open, or the panel cannot fit the screenshot at the default pose, `tapAt`
 refuses before tapping; close the other panels or restore the panel, then
 observe again.
+
+Apps whose content is a Compose spatial panel cannot receive coordinate taps.
+`tapAt` refuses them wherever the panel sits, with “XR spatial-panel input
+injection is unsupported”; moving, reopening, or re-observing does not help.
+Use `tapOn` or `tapAny`, which click the accessibility node, or move keyboard
+focus with `focusNavigate` (or `sendKeys` arrow keys) and press `enter`.

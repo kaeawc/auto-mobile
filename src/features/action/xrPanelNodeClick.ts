@@ -1,3 +1,4 @@
+import { linkWindowRoots } from "../observe/linkWindowRoots";
 import {
   ActionableError,
   type Element,
@@ -206,7 +207,12 @@ function xrNodeClickSelector(
   ) {
     throw xrCoordinateError();
   }
-  const entries = new SearchableHierarchy().project(hierarchy);
+  // Serialized captures duplicate merged/window trees; link their explicit windowId roots
+  // before using object identity to distinguish genuine global selector/bounds collisions.
+  const entries = new SearchableHierarchy().project({
+    ...hierarchy,
+    windows: linkWindowRoots(hierarchy.hierarchy, hierarchy.windows),
+  });
   const scope = xrClickScope(entries, element, options, { hierarchy, resolveContainer });
   // Native selectors are global across windows, including for an ancestor click.
   const uniqueSelector = (candidate: Element, label?: Element) => {
@@ -226,7 +232,11 @@ function xrNodeClickSelector(
       ) {
         return undefined;
       }
-      const identityHints = xrNodeIdentityHints(matches[0].properties, label);
+      // Selection may already have promoted the text leaf to its classless Compose owner.
+      const identityHints = xrNodeIdentityHints(
+        matches[0].properties,
+        label ?? matches[0].hoistedLabelSources?.[0]?.properties,
+      );
       if (!identityHints) {
         return undefined;
       }

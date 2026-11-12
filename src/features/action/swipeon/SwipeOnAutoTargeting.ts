@@ -1,3 +1,4 @@
+import { isFalsy } from "../../../models/Element";
 import {
   BootedDevice,
   Element,
@@ -149,4 +150,12 @@ export class SwipeOnAutoTargeting {
       scrollableCandidates: decision.scrollableCandidates,
     };
   }
+}
+
+/** Unknown visibility remains eligible; explicit hidden nodes cannot receive XR auto-scrolls. */
+export function isVisibleAutoScrollTarget(
+  element: Element | undefined,
+  androidXr: boolean,
+): element is Element {
+  return element !== undefined && (!androidXr || !isFalsy(element["visible-to-user"]));
 }

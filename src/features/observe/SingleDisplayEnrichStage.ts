@@ -23,6 +23,7 @@ import type { ScreenRoundReader } from "../wear/screenRound";
 /** Stages 3 and 5 of one single-display observation: derive elements, start screenshots, run audits and predictions, then attach timings and protect the screenshot. */
 export interface SingleDisplayEnrichStageDependencies {
   device: () => BootedDevice;
+  isAndroidXr?: () => boolean;
   timer: () => Timer;
   platformTraits: () => PlatformObservationTraits;
   screenshotRecorder: () => ObserveScreenshotRecorder;
@@ -60,11 +61,15 @@ export class SingleDisplayEnrichStage {
     result.layoutWarnings = { scope: "full", warnings: this.d.safeAreaAuditor().inspect(result) };
 
     if (result.viewHierarchy) {
+      const device = this.d.device();
+      const androidXr = device.platform === "android" && (this.d.isAndroidXr?.() ?? false);
       result.elements = this.d
         .elementsBuilder()
         .build(
           result.viewHierarchy,
-          requireAndroidOrIosPlatform(this.d.device().platform, "Observing the view hierarchy"),
+          requireAndroidOrIosPlatform(device.platform, "Observing the view hierarchy"),
+          androidXr,
+          result,
         );
     }
   }

@@ -778,13 +778,13 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
   }
 
-  /** Resolves with the shared XR predicate, asked only when tapAt maps screenshot pixels on Android. */
+  /** Resolves with the shared XR predicate for every Android tapAt, including native points. */
   private async resolveWithXr(
     options: TapAtOptions,
     observation: ObserveResult,
     signal?: AbortSignal,
   ): Promise<ReturnType<typeof resolveCoordinates>> {
-    if (this.device.platform === "android" && options.pointSpace !== "native") {
+    if (this.device.platform === "android") {
       this.androidXr = await isAndroidXr(
         { device: this.device, adb: this.adb, backStack: observation.backStack, signal },
         this.xrDetector,

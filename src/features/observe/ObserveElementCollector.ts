@@ -1,3 +1,4 @@
+import { xrVisibleElements } from "./xrVisibleElements";
 import { boundsArea, intersectBounds, parseBounds } from "../../utils/bounds";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import type { ElementBounds } from "../../models/ElementBounds";
@@ -25,6 +26,8 @@ export interface ObserveElementCollector {
   collect(
     viewHierarchy: ViewHierarchyResult,
     platform: "android" | "ios",
+    androidXr?: boolean,
+    foreground?: Pick<ObserveResult, "activeWindow" | "backStack">,
   ): ObserveResult["elements"];
 }
 
@@ -40,6 +43,8 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
   collect(
     viewHierarchy: ViewHierarchyResult,
     platform: "android" | "ios",
+    androidXr?: boolean,
+    foreground?: Pick<ObserveResult, "activeWindow" | "backStack">,
   ): ObserveResult["elements"] {
     const clickable: Element[] = [];
     const scrollable: Element[] = [];
@@ -54,7 +59,12 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     // root in a single group while each window root gets its own.
     const rootGroups = new Map<number, SearchableEntry[]>();
     const seen = new Set<SearchableEntry["source"]>();
-    const projected = this.searchableHierarchy.project(viewHierarchy);
+    const entries = this.searchableHierarchy.project(viewHierarchy);
+    const projected = xrVisibleElements(entries, viewHierarchy, this.parser, {
+      platform,
+      androidXr,
+      foreground,
+    });
     const windowRanks = new Map<SearchableEntry["source"], number>();
     for (const entry of projected) {
       windowRanks.set(
@@ -107,7 +117,9 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     const media = this.mediaClassifier.classify(viewHierarchy, platform, flattenedEntries);
 
     const elements: NonNullable<ObserveResult["elements"]> = { clickable, scrollable, text, media };
-    setSearchableEntries(elements, projected);
+    // Selector metadata retains the full index-addressed ancestry graph; only public
+    // descriptors are filtered. Removing entries here would invalidate parentIndex links.
+    setSearchableEntries(elements, entries);
     // Like element ancestry, this is output-projection metadata, not raw element content.
     if (keyboardPackage) {
       setCapturedKeyboard(elements, { visible: true, package: keyboardPackage });

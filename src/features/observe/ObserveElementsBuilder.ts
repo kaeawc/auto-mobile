@@ -11,7 +11,9 @@ export class ObserveElementsBuilder {
   build(
     viewHierarchy: ViewHierarchyResult,
     platform: "android" | "ios" = "android",
+    androidXr = false,
+    foreground?: Pick<ObserveResult, "activeWindow" | "backStack">,
   ): ObserveResult["elements"] {
-    return this.collector.collect(viewHierarchy, platform);
+    return this.collector.collect(viewHierarchy, platform, androidXr, foreground);
   }
 }

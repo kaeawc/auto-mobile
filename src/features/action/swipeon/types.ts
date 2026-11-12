@@ -35,6 +35,8 @@ export type SwipeInterval = { start: number; end: number; length: number };
 export type BoomerangConfig = { apexPauseMs: number; returnSpeed: number };
 
 export type SwipeGestureRequest = {
+  /** Android observation used to refuse display input while preserving semantic node scrolls. */
+  observation?: ObserveResult;
   x1: number;
   y1: number;
   x2: number;

@@ -1,5 +1,5 @@
 import { RealWaitForCondition } from "../../../src/features/observe/WaitForCondition";
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import {
@@ -49,6 +49,12 @@ function setup(capture: boolean | "host-missing" = false) {
   tap.refreshViewHierarchy = async () => observation.viewHierarchy!;
   return { timer, adb, service, xrDetector, observation, tap };
 }
+
+// The first tapOn in a process pays one-time module and JIT warm-up that is not the behaviour
+// under test; pay it here so it is not charged to the first test (beforeAll is outside the budget).
+beforeAll(async () => {
+  await setup().tap.execute({ action: "tap", text: "Settings", searchUntil: { duration: 100 } });
+});
 
 for (const [text, bounds] of [
   ["Settings", { left: 2470, top: 96, right: 2672, bottom: 192 }],

@@ -17,7 +17,9 @@
  *               names (`observe`, `network`) are also English words, so they are
  *               only checked inside inline code.
  *  - real tool: the first column of a tool table (header `Tool`) and inline code
- *               followed by the word "tool" must name a registered tool.
+ *               followed by the word "tool" must name a registered tool. In a
+ *               `Tool | What it does` index a bare (unformatted) first cell is
+ *               read as the tool name and also reported under backticks.
  *  - summary:   a tool table's `What it does` cell must be the tool's canonical
  *               one-line description (`leadClause` of its definition).
  */
@@ -241,8 +243,15 @@ class Scanner {
     const summaryColumn = headings.findIndex((cell) => /^what it does$/i.test(cell));
     for (const row of toolColumn >= 0 ? rows : []) {
       const cell = row.children[toolColumn];
-      const names = collect(cell, "inlineCode").map((code) => code.value);
       const leading = plainText(cell?.children ?? []).replace(/^[^A-Za-z<]*/, "");
+      const names = collect(cell, "inlineCode").map((code) => code.value);
+      // An index row without code markup still names a tool: read the bare
+      // cell as the name so it cannot escape the registry and summary checks.
+      const bare = normalizeCell(leading);
+      if (summaryColumn >= 0 && names.length === 0 && bare !== "") {
+        this.report("backticks", `tool table cell ${bare} should be \`${bare}\``);
+        names.push(bare);
+      }
       const checked =
         summaryColumn >= 0
           ? names

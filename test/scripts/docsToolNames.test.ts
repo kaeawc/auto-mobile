@@ -104,6 +104,16 @@ describe("tool tables", () => {
     expect(rules(index("`tapper`", "Taps"))).toEqual(["real-tool"]);
   });
 
+  test("an index row without code markup is checked and flagged as unformatted", () => {
+    expect(scan(index("observe", "Totally wrong summary"))).toEqual([
+      { rule: "backticks", message: "tool table cell observe should be `observe`" },
+      { rule: "summary", message: "`observe` summary should be: Get the screen hierarchy" },
+    ]);
+    expect(rules(index("tapper", "Unregistered tool"))).toEqual(["backticks", "real-tool"]);
+    expect(rules(index("👀 observe", "Get the screen hierarchy"))).toEqual(["backticks"]);
+    expect(scan(index(" ", "Tap an element by text"))).toEqual([]);
+  });
+
   test("other Tool tables only check a leading lowerCamel name", () => {
     const table = (cell: string) => `| Tool | Result |\n| --- | --- |\n| ${cell} | Pass |\n`;
     expect(scan(table("`swipeOn` with `lookFor`"))).toEqual([]);

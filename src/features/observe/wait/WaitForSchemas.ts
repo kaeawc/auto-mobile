@@ -254,11 +254,16 @@ const WAIT_FOR_CONDITION_KINDS = [
   "textEquals",
   "countStable",
 ] as const;
-const WAIT_FOR_DSL_KINDS = [...WAIT_FOR_CONDITION_KINDS, "stable"] as const;
+// `focused` (tvOS only, #18017) waits for the focus engine to settle on an element; its selector is
+// optional, so it is not one of the selector-requiring condition kinds above.
+const WAIT_FOR_DSL_KINDS = [...WAIT_FOR_CONDITION_KINDS, "focused", "stable"] as const;
+
+const FOR_DESCRIPTION =
+  'Declarative condition to wait for. "focused" (tvOS only): wait until an element holds focus, the one matching elementId/text when given';
 
 const waitForConditionDslSchema = z
   .object({
-    for: z.enum(WAIT_FOR_DSL_KINDS).describe("Declarative condition to wait for"),
+    for: z.enum(WAIT_FOR_DSL_KINDS).describe(FOR_DESCRIPTION),
     elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
     text: z
       .string()
@@ -307,6 +312,15 @@ const waitForConditionDslSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: 'waitFor "for: stable" does not support container or selectionStrategy',
+        });
+      }
+      return;
+    }
+    if (value.for === "focused") {
+      if (value.container !== undefined || value.selectionStrategy !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'waitFor "for: focused" does not support container or selectionStrategy',
         });
       }
       return;
@@ -380,7 +394,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   properties: {
     for: {
       type: "string",
-      enum: ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"],
+      enum: ["appear", "disappear", "clickable", "textEquals", "countStable", "focused", "stable"],
+      description: FOR_DESCRIPTION,
     },
     pollMs: { type: "number" },
     stableReads: { type: "number" },
@@ -442,6 +457,10 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   anyOf: [
     {
       properties: { for: { const: "stable" }, container: false, selectionStrategy: false },
+      required: ["for"],
+    },
+    {
+      properties: { for: { const: "focused" }, container: false, selectionStrategy: false },
       required: ["for"],
     },
     {

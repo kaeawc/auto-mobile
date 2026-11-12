@@ -2,7 +2,10 @@ import type { Affordance, ElementBounds, ScreenSize } from "../../models";
 import type { SearchableEntry } from "../utility/SearchableNode";
 import { contains } from "./ApplicationWindowCover";
 
-/** Unnamed tap-only overflow artwork is chrome with multiple edges or an enclosed sheet sibling. */
+/**
+ * Unnamed tap-only overflow artwork is chrome with multiple edges, or with one edge and an
+ * enclosed sheet sibling or top-level popover content sibling.
+ */
 export function isIosPresentationChrome(
   node: {
     affordances: Iterable<Affordance>;
@@ -37,11 +40,61 @@ export function isIosPresentationChrome(
   const overflowingEdges = [left < 0, top < 0, right > screen.width, bottom > screen.height].filter(
     Boolean,
   ).length;
-  // List-anchored confirmation dialogs have a shadow halo overflowing only one edge.
-  // Require the captured sheet sibling, not just overlap with an action inside it.
+  // List-anchored confirmation dialogs and edge-anchored popovers have a shadow halo
+  // overflowing only one edge. Require the captured sheet or popover content sibling,
+  // not just overlap with an action inside it.
   return (
     overflowingEdges >= 2 ||
-    (overflowingEdges >= 1 && containsSheetSibling(node, node.bounds, nodes))
+    (overflowingEdges >= 1 && enclosesPresentationSibling(node, node.bounds, nodes))
+  );
+}
+
+function enclosesPresentationSibling(
+  node: Pick<SearchableEntry, "className" | "parentIndex"> & { index?: number },
+  bounds: ElementBounds,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  return (
+    containsSheetSibling(node, bounds, nodes) || containsPopoverContentSibling(node, bounds, nodes)
+  );
+}
+
+function encloses(outer: ElementBounds, inner: ElementBounds): boolean {
+  return (
+    contains(outer, inner.left, inner.top) &&
+    inner.right <= outer.right &&
+    inner.bottom <= outer.bottom
+  );
+}
+
+/**
+ * A popover's shadow is a direct child of the presentation root (the application or a bare
+ * root), drawn before the labeled content it surrounds. Artwork nested inside app content
+ * never has the root as its parent, so an ordinary hero image under a caption is kept.
+ */
+function containsPopoverContentSibling(
+  node: Pick<SearchableEntry, "className" | "parentIndex"> & { index?: number },
+  bounds: ElementBounds,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  const { className, parentIndex, index } = node;
+  if (className !== "UIImageView" || parentIndex === undefined || index === undefined) {
+    return false;
+  }
+  const parent = nodes[parentIndex];
+  if (
+    parent?.index !== parentIndex ||
+    (parent.parentIndex !== undefined && parent.className !== "XCUIApplication")
+  ) {
+    return false;
+  }
+  return nodes.some(
+    (sibling) =>
+      sibling.parentIndex === parentIndex &&
+      sibling.index > index &&
+      sibling.label !== undefined &&
+      !!sibling.bounds &&
+      encloses(bounds, sibling.bounds),
   );
 }
 
@@ -60,8 +113,6 @@ function containsSheetSibling(
       sibling.index > index &&
       sibling.className === "UIActionSheet" &&
       !!sibling.bounds &&
-      contains(bounds, sibling.bounds.left, sibling.bounds.top) &&
-      sibling.bounds.right <= bounds.right &&
-      sibling.bounds.bottom <= bounds.bottom,
+      encloses(bounds, sibling.bounds),
   );
 }

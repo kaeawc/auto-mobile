@@ -152,9 +152,11 @@ restarts a runner AutoMobile started for the session. If recovery fails, `observ
 screenshot with `hierarchyUnavailable` and the recovery error in its `message` (`project` and
 `waitFor` are refused); call `startDevice` to restart the runner. With a runner, `waitFor`
 waits for an element (`elementId`, `testTag`, `text`, `textAny`, `className`,
-`contentDescription`, `absent`) by re-reading the hierarchy until it matches or `timeout` elapses;
-`waitFor` with `for`, `posture`, `activeDisplay` or `activeWindow` is refused. Other advanced
-observe options are refused.
+`contentDescription`, `absent`) by re-reading the hierarchy until it matches or `timeout` elapses.
+`waitFor: {for: "focused"}` waits until an element holds focus, which lets a plan wait for focus to
+settle after a press or a screen change; add `elementId` or `text` to wait for that element to be
+focused. Other `for` kinds, `posture`, `activeDisplay` and `activeWindow` are refused, as are other
+advanced observe options.
 
 ## Record and compare the screen
 

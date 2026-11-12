@@ -175,7 +175,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       const result = await h.action.execute(search);
       expect(result.success).toBe(false);
       expect(result.error).toBe(
-        'Scroll reached end of container in both directions (up and down; no change after 2 consecutive swipes each way). text "Found" not found. 0 swipes moved the screen.',
+        'Scroll reached end of container in both directions (up and down; no change after 2 consecutive swipes each way). text "Found" not found. 0 swipes moved the screen. The item may be absent from this container, or the swipe direction may be wrong.',
       );
       expect(h.legs()).toHaveLength(4);
       expect(h.legs()[1].y1).toBeGreaterThan(h.legs()[1].y2);

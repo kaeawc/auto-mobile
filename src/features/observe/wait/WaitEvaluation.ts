@@ -185,6 +185,12 @@ const runWaitForConditionDsl = async (
     return applySettledGate(outcome, settle.settled);
   }
 
+  if (waitFor.for === "focused") {
+    throw new ActionableError(
+      'waitFor "for: focused" is supported only on tvOS. On Android and iOS wait with ' +
+        '"for: clickable" or an element waitFor instead.',
+    );
+  }
   const tracked = trackContainerFailure(new ElementResolver(), waitFor.container);
   const selector = {
     elementId: waitFor.elementId,

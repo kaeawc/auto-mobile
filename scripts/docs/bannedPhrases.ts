@@ -5,7 +5,9 @@
  * fenced and indented code blocks, inline code and raw HTML are excluded by
  * the parser rather than by line regexes. Each prose text leaf is mapped back
  * to its source line by scanning the source forward from the previous leaf,
- * which is exact because md4c emits leaves in document order.
+ * which is exact because md4c emits leaves in document order. Link reference
+ * definitions are not rendered, so they are blanked out of the searched copy
+ * of the source first; otherwise a leaf could be located inside one.
  */
 
 export interface BannedPhraseRule {
@@ -121,14 +123,80 @@ function lineStartsOf(source: string): number[] {
   return starts;
 }
 
+/** Opening line of a possible link reference definition; md4c confirms it. */
+const REFERENCE_DEFINITION_START = /^ {0,3}\[[^\]\n]+\]:/;
+/** Longest definition span tried: label, destination and title lines. */
+const MAX_DEFINITION_LINES = 3;
+
+function sameLeaves(a: Leaf[], b: Leaf[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (leaf, i) =>
+        leaf.text === b[i].text &&
+        leaf.excluded === b[i].excluded &&
+        leaf.blockEnd === b[i].blockEnd,
+    )
+  );
+}
+
+/** Replaces every character of `source[start, end)` except newlines with a space. */
+function blank(source: string, start: number, end: number): string {
+  return (
+    source.slice(0, start) + source.slice(start, end).replace(/[^\n]/g, " ") + source.slice(end)
+  );
+}
+
+/**
+ * Returns `source` with its top-level link reference definitions blanked, so
+ * the forward leaf search cannot land on text md4c does not render. The
+ * regex only proposes a span; md4c accepts it only if blanking the span in
+ * place and re-appending it at the end of the document (definitions are
+ * document-wide, so links that use it still resolve) renders the same leaves.
+ * That rejects look-alikes inside code blocks or paragraph continuations.
+ */
+function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
+  const lineStarts = lineStartsOf(source);
+  const lineEnd = (line: number) =>
+    line + 1 < lineStarts.length ? lineStarts[line + 1] - 1 : source.length;
+  const lineText = (line: number) => source.slice(lineStarts[line], lineEnd(line));
+  let searchable = source;
+  let moved = "";
+  /** Number of lines of the definition starting at `line` md4c accepts, or 0. */
+  const acceptedSpan = (line: number): number => {
+    for (let span = 1; span <= MAX_DEFINITION_LINES; span++) {
+      const last = line + span - 1;
+      if (last >= lineStarts.length || lineText(last).trim() === "") {
+        return 0;
+      }
+      const definition = source.slice(lineStarts[line], lineEnd(last));
+      const candidate = blank(searchable, lineStarts[line], lineEnd(last));
+      if (sameLeaves(collectLeaves(`${candidate}\n\n${moved}${definition}\n`), leaves)) {
+        searchable = candidate;
+        moved += `${definition}\n`;
+        return span;
+      }
+    }
+    return 0;
+  };
+  let line = 0;
+  while (line < lineStarts.length) {
+    const span = REFERENCE_DEFINITION_START.test(lineText(line)) ? acceptedSpan(line) : 0;
+    line += Math.max(span, 1);
+  }
+  return searchable;
+}
+
 /** Splits the document's prose into blocks of located text segments. */
 function proseBlocks(source: string): ProseSegment[][] {
   const lineStarts = lineStartsOf(source);
   const blocks: ProseSegment[][] = [];
   let current: ProseSegment[] = [];
   let cursor = 0;
-  for (const leaf of collectLeaves(source)) {
-    const found = leaf.text.length > 0 ? source.indexOf(leaf.text, cursor) : -1;
+  const leaves = collectLeaves(source);
+  const searchable = blankReferenceDefinitions(source, leaves);
+  for (const leaf of leaves) {
+    const found = leaf.text.length > 0 ? searchable.indexOf(leaf.text, cursor) : -1;
     const fallbackLine = lineAt(lineStarts, cursor);
     if (found >= 0) {
       cursor = found + leaf.text.length;
@@ -168,9 +236,16 @@ export function findBannedPhrases(
   for (const block of proseBlocks(source)) {
     const starts: number[] = [];
     let joined = "";
+    let previousEnd = -1;
     for (const segment of block) {
+      // md4c drops soft line breaks between leaves; restore one as a space so
+      // words on adjacent lines do not run together.
+      if (previousEnd >= 0 && segment.offset > previousEnd) {
+        joined += source.slice(previousEnd, segment.offset).includes("\n") ? " " : "";
+      }
       starts.push(joined.length);
       joined += segment.text;
+      previousEnd = segment.offset >= 0 ? segment.offset + segment.text.length : -1;
     }
     for (const { rule, regex } of compiled) {
       for (const match of joined.matchAll(regex)) {

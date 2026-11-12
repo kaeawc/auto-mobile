@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-10-20
-- Source: moved from `docs/decisions/prototype-embedded-request-routing.md` (added in #13828)
+- Source: moved from docs/decisions/prototype-embedded-request-routing.md (added in #13828)
 - Shaped: [Embedding a prototype in an app](../using/prototype-embedding.md), [Native prototype embedding](../how-it-works/prototype-embedding.md)
 
 Status: accepted for #13721 (part of the embeddable-renderer epic #13720). Owner decision recorded on

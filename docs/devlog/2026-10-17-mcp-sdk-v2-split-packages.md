@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-10-17
-- Source: moved from `docs/decisions/mcp-sdk-v2-split-packages.md` (added in #13042)
+- Source: moved from docs/decisions/mcp-sdk-v2-split-packages.md (added in #13042)
 - Shaped: [MCP SDK v2 adoption survey](../how-it-works/mcp/sdk-v2-adoption-survey.md), [MCP SDK v2 and stateless daemon layer](../how-it-works/mcp/sdk-v2-stateless-migration.md)
 
 Status: accepted for #4678 (step 1 of 3: dependency swap and handler rewrite).

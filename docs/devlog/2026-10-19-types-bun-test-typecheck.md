@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-10-19
-- Source: moved from `docs/decisions/types-bun-test-typecheck.md` (added in #13529)
+- Source: moved from docs/decisions/types-bun-test-typecheck.md (added in #13529)
 
 Status: accepted for #11787 (type-check `test/` behind a per-file count baseline).
 

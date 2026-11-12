@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-08-28
-- Source: moved from `docs/decisions/ios-user-files-provider.md` (added in #5831)
+- Source: moved from docs/decisions/ios-user-files-provider.md (added in #5831)
 
 Status: accepted for implementation in #5807. This decision records the
 research and simulator experiment from #5806. The TypeScript staging provider

@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-10-16
-- Source: moved from `docs/decisions/prototype-request-retrofit.md` (added in #12528)
+- Source: moved from docs/decisions/prototype-request-retrofit.md (added in #12528)
 
 Status: accepted for #12528.
 

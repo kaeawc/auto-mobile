@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-10-28
-- Source: moved from `docs/decisions/watchos-platform.md` (added in #15773)
+- Source: moved from docs/decisions/watchos-platform.md (added in #15773)
 - Shaped: [Device resources](../how-it-works/device-resources.md), [Session broker device reuse, reset, and capacity](../how-it-works/session-broker-device-reuse.md), [Session device requirements](../how-it-works/session-requirements.md)
 
 Status: accepted for #14899 (part of the Apple Watch simulator epic #14895); extended to every

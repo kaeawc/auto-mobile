@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-02
-- Source: moved from `docs/decisions/playwright-core-web-screenshots.md` (added in #16412)
+- Source: moved from docs/decisions/playwright-core-web-screenshots.md (added in #16412)
 
 Status: accepted for #16346 (CI-only headless browser screenshot check of the prototype web
 renderer's reference specs).

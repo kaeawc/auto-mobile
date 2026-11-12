@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-10-27
-- Source: moved from `docs/decisions/prototype-mock-backend.md` (added in #15648)
+- Source: moved from docs/decisions/prototype-mock-backend.md (added in #15648)
 - Shaped: [Agent-authored prototype specification](../how-it-works/plat/android/prototype-ux.md)
 
 Status: accepted for #14271.

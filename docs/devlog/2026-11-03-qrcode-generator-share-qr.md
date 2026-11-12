@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-03
-- Source: moved from `docs/decisions/qrcode-generator-share-qr.md` (added in #16496)
+- Source: moved from docs/decisions/qrcode-generator-share-qr.md (added in #16496)
 
 Status: accepted for #14128 (MCP `prototype share` returns a QR of the ProtoViewer import link).
 

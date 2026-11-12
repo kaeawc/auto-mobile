@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-03
-- Source: moved from `docs/decisions/material-icons-web-glyphs.md` (added in #16608)
+- Source: moved from docs/decisions/material-icons-web-glyphs.md (added in #16608)
 
 Status: accepted for #16532 (part of the prototype web renderer epic #16525). The iOS skin's glyph
 set is decided separately in #16526.

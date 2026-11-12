@@ -27,7 +27,7 @@ bypass provisioning.
   `READ_CONTACTS` and `WRITE_CONTACTS`. The seeder declares Contacts permissions for photo writes and
   read-back.
 - APK lookup uses `AUTOMOBILE_CONTENT_SEEDER_APK_PATH`, then the checkout's
-  `android/content-seeder/build/outputs/apk/debug/content-seeder-debug.apk`. A missing-APK error
+  android/content-seeder/build/outputs/apk/debug/content-seeder-debug.apk. A missing-APK error
   names `./gradlew :content-seeder:assembleDebug`.
 
 ## Broadcast protocol

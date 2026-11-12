@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-08
-- Source: moved from `docs/decisions/androidx-baseline-profile-generator.md` (added in #17439)
+- Source: moved from docs/decisions/androidx-baseline-profile-generator.md (added in #17439)
 
 Status: accepted for #17417.
 

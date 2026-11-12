@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-06
-- Source: moved from `docs/decisions/androidx-tv-fixture-libraries.md` (added in #17311)
+- Source: moved from docs/decisions/androidx-tv-fixture-libraries.md (added in #17311)
 
 Status: accepted for #16736 (part of the Android TV epic #15900).
 

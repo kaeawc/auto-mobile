@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-04
-- Source: moved from `docs/decisions/androidx-wear-fixture-libraries.md` (added in #16862)
+- Source: moved from docs/decisions/androidx-wear-fixture-libraries.md (added in #16862)
 
 Status: accepted for #16828 (part of the Wear OS epic #14894).
 

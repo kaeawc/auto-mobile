@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-03
-- Source: moved from `docs/decisions/fastlane-supply-play-publishing.md` (added in #16488)
+- Source: moved from docs/decisions/fastlane-supply-play-publishing.md (added in #16488)
 - Shaped: [ProtoViewer: a prototype library app for iOS and Android](../how-it-works/protoviewer.md)
 
 Status: accepted for #14147 (part of the ProtoViewer store-readiness epic #14142).

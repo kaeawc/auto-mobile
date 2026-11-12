@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-04
-- Source: moved from `docs/decisions/androidx-car-app-template-snapshots.md` (added in #16778)
+- Source: moved from docs/decisions/androidx-car-app-template-snapshots.md (added in #16778)
 
 Status: accepted for #16751 (part of the Android Auto epic #16749).
 

@@ -27,7 +27,7 @@ export interface WatchSimulatorCatalog {
 
 /**
  * Apple Watch simulators, published as `platform: "watchos"`. The iOS simulator listing skips
- * watchOS runtimes, so a watch is listed here and only here (docs/decisions/watchos-platform.md).
+ * watchOS runtimes, so a watch is listed here and only here (docs/devlog/2026-10-28-watchos-platform.md).
  * Read failures propagate: an empty result always means "no watch simulators".
  */
 export class WatchSimulatorInventory {

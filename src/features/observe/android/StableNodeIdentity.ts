@@ -18,7 +18,7 @@ import {
  * `ObserveResultOutput.ts`) therefore can never re-pair id-less/text-less rows
  * across a scroll: their only candidate id churns with position. That is the
  * residual "opaque remove+add cascade" quantified in
- * `docs/design-docs/plat/android/actions-diff-observe-signoff.md` §4.
+ * `docs/how-it-works/plat/android/actions-diff-observe-signoff.md` §4.
  *
  * This module rewrites those *generated* (UUID-shaped) `view-id`s at TS
  * ingest into a **content-derived** stable id: a Merkle-style SHA-256 over the

@@ -160,7 +160,7 @@ Repeatable `--enable-tool` and `--disable-tool` flags override these values, and
 
 </div>
 
-See [the session broker experiment](../design-docs/session-broker-experiment.md)
+See [the session broker experiment](../how-it-works/session-broker-experiment.md)
 for the file formats.
 
 ## Session heartbeat timeout

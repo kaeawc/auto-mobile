@@ -5,7 +5,7 @@ name: "Publish ProtoViewer to Google Play"
 # promotions of that same versionCode, never a rebuild, and each one is a separate job in
 # the reviewer-protected `google-play-release` environment. Production starts as a staged
 # rollout. A manual dispatch re-runs one promotion, changes the rollout fraction, or halts
-# it. Resume and environment setup are in docs/design-docs/protoviewer.md section 8.3.
+# it. Resume and environment setup are in docs/how-it-works/protoviewer.md section 8.3.
 #
 # PLAY_SERVICE_ACCOUNT_JSON is an environment secret of `google-play-internal` and
 # `google-play-release` only, and is never a repository secret.

@@ -91,7 +91,7 @@ that lifecycle check.
 
 Run on an Android emulator (Playground) and on an iOS simulator (an app launched with
 `launchApp prototype: true`); record PASS/FAIL per platform. Design: the "Data, storage and network"
-sections of `docs/design-docs/plat/android/prototype-ux.md` and `docs/design-docs/plat/ios/prototype-agent.md`.
+sections of `docs/how-it-works/plat/android/prototype-ux.md` and `docs/how-it-works/plat/ios/prototype-agent.md`.
 
 **Fixture.** Start the local server on the host and keep it running:
 `bun scripts/manual-test/prototype-request-fixture.ts 8787`. It serves `GET /items` (two seed items),
@@ -154,5 +154,5 @@ broker-looking name; only ledger-bound devices are allowed. The separate plain
 persistence test uses the harness's provenance-checked `shutdown-devices` before
 private daemon stop. Destruction/handoff resource samples remain `not-verifiable`
 until a product read-only diagnostic exists; do not turn that limit into PASS.
-See the [broker harness](../../docs/design-docs/manual-test-harness.md) and
-[broker lifecycle contract](../../docs/design-docs/session-broker-experiment.md).
+See the [broker harness](../../docs/how-it-works/manual-test-harness.md) and
+[broker lifecycle contract](../../docs/how-it-works/session-broker-experiment.md).

@@ -2,7 +2,7 @@
 
 AutoMobile welcomes contributions!
 
-If you have a question file an issue or discussion, but small contributions like documentation improvements, small obvious fixes, etc don't need prior discussion. If you see a TODO go for it. For larger functionality changes or features, please raise a discussion or issue first before starting work. Read the [system design](https://kaeawc.github.io/auto-mobile/design-docs/) overview to see how the pieces fit together. Almost everything in CI can be run locally, check out the `scripts/` directory. After you've forked and cloned the project, set up your [local development](#local-development) environment. We expect contributors to be active users of Claude Code or some other AI tool.
+If you have a question file an issue or discussion, but small contributions like documentation improvements, small obvious fixes, etc don't need prior discussion. If you see a TODO go for it. For larger functionality changes or features, please raise a discussion or issue first before starting work. Read the [system design](https://kaeawc.github.io/auto-mobile/how-it-works/) overview to see how the pieces fit together. Almost everything in CI can be run locally, check out the `scripts/` directory. After you've forked and cloned the project, set up your [local development](#local-development) environment. We expect contributors to be active users of Claude Code or some other AI tool.
 
 ## Ways to Contribute
 
@@ -19,7 +19,7 @@ If you have a question file an issue or discussion, but small contributions like
 - **Run validation** - `bun run lint` and `bun test` before submitting. If modifying Android or iOS code check for appropriate validation scripts in the `scripts/` directory
 - **Keep PRs focused** - One feature or fix per PR
 - **Add tests** - Cover new functionality with tests
-- **Prefer standard and existing code** - Before adding a dependency or a generic utility, check the JavaScript/Node standard library and `src/utils/`. Keep time, randomness, I/O, concurrency, and process access behind an interface with a fake when tests need control. Every new dependency needs a short decision record under `docs/decisions/` that `bun run check:stdlib-first` verifies.
+- **Prefer standard and existing code** - Before adding a dependency or a generic utility, check the JavaScript/Node standard library and `src/utils/`. Keep time, randomness, I/O, concurrency, and process access behind an interface with a fake when tests need control. Every new dependency needs a short decision record under `docs/devlog/` that `bun run check:stdlib-first` verifies.
 
 ## Pull Request Process
 

@@ -18,7 +18,7 @@ bun_test_timeout_ms() {
 # Files per `bun test --isolate` process in a unit shard's isolated group
 # (0 = one process for the whole group). A long isolated process slows down as
 # it ages, so the group is split into fixed-size sequential chunks (#10583).
-# The default comes from the sweep in docs/design-docs/ci/unit-lane-scaling.md.
+# The default comes from the sweep in docs/how-it-works/ci/unit-lane-scaling.md.
 UNIT_ISOLATED_CHUNK_DEFAULT=30
 unit_isolated_chunk_size() {
   printf '%s\n' "${AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE-$UNIT_ISOLATED_CHUNK_DEFAULT}"

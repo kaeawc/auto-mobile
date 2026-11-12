@@ -8,7 +8,7 @@ import {
 
 /**
  * Device-aware tools that accept each non-iOS Apple platform. Every other device-aware tool rejects
- * such a device before its handler runs (docs/decisions/watchos-platform.md). Add a tool to a
+ * such a device before its handler runs (docs/devlog/2026-10-28-watchos-platform.md). Add a tool to a
  * platform only together with that platform's behaviour and tests that make it safe.
  */
 export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<

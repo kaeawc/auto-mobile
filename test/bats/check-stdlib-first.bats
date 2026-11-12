@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # bats file_tags=serial
 # Rewrites the real root package.json (backup -> mutate -> restore) and writes
-# docs/decisions/ fixtures, operating in the repo root (no cd to a temp dir), so
+# docs/devlog/ fixtures, operating in the repo root (no cd to a temp dir), so
 # it races any concurrent test that reads or rewrites package.json. Runs in the
 # serial pass; see scripts/ci/run-bats.sh and test/scripts/batsSerialTags.test.ts.
 
@@ -36,7 +36,7 @@ SCRIPT="scripts/check-stdlib-first.sh"
   result_status="$status"
   result_output="$output"
   cp "$package_backup" package.json
-  rm -f "$package_backup" docs/decisions/stdlib-first-bats-fixture.md
+  rm -f "$package_backup" docs/devlog/stdlib-first-bats-fixture.md
 
   [ "$result_status" -eq 1 ]
   [[ "$result_output" == *"stdlib-first-bats-fixture"* ]]
@@ -56,7 +56,7 @@ SCRIPT="scripts/check-stdlib-first.sh"
   result_status="$status"
   result_output="$output"
   cp "$package_backup" package.json
-  rm -f "$package_backup" docs/decisions/stdlib-first-optional-fixture.md
+  rm -f "$package_backup" docs/devlog/stdlib-first-optional-fixture.md
 
   [ "$result_status" -eq 1 ]
   [[ "$result_output" == *"stdlib-first-optional-fixture"* ]]

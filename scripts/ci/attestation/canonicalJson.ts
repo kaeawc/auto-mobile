@@ -40,7 +40,7 @@ function sortValue(value: unknown): unknown {
  * JSON with every object's keys sorted: the bytes an attestation is signed and identified by.
  * Values another language would serialize differently are refused rather than guessed at
  * (undefined, NaN, Infinity, negative zero, lone surrogates), so the bytes are the same for any
- * verifier that follows docs/design-docs/ci/attestation-envelope.md.
+ * verifier that follows docs/how-it-works/ci/attestation-envelope.md.
  */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortValue(value));

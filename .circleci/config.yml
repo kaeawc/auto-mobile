@@ -3,7 +3,7 @@ version: 2.1
 # AutoMobile — CircleCI runs the macOS/iOS lanes only.
 #
 # CircleCI is one of three macOS capacity pools (#11010, #11011, #11012); see
-# docs/design-docs/ci/macos-capacity-plan.md for which job runs where. Linux,
+# docs/how-it-works/ci/macos-capacity-plan.md for which job runs where. Linux,
 # Android, Gradle and emulator work runs on GitHub Actions.
 #
 # DYNAMIC CONFIG (setup workflow): this file is a cheap Linux "setup" pipeline
@@ -22,7 +22,7 @@ version: 2.1
 # - Nightly: a scheduled pipeline on main with `run-nightly-macos: true`.
 #
 # Other pushes never spin up a macOS executor. The heavier macOS jobs live in
-# continue_config.yml; docs/design-docs/ci/macos-capacity-plan.md maps every
+# continue_config.yml; docs/how-it-works/ci/macos-capacity-plan.md maps every
 # macOS job to where it runs and lists the CircleCI UI steps (dynamic config,
 # the nightly schedule).
 #
@@ -34,7 +34,7 @@ version: 2.1
 #
 # Budget: open-source macOS usage is not capped by the 30,000-credit Free-plan
 # limit (#11010); concurrency (one macOS job) is the binding constraint, which is
-# why post-merge work is path-gated and coalesced. docs/design-docs/ci/
+# why post-merge work is path-gated and coalesced. docs/how-it-works/ci/
 # circleci-macos-migration.md (#10887) has the sourced plan numbers.
 
 setup: true

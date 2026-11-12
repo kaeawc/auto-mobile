@@ -241,7 +241,7 @@ request, which must stay at zero once warm. The harness injects its own token an
 sends `Authorization: Bearer <token>` on every request to harden daemon HTTP
 ingress with a per-daemon token. Local external clients read the daemon token
 file (or use `AUTOMOBILE_DAEMON_HTTP_TOKEN`); there is no unauthenticated fallback.
-See [daemon HTTP ingress](../docs/design-docs/mcp/daemon.md#http-ingress).
+See [daemon HTTP ingress](../docs/how-it-works/mcp/daemon.md#http-ingress).
 
 Run the benchmark:
 
@@ -392,7 +392,7 @@ Options: `--app-id` (default: the plan's first `launchApp`), `--personas`,
 `--repeats`, `--ablate`, `--session`, `--avd`, `--server` and `--out` (default
 `scratch/persona-robustness/<time>/`). It exits 1 when a reset failed and the
 run stopped early. Scoring and attribution rules are in
-`docs/design-docs/plat/android/persona-robustness-harness.md`.
+`docs/how-it-works/plat/android/persona-robustness-harness.md`.
 
 ## Other Scripts
 
@@ -416,7 +416,7 @@ run stopped early. Scoring and attribution rules are in
 - `local-dev/probe-device-condition-capabilities.sh` - Probe an attached emulator for the commands the device-condition fixtures rely on (#14053)
   - `matrix` (default) - Print a Markdown capability matrix; `OUT_FILE` also writes it to a file
   - `persistence-prepare` / `persistence-verify` - Check whether `-writable-system` changes survive an `avd snapshot save` + cold reload
-  - See `docs/design-docs/plat/android/device-condition-capability-probe.md`
+  - See `docs/how-it-works/plat/android/device-condition-capability-probe.md`
 - `capture-oem-evidence.sh <serial> [out-dir]` - Capture the non-interactive OEM evidence for #14048 from one connected device: `getprop` (device identifiers redacted), `pm list features`, system packages and default-app holders, under `test/fixtures/android-oem/<manufacturer>-<model>-<date>/` with a provenance manifest. The README it writes there lists the hierarchy captures still to take by hand. Tests: `test/bats/capture-oem-evidence.bats` (stub adb).
 - `media/generate-prototype-test-media.sh [out-dir]` - Generate the prototype test clips (#14257) with ffmpeg `lavfi` sources into `scratch/prototype-media/` (default): H.264/AAC MP4 and VP9/Opus WebM clips from 160x90 to 640x360 and 3-10 s, a two-rendition HLS ladder, five 5 s AAC episodes and a `manifest.txt` of sha256 sums. Output is byte-identical across runs with the same ffmpeg build, so no clip is committed. Needs ffmpeg with `libx264`, `aac`, `libvpx-vp9` and `libopus`; `FFMPEG` overrides the binary. Tests: `test/bats/generate-prototype-test-media.bats` (stub ffmpeg).
 
@@ -584,7 +584,7 @@ All scripts should:
 - `scripts/android/prototype-feed-benchmark.sh` — feed gfxinfo scenarios with report-only or enforced p95 verdicts and optional Markdown output.
 - `scripts/ios/prototype-feed-benchmark.sh` — explicit-simulator scripted feed scrolling with per-step and total wall time, without frame metrics.
 
-See [prototype performance measurement](../docs/design-docs/plat/android/prototype-performance-measurement.md) for prerequisites and output formats.
+See [prototype performance measurement](../docs/how-it-works/plat/android/prototype-performance-measurement.md) for prerequisites and output formats.
 
 ### Manual Linux Qualification
 

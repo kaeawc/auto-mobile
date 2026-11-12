@@ -3,7 +3,7 @@ version: 2.1
 # Continuation config for the CircleCI macOS/iOS lanes. Reached from
 # .circleci/config.yml (the setup pipeline). See its header for the why and the
 # REQUIRED dynamic-config project setting, and
-# docs/design-docs/ci/macos-capacity-plan.md for where every macOS job runs.
+# docs/how-it-works/ci/macos-capacity-plan.md for where every macOS job runs.
 #
 # CircleCI runs ONE macOS job at a time for this organization (#11010), so the
 # file holds exactly three kinds of work:
@@ -25,7 +25,7 @@ version: 2.1
 # are "true". No secrets are configured on CircleCI, so everything builds unsigned.
 # The `ios` executor pins both flags to "false" so a project-level environment
 # variable added later can never turn signing on. Release/signing workflows stay
-# on GitHub (#10887, docs/design-docs/ci/circleci-macos-migration.md); no workflow
+# on GitHub (#10887, docs/how-it-works/ci/circleci-macos-migration.md); no workflow
 # in this file references a context.
 #
 # Prototype Simulator moved to the GitHub self-hosted heavy lane (#11011) and iOS

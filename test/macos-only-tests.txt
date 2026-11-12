@@ -2,7 +2,7 @@
 # run on Linux or Windows). `scripts/test-ts.sh` leaves them out of the unit and
 # integration lanes on any non-macOS host; the macOS lanes (nightly CircleCI
 # macOS Node Unit Tests, local macOS runs) still run every file. Mechanism and
-# rationale: docs/design-docs/ci/macos-only-tests.md.
+# rationale: docs/how-it-works/ci/macos-only-tests.md.
 #
 # Classification, in order:
 #   1. The first rule below that matches a path wins. Format:

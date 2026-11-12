@@ -148,7 +148,7 @@ const EXEMPT_TOOL_LISTS: Readonly<Record<string, string>> = {
   "src/server/deviceMutationLifecycleAdapters.ts\tAPP_FALLBACK_TOOLS":
     "the vocabulary of an opaque fallback key prefix, not a behaviour list",
   "src/server/applePlatformToolSupport.ts\tAPPLE_PLATFORM_SUPPORTED_TOOLS":
-    "a policy allow-list documented in docs/decisions/watchos-platform.md",
+    "a policy allow-list documented in docs/devlog/2026-10-28-watchos-platform.md",
   "src/utils/android-cmdline-tools/detection.ts\tANDROID_TOOLS":
     "Android SDK command-line tools, not MCP tools",
   "src/utils/plan/coordinationTools.ts\tCOORDINATION_TOOLS":

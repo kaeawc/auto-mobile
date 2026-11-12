@@ -4,6 +4,7 @@ import { ActionableError } from "../../../../src/models/ActionableError";
 import {
   parsePrototypePreviewRoute,
   PROTOTYPE_PREVIEW_SHELL_SCRIPT,
+  prototypePreviewPath,
   prototypePreviewResponse,
 } from "../../../../src/features/prototype/preview/prototypePreviewRoutes";
 import { FakePreviewPageSource } from "./previewFakes";
@@ -24,8 +25,33 @@ describe("parsePrototypePreviewRoute", () => {
     expect(parsePrototypePreviewRoute("/p/a/events")).toEqual({ kind: "events", id: "a" });
   });
 
+  test("dot-segment ids use the query form and round-trip every view (#18077)", () => {
+    for (const id of [".", ".."]) {
+      expect(prototypePreviewPath(id)).toBe(`/p?id=${encodeURIComponent(id)}`);
+      expect(parsePrototypePreviewRoute(prototypePreviewPath(id))).toEqual({ kind: "shell", id });
+      expect(
+        parsePrototypePreviewRoute(prototypePreviewPath(id, "page", { variant: "b", frame: "f" })),
+      ).toEqual({ kind: "page", id, variant: "b", frame: "f" });
+      expect(parsePrototypePreviewRoute(prototypePreviewPath(id, "events"))).toEqual({
+        kind: "events",
+        id,
+      });
+      // The browser's URL normalization keeps the query form intact.
+      const url = new URL(prototypePreviewPath(id, "page"), "http://127.0.0.1:1");
+      expect(parsePrototypePreviewRoute(url.pathname + url.search)).toEqual({ kind: "page", id });
+    }
+    expect(prototypePreviewPath("a", "page", { variant: "b" })).toBe("/p/a/page?variant=b");
+    expect(prototypePreviewPath(".a")).toBe("/p/.a");
+  });
+
+  test("a query form without an id or with an unknown view is notFound", () => {
+    ["/p?view=page", "/p?id=", "/p?id=a&view=other"].forEach((path) =>
+      expect(parsePrototypePreviewRoute(path)).toEqual({ kind: "notFound" }),
+    );
+  });
+
   test("anything else, or a malformed escape, is notFound", () => {
-    ["/p", "/p/", "/p/a/other", "/x", "/p/%E0%A4%A"].forEach((path) =>
+    ["/p", "/p/", "/p/a/other", "/x", "/p/%E0%A4%A", "//["].forEach((path) =>
       expect(parsePrototypePreviewRoute(path)).toEqual({ kind: "notFound" }),
     );
   });
@@ -43,6 +69,16 @@ describe("prototypePreviewResponse", () => {
     expect(response.body).toContain('data-page="/p/a%2Fb/page?variant=v"');
     expect(response.body).not.toContain(" src=");
     expect(response.body).toContain('data-events="/p/a%2Fb/events"');
+  });
+
+  test("a dot-segment id's shell, page and index links use the query form (#18077)", async () => {
+    const source = new FakePreviewPageSource();
+    source.change("..");
+    const shell = await prototypePreviewResponse({ kind: "shell", id: "..", variant: "v" }, source);
+    expect(shell.body).toContain('data-page="/p?id=..&amp;view=page&amp;variant=v"');
+    expect(shell.body).toContain('data-events="/p?id=..&amp;view=events"');
+    const index = await prototypePreviewResponse({ kind: "index" }, source);
+    expect(index.body).toContain('<a href="/p?id=..">..</a>');
   });
 
   test("an unknown id gets a waiting page; a bad query a 400", async () => {

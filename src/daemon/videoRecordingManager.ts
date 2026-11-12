@@ -86,7 +86,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // long-idle daemon never pruned, and a single uncapped in-progress capture could
 // fill the disk. These add a time-based TTL sweep and a live in-progress size cap.
 // All three are overridable via env so operators can tune retention without a
-// rebuild (documented in docs/design-docs/mcp/observe/video-recording.md).
+// rebuild (documented in docs/how-it-works/mcp/observe/video-recording.md).
 const DEFAULT_RETENTION_DAYS = 7;
 const DEFAULT_RETENTION_SWEEP_INTERVAL_MINUTES = 60;
 const DEFAULT_IN_PROGRESS_SIZE_CHECK_SECONDS = 15;
@@ -2270,7 +2270,7 @@ async function removeVideoRecordingArtifacts(filePath: string): Promise<void> {
   // the underlying blocks, so screen-capture bytes (which may contain OTPs,
   // credentials, or PII) can remain recoverable from the raw device until the
   // filesystem reuses them. This is documented as a known limitation in
-  // docs/design-docs/mcp/observe/video-recording.md. A future opt-in
+  // docs/how-it-works/mcp/observe/video-recording.md. A future opt-in
   // "sensitive mode" would overwrite-before-unlink here; it is deliberately a
   // follow-up (see the doc) rather than an unconditional cost on every delete.
   await fsPromises.rm(recordingDir, { recursive: true, force: true });

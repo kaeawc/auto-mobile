@@ -36,7 +36,7 @@ const PAGES: PageSpec[] = [
   { path: "", status: 200 },
   { path: "tools/", status: 200 },
   { path: "using/agent-examples/", status: 200 },
-  { path: "design-docs/plat/android/prototype-ux/", status: 200 },
+  { path: "how-it-works/plat/android/prototype-ux/", status: 200 },
   // GitHub Pages serves 404.html for a dead link; it redirects to the home page.
   { path: "using/this-page-does-not-exist/", status: 404, redirectsTo: "" },
 ];

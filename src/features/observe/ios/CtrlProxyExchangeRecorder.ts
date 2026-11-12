@@ -10,7 +10,7 @@
  *   NNNN-push-<type>.json     {"push": {...}}   (messages with no pending request)
  *
  * The files replay through `test/fakes/ReplayCtrlProxyWebSocket.ts` in unit tests.
- * See docs/design-docs/plat/ios/ctrlproxy-golden-replay.md.
+ * See docs/how-it-works/plat/ios/ctrlproxy-golden-replay.md.
  *
  * Owner policy: nothing is redacted except text typed into a password field.
  * The recorder cannot see the field it types into, so it resolves the target

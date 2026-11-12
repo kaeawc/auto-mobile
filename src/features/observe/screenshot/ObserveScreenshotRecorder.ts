@@ -1,3 +1,4 @@
+import { pickScreenshotMetadata } from "../ScreenshotMetadata";
 import {
   screenshotPathProtection,
   type ScreenshotPathProtection,
@@ -251,6 +252,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
           this.store.updateForObservation(this.device.deviceId, observationId, {
             path: validated,
             imageSize: result.screenshotImageSize,
+            metadata: pickScreenshotMetadata(result),
           });
           return validated;
         }
@@ -371,6 +373,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
           path,
           error,
           imageSize: screenshotResult.screenshotImageSize,
+          metadata: pickScreenshotMetadata(screenshotResult),
         });
       }
     };

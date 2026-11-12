@@ -14,6 +14,9 @@ describe("fallbackReasonForCtrlProxyFailure", () => {
 
   it("maps the internal timeout sentinel to ctrlproxy_timeout", () => {
     expect(fallbackReasonForCtrlProxyFailure("Screenshot timeout")).toBe("ctrlproxy_timeout");
+    expect(fallbackReasonForCtrlProxyFailure("Screenshot timeout after 3000ms")).toBe(
+      "ctrlproxy_timeout",
+    );
   });
 
   it("maps a generic old-APK screenshot_error to ctrlproxy_failed (backward compatible)", () => {

@@ -16,7 +16,7 @@ description: >
 
 inputs:
   xcode-version:
-    description: "Xcode version to select via maxim-lobanov/setup-xcode (e.g. 26.2, 26.5)."
+    description: "Xcode version to select via maxim-lobanov/setup-xcode (e.g. 26.2, 26.6)."
     required: true
 
 runs:

@@ -63,6 +63,7 @@ const OTHER_DEVICE_STATE_FIELDS: readonly (keyof DeviceConditionCallFields)[] = 
 /** The refusal for a deviceCondition call while the flag is off (#16882, #16906). */
 export const DEVICE_CONDITION_FLAG_DISABLED_MESSAGE = featureFlagDisabledMessage(
   "device-condition",
+  "setDeviceState",
   "deviceCondition",
 );
 

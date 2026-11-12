@@ -6,7 +6,7 @@ export type NonGeometricFormFactor = (typeof NON_GEOMETRIC_KINDS)[number];
 /**
  * Non-handheld form factors, keyed by system-image tag and avdmanager profile id.
  * Names are from sdkmanager/avdmanager listings; confirm with `sdkmanager --list` and
- * `avdmanager list device` (docs/design-docs/plat/android/form-factors.md, checklist row 10).
+ * `avdmanager list device` (docs/how-it-works/plat/android/form-factors.md, checklist row 10).
  * A wrong name is a one-line fix here. `systemImageTags` is in provisioning preference order,
  * and `defaultProfileId` is the hardware profile created when a request names none.
  */

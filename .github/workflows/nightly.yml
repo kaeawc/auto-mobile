@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   # Nightly schedules no GitHub-hosted macOS job (#11010). The macOS BATS / Node
-  # lanes, the Xcode 26.5 / 26.6 Swift Packages and Build Xcode Projects sweeps,
+  # lanes, the Xcode 26.6 Swift Packages and Build Xcode Projects sweeps,
   # XCTestRunner Thread Sanitizer and XCTestRunner Simulator Tests run on CircleCI's
   # `nightly-macos` workflow (.circleci/continue_config.yml), started by a scheduled
   # pipeline. build-ctrl-proxy-ios-ipa below is the release IPA workflow (out of

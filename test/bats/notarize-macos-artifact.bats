@@ -23,14 +23,15 @@ teardown() {
   rm -rf "${TEST_ROOT}"
 }
 
-# Write a fake `xcrun` whose `notarytool submit` prints the given verdict JSON.
+# Write a fake `xcrun` whose `notarytool submit` prints the given verdict JSON
+# and exits with the optional second argument (default 0).
 make_fake_xcrun() {
-  local status="$1"
+  local status="$1" submit_rc="${2:-0}"
   cat >"${TEST_ROOT}/xcrun" <<FAKE
 #!/usr/bin/env bash
 echo "\$@" >> "${XCRUN_LOG}"
 case "\$2" in
-  submit) echo '{"id":"sub-123","status":"${status}"}' ;;
+  submit) echo '{"id":"sub-123","status":"${status}"}'; exit ${submit_rc} ;;
   log)    echo '{"issues":[{"message":"example"}]}' ;;
 esac
 FAKE
@@ -81,4 +82,69 @@ FAKE
   unset APPLE_NOTARY_KEY_ID
   run bash "${SCRIPT}" "${ARTIFACT}"
   [ "$status" -ne 0 ]
+}
+
+@test "bounds the notary wait with a default 30m --timeout (#18176)" {
+  make_fake_xcrun "Accepted"
+  run bash "${SCRIPT}" "${ARTIFACT}"
+  [ "$status" -eq 0 ]
+  grep -q -- "--wait --timeout 30m --output-format json" "${XCRUN_LOG}"
+}
+
+@test "honors NOTARY_WAIT_TIMEOUT" {
+  make_fake_xcrun "Accepted"
+  NOTARY_WAIT_TIMEOUT=45m run bash "${SCRIPT}" "${ARTIFACT}"
+  [ "$status" -eq 0 ]
+  grep -q -- "--timeout 45m" "${XCRUN_LOG}"
+}
+
+@test "rejects a malformed NOTARY_WAIT_TIMEOUT before submitting" {
+  make_fake_xcrun "Accepted"
+  NOTARY_WAIT_TIMEOUT="30 minutes" run bash "${SCRIPT}" "${ARTIFACT}"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid NOTARY_WAIT_TIMEOUT"* ]]
+  [ ! -e "${XCRUN_LOG}" ]
+}
+
+@test "a submission still in progress at the timeout fails with a clear message" {
+  make_fake_xcrun "In Progress" 1
+  run bash "${SCRIPT}" "${ARTIFACT}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"notarytool submit failed (exit 1)"* ]]
+  [[ "$output" == *"no notarization verdict within 30m"* ]]
+  [[ "$output" == *"status: In Progress, submission sub-123"* ]]
+  [[ "$output" == *"notarytool info sub-123"* ]]
+}
+
+@test "a failed submit with non-JSON output still fails clearly" {
+  cat >"${TEST_ROOT}/xcrun" <<'FAKE'
+#!/usr/bin/env bash
+echo "Error: HTTP status code: 401. Unable to authenticate."
+exit 69
+FAKE
+  chmod +x "${TEST_ROOT}/xcrun"
+  export XCRUN="${TEST_ROOT}/xcrun"
+  run bash "${SCRIPT}" "${ARTIFACT}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"notarytool submit failed (exit 69)"* ]]
+  [[ "$output" == *"submission unknown"* ]]
+}
+
+load yq-helpers
+
+@test "the dmg job's time limit covers packaging plus two notary waits (#18176)" {
+  require_mikefarah_yq
+  local workflow=".github/workflows/build-desktop-app-installers.yml"
+
+  run yq -r '.jobs.build."timeout-minutes"' "$workflow"
+  [ "$output" = '${{ matrix.timeout-minutes }}' ]
+
+  # Two 30m notary waits plus packaging must fit.
+  run yq -r '.jobs.build.strategy.matrix.include[] | select(.format == "dmg") | ."timeout-minutes"' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 90 ]
+
+  # Every matrix entry sets its own limit, so none falls back to the 360m default.
+  run yq -r '[.jobs.build.strategy.matrix.include[] | select(has("timeout-minutes") | not)] | length' "$workflow"
+  [ "$output" = "0" ]
 }

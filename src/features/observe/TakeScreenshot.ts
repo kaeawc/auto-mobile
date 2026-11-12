@@ -9,10 +9,13 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { Window } from "./Window";
 import { logger } from "../../utils/logger";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { ScreenshotResult } from "../../models/ScreenshotResult";
-import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimensions";
-import { encodeScreenshot, encodingOptions } from "./screenshot/screenshotEncoding";
+import {
+  ctrlProxyScreenshotFormat,
+  encodeScreenshot,
+  encodingOptions,
+} from "./screenshot/screenshotEncoding";
 import { BootedDevice } from "../../models";
 import {
   ScreenshotJobHandle,
@@ -45,6 +48,7 @@ import {
   metadataForScreenshotFormat,
 } from "./ScreenshotMetadata";
 import {
+  replaceScreenshotExtension,
   screenshotExtensionForFormat,
   screenshotFileName,
   screenshotTempIdToken,
@@ -71,14 +75,21 @@ import {
 import { captureHideDeadlineMs } from "../prototype/ios/iosPrototypeTransport";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
+import {
+  defaultCtrlProxyCaptureCooldown,
+  type CtrlProxyCaptureCooldown,
+} from "./android/CtrlProxyCaptureCooldown";
+import { AndroidOneShotScreenshotCapture } from "./android/AndroidOneShotScreenshotCapture";
+
+/** Bound one-shot Android CtrlProxy latency before the independent ADB fallback. */
+export const ANDROID_CTRLPROXY_CAPTURE_TIMEOUT_MS = 3000;
+const ANDROID_HIDDEN_PROTOTYPE_SCREENSHOT_TIMEOUT_MS = 10000;
+
 const SCREENSHOT_CLEANUP_TIMEOUT_MS = 1500;
 /** How long the host waits for the CtrlProxy iOS screenshot; the prototype hide deadline derives from it. */
 const IOS_SCREENSHOT_TIMEOUT_MS = 10000;
 
-export function replaceScreenshotExtension(filePath: string, extension: string): string {
-  const oldExtension = path.extname(filePath);
-  return `${filePath.slice(0, filePath.length - oldExtension.length)}.${extension}`;
-}
+export { replaceScreenshotExtension } from "../../utils/screenshot/screenshotFormats";
 
 export interface ScreenshotOptions {
   format?: "jpeg" | "png" | "webp";
@@ -95,25 +106,11 @@ export interface ScreenshotOptions {
   hidePrototypes?: boolean;
 }
 
-function ctrlProxyScreenshotFormat(
-  result: CtrlProxyScreenshotResult,
-  imageBuffer: Buffer,
-  useLegacyFormat: boolean,
-): "png" | "jpeg" | "webp" {
-  if (useLegacyFormat) {
-    return result.format?.toLowerCase() === "png" ? "png" : "jpeg";
-  }
-  const mime = detectImageMimeType(imageBuffer);
-  if (!mime) {
-    throw new Error("Android CtrlProxy returned an unsupported screenshot format");
-  }
-  return mime.slice(6) as "png" | "jpeg" | "webp";
-}
-
-function resolveIosPrototypeHider(
-  hider: IosCapturePrototypeHiderResolver | undefined,
-): IosCapturePrototypeHiderResolver {
-  return hider ?? defaultIosCapturePrototypeHider;
+function resolveCaptureServices(options: TakeScreenshotOptions) {
+  return {
+    iosPrototypeHider: options.iosPrototypeHider ?? defaultIosCapturePrototypeHider,
+    ctrlProxyCaptureCooldown: options.ctrlProxyCaptureCooldown ?? defaultCtrlProxyCaptureCooldown,
+  };
 }
 
 export interface TakeScreenshotOptions {
@@ -127,6 +124,7 @@ export interface TakeScreenshotOptions {
   cleanupOnCreate?: boolean;
   pathProtection?: ScreenshotPathProtection;
   iosPrototypeHider?: IosCapturePrototypeHiderResolver;
+  ctrlProxyCaptureCooldown?: CtrlProxyCaptureCooldown;
 }
 
 export class TakeScreenshot implements ScreenshotService {
@@ -163,7 +161,20 @@ export class TakeScreenshot implements ScreenshotService {
       return await raceWithDeadline(
         async () => {
           if (this.device.platform !== "ios") {
-            return this.captureScreenshotBase64(finalPath, options, captureSignal, true);
+            const result = await this.captureScreenshotBase64(
+              finalPath,
+              options,
+              captureSignal,
+              true,
+            );
+            const elapsedMs = this.timer.now() - startedAt;
+            const screenshotStageDurationsMs = { adbMs: elapsedMs, totalMs: elapsedMs };
+            logger.info(
+              `[SCREENSHOT] Capture source=${result.screenshotCaptureSource ?? "none"} ` +
+                `fallbackReason=${result.screenshotFallbackReason ?? "none"} ` +
+                `stageDurationsMs=${JSON.stringify(screenshotStageDurationsMs)}`,
+            );
+            return result.success ? { ...result, screenshotStageDurationsMs } : result;
           }
           const capture = await this.captureIosObserverScreenshot(captureSignal);
           return this.writeiOSScreenshot(finalPath, capture, startedAt, {
@@ -259,6 +270,7 @@ export class TakeScreenshot implements ScreenshotService {
   private readonly pathProtection: ScreenshotPathProtection;
   private readonly iosPrototypeHider: IosCapturePrototypeHiderResolver;
   private readonly physicalDisplayIdResolver: PhysicalDisplayIdResolver;
+  private readonly ctrlProxyCaptureCooldown: CtrlProxyCaptureCooldown;
   /**
    * Get the cache directory, creating it with secure permissions if needed.
    * Resolved on every call rather than memoised process-wide: the directory
@@ -286,7 +298,9 @@ export class TakeScreenshot implements ScreenshotService {
       cleanupOnCreate = true,
     } = options;
     this.pathProtection = options.pathProtection ?? screenshotPathProtection;
-    this.iosPrototypeHider = resolveIosPrototypeHider(options.iosPrototypeHider);
+    const services = resolveCaptureServices(options);
+    this.iosPrototypeHider = services.iosPrototypeHider;
+    this.ctrlProxyCaptureCooldown = services.ctrlProxyCaptureCooldown;
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
@@ -436,39 +450,17 @@ export class TakeScreenshot implements ScreenshotService {
    */
   private async captureAndroidScreenshot(
     finalPath: string,
-    options: ScreenshotOptions = { format: "png" },
+    options: ScreenshotOptions,
     signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
-    logger.info(`[SCREENSHOT] Starting screenshot capture with format: ${options.format}`);
-
-    if (options.hidePrototypes === true) {
-      return this.captureScreenshotWithPrototypeHidden(finalPath, options, signal);
-    }
-
-    if (
-      options.format === undefined ||
-      (options.format === "jpeg" && options.quality === undefined)
-    ) {
-      try {
-        return await this.captureScreenshotViaCtrlProxy(
-          finalPath,
-          signal,
-          options.displayId,
-          options.format === undefined,
-        );
-      } catch (error) {
-        if (options.displayId !== undefined) {
-          throw error;
-        }
-        logger.info(`[SCREENSHOT] CtrlProxy capture failed, falling back to ADB: ${error}`);
-        if (options.format === undefined) {
-          finalPath = replaceScreenshotExtension(finalPath, "png");
-          options = { ...options, format: "png" };
-        }
-      }
-    }
-
-    return this.captureAndroidScreenshotViaAdb(finalPath, options, signal);
+    return new AndroidOneShotScreenshotCapture({
+      deviceId: this.device.deviceId,
+      timer: this.timer,
+      cooldown: this.ctrlProxyCaptureCooldown,
+      captureCtrlProxy: (...args) => this.captureScreenshotViaCtrlProxy(...args),
+      captureAdb: (...args) => this.captureAndroidScreenshotViaAdb(...args),
+      captureHidden: (...args) => this.captureScreenshotWithPrototypeHidden(...args),
+    }).capture(finalPath, options, signal);
   }
 
   private async captureAndroidScreenshotViaAdb(
@@ -545,7 +537,7 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<CtrlProxyScreenshotResult | null> {
     const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     try {
-      // The client's own 10s timeout is unaware of the signal, so race it
+      // The client's request timeout is unaware of the signal, so race it
       // against the abort the way the iOS path does - otherwise a cancelled
       // capture still blocks the caller for the full request timeout. The signal
       // also goes INTO the client: winning the outer race only unblocks this
@@ -553,7 +545,13 @@ export class TakeScreenshot implements ScreenshotService {
       // (re)connection completes, burning the shared screenshot rate limit and
       // pushing a late observation-stream frame (#6605).
       const result = await awaitWhileRequestIsLive(
-        client.requestScreenshot(10000, undefined, { signal, displayId, hidePrototypes }),
+        client.requestScreenshot(
+          hidePrototypes
+            ? ANDROID_HIDDEN_PROTOTYPE_SCREENSHOT_TIMEOUT_MS
+            : ANDROID_CTRLPROXY_CAPTURE_TIMEOUT_MS,
+          undefined,
+          { signal, displayId, hidePrototypes },
+        ),
         signal,
       );
       return signal?.aborted ? null : result;
@@ -564,7 +562,7 @@ export class TakeScreenshot implements ScreenshotService {
         logger.debug(`[SCREENSHOT] Android CtrlProxy capture cancelled: ${errorMessage(error)}`);
         return null;
       }
-      throw error;
+      throw toActionableError(error, "Android CtrlProxy screenshot request failed");
     }
   }
 

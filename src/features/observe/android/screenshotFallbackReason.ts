@@ -22,7 +22,10 @@ export const CTRLPROXY_RATE_LIMITED_ERROR = "Screenshot rate limited";
  * stays `ctrlproxy_failed`, preserving backward compatibility (issue #4927).
  */
 export function fallbackReasonForCtrlProxyFailure(error?: string): ScreenshotFallbackReason {
-  if (error === CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR) {
+  if (
+    error === CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR ||
+    error?.startsWith(`${CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR} after `)
+  ) {
     return "ctrlproxy_timeout";
   }
   if (error === CTRLPROXY_RATE_LIMITED_ERROR) {

@@ -75,6 +75,7 @@ export type SessionBrokerProtocolErrorCode =
   | "session_request_not_found"
   | "session_restart_handoff_pending"
   | "session_owner_mismatch"
+  | "session_request_owner_mismatch"
   | "session_export_not_found"
   | "session_export_identity_mismatch";
 

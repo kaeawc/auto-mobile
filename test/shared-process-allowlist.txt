@@ -8,7 +8,7 @@
 # spies qualify only in tests/beforeEach with every restore proven (#13568).
 # Losing proof reports file:line:reason. beforeAll spies always stay isolated.
 # Regenerate to move it back to the isolated group. New files run isolated
-# until the list is regenerated. See docs/design-docs/ci/unit-lane-scaling.md.
+# until the list is regenerated. See docs/how-it-works/ci/unit-lane-scaling.md.
 test/cli/bootDevice.test.ts
 test/cli/bootDeviceEntrypoint.test.ts
 test/cli/cliValueCoercion.test.ts

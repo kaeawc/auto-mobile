@@ -3,7 +3,7 @@ import Foundation
 // The on-device HTTP seam for `request` actions with `via: "device"` (#12529). Core knows only
 // this protocol, so session and driver tests use a fake and Core links no HTTP library.
 // `PrototypeURLSessionClient` is the URLSession implementation; an Alamofire one would be a second
-// conformance behind the same protocol (see docs/design-docs/plat/ios/prototype-agent.md).
+// conformance behind the same protocol (see docs/how-it-works/plat/ios/prototype-agent.md).
 
 struct PrototypeHttpRequest: Equatable, Sendable {
     let method: PrototypeRequestMethod

@@ -16,7 +16,7 @@ set -euo pipefail
 # Output key and runner label of each pool, in summary order.
 pools=("small:automobile-mac" "heavy:automobile-mac-heavy")
 timeout_seconds="${MAC_POOL_ROUTING_TIMEOUT_SECONDS:-30}"
-doc='docs/design-docs/ci/macos-capacity-plan.md'
+doc='docs/how-it-works/ci/macos-capacity-plan.md'
 
 summary() {
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then

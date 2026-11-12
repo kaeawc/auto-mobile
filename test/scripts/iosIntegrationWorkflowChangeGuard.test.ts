@@ -126,8 +126,8 @@ describe("advisory watchOS simulator smoke", () => {
 
   test("pins Xcode and preserves private namespace and failure artifacts", () => {
     const steps = loadJobSteps(watchWorkflow, "watchos-sim-smoke");
-    expect(steps.find((step) => step.name === "Select Xcode 26.5")?.with?.["xcode-version"]).toBe(
-      "26.5",
+    expect(steps.find((step) => step.name === "Select Xcode 26.6")?.with?.["xcode-version"]).toBe(
+      "26.6",
     );
     expect(steps.find((step) => step.name === "Ensure watchOS runtime")?.run).toContain(
       "xcodebuild -downloadPlatform watchOS",

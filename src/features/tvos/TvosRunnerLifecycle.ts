@@ -168,6 +168,9 @@ export class TvosRunnerLifecycle {
         throw new ActionableError("the tvos session ended during runner startup");
       }
       await this.restoreForeground(deviceId, signal);
+      if (signal.aborted || this.runners.get(deviceId) !== entry) {
+        throw new ActionableError("the tvos session ended during runner startup");
+      }
       return {
         stop: () => {
           if (this.runners.get(deviceId) === entry) {

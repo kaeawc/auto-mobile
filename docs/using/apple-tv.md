@@ -98,7 +98,9 @@ runtime and device type identifiers from `automobile:devices/images/tvos`:
 runner and binds a session. It accepts `enableTools` too. It never creates a simulator; a name or
 `deviceId` that matches none, or more than one, fails and asks for an exact `deviceId`. Starting the
 runner brings its own host app to the front, so an app you launched with `launchApp` before is
-brought back to the foreground once the runner is up, including after an automatic restart.
+brought back to the foreground once the runner is up, including after an automatic restart. If the
+restore fails, the runner still works and the host app stays in front. Call `launchApp` again to bring
+the app back.
 
 On first tvOS use, AutoMobile downloads and verifies the release’s prebuilt runner; no source
 checkout is needed. `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` selects an explicit `.xctestrun` instead.

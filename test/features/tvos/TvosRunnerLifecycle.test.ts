@@ -4,6 +4,11 @@ import { requireTvosRunner } from "../../../src/features/tvos/TvosRunnerRecovery
 import { ActionableError } from "../../../src/models/ActionableError";
 import { afterEach, expect, test } from "bun:test";
 import { TvosRunnerLifecycle } from "../../../src/features/tvos/TvosRunnerLifecycle";
+import {
+  TargetAppForegroundRestore,
+  type TvosForegroundRestore,
+} from "../../../src/features/tvos/TvosForegroundRestore";
+import { InMemoryVisionosTargetApps } from "../../../src/features/visionos/VisionosTargetApps";
 import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
 import type {
   SessionReleaseCallback,
@@ -52,7 +57,7 @@ afterEach(() => {
   }
 });
 
-function fixture() {
+function fixture(foreground?: TvosForegroundRestore) {
   const client = new FakeTvosRunnerClient();
   const launcher = new FakeTvosRunnerLauncher(client);
   const released: string[] = [];
@@ -63,6 +68,7 @@ function fixture() {
   const timer = new FakeTimer();
   const owner = new TvosRunnerLifecycle({
     timer,
+    foreground,
     launcher,
     artifacts,
     ports: {
@@ -249,6 +255,31 @@ test("abort during launch stops a late handle and frees its port", async () => {
   });
   expect(f.launcher.stops).toBe(1);
   expect(f.released).toEqual(["owned-tvos"]);
+});
+
+test("abort during successful foreground activation returns no stop handle", async () => {
+  const controller = new AbortController();
+  const targetApps = new InMemoryVisionosTargetApps();
+  targetApps.launched("owned-tvos", "dev.example.tvapp");
+  const activations: string[] = [];
+  const f = fixture(
+    new TargetAppForegroundRestore({
+      targetApps,
+      activate: async (deviceId, bundleId) => {
+        activations.push(`${deviceId} ${bundleId}`);
+        controller.abort();
+        return { success: true };
+      },
+    }),
+  );
+  const started = await f.owner.start({ ...f.request, signal: controller.signal });
+  expect(activations).toEqual(["owned-tvos dev.example.tvapp"]);
+  expect(started.runnerUnavailable).toBe("the tvos session ended during runner startup");
+  expect(started.stop).toBeUndefined();
+  expect(f.launcher.stops).toBe(1);
+  expect(f.released).toEqual(["owned-tvos"]);
+  expect(f.owner.ownsRunner("owned-tvos")).toBe(false);
+  expect(tvosRunners.get("owned-tvos")).toBeUndefined();
 });
 
 test("failure cleanup from an old launch cannot stop a replacement runner", async () => {

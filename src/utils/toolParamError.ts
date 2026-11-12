@@ -371,6 +371,25 @@ function sendKeysShapeHint(flattenedIssues: ReadonlyArray<FlattenedIssue>): stri
   return needsShape ? SEND_KEYS_SHAPE : undefined;
 }
 
+// Names an agent reaches for when it means setToolEnabled's toolNames: acquisition tools take the
+// same list as enableTools, so `tools`/`enableTools` are the common misses (#18020).
+const SET_TOOL_ENABLED_MISNAMED_KEYS = new Set(["tools", "enableTools", "tool", "names"]);
+const SET_TOOL_ENABLED_NAMES_HINT =
+  'setToolEnabled takes toolNames: ["<tool>", ...] for a batch or toolName: "<tool>" for one tool ' +
+  "(device acquisition tools take the same list as enableTools)";
+
+function setToolEnabledNamesHint(
+  flattenedIssues: ReadonlyArray<FlattenedIssue>,
+): string | undefined {
+  const misnamed = flattenedIssues.some(
+    ({ issue }) =>
+      issue.path.length === 0 &&
+      isUnrecognizedKeys(issue) &&
+      issue.keys.some((name) => SET_TOOL_ENABLED_MISNAMED_KEYS.has(String(name))),
+  );
+  return misnamed ? SET_TOOL_ENABLED_NAMES_HINT : undefined;
+}
+
 // The commands hint is about 150 characters, so the keys line beside it lists
 // fewer keys than the generic hint to keep the whole hint near 250 (#17675).
 const SEND_KEYS_MAX_KEYS_LISTED = 5;
@@ -742,6 +761,12 @@ export function formatToolParamError(
         'container must be an object like { "elementId": "<id>" } or { "text": "<text>" }',
       );
     }
+  }
+
+  const toolNamesHint =
+    toolName === "setToolEnabled" ? setToolEnabledNamesHint(flattenedIssues) : undefined;
+  if (toolNamesHint) {
+    hints.push(toolNamesHint);
   }
 
   // The sendKeys commands hint (#16893) already names the command shape and its

@@ -31,9 +31,8 @@ import { stripInternalToolParams } from "./internalToolParams";
 import { z } from "zod/v4";
 
 // The registered shape already advertises tvOS; only exact simulator selectors apply here.
-const parameters = watchStartDeviceParametersSchema
-  .omit({ enableTools: true })
-  .extend({ platform: z.literal("tvos") });
+// enableTools is granted by the acquisition ingress against the session this call binds (#18020).
+const parameters = watchStartDeviceParametersSchema.extend({ platform: z.literal("tvos") });
 
 export function isAppleTvStartRequest(rawArgs: object): boolean {
   const merged = mergeLegacyStartDevicePayload(rawArgs);

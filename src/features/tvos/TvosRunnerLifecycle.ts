@@ -14,6 +14,9 @@ import { SingleFlight } from "../../utils/cache/SingleFlight";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { TvosRunnerClient } from "./TvosRunnerClient";
+import { TargetAppForegroundRestore, type TvosForegroundRestore } from "./TvosForegroundRestore";
+import { tvosTargetApps } from "./TvosTargetApps";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 
 type TvosRunnerSessions = Pick<
   SessionManager,
@@ -41,6 +44,8 @@ export class TvosRunnerLifecycle {
       launcher: TvosRunnerLauncher;
       ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
       timer?: Timer;
+      /** Brings the app under test back in front once a launched runner is up (#18020). */
+      foreground?: TvosForegroundRestore;
     },
   ) {}
 
@@ -162,6 +167,10 @@ export class TvosRunnerLifecycle {
         }
         throw new ActionableError("the tvos session ended during runner startup");
       }
+      await this.restoreForeground(deviceId, signal);
+      if (signal.aborted || this.runners.get(deviceId) !== entry) {
+        throw new ActionableError("the tvos session ended during runner startup");
+      }
       return {
         stop: () => {
           if (this.runners.get(deviceId) === entry) {
@@ -178,6 +187,19 @@ export class TvosRunnerLifecycle {
       return { runnerUnavailable: reason };
     } finally {
       signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  /** A failed restore leaves the runner usable; the app under test can still be launched. */
+  private async restoreForeground(deviceId: string, signal: AbortSignal): Promise<void> {
+    try {
+      await this.dependencies.foreground?.restore(deviceId, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      logger.warn(
+        `[TvosRunner] App under test not restored to the foreground on ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
     }
   }
 
@@ -287,6 +309,10 @@ export function getTvosRunnerLifecycle(): TvosRunnerLifecycle {
               : task();
           },
         },
+      }),
+      foreground: new TargetAppForegroundRestore({
+        targetApps: tvosTargetApps,
+        activate: (deviceId, bundleId) => new SimCtlClient().launchApp(bundleId, {}, deviceId),
       }),
       launcher: new XcodebuildTvosRunnerLauncher({
         writeRunnerEnvironment: (file, env, deviceId) =>

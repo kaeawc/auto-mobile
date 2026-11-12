@@ -5,6 +5,7 @@ import { sendKeysSchema, swipeOnSchema, tapOnSchema } from "../../src/server/int
 import { listDeviceImagesSchema } from "../../src/server/deviceTools";
 import { observeSchema, waitForSchema } from "../../src/server/observeTools";
 import { setPreferenceSchema } from "../../src/server/preferenceTools";
+import { setToolEnabledSchema } from "../../src/server/toolSelectionTools";
 
 // Issue #4181, rank 7 (A6): the "container must be an object …" hint is
 // appended only for tapOn/swipeOn when a validation issue lands on the
@@ -504,6 +505,28 @@ describe("formatToolParamError sendKeys commands shape hint (#16893)", () => {
     }
     expect(formatToolParamError("tapOn", result.error, input, tapOnSchema)).not.toContain(
       "sendKeys takes commands",
+    );
+  });
+});
+
+describe("formatToolParamError setToolEnabled names hint (#18020)", () => {
+  const format = (input: Record<string, unknown>) => {
+    const parsed = setToolEnabledSchema.safeParse(input);
+    if (parsed.success) {
+      throw new Error("expected a validation failure");
+    }
+    return formatToolParamError("setToolEnabled", parsed.error, input, setToolEnabledSchema);
+  };
+
+  test.each(["tools", "enableTools"])("a %s key is pointed at toolNames", (key) => {
+    const message = format({ [key]: ["executePlan"] });
+    expect(message).toContain("Unrecognized key");
+    expect(message).toContain('setToolEnabled takes toolNames: ["<tool>", ...]');
+  });
+
+  test("an unrelated unknown key gets no toolNames hint", () => {
+    expect(format({ toolNames: ["executePlan"], verbose: true })).not.toContain(
+      "setToolEnabled takes toolNames",
     );
   });
 });

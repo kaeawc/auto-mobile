@@ -31,3 +31,11 @@ test("cooldown duration is injectable", () => {
   timer.advanceTime(10);
   expect(cooldown.hasRecentFailure("a")).toBe(false);
 });
+
+test("a backward wall-clock step expires the cooldown instead of extending it", () => {
+  const timer = new FakeTimer();
+  const cooldown = new InMemoryCtrlProxyCaptureCooldown(timer);
+  cooldown.recordFailure("a");
+  timer.stepWallClock(-3_600_000);
+  expect(cooldown.hasRecentFailure("a")).toBe(false);
+});

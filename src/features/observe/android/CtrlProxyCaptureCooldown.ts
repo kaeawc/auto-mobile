@@ -23,7 +23,9 @@ export class InMemoryCtrlProxyCaptureCooldown implements CtrlProxyCaptureCooldow
     if (failedAt === undefined) {
       return false;
     }
-    if (this.timer.now() - failedAt < this.cooldownMs) {
+    const elapsed = this.timer.now() - failedAt;
+    // A negative elapsed time means the host clock moved backward: treat the cooldown as expired.
+    if (elapsed >= 0 && elapsed < this.cooldownMs) {
       return true;
     }
     this.clear(deviceId);

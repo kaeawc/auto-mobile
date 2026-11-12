@@ -12,6 +12,14 @@ def emit(event, command_id=None, **fields):
     print(json.dumps({"event": event, **({"id": command_id} if command_id is not None else {}), **fields}), flush=True)
 
 
+async def open_transport_bounded(opener, spec, timeout_s=OPEN_TRANSPORT_TIMEOUT_S):
+    # TimeoutError has an empty message, which would surface as a bare "BLE sidecar: ".
+    try:
+        return await asyncio.wait_for(opener(spec), timeout_s)
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"Timed out after {timeout_s} s opening BLE transport {spec}") from None
+
+
 def decode_value(value):
     return bytes.fromhex(value["value"]) if value.get("encoding") == "hex" else value["value"].encode("utf-8")
 
@@ -30,7 +38,7 @@ async def main():
     if not config_line:
         return
     config = json.loads(config_line)
-    transport = await asyncio.wait_for(open_transport(config["transport"]), OPEN_TRANSPORT_TIMEOUT_S)
+    transport = await open_transport_bounded(open_transport, config["transport"])
     async with transport as (source, sink):
         device = Device.with_hci(config["name"], Address(config["address"]), source, sink)
         level = [87]

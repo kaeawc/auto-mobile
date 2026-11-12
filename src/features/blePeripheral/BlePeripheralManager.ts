@@ -25,6 +25,8 @@ interface Peripheral {
   config?: BlePeripheralConfig;
   sidecar: BlePeripheralSidecar;
   controller: AbortController;
+  /** Set when the cleanup stop after a failed start rejected; the sidecar may still be running. */
+  cleanupFailed?: boolean;
 }
 
 /** Released-session tombstones only fence calls racing the release; the oldest are dropped past this bound. */
@@ -113,10 +115,14 @@ export class BlePeripheralManager {
       }
       return { handle, ...config, ...status };
     } catch (error) {
-      await peripheral.sidecar.stop().catch((stopError: unknown) => {
+      try {
+        await peripheral.sidecar.stop();
+        this.peripherals.delete(handle);
+      } catch (stopError) {
+        // The sidecar may still run; keep the owned entry so stop, session release or shutdown retries the kill.
+        peripheral.cleanupFailed = true;
         logger.warn("BLE sidecar cleanup after a failed start did not complete", stopError);
-      });
-      this.peripherals.delete(handle);
+      }
       throw toActionableError(
         error,
         "BLE peripheral start failed; check python3, Bumble dependencies and the netsim transport",

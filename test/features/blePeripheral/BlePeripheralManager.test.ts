@@ -69,18 +69,37 @@ describe("session-owned BLE peripherals", () => {
     expect(await manager.run(owners[0], bleStartArgs())).toMatchObject({ running: true });
   });
 
-  test("a failing cleanup stop keeps the original start error and drops the handle", async () => {
+  test("a failing cleanup stop keeps the original start error and keeps the entry for retry", async () => {
     const { manager, environments, sidecars } = blePeripheralFixture();
     environments.error = new Error("pip offline");
     const started = manager.run("s1", bleStartArgs());
     sidecars.created[0].stopError = new Error("kill failed");
     await expect(started).rejects.toThrow(/pip offline/);
     expect(sidecars.created[0].stops).toBe(1);
+    // The handle was never returned, so it is not usable for tool calls.
     await expect(manager.run("s1", { action: "status", handle: "fake-1" })).rejects.toThrow(
       /Unknown BLE handle/,
     );
+    // Session release still owns the possibly-running sidecar and surfaces the unconfirmed kill.
+    await expect(manager.releaseSession("s1")).rejects.toThrow(/kill failed/);
+    expect(sidecars.created[0].stops).toBe(2);
+    sidecars.created[0].stopError = undefined;
     await manager.releaseSession("s1");
-    expect(sidecars.created[0].stops).toBe(1);
+    expect(sidecars.created[0].stops).toBe(3);
+    // A confirmed kill removes the entry, so shutdown has nothing left to stop.
+    await manager.shutdown();
+    expect(sidecars.created[0].stops).toBe(3);
+  });
+
+  test("a failing cleanup stop after a failed start is retried by shutdown", async () => {
+    const { manager, environments, sidecars } = blePeripheralFixture();
+    environments.error = new Error("pip offline");
+    const started = manager.run("s1", bleStartArgs());
+    sidecars.created[0].stopError = new Error("kill failed");
+    await expect(started).rejects.toThrow(/pip offline/);
+    sidecars.created[0].stopError = undefined;
+    await manager.shutdown();
+    expect(sidecars.created[0].stops).toBe(2);
   });
 
   test("multiple handles stay isolated across owners", async () => {

@@ -3,6 +3,7 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { type HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import type { FileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { getTempDir } from "../../utils/tempDir";
+import { type DirectoryLock, FileDirectoryLock } from "../../utils/directoryLock";
 import { shellQuote } from "../../utils/shellQuote";
 
 export const BLE_PYTHON_PINS = ["bumble==0.0.236", "grpcio==1.85.1", "protobuf==7.36.2"] as const;
@@ -25,9 +26,26 @@ export interface PythonEnvProvisioner {
   ensure(): Promise<string>;
 }
 
-/** One managed environment; simultaneous starts share provisioning and failed installs never mark it ready. */
+/** Covers `venv --clear` plus the pinned pip install, whose own timeouts total 240 s. */
+const PROVISION_LOCK_TIMEOUT_MS = 300_000;
+
+function defaultProvisionLock(): DirectoryLock {
+  return new FileDirectoryLock({
+    fileName: "provision.lock",
+    description: "the BLE Python environment lock",
+    holderActivity: "Another AutoMobile process is installing the BLE Python environment",
+    timeoutMs: PROVISION_LOCK_TIMEOUT_MS,
+    pollMs: 250,
+  });
+}
+
+/**
+ * One managed environment; simultaneous starts share provisioning and failed installs never mark it ready.
+ * A file lock on the environment directory serializes provisioning across daemon processes.
+ */
 export class ManagedPythonEnvProvisioner implements PythonEnvProvisioner {
   private pending?: Promise<string>;
+  private readonly lock: DirectoryLock;
 
   constructor(
     private readonly deps: {
@@ -35,8 +53,11 @@ export class ManagedPythonEnvProvisioner implements PythonEnvProvisioner {
       files: Pick<FileSystem, "existsSync" | "readFile" | "writeFile" | "ensureDir">;
       directory?: () => string;
       platform?: NodeJS.Platform;
+      lock?: DirectoryLock;
     },
-  ) {}
+  ) {
+    this.lock = deps.lock ?? defaultProvisionLock();
+  }
 
   ensure(): Promise<string> {
     this.pending ??= this.provision().finally(() => {
@@ -46,7 +67,7 @@ export class ManagedPythonEnvProvisioner implements PythonEnvProvisioner {
   }
 
   private async provision(): Promise<string> {
-    const { commands, files } = this.deps;
+    const { files } = this.deps;
     const root = (this.deps.directory ?? (() => getTempDir("ble-peripheral")))();
     const venv = join(root, "venv");
     const python = join(
@@ -55,36 +76,47 @@ export class ManagedPythonEnvProvisioner implements PythonEnvProvisioner {
     );
     const marker = join(root, "pins.json");
     const pins = JSON.stringify(BLE_PYTHON_PINS);
+    const ready = async () =>
+      files.existsSync(python) &&
+      files.existsSync(marker) &&
+      (await files.readFile(marker)) === pins;
     try {
-      if (
-        files.existsSync(python) &&
-        files.existsSync(marker) &&
-        (await files.readFile(marker)) === pins
-      ) {
+      if (await ready()) {
         return python;
       }
       await this.assertSupportedPython();
       await files.ensureDir(root);
-      // Without a matching marker the venv may be half-built (no pip, interrupted install); rebuild it.
-      await commands.executeCommand("python3", ["-m", "venv", "--clear", venv], {
-        timeoutMs: 60_000,
+      return await this.lock.withLock(root, async () => {
+        // Another process may have finished provisioning while this one waited for the lock.
+        if (await ready()) {
+          return python;
+        }
+        await this.install(venv, python);
+        await files.writeFile(marker, pins);
+        return python;
       });
-      try {
-        await commands.executeCommand(python, ["-I", "-m", "pip", "install", ...BLE_PYTHON_PINS], {
-          timeoutMs: 180_000,
-        });
-      } catch (error) {
-        throw new ActionableError(
-          `BLE dependency installation failed. Check network access to PyPI and run ${shellQuote(python)} -I -m pip install ${BLE_PYTHON_PINS.join(" ")}, then retry start.`,
-          { cause: error },
-        );
-      }
-      await files.writeFile(marker, pins);
-      return python;
     } catch (error) {
       throw toActionableError(
         error,
         `Could not prepare BLE Python environment at ${venv}. ${PYTHON_INSTALL_FIX}`,
+      );
+    }
+  }
+
+  private async install(venv: string, python: string): Promise<void> {
+    const { commands } = this.deps;
+    // Without a matching marker the venv may be half-built (no pip, interrupted install); rebuild it.
+    await commands.executeCommand("python3", ["-m", "venv", "--clear", venv], {
+      timeoutMs: 60_000,
+    });
+    try {
+      await commands.executeCommand(python, ["-I", "-m", "pip", "install", ...BLE_PYTHON_PINS], {
+        timeoutMs: 180_000,
+      });
+    } catch (error) {
+      throw new ActionableError(
+        `BLE dependency installation failed. Check network access to PyPI and run ${shellQuote(python)} -I -m pip install ${BLE_PYTHON_PINS.join(" ")}, then retry start.`,
+        { cause: error },
       );
     }
   }

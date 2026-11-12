@@ -293,41 +293,46 @@ public final class AutoMobilePlanExecutor: Sendable {
             }
             PerfTimer.log("sessionUuid=\(sessionUuid)")
 
-            // Ask the daemon to keep this attempt's session and device on failure only when AI recovery
-            // may follow (#10834 / #11072); every path that does not resume on it releases it.
-            let holdForRecovery = await recoveryMayFollow(
-                recoveryAlreadyAttempted: recoveryAlreadyAttempted,
-                testMetadata: testMetadata
-            )
-
-            var arguments = PerfTimer.measure("buildExecutePlanArguments") {
-                buildExecutePlanArguments(
-                    planContent: substituted,
-                    sessionUuid: sessionUuid,
-                    platform: platform,
-                    startStep: startStep,
-                    deviceIdOverride: deviceIdOverride,
-                    deviceLabels: planMetadata.deviceLabels,
-                    testMetadata: testMetadata
-                )
-            }
-            if holdForRecovery {
-                arguments["holdSessionOnFailure"] = true
-            }
-            PerfTimer.log("arguments built, keys=\(arguments.keys.sorted())")
-
-            try Task.checkCancellation()
-            let enabled = try await mcpClient.callTool(
-                name: "setToolEnabled",
-                arguments: ["toolName": "executePlan", "sessionUuid": sessionUuid],
-                timeout: configuration.timeoutSeconds
-            )
-            try Task.checkCancellation()
-            // A refused opt-in (held device, terminal session) must not go on to executePlan, which
-            // the daemon would then refuse as not enabled for this session.
-            try validateToolResponse(enabled, tool: "setToolEnabled")
+            let acquiredSession = sessionUuidOverride == nil
+            var holdForRecovery = false
+            var dispatched = false
             let result: ExecutePlanResult
             do {
+                try Task.checkCancellation()
+                // Ask the daemon to keep this attempt's session and device on failure only when AI recovery
+                // may follow (#10834 / #11072); every path that does not resume on it releases it.
+                holdForRecovery = await recoveryMayFollow(
+                    recoveryAlreadyAttempted: recoveryAlreadyAttempted,
+                    testMetadata: testMetadata
+                )
+
+                var arguments = PerfTimer.measure("buildExecutePlanArguments") {
+                    buildExecutePlanArguments(
+                        planContent: substituted,
+                        sessionUuid: sessionUuid,
+                        platform: platform,
+                        startStep: startStep,
+                        deviceIdOverride: deviceIdOverride,
+                        deviceLabels: planMetadata.deviceLabels,
+                        testMetadata: testMetadata
+                    )
+                }
+                if holdForRecovery {
+                    arguments["holdSessionOnFailure"] = true
+                }
+                PerfTimer.log("arguments built, keys=\(arguments.keys.sorted())")
+
+                try Task.checkCancellation()
+                let enabled = try await mcpClient.callTool(
+                    name: "setToolEnabled",
+                    arguments: ["toolName": "executePlan", "sessionUuid": sessionUuid],
+                    timeout: configuration.timeoutSeconds
+                )
+                try Task.checkCancellation()
+                // A refused opt-in (held device, terminal session) must not go on to executePlan, which
+                // the daemon would then refuse as not enabled for this session.
+                try validateToolResponse(enabled, tool: "setToolEnabled")
+                dispatched = true
                 executePlanDispatch?.sent = true
                 let response = try await mcpClient.callTool(
                     name: "executePlan", arguments: arguments,
@@ -339,9 +344,13 @@ public final class AutoMobilePlanExecutor: Sendable {
                     try decodeExecutePlanResult(from: response)
                 }
             } catch {
-                // No failure result reaches recovery, so a session the daemon may hold is freed now.
-                if holdForRecovery {
-                    await releaseHeldSession(sessionUuid)
+                // No decoded result takes over this acquisition. Free it even before dispatch (#11139),
+                // shielding cleanup from cancellation. A caller-supplied session is released only
+                // when the daemon was asked to hold it.
+                if acquiredSession || (holdForRecovery && dispatched) {
+                    await Task.detached {
+                        await self.releaseHeldSession(sessionUuid)
+                    }.value
                 }
                 throw error
             }
@@ -408,7 +417,6 @@ public final class AutoMobilePlanExecutor: Sendable {
         let response = try await mcpClient.callTool(
             name: tool, arguments: arguments, timeout: configuration.timeoutSeconds
         )
-        try Task.checkCancellation()
         try validateToolResponse(response, tool: tool)
         do {
             let device = try JSONDecoder().decode(AcquiredDevice.self, from: Data(response.text.utf8))

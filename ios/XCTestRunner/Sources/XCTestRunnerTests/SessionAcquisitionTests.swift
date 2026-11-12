@@ -68,6 +68,147 @@ final class SessionAcquisitionTests: XCTestCase {
         }
     }
 
+    func testEnableFailuresReleaseOnlyTheAcquiredSessionExactlyOnce() async {
+        for sessionUuid: String? in [nil, "caller-session"] {
+            for response: MCPToolResponse? in [
+                nil,
+                MCPToolResponse(text: "enable failed", isError: true),
+                MCPToolResponse(
+                    text: #"{"success":false,"error":"terminal session","code":"daemon_session_not_found","retryable":false}"#,
+                    isError: true
+                ),
+            ] {
+                let client = AcquisitionMCPClient()
+                if let response {
+                    client.replies["setToolEnabled"] = [response]
+                } else {
+                    client.errors["setToolEnabled"] = .requestFailed("enable transport failed")
+                }
+                let heldSessions = RecordingHeldSessionController()
+                let executor = makeExecutor(client: client, heldSessionController: heldSessions)
+
+                await assertAsyncThrowsError { try await executor.execute(sessionUuid: sessionUuid) }
+
+                XCTAssertEqual(heldSessions.releasedSessions, sessionUuid == nil ? ["issued-session"] : [])
+                XCTAssertEqual(
+                    client.events,
+                    sessionUuid == nil
+                        ? ["initialize", "getApple", "setToolEnabled"]
+                        : ["initialize", "setToolEnabled"]
+                )
+            }
+        }
+    }
+
+    func testCancellationBeforeDispatchReleasesOnlyTheAcquiredSessionOutsideCancellation() async throws {
+        for sessionUuid: String? in [nil, "caller-session"] {
+            for tool in sessionUuid == nil ? ["getApple", "setToolEnabled"] : ["setToolEnabled"] {
+                let client = AcquisitionMCPClient()
+                client.cancelOnCall = tool
+                let heldSessions = RecordingHeldSessionController()
+                let executor = makeExecutor(
+                    client: client,
+                    heldSessionController: CancellationCheckingHeldSessionController(recording: heldSessions)
+                )
+                let task = Task { try await executor.execute(sessionUuid: sessionUuid) }
+
+                do {
+                    _ = try await task.value
+                    XCTFail("expected cancellation after \(tool)")
+                } catch is CancellationError {}
+
+                XCTAssertEqual(heldSessions.releasedSessions, sessionUuid == nil ? ["issued-session"] : [])
+                XCTAssertEqual(client.events.last, tool)
+                XCTAssertFalse(client.events.contains("executePlan"))
+            }
+        }
+    }
+
+    func testExecutePlanTransportAndDecodeErrorsReleaseOnlyTheAcquiredSessionExactlyOnce() async {
+        for sessionUuid: String? in [nil, "caller-session"] {
+            for recoveryEnabled in [false, true] {
+                for transportError in [false, true] {
+                    let client = AcquisitionMCPClient()
+                    if transportError {
+                        client.errors["executePlan"] = .requestFailed("plan transport failed")
+                    } else {
+                        client.replies["executePlan"] = [MCPToolResponse(text: "{broken")]
+                    }
+                    let heldSessions = RecordingHeldSessionController()
+                    let executor = makeExecutor(
+                        client: client,
+                        heldSessionController: heldSessions,
+                        recoveryEnabled: recoveryEnabled
+                    )
+
+                    await assertAsyncThrowsError { try await executor.execute(sessionUuid: sessionUuid) }
+
+                    XCTAssertEqual(
+                        heldSessions.releasedSessions,
+
+                        sessionUuid == nil ? ["issued-session"] : (recoveryEnabled ? ["caller-session"] : [])
+                    )
+                    XCTAssertEqual(client.events.filter { $0 == "executePlan" }.count, 1)
+                    XCTAssertEqual(
+                        client.calls.last?.arguments["holdSessionOnFailure"] as? Bool,
+                        recoveryEnabled ? true : nil
+                    )
+                }
+            }
+        }
+    }
+
+    func testCancellationAfterDispatchReleasesOnlyTheAcquiredSessionOutsideCancellation() async throws {
+        for sessionUuid: String? in [nil, "caller-session"] {
+            let client = AcquisitionMCPClient()
+            client.cancelOnCall = "executePlan"
+            let heldSessions = RecordingHeldSessionController()
+            let executor = makeExecutor(
+                client: client,
+                heldSessionController: CancellationCheckingHeldSessionController(recording: heldSessions)
+            )
+            let task = Task { try await executor.execute(sessionUuid: sessionUuid) }
+
+            do {
+                _ = try await task.value
+                XCTFail("expected cancellation after dispatch")
+            } catch is CancellationError {}
+
+            XCTAssertEqual(heldSessions.releasedSessions, sessionUuid == nil ? ["issued-session"] : [])
+            XCTAssertEqual(client.events.last, "executePlan")
+        }
+    }
+
+    func testSuccessfulRunReleasesNothingExtra() async throws {
+        for sessionUuid: String? in [nil, "caller-session"] {
+            let client = AcquisitionMCPClient()
+            let heldSessions = RecordingHeldSessionController()
+            let executor = makeExecutor(client: client, heldSessionController: heldSessions)
+
+            let result = try await executor.execute(sessionUuid: sessionUuid)
+
+            XCTAssertTrue(result.success)
+            XCTAssertEqual(heldSessions.releasedSessions, [])
+        }
+    }
+
+    func testDecodedFailureKeepsExistingReleaseBehavior() async {
+        for recoveryEnabled in [false, true] {
+            let client = AcquisitionMCPClient()
+            client.replies["executePlan"] = [MCPToolResponse(
+                text: #"{"success":false,"executedSteps":0,"totalSteps":1}"#
+            )]
+            let heldSessions = RecordingHeldSessionController()
+            let executor = makeExecutor(
+                client: client, heldSessionController: heldSessions, recoveryEnabled: recoveryEnabled
+            )
+
+            await assertAsyncThrowsError { try await executor.execute() }
+
+            XCTAssertEqual(heldSessions.releasedSessions, recoveryEnabled ? ["issued-session"] : [])
+        }
+    }
+
     func testDaemonErrorsPreserveTextAtEveryToolBoundary() async throws {
         let message = "Session ABC is not an active daemon session (not found). Acquire a device first."
         for tool in ["getApple", "getAndroid", "setToolEnabled", "executePlan"] {
@@ -214,7 +355,9 @@ final class SessionAcquisitionTests: XCTestCase {
         client: AcquisitionMCPClient,
         platform: String = "ios",
         deviceId: String? = "configured-device",
-        scheduler: any DeadlineScheduler = VirtualDeadlineScheduler()
+        scheduler: any DeadlineScheduler = VirtualDeadlineScheduler(),
+        heldSessionController: HeldSessionControlling? = nil,
+        recoveryEnabled: Bool = false
     )
         -> AutoMobilePlanExecutor
     {
@@ -223,15 +366,18 @@ final class SessionAcquisitionTests: XCTestCase {
                 transport: .daemonUnixSocket(path: "/unused/acquisition.sock"),
                 planPath: "unused",
                 deviceId: deviceId,
-                aiAssistance: false
+                aiAssistance: recoveryEnabled
             ),
             planLoader: AcquisitionPlanLoader(platform: platform),
             mcpClient: client,
             timer: FakeTimer(),
             logger: AcquisitionLogger(),
+            recoveryHandler: recoveryEnabled ? AcquisitionRecoveryHandler() : nil,
+            recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: recoveryEnabled),
             recoveryModelConfig: nil,
             daemonEnsurer: HermeticDaemonEnsurer(),
-            deadlineScheduler: scheduler
+            deadlineScheduler: scheduler,
+            heldSessionController: heldSessionController
         )
     }
 }
@@ -257,6 +403,27 @@ private struct AcquisitionLogger: AutoMobileLogger {
     func error(_: String) {}
 }
 
+private struct AcquisitionRecoveryHandler: PlanRecoveryHandler {
+    func attemptRecovery(_: FailedStepContext) async -> RecoveryOutcome {
+        XCTFail("a transport/decode error or a result without a failed step must not reach recovery")
+        return RecoveryOutcome(success: false)
+    }
+}
+
+/// Models cancellation-sensitive release I/O while keeping the shared recorder's exact release list.
+private struct CancellationCheckingHeldSessionController: HeldSessionControlling {
+    let recording: RecordingHeldSessionController
+
+    func startHeartbeating(sessionId: String) -> any HeldSessionHeartbeat {
+        recording.startHeartbeating(sessionId: sessionId)
+    }
+
+    func release(sessionId: String) async {
+        guard !Task.isCancelled else { return }
+        await recording.release(sessionId: sessionId)
+    }
+}
+
 /// A sequential script, configured before execution and inspected after awaiting it (or a scheduler event).
 private final class AcquisitionMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     struct Call {
@@ -265,6 +432,8 @@ private final class AcquisitionMCPClient: AutoMobileMCPClient, @unchecked Sendab
     }
 
     var replies: [String: [MCPToolResponse]] = [:]
+    var errors: [String: MCPClientError] = [:]
+    var cancelOnCall: String?
     private(set) var events: [String] = []
     private(set) var calls: [Call] = []
 
@@ -272,6 +441,10 @@ private final class AcquisitionMCPClient: AutoMobileMCPClient, @unchecked Sendab
     func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) async throws -> MCPToolResponse {
         events.append(name)
         calls.append(Call(name: name, arguments: arguments))
+        if cancelOnCall == name {
+            withUnsafeCurrentTask { $0?.cancel() }
+        }
+        if let error = errors[name] { throw error }
         if let next = replies[name]?.first {
             replies[name]?.removeFirst()
             return next

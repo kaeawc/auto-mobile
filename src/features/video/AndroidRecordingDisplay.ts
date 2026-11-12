@@ -6,7 +6,10 @@ import type { ProcessExitState } from "../../utils/ChildProcessTracker";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
-import { resolveTargetDisplay } from "../observe/DisplaySelection";
+import {
+  assertDisplayInventoryAvailable,
+  resolveDeviceTargetDisplay,
+} from "../observe/DisplaySelection";
 import { displayTransitions } from "../observe/DisplayTransition";
 
 export interface RecordingPanel {
@@ -73,7 +76,7 @@ function resolveOnOldApi(device: BootedDevice, request?: string): AndroidRecordi
   if (request !== undefined && request !== "active") {
     throw new ActionableError("Recording a selected Android panel requires API 34 or newer.");
   }
-  const selected = resolveTargetDisplay(device.displays, "active", {});
+  const selected = resolveDeviceTargetDisplay(device, "active", {});
   const panel = { key: selected.key, role: selected.role };
   return {
     panel,
@@ -88,11 +91,11 @@ function resolveWithoutMultiplePanels(
 ): AndroidRecordingDisplay | undefined {
   if (!device.displays?.panels.length) {
     if (request !== undefined && request !== "active") {
-      resolveTargetDisplay(device.displays, request, {});
+      resolveDeviceTargetDisplay(device, request, {});
     }
     return undefined;
   }
-  const selected = resolveTargetDisplay(device.displays, request, {});
+  const selected = resolveDeviceTargetDisplay(device, request, {});
   const panel = { key: selected.key, role: selected.role };
   return { panel, activePanel: panel };
 }
@@ -107,6 +110,7 @@ export async function resolveAndroidRecordingDisplay(
     timer = defaultTimer,
   }: { request?: string; signal?: AbortSignal; timer?: Pick<Timer, "now"> } = {},
 ): Promise<AndroidRecordingDisplay | undefined> {
+  assertDisplayInventoryAvailable(device, request);
   if ((device.displays?.panels.length ?? 0) < 2) {
     return resolveWithoutMultiplePanels(device, request);
   }
@@ -119,7 +123,7 @@ export async function resolveAndroidRecordingDisplay(
     stamped && device.displays?.panels.some((panel) => panel.key === stamped.key)
       ? stamped
       : observed.display;
-  const selected = resolveTargetDisplay(device.displays, request, {
+  const selected = resolveDeviceTargetDisplay(device, request, {
     focusedPanelKey: active.key,
     activePanelKey: observed.display.key,
     posture: observed.display.posture,

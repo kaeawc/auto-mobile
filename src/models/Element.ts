@@ -12,6 +12,9 @@ export const VALUE_REDACTED_ATTRIBUTE = "value-redacted";
  */
 export interface Element {
   bounds: ElementBounds;
+  /** visionOS ornament-local bounds: tap by label/identifier, never coordinates. */
+  space?: "ornament";
+  value?: string;
   text?: string;
   "content-desc"?: string;
   "resource-id"?: string;

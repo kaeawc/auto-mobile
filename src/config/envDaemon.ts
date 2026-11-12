@@ -452,6 +452,13 @@ export const DAEMON_ENV = {
     internal: true,
     doc: "Manager-injected per-launch nonce that readiness matches against the answering daemon.",
   },
+  DAEMON_LAUNCH_CHECKOUT_VERSION: {
+    name: "AUTOMOBILE_DAEMON_LAUNCH_CHECKOUT_VERSION",
+    kind: "string",
+    default: "unset",
+    internal: true,
+    doc: "Manager-injected checkout version with working-tree hash, probed just before launch.",
+  },
   HARNESS_PRIVATE_DAEMON: {
     name: "AUTOMOBILE_HARNESS_PRIVATE_DAEMON",
     kind: "string",

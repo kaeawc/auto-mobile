@@ -936,7 +936,7 @@ export class TapAnyElement extends BaseVisualChange {
           }),
         {
           ...OBSERVED_INTERACTION_PROFILES.selectorResolvedGesture,
-          display: targetDisplay?.observation.display.key,
+          display: targetDisplay?.followUpDisplay,
           previousObservation: targetDisplay?.observation,
           timeoutMs: SETTLE_BUDGET_MS.gesture,
           progress,

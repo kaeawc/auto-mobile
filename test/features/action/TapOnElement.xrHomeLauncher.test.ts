@@ -7,7 +7,7 @@ import {
 } from "../../../src/features/action/xrHiddenChrome";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
-import type { ObserveResult } from "../../../src/models";
+import type { ObserveResult, TapEffect } from "../../../src/models";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
@@ -24,6 +24,27 @@ const capture: ObserveResult = JSON.parse(
     "utf8",
   ),
 );
+
+// Verbatim from the headset (#17798): tapOn launcher_button and CtrlProxy's logcat for it.
+const launcherButtonRun: {
+  tapOnLauncherButton: {
+    success: boolean;
+    effect: TapEffect;
+    warnings: string[];
+    selectedElement: { resourceId: string };
+  };
+  ctrlProxyLogcat: string[];
+} = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-xr/tapon-launcher-button-no-effect-17798.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+
+const changed: TapEffect = { screenChanged: true, basis: "viewHierarchy changed" };
 
 /** An app window beside the captured System UI: one clickable Button with a unique resource ID. */
 function withAppButton(visibleToUser: boolean): ObserveResult {
@@ -54,7 +75,7 @@ function withAppButton(visibleToUser: boolean): ObserveResult {
   return observation;
 }
 
-function setup(observation = structuredClone(capture)) {
+function setup(observation = structuredClone(capture), effect: TapEffect = changed) {
   const hierarchy = observation.viewHierarchy!;
   // The parser's window contract wraps the captured root in a hierarchy container.
   hierarchy.windows = hierarchy.windows?.map((window) => ({
@@ -81,6 +102,11 @@ function setup(observation = structuredClone(capture)) {
     observation,
   });
   tap.refreshViewHierarchy = async () => hierarchy;
+  // The post-click effect is the device's verdict; inject it rather than diffing equal captures.
+  tap.deriveTapEffectAfterPostTapObservation = async (_previous, current) => ({
+    effect,
+    observation: current,
+  });
   return { tap, service, adb, timer, hierarchy };
 }
 
@@ -227,5 +253,68 @@ describe("XR home-space hidden launcher controls", () => {
       new SearchableHierarchy().project(projected.hierarchy).filter((entry) => entry.bounds),
     ).toEqual([]);
     expect(projected.hiddenNodes.size).toBeGreaterThan(0);
+  });
+});
+
+describe("XR hidden System UI node click that changed nothing (#17798)", () => {
+  const launcherButton = { elementId: "com.android.systemui:id/launcher_button" };
+
+  test("the captured run reported success for a CtrlProxy-accepted click with no effect", () => {
+    const sent = launcherButtonRun.ctrlProxyLogcat.findIndex((line) =>
+      line.includes("performAction: action='click'"),
+    );
+    expect(launcherButtonRun.ctrlProxyLogcat[sent]).toContain(launcherButton.elementId);
+    expect(launcherButtonRun.ctrlProxyLogcat[sent + 1]).toContain("Action completed: success=true");
+    const run = launcherButtonRun.tapOnLauncherButton;
+    expect(run.selectedElement.resourceId).toBe(launcherButton.elementId);
+    expect(run.success).toBe(true);
+    expect(run.effect.screenChanged).toBe(false);
+    expect(run.warnings[0]).toContain("TalkBack activation is unconfirmed");
+  });
+
+  test("tapOn launcher_button fails and names the working text selector", async () => {
+    const { tap, service, adb } = setup(undefined, launcherButtonRun.tapOnLauncherButton.effect);
+    const result = await tap.execute({ action: "tap", ...launcherButton });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      "Target 'com.android.systemui:id/launcher_button' is hidden XR system chrome",
+    );
+    expect(result.error).toContain("the screen did not change");
+    expect(result.error).toContain('tapOn {text: "Open Launcher Panel"}');
+    expect(result.error).not.toContain("Environment");
+    expect(result.warnings).toBeUndefined();
+    // The click was sent once through the node path, never retried or sent as a coordinate tap.
+    expect(service.getNodeActionHistory()).toHaveLength(1);
+    expect(service.getNodeActionHistory()[0]).toMatchObject({ allowInvisible: true });
+    expect(service.getTapHistory()).toEqual([]);
+    expect(adb.getAllCommands().some((command) => command.includes("input"))).toBe(false);
+  });
+
+  test("an unchanged screen after the text path fails without suggesting another control", async () => {
+    const { tap } = setup(undefined, { screenChanged: false, basis: "viewHierarchy unchanged" });
+    const result = await tap.execute({ action: "tap", text: "Open Launcher Panel" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("the screen did not change");
+    expect(result.error).toContain("tapAt with screen coordinates");
+    expect(result.error).not.toContain("tapOn {text:");
+  });
+
+  test("the working text path still succeeds when the launcher panel opens", async () => {
+    const { tap, service } = setup();
+    const result = await tap.execute({ action: "tap", text: "Open Launcher Panel" });
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(service.getNodeActionHistory()).toMatchObject([
+      { selector: { resourceId: "com.android.systemui:id/home_screen_launcher_button" } },
+    ]);
+  });
+
+  test("a visible app node click with an unchanged screen keeps its existing success", async () => {
+    const { tap } = setup(withAppButton(true), {
+      screenChanged: false,
+      basis: "viewHierarchy unchanged",
+    });
+    const result = await tap.execute({ action: "tap", elementId: "com.example.app:id/buy" });
+    expect(result.success).toBe(true);
   });
 });

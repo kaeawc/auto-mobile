@@ -67,6 +67,15 @@ Watch, Apple TV or Apple Vision Pro, both lists leave out tools that refuse that
 platform, so every listed tool can run on the acquired device. A direct
 `tools/call` can still invoke an omitted tool.
 
+On a TV (an Android TV device or an Apple TV), acquiring the device also enables
+`focusNavigate`, since D-pad focus is how a TV is navigated; it then appears in
+`enabledTools` and `tools/list`. A startup `--disable-tool focusNavigate` (or the
+environment equivalent) or an earlier `setToolEnabled` choice for the session
+wins over this. Other tools that are off by default stay off on a TV, as on any
+device, to keep `tools/list` short: `executePlan`, `recordToolCalls`, `getLogs`
+and `provisionDevice` among them. They appear in `gatedTools`; list them with
+`enableTools` at acquisition or with `setToolEnabled`, or call them by name.
+
 If the device is acquired but the capability declaration itself cannot be
 persisted, the response keeps its session handle and adds an `enableToolsError`
 describing what did not land; re-declare those tools with `setToolEnabled`.
@@ -103,6 +112,12 @@ ways to turn it on, for example:
 ```text
 recordToolCalls is behind the 'tool-call-recording' feature flag, which is disabled. Enable it with `auto-mobile --daemon set-feature-flag tool-call-recording true` or in the IDE plugin under Settings > AutoMobile > Feature Flags, then retry the call.
 ```
+
+A `recordToolCalls` recording retains successful explicit verification calls:
+`systemTray` `list`/`find`, `getLogs`, and `observe`, in their original order.
+Incidental probes such as keyboard detection and clipboard reads are omitted.
+Recording does not infer assertions from the result; add step `expect` checks
+to the exported plan as described in [UI tests](ui-tests.md#step-expectations).
 
 Debug-only tools (`debug`), `recordToolCalls` `begin`/`end`
 (`tool-call-recording`) and `setDeviceState` `deviceCondition`

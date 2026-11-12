@@ -72,8 +72,25 @@ test("correlates a real remote press result and reports runner errors", async ()
   client.close();
 });
 
+test("refuses a hold on a runner that does not advertise press_button_hold", async () => {
+  const { socket, client, timer } = fixture();
+  socket.receive({ ...connected, supportedFeatures: [] });
+  await expect(
+    client.request({ type: "request_press_button", action: "select", durationMs: 800 }),
+  ).rejects.toThrow("predates remote long presses");
+  expect(socket.sent).toEqual([]);
+  const plain = client.request({ type: "request_press_button", action: "select" });
+  await drainMicrotasks(2);
+  expect(socket.sent[0]).toMatchObject({ type: "request_press_button", action: "select" });
+  socket.receive({ ...pressResult, requestId: socket.sent[0].requestId });
+  await plain;
+  expect(timer.getSleepHistory()).toEqual([]);
+  client.close();
+});
+
 test.each([
   { type: "request_press_button", action: "menu" },
+  { type: "request_press_button", action: "playPause", durationMs: 1500 },
   { type: "request_hierarchy" },
   { type: "request_append_text", text: "hello" },
 ] satisfies TvosCommand[])(
@@ -148,5 +165,34 @@ test("bounds a missing handshake and never dispatches after its deadline", async
   await drainMicrotasks(2);
   expect(socket.sent).toEqual([]);
   expect(timer.getSleepHistory()).toEqual([]);
+  client.close();
+});
+
+test("budgets a read queued behind an in-flight hold for the hold's remaining time", async () => {
+  const { socket, client, timer } = fixture();
+  socket.receive(connected);
+  const hold = client.request(
+    { type: "request_press_button", action: "select", durationMs: 8000 },
+    undefined,
+    { timeoutMs: 13000 },
+  );
+  await drainMicrotasks(2);
+  timer.advanceTime(1000);
+  const read = client.request({ type: "request_hierarchy" });
+  await drainMicrotasks(2);
+  expect(socket.sent.map((sent) => sent.type)).toEqual([
+    "request_press_button",
+    "request_hierarchy",
+  ]);
+  // The runner serves commands serially: the read cannot start until the 8 s hold ends.
+  timer.advanceTime(7000);
+  await drainMicrotasks(2);
+  expect(socket.closed).toBe(false);
+  socket.receive({ ...pressResult, requestId: socket.sent[0].requestId });
+  await hold;
+  timer.advanceTime(500);
+  socket.receive({ ...b01, requestId: socket.sent[1].requestId });
+  await expect(read).resolves.toBeDefined();
+  expect(client.isUsable()).toBe(true);
   client.close();
 });

@@ -122,6 +122,23 @@ final class VisionCommandPolicyTests: XCTestCase {
         XCTAssertNil(secure.enteredValue("hunter2", placeholder: nil))
     }
 
+    func testToggleSnapshotValuesIncludeOffAndDisabledStates() {
+        for enabled in [true, false] {
+            let traits = VisionElementTraits.traits(for: .button, isEnabled: enabled)
+            XCTAssertEqual(traits.snapshotValue("1", placeholder: "1", isToggle: true), "1")
+            XCTAssertEqual(traits.snapshotValue("0", placeholder: nil, isToggle: true), "0")
+            XCTAssertEqual(traits.snapshotValue(NSNumber(value: true), placeholder: nil, isToggle: true), "1")
+            XCTAssertEqual(traits.snapshotValue(NSNumber(value: false), placeholder: nil, isToggle: true), "0")
+            XCTAssertNil(traits.snapshotValue(nil, placeholder: nil, isToggle: true))
+            XCTAssertNil(traits.snapshotValue("1", placeholder: nil, isToggle: false))
+        }
+        let field = VisionElementTraits.traits(for: .textInput, isEnabled: true)
+        XCTAssertEqual(field.snapshotValue("hello", placeholder: "Name", isToggle: false), "hello")
+        XCTAssertNil(field.snapshotValue("Name", placeholder: "Name", isToggle: false))
+        let secure = VisionElementTraits.traits(for: .secureTextInput, isEnabled: true)
+        XCTAssertNil(secure.snapshotValue("secret", placeholder: nil, isToggle: false))
+    }
+
     func testAppendTextRejectsDeleteKeySequences() {
         XCTAssertTrue(VisionCommandPolicy.containsDeleteKey("ab\u{8}"))
         XCTAssertTrue(VisionCommandPolicy.containsDeleteKey("\u{7F}"))

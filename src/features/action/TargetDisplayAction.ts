@@ -10,7 +10,11 @@ import { serverConfig } from "../../utils/ServerConfig";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
 import { StaleDisplayError, staleDisplayError } from "../observe/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
-import { DisplaySelectionError, resolveTargetDisplay } from "../observe/DisplaySelection";
+import {
+  DisplaySelectionError,
+  followUpDisplaySelector,
+  resolveDeviceTargetDisplay,
+} from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type {
   ObserveScreen,
@@ -202,7 +206,7 @@ export async function resolveActionDisplay(
   const previous = (dependencies.lastRenderedObservation ?? sessionRenderedObservation)(
     device.deviceId,
   );
-  const panel = resolveTargetDisplay(device.displays, display, {
+  const panel = resolveDeviceTargetDisplay(device, display, {
     focusedPanelKey: previous?.display.key,
     activePanelKey: previous?.display.key,
     posture: previous?.display.posture,
@@ -253,13 +257,22 @@ export interface TargetDisplayCall extends ActionCall {
   transitions?: DisplayTransitionReader;
 }
 
+/** A display-targeted action's prepared panel, read and fence. */
+export interface PreparedTargetDisplay {
+  observation: ObserveResult;
+  displayId?: number;
+  /** Selector for the action's follow-up observe reads; see {@link followUpDisplaySelector}. */
+  followUpDisplay: string;
+  assertCurrent: () => void;
+}
+
 /** Resolve explicit action targeting against the caller's last visible panel. */
 export async function prepareTargetDisplayAction(
   device: BootedDevice,
   display: string,
   observe: Pick<ObserveScreen, "execute">,
   { adb, ...call }: TargetDisplayCall & { adb: AdbCommandRunner },
-): Promise<{ observation: ObserveResult; displayId?: number; assertCurrent: () => void }> {
+): Promise<PreparedTargetDisplay> {
   const {
     lastRenderedObservation = sessionRenderedObservation,
     signal,
@@ -273,7 +286,7 @@ export async function prepareTargetDisplayAction(
     previous,
     transitions,
   );
-  const panel = resolveTargetDisplay(device.displays, display, {
+  const panel = resolveDeviceTargetDisplay(device, display, {
     focusedPanelKey: previous?.display.key,
     activePanelKey: previous?.display.key,
     posture: previous?.display.posture,
@@ -302,6 +315,7 @@ export async function prepareTargetDisplayAction(
   return {
     observation,
     displayId,
+    followUpDisplay: followUpDisplaySelector(device, display, panel.key),
     assertCurrent,
   };
 }

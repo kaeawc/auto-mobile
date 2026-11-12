@@ -45,7 +45,7 @@ Use the same session and returned handle for subsequent calls:
 
 ## Keeping the session alive
 
-A peripheral lives only as long as its session. Releasing, unbinding or idling out the session, or shutting down the daemon, kills it. A session with no control call can be released in about 20 seconds; `setToolEnabled` does not count as use. While a central connects or a test runs, call `blePeripheral` `status` periodically (for example every 10 seconds) to keep the session and its peripheral alive. See [Device ownership](device-ownership.md#when-a-session-is-released) for the release rules.
+A peripheral lives only as long as its session. Releasing, unbinding or idling out the session, or shutting down the daemon, kills it. A session whose owner never sends a heartbeat is released through the lost-heartbeat path: about 20 seconds after it was created when it set its own heartbeat timeout (about 5 seconds on the default timeout), and after that once no control call has arrived within its heartbeat timeout. A session whose owner heartbeats is released after the idle window (2 minutes by default) with no control call. Every `blePeripheral` action, `status` included, is a control call, so it counts as use; `setToolEnabled` counts only when it passes the session's `sessionUuid`. While a central connects or a test runs, keep the owner heartbeating, or call `blePeripheral` `status` more often than the session's heartbeat timeout, to keep the session and its peripheral alive. See [Device ownership](device-ownership.md#when-a-session-is-released) for the release rules.
 
 A connected peripheral stops advertising until disconnect. Advertising restarts automatically after disconnection; notifications continue while connected.
 

@@ -1,3 +1,4 @@
+import type { CtrlProxyScreenshotResult } from "../ios/types";
 import { Image } from "../../../utils/image-utils";
 import { detectImageMimeType } from "../../../utils/screenshot/imageHeaderDimensions";
 import { validateScreenshotOptions, type ScreenshotEncodingOptions } from "./screenshotOptions";
@@ -45,4 +46,19 @@ export function encodingOptions(options: ScreenshotOptions): ScreenshotEncodingO
     ...(options.quality === undefined ? {} : { quality: options.quality }),
     ...(options.lossless === undefined ? {} : { lossless: options.lossless }),
   });
+}
+
+export function ctrlProxyScreenshotFormat(
+  result: CtrlProxyScreenshotResult,
+  imageBuffer: Buffer,
+  useLegacyFormat: boolean,
+): "png" | "jpeg" | "webp" {
+  if (useLegacyFormat) {
+    return result.format?.toLowerCase() === "png" ? "png" : "jpeg";
+  }
+  const mime = detectImageMimeType(imageBuffer);
+  if (!mime) {
+    throw new Error("Android CtrlProxy returned an unsupported screenshot format");
+  }
+  return mime.slice(6) as "png" | "jpeg" | "webp";
 }

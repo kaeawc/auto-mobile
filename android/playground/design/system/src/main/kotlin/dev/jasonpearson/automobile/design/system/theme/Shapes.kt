@@ -8,7 +8,7 @@ import androidx.compose.ui.unit.dp
 // Chunkier, softer corners than the Material default scale — the token-layer
 // foundation of the hand-drawn crayon look. True irregular "wobble" borders are
 // layered on top in the design-system components (follow-up item). See
-// docs/design-docs/playground-design-system.md.
+// docs/how-it-works/playground-design-system.md.
 val AutoMobileShapes =
   Shapes(
     extraSmall = RoundedCornerShape(6.dp),

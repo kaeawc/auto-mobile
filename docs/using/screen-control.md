@@ -7,7 +7,7 @@ that socket wire protocol and shows minimal clients in four languages.
 
 For the geometry — how to convert a click on your rendered canvas into the device
 coordinates these commands expect — see the
-[coordinate mapping contract](../design-docs/mcp/daemon/screen-control-mapping.md).
+[coordinate mapping contract](../how-it-works/mcp/daemon/screen-control-mapping.md).
 This page assumes you already have a device coordinate to send.
 
 ## The socket

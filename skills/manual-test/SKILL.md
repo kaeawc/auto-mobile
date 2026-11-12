@@ -22,14 +22,14 @@ timings measured across a host sleep or a load spike as invalid.
 
 ## Harness
 
-Use [the manual-test harness](../../docs/design-docs/manual-test-harness.md) for private
+Use [the manual-test harness](../../docs/how-it-works/manual-test-harness.md) for private
 batches: `private-daemon.ts init|start|status|stop|env|wrappers|devices|shutdown-devices|preflight|boot-gate`, `in-daemon-env.sh`,
 `proxy-session.ts up|serve|call|read|tools|resources|subscribe|status|close|release|abandon|info|owner-kill`,
 `broker-batch.ts up|status|down|report`, `broker-scenario.ts list|run`,
 `daemon-frame.ts send|session-info|heartbeat`, and `aux-socket.ts recording|video|webrtc` under
 `scripts/manual-test/`. Use those commands instead of hand-rolling a private
 environment, MCP stdio loop or socket client. For Python/anyio close and typing
-reproduction, use the [Python MCP SDK stdio clients](../../docs/design-docs/manual-test-harness.md#python-mcp-sdk-stdio-clients).
+reproduction, use the [Python MCP SDK stdio clients](../../docs/how-it-works/manual-test-harness.md#python-mcp-sdk-stdio-clients).
 
 Initialize with `private-daemon.ts init --broker-batch /absolute/broker-batch.json
 --count 1` and use one broker daemon per batch. `--max-devices` defaults to 2,
@@ -42,8 +42,8 @@ evidence files; `evidence/ledger.jsonl` binds grants to native devices and clean
 The harness owns `AUTOMOBILE_SESSION_BROKER_CONFIG`/`AUTOMOBILE_SESSION_CONFIG`:
 inherited values are scrubbed, `--env`/`--daemon-env` overrides refuse, and only
 daemon 1 start receives the operator config. Client requests use `--client`.
-See the [broker contract](../../docs/design-docs/session-broker-experiment.md)
-and [requirements](../../docs/design-docs/session-requirements.md).
+See the [broker contract](../../docs/how-it-works/session-broker-experiment.md)
+and [requirements](../../docs/how-it-works/session-requirements.md).
 
 Use `broker1 up` to run strict preflight, probe `session-broker/v1`, and gate
 acquisitions by host load and boot permits; it finishes planned ready clients
@@ -77,7 +77,7 @@ scenario. Fake entries use an in-memory broker/native fake without devices or
 daemons. Device entries require an already-running private single-daemon batch,
 zero pooling, strict preflight, no live client drivers, and verified prior cleanup.
 Only `daemon-restart-with-live-sessions --device` accepts `--crash`.
-The [scenario/evidence table](../../docs/design-docs/manual-test-harness.md#broker-scenarios-and-acceptance)
+The [scenario/evidence table](../../docs/how-it-works/manual-test-harness.md#broker-scenarios-and-acceptance)
 lists expected assertions. Summaries at `evidence/<scenario>/summary.json`
 include redacted requests, timings and ledger deltas. Destruction/handoff
 resource samples are `not-verifiable` until a product read-only diagnostic exists;

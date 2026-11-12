@@ -12,7 +12,7 @@
 # Running one `observe` here — in a dedicated step with a generous window — leaves
 # CtrlProxy running so the in-test `observe` is fast (~sub-second). This is the
 # documented "CtrlProxy pre-installation" step
-# (docs/design-docs/plat/ios/xctestrunner/ci-integration.md).
+# (docs/how-it-works/plat/ios/xctestrunner/ci-integration.md).
 #
 # `observe` exits non-zero when it cannot produce a hierarchy, so a clean exit
 # means CtrlProxy is attached and serving.

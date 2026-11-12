@@ -87,7 +87,7 @@ const IOS_UNLOCK_POLL_MAX_MS = 2_500;
  * keyguard by raising the bouncer and typing the PIN as key events (the
  * accessibility path cannot type into a secure bouncer). The outcome is grounded
  * in a bounded re-read poll of the lock state, never in the fact that keys were
- * sent. See docs/design-docs/plat/android/keyguard.md.
+ * sent. See docs/how-it-works/plat/android/keyguard.md.
  *
  * iOS: wake and swipe-dismiss the non-secure lock screen; a `pin` is ignored
  * (simulators have no settable passcode).

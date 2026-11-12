@@ -24,7 +24,7 @@ import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenan
 import { snapshotPlatformDeviceManagerFactory } from "../../helpers/platformDeviceManagerSnapshot";
 
 // Watch simulators are listed only under automobile:devices/images/watchos as platform "watchos",
-// and their runtimes and models leave the iOS catalog (#14901, docs/decisions/watchos-platform.md).
+// and their runtimes and models leave the iOS catalog (#14901, docs/devlog/2026-10-28-watchos-platform.md).
 
 const fixtures = join(import.meta.dir, "../../fixtures/ios-simctl");
 const capturedRuntimes = (

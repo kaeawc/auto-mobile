@@ -92,6 +92,9 @@ export class DeviceReadScreenshot {
         : await this.screenshotService.execute(captureOptions, signal);
     signal?.throwIfAborted();
     if (capture.success && capture.path) {
+      result.screenshotFallback = capture.screenshotFallback;
+      result.screenshotFallbackReason = capture.screenshotFallbackReason;
+      result.screenshotStageDurationsMs = capture.screenshotStageDurationsMs;
       Object.assign(
         result,
         await observationScreenshotEvidence(capture.path, "fresh", undefined, {

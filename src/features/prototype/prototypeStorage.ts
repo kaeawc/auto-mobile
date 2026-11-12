@@ -11,7 +11,7 @@ import { record } from "./prototypeTemplate";
  * The spec's root-level `storage` block (#12522, `prototype_storage_v1`):
  * `"storage": {"version": 1, "keys": ["state:darkMode", "data:/cart"]}`. The device saves the listed
  * state keys and `/data` pointers under the spec `id` after every write and restores them on the
- * next show of that id (see "Storage" in docs/design-docs/plat/android/prototype-ux.md for the
+ * next show of that id (see "Storage" in docs/how-it-works/plat/android/prototype-ux.md for the
  * precedence rules). This module is the host's half: the gate, the static validation and the
  * device-to-host report parser. The restore rules live in `prototypeStorageRestore.ts`.
  */

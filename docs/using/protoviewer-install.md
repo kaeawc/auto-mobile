@@ -1,7 +1,7 @@
 # Installing ProtoViewer on Android
 
 ProtoViewer is the standalone app for opening, switching between and sharing saved prototypes (see
-the [design doc](../design-docs/protoviewer.md)). `prototype save` on Android routes to it when it is
+the [design doc](../how-it-works/protoviewer.md)). `prototype save` on Android routes to it when it is
 installed, so install it once per device or emulator you use.
 
 Every GitHub release carries two ProtoViewer assets next to the CtrlProxy APK:

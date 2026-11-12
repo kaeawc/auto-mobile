@@ -24,6 +24,136 @@ hooks:
 
 plugins:
   - search
+  # Old paths keep working after docs/design-docs/ became docs/how-it-works/ and
+  # docs/decisions/ moved into docs/devlog/ (#18138, #18139).
+  - redirects:
+      redirect_maps:
+        "decisions/androidx-baseline-profile-generator.md": "devlog/2026-11-08-androidx-baseline-profile-generator.md"
+        "decisions/androidx-car-app-template-snapshots.md": "devlog/2026-11-04-androidx-car-app-template-snapshots.md"
+        "decisions/androidx-tv-fixture-libraries.md": "devlog/2026-11-06-androidx-tv-fixture-libraries.md"
+        "decisions/androidx-wear-fixture-libraries.md": "devlog/2026-11-04-androidx-wear-fixture-libraries.md"
+        "decisions/fastlane-supply-play-publishing.md": "devlog/2026-11-03-fastlane-supply-play-publishing.md"
+        "decisions/ios-user-files-provider.md": "devlog/2026-08-28-ios-user-files-provider.md"
+        "decisions/material-icons-web-glyphs.md": "devlog/2026-11-03-material-icons-web-glyphs.md"
+        "decisions/mcp-sdk-v2-split-packages.md": "devlog/2026-10-17-mcp-sdk-v2-split-packages.md"
+        "decisions/playwright-core-web-screenshots.md": "devlog/2026-11-02-playwright-core-web-screenshots.md"
+        "decisions/prototype-embedded-request-routing.md": "devlog/2026-10-20-prototype-embedded-request-routing.md"
+        "decisions/prototype-mock-backend.md": "devlog/2026-10-27-prototype-mock-backend.md"
+        "decisions/prototype-request-retrofit.md": "devlog/2026-10-16-prototype-request-retrofit.md"
+        "decisions/qrcode-generator-share-qr.md": "devlog/2026-11-03-qrcode-generator-share-qr.md"
+        "decisions/types-bun-test-typecheck.md": "devlog/2026-10-19-types-bun-test-typecheck.md"
+        "decisions/watchos-platform.md": "devlog/2026-10-28-watchos-platform.md"
+        "design-docs/android-emulator-host-cost.md": "how-it-works/android-emulator-host-cost.md"
+        "design-docs/android-emulator-optimization.md": "how-it-works/android-emulator-optimization.md"
+        "design-docs/ble-peripheral.md": "how-it-works/ble-peripheral.md"
+        "design-docs/ci/attestation-envelope.md": "how-it-works/ci/attestation-envelope.md"
+        "design-docs/ci/attestation-github-app-transport.md": "how-it-works/ci/attestation-github-app-transport.md"
+        "design-docs/ci/attestation-shadow-promotion.md": "how-it-works/ci/attestation-shadow-promotion.md"
+        "design-docs/ci/attestation-store.md": "how-it-works/ci/attestation-store.md"
+        "design-docs/ci/circleci-macos-migration.md": "how-it-works/ci/circleci-macos-migration.md"
+        "design-docs/ci/macos-capacity-plan.md": "how-it-works/ci/macos-capacity-plan.md"
+        "design-docs/ci/macos-only-tests.md": "how-it-works/ci/macos-only-tests.md"
+        "design-docs/ci/prepush-ci-misses.md": "how-it-works/ci/prepush-ci-misses.md"
+        "design-docs/ci/unit-lane-scaling.md": "how-it-works/ci/unit-lane-scaling.md"
+        "design-docs/ci/workflow-deduplication.md": "how-it-works/ci/workflow-deduplication.md"
+        "design-docs/device-description-audit.md": "how-it-works/device-description-audit.md"
+        "design-docs/device-farm.md": "how-it-works/device-farm.md"
+        "design-docs/device-resources.md": "how-it-works/device-resources.md"
+        "design-docs/host-toolchain-resource.md": "how-it-works/host-toolchain-resource.md"
+        "design-docs/index.md": "how-it-works/index.md"
+        "design-docs/ios-keep-booted-reset.md": "how-it-works/ios-keep-booted-reset.md"
+        "design-docs/live-device-acceptance.md": "how-it-works/live-device-acceptance.md"
+        "design-docs/manual-test-harness.md": "how-it-works/manual-test-harness.md"
+        "design-docs/mcp/build-source-revision.md": "how-it-works/mcp/build-source-revision.md"
+        "design-docs/mcp/daemon.md": "how-it-works/mcp/daemon.md"
+        "design-docs/mcp/daemon/screen-control-mapping.md": "how-it-works/mcp/daemon/screen-control-mapping.md"
+        "design-docs/mcp/elicitation-ambiguous-device.md": "how-it-works/mcp/elicitation-ambiguous-device.md"
+        "design-docs/mcp/interaction-loop.md": "how-it-works/mcp/interaction-loop.md"
+        "design-docs/mcp/observe-app-interactive.md": "how-it-works/mcp/observe-app-interactive.md"
+        "design-docs/mcp/observe-app-shell.md": "how-it-works/mcp/observe-app-shell.md"
+        "design-docs/mcp/sdk-v2-adoption-survey.md": "how-it-works/mcp/sdk-v2-adoption-survey.md"
+        "design-docs/mcp/sdk-v2-stateless-migration.md": "how-it-works/mcp/sdk-v2-stateless-migration.md"
+        "design-docs/mcp/stylus-pressure-hover-injection.md": "how-it-works/mcp/stylus-pressure-hover-injection.md"
+        "design-docs/mcp/tool-registration.md": "using/dynamic-tools.md"
+        "design-docs/mcp/tool-requirements.md": "how-it-works/mcp/tool-requirements.md"
+        "design-docs/plat/android/accessibility-data-sensitive-windows.md": "how-it-works/plat/android/accessibility-data-sensitive-windows.md"
+        "design-docs/plat/android/android-17-target-sdk-audit.md": "how-it-works/plat/android/android-17-target-sdk-audit.md"
+        "design-docs/plat/android/android-auto-projection-provisioning.md": "how-it-works/plat/android/android-auto-projection-provisioning.md"
+        "design-docs/plat/android/android17-playground-audit.md": "how-it-works/plat/android/android17-playground-audit.md"
+        "design-docs/plat/android/car-app-templates.md": "how-it-works/plat/android/car-app-templates.md"
+        "design-docs/plat/android/content-seeding.md": "how-it-works/plat/android/content-seeding.md"
+        "design-docs/plat/android/ctrlproxy-baseline-profile.md": "how-it-works/plat/android/ctrlproxy-baseline-profile.md"
+        "design-docs/plat/android/dependency-injection.md": "how-it-works/plat/android/dependency-injection.md"
+        "design-docs/plat/android/desktop-app.md": "how-it-works/plat/android/desktop-app.md"
+        "design-docs/plat/android/device-condition-attestation-ceiling.md": "how-it-works/plat/android/device-condition-attestation-ceiling.md"
+        "design-docs/plat/android/device-condition-capability-probe.md": "how-it-works/plat/android/device-condition-capability-probe.md"
+        "design-docs/plat/android/emulator-grpc-audio.md": "how-it-works/plat/android/emulator-grpc-audio.md"
+        "design-docs/plat/android/form-factors.md": "how-it-works/plat/android/form-factors.md"
+        "design-docs/plat/android/ime-trace-conformance.md": "how-it-works/plat/android/ime-trace-conformance.md"
+        "design-docs/plat/android/junit-runner/index.md": "how-it-works/plat/android/junit-runner/index.md"
+        "design-docs/plat/android/keystore-strongbox-fault.md": "how-it-works/plat/android/keystore-strongbox-fault.md"
+        "design-docs/plat/android/oem-identity-lane.md": "how-it-works/plat/android/oem-identity-lane.md"
+        "design-docs/plat/android/persona-robustness-harness.md": "how-it-works/plat/android/persona-robustness-harness.md"
+        "design-docs/plat/android/physical-panel-identity.md": "how-it-works/plat/android/physical-panel-identity.md"
+        "design-docs/plat/android/port-reverse.md": "how-it-works/plat/android/port-reverse.md"
+        "design-docs/plat/android/prototype-compose-compiler-report.md": "how-it-works/plat/android/prototype-compose-compiler-report.md"
+        "design-docs/plat/android/prototype-performance-measurement.md": "how-it-works/plat/android/prototype-performance-measurement.md"
+        "design-docs/plat/android/prototype-ux.md": "how-it-works/plat/android/prototype-ux.md"
+        "design-docs/plat/android/robolectric-android-all.md": "how-it-works/plat/android/robolectric-android-all.md"
+        "design-docs/plat/android/system-tray-lookfor.md": "how-it-works/plat/android/system-tray-lookfor.md"
+        "design-docs/plat/android/windowing.md": "how-it-works/plat/android/windowing.md"
+        "design-docs/plat/android/xr-headset.md": "how-it-works/plat/android/xr-headset.md"
+        "design-docs/plat/ios/carplay-prototypes.md": "how-it-works/plat/ios/carplay-prototypes.md"
+        "design-docs/plat/ios/carplay-template-snapshot.md": "how-it-works/plat/ios/carplay-template-snapshot.md"
+        "design-docs/plat/ios/ctrlproxy-rewrite/README.md": "how-it-works/plat/ios/ctrlproxy-rewrite/README.md"
+        "design-docs/plat/ios/ctrlproxy-rewrite/STATUS.md": "how-it-works/plat/ios/ctrlproxy-rewrite/STATUS.md"
+        "design-docs/plat/ios/ctrlproxy-rewrite/fixup-hierarchy-merger-geometry.md": "how-it-works/plat/ios/ctrlproxy-rewrite/fixup-hierarchy-merger-geometry.md"
+        "design-docs/plat/ios/ctrlproxy-rewrite/golden-replay.md": "how-it-works/plat/ios/ctrlproxy-rewrite/golden-replay.md"
+        "design-docs/plat/ios/host-integration-profile.md": "how-it-works/plat/ios/host-integration-profile.md"
+        "design-docs/plat/ios/iproxy-tunnel-client.md": "how-it-works/plat/ios/iproxy-tunnel-client.md"
+        "design-docs/plat/ios/keychain-and-shared-store-capabilities.md": "how-it-works/plat/ios/keychain-and-shared-store-capabilities.md"
+        "design-docs/plat/ios/network-capture-wire-contract.md": "how-it-works/plat/ios/network-capture-wire-contract.md"
+        "design-docs/plat/ios/observation-bridge.md": "how-it-works/plat/ios/observation-bridge.md"
+        "design-docs/plat/ios/photos-full-access.md": "how-it-works/plat/ios/photos-full-access.md"
+        "design-docs/plat/ios/playground-theme-parity.md": "how-it-works/plat/ios/playground-theme-parity.md"
+        "design-docs/plat/ios/prototype-agent.md": "how-it-works/plat/ios/prototype-agent.md"
+        "design-docs/plat/ios/sdk-contract-suite.md": "how-it-works/plat/ios/sdk-contract-suite.md"
+        "design-docs/plat/ios/simctl-devicectl-boundary.md": "how-it-works/plat/ios/simctl-devicectl-boundary.md"
+        "design-docs/plat/ios/simulator-audio-loopback.md": "how-it-works/plat/ios/simulator-audio-loopback.md"
+        "design-docs/plat/ios/simulator-camera-poster.md": "how-it-works/plat/ios/simulator-camera-poster.md"
+        "design-docs/plat/ios/simulator-load-reduction.md": "how-it-works/plat/ios/simulator-load-reduction.md"
+        "design-docs/plat/ios/webview-bridge-actions.md": "how-it-works/plat/ios/webview-bridge-actions.md"
+        "design-docs/plat/ios/xctestrunner/ci-integration.md": "how-it-works/plat/ios/xctestrunner/ci-integration.md"
+        "design-docs/plat/pressure-hover-stylus-input.md": "how-it-works/plat/pressure-hover-stylus-input.md"
+        "design-docs/plat/tvos/focus-explore.md": "how-it-works/plat/tvos/focus-explore.md"
+        "design-docs/plat/tvos/tool-matrix.md": "how-it-works/plat/tvos/tool-matrix.md"
+        "design-docs/plat/tvos/xcuitest-spike.md": "how-it-works/plat/tvos/xcuitest-spike.md"
+        "design-docs/plat/visionos/xcuitest-capabilities.md": "how-it-works/plat/visionos/xcuitest-capabilities.md"
+        "design-docs/plat/watchos/smart-stack.md": "how-it-works/plat/watchos/smart-stack.md"
+        "design-docs/plat/watchos/xcuitest-spike.md": "how-it-works/plat/watchos/xcuitest-spike.md"
+        "design-docs/prototype-camera-media.md": "how-it-works/prototype-camera-media.md"
+        "design-docs/prototype-embedding.md": "how-it-works/prototype-embedding.md"
+        "design-docs/prototype-headless.md": "how-it-works/prototype-headless.md"
+        "design-docs/prototype-platform-security.md": "how-it-works/prototype-platform-security.md"
+        "design-docs/prototype-sdk-matrix.md": "how-it-works/prototype-sdk-matrix.md"
+        "design-docs/prototype-user-test-sessions.md": "how-it-works/prototype-user-test-sessions.md"
+        "design-docs/prototype-web-3d.md": "how-it-works/prototype-web-3d.md"
+        "design-docs/prototype-web-frames-v2.md": "how-it-works/prototype-web-frames-v2.md"
+        "design-docs/prototype-web-library.md": "how-it-works/prototype-web-library.md"
+        "design-docs/prototype-web-preview-server.md": "how-it-works/prototype-web-preview-server.md"
+        "design-docs/prototype-web-renderer.md": "how-it-works/prototype-web-renderer.md"
+        "design-docs/protoviewer-agent.md": "how-it-works/protoviewer-agent.md"
+        "design-docs/protoviewer-localization.md": "how-it-works/protoviewer-localization.md"
+        "design-docs/protoviewer-store-listing.md": "how-it-works/protoviewer-store-listing.md"
+        "design-docs/protoviewer.md": "how-it-works/protoviewer.md"
+        "design-docs/release/runtime-dependency-pinning.md": "how-it-works/release/runtime-dependency-pinning.md"
+        "design-docs/session-broker-device-mutation-journal.md": "how-it-works/session-broker-device-mutation-journal.md"
+        "design-docs/session-broker-device-reuse.md": "how-it-works/session-broker-device-reuse.md"
+        "design-docs/session-broker-experiment.md": "how-it-works/session-broker-experiment.md"
+        "design-docs/session-broker-remote-devices.md": "how-it-works/session-broker-remote-devices.md"
+        "design-docs/session-requirements.md": "how-it-works/session-requirements.md"
+        "design-docs/session-state-record.md": "how-it-works/session-state-record.md"
+        "how-it-works/mcp/tool-registration.md": "using/dynamic-tools.md"
   - mermaid2:
       version: 10.0.2
 
@@ -102,30 +232,15 @@ markdown_extensions:
 # Author/design docs kept in the repo but intentionally off the site nav. They
 # are still built (so in-repo links resolve) but hidden from navigation.
 not_in_nav: |
-  /design-docs/mcp/daemon/screen-control-mapping.md
-  /design-docs/plat/android/system-tray-lookfor.md
-  /design-docs/plat/android/accessibility-data-sensitive-windows.md
-  /design-docs/plat/android/android-17-target-sdk-audit.md
-  /design-docs/plat/android/android17-playground-audit.md
-  /design-docs/plat/android/dependency-injection.md
+  /how-it-works/mcp/daemon/screen-control-mapping.md
+  /how-it-works/plat/android/system-tray-lookfor.md
+  /how-it-works/plat/android/accessibility-data-sensitive-windows.md
+  /how-it-works/plat/android/android-17-target-sdk-audit.md
+  /how-it-works/plat/android/android17-playground-audit.md
+  /how-it-works/plat/android/dependency-injection.md
   /release/ios-simulator-continuity.md
   /release/device-claims-registry-migration.md
-  /design-docs/plat/ios/xctestrunner/ci-integration.md
-  /decisions/androidx-baseline-profile-generator.md
-  /decisions/androidx-car-app-template-snapshots.md
-  /decisions/androidx-tv-fixture-libraries.md
-  /decisions/androidx-wear-fixture-libraries.md
-  /decisions/fastlane-supply-play-publishing.md
-  /decisions/ios-user-files-provider.md
-  /decisions/material-icons-web-glyphs.md
-  /decisions/mcp-sdk-v2-split-packages.md
-  /decisions/playwright-core-web-screenshots.md
-  /decisions/prototype-embedded-request-routing.md
-  /decisions/prototype-mock-backend.md
-  /decisions/prototype-request-retrofit.md
-  /decisions/qrcode-generator-share-qr.md
-  /decisions/types-bun-test-typecheck.md
-  /decisions/watchos-platform.md
+  /how-it-works/plat/ios/xctestrunner/ci-integration.md
 
 nav:
   - "Overview": index.md
@@ -178,107 +293,206 @@ nav:
       - "Managed Macs and CI runners": using/managed-macs.md
       - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":
-      - "System design": design-docs/index.md
-      - "Device-description audit": design-docs/device-description-audit.md
-      - "Live device acceptance": design-docs/live-device-acceptance.md
-      - "Manual-test harness": design-docs/manual-test-harness.md
-      - "Device resources": design-docs/device-resources.md
-      - "Host toolchain resource": design-docs/host-toolchain-resource.md
-      - "Session broker experiment": design-docs/session-broker-experiment.md
-      - "Session broker device mutation journal": design-docs/session-broker-device-mutation-journal.md
-      - "Session broker device reuse": design-docs/session-broker-device-reuse.md
-      - "Session broker remote devices": design-docs/session-broker-remote-devices.md
-      - "Device farm": design-docs/device-farm.md
-      - "Session device requirements": design-docs/session-requirements.md
-      - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
-      - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
-      - "tvOS XCUITest spike": design-docs/plat/tvos/xcuitest-spike.md
-      - "tvOS explore and plan replay": design-docs/plat/tvos/focus-explore.md
-      - "tvOS tool support matrix": design-docs/plat/tvos/tool-matrix.md
-      - "watchOS XCUITest spike": design-docs/plat/watchos/xcuitest-spike.md
-      - "watchOS Smart Stack cells": design-docs/plat/watchos/smart-stack.md
-      - "visionOS XCUITest capability boundary": design-docs/plat/visionos/xcuitest-capabilities.md
-      - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
-      - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
-      - "iOS WKWebView bridge actions": design-docs/plat/ios/webview-bridge-actions.md
-      - "iOS SDK observation bridge": design-docs/plat/ios/observation-bridge.md
-      - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
-      - "iOS Keychain and shared-store capabilities": design-docs/plat/ios/keychain-and-shared-store-capabilities.md
-      - "iOS Photos full access": design-docs/plat/ios/photos-full-access.md
-      - "iOS simulator load reduction": design-docs/plat/ios/simulator-load-reduction.md
-      - "iOS Simulator audio loopback": design-docs/plat/ios/simulator-audio-loopback.md
-      - "iOS Simulator camera poster": design-docs/plat/ios/simulator-camera-poster.md
-      - "iOS SDK host-integration profile": design-docs/plat/ios/host-integration-profile.md
-      - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
-      - "Android emulator optimization": design-docs/android-emulator-optimization.md
-      - "Android emulator host cost": design-docs/android-emulator-host-cost.md
-      - "Android port reverse ownership": design-docs/plat/android/port-reverse.md
-      - "CtrlProxy baseline profile": design-docs/plat/android/ctrlproxy-baseline-profile.md
-      - "Android prototype specification": design-docs/plat/android/prototype-ux.md
-      - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
-      - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
-      - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
-      - "iOS CarPlay template snapshots": design-docs/plat/ios/carplay-template-snapshot.md
-      - "iOS CarPlay prototypes": design-docs/plat/ios/carplay-prototypes.md
-      - "ProtoViewer": design-docs/protoviewer.md
-      - "ProtoViewer localization": design-docs/protoviewer-localization.md
-      - "ProtoViewer agent": design-docs/protoviewer-agent.md
+      - "System design": how-it-works/index.md
+      - "Device-description audit": how-it-works/device-description-audit.md
+      - "Live device acceptance": how-it-works/live-device-acceptance.md
+      - "Manual-test harness": how-it-works/manual-test-harness.md
+      - "Device resources": how-it-works/device-resources.md
+      - "Host toolchain resource": how-it-works/host-toolchain-resource.md
+      - "Session broker experiment": how-it-works/session-broker-experiment.md
+      - "Session broker device mutation journal": how-it-works/session-broker-device-mutation-journal.md
+      - "Session broker device reuse": how-it-works/session-broker-device-reuse.md
+      - "Session broker remote devices": how-it-works/session-broker-remote-devices.md
+      - "Device farm": how-it-works/device-farm.md
+      - "Session device requirements": how-it-works/session-requirements.md
+      - "iOS simctl and devicectl boundary": how-it-works/plat/ios/simctl-devicectl-boundary.md
+      - "iOS SDK contract suite": how-it-works/plat/ios/sdk-contract-suite.md
+      - "tvOS XCUITest spike": how-it-works/plat/tvos/xcuitest-spike.md
+      - "tvOS explore and plan replay": how-it-works/plat/tvos/focus-explore.md
+      - "tvOS tool support matrix": how-it-works/plat/tvos/tool-matrix.md
+      - "watchOS XCUITest spike": how-it-works/plat/watchos/xcuitest-spike.md
+      - "watchOS Smart Stack cells": how-it-works/plat/watchos/smart-stack.md
+      - "visionOS XCUITest capability boundary": how-it-works/plat/visionos/xcuitest-capabilities.md
+      - "iOS iproxy tunnel client": how-it-works/plat/ios/iproxy-tunnel-client.md
+      - "iOS network capture wire contract": how-it-works/plat/ios/network-capture-wire-contract.md
+      - "iOS WKWebView bridge actions": how-it-works/plat/ios/webview-bridge-actions.md
+      - "iOS SDK observation bridge": how-it-works/plat/ios/observation-bridge.md
+      - "iOS Playground theme parity": how-it-works/plat/ios/playground-theme-parity.md
+      - "iOS Keychain and shared-store capabilities": how-it-works/plat/ios/keychain-and-shared-store-capabilities.md
+      - "iOS Photos full access": how-it-works/plat/ios/photos-full-access.md
+      - "iOS simulator load reduction": how-it-works/plat/ios/simulator-load-reduction.md
+      - "iOS Simulator audio loopback": how-it-works/plat/ios/simulator-audio-loopback.md
+      - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
+      - "iOS SDK host-integration profile": how-it-works/plat/ios/host-integration-profile.md
+      - "iOS keep-booted reset": how-it-works/ios-keep-booted-reset.md
+      - "Android emulator optimization": how-it-works/android-emulator-optimization.md
+      - "Android emulator host cost": how-it-works/android-emulator-host-cost.md
+      - "Android port reverse ownership": how-it-works/plat/android/port-reverse.md
+      - "CtrlProxy baseline profile": how-it-works/plat/android/ctrlproxy-baseline-profile.md
+      - "Android prototype specification": how-it-works/plat/android/prototype-ux.md
+      - "Prototype performance measurement": how-it-works/plat/android/prototype-performance-measurement.md
+      - "Prototype Compose compiler report": how-it-works/plat/android/prototype-compose-compiler-report.md
+      - "iOS simulator prototype agent": how-it-works/plat/ios/prototype-agent.md
+      - "iOS CarPlay template snapshots": how-it-works/plat/ios/carplay-template-snapshot.md
+      - "iOS CarPlay prototypes": how-it-works/plat/ios/carplay-prototypes.md
+      - "ProtoViewer": how-it-works/protoviewer.md
+      - "ProtoViewer localization": how-it-works/protoviewer-localization.md
+      - "ProtoViewer agent": how-it-works/protoviewer-agent.md
       - "ProtoViewer privacy": protoviewer/privacy.md
       - "ProtoViewer support": protoviewer/support.md
-      - "ProtoViewer store listing": design-docs/protoviewer-store-listing.md
-      - "Native prototype embedding": design-docs/prototype-embedding.md
-      - "Virtual BLE peripheral": design-docs/ble-peripheral.md
-      - "Prototype platform security": design-docs/prototype-platform-security.md
-      - "Prototype user-test sessions": design-docs/prototype-user-test-sessions.md
-      - "Prototype SDK support matrix": design-docs/prototype-sdk-matrix.md
-      - "Prototype camera and media guide": design-docs/prototype-camera-media.md
-      - "Prototype web renderer": design-docs/prototype-web-renderer.md
-      - "Headless prototype mode": design-docs/prototype-headless.md
-      - "Prototype web frames for every form factor": design-docs/prototype-web-frames-v2.md
-      - "Prototype web library": design-docs/prototype-web-library.md
-      - "Prototype web 3D device view": design-docs/prototype-web-3d.md
-      - "Prototype live preview server": design-docs/prototype-web-preview-server.md
-      - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
-      - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
-      - "Workflow de-duplication": design-docs/ci/workflow-deduplication.md
-      - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
-      - "CI attestation store": design-docs/ci/attestation-store.md
-      - "CI attestation signing envelope": design-docs/ci/attestation-envelope.md
-      - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
-      - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
-      - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
-      - "macOS-only iOS tests": design-docs/ci/macos-only-tests.md
-      - "Pre-push vs CI misses": design-docs/ci/prepush-ci-misses.md
-      - "Interaction loop": design-docs/mcp/interaction-loop.md
-      - "Stylus, pressure and hover injection": design-docs/mcp/stylus-pressure-hover-injection.md
-      - "Daemon": design-docs/mcp/daemon.md
+      - "ProtoViewer store listing": how-it-works/protoviewer-store-listing.md
+      - "Native prototype embedding": how-it-works/prototype-embedding.md
+      - "Virtual BLE peripheral": how-it-works/ble-peripheral.md
+      - "Prototype platform security": how-it-works/prototype-platform-security.md
+      - "Prototype user-test sessions": how-it-works/prototype-user-test-sessions.md
+      - "Prototype SDK support matrix": how-it-works/prototype-sdk-matrix.md
+      - "Prototype camera and media guide": how-it-works/prototype-camera-media.md
+      - "Prototype web renderer": how-it-works/prototype-web-renderer.md
+      - "Headless prototype mode": how-it-works/prototype-headless.md
+      - "Prototype web frames for every form factor": how-it-works/prototype-web-frames-v2.md
+      - "Prototype web library": how-it-works/prototype-web-library.md
+      - "Prototype web 3D device view": how-it-works/prototype-web-3d.md
+      - "Prototype live preview server": how-it-works/prototype-web-preview-server.md
+      - "Runtime dependency pinning": how-it-works/release/runtime-dependency-pinning.md
+      - "Unit lane scaling": how-it-works/ci/unit-lane-scaling.md
+      - "Workflow de-duplication": how-it-works/ci/workflow-deduplication.md
+      - "CI attestation shadow promotion": how-it-works/ci/attestation-shadow-promotion.md
+      - "CI attestation store": how-it-works/ci/attestation-store.md
+      - "CI attestation signing envelope": how-it-works/ci/attestation-envelope.md
+      - "CI attestation GitHub App transport": how-it-works/ci/attestation-github-app-transport.md
+      - "CircleCI macOS migration": how-it-works/ci/circleci-macos-migration.md
+      - "macOS CI capacity plan": how-it-works/ci/macos-capacity-plan.md
+      - "macOS-only iOS tests": how-it-works/ci/macos-only-tests.md
+      - "Pre-push vs CI misses": how-it-works/ci/prepush-ci-misses.md
+      - "Interaction loop": how-it-works/mcp/interaction-loop.md
+      - "Stylus, pressure and hover injection": how-it-works/mcp/stylus-pressure-hover-injection.md
+      - "Daemon": how-it-works/mcp/daemon.md
       - "Push-stream backpressure": push-stream-backpressure.md
-      - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
-      - "MCP SDK v2 adoption survey": design-docs/mcp/sdk-v2-adoption-survey.md
-      - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
-      - "Live observe App shell": design-docs/mcp/observe-app-shell.md
-      - "Interactive observe App": design-docs/mcp/observe-app-interactive.md
-      - "Build source revision": design-docs/mcp/build-source-revision.md
-      - "Tool requirements": design-docs/mcp/tool-requirements.md
-      - "Session state record": design-docs/session-state-record.md
-      - "Test runners": design-docs/plat/android/junit-runner/index.md
-      - "Robolectric runtime jars": design-docs/plat/android/robolectric-android-all.md
-      - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
-      - "Persona robustness harness": design-docs/plat/android/persona-robustness-harness.md
-      - "OEM identity lane": design-docs/plat/android/oem-identity-lane.md
-      - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
-      - "Android windowing": design-docs/plat/android/windowing.md
-      - "Android form factors": design-docs/plat/android/form-factors.md
-      - "Android XR headset baseline": design-docs/plat/android/xr-headset.md
-      - "Car App Library template snapshots": design-docs/plat/android/car-app-templates.md
-      - "Android Auto projection provisioning": design-docs/plat/android/android-auto-projection-provisioning.md
-      - "Emulator gRPC audio": design-docs/plat/android/emulator-grpc-audio.md
-      - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
-      - "Device-condition attestation ceiling": design-docs/plat/android/device-condition-attestation-ceiling.md
-      - "Keystore StrongBox-unavailable fault": design-docs/plat/android/keystore-strongbox-fault.md
-      - "Content seeding": design-docs/plat/android/content-seeding.md
-      - "Desktop App": design-docs/plat/android/desktop-app.md
-      - "Pressure, hover and stylus input": design-docs/plat/pressure-hover-stylus-input.md
+      - "MCP SDK v2 and stateless daemon": how-it-works/mcp/sdk-v2-stateless-migration.md
+      - "MCP SDK v2 adoption survey": how-it-works/mcp/sdk-v2-adoption-survey.md
+      - "Elicitation for an ambiguous device": how-it-works/mcp/elicitation-ambiguous-device.md
+      - "Live observe App shell": how-it-works/mcp/observe-app-shell.md
+      - "Interactive observe App": how-it-works/mcp/observe-app-interactive.md
+      - "Build source revision": how-it-works/mcp/build-source-revision.md
+      - "Tool requirements": how-it-works/mcp/tool-requirements.md
+      - "Session state record": how-it-works/session-state-record.md
+      - "Test runners": how-it-works/plat/android/junit-runner/index.md
+      - "Robolectric runtime jars": how-it-works/plat/android/robolectric-android-all.md
+      - "InputConnection trace comparison": how-it-works/plat/android/ime-trace-conformance.md
+      - "Persona robustness harness": how-it-works/plat/android/persona-robustness-harness.md
+      - "OEM identity lane": how-it-works/plat/android/oem-identity-lane.md
+      - "Android physical panel identity": how-it-works/plat/android/physical-panel-identity.md
+      - "Android windowing": how-it-works/plat/android/windowing.md
+      - "Android form factors": how-it-works/plat/android/form-factors.md
+      - "Android XR headset baseline": how-it-works/plat/android/xr-headset.md
+      - "Car App Library template snapshots": how-it-works/plat/android/car-app-templates.md
+      - "Android Auto projection provisioning": how-it-works/plat/android/android-auto-projection-provisioning.md
+      - "Emulator gRPC audio": how-it-works/plat/android/emulator-grpc-audio.md
+      - "Device-condition capability probe": how-it-works/plat/android/device-condition-capability-probe.md
+      - "Device-condition attestation ceiling": how-it-works/plat/android/device-condition-attestation-ceiling.md
+      - "Keystore StrongBox-unavailable fault": how-it-works/plat/android/keystore-strongbox-fault.md
+      - "Content seeding": how-it-works/plat/android/content-seeding.md
+      - "Desktop App": how-it-works/plat/android/desktop-app.md
+      - "Pressure, hover and stylus input": how-it-works/plat/pressure-hover-stylus-input.md
+  - "Devlog":
+      - "Index": devlog/index.md
+      - "Entry template": devlog/template.md
+      - "2026-11-11: Build the camera poster dylib on demand": devlog/2026-11-11-simulator-camera-poster-on-demand-build.md
+      - "2026-11-11: Live preview server uses node:http and SSE, not Vite": devlog/2026-11-11-prototype-web-preview-server-no-vite.md
+      - "2026-11-11: Headless prototype follow-ups": devlog/2026-11-11-prototype-headless-follow-ups.md
+      - "2026-11-11: Car App templates: head-unit visibility from host state": devlog/2026-11-11-car-app-templates-host-visibility.md
+      - "2026-11-10: Interactive observe App spike": devlog/2026-11-10-observe-app-interactive-spike.md
+      - "2026-11-10: Post-action screenshot timing": devlog/2026-11-10-interaction-loop-screenshot-timing.md
+      - "2026-11-10: Android Auto projection: no Google account": devlog/2026-11-10-android-auto-projection-provisioning-no-account.md
+      - "2026-11-08: Android Auto stub and DHU 2.1 on a Play emulator": devlog/2026-11-08-form-factors-android-auto-dhu-stub.md
+      - "2026-11-08: AndroidX baseline profile tooling for CtrlProxy": devlog/2026-11-08-androidx-baseline-profile-generator.md
+      - "2026-11-06: Keystore StrongBox fault: pre-generation check": devlog/2026-11-06-keystore-strongbox-fault-pre-generation-check.md
+      - "2026-11-06: AndroidX TV libraries for the Android TV fixture apps": devlog/2026-11-06-androidx-tv-fixture-libraries.md
+      - "2026-11-05: Prototype remote image URLs": devlog/2026-11-05-prototype-ux-remote-image-urls.md
+      - "2026-11-05: Eject scaffold covers a fixed node subset": devlog/2026-11-05-prototype-embedding-eject-subset.md
+      - "2026-11-04: visionOS XCUITest runner scope": devlog/2026-11-04-xcuitest-capabilities-visionos-runner-scope.md
+      - "2026-11-04: Device farm design": devlog/2026-11-04-device-farm-design.md
+      - "2026-11-04: AndroidX Wear libraries for the Wear OS fixture app": devlog/2026-11-04-androidx-wear-fixture-libraries.md
+      - "2026-11-04: androidx.car.app for Car App Library template snapshots": devlog/2026-11-04-androidx-car-app-template-snapshots.md
+      - "2026-11-03: Device Streaming tokens come from gcloud": devlog/2026-11-03-session-broker-remote-devices-gcloud-token.md
+      - "2026-11-03: qrcode-generator for the prototype share QR": devlog/2026-11-03-qrcode-generator-share-qr.md
+      - "2026-11-03: Embeddable web prototype library plan": devlog/2026-11-03-prototype-web-library-plan.md
+      - "2026-11-03: CSS 3D transforms for the web device view": devlog/2026-11-03-prototype-web-3d-css-transforms.md
+      - "2026-11-03: Material Icons SVG package for prototype web icon glyphs": devlog/2026-11-03-material-icons-web-glyphs.md
+      - "2026-11-03: fastlane supply for ProtoViewer Google Play publishing": devlog/2026-11-03-fastlane-supply-play-publishing.md
+      - "2026-11-03: Defer CarPlay prototypes": devlog/2026-11-03-carplay-prototypes-deferred.md
+      - "2026-11-02: playwright-core for the prototype web screenshot check": devlog/2026-11-02-playwright-core-web-screenshots.md
+      - "2026-10-31: watchOS XCUITest runner spike": devlog/2026-10-31-xcuitest-spike-watchos-runner.md
+      - "2026-10-31: tvOS XCUITest runner spike": devlog/2026-10-31-xcuitest-spike-tvos-runner.md
+      - "2026-10-31: SDK prerequisite captures": devlog/2026-10-31-prototype-sdk-matrix-prerequisite-captures.md
+      - "2026-10-31: OEM identity lane: first executor rung": devlog/2026-10-31-oem-identity-lane-first-executor.md
+      - "2026-10-28: watchOS as its own platform, fail-closed per tool": devlog/2026-10-28-watchos-platform.md
+      - "2026-10-28: Prototype map backends and tile sources": devlog/2026-10-28-prototype-ux-map-backends.md
+      - "2026-10-28: Persona robustness harness: survival measurements": devlog/2026-10-28-persona-robustness-harness-survival-measurements.md
+      - "2026-10-28: Emulator gRPC audio: transport choice and open questions": devlog/2026-10-28-emulator-grpc-audio-transport.md
+      - "2026-10-27: Workflow de-duplication audit and plan": devlog/2026-10-27-workflow-deduplication-audit.md
+      - "2026-10-27: MCP SDK v2 adoption survey": devlog/2026-10-27-sdk-v2-adoption-survey-proposals.md
+      - "2026-10-27: Prototype glass surfaces and custom AGSL shaders": devlog/2026-10-27-prototype-ux-glass-and-custom-shaders.md
+      - "2026-10-27: Declarative mock backend for prototypes": devlog/2026-10-27-prototype-mock-backend.md
+      - "2026-10-27: Attestation store layout and read cache": devlog/2026-10-27-attestation-store-layout.md
+      - "2026-10-27: Ed25519 for the attestation envelope": devlog/2026-10-27-attestation-envelope-ed25519.md
+      - "2026-10-26: Prototype native look and motion profiles": devlog/2026-10-26-prototype-ux-native-look-and-motion-profiles.md
+      - "2026-10-26: Read-only live observe App shell": devlog/2026-10-26-observe-app-shell-read-only.md
+      - "2026-10-26: Elicitation for an ambiguous device target": devlog/2026-10-26-elicitation-ambiguous-device-scope.md
+      - "2026-10-26: Android emulator host cost research": devlog/2026-10-26-android-emulator-host-cost-research.md
+      - "2026-10-25: ProtoViewer open-source notice generators": devlog/2026-10-25-protoviewer-open-source-notices.md
+      - "2026-10-24: Simulator first-boot CPU measurements": devlog/2026-10-24-simulator-load-reduction-measurements.md
+      - "2026-10-24: Lean profile and template clone defaults": devlog/2026-10-24-simulator-load-reduction-defaults.md
+      - "2026-10-23: Session broker native qualification": devlog/2026-10-23-session-broker-experiment-native-qualification.md
+      - "2026-10-23: Unpersisted recording gap is an accepted residual": devlog/2026-10-23-session-broker-device-mutation-journal-unpersisted-gap.md
+      - "2026-10-23: ProtoViewer on-device agent and tool surfaces": devlog/2026-10-23-protoviewer-agent-design.md
+      - "2026-10-23: Manual-test batch incidents": devlog/2026-10-23-manual-test-harness-batch-incidents.md
+      - "2026-10-23: macOS-only test subset on a PR lane": devlog/2026-10-23-macos-only-tests-pr-lane.md
+      - "2026-10-22: Android form-factor spike: TV, Wear OS and Android Auto": devlog/2026-10-22-form-factors-spike.md
+      - "2026-10-22: Device-condition attestation ceiling": devlog/2026-10-22-device-condition-attestation-ceiling.md
+      - "2026-10-21: Android windowing: verification plan and follow-ups": devlog/2026-10-21-windowing-verification-plan.md
+      - "2026-10-21: Keep-booted reset is operational cleanup": devlog/2026-10-21-session-broker-experiment-keep-booted-cleanup.md
+      - "2026-10-21: Session broker reuse measurements": devlog/2026-10-21-session-broker-device-reuse-measurements.md
+      - "2026-10-21: Legacy-restorer import into the mutation journal": devlog/2026-10-21-session-broker-device-mutation-journal-legacy-restorer-import.md
+      - "2026-10-21: Best-effort keep-booted cleaning": devlog/2026-10-21-ios-keep-booted-reset-best-effort.md
+      - "2026-10-21: Device-condition capability probe: spike and helper proposal": devlog/2026-10-21-device-condition-capability-probe-spike.md
+      - "2026-10-21: Linux GPU renderer qualification": devlog/2026-10-21-android-emulator-optimization-linux-gpu.md
+      - "2026-10-20: Spy-only unit files in the shared process": devlog/2026-10-20-unit-lane-scaling-spy-only-shared.md
+      - "2026-10-20: ProtoViewer design decisions": devlog/2026-10-20-protoviewer-design.md
+      - "2026-10-20: Request routing for embedded prototype renderers": devlog/2026-10-20-prototype-embedded-request-routing.md
+      - "2026-10-19: @types/bun for the test/ type-check": devlog/2026-10-19-types-bun-test-typecheck.md
+      - "2026-10-19: Stylus, pressure and hover injection spike": devlog/2026-10-19-stylus-pressure-hover-injection-spike.md
+      - "2026-10-18: Pressure, hover and stylus input research": devlog/2026-10-18-pressure-hover-stylus-input-research.md
+      - "2026-10-17: MCP TypeScript SDK v2 split packages": devlog/2026-10-17-mcp-sdk-v2-split-packages.md
+      - "2026-10-16: Retrofit for prototype `request` actions on the device": devlog/2026-10-16-prototype-request-retrofit.md
+      - "2026-10-15: Session state record and row writer design": devlog/2026-10-15-session-state-record-design.md
+      - "2026-10-15: Verifying iOS Photos full access": devlog/2026-10-15-photos-full-access-verification.md
+      - "2026-10-15: Android dependency injection: Metro only": devlog/2026-10-15-dependency-injection-metro-only.md
+      - "2026-10-14: Physical panel identity: hidden-API finding and fingerprint decision": devlog/2026-10-14-physical-panel-identity-fingerprint.md
+      - "2026-10-14: Android 17 Playground audit": devlog/2026-10-14-android17-playground-audit.md
+      - "2026-10-14: Android 17 CtrlProxy targetSdk 37 audit": devlog/2026-10-14-android-17-target-sdk-audit.md
+      - "2026-10-13: Prototype performance measurements": devlog/2026-10-13-prototype-performance-measurement-results.md
+      - "2026-10-09: Prototype spec open follow-ups": devlog/2026-10-09-prototype-ux-open-follow-ups.md
+      - "2026-10-09: iOS prototype agent decisions": devlog/2026-10-09-prototype-agent-ios-decisions.md
+      - "2026-10-09: macOS CI capacity plan choices": devlog/2026-10-09-macos-capacity-plan-choices.md
+      - "2026-10-09: Moving GitHub-hosted macOS jobs to CircleCI": devlog/2026-10-09-circleci-macos-migration-plan.md
+      - "2026-10-08: Unit lane scaling study": devlog/2026-10-08-unit-lane-scaling-study.md
+      - "2026-10-08: iOS prototype agent verification backlog": devlog/2026-10-08-prototype-agent-ios-verification-backlog.md
+      - "2026-10-08: Golden replay of the nearest-match tie-break": devlog/2026-10-08-golden-replay-tie-break-results.md
+      - "2026-10-06: Keep iproxy behind a typed tunnel client": devlog/2026-10-06-iproxy-tunnel-client.md
+      - "2026-10-04: Prototype spec shape and host-escape decisions": devlog/2026-10-04-prototype-ux-spec-decisions.md
+      - "2026-10-04: Prototype device verification status": devlog/2026-10-04-prototype-ux-device-verification-status.md
+      - "2026-10-02: devicectl simulator probe findings": devlog/2026-10-02-simctl-devicectl-boundary-probe-findings.md
+      - "2026-10-01: HierarchyMerger range-index matching": devlog/2026-10-01-fixup-hierarchy-merger-geometry-range-index.md
+      - "2026-09-18: Canonical device description: alias removal and live audit": devlog/2026-09-18-device-description-audit-canonical-shape.md
+      - "2026-09-13: System tray: header-less Silent rows": devlog/2026-09-13-system-tray-lookfor-headerless-rows.md
+      - "2026-09-13: Android emulator optimization measurements": devlog/2026-09-13-android-emulator-optimization-measurements.md
+      - "2026-09-09: CtrlProxy Swift 6 rewrite status and race ledger": devlog/2026-09-09-status-ctrlproxy-swift6-rewrite.md
+      - "2026-09-09: CtrlProxy Swift 6 parallel rewrite": devlog/2026-09-09-readme-ctrlproxy-swift6-parallel-rewrite.md
+      - "2026-09-05: Accessibility-data-sensitive windows: null roots on Android 14": devlog/2026-09-05-accessibility-data-sensitive-windows-null-roots.md
+      - "2026-08-28: iOS `user_files` provider": devlog/2026-08-28-ios-user-files-provider.md
+      - "2026-08-21: Pinning the published runtime dependency graph": devlog/2026-08-21-runtime-dependency-pinning.md
+      - "2026-07-29: MCP SDK v2 and stateless daemon migration": devlog/2026-07-29-sdk-v2-stateless-migration-decisions.md
   - "Contributing": contributing.md
   - "Usage Data": metrics/usage-data.md
   - "FAQ": faq.md

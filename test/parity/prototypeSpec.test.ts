@@ -232,7 +232,7 @@ test("undefined object properties are rejected before JSON serialization can dro
 });
 test("worked documentation examples match the shared fixture files", () => {
   const document = readFileSync(
-    join(import.meta.dir, "../../docs/design-docs/plat/android/prototype-ux.md"),
+    join(import.meta.dir, "../../docs/how-it-works/plat/android/prototype-ux.md"),
     "utf8",
   );
   const examples = parseDocumentExamples(document);
@@ -248,7 +248,7 @@ test("worked documentation examples match the shared fixture files", () => {
 });
 test("worked documentation examples parse identically with LF and CRLF line endings", () => {
   const document = readFileSync(
-    join(import.meta.dir, "../../docs/design-docs/plat/android/prototype-ux.md"),
+    join(import.meta.dir, "../../docs/how-it-works/plat/android/prototype-ux.md"),
     "utf8",
   ).replace(/\r\n/g, "\n");
   const lfExamples = parseDocumentExamples(document);

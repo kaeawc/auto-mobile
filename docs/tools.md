@@ -42,6 +42,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🔎 <code>identifyInteractions</code> | Suggest likely interactions                              |
 | 🧪 <code>prototype</code>            | Show agent-authored UI on the device                     |
 | 🌐 <code>exportPrototypeWeb</code>   | Write a shown prototype's web preview to an HTML file    |
+| 📡 <code>blePeripheral</code>        | Advertise and notify a session-owned virtual BLE device  |
 | 🔦 <code>highlight</code>            | Draw a red hand-drawn circle around a UI element         |
 
 ## 👆 Interact

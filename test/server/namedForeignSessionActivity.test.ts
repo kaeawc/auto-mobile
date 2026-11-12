@@ -42,6 +42,7 @@ type Args = Record<string, unknown>;
  * session. The first test below fails when the server registers a plain tool this table lacks.
  */
 const PLAIN_TOOL_CALLS: Record<string, Args[]> = {
+  blePeripheral: [{ action: "status", handle: "peripheral" }],
   setActiveDevice: [{ deviceId: free.deviceId, platform: "android" }],
   listDeviceImages: [{ platform: "android" }],
   listDevices: [{}],

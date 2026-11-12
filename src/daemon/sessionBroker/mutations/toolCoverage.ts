@@ -48,6 +48,11 @@ const SESSION_DISPATCH_REASON =
 
 export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationToolCoverage>> = {
   ...tools(
+    ["blePeripheral"],
+    "Virtual GATT state lives in a session-owned host sidecar, killed on session release and daemon shutdown; no persistent device settings are changed.",
+    "notJournaled",
+  ),
+  ...tools(
     [
       "accessibility",
       "accessibilityAction",

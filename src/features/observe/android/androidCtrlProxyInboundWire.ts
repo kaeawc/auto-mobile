@@ -50,10 +50,9 @@ export function displayTransitionFromWire(value: unknown): AndroidDisplayTransit
 }
 
 export function screenshotPerformanceMetadataFrom(
-  metadata: ScreenshotPerformanceMetadata,
-): ScreenshotPerformanceMetadata {
+  metadata: Omit<ScreenshotPerformanceMetadata, "screenshotStageDurationsMs">,
+): Omit<ScreenshotPerformanceMetadata, "screenshotStageDurationsMs"> {
   return {
-    screenshotStageDurationsMs: metadata.screenshotStageDurationsMs,
     screenshotCaptureDurationMs: metadata.screenshotCaptureDurationMs,
     screenshotEncodeDurationMs: metadata.screenshotEncodeDurationMs,
     screenshotByteLength: metadata.screenshotByteLength,

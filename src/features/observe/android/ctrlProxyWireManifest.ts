@@ -494,7 +494,6 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     prototypesHidden: "optional",
     timestamp: "optional",
     error: "optional",
-    screenshotStageDurationsMs: "optional",
     screenshotCaptureDurationMs: "optional",
     screenshotEncodeDurationMs: "optional",
     screenshotByteLength: "optional",

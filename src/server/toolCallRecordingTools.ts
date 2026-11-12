@@ -179,6 +179,8 @@ export const registerToolCallRecordingTools = () => {
     {
       handler: recordToolCallsTool,
       defaultEnabled: false,
+      // begin/end are refused while the flag is off (TOOL_CALL_RECORDING_DISABLED_ERROR).
+      featureFlags: ["tool-call-recording"],
       outputSchema: recordToolCallsResultSchema,
       // `status` only reports the recording; begin/end change it (#11107).
       readOnly: (args: { action?: unknown }) => args?.action === "status",

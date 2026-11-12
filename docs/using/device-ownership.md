@@ -245,9 +245,15 @@ the windows with the variables in
 
 - **Lost heartbeat.** A session whose owner stops heartbeating is released after
   roughly ten seconds. Calls from other callers do not keep a dead owner alive.
+  A session whose owner has never heartbeated is released about 20 seconds after
+  it was created if it set its own heartbeat timeout (about 5 seconds on the
+  default timeout), and after that once no control call has arrived within its
+  heartbeat timeout.
 - **Idle.** A session is released after 2 minutes (default) with no control call.
-  Heartbeats and reads do not extend the window; a control call still running
-  holds the release until it finishes.
+  Heartbeats and reads do not extend the window, nor does a `setToolEnabled`
+  call that does not pass the session's `sessionUuid`; a control call still
+  running holds the release until it finishes. Every `blePeripheral` action,
+  `status` included, is a control call and extends it.
 - **Terminal releases.** A released session UUID is never revived. A later call
   naming it is refused with `session_ownership_lost`, `retryable: false` and
   `nextAction: "acquire_new_session"`. After an idle release the refusal also

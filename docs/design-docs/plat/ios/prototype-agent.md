@@ -356,7 +356,7 @@ the prototype as app UI.
   Xcode) have no agent unless set up as below.
 - SpringBoard and system UI are not covered. Prototypes vanish when the app exits or relaunches
   without the agent.
-- **Structural limits re-checked.** The agent refuses a spec whose expanded tree passes node (2000),
+- **Structural limits re-checked.** The agent refuses a spec whose expanded tree passes the node limits (2000 per stack screen, 10000 per spec),
   depth (24) or `repeat` item (128) limits of `schemas/prototype-spec-contract.json` before expanding
   (#11049).
 - **Every state write is validated.** Taps, control writes, text typing and `setStates` go through one

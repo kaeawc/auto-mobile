@@ -16,8 +16,8 @@ internal object PrototypeRepeatTree {
   data class Child(val node: JsonObject, val path: String)
 
   class Budget {
-    var nodes: Int = 0
-    var images: Int = 0
+    /** Expanded nodes and images, per stack screen and for the whole spec (#14213). */
+    internal val screens = PrototypeScreenBudget()
     var effects: Int = 0
     var animatedEffects: Int = 0
     var loopNodes: Int = 0
@@ -184,11 +184,9 @@ internal object PrototypeRepeatTree {
     data: PrototypeRepeatData,
   ): PrototypeSpecError? {
     val at = repeatPath ?: path
-    if (++budget.nodes > PrototypeSpecValidator.MAX_PROTOTYPE_NODES)
-      return fail(at, "Expanded node limit exceeded")
-    budget.images += imageUses(node)
-    if (budget.images > PrototypeSpecValidator.MAX_PROTOTYPE_IMAGES)
-      return fail(at, "Expanded image limit exceeded")
+    (budget.screens.charge(1, 0) ?: budget.screens.charge(0, imageUses(node)))?.let {
+      return fail(at, it.expandedMessage)
+    }
     specialNodeErrors(node, path, budget)?.let {
       return it
     }
@@ -197,12 +195,18 @@ internal object PrototypeRepeatTree {
     }
     val scope = scopeOf(node, path, data)
     val nestedPath = if (scope != null) "$path.repeat" else repeatPath
+    val stack = node["screens"] is JsonObject
     repeat(if (node.text("type") == "list") 1 else scope?.items?.size ?: 1) {
+      if (stack) budget.screens.enterStack()
       for (child in childrenOf(node, path)) {
+        val screen = stack && child.path.startsWith("$path.screens[")
+        if (screen) budget.screens.enterScreen()
         expandedErrors(child.node, child.path, budget, nestedPath, data)?.let {
           return it
         }
+        if (screen) budget.screens.exitScreen()
       }
+      if (stack) budget.screens.exitStack()
     }
     return null
   }

@@ -323,7 +323,8 @@ function expandNode(node: Raw, path: string, stack: string[], context: Context):
     return expandUse(node, path, stack, context);
   }
   context.nodes++;
-  if (context.nodes > prototypeRenderLimits.MAX_PROTOTYPE_NODES) {
+  // Per-screen bounds are the validator's; expansion only stops at the whole-spec ceiling (#14213).
+  if (context.nodes > prototypeRenderLimits.MAX_PROTOTYPE_SPEC_NODES) {
     return { error: fail(context, path, "Expanded node limit exceeded") };
   }
   return node.type === "list" || node.type === "adaptive"

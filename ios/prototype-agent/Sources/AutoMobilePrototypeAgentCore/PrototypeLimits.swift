@@ -7,13 +7,16 @@ import Foundation
 /// The constants repeat `schemas/prototype-spec-contract.json` (the data and list limits read it
 /// directly); `PrototypeLimitsTests` fails when any of them drifts from it.
 enum PrototypeLimits {
-    static let maxStackScreens = 32
+    static let maxStackScreens = 64
     static let maxStackDepth = 32
     static let maxEmitContextEntries = 16
     static let maxEmitPayloadBytes = 4096
     static let maxEmitPayloadDepth = 24
     static let maxPatchOps = 64
+    /// One stack screen's node bound, with the content drawn around it (#14213).
     static let maxNodes = 2000
+    /// The whole-spec node ceiling, every stack screen included.
+    static let maxSpecNodes = 10000
     static let maxDepth = 24
     static let maxTextSpans = 64
     static let maxRepeatItems = 128
@@ -121,7 +124,7 @@ enum PrototypeLimits {
     /// Throws the first limit the tree breaks. `repeat` templates count once per instance, in the
     /// same traversal order and path spelling as the Android guard (`root.repeat[1].children[0]`).
     static func guardTree(_ root: JSONValue) throws {
-        var expandedCount = 0
+        var expandedCount = PrototypeScreenBudget()
         try visit(root, path: "root", depth: 1, authored: false, count: &expandedCount)
         try PrototypeScrollMotion.validate(root)
     }
@@ -130,9 +133,9 @@ enum PrototypeLimits {
     /// an independent authored budget, visited once even inside a literal repeat's instances.
     static func guardAuthoredTree(_ root: JSONValue) throws {
         try guardObjectChildren(root, path: "root", depth: 1)
-        var expandedCount = 0
+        var expandedCount = PrototypeScreenBudget()
         try visit(root, path: "root", depth: 1, authored: true, count: &expandedCount)
-        var authoredTemplateCount = 0
+        var authoredTemplateCount = PrototypeScreenBudget()
         try visitAuthoredTemplates(root, path: "root", depth: 1, template: false, count: &authoredTemplateCount)
     }
 
@@ -204,13 +207,15 @@ enum PrototypeLimits {
         path: String,
         depth: Int,
         authored: Bool,
-        count: inout Int
+        count: inout PrototypeScreenBudget
     )
         throws
     {
         if case let .object(screens)? = fields["screens"] {
+            count.enterStack()
             for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
                 if let screen = screens[name] {
+                    count.enterScreen()
                     try visit(
                         screen,
                         path: PrototypeStacks.screenPath(path, name: name),
@@ -218,20 +223,21 @@ enum PrototypeLimits {
                         authored: authored,
                         count: &count
                     )
+                    count.exitScreen()
                 }
             }
+            count.exitStack()
         }
     }
 
     private static func visit(
-        _ node: JSONValue, path: String, depth: Int, authored: Bool, count: inout Int
+        _ node: JSONValue, path: String, depth: Int, authored: Bool, count: inout PrototypeScreenBudget
     )
         throws
     {
         guard case let .object(fields) = node else { return }
         try guardCheckLimits(.object(fields), path: path)
-        count += 1
-        if count > maxNodes { throw violation(path, "Node limit exceeded") }
+        if let overflow = count.charge(nodes: 1, images: 0) { throw violation(path, overflow.message) }
         if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
         if authored { try guardTextSpans(fields, path: path) }
         if authored, hasUncountedTemplate(fields) { return }
@@ -262,7 +268,7 @@ enum PrototypeLimits {
 
     private static func visitLiteralChildren(
         _ spec: [String: JSONValue], children: [JSONValue], path: String, depth: Int,
-        authored: Bool, count: inout Int
+        authored: Bool, count: inout PrototypeScreenBudget
     )
         throws
     {
@@ -293,35 +299,39 @@ enum PrototypeLimits {
         path: String,
         depth: Int,
         childTemplate: Bool,
-        count: inout Int,
+        count: inout PrototypeScreenBudget,
         insideRepeat: Bool
     )
         throws
     {
         if case let .object(screens)? = fields["screens"] {
+            count.enterStack()
             for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
                 if let screen = screens[name] {
+                    count.enterScreen()
                     try visitAuthoredTemplates(
                         screen, path: PrototypeStacks.screenPath(path, name: name), depth: depth + 1,
                         template: childTemplate, count: &count, insideRepeat: insideRepeat || fields["repeat"] != nil
                     )
+                    count.exitScreen()
                 }
             }
+            count.exitStack()
         }
     }
 
     /// Structural traversal, never instance expansion: all descendants of an uncounted template
     /// consume this budget once, including nested repeats and single-child nodes.
     private static func visitAuthoredTemplates(
-        _ node: JSONValue, path: String, depth: Int, template: Bool, count: inout Int, insideRepeat: Bool = false
+        _ node: JSONValue, path: String, depth: Int, template: Bool, count: inout PrototypeScreenBudget,
+        insideRepeat: Bool = false
     )
         throws
     {
         guard case let .object(fields) = node else { return }
         try guardCheckLimits(.object(fields), path: path)
         if template {
-            count += 1
-            if count > maxNodes { throw violation(path, "Node limit exceeded") }
+            if let overflow = count.charge(nodes: 1, images: 0) { throw violation(path, overflow.message) }
         }
         if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
         if template { try guardTextSpans(fields, path: path) }

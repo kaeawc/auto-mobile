@@ -69,8 +69,8 @@ struct PrototypeContractValidator {
     let limits: [String: Int]
     var locatedNodes: [PrototypeLocatedValue] = []
     var actions: [PrototypeLocatedValue] = []
-    var nodes = 0
-    var images = 0
+    /// Node and image budgets per stack screen and for the whole spec (#14213).
+    var budget = PrototypeScreenBudget()
     var effects = PrototypeEffectUses()
     var loopNodes = 0
     var keyframeNodes = 0
@@ -216,9 +216,9 @@ struct PrototypeContractValidator {
         }
         if name == "action", let fields = value.objectFields { actions.append(.init(value: fields, path: path)) }
         if name == "item" {
-            images += Self.imageUses(value.objectFields?["image"])
-            if images >
-                (limits["MAX_PROTOTYPE_IMAGES"] ?? 0) { throw Self.invalid("\(path).image", "Image limit exceeded") }
+            if let overflow = budget.charge(nodes: 0, images: Self.imageUses(value.objectFields?["image"])) {
+                throw Self.invalid("\(path).image", overflow.message)
+            }
         }
         if name == "node" {
             if let fields = value.objectFields, fields["onAppear"] != nil,
@@ -228,12 +228,14 @@ struct PrototypeContractValidator {
             }
             guard let node = value.objectFields else { throw Self.invalid(path, "Expected object") }
             locatedNodes.append(.init(value: node, path: path))
-            nodes += 1
-            if nodes > PrototypeLimits.maxNodes { throw Self.invalid(path, "Node limit exceeded") }
+            if let overflow = budget.charge(nodes: 1, images: 0) { throw Self.invalid(path, overflow.message) }
             if depth + 1 > PrototypeLimits.maxDepth { throw Self.invalid(path, "Tree depth limit exceeded") }
-            if node["type"] == .string("image") { images += max(1, Self.imageUses(node["asset"])) }
-            if node["type"] == .string("videoPlayer") { images += Self.imageUses(node["poster"]) }
-            if images > (limits["MAX_PROTOTYPE_IMAGES"] ?? 0) { throw Self.invalid(path, "Image limit exceeded") }
+            let nodeImages: Int = switch node["type"] {
+            case .string("image"): max(1, Self.imageUses(node["asset"]))
+            case .string("videoPlayer"): Self.imageUses(node["poster"])
+            default: 0
+            }
+            if let overflow = budget.charge(nodes: 0, images: nodeImages) { throw Self.invalid(path, overflow.message) }
             if node["keyframes"] != nil { keyframeNodes += 1 }
             if keyframeNodes > (limits["MAX_PROTOTYPE_KEYFRAME_NODES"] ?? 0) {
                 throw Self.invalid("\(path).keyframes", "Keyframe node limit exceeded")

@@ -92,7 +92,7 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 \`replace {stack, screen}\` append, remove the top, reset to [start], and swap the top respectively.
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
-\`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
+\`prototype_stack_v1\`; ≤64 screens, each 2000 nodes/32 images with its surroundings, 10000/160 per spec.
 Routes (requires \`prototype_routes_v1\`; older devices refuse them):
 keep \`screens\` as bare nodes and optionally add \`routes:{screen:{params?,onEnter?,onBack?}}\`.
 Declare up to 16 params per screen as string|number|boolean; names match [A-Za-z_][A-Za-z0-9_]*.

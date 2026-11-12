@@ -42,6 +42,7 @@ final class PrototypeLimitsTests: XCTestCase {
         XCTAssertEqual(PrototypeLimits.maxEmitPayloadDepth, limits["MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH"])
         XCTAssertEqual(PrototypeLimits.maxPatchOps, limits["MAX_PROTOTYPE_PATCH_OPS"])
         XCTAssertEqual(PrototypeLimits.maxNodes, limits["MAX_PROTOTYPE_NODES"])
+        XCTAssertEqual(PrototypeLimits.maxSpecNodes, limits["MAX_PROTOTYPE_SPEC_NODES"])
         XCTAssertEqual(PrototypeLimits.maxDepth, limits["MAX_PROTOTYPE_DEPTH"])
         XCTAssertEqual(PrototypeLimits.maxSpecBytes, limits["MAX_PROTOTYPE_SPEC_BYTES"])
         let definitions = try XCTUnwrap(contract?["definitions"] as? [String: Any])

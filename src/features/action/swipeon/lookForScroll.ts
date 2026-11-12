@@ -39,11 +39,15 @@ export function oppositeDirection(direction: SwipeDirection): SwipeDirection {
   return opposite[direction];
 }
 
-/** Keyed descendants of the observed container, in hierarchy order. */
-function containerItems(
-  observation: ObserveResult,
-  container: Element,
-): Array<{ key: string; bounds: SearchableEntry["bounds"]; value?: string }> {
+interface ContainerItem {
+  /** Overlap identity; absent for an editable whose only text is its value or iOS hint. */
+  key?: string;
+  bounds: SearchableEntry["bounds"];
+  textSources: SearchableEntry["textSources"];
+}
+
+/** Visible descendants of the observed container that carry text or an id, in hierarchy order. */
+function containerItems(observation: ObserveResult, container: Element): ContainerItem[] {
   if (!observation.viewHierarchy) {
     return [];
   }
@@ -55,7 +59,7 @@ function containerItems(
       boundsEqual(node.element.bounds, container.bounds),
   );
   const descendants = new Set<number>();
-  const items: Array<{ key: string; bounds: SearchableEntry["bounds"]; value?: string }> = [];
+  const items: ContainerItem[] = [];
   for (const node of nodes) {
     if (node === root) {
       descendants.add(node.index);
@@ -65,9 +69,12 @@ function containerItems(
       continue;
     }
     descendants.add(node.index);
-    const key = scrollItemKey(node, container.bounds);
-    if (key) {
-      items.push({ key, bounds: node.bounds, value: node.textSources.value });
+    if (!isVisibleItem(node, container.bounds)) {
+      continue;
+    }
+    const key = scrollItemKey(node);
+    if (key || isEditableItem(node)) {
+      items.push({ key, bounds: node.bounds, textSources: node.textSources });
     }
   }
   return items;
@@ -80,6 +87,9 @@ export function visibleScrollKeys(
 ): Map<string, number> {
   const counts = new Map<string, number>();
   for (const { key } of containerItems(observation, container)) {
+    if (key === undefined) {
+      continue;
+    }
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   // Keep repeated identities: shared presence still establishes overlap.
@@ -90,14 +100,21 @@ export function visibleScrollKeys(
  * The container's visible items with their positions; `""` when it has none.
  * Equal signatures mean the list did not scroll, even when chrome outside the
  * container (a clock, an edge indicator) changed the whole-screen fingerprint.
- * Editable values count: a virtualized form can reuse ids, placeholders and
- * bounds while scrolling different values.
+ * Every searched text source counts, including editable values and iOS hints:
+ * a virtualized form can reuse ids, labels and bounds while scrolling different
+ * values or placeholders, and a value-only field still has a position.
  */
 export function containerContentSignature(observation: ObserveResult, container: Element): string {
   const items = containerItems(observation, container);
   return items.length === 0
     ? ""
-    : JSON.stringify(items.map(({ key, bounds, value }) => [key, bounds, value ?? null]));
+    : JSON.stringify(
+        items.map(({ key, bounds, textSources }) => [
+          key ?? null,
+          bounds,
+          Object.entries(textSources).sort(([a], [b]) => a.localeCompare(b)),
+        ]),
+      );
 }
 
 export interface ContainerContent {
@@ -116,17 +133,21 @@ export function itemsStayed(previous: ContainerContent, observation: ObserveResu
   );
 }
 
-function scrollItemKey(node: SearchableEntry, viewport: Element["bounds"]): string | undefined {
+function isVisibleItem(node: SearchableEntry, viewport: Element["bounds"]): boolean {
   if (!node.bounds || node.categories.scrollable || !intersectBounds(node.bounds, viewport)) {
-    return;
+    return false;
   }
-  if (
-    [node.properties.visible, node.properties["visible-to-user"]].some(
-      (value) => value === false || value === "false",
-    )
-  ) {
-    return;
-  }
+  return ![node.properties.visible, node.properties["visible-to-user"]].some(
+    (value) => value === false || value === "false",
+  );
+}
+
+/** An editable field: `toSearchable` captures `value` (even empty) or an iOS hint only for those. */
+function isEditableItem(node: SearchableEntry): boolean {
+  return node.textSources.value !== undefined || node.textSources["hint-text"] !== undefined;
+}
+
+function scrollItemKey(node: SearchableEntry): string | undefined {
   const {
     text,
     "content-desc": description,

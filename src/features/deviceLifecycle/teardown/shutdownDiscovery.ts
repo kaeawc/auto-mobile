@@ -16,6 +16,9 @@ import { getShutdownInitiatingExecutionId, isShutdownTimeoutError } from "./shut
 import { isUnknownAndroidRuntimeName } from "../identity/androidIdentity";
 import { type ShutdownOwnershipContext } from "./shutdownOwnership";
 
+/** Timeout detail when a discovery read itself did not finish before its deadline. */
+export const SHUTDOWN_DISCOVERY_INCOMPLETE_DETAIL = "platform discovery did not complete";
+
 export const DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF = fixedBackoff(1_000);
 
 export interface ShutdownDiscoveryContext {
@@ -51,7 +54,7 @@ export async function getShutdownDiscovery(
 ) {
   const { deviceManager, device, timer, deadlineMs, requestAbortSignal, timeoutMs } = context;
   return await runWithinShutdownDeadline(device, timer, deadlineMs, {
-    detail: "platform discovery did not complete",
+    detail: SHUTDOWN_DISCOVERY_INCOMPLETE_DETAIL,
     requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
     operation: async () => {
       const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
@@ -208,7 +211,7 @@ export async function waitForDeviceShutdown(
   skipAndroidNameEnrichment = false,
 ): Promise<BootedDevice | undefined> {
   const { device, timer, deadlineMs, timeoutMs } = context;
-  let lastDiscoveryDetail = "platform discovery did not complete";
+  let lastDiscoveryDetail = SHUTDOWN_DISCOVERY_INCOMPLETE_DETAIL;
   for (;;) {
     if (timer.now() >= deadlineMs) {
       throw shutdownTimeoutError(device, lastDiscoveryDetail, timeoutMs);

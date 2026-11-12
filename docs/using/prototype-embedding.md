@@ -7,7 +7,17 @@ fonts. Only a short host file is generated per app, and the renderer draws the r
 
 ## Add the library
 
-**Android** (Jetpack Compose), from Maven Central:
+**Android** (Jetpack Compose). The renderer is not on Maven Central yet, so build it from the
+release tag and publish it to your local Maven repository (`~/.m2`). This needs JDK 21 and an
+Android SDK (`ANDROID_HOME` set, or `sdk.dir` in `android/local.properties`):
+
+```bash
+git clone --depth 1 --branch <version> https://github.com/kaeawc/auto-mobile.git
+cd auto-mobile/android
+./gradlew :protocol:publishToMavenLocal :prototype-compose:publishToMavenLocal -PVERSION_NAME=<version>
+```
+
+Then add `mavenLocal()` to the app's repositories and depend on it:
 
 ```kotlin
 dependencies {

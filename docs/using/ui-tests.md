@@ -16,14 +16,40 @@ not record video.
 
 **Gradle**
 
-Add the JUnit runner to the module that owns the tests:
+Maven Central has the AutoMobile Android libraries only up to `0.0.67`; newer
+releases are not published there yet. To use a newer release, build the runner from
+that release's tag and publish it to your local Maven repository (`~/.m2`). This
+needs JDK 21 and an Android SDK (`ANDROID_HOME` set, or `sdk.dir` in
+`android/local.properties`):
+
+```bash
+git clone --depth 1 --branch 0.0.93 https://github.com/kaeawc/auto-mobile.git
+cd auto-mobile/android
+./gradlew :test-plan-validation:publishToMavenLocal :junit-runner:publishToMavenLocal -PVERSION_NAME=0.0.93
+```
+
+Then add `mavenLocal()` to the consuming project's repositories and the JUnit runner
+to the module that owns the tests:
 
 ```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        mavenLocal()
+        google()
+        mavenCentral()
+    }
+}
+
 // app/build.gradle.kts
 dependencies {
     testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.93")
 }
 ```
+
+To resolve the runner from Maven Central instead, skip the build, leave out
+`mavenLocal()`, and use version `0.0.67` for the runner and for the CLI pin in
+[Pin a release in CI](#6-pin-a-release-in-ci).
 
 The runner executes as a normal JVM test, so no test APK or
 `connectedAndroidTest` task is required. Ensure `adb` is on `PATH` and an

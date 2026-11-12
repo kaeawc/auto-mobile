@@ -301,6 +301,8 @@ patterns = (
     ),
     (r"(auto-mobile-junit-runner:)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
     (r"(AUTOMOBILE_VERSION=)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
+    (r"(--branch )\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?(?= https://github\.com/kaeawc/auto-mobile\.git)", rf"\g<1>{version}"),
+    (r"(-PVERSION_NAME=)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
     (r"(@kaeawc/auto-mobile@)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
     (
         r'(\.package\(url: "https://github\.com/kaeawc/auto-mobile\.git", from: ")'

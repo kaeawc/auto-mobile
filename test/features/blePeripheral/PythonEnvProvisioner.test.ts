@@ -9,6 +9,7 @@ import type { ExecResult } from "../../../src/models";
 import { shellQuote } from "../../../src/utils/shellQuote";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
+import { FakeDirectoryLock } from "../../fakes/FakeDirectoryLock";
 
 function pythonVersion(stdout: string, stderr = ""): ExecResult {
   return {
@@ -26,13 +27,16 @@ function setup() {
   commands.setCommandResponse("python3 --version", pythonVersion("Python 3.12.4\n"));
   const directory = join("fake", "data", "ble-peripheral");
   const python = join(directory, "venv", "bin/python3");
-  const env = new ManagedPythonEnvProvisioner({
-    files,
-    commands,
-    directory: () => directory,
-    platform: "linux",
-  });
-  return { files, commands, directory, python, env };
+  const lock = new FakeDirectoryLock();
+  const create = () =>
+    new ManagedPythonEnvProvisioner({
+      files,
+      commands,
+      directory: () => directory,
+      platform: "linux",
+      lock,
+    });
+  return { files, commands, directory, python, lock, create, env: create() };
 }
 
 describe("managed BLE Python environment", () => {
@@ -99,6 +103,37 @@ describe("managed BLE Python environment", () => {
     await expect(env.ensure()).rejects.toThrow(
       `${shellQuote(python)} -I -m pip install ${BLE_PYTHON_PINS.join(" ")}`,
     );
+    expect(files.getWrittenFiles().size).toBe(0);
+  });
+
+  test("provisioning runs under the directory lock; two processes sharing it build the venv once", async () => {
+    const { env, create, commands, directory, files, lock, python } = setup();
+    // The fake venv command creates nothing, so model the interpreter it would leave behind.
+    files.setFile(python, "fake executable");
+    // Each provisioner models a separate daemon process: no shared in-memory pending promise.
+    expect(await Promise.all([env.ensure(), create().ensure()])).toEqual([python, python]);
+    expect(lock.acquired).toEqual([directory, directory]);
+    expect(
+      commands.getExecutedCommands().filter((c) => c.includes("-m venv --clear")),
+    ).toHaveLength(1);
+  });
+
+  test("a venv another process finished while this one waited is reused without --clear", async () => {
+    const { env, commands, directory, files, lock, python } = setup();
+    lock.onAcquire = () => {
+      files.setFile(python, "fake executable");
+      files.setFile(join(directory, "pins.json"), JSON.stringify(BLE_PYTHON_PINS));
+    };
+    expect(await env.ensure()).toBe(python);
+    expect(commands.wasCommandExecuted("-m venv")).toBe(false);
+    expect(commands.wasCommandExecuted("pip")).toBe(false);
+  });
+
+  test("a lock timeout fails provisioning without touching the venv", async () => {
+    const { env, commands, files, lock } = setup();
+    lock.error = new ActionableError("Timed out waiting for the BLE Python environment lock");
+    await expect(env.ensure()).rejects.toThrow(/Timed out waiting for the BLE Python environment/);
+    expect(commands.wasCommandExecuted("-m venv")).toBe(false);
     expect(files.getWrittenFiles().size).toBe(0);
   });
 });

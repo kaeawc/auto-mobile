@@ -260,6 +260,12 @@ export class PrototypePreviewServer implements PrototypePreviewControl {
       return;
     }
     const route = parsePrototypePreviewRoute(request.url);
+    if (route.kind === "events" && request.method === "HEAD") {
+      // A probe gets the stream's headers but no subscription, so it cannot hold off the idle stop.
+      response.writeHead(200, PROTOTYPE_PREVIEW_EVENT_HEADERS);
+      response.end();
+      return;
+    }
     if (route.kind === "events") {
       this.openStream(route.id, response);
       return;

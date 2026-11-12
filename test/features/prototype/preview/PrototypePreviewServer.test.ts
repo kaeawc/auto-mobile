@@ -115,6 +115,18 @@ describe("PrototypePreviewServer idle timeout", () => {
     await Promise.resolve();
     expect(server.info()?.running).toBe(false);
   });
+
+  test("a HEAD probe of the event stream ends at once and does not hold the server", async () => {
+    await server.serve({ idleTimeoutMs: 5000 });
+    const probe = http.request("/p/a/events", { ...LOCAL, method: "HEAD" });
+    expect(probe.ended).toBe(true);
+    expect(probe.status).toBe(200);
+    expect(probe.headers["content-type"]).toBe("text/event-stream; charset=utf-8");
+    expect(probe.body).toBe("");
+    await timer.advanceTimersByTimeAsync(5000);
+    await Promise.resolve();
+    expect(server.info()).toEqual({ running: false, stoppedReason: "idle" });
+  });
 });
 
 describe("PrototypePreviewServer event streams", () => {

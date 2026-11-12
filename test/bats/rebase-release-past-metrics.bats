@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
 #
 # Tests for scripts/release/rebase-release-past-metrics.sh (#18175).
 #

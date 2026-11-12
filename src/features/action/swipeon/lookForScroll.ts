@@ -39,13 +39,13 @@ export function oppositeDirection(direction: SwipeDirection): SwipeDirection {
   return opposite[direction];
 }
 
-/** Bounds-independent child identities, scoped through the existing hierarchy projection. */
-export function visibleScrollKeys(
+/** Keyed descendants of the observed container, in hierarchy order. */
+function containerItems(
   observation: ObserveResult,
   container: Element,
-): Map<string, number> {
+): Array<{ key: string; bounds: SearchableEntry["bounds"] }> {
   if (!observation.viewHierarchy) {
-    return new Map();
+    return [];
   }
   const nodes = searchable.project(observation.viewHierarchy);
   const root = nodes.find(
@@ -55,7 +55,7 @@ export function visibleScrollKeys(
       boundsEqual(node.element.bounds, container.bounds),
   );
   const descendants = new Set<number>();
-  const counts = new Map<string, number>();
+  const items: Array<{ key: string; bounds: SearchableEntry["bounds"] }> = [];
   for (const node of nodes) {
     if (node === root) {
       descendants.add(node.index);
@@ -66,13 +66,50 @@ export function visibleScrollKeys(
     }
     descendants.add(node.index);
     const key = scrollItemKey(node, container.bounds);
-    if (!key) {
-      continue;
+    if (key) {
+      items.push({ key, bounds: node.bounds });
     }
+  }
+  return items;
+}
+
+/** Bounds-independent child identities, scoped through the existing hierarchy projection. */
+export function visibleScrollKeys(
+  observation: ObserveResult,
+  container: Element,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const { key } of containerItems(observation, container)) {
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   // Keep repeated identities: shared presence still establishes overlap.
   return counts;
+}
+
+/**
+ * The container's visible items with their positions; `""` when it has none.
+ * Equal signatures mean the list did not scroll, even when chrome outside the
+ * container (a clock, an edge indicator) changed the whole-screen fingerprint.
+ */
+export function containerContentSignature(observation: ObserveResult, container: Element): string {
+  const items = containerItems(observation, container);
+  return items.length === 0 ? "" : JSON.stringify(items.map(({ key, bounds }) => [key, bounds]));
+}
+
+export interface ContainerContent {
+  container: Element;
+  signature: string;
+}
+
+/**
+ * Items left in place mean the list did not move, even when chrome outside the
+ * container changed the whole-screen fingerprint at a list edge (#18034).
+ */
+export function itemsStayed(previous: ContainerContent, observation: ObserveResult): boolean {
+  return (
+    previous.signature !== "" &&
+    containerContentSignature(observation, previous.container) === previous.signature
+  );
 }
 
 function scrollItemKey(node: SearchableEntry, viewport: Element["bounds"]): string | undefined {

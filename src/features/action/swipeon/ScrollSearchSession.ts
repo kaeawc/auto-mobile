@@ -23,7 +23,14 @@ import { waitForScrollIdle } from "../../../utils/scrollIdle";
 import type { DisplayFence, ProgressCallback } from "../BaseVisualChange";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { type SwipeCounter } from "./searchCancellation";
-import { capLookForTravel, oppositeDirection, visibleScrollKeys } from "./lookForScroll";
+import {
+  capLookForTravel,
+  type ContainerContent,
+  containerContentSignature,
+  itemsStayed,
+  oppositeDirection,
+  visibleScrollKeys,
+} from "./lookForScroll";
 import type { AndroidSearchDragState } from "./androidSearchDrag";
 import type {
   ScrollUntilVisibleDependencies,
@@ -112,6 +119,8 @@ interface ScrollSearchOperations {
 interface SearchStep {
   dispatch: SearchSwipeDispatchOptions;
   previousKeys: Map<string, number>;
+  /** The container and its item positions before this swipe, for end-of-list evidence. */
+  previousContent: ContainerContent;
   chromeStartWarning?: string;
 }
 type SearchStepOutcome =
@@ -240,8 +249,11 @@ export class ScrollSearchSession {
       this.recordForwardMovement(
         { observation: forwardObservation, fingerprint: forwardFingerprint },
         currentFingerprint,
-        recoveryAttempted,
-        outcome.failedAndroidSwipe,
+        {
+          recoveryAttempted,
+          failedAndroidSwipe: outcome.failedAndroidSwipe,
+          previousContent: step.previousContent,
+        },
       );
       if (this.foundElement) {
         break;
@@ -252,6 +264,7 @@ export class ScrollSearchSession {
         currentFingerprint,
         failedAndroidSwipe: outcome.failedAndroidSwipe,
         chromeStartWarning: step.chromeStartWarning,
+        previousContent: step.previousContent,
       });
       this.recordIterationTime(wasReverse, this.deps.timer.now() - iterationStart);
     }
@@ -348,13 +361,30 @@ export class ScrollSearchSession {
   private recordForwardMovement(
     forward: { observation: ObserveResult; fingerprint: string },
     currentFingerprint: string,
-    recoveryAttempted: boolean,
-    failedAndroidSwipe: boolean,
+    {
+      recoveryAttempted,
+      failedAndroidSwipe,
+      previousContent,
+    }: {
+      recoveryAttempted: boolean;
+      failedAndroidSwipe: boolean;
+      previousContent: ContainerContent;
+    },
   ): void {
     if (recoveryAttempted) {
-      this.recordMovedSwipe(forward.fingerprint, failedAndroidSwipe, forward.observation);
+      this.recordMovedSwipe(
+        forward.fingerprint,
+        failedAndroidSwipe,
+        forward.observation,
+        previousContent,
+      );
     } else {
-      this.recordMovedSwipe(currentFingerprint, failedAndroidSwipe, this.lastObservation);
+      this.recordMovedSwipe(
+        currentFingerprint,
+        failedAndroidSwipe,
+        this.lastObservation,
+        previousContent,
+      );
     }
   }
 
@@ -362,13 +392,15 @@ export class ScrollSearchSession {
     currentFingerprint: string,
     failedAndroidSwipe: boolean,
     observation: ObserveResult,
+    previousContent: ContainerContent,
   ): void {
     if (
       !failedAndroidSwipe &&
       observation.freshness?.isFresh !== false &&
       currentFingerprint &&
       this.lastFingerprint &&
-      currentFingerprint !== this.lastFingerprint
+      currentFingerprint !== this.lastFingerprint &&
+      !itemsStayed(previousContent, observation)
     ) {
       this.movedSwipes++;
     }
@@ -584,6 +616,10 @@ export class ScrollSearchSession {
     // Forward uses the requested direction (the overlap guard owns bounded back-scrolls);
     // once forward reaches its end, a half-screen slow reverse sweep searches back.
     const previousKeys = visibleScrollKeys(this.lastObservation, this.containerElement);
+    const previousContent = {
+      container: this.containerElement,
+      signature: containerContentSignature(this.lastObservation, this.containerElement),
+    };
     const activeCoords = this.reverseMode
       ? this.host.computeHalfScreenReverseCoords(this.reverseDirection, reverseBounds)
       : this.deps.device.platform === "android" && this.request.strategy
@@ -612,6 +648,7 @@ export class ScrollSearchSession {
 
     return {
       previousKeys,
+      previousContent,
       chromeStartWarning,
       dispatch: {
         coordinates: activeCoords,
@@ -838,14 +875,17 @@ export class ScrollSearchSession {
     currentFingerprint,
     failedAndroidSwipe,
     chromeStartWarning,
+    previousContent,
   }: {
     recoveryAttempted: boolean;
     currentFingerprint: string;
     failedAndroidSwipe: boolean;
     chromeStartWarning?: string;
+    previousContent: ContainerContent;
   }): Promise<void> {
     // A guard-restored page is not evidence that the forward step reached the end.
-    const fingerprintChanged = recoveryAttempted || currentFingerprint !== this.lastFingerprint;
+    const fingerprintChanged =
+      recoveryAttempted || this.screenMoved(currentFingerprint, previousContent);
     logger.info(
       `[SwipeOn] Iteration ${this.scrollIteration}: hierarchy ${fingerprintChanged ? "changed" : "UNCHANGED"} (fingerprint[0:40]="${currentFingerprint.slice(0, 40)}")`,
     );
@@ -888,6 +928,13 @@ export class ScrollSearchSession {
     this.lastFingerprint = currentFingerprint;
 
     logger.info(`[SwipeOn] Iteration ${this.scrollIteration}: ${this.target} not yet found`);
+  }
+
+  private screenMoved(currentFingerprint: string, previousContent: ContainerContent): boolean {
+    return (
+      currentFingerprint !== this.lastFingerprint &&
+      !itemsStayed(previousContent, this.lastObservation)
+    );
   }
 
   /** Forward end switches to the reverse sweep; reachedEnd only once both directions are exhausted. */

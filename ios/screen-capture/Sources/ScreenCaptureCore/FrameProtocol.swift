@@ -1,6 +1,6 @@
 import Foundation
 
-/// Binary frame protocol matching docs/design-docs/plat/ios/screen-streaming.md.
+/// Binary frame protocol matching docs/how-it-works/plat/ios/screen-streaming.md.
 ///
 /// Wire format (header = 24 bytes, little-endian UInt32):
 ///

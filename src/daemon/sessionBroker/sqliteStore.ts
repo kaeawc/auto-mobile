@@ -1,5 +1,5 @@
 import { activationHardware } from "./profile";
-import { sameProcess } from "./brokerSupport";
+import { foreignOwnerRefusal, sameProcess } from "./brokerSupport";
 import { countSessionAdmissions, occupiedResources } from "./sqliteAdmissions";
 import { completedAcquisitionTiming, pendingAcquisitionTiming } from "./timingRecorder";
 import { requestRecord, resourceRecord, readRequest, readResource } from "./sqliteRecords";
@@ -340,7 +340,10 @@ export class SqliteSessionBrokerStore {
       if (
         previous.fingerprint !== sessionRequestFingerprint(previous.parameters, livenessOwnerToken)
       ) {
-        throw new ActionableError("Session request belongs to another liveness owner");
+        const resource = previous.resourceId
+          ? await readResource(trx, previous.resourceId)
+          : undefined;
+        throw foreignOwnerRefusal(previous, resource, false);
       }
       if (previous.state === "released" || previous.state === "failed") {
         return {

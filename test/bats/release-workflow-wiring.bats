@@ -178,7 +178,20 @@
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Promote verified release and create tag") | .run' "$workflow"
   [ "$status" -eq 0 ]
   [[ "$output" == *'git push origin "$EXPECTED_RELEASE_COMMIT":main'* ]]
-  [[ "$output" == *'git tag "$TAG" "$EXPECTED_RELEASE_COMMIT"'* ]]
+  [[ "$output" == *'git tag "$TAG" "$release_commit"'* ]]
+  # Main that moved only by docs/metrics/** commits is promoted past (#18175).
+  [[ "$output" == *'bash scripts/release/rebase-release-past-metrics.sh rebase'* ]]
+  [[ "$output" == *'git diff --no-renames --name-only "$EXPECTED_RELEASE_COMMIT" "$existing_tag_commit"'* ]]
+  [[ "$output" == *'if ! git merge-base --is-ancestor "$release_commit" FETCH_HEAD; then
+        git push origin "$release_commit":main
+      fi'* ]]
+  [[ "$output" == *'echo "release_commit=$release_commit" >> "$GITHUB_OUTPUT"'* ]]
+
+  # Provenance and the Release dispatch name the commit that was actually tagged.
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Create release artifact provenance") | .env.TAG_SHA' "$workflow"
+  [ "$output" = '${{ steps.promote.outputs.release_commit }}' ]
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Start the release") | .env.RELEASE_SHA' "$workflow"
+  [ "$output" = '${{ steps.promote.outputs.release_commit }}' ]
 }
 
 @test "prepare-release builds the notarized Network Filter probe with both provisioning profiles" {

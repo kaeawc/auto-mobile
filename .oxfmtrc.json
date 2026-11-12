@@ -88,6 +88,6 @@
     "**/*.generated.ts",
     "**/generated/**",
     "test/bats/fixtures/compose-compiler-report/**/*.json",
-    "docs/design-docs/plat/android/prototype-compose-compiler-report.md"
+    "docs/how-it-works/plat/android/prototype-compose-compiler-report.md"
   ]
 }

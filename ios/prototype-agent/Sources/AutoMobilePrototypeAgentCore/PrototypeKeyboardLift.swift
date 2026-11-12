@@ -1,7 +1,7 @@
 import Foundation
 
 /// Lifts a bottom `sheet` above the on-screen keyboard, as Android does (owner decision 2026-10-09,
-/// docs/design-docs/plat/android/prototype-ux.md "Bottom sheet and the keyboard"). Device-free: the
+/// docs/how-it-works/plat/android/prototype-ux.md "Bottom sheet and the keyboard"). Device-free: the
 /// agent feeds it the keyboard frame from UIKit's keyboard notifications.
 ///
 /// Exactly one mechanism moves the sheet: `amount`, applied as bottom padding inside a full-window

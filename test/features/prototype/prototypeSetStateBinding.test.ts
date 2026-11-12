@@ -3,7 +3,7 @@ import { validatePrototypeSpec } from "../../../src/features/prototype/prototype
 
 /**
  * The host refuses toggle/increment/decrement on a mistyped key but not setState, although
- * docs/design-docs/plat/android/prototype-ux.md says setState must preserve a binding's scalar
+ * docs/how-it-works/plat/android/prototype-ux.md says setState must preserve a binding's scalar
  * type and that "the validators should refuse at show" a setState whose value type does not fit a
  * control bound to the key. The iOS agent does not re-validate at runtime, so the host is the only
  * gate on iOS; on Android the runtime silently rejects the whole tap.

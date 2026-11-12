@@ -8,7 +8,7 @@ import { canonicalJson } from "./canonicalJson";
  *
  * The scheme is Ed25519 (RFC 8032) over a domain-separated, length-prefixed byte string, so a
  * signature cannot be replayed under another key id, algorithm or protocol. See
- * docs/design-docs/ci/attestation-envelope.md.
+ * docs/how-it-works/ci/attestation-envelope.md.
  */
 export const ED25519_ALGORITHM = "ed25519-v1";
 

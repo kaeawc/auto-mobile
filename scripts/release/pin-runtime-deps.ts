@@ -186,7 +186,7 @@ function writeMode(): void {
 
   const manifest: Manifest = {
     description:
-      "Pinned runtime dependency graph for @kaeawc/auto-mobile. Regenerate with `bun scripts/release/pin-runtime-deps.ts --write` after a dependency or security update; see docs/design-docs/release/runtime-dependency-pinning.md.",
+      "Pinned runtime dependency graph for @kaeawc/auto-mobile. Regenerate with `bun scripts/release/pin-runtime-deps.ts --write` after a dependency or security update; see docs/how-it-works/release/runtime-dependency-pinning.md.",
     issue: 5421,
     roots: intended.roots,
     dependencies: intended.dependencies,

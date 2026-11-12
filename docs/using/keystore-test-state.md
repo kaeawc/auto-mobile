@@ -93,7 +93,7 @@ call's remaining operations run without delay. A `resetKeychain` reset waits up 
 
 `STRONGBOX_UNAVAILABLE` affects key generation only, and only in an app that runs
 the debug SDK's key-generation check with its key spec immediately before
-generating a key ([integration](../design-docs/plat/android/keystore-strongbox-fault.md)).
+generating a key ([integration](../how-it-works/plat/android/keystore-strongbox-fault.md)).
 When the alias is armed and the spec requests StrongBox, generation fails with
 `StrongBoxUnavailableException`, as it does on a device without StrongBox, so the
 app's fallback runs. Keys that do not request StrongBox, unarmed aliases, API

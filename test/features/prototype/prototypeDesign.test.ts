@@ -87,7 +87,7 @@ test("native coverage is exactly today's SwiftUI control set", () => {
 for (const doc of ["android/prototype-ux.md", "ios/prototype-agent.md"]) {
   test(`design coverage table in ${doc} matches the contract`, () => {
     const prose = readFileSync(
-      new URL(`../../../docs/design-docs/plat/${doc}`, import.meta.url),
+      new URL(`../../../docs/how-it-works/plat/${doc}`, import.meta.url),
       "utf8",
     );
     const rows = prose

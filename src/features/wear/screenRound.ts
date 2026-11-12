@@ -6,7 +6,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 /**
  * `Display.FLAG_ROUND` as `dumpsys display` prints it (#14948). Hypothesis: the flag name in
  * the default display's `DisplayInfo{...}` / `DisplayDeviceInfo{...}` line is unconfirmed on a
- * Wear image (docs/design-docs/plat/android/form-factors.md, checklist row 8).
+ * Wear image (docs/how-it-works/plat/android/form-factors.md, checklist row 8).
  */
 const ROUND_FLAG = /\bFLAG_ROUND\b/;
 const DEFAULT_DISPLAY_INFO = /DisplayInfo\{[^\n]*\bdisplayId 0\b/;

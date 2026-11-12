@@ -123,16 +123,16 @@ function fixture(name = "ambroker-stale") {
 
 describe("stale broker snapshot cleanup", () => {
   for (const name of ["ambroker-stale", "amslot-stale"]) {
-    test(`${name} removes capture and retains baseline and default_boot`, async () => {
+    test(`${name} removes capture and default_boot and retains baseline`, async () => {
       const f = fixture(name);
       const [report] = await f.run();
-      expect(report.deletedSnapshotNames).toEqual(["capture"]);
-      expect(report.keptSnapshots.map((entry) => entry.snapshotName)).toEqual([
-        "default_boot",
-        baseline,
+      expect(report.deletedSnapshotNames).toEqual(["capture", "default_boot"]);
+      expect(report.keptSnapshots.map((entry) => entry.snapshotName)).toEqual([baseline]);
+      expect(f.filesystem.removed).toEqual([
+        join(f.resolver.directory!, "snapshots", "capture"),
+        join(f.resolver.directory!, "snapshots", "default_boot"),
       ]);
-      expect(f.filesystem.removed).toEqual([join(f.resolver.directory!, "snapshots", "capture")]);
-      expect(f.liveness.calls).toBe(2);
+      expect(f.liveness.calls).toBe(3);
     });
   }
   test("any registry reference, including a case mismatch, retains everything", async () => {
@@ -185,11 +185,45 @@ describe("stale broker snapshot cleanup", () => {
   for (const name of ["amverify-old", "user-avd", "AMBROKER-stale"]) {
     test(`never deletes ${name}`, async () => {
       const f = fixture(name);
-      await f.run();
+      const [report] = await f.run();
       expect(f.filesystem.removed).toEqual([]);
+      expect(report.keptSnapshots.map(({ snapshotName }) => snapshotName)).toContain(
+        "default_boot",
+      );
     });
   }
-  test("pure plan protects case aliases and respects validation evidence", () => {
+  test("default_boot of a referenced or running broker AVD is kept", async () => {
+    for (const mode of ["referenced", "running"]) {
+      const f = fixture();
+      f.registry.names = mode === "referenced" ? [f.name] : [];
+      f.liveness.process = mode === "running";
+      const [report] = await f.run();
+      expect(report.deletedSnapshotNames).toEqual([]);
+      expect(report.keptSnapshots.map(({ snapshotName }) => snapshotName)).toContain(
+        "default_boot",
+      );
+      expect(f.filesystem.removed).toEqual([]);
+    }
+  });
+  test("pure plan keeps default_boot when the AVD is kept and deletes it otherwise", () => {
+    const evidence = {
+      avdName: "amslot-old",
+      snapshotNames: ["default_boot", baseline],
+      referencedAvdNames: [],
+      running: false,
+    };
+    expect(planAvdSnapshotCleanup(evidence).deleteNames).toEqual(["default_boot"]);
+    for (const kept of [
+      { ...evidence, avdName: "user-avd" },
+      { ...evidence, referencedAvdNames: ["AMSLOT-OLD"] },
+      { ...evidence, running: null },
+      { ...evidence, running: true },
+      { ...evidence, referencedAvdNames: null },
+    ]) {
+      expect(planAvdSnapshotCleanup(kept).deleteNames).toEqual([]);
+    }
+  });
+  test("pure plan protects baseline case aliases and respects validation evidence", () => {
     const plan = planAvdSnapshotCleanup({
       avdName: "ambroker-old",
       snapshotNames: ["../escape", "a\\b", "DEFAULT_BOOT", baseline.toUpperCase(), "capture"],
@@ -200,8 +234,8 @@ describe("stale broker snapshot cleanup", () => {
         ["a\\b", "invalid segment"],
       ]),
     });
-    expect(plan.deleteNames).toEqual(["capture"]);
-    expect(plan.keptSnapshots).toHaveLength(4);
+    expect(plan.deleteNames).toEqual(["DEFAULT_BOOT", "capture"]);
+    expect(plan.keptSnapshots).toHaveLength(3);
   });
   test("invalid snapshot segments are kept by the executor", async () => {
     const f = fixture();
@@ -257,7 +291,7 @@ describe("snapshot cleanup on disk", () => {
   const scratch = useScratchRoot("avd-cleanup-");
   const diskFilesystem = nodeAvdSnapshotCleanupFilesystem;
 
-  test("real temporary AVD tree deletes only stale capture directories", async () => {
+  test("real temporary AVD tree deletes stale captures and default_boot, not the baseline", async () => {
     const home = await realpath(scratch.next());
     const f = fixture();
     f.resolver = new FakeResolver(home, f.name);
@@ -270,8 +304,9 @@ describe("snapshot cleanup on disk", () => {
       resolver: f.resolver,
       filesystem: diskFilesystem,
     });
-    expect(report.deletedSnapshotNames).toEqual(["capture"]);
-    expect(await sortedReaddir(root)).toEqual([baseline, "default_boot"]);
+    expect(report.deletedSnapshotNames).toEqual(["capture", "default_boot"]);
+    expect(await sortedReaddir(root)).toEqual([baseline]);
+    expect(await sortedReaddir(f.resolver.directory!)).toEqual(["snapshots"]);
   });
   for (const linkAt of ["avd", "snapshots", "capture"]) {
     test(`does not follow a ${linkAt} symlink`, async () => {

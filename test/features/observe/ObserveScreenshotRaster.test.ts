@@ -23,6 +23,11 @@ import { dirname } from "node:path";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device: BootedDevice = { deviceId: "raster-test", name: "Fake", platform: "android" };
+const captureDiagnostics = {
+  screenshotFallback: true,
+  screenshotFallbackReason: "ctrlproxy_recent_failure" as const,
+  screenshotStageDurationsMs: { adbMs: 200, totalMs: 200 },
+};
 const options = {
   screenshot: "settled" as const,
   skipBackStack: true,
@@ -74,7 +79,11 @@ function setup(
   recorder.captureSettled = async (observationId) => {
     recorder.captureSettledCalls++;
     const path = "/fake/settled.png";
-    store.updateForObservation(device.deviceId, observationId, { path, imageSize: captureSize });
+    store.updateForObservation(device.deviceId, observationId, {
+      path,
+      imageSize: captureSize,
+      metadata: captureDiagnostics,
+    });
     return path;
   };
   let capturedDisplayId: number | undefined;
@@ -89,7 +98,12 @@ function setup(
           capturedDisplayId = captureOptions?.displayId;
           return captureFails
             ? { success: false, error: "capture failed" }
-            : { success: true, path: "/fake/read.png", screenshotImageSize: captureSize };
+            : {
+                success: true,
+                path: "/fake/read.png",
+                screenshotImageSize: captureSize,
+                ...captureDiagnostics,
+              };
         },
         generateScreenshotPath: () => "/fake/read.png",
         getActivityHash: async () => "",
@@ -124,6 +138,7 @@ test("Android identity scale reaches the default skeleton and cached reuse", asy
   const { screen } = setup();
   const result = await screen.execute(options);
   const fields = {
+    ...captureDiagnostics,
     screenshotOrientation: "display",
     screenshotImageSize: { width: 1080, height: 2400 },
     screenshotPixelsPerNativeUnit: { x: 1, y: 1 },
@@ -151,6 +166,7 @@ test("deviceId read uses capture-buffer dimensions without file metadata I/O", a
   const { screen, setCaptureSize } = setup();
   setCaptureSize({ width: 540, height: 1200 });
   expect(await screen.executeDeviceRead()).toMatchObject({
+    ...captureDiagnostics,
     screenshotOrientation: "display",
     screenshotImageSize: { width: 540, height: 1200 },
     screenshotPixelsPerNativeUnit: { x: 0.5, y: 0.5 },

@@ -5,7 +5,7 @@ import { shellQuote } from "../../utils/shellQuote";
  * Device-shell commands `windowMode` runs (#14115). Every one is a candidate: the controller
  * reads `dumpsys activity activities` back after each and stops at the first that reached the
  * requested state, so a command a release lacks costs one attempt, not a wrong answer. See
- * docs/design-docs/plat/android/windowing.md for the per-API-level reasoning; none of these
+ * docs/how-it-works/plat/android/windowing.md for the per-API-level reasoning; none of these
  * has been verified on an emulator yet.
  */
 

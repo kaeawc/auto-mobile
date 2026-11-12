@@ -140,6 +140,9 @@ export interface ObserveDiff {
   screenshotPath?: string;
   screenshotSource?: "fresh" | "cached";
   screenshotCaptureSource?: "device" | "observation-cache";
+  screenshotFallback?: ObserveResult["screenshotFallback"];
+  screenshotFallbackReason?: ObserveResult["screenshotFallbackReason"];
+  screenshotStageDurationsMs?: ObserveResult["screenshotStageDurationsMs"];
   screenshotCapturedAt?: string;
   screenshotAgeMs?: number;
   screenshotHierarchyLagMs?: number;

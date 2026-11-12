@@ -9,7 +9,7 @@ name: "ProtoViewer Release Smoke (advisory)"
 # The previous release's APK must be signed with the same key as the candidate, or `adb install -r`
 # refuses the upgrade; this workflow takes it from a published release asset, so it only runs once a
 # release carries a ProtoViewer APK (#15301). Settings persistence and the iOS screens are not
-# automated; see docs/design-docs/protoviewer.md.
+# automated; see docs/how-it-works/protoviewer.md.
 on:
   workflow_dispatch:
     inputs:

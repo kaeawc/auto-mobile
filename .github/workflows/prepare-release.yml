@@ -109,7 +109,7 @@ jobs:
           base_main_commit="$(git rev-parse HEAD)"
 
           mapfile -t changed_files < <(
-            { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
+            { git diff --no-renames --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
           )
           # The bump script owns the list of files it rewrites; consume it so
           # the allow-list cannot drift from the script again (#5008).
@@ -446,7 +446,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           mapfile -t changed_files < <(
-            { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
+            { git diff --no-renames --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
           )
           if ((${#changed_files[@]} == 0)); then
             echo "Release files are already up to date for v$VERSION"
@@ -656,6 +656,7 @@ jobs:
           bash scripts/ci/verify-desktop-installer-assets.sh "$VERSION" /tmp/desktop
 
       - name: Promote verified release and create tag
+        id: promote
         shell: bash
         env:
           TAG: ${{ inputs.version }}
@@ -664,37 +665,65 @@ jobs:
         run: |
           set -euo pipefail
 
-          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [[ "$remote_main" == "$BASE_MAIN_COMMIT" ]]; then
-            git push origin "$EXPECTED_RELEASE_COMMIT":main
-          elif [[ "$remote_main" != "$EXPECTED_RELEASE_COMMIT" ]]; then
-            # A rerun can arrive after this job promoted and tagged the release,
-            # then a normal main commit landed before a later dispatch step
-            # failed. That is recoverable only when this exact release remains
-            # in main's history; otherwise never tag a different tree.
-            git fetch origin main
-            if ! git merge-base --is-ancestor "$EXPECTED_RELEASE_COMMIT" FETCH_HEAD; then
-              echo "main moved while the release was being verified; refusing to promote a different tree" >&2
-              exit 1
-            fi
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # The commit to push and tag. It stays the verified commit unless main
+          # moved only by docs/metrics/** commits (the download-metrics bot), in
+          # which case it is the verified release replayed onto that main (#18175).
+          release_commit="$EXPECTED_RELEASE_COMMIT"
           git fetch --tags origin
+
           if git rev-parse "$TAG" >/dev/null 2>&1; then
+            # A rerun after this job already promoted and tagged the release.
+            # The tag must be the verified commit, or a rebase of it that
+            # differs only under docs/metrics/** and is already on main.
             existing_tag_commit="$(git rev-parse "$TAG^{commit}")"
             if [[ "$existing_tag_commit" != "$EXPECTED_RELEASE_COMMIT" ]]; then
-              echo "Tag $TAG already exists on a different commit" >&2
-              exit 1
+              git fetch origin main
+              if ! git merge-base --is-ancestor "$existing_tag_commit" FETCH_HEAD \
+                || ! git diff --no-renames --name-only "$EXPECTED_RELEASE_COMMIT" "$existing_tag_commit" \
+                  | bash scripts/release/rebase-release-past-metrics.sh check-paths; then
+                echo "Tag $TAG already exists on a different commit" >&2
+                exit 1
+              fi
             fi
+            release_commit="$existing_tag_commit"
           else
-            git tag "$TAG" "$EXPECTED_RELEASE_COMMIT"
+            remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+            if [[ "$remote_main" == "$BASE_MAIN_COMMIT" ]]; then
+              git push origin "$EXPECTED_RELEASE_COMMIT":main
+            elif [[ "$remote_main" != "$EXPECTED_RELEASE_COMMIT" ]]; then
+              git fetch origin main
+              # A rerun can arrive after this job promoted the release, then a
+              # normal main commit landed before tagging. That is recoverable
+              # only when this exact release remains in main's history.
+              if ! git merge-base --is-ancestor "$EXPECTED_RELEASE_COMMIT" FETCH_HEAD; then
+                # Otherwise main moved while the release was being verified.
+                # Promote only past docs/metrics/** commits; the script refuses
+                # (and this step fails) for any other change.
+                if ! release_commit="$(bash scripts/release/rebase-release-past-metrics.sh rebase \
+                  "$EXPECTED_RELEASE_COMMIT" "$BASE_MAIN_COMMIT" FETCH_HEAD)"; then
+                  echo "main moved while the release was being verified; refusing to promote a different tree" >&2
+                  exit 1
+                fi
+                echo "main moved only under docs/metrics/**; promoting $release_commit (rebase of $EXPECTED_RELEASE_COMMIT)"
+                # Not forced: if main moved again, this push fails closed.
+                if ! git merge-base --is-ancestor "$release_commit" FETCH_HEAD; then
+                  git push origin "$release_commit":main
+                fi
+              fi
+            fi
+            git tag "$TAG" "$release_commit"
             git push origin "$TAG"
           fi
+
+          echo "release_commit=$release_commit" >> "$GITHUB_OUTPUT"
 
       - name: Create release artifact provenance
         env:
           TAG: ${{ inputs.version }}
-          TAG_SHA: ${{ needs.finalize-release.outputs.release_commit }}
+          TAG_SHA: ${{ steps.promote.outputs.release_commit }}
           PREPARE_RUN_ID: ${{ github.run_id }}
         run: |
           jq -n \
@@ -720,7 +749,7 @@ jobs:
           TAG: ${{ inputs.version }}
           REPO: ${{ github.repository }}
           PREPARE_RUN_ID: ${{ github.run_id }}
-          RELEASE_SHA: ${{ needs.finalize-release.outputs.release_commit }}
+          RELEASE_SHA: ${{ steps.promote.outputs.release_commit }}
         run: |
           set -euo pipefail
 

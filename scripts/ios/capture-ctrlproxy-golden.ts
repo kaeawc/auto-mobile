@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Capture golden iOS CtrlProxy exchanges from a runner you started yourself
- * (issue #5837). See docs/design-docs/plat/ios/ctrlproxy-golden-replay.md.
+ * (issue #5837). See docs/how-it-works/plat/ios/ctrlproxy-golden-replay.md.
  *
  * Usage:
  *   AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR=<dir> bun scripts/ios/capture-ctrlproxy-golden.ts \

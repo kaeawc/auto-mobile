@@ -15,7 +15,7 @@ import org.gradle.kotlin.dsl.getByType
 // per-versionCode R8 mapping archive. It replaces automobile.android-app-signing for ProtoViewer,
 // which falls back open and signs debug builds with the release key. Inputs come from the
 // environment (CI) or gradle.properties (local); names live in ProtoViewerInputNames and are
-// documented in docs/design-docs/protoviewer.md. Debug builds always use the debug key.
+// documented in docs/how-it-works/protoviewer.md. Debug builds always use the debug key.
 
 fun input(name: String): String? =
   providers.environmentVariable(name).orElse(providers.gradleProperty(name)).orNull

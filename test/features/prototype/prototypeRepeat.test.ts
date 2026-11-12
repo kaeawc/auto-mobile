@@ -227,7 +227,7 @@ test("the public schema constrains repeat items to flat scalar maps", () => {
 
 test("the documented repeat snippet is a valid spec root", () => {
   const document = readFileSync(
-    join(import.meta.dir, "../../../docs/design-docs/plat/android/prototype-ux.md"),
+    join(import.meta.dir, "../../../docs/how-it-works/plat/android/prototype-ux.md"),
     "utf8",
   ).replace(/\r\n/g, "\n"); // Windows checkouts may convert the doc to CRLF
   const section = document.split("### List templates: repeat")[1];

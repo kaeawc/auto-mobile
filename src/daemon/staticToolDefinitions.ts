@@ -53,6 +53,8 @@ const DEVICE_RESOURCE_BUDGET_META_KEY = "automobile/deviceResourceBudget";
 const HOST_INVENTORY_META_KEY = "automobile/hostInventory";
 const HOST_SIDE_STATE_META_KEY = "automobile/hostSideState";
 const OPAQUE_PERSISTENT_STATE_META_KEY = "automobile/opaquePersistentState";
+/** Catalog-only (#18141): live `tools/list` does not carry it, so the cold start does not either. */
+const REQUIRES_META_KEY = "automobile/requires";
 
 function isConnectedFallbackAvailable(
   tool: RawToolDefinition,
@@ -120,6 +122,7 @@ function toolDefinitions(
     delete meta[HOST_INVENTORY_META_KEY];
     delete meta[HOST_SIDE_STATE_META_KEY];
     delete meta[OPAQUE_PERSISTENT_STATE_META_KEY];
+    delete meta[REQUIRES_META_KEY];
     const definition: ProxiedToolDefinition = {
       name: tool.name,
       title: tool.title,

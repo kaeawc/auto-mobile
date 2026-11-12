@@ -3,7 +3,7 @@ version: 2.1
 # Continuation config for the CircleCI macOS/iOS lanes. Reached from
 # .circleci/config.yml (the setup pipeline). See its header for the why and the
 # REQUIRED dynamic-config project setting, and
-# docs/design-docs/ci/macos-capacity-plan.md for where every macOS job runs.
+# docs/how-it-works/ci/macos-capacity-plan.md for where every macOS job runs.
 #
 # CircleCI runs ONE macOS job at a time for this organization (#11010), so the
 # file holds exactly three kinds of work:
@@ -25,7 +25,7 @@ version: 2.1
 # are "true". No secrets are configured on CircleCI, so everything builds unsigned.
 # The `ios` executor pins both flags to "false" so a project-level environment
 # variable added later can never turn signing on. Release/signing workflows stay
-# on GitHub (#10887, docs/design-docs/ci/circleci-macos-migration.md); no workflow
+# on GitHub (#10887, docs/how-it-works/ci/circleci-macos-migration.md); no workflow
 # in this file references a context.
 #
 # Prototype Simulator moved to the GitHub self-hosted heavy lane (#11011) and iOS
@@ -56,8 +56,8 @@ executors:
     parameters:
       xcode:
         type: string
-        default: "26.5"
-        description: "CircleCI Xcode image tag (26.5 matches the PR toolchain floor)."
+        default: "26.6"
+        description: "CircleCI Xcode image tag (26.6 matches the PR toolchain floor)."
     macos:
       # Verify a tag is offered at
       # https://circleci.com/developer/machine/image/xcode before adding it.
@@ -235,7 +235,7 @@ jobs:
     parameters:
       xcode:
         type: string
-        default: "26.5"
+        default: "26.6"
       superseded-path-group:
         type: string
         default: ""
@@ -325,7 +325,7 @@ jobs:
     parameters:
       xcode:
         type: string
-        default: "26.5"
+        default: "26.6"
     executor:
       name: ios
       xcode: << parameters.xcode >>
@@ -502,7 +502,7 @@ jobs:
           name: "Resolve CtrlProxy Swift package dependencies"
           command: cd ios/control-proxy && swift package resolve
       - run:
-          name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)"
+          name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.6)"
           no_output_timeout: 12m
           command: |
             ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
@@ -537,7 +537,7 @@ jobs:
               echo "export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest"
             } >> "${BASH_ENV}"
       - run:
-          name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
+          name: "Run selected CtrlProxy iOS tests (Xcode 26.6)"
           no_output_timeout: 8m
           command: |
             if [[ ! "${SIMULATOR_UDID}" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
@@ -555,7 +555,7 @@ jobs:
               -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteRemovesFollowingCharacter \
               -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteAtEndOfTextFailsClosed
       - run:
-          name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
+          name: "Ensure AutoMobile daemon ready (Xcode 26.6)"
           environment:
             AUTOMOBILE_DAEMON_DEBUG: "1"
             AUTOMOBILE_DAEMON_EMBEDDED_SDK: "1"
@@ -566,7 +566,7 @@ jobs:
             echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
             ./scripts/ci/ensure-daemon-ready.sh
       - run:
-          name: "Warm up iOS CtrlProxy (Xcode 26.5)"
+          name: "Warm up iOS CtrlProxy (Xcode 26.6)"
           no_output_timeout: 12m
           command: ./scripts/ci/ensure-ctrl-proxy-ready.sh
       - run:
@@ -665,8 +665,7 @@ workflows:
   # ── Nightly (replaces nightly.yml's hosted macOS jobs) ──────────────────────
   # With one macOS slot the jobs run one at a time anyway; the `terminal` chain
   # fixes the order (most valuable first) and lets every job run whatever the
-  # previous one's outcome. Xcode 26.5 sweeps come last because every iOS PR
-  # already builds that toolchain.
+  # previous one's outcome.
   nightly-macos:
     when: << pipeline.parameters.run-nightly-macos >>
     jobs:
@@ -702,13 +701,3 @@ workflows:
           name: "XCTestRunner Thread Sanitizer"
           requires:
             - "macOS BATS Integration Tests": terminal
-      - ios-swift-packages:
-          name: "Swift Packages Sweep (Xcode 26.5)"
-          xcode: "26.5"
-          requires:
-            - "XCTestRunner Thread Sanitizer": terminal
-      - ios-xcode-build:
-          name: "Build Xcode Projects Sweep (Xcode 26.5)"
-          xcode: "26.5"
-          requires:
-            - "Swift Packages Sweep (Xcode 26.5)": terminal

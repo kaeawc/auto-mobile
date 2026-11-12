@@ -47,7 +47,7 @@ function isTalkBackService(component: string): boolean {
  * DefaultAccessibilityDetector handles detection of accessibility services (TalkBack)
  * with caching to minimize performance impact.
  *
- * Design: As per docs/design-docs/mcp/talkback-voiceover.md Phase 1
+ * Design: As per docs/how-it-works/mcp/talkback-voiceover.md Phase 1
  * - Uses ADB shell command for detection (preferred method)
  * - Caches results with 60-second TTL
  * - Supports feature flag overrides for testing

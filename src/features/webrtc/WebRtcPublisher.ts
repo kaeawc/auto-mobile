@@ -219,7 +219,7 @@ export type WebRtcStreamPublisher = Pick<
  * [JSEP (RFC 9429)](https://www.rfc-editor.org/rfc/rfc9429.html),
  * [WHIP (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html), and
  * [H.264 over RTP (RFC 6184)](https://www.rfc-editor.org/rfc/rfc6184.html).
- * See `docs/design-docs/mcp/observe/webrtc-standards-map.md` for the full
+ * See `docs/how-it-works/mcp/observe/webrtc-standards-map.md` for the full
  * implementation-to-spec mapping.
  */
 export class WebRtcPublisher {

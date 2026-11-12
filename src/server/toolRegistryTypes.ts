@@ -21,6 +21,7 @@ import { ToolCallRepository } from "../db/toolCallRepository";
 import type { Environment } from "../daemon/poolConfig";
 
 import { type Timer } from "../utils/SystemTimer";
+import type { FeatureFlagKey } from "../models/FeatureFlagDefinitions";
 
 import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import type { RequestDeadline } from "../features/toolSelection/toolSelectionContext";
@@ -139,6 +140,12 @@ export interface ToolRegistrationOptions {
   /** Loopback closure recovery: connect only, or replay after ambiguous delivery. */
   transportRecovery?: ToolTransportRecovery;
   debugOnly?: boolean;
+  /**
+   * Feature flags whose `featureFlagDisabledMessage` refusal this tool's handler returns for some
+   * or all calls. Advertised as `featureFlag:<key>` requirements (#18141); the tool-definitions
+   * check fails when a refusal site and this list disagree.
+   */
+  featureFlags?: readonly FeatureFlagKey[];
   /**
    * Hidden from `tools/list` and discovery (`getAllTools` and
    * `registerWithServer`'s MCP-SDK registration). Still directly callable by
@@ -364,6 +371,11 @@ export interface DeviceAwareToolOptions<T = Record<string, unknown>>
 
 export interface ToolListingOptions {
   includeUnavailable?: boolean;
+  /**
+   * Add `_meta["automobile/requires"]` to every definition (#18141). Only the committed catalog
+   * (`scripts/generate-tool-definitions.ts`) asks for it; live `tools/list` stays lean.
+   */
+  includeRequirements?: boolean;
   /** Override the process default for one connection-scoped tools/list response. */
   suppressOutputSchema?: boolean;
 }
@@ -393,6 +405,8 @@ export interface RegisteredTool extends ToolTraits {
   /** The tool's `deviceReadOnly` classification for one argument set (#10969 read lane). */
   isDeviceReadOnlyCall?: (args: unknown) => boolean;
   debugOnly?: boolean;
+  /** See {@link ToolRegistrationOptions.featureFlags}. */
+  featureFlags?: readonly FeatureFlagKey[];
   hidden?: boolean;
   embeddedSdkOnly?: boolean;
   /** Tool-specific guidance appended to the embedded-SDK gate reason (#17528). */
@@ -412,6 +426,16 @@ export interface RegisteredTool extends ToolTraits {
    */
   deviceReadOnly?: boolean | ((args: Record<string, unknown>) => boolean);
   deviceReadOnlyArgs?: readonly DeviceReadOnlyArgShape[];
+}
+
+/** Both registration paths' debug and feature-flag gate fields (#18141). */
+export function availabilityGateMetadata(
+  options: Pick<ToolRegistrationOptions, "debugOnly" | "featureFlags">,
+): Pick<RegisteredTool, "debugOnly" | "featureFlags"> {
+  return {
+    debugOnly: options.debugOnly ?? false,
+    ...(options.featureFlags?.length ? { featureFlags: options.featureFlags } : {}),
+  };
 }
 
 /** Keep both registration paths' advertised read metadata consistent. */

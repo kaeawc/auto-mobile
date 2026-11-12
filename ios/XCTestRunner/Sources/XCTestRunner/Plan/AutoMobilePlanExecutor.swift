@@ -24,8 +24,8 @@ public final class AutoMobilePlanExecutor: Sendable {
         attributes: .concurrent
     )
     private let recoveryConfigProvider: RecoveryConfigProviding
-    // Nil = no AI recovery (no injected handler and no model API key in the environment); the executor
-    // then behaves exactly as it did before this feature — a failed step throws.
+    // Nil = no AI recovery (no injected handler and either Tachikoma is unavailable or no model API key
+    // is configured); a failed step throws.
     private let recoveryHandler: PlanRecoveryHandler?
     // Heartbeats and releases a session the daemon held for recovery (#10834 / #11072). Nil (HTTP
     // transport) never asks the daemon to hold a failed attempt's session.
@@ -85,21 +85,27 @@ public final class AutoMobilePlanExecutor: Sendable {
         self.recoveryConfigProvider = recoveryConfigProvider
             ?? DaemonRecoveryConfigProvider(clientProvider: { resolvedClient }, logger: logger)
 
-        // Auto-wire the Tachikoma handler only when recovery can actually run — a model API key must be
-        // present. Without a key (CI, most unit tests) the handler stays nil and behavior is unchanged.
+        // Auto-wire AI recovery only in macOS test bundles with a model API key. iOS test bundles
+        // have no Tachikoma dependency; callers can still inject a platform-independent handler.
         if let recoveryHandler = recoveryHandler {
             self.recoveryHandler = recoveryHandler
-        } else if let recoveryModelConfig = recoveryModelConfig {
-            self.recoveryHandler = TachikomaPlanRecoveryHandler(
-                mcpClient: resolvedClient,
-                configProvider: self.recoveryConfigProvider,
-                modelConfig: recoveryModelConfig,
-                timer: timer,
-                logger: logger,
-                deadlineScheduler: deadlineScheduler
-            )
         } else {
-            self.recoveryHandler = nil
+            #if canImport(Tachikoma)
+                if let recoveryModelConfig = recoveryModelConfig {
+                    self.recoveryHandler = TachikomaPlanRecoveryHandler(
+                        mcpClient: resolvedClient,
+                        configProvider: self.recoveryConfigProvider,
+                        modelConfig: recoveryModelConfig,
+                        timer: timer,
+                        logger: logger,
+                        deadlineScheduler: deadlineScheduler
+                    )
+                } else {
+                    self.recoveryHandler = nil
+                }
+            #else
+                self.recoveryHandler = nil
+            #endif
         }
     }
 

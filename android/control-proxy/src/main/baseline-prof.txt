@@ -1,6 +1,6 @@
 # Hand-authored from CtrlProxy startup and hot paths in the manifest and Kotlin sources.
 # Device-recorded rules come from :control-proxy-baselineprofile and are merged with these; see
-# docs/design-docs/plat/android/ctrlproxy-baseline-profile.md.
+# docs/how-it-works/plat/android/ctrlproxy-baseline-profile.md.
 # Method flags: H = hot, S = startup, P = post-startup; L-only rules cover class loading.
 
 # Accessibility service startup, event handling, and hierarchy traversal (including inner classes).

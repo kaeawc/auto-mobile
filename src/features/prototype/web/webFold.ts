@@ -3,7 +3,7 @@ import { PrototypeWebInputError } from "./prototypeWebInputError";
 import type { WebOrientation } from "./webFrame";
 
 /**
- * Foldable postures in the still and the page (#16445, docs/design-docs/prototype-web-frames-v2.md
+ * Foldable postures in the still and the page (#16445, docs/how-it-works/prototype-web-frames-v2.md
  * "Foldables"): which panel a posture lights, where the hinge crosses it in the drawn orientation,
  * and the area the spec lays out on.
  */

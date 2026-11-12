@@ -192,6 +192,10 @@ function redactError(error: unknown, token: string): Error {
     retryAfterMs: source.retryAfterMs,
     releaseReason: redact(source.releaseReason),
     idle: source.idle,
+    // A foreign-owner refusal's only evidence is `{ terminal }` (#18150); it carries no token.
+    ...(isRecord(source.details) && typeof source.details.terminal === "boolean"
+      ? { details: { terminal: source.details.terminal } }
+      : {}),
   });
 }
 

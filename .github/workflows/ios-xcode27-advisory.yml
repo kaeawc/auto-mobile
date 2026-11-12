@@ -1,7 +1,7 @@
 name: "iOS Xcode 27 Build (Advisory)"
 
 # Advisory Xcode 27 iOS build on the self-hosted Macs (owner decision 7 of #15244). The required
-# iOS jobs stay on Xcode 26.5 and switch only after a green week here. Runs nightly, on dispatch,
+# iOS jobs stay on Xcode 26.6 and switch only after a green week here. Runs nightly, on dispatch,
 # and on pull requests only when opted in with the `run-xcode27` label. This is not a required
 # check and nothing depends on it. If the runner has no Xcode 27, select-self-hosted-xcode.sh
 # fails the job, which stays advisory.

@@ -88,6 +88,7 @@ add_check "lfs-pointers" "\"$PROJECT_ROOT/scripts/check-lfs-pointers.sh\"" "lint
 add_check "scripts-referenced" "\"$PROJECT_ROOT/scripts/conventions/validate-scripts-referenced.sh\"" "lint,conventions,shell" "Require every .sh/.ts/.py/.mjs file under scripts/ to be referenced or allow-listed with a reason (#11874)"
 add_check "datetime-now-literal" "\"$PROJECT_ROOT/scripts/validate-no-datetime-now-literal.sh\"" "lint" "Reject string-literal SQL time-expression defaults in migrations"
 add_check "desktop-core-unified" "\"$PROJECT_ROOT/scripts/android/validate-no-desktop-core-unified.sh\"" "lint,android" "Reject abandoned desktop-core unified socket-client package"
+add_check "version-catalog-toml" "\"$PROJECT_ROOT/scripts/android/validate-version-catalog-toml.sh\"" "config,android" "Reject duplicate keys or tables in the Android version catalog TOML (#16815)"
 add_check "workflow-assertion-triggers" "\"$PROJECT_ROOT/scripts/ci/validate_workflow_assertion_triggers.sh\"" "config,ci" "Ensure workflow-YAML assertion tests are triggered by the paths they assert"
 add_check "github-python-lock" "cd \"$PROJECT_ROOT/scripts/github\" && uv sync --locked --no-install-project" "config,dependencies" "Validate the GitHub documentation Python lockfile"
 add_check "manual-test-python" "\"$PROJECT_ROOT/scripts/validate_manual_test_python.sh\"" "config,dependencies" "Validate the private Python MCP stdio harness"

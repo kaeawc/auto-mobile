@@ -16,6 +16,8 @@ import type {
  * - `/p/<id>` is the live shell: the page in an iframe, reloaded on each change event.
  * - `/p/<id>/page` is the same HTML as `automobile:prototype/<id>/web`, byte for byte.
  * - `/p/<id>/events` is the server-sent event stream the shell listens to.
+ * - `/p?id=<id>&view=page|events` addresses the same routes by query, for the ids `.` and `..`:
+ *   browsers normalize those dot segments (even escaped as `%2e`) out of a path (#18077).
  *
  * The prototype page keeps its own CSP (no script but its runtime, no network), so the reload
  * script lives in the shell, never in the page.
@@ -51,11 +53,33 @@ function pageQuery(id: string, params: URLSearchParams): PrototypePreviewPageQue
   return { id, ...(variant ? { variant } : {}), ...(frame ? { frame } : {}) };
 }
 
+export type PrototypePreviewView = "shell" | "page" | "events";
+
+const QUERY_PATH = /^\/p\/?$/;
+
+/** A query-form route (`/p?id=<id>&view=...`), or notFound. */
+function queryRoute(params: URLSearchParams): PrototypePreviewRoute {
+  const id = params.get("id");
+  const view = params.get("view") ?? "shell";
+  if (!id) {
+    return { kind: "notFound" };
+  }
+  if (view === "events") {
+    return { kind: "events", id };
+  }
+  return view === "shell" || view === "page"
+    ? { kind: view, ...pageQuery(id, params) }
+    : { kind: "notFound" };
+}
+
 /** The route of a request target (path and query); anything else is notFound. */
 export function parsePrototypePreviewRoute(target: string): PrototypePreviewRoute {
   const url = new URL(target, "http://preview.invalid");
   if (url.pathname === "/") {
     return { kind: "index" };
+  }
+  if (QUERY_PATH.test(url.pathname)) {
+    return queryRoute(url.searchParams);
   }
   const match = PAGE_PATH.exec(url.pathname);
   const id = match?.[1] === undefined ? undefined : decoded(match[1]);
@@ -68,9 +92,22 @@ export function parsePrototypePreviewRoute(target: string): PrototypePreviewRout
   return { kind: match?.[2] === "/page" ? "page" : "shell", ...pageQuery(id, url.searchParams) };
 }
 
-/** The shell's path for a prototype id. */
-export function prototypePreviewPath(id: string): string {
-  return `/p/${encodeUriSegment(id)}`;
+/**
+ * The path (and query) of a prototype's `view`: `/p/<id>[/view]` for ordinary ids, and the query
+ * form for `.` and `..`, which no path segment can carry through a browser.
+ */
+export function prototypePreviewPath(
+  id: string,
+  view: PrototypePreviewView = "shell",
+  params: Readonly<Record<string, string>> = {},
+): string {
+  if (id === "." || id === "..") {
+    const query = new URLSearchParams({ id, ...(view === "shell" ? {} : { view }), ...params });
+    return `/p?${query.toString()}`;
+  }
+  const query = new URLSearchParams(params).toString();
+  const suffix = view === "shell" ? "" : `/${view}`;
+  return `/p/${encodeUriSegment(id)}${suffix}${query ? `?${query}` : ""}`;
 }
 
 /**
@@ -190,11 +227,10 @@ function indexPage(source: PrototypePreviewPageSource): PrototypePreviewResponse
 }
 
 function shellPage(query: PrototypePreviewPageQuery): PrototypePreviewResponse {
-  const params = new URLSearchParams({
+  const params = {
     ...(query.variant ? { variant: query.variant } : {}),
     ...(query.frame ? { frame: query.frame } : {}),
-  }).toString();
-  const base = prototypePreviewPath(query.id);
+  };
   const header = el("header", {}, [
     el("a", { attrs: { href: "/" } }, ["All prototypes"]),
     el("strong", {}, [query.id]),
@@ -204,11 +240,11 @@ function shellPage(query: PrototypePreviewPageQuery): PrototypePreviewResponse {
     attrs: {
       "data-preview": "",
       title: query.id,
-      "data-page": `${base}/page${params ? `?${params}` : ""}`,
+      "data-page": prototypePreviewPath(query.id, "page", params),
     },
   });
   const page = htmlDocument(`${query.id} preview`, [header, frame], {
-    "data-events": `${base}/events`,
+    "data-events": prototypePreviewPath(query.id, "events"),
   });
   // The script is appended after the body's content so the elements it queries exist.
   const withScript = page.replace(

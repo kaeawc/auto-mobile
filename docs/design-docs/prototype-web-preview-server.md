@@ -24,6 +24,10 @@ web page in a browser and reloads it on each `show` and landed `patch`.
 | `/p/<id>/page`   | The web resource HTML; `frame` and `variant` query parameters pass through     |
 | `/p/<id>/events` | Server-sent events: `ready {generation}` on connect, `reload {id, generation}` |
 
+Browsers drop the dot segments `.` and `..` from a path, even escaped as `%2e`. So for those two
+ids every link uses the query form `/p?id=<id>` with `view=page` or `view=events`. The parser
+accepts both forms for any id.
+
 The web page's CSP allows only its own runtime script and no network, so the page is never
 modified. The reload script lives in the shell, whose CSP pins that script's hash and allows
 `connect-src 'self'` and `frame-src 'self'`. The shell renders the iframe without `src` and loads

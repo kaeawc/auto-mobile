@@ -38,12 +38,14 @@ export type { DelegateContext } from "../shared/types";
 export interface CtrlProxyNode {
   text?: string;
   /**
-   * Entered/current value of a text-input element (UITextField, UITextView,
+   * Current value of a visionOS toggle, or entered value of a text-input element (UITextField, UITextView,
    * UISearchBar, UISecureTextField). Distinct from `text` — which carries the
    * accessibility label (often the placeholder for these elements). Password
    * fields are masked as bullet characters before serialization.
    */
   value?: string;
+  /** visionOS ornament-local bounds; absent means window space. */
+  space?: "ornament";
   textSize?: number;
   contentDesc?: string;
   resourceId?: string;

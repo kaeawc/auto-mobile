@@ -212,7 +212,11 @@ final class VisionCommandRouter {
         let traits = VisionElementTraits.traits(for: kind(of: snapshot.elementType), isEnabled: snapshot.isEnabled)
         return UIElementInfo(
             text: snapshot.label,
-            value: traits.enteredValue(snapshot.value, placeholder: snapshot.placeholderValue),
+            value: traits.snapshotValue(
+                snapshot.value,
+                placeholder: snapshot.placeholderValue,
+                isToggle: [.switch, .toggle, .checkBox].contains(snapshot.elementType)
+            ),
             resourceId: snapshot.identifier,
             className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),

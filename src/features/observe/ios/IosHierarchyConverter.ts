@@ -70,6 +70,9 @@ function convertNode(node: ConvertibleNode): ConvertedNode {
   if (typeof node.value === "string") {
     attrs["value"] = node.value;
   }
+  if (node.space === "ornament") {
+    attrs["space"] = node.space;
+  }
   const fields = readConversionFields(node);
   assignContentAttributes(node, attrs, fields);
   assignInteractionAttributes(node, attrs, fields);

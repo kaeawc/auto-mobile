@@ -21,6 +21,11 @@ AI recovery resumes reuse the held session, and the daemon releases it when the 
 Typed acquisition refusals retain the existing device-wait and retry policy; other daemon tool
 errors preserve the response text in the test failure.
 
+The iOS Simulator test bundle supports plan execution without AI-assisted recovery. The
+`XCTestRunner` target links Tachikoma only on macOS, and its executor leaves the recovery handler
+nil on iOS unless a caller injects one. Built-in AI recovery requires a macOS test bundle driving
+the device through the daemon; running an iOS test bundle on a macOS CI host does not enable it.
+
 > [!NOTE]
 > **No cloud device service required.** Unlike Android — which uses
 > [emulator.wtf](https://emulator.wtf) to provision managed cloud emulators — iOS
@@ -165,10 +170,10 @@ change still fetches any newly introduced dependency before the cached DerivedDa
 
 | Cache                     | Key                                                              | What it stores                                                                                                                                                                                                                                                                                              |
 | ------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SPM packages              | `macOS-spm-xctestrunner-26.5-<hash(Package.swift files)>`        | `~/Library/Caches/org.swift.swiftpm` and `~/.swiftpm/cache` (SwiftPM's global package/artifact cache); `~/.swiftpm` itself, including machine-specific `configuration/` and `security/` state, is deliberately excluded so a self-hosted runner's SwiftPM tree can never leak onto a hosted-runner fallback |
-| DerivedData intermediates | `macOS-derived-xctestrunner-26.5-<hash(CtrlProxy build inputs)>` | `/tmp/automobile-ctrl-proxy/Build` and `/tmp/automobile-ctrl-proxy/ModuleCache.noindex` build products/module cache; not `SourcePackages`                                                                                                                                                                   |
+| SPM packages              | `macOS-spm-xctestrunner-26.6-<hash(Package.swift files)>`        | `~/Library/Caches/org.swift.swiftpm` and `~/.swiftpm/cache` (SwiftPM's global package/artifact cache); `~/.swiftpm` itself, including machine-specific `configuration/` and `security/` state, is deliberately excluded so a self-hosted runner's SwiftPM tree can never leak onto a hosted-runner fallback |
+| DerivedData intermediates | `macOS-derived-xctestrunner-26.6-<hash(CtrlProxy build inputs)>` | `/tmp/automobile-ctrl-proxy/Build` and `/tmp/automobile-ctrl-proxy/ModuleCache.noindex` build products/module cache; not `SourcePackages`                                                                                                                                                                   |
 
-The restore-key prefixes retain the `26.5` toolchain segment, so a different Xcode version never
+The restore-key prefixes retain the `26.6` toolchain segment, so a different Xcode version never
 restores compiled artifacts from this lane. Source changes fall back to the prior matching-toolchain
 entry for incremental compilation.
 

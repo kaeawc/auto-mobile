@@ -23,9 +23,9 @@ needs JDK 21 and an Android SDK (`ANDROID_HOME` set, or `sdk.dir` in
 `android/local.properties`):
 
 ```bash
-git clone --depth 1 --branch 0.0.93 https://github.com/kaeawc/auto-mobile.git
+git clone --depth 1 --branch 0.0.94 https://github.com/kaeawc/auto-mobile.git
 cd auto-mobile/android
-./gradlew :test-plan-validation:publishToMavenLocal :junit-runner:publishToMavenLocal -PVERSION_NAME=0.0.93
+./gradlew :test-plan-validation:publishToMavenLocal :junit-runner:publishToMavenLocal -PVERSION_NAME=0.0.94
 ```
 
 Then add `mavenLocal()` to the consuming project's repositories and the JUnit runner
@@ -43,7 +43,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.93")
+    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.94")
 }
 ```
 
@@ -64,10 +64,10 @@ Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), 
 For a Swift package manifest, use the released package:
 
 ```swift
-.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.93")
+.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.94")
 ```
 
-`from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
+`from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6 and supports macOS 15 or iOS 17 test bundles. AI-assisted recovery runs only in a macOS test bundle; it is unavailable in an iOS Simulator test bundle.
 
 </div>
 
@@ -222,6 +222,25 @@ not match rows; its `textMatch: "exact"` comparison is case-sensitive. The top-l
 
 </div>
 
+### Export a recording as an XCTest
+
+`exportPlan` and `recordToolCalls` with `action: "end"` return the recorded plan
+YAML in `planContent`. Pass `format: "xctest"` to also get an `xctest` object for
+an iOS test target (the default, `format: "yaml"`, returns the plan only):
+
+| Field              | Use                                                                        |
+| ------------------ | -------------------------------------------------------------------------- |
+| `planFileName`     | Save `planContent` under this name, for example `save-note.yaml`           |
+| `planResourcePath` | Where the plan must sit in the test bundle, `test-plans/<planFileName>`    |
+| `swiftFileName`    | Save `swiftSource` under this name in the test target                      |
+| `swiftSource`      | An `AutoMobileTestCase` subclass whose `planPath` is `planResourcePath`    |
+| `className`        | The class name, derived from the plan name (`save-note` → `SaveNoteTests`) |
+
+To wire it up, add a `test-plans` folder to the test target as a folder
+reference (in Xcode, **Add Files…** with **Create folder references**), so the
+bundle keeps the `test-plans/` prefix, and save the plan file in it. Then add the Swift file to the same target and run it as in
+[Consume the plan](#3-consume-the-plan).
+
 ### Step expectations
 
 A step can check the screen after its tool succeeds. Each entry in
@@ -340,7 +359,7 @@ AutoMobilePlan("test-plans/login.yaml") { "apiToken" to token }
     .execute(AutoMobilePlanExecutionOptions(secretParameterKeys = setOf("apiToken")))
 ```
 
-iOS — set `secretParameterKeys` on `AutoMobilePlanExecutor.Configuration`. The
+For a macOS test bundle driving iOS, set `secretParameterKeys` on `AutoMobilePlanExecutor.Configuration`. The
 plan-declared and runner-supplied sets are unioned, so either source (or both)
 protects the value. Recovery stays opt-in; this only changes what recovery may
 disclose.
@@ -428,12 +447,12 @@ Use one release version for the test runner and the AutoMobile CLI. Restart a
 shared daemon so it receives the pin, then check the environment before tests:
 
 ```bash
-export AUTOMOBILE_VERSION=0.0.93
-bunx @kaeawc/auto-mobile@0.0.93 --daemon restart
-bunx @kaeawc/auto-mobile@0.0.93 --cli doctor
+export AUTOMOBILE_VERSION=0.0.94
+bunx @kaeawc/auto-mobile@0.0.94 --daemon restart
+bunx @kaeawc/auto-mobile@0.0.94 --cli doctor
 ```
 
-Replace `0.0.93` with the version used by your test runner dependency.
+Replace `0.0.94` with the version used by your test runner dependency.
 
 `--cli doctor` reports the status of AutoMobile on each booted Android device,
 including whether the accessibility service is installed and up to date. It is

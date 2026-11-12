@@ -33,7 +33,7 @@ describe("iOS CI product boot lifecycle", () => {
       ".github/workflows/xctestrunner-simulator-tests.yml",
       "ios-xctest-runner-simulator-tests",
     );
-    const boot = stepNamed(steps, "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)");
+    const boot = stepNamed(steps, "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.6)");
 
     expect(boot?.run).toContain(PRODUCT_BOOT);
     expect(boot?.run).toContain("xcrun --sdk iphonesimulator --show-sdk-version");
@@ -43,9 +43,9 @@ describe("iOS CI product boot lifecycle", () => {
     expect(boot?.run).not.toContain('--name "iPhone 15"');
     expect(boot?.run).toContain("simulator_udid=");
     expect(steps.some((step) => step.name === "Shutdown iOS Simulators")).toBe(false);
-    expect(steps.some((step) => step.name === "Boot iOS Simulator (Xcode 26.5)")).toBe(false);
+    expect(steps.some((step) => step.name === "Boot iOS Simulator (Xcode 26.6)")).toBe(false);
 
-    const uiTests = stepNamed(steps, "Run selected CtrlProxy iOS tests (Xcode 26.5)");
+    const uiTests = stepNamed(steps, "Run selected CtrlProxy iOS tests (Xcode 26.6)");
     expect(uiTests?.run).not.toContain(
       "-only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotMatchesNativeDimensionsOnOddWidthDevice",
     );

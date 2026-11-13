@@ -434,7 +434,9 @@ export type SessionRequirementErrorCode =
   | "runtime_incompatible"
   | "catalog_unavailable"
   | "catalog_metadata_invalid"
-  | "ambiguous_model_alias";
+  | "ambiguous_model_alias"
+  /** The `deviceProfile` requires an OEM capability no emulator can serve (#14058). */
+  | "requires_real_device";
 
 export interface SessionRequirementError {
   code: SessionRequirementErrorCode;

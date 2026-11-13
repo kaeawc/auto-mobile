@@ -94,6 +94,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   getDeepLinks: READ_ONLY,
   getDeviceState: READ_ONLY,
   getIosSimulatorCapabilities: READ_ONLY,
+  getSessionRequirementCapability: READ_ONLY,
   getNavigationGraph: READ_ONLY,
   getNetworkGraph: READ_ONLY,
   getNotificationPolicy: READ_ONLY,

@@ -29,6 +29,25 @@ Each archetype (`phone`, `tablet`, `duo`) may appear at most once; a duplicate f
 loading. An entry applies only when the request omits `os`; a request that passes an `os`
 selector gets exactly that selector. Alternatively, pass `os` in the Duo request.
 
+To check a host before sending it a request, call `getSessionRequirementCapability` with the
+request's `device`. It acquires nothing. With `os` omitted it reports the OS the host's
+default resolves to and whether that runtime is installed:
+
+```bash
+auto-mobile --cli getSessionRequirementCapability --device '{"schemaVersion":1,"platform":"ios","hardware":{"kind":"model-type","modelType":{"family":"duo","variant":"duo"}},"os":{"kind":"omitted"}}'
+```
+
+| Field                                   | Meaning                                                                                                                                                      |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `resolvedOs`                            | `source` (`request`, `device-type-default` or `platform-default`), the effective `selector`, and `osVersion`/`runtime` when satisfiable.                     |
+| `satisfiable`, `reason`                 | Whether an installed runtime and device type can serve the request now; otherwise the refusal code (`missing_installed_runtime`, `runtime_incompatible`, …). |
+| `defaultOsSatisfiable`                  | The same hardware with `os` omitted is satisfiable on this host.                                                                                             |
+| `anyOsSatisfiable`, `installedRuntimes` | The installed runtimes that can run the hardware when named exactly.                                                                                         |
+| `policyVersion`                         | The host defaults policy that produced the answer.                                                                                                           |
+
+A host without iOS tooling answers `success: false` with `code: "catalog_unavailable"`; a daemon
+not running the session broker answers `code: "session_broker_unavailable"`.
+
 ## Reading the posture with `getDeviceState`
 
 `getDeviceState` is not listed in `tools/list` by default. A client that picks tools from

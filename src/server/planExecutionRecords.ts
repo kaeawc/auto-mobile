@@ -112,6 +112,8 @@ export interface VideoState {
    * hook, so only the session's timer can rotate ahead of screenrecord's 180 s cap (#10026).
    */
   androidTimerDriven?: boolean;
+  /** Orchestrator clock time the Android session's first segment started (#18276). */
+  androidStartedAtMs?: number;
   iosRecordingId?: string;
 }
 
@@ -404,5 +406,36 @@ export function convertPerDeviceSkippedStepsToRecords(
 
   return skippedRecords.sort(
     (a, b) => a.stepIndex - b.stepIndex || a.action.localeCompare(b.action),
+  );
+}
+
+/** Below this plan recording window, startup latency alone can halve the recorded duration. */
+const SHORT_PLAN_VIDEO_MIN_WINDOW_MS = 3000;
+
+/**
+ * A warning when the plan's Android segments together cover less than half of the time the
+ * plan recorded for, so a recorder that died early is never delivered as a normal video
+ * (#18276). Undefined when the window is too short to judge or any segment's duration is
+ * unknown (an unreadable duration is the capture backend's to flag).
+ */
+export function shortPlanVideoWarning(
+  segments: ReadonlyArray<{ videoDurationMs?: number }>,
+  windowMs: number,
+): string | undefined {
+  if (segments.length === 0 || windowMs < SHORT_PLAN_VIDEO_MIN_WINDOW_MS) {
+    return undefined;
+  }
+  const durations = segments.map((segment) => segment.videoDurationMs);
+  if (durations.some((duration) => duration === undefined)) {
+    return undefined;
+  }
+  const recordedMs = durations.reduce<number>((sum, duration) => sum + (duration ?? 0), 0);
+  if (recordedMs >= windowMs / 2) {
+    return undefined;
+  }
+  const seconds = (ms: number) => (ms / 1000).toFixed(1);
+  return (
+    `Video truncated: the recording covers ${seconds(recordedMs)}s of the ${seconds(windowMs)}s ` +
+    "plan run; the recorder ended early and the rest of the plan was not recorded."
   );
 }

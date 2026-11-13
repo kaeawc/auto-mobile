@@ -81,6 +81,8 @@ internal class PlanExecutor(
         )
 
       val executionTime = System.currentTimeMillis() - startTime
+      val videoWarnings = PlanVideoWarnings.fromOutput(result.output, Json)
+      PlanVideoWarnings.report(videoWarnings)
 
       return failureDiagnostics.annotate(
         AutoMobilePlanExecutionResult(
@@ -93,6 +95,7 @@ internal class PlanExecutor(
           aiRecoverySuccessful = result.aiRecoverySuccessful,
           parametersUsed = parameters,
           toolResults = result.toolResults,
+          videoWarnings = videoWarnings,
         ),
         options,
       )

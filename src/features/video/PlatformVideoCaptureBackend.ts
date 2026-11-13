@@ -228,13 +228,13 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       }
     }
 
-    if (backendHandle.process.exitCode === null) {
+    // A signal exit has a null exitCode too; the tracker records null only after
+    // observing exit, so do not try to kill an already-ended host session again.
+    if (backendHandle.exitState.exitCode === undefined) {
       logger.warn(`[VideoCapture] screenrecord still running after SIGINT; sending SIGKILL`);
       backendHandle.process.kill("SIGKILL");
-      await backendHandle.exitPromise;
-    } else {
-      await backendHandle.exitPromise;
     }
+    await backendHandle.exitPromise;
 
     logger.info(
       `[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`,
@@ -245,7 +245,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     try {
       try {
         // Give screenrecord extra time to finalize the file on device. Even
-        // though the process has exited, file writes may still be in progress.
+        // though the host has exited, the detached device recorder may still be running.
         logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
         await this.timer.sleep(SCREENRECORD_FINALIZE_SETTLE_MS);
         retainDeviceFile = !(await this.waitForDeviceFileToFinalize(adb, backendHandle));
@@ -306,17 +306,22 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   ): string[] {
     const warnings: string[] = [];
     const earlyExit = this.earlyExitDescription(backendHandle);
-    if (earlyExit) {
-      warnings.push(
-        `The Android recorder ${earlyExit} before the stop was requested; the recording may end sooner than requested.`,
-      );
-    }
     const windowMs =
       (backendHandle.stopRequestedAtMs ?? this.timer.now()) - backendHandle.launchedAtMs;
-    if (
+    const isShort =
       sizeBytes < 10_000 ||
-      (videoDurationMs !== undefined && windowMs >= 3000 && videoDurationMs < windowMs / 2)
-    ) {
+      (videoDurationMs !== undefined && windowMs >= 3000 && videoDurationMs < windowMs / 2);
+    if (earlyExit) {
+      const message = `The host adb session to the Android recorder ${earlyExit} before the stop was requested`;
+      if (isShort) {
+        warnings.push(`${message}; the recording is shorter than requested.`);
+      } else {
+        logger.info(
+          `[VideoCapture] ${message}; the device recording was collected and is not short.`,
+        );
+      }
+    }
+    if (isShort) {
       warnings.push(
         "The Android video is much shorter than the recording window and should not be used as evidence.",
       );
@@ -383,7 +388,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
     } catch (error) {
       logger.warn(
-        `[VideoCapture] Device-side SIGINT of screenrecord failed; will rely on host SIGINT: ${errorMessage(error)}`,
+        `[VideoCapture] Device-side SIGINT of screenrecord failed; will check device finalization before pulling: ${errorMessage(error)}`,
       );
     }
   }
@@ -539,6 +544,27 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
   }
 
+  /** A detached recorder can survive host adb exit; wait for its known pid before file polling. */
+  private async waitForDeviceFileToFinalize(
+    adb: AdbExecutor,
+    backendHandle: AndroidBackendHandle,
+  ): Promise<boolean> {
+    const pid = backendHandle.devicePid?.pid;
+    if (pid !== undefined) {
+      for (let attempt = 0; attempt < DEVICE_FILE_FINALIZE_POLL_ATTEMPTS; attempt++) {
+        if (await this.confirmDeviceRecorderPidExited(adb, backendHandle, pid)) {
+          return this.waitForStableDeviceFile(adb, backendHandle);
+        }
+        await this.timer.sleep(DEVICE_FILE_FINALIZE_POLL_INTERVAL_MS);
+      }
+      logger.warn(
+        `[VideoCapture] Could not confirm device recorder pid ${pid} exit before finalization`,
+      );
+      return false;
+    }
+    return this.waitForStableDeviceFile(adb, backendHandle);
+  }
+
   /**
    * Waits for the on-device recording file to stop growing before the caller
    * pulls it (issue #6291: a stop that lands right after start races
@@ -549,7 +575,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    * produce a truncated MP4. If the file cannot be observed at all, preserve
    * the existing bounded pull retry as the only recovery path.
    */
-  private async waitForDeviceFileToFinalize(
+  private async waitForStableDeviceFile(
     adb: AdbExecutor,
     backendHandle: AndroidBackendHandle,
   ): Promise<boolean> {
@@ -855,7 +881,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
           describeAbnormalExit(exitState, stderr)
         ) {
           logger.warn(
-            `[VideoCapture] Android recorder exited with code ${exitState.exitCode}, signal ${exitState.signal} after ${this.timer.now() - launchedAtMs} ms since launch: ${recordingStderrTail(stderr) || "stderr was empty"}`,
+            `[VideoCapture] Host adb session to the Android recorder exited with code ${exitState.exitCode}, signal ${exitState.signal} after ${this.timer.now() - launchedAtMs} ms since launch: ${recordingStderrTail(stderr) || "stderr was empty"}. When launched with setsid, the device-side recorder keeps running; stop will signal it and collect the recording.`,
           );
         }
       })

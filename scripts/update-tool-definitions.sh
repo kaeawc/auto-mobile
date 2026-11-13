@@ -35,8 +35,10 @@ echo "Generating tool definitions..."
 # drift that the CI formatter gate would reject.
 # Only the pages the generator writes (docs/tools.md and each tool's own page), so
 # unrelated edits elsewhere in docs/ are never formatted or staged.
-mapfile -t TOOL_DOCS < <(cd "${PROJECT_ROOT}" && bun --no-install scripts/generate-tool-definitions.ts --list-docs)
-GENERATED=(schemas/tool-definitions.json "${TOOL_DOCS[@]}")
+# A read loop: macOS system Bash 3.2 has no builtin that reads lines into an array.
+TOOL_DOCS=()
+while IFS= read -r doc; do TOOL_DOCS+=("$doc"); done < <(cd "${PROJECT_ROOT}" && bun --no-install scripts/generate-tool-definitions.ts --list-docs)
+GENERATED=(schemas/tool-definitions.json ${TOOL_DOCS[@]+"${TOOL_DOCS[@]}"})
 (cd "${PROJECT_ROOT}" && bunx oxfmt "${GENERATED[@]}")
 
 if [[ "${1:-}" == "--no-stage" ]]; then

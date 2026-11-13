@@ -72,3 +72,24 @@ STUB
   [[ "$output" == *"add -- schemas/tool-definitions.json docs/tools.md docs/using/observe.md"* ]]
   [[ "$output" != *"docs/using "* && "$output" != *"docs/using"$'\n'* ]]
 }
+
+@test "collects the listed docs without mapfile or readarray (macOS Bash 3.2)" {
+  run grep -nE '\b(mapfile|readarray)\b' "$REAL_SCRIPT"
+  [ "$status" -eq 1 ]
+  mkdir -p "$TMP_ROOT/node_modules/zod" && echo '{}' > "$TMP_ROOT/node_modules/zod/package.json"
+  cat > "$TMP_ROOT/stubs/bun" <<'STUB'
+#!/usr/bin/env bash
+if [[ " $* " == *" --list-docs "* ]]; then
+  printf 'docs/tools.md\ndocs/using/observe.md\n'
+fi
+STUB
+  printf '#!/usr/bin/env bash\necho "bunx $*" >> "$STUB_LOG"\n' > "$TMP_ROOT/stubs/bunx"
+  chmod +x "$TMP_ROOT/stubs/bun" "$TMP_ROOT/stubs/bunx"
+  # Disable the builtins Bash 3.2 lacks, then run the script in that shell.
+  PATH="$TMP_ROOT/stubs:$PATH" run bash -c 'enable -n mapfile readarray; . "$0" "$@"' \
+    "$TMP_ROOT/scripts/update-tool-definitions.sh" --no-stage
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"without staging"* ]]
+  run cat "$STUB_LOG"
+  [[ "$output" == *"bunx oxfmt schemas/tool-definitions.json docs/tools.md docs/using/observe.md"* ]]
+}

@@ -1,4 +1,4 @@
-import { isRangeWidget } from "./RangeInfo";
+import { isAdjustableRangeWidget } from "./RangeInfo";
 import {
   displayedSearchableLabel,
   foldSearchableLabels,
@@ -185,7 +185,7 @@ function deriveAffordances(properties: SearchableProperties): Affordance[] {
   if (isTruthy(properties.checkable)) {
     affordances.push("toggle");
   }
-  if (isRangeWidget(properties)) {
+  if (isAdjustableRangeWidget(properties)) {
     affordances.push("adjust");
   }
   return affordances;

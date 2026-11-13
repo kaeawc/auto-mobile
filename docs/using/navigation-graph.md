@@ -58,16 +58,16 @@ It also hides a keyboard its last interaction opened before it returns. An
 element whose tap or select left the screen unchanged is not tried again on that
 screen. It interacts with the device, so run it on a test device and test account.
 
-| Parameter         | Default    | Meaning                                                                                                |
-| ----------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
-| `packageName`     | none       | App to stay inside. It must be installed; if exploration leaves the app, it relaunches it.             |
-| `maxInteractions` | `200`      | Stop after this many interactions.                                                                     |
-| `timeoutMs`       | `300000`   | Stop after this many milliseconds.                                                                     |
-| `strategy`        | `weighted` | `breadth-first`, `depth-first`, or `weighted` (scores elements by how likely they lead somewhere new). |
-| `mode`            | `hybrid`   | `discover` favors new elements, `validate` re-walks known transitions, `hybrid` balances both.         |
-| `resetToHome`     | `false`    | Periodically press the device home button, then relaunch `packageName`.                                |
-| `resetInterval`   | `15`       | Interactions between resets when `resetToHome` is on.                                                  |
-| `dryRun`          | `false`    | Plan without interacting. Returns `currentScreen`, `plannedInteractions`, and `estimatedCoverage`.     |
+| Parameter         | Default    | Meaning                                                                                                         |
+| ----------------- | ---------- | --------------------------------------------------------------------------------------------------------------- |
+| `packageName`     | none       | App to stay inside. It must be installed; if exploration leaves the app, it relaunches it.                      |
+| `maxInteractions` | `200`      | Stop after this many interactions.                                                                              |
+| `timeoutMs`       | `300000`   | Stop after this many milliseconds.                                                                              |
+| `strategy`        | `weighted` | `breadth-first`, `depth-first`, or `weighted` (scores elements by how likely they lead somewhere new).          |
+| `mode`            | `hybrid`   | `discover` favors new elements, `validate` re-walks known transitions, `hybrid` balances both.                  |
+| `resetToHome`     | `false`    | Periodically press the device home button, then relaunch `packageName`.                                         |
+| `resetInterval`   | `15`       | Interactions between resets when `resetToHome` is on.                                                           |
+| `dryRun`          | `false`    | Plan without interacting. Returns `inputMode`, `currentScreen`, `plannedInteractions`, and `estimatedCoverage`. |
 
 Start with a small `maxInteractions` and `dryRun: true` to see what `explore`
 would tap before letting it run.

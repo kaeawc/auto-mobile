@@ -286,6 +286,7 @@ describe("navigation tool session graph selection", () => {
         const dryRun = {
           success: true as const,
           dryRun: true as const,
+          inputMode: "touch" as const,
           plannedInteractions: [],
           currentScreen: { name: "Home", interactableElements: 0 },
           estimatedCoverage: {

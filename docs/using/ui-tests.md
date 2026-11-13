@@ -163,7 +163,9 @@ Run it with:
 `ANDROID_SERIAL` pins every single-device plan to that serial and runs the
 class's tests one at a time; without either, the daemon picks a free device.
 Multi-device plans (section 4) choose their own devices and ignore
-`ANDROID_SERIAL`.
+`ANDROID_SERIAL`. The test acquires that device with `getAndroid` before the
+plan runs and releases it afterwards; if the device cannot be acquired (for
+example another session holds it), `result.output` says so.
 
 **Daemon.** The runner uses the daemon on `AUTOMOBILE_DAEMON_SOCKET_PATH` when
 it is set, or the default per-user daemon otherwise, and starts one only if

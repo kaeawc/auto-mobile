@@ -50,6 +50,7 @@ class PlanRecoveryInteractionTest {
     heartbeat = PlanInteractionHeartbeat()
     collaborators =
       PlanExecutorCollaborators(
+        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
         agent = { recordingAgent },
         deviceChecker = PlanInteractionDeviceChecker(),
         daemon = daemon,

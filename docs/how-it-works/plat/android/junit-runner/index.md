@@ -20,12 +20,20 @@ sequenceDiagram
 
   Gradle->>Runner: run test class
   Runner->>Daemon: connect
-  Runner->>Daemon: execute YAML plan
+  Runner->>Daemon: getAndroid (acquire a device session)
+  Runner->>Daemon: execute YAML plan under the issued session
   Daemon->>Device: launch, observe, interact
   Device-->>Daemon: UI state and screenshots
   Daemon-->>Runner: success or failed step
+  Runner->>Daemon: release the session
   Runner-->>Gradle: pass or fail
 ```
+
+Each attempt runs under a session the daemon issued: the daemon refuses a
+`sessionUuid` it never issued, so the runner acquires one with `getAndroid`
+(on the configured device or `ANDROID_SERIAL`, otherwise one the daemon picks)
+and releases it when the attempt ends. A failed attempt held for AI recovery is
+released by the recovery flow instead.
 
 ## iOS
 

@@ -37,6 +37,7 @@ class AutoMobilePlanRedactionTest {
     capturingAgent = CapturingAgent()
     collaborators =
       PlanExecutorCollaborators(
+        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
         agent = { capturingAgent },
         deviceChecker = RedactionDeviceChecker(devicesAvailable = true),
         daemon = fakeDaemonClient,

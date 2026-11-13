@@ -18,7 +18,8 @@ internal data class PlanAttemptOutcome(
   val outputPayload: String,
   val parsed: ParsedToolResult,
   val toolResults: List<ToolResultEntry>,
-  val attemptSessionUuid: String,
+  /** Null when the attempt failed before the daemon issued it a session. */
+  val attemptSessionUuid: String?,
 )
 
 internal data class PlanFailure(

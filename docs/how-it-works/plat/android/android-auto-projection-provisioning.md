@@ -52,9 +52,11 @@ device uses an AVD snapshot that a person signed in to once.
   and then failed on.
 - **`killDevice`.** Stops the emulator's DHU within the shutdown deadline and forgets its host port
   redirect only once the kill succeeds, since a failed kill leaves the emulator and its redirect in
-  place. Stopping an owned DHU before the kill writes a marker in the resolved AVD directory: the
-  next launch skips the unusable quickboot snapshot with `-no-snapshot-load` and consumes the marker
-  only after the process spawns, even across a daemon restart (#17903). A post-kill stop that
+  place. Stopping an owned DHU before the kill writes a marker in the resolved AVD directory (for a
+  kill target name with no AVD directory, the AVD the running emulator reports): the next launch
+  skips the unusable quickboot snapshot with `-no-snapshot-load` and consumes the marker only once
+  that launch reaches boot readiness, even across a daemon restart (#17903, #17929). A launch that
+  exits first keeps the marker; a kill that fails after the write costs at most one cold boot. A post-kill stop that
   outlives the deadline keeps the serial's shutdown reservation until it settles, whether the rest
   of the shutdown succeeds or fails, so a replacement never boots under it.
 - **Session end without a kill.** When the session holding the phone ends (release, heartbeat reap,

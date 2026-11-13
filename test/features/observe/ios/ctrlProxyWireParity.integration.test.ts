@@ -72,6 +72,7 @@ const SWIFT_REQUEST_TYPES = [
   "request_location",
   "request_siri",
   "set_hinge_angle",
+  "refresh_geometry",
   "request_appearance",
   "request_clipboard",
   "get_current_focus",

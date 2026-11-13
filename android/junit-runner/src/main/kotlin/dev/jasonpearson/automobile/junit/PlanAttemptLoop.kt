@@ -7,13 +7,7 @@ import dev.jasonpearson.automobile.junit.DaemonToolResultParser.refusalDispositi
 import dev.jasonpearson.automobile.junit.DeviceWaitPolicy.RECOVERY_CODES
 import dev.jasonpearson.automobile.junit.DeviceWaitPolicy.deviceOwnedBackoffDelayMs
 import dev.jasonpearson.automobile.junit.DeviceWaitPolicy.deviceOwnedGiveUpMessage
-import dev.jasonpearson.automobile.junit.DeviceWaitPolicy.isTransientError
-import dev.jasonpearson.automobile.junit.PlanRequestOptions.appendCaptureObserveStepsArgs
-import dev.jasonpearson.automobile.junit.PlanRequestOptions.appendExecutePlanCleanupArgs
-import dev.jasonpearson.automobile.junit.PlanTestMetadata.buildTestMetadata
-import dev.jasonpearson.automobile.junit.PlanTestMetadata.detectTestContext
 import dev.jasonpearson.automobile.junit.PlanToolResultsParser.parseToolResults
-import dev.jasonpearson.automobile.validation.ToolResultEntry
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -58,7 +52,7 @@ internal class PlanAttemptLoop(
       parsed = outcome.parsed
       val response = outcome.response
 
-      logResponse(options, response, outcome.outputPayload)
+      PlanAttemptSupport.logResponse(options, response, outcome.outputPayload)
 
       if (response.success && parsed.success) {
         return outcome
@@ -78,7 +72,7 @@ internal class PlanAttemptLoop(
         attempt--
         continue
       }
-      if (attempt > maxRetries || !shouldRetry(parsed, errorMessage)) {
+      if (attempt > maxRetries || !PlanAttemptSupport.shouldRetry(parsed, errorMessage)) {
         break
       }
 
@@ -97,15 +91,22 @@ internal class PlanAttemptLoop(
     reuseSession: String?,
     attempt: Int,
   ): PlanAttemptOutcome {
-    val deviceId = effectiveDeviceId(request)
+    val deviceId = PlanAttemptSupport.effectiveDeviceId(request, collaborators)
     val sessionUuid =
       reuseSession
-        ?: when (val acquisition = acquireSession(deviceId, request.options)) {
+        ?: when (
+          val acquisition =
+            collaborators.sessionAcquirer.acquire(
+              deviceId,
+              request.options.effectiveExecutePlanTimeoutMs(),
+            )
+        ) {
           is PlanSessionAcquisition.Acquired -> acquisition.sessionUuid
-          is PlanSessionAcquisition.Failed -> return acquisitionFailedOutcome(acquisition)
+          is PlanSessionAcquisition.Failed ->
+            return PlanAttemptSupport.acquisitionFailedOutcome(acquisition)
         }
     val acquired = reuseSession == null
-    val args = buildArguments(request, holdForRecovery, sessionUuid, deviceId)
+    val args = PlanAttemptSupport.buildArguments(request, holdForRecovery, sessionUuid, deviceId)
     // Opt this device session into executePlan before invoking it.
     val selectionResponse = enableExecutePlan(sessionUuid, request.options)
     if (!selectionResponse.success) {
@@ -113,23 +114,6 @@ internal class PlanAttemptLoop(
     }
     return runExecutePlan(request, holdForRecovery, sessionUuid, args, attempt)
   }
-
-  private fun acquireSession(
-    deviceId: String?,
-    options: AutoMobilePlanExecutionOptions,
-  ): PlanSessionAcquisition =
-    collaborators.sessionAcquirer.acquire(deviceId, options.effectiveExecutePlanTimeoutMs())
-
-  private fun acquisitionFailedOutcome(
-    acquisition: PlanSessionAcquisition.Failed,
-  ): PlanAttemptOutcome =
-    PlanAttemptOutcome(
-      acquisition.response,
-      acquisition.outputPayload,
-      acquisition.parsed,
-      emptyList(),
-      null,
-    )
 
   private fun enableExecutePlan(
     sessionUuid: String,
@@ -154,7 +138,7 @@ internal class PlanAttemptLoop(
     // Treat the prerequisite like executePlan itself: the retry classifier
     // below handles transient daemon responses rather than throwing before
     // it has a chance to retry the attempt.
-    val outputPayload = encodeOutputPayload(response)
+    val outputPayload = PlanAttemptSupport.encodeOutputPayload(response)
     val parsed =
       parseDaemonToolResult(response, json).let {
         if (response.error.isNullOrBlank()) it.copy(errorMessage = "Unable to enable executePlan")
@@ -192,89 +176,14 @@ internal class PlanAttemptLoop(
       } finally {
         collaborators.heartbeat.unregisterSession(sessionUuid)
       }
-    val outputPayload = encodeOutputPayload(response)
+    val outputPayload = PlanAttemptSupport.encodeOutputPayload(response)
     val parsed = parseDaemonToolResult(response, json)
     val toolResults = parseToolResults(response, json, options.debugMode)
-    if (shouldReleaseAfterPlan(response, parsed, holdForRecovery)) {
+    if (PlanAttemptSupport.shouldReleaseAfterPlan(response, parsed, holdForRecovery)) {
       collaborators.sessionAcquirer.release(sessionUuid)
     }
     return PlanAttemptOutcome(response, outputPayload, parsed, toolResults, sessionUuid)
   }
-
-  /**
-   * The daemon keeps a session its caller held before the plan, so the runner releases it, except
-   * a failed attempt held for AI recovery, whose release the recovery flow owns. A failure the
-   * daemon reports as not held (`sessionHeld: false`) skips recovery, so its caller-held base is
-   * released here too.
-   */
-  private fun shouldReleaseAfterPlan(
-    response: DaemonResponse,
-    parsed: ParsedToolResult,
-    holdForRecovery: Boolean,
-  ): Boolean {
-    val succeeded = response.success && parsed.success
-    val heldForRecovery = holdForRecovery && parsed.sessionHeld != false
-    return succeeded || !heldForRecovery
-  }
-
-  private fun encodeOutputPayload(response: DaemonResponse): String =
-    response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
-
-  /**
-   * The configured device, `ANDROID_SERIAL`, or the device recovery just drove; null lets the
-   * daemon choose.
-   */
-  private fun effectiveDeviceId(request: PlanExecutionRequest): String? =
-    request.deviceIdOverride
-      ?: PlanDeviceSelection.resolveDeviceId(
-        request.options.device,
-        request.planContent,
-        collaborators.environment,
-      )
-
-  private fun buildArguments(
-    request: PlanExecutionRequest,
-    holdForRecovery: Boolean,
-    sessionUuid: String,
-    effectiveDeviceId: String?,
-  ): MutableMap<String, JsonElement> {
-    val planContent = request.planContent
-    val startStep = request.startStep
-    val args =
-      mutableMapOf<String, JsonElement>(
-        "planContent" to
-          JsonPrimitive(
-            "base64:" + java.util.Base64.getEncoder().encodeToString(planContent.toByteArray()),
-          ),
-        "platform" to JsonPrimitive("android"),
-        "startStep" to JsonPrimitive(startStep),
-        "sessionUuid" to JsonPrimitive(sessionUuid),
-      )
-
-    // Pin to the recovered device if specified, otherwise the configured device or ANDROID_SERIAL
-    if (effectiveDeviceId != null) {
-      args["deviceId"] = JsonPrimitive(effectiveDeviceId)
-    }
-
-    // Detect calling test context and include metadata for test run recording
-    val testContext = detectTestContext()
-    if (testContext != null) {
-      args["testMetadata"] = buildTestMetadata(testContext)
-    }
-
-    appendExecutePlanCleanupArgs(args)
-    appendCaptureObserveStepsArgs(args)
-    if (holdForRecovery) {
-      args["holdSessionOnFailure"] = JsonPrimitive(true)
-    }
-
-    return args
-  }
-
-  private fun shouldRetry(parsed: ParsedToolResult, errorMessage: String): Boolean =
-    parsed.retryable ||
-      parsed.acquireNewSession ||
-      (!parsed.terminal && isTransientError(errorMessage))
 
   private fun callDaemonToolForAttempt(
     toolName: String,
@@ -323,19 +232,6 @@ internal class PlanAttemptLoop(
     wait.count++
     wait.elapsedMs += delayMs
     return true
-  }
-
-  private fun logResponse(
-    options: AutoMobilePlanExecutionOptions,
-    response: DaemonResponse,
-    outputPayload: String,
-  ) {
-    if (options.debugMode) {
-      println("Daemon response:\n$outputPayload")
-      if (!response.error.isNullOrBlank()) {
-        println("Daemon error: ${response.error}")
-      }
-    }
   }
 
   private fun releaseForRetry(holdForRecovery: Boolean, sessionUuid: String?) {

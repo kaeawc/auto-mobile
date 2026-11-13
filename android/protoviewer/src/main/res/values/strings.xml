@@ -111,4 +111,6 @@
   <string name="contact">Report a problem or contact us</string>
   <!-- Email subject of a general support or abuse message. -->
   <string name="contact_subject">ProtoViewer feedback</string>
+  <!-- Refusal shown instead of an imported prototype containing a web page while network is off. No placeholders; authored node paths are not displayed. -->
+  <string name="webview_import_refused">This prototype contains a web page. Turn on Allow network for imported prototypes in Settings to open it.</string>
 </resources>

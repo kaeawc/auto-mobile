@@ -29,6 +29,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.core.app.ApplicationProvider
+import dev.jasonpearson.automobile.protocol.PrototypeWebView
 import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -272,6 +273,14 @@ class ChromeA11yMatrixTest {
         assertHeading(cell)
         assertChrome(cell, scroll = true)
       }
+      render(cell, "viewer/webview-refused") {
+        Column {
+          ViewerChrome(false, false, false, {}, {}, {})
+          ViewerImportRefusal(PrototypeWebView.ImportError("root.children[1]"))
+        }
+      }
+      assertHeading(cell)
+      assertChrome(cell, scroll = true)
     }
   }
 

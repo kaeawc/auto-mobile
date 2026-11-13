@@ -71,7 +71,7 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
     const client = factory.getFakeClient();
     client.setSpawnRunning(LAUNCH);
     client.setSpawnStdout(LAUNCH, "4321\n");
-    client.setCommandResult(PROBE, OUR_CMDLINE);
+    client.setCommandResultSequence(PROBE, [OUR_CMDLINE, ""]);
     const handle = await backend.start(config(overrides));
     // Let the buffered launch stdout reach the pid reader (a real macrotask turn, as in the
     // device-pid tests: an immediate-based flush loses the settle probe's queued dispatch).

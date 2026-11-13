@@ -239,13 +239,18 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     private func focusedCrownValue() throws -> WatchCrownValue? {
         guard app.state == .runningForeground, systemAlerts().isEmpty else { return nil }
         let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
-        guard focused.count == 1 else { return nil }
-        let snapshot = try focused.element(boundBy: 0).snapshot()
-        let value = (snapshot.value as? String) ?? (snapshot.value as? NSNumber)?.stringValue
-        guard snapshot.isEnabled, let value, !value.isEmpty else { return nil }
-        return WatchCrownValue(
-            elementType: snapshot.elementType.rawValue, identifier: snapshot.identifier,
-            frame: snapshot.frame, value: value
+        let count = focused.count
+        // A larger set is not a single crown target; skip the per-element snapshots.
+        guard (1 ... 8).contains(count) else { return nil }
+        let candidates = try (0 ..< count).map { try crownCandidate(focused.element(boundBy: $0).snapshot()) }
+        return watchCrownFocusedValue(candidates)
+    }
+
+    private func crownCandidate(_ snapshot: any XCUIElementSnapshot) -> WatchCrownCandidate {
+        WatchCrownCandidate(
+            elementType: snapshot.elementType.rawValue, identifier: snapshot.identifier, frame: snapshot.frame,
+            value: (snapshot.value as? String) ?? (snapshot.value as? NSNumber)?.stringValue,
+            isEnabled: snapshot.isEnabled, children: snapshot.children.map { crownCandidate($0) }
         )
     }
 

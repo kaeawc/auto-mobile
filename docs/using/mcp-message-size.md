@@ -11,7 +11,7 @@ limit of the transport you connect with:
 The stdio error message names the limit, and `error.data` holds `limitBytes` and
 `requestBytes`. Your client can send later requests on the same session.
 
-## Large files with putAppFile
+## Large files with `putAppFile`
 
 `putAppFile` takes each file as `contentText`, `contentBase64`, or `sourcePath`.
 Base64 content travels inside the message and is about 4/3 of the file size, so a

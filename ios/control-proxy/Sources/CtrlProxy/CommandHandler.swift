@@ -166,7 +166,8 @@ final class CommandHandler: CommandHandling {
         async throws -> any WebSocketResponsePayload
     {
         switch request {
-        case .requestHierarchy, .requestHierarchyIfStale, .setHierarchyPollInterval, .requestScreenshot:
+        case .requestHierarchy, .requestHierarchyIfStale, .setHierarchyPollInterval, .requestScreenshot,
+             .refreshGeometry:
             return try await dispatchHierarchy(request, startTime: startTime)
         case .tapCoordinates, .swipe, .twoFingerSwipe, .multiFingerSwipe, .drag, .pinch, .pathGesture:
             return try await dispatchGesture(
@@ -214,6 +215,8 @@ final class CommandHandler: CommandHandling {
             return try await handleSetHierarchyPollInterval(payload, startTime: startTime)
         case let .requestScreenshot(payload):
             return try await handleRequestScreenshot(payload, startTime: startTime)
+        case let .refreshGeometry(payload):
+            return await handleRefreshGeometry(payload, startTime: startTime)
         default:
             throw CommandError.unknownCommand(request.typeString)
         }

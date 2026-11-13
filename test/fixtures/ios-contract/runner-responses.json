@@ -1498,6 +1498,7 @@
     "press_home_result",
     "press_key_result",
     "recent_apps_result",
+    "refresh_geometry_result",
     "remove_preference_result",
     "reset_permissions_result",
     "rotate_result",

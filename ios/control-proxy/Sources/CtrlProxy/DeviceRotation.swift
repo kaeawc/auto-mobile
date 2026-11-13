@@ -121,6 +121,8 @@ enum DeviceRotation {
             changeMonitor.captureSample(using: rotationSampler)
         }
 
+        static var changeGeneration: UInt64 { changeMonitor.generation }
+
         static func current() -> Int? {
             rotationSampler.currentRotation()
         }

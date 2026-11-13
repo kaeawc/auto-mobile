@@ -13,6 +13,9 @@ final class FakeElementLocator: ElementLocating, HierarchyExtracting {
     private(set) var filteringRequests: [Bool] = []
     var hierarchy: ViewHierarchy
     var onCapture: (() throws -> Void)?
+    var gestureGeometry: GestureCoordinateGeometry?
+    var nextGestureGeometry: GestureCoordinateGeometry?
+    private(set) var geometryRefreshCalls = 0
     private let appStateWaiter: AppStateWaiter
 
     init(
@@ -40,7 +43,18 @@ final class FakeElementLocator: ElementLocating, HierarchyExtracting {
     func getViewHierarchy(disableAllFiltering: Bool) throws -> ViewHierarchy {
         filteringRequests.append(disableAllFiltering)
         try onCapture?()
+        gestureGeometry = nextGestureGeometry
         return hierarchy
+    }
+
+    func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
+        geometryRefreshCalls += 1
+        gestureGeometry = nil
+        let capture = try getViewHierarchy(disableAllFiltering: false)
+        foregroundBundleId = capture.packageName
+        return gestureGeometry.map {
+            RefreshGeometryResponse.Geometry(geometry: $0, foregroundBundleId: foregroundBundleId)
+        }
     }
 
     func findElement(byResourceId _: String) -> Any? { nil }

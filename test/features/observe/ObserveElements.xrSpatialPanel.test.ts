@@ -430,3 +430,50 @@ test("a cached XR clone restores provenance and keeps the live skeleton labels (
   expect(JSON.stringify(live)).toContain('"label":"Item 1"');
   expect(cloned).toEqual(live);
 });
+
+const SWITCH_ID = "s2-54a37556722ca76a";
+
+async function switchScrollSkeleton(mutate?: (observation: ObserveResult) => void) {
+  const observation = spatialPanelObservation("switch-scroll");
+  mutate?.(observation);
+  await enrich(observation, true);
+  return sanitizeObserveResult(observation, {
+    dropElements: false,
+    compact: true,
+    project: "skeleton",
+  });
+}
+
+test("captured unlabelled Compose Switch takes its preceding sibling text (#17955)", async () => {
+  const output = await switchScrollSkeleton();
+  expect(output.skeleton!.find((row) => row.elementId === SWITCH_ID)).toEqual({
+    bounds: [32, 65, 136, 161],
+    affordances: ["tap", "toggle"],
+    elementId: SWITCH_ID,
+    label: "XrPanel title",
+    checked: false,
+    boundsSpace: "panel",
+  });
+  // The text itself stays readable context; it is not consumed by the toggle.
+  expect(output.context!.find((row) => row.label === "XrPanel title")).toBeDefined();
+});
+
+test("captured Switch stays unlabelled when no text precedes it (#17955)", async () => {
+  const output = await switchScrollSkeleton((observation) => {
+    // Drop the captured title text only; every other captured value is unchanged.
+    const strip = (node: unknown): void => {
+      if (!node || typeof node !== "object") {
+        return;
+      }
+      const record = node as Record<string, unknown>;
+      if (record.text === "XrPanel title") {
+        delete record.text;
+      }
+      Object.values(record).forEach(strip);
+    };
+    strip(observation.viewHierarchy);
+  });
+  const row = output.skeleton!.find((entry) => entry.elementId === SWITCH_ID);
+  expect(row).toBeDefined();
+  expect(row).not.toHaveProperty("label");
+});

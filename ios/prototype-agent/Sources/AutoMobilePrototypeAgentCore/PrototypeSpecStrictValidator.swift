@@ -101,6 +101,7 @@ public enum PrototypeSpecStrictValidator {
                         throw PrototypeContractValidator.invalid(error.path, error.message)
                     }
                 }
+                try PrototypeMapMarkerAssets.validateKnown(context.locatedNodes, assets: shareAssetIds)
             }
             if library, PrototypeCustomShaders.uses(fields) {
                 throw PrototypeContractValidator.invalid(

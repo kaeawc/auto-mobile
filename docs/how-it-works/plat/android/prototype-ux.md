@@ -4066,7 +4066,10 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   at `<node>.backend`.
 - `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. `id`, `lat`, `lng`,
   `title` (also the accessibility label) and the optional `heading` (degrees clockwise from north) are
-  templates resolved per item. `icon` is a Material icon name. `animateMs` (0 to 2000) eases a moved marker.
+  templates resolved per item. `icon` is a Material icon name, or `{"asset": "<id>"}` naming an image uploaded
+  in the spec's `assets`, never a URL (#16491). Given a complete uploaded-asset inventory, all three
+  validators refuse an unknown id at `<node>.markers.icon.asset`, and the bundle export lists the asset with the
+  spec's other images on Android and iOS. `animateMs` (0 to 2000) eases a moved marker.
   Every marker is an accessibility node with the identifier `<mapId>/marker/<id>`, so `observe` and `tapOn`
   reach it.
 - `polylines` (1 to 8) each draw the `{lat, lng}` points of the `/data` array at `path`, with an optional

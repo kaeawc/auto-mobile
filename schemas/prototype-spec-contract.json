@@ -21854,8 +21854,26 @@
         },
         "icon": {
           "rule": {
-            "kind": "ref",
-            "name": "iconName"
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "ref",
+                "name": "iconName"
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "asset": {
+                    "rule": {
+                      "kind": "string",
+                      "nonblank": true,
+                      "max": 256
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
           },
           "optional": true
         },

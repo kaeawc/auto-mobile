@@ -94,3 +94,29 @@ function markerTapContextError(actions: unknown, path: string): PrototypePlatfor
   }
   return undefined;
 }
+
+const MARKER_PLACEHOLDER = /\{[^{}]+\}/;
+
+/**
+ * The image asset id a map node's `markers.icon` names (#16491), or undefined for a Material icon
+ * name. An id with a `{alias.field}` placeholder is a per-marker template, not an asset reference.
+ */
+export function prototypeMapMarkerAsset(node: Raw): string | undefined {
+  const asset = record(record(record(node.markers)?.icon))?.asset;
+  return typeof asset === "string" && !MARKER_PLACEHOLDER.test(asset) ? asset : undefined;
+}
+
+/** The first map whose `markers.icon.asset` is not in a complete uploaded asset inventory. */
+export function prototypeMapMarkerAssetsError(
+  spec: unknown,
+  assets: ReadonlySet<string>,
+): PrototypePlatformError | undefined {
+  let first: PrototypePlatformError | undefined;
+  walkPrototypeNodes(spec, (node, path) => {
+    const asset = node.type === "map" ? prototypeMapMarkerAsset(node) : undefined;
+    if (!first && asset !== undefined && !assets.has(asset)) {
+      first = { path: `${path}.markers.icon.asset`, message: "Unknown marker asset" };
+    }
+  });
+  return first;
+}

@@ -2,6 +2,7 @@ import { prototypePlatformUses } from "./prototypePlatform";
 import { prototypeShaderUses } from "./prototypeShaders";
 import { isPrototypeMediaId } from "./prototypeMediaItems";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { prototypeMapMarkerAsset } from "./prototypeMap";
 import { mapBindableFields, record } from "./prototypeTemplate";
 
 const REPEAT_PLACEHOLDER = /\{[^{}]+\}/;
@@ -63,6 +64,10 @@ export function collectPrototypeAssetReferences(spec: unknown): {
     });
     if (node.type === "image") {
       addImage(node.asset, images);
+    }
+    const markerAsset = node.type === "map" ? prototypeMapMarkerAsset(node) : undefined;
+    if (markerAsset !== undefined) {
+      images.add(markerAsset);
     }
     for (const item of Array.isArray(node.items) ? node.items : []) {
       addImage(record(item)?.image, images);

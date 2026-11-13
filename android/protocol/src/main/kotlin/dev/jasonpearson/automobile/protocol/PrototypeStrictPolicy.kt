@@ -178,7 +178,7 @@ internal object PrototypeStrictPolicy {
             return it
           }
       }
-      return null
+      return PrototypeMapMarkerAssets.unknownError(context.nodes, ids)
     }
 
     fun fields(context: PrototypeStateChecks.Context): List<Field> {

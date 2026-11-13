@@ -133,7 +133,10 @@ export interface AdoptedPrototype {
 export interface PrototypeStatus {
   prototypes: (PrototypeLastResult & Partial<PrototypeEventState>)[];
   lastResult?: PrototypeLastResult;
-  /** The last `battery|power|audio.changed` values the device delivered in this scope (#14316). */
+  /**
+   * The last `battery|power|audio.changed` values the device delivered in this scope (#14316), and the
+   * accuracy-only summary of the last `location.updated` (#16463).
+   */
   platformStatus?: PrototypeDeviceStatusMirror;
 }
 export interface PrototypeScope {

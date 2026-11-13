@@ -308,9 +308,13 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     const earlyExit = this.earlyExitDescription(backendHandle);
     const windowMs =
       (backendHandle.stopRequestedAtMs ?? this.timer.now()) - backendHandle.launchedAtMs;
+    // After an abnormal exit, a recorder that died before finalizing leaves no moov/mvhd, so an
+    // unverifiable duration counts as short rather than dropping the warning (#18257).
     const isShort =
       sizeBytes < 10_000 ||
-      (videoDurationMs !== undefined && windowMs >= 3000 && videoDurationMs < windowMs / 2);
+      (videoDurationMs === undefined
+        ? earlyExit !== undefined
+        : windowMs >= 3000 && videoDurationMs < windowMs / 2);
     if (earlyExit) {
       const message = `The host adb session to the Android recorder ${earlyExit} before the stop was requested`;
       if (isShort) {

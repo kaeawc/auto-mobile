@@ -243,7 +243,7 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         // SwiftUI's digitalCrownRotation does not set XCUI hasFocus (device-checked on watchOS 26.5,
         // #17549), so with no focused element the app's single readable non-scrolling value is the target.
         if focusedCount == 0 {
-            return watchCrownFocusedValue([crownCandidate(try app.snapshot())])
+            return try watchCrownFocusedValue([crownCandidate(app.snapshot())])
         }
         // A larger set is not a single crown target; skip the per-element snapshots.
         guard (1 ... 8).contains(focusedCount) else { return nil }

@@ -61,6 +61,7 @@ private fun DemoIndexEntry(destination: DemoIndexDestination, state: NavigationS
           onNavigateToPointerProbe = { backStack.add(DemoPointerProbeDestination) },
           onNavigateToCollapsingComposer = { backStack.add(DemoCollapsingComposerDestination) },
           onNavigateToSharedRowIdList = { backStack.add(DemoSharedRowIdListDestination) },
+          onNavigateToControlShapes = { backStack.add(DemoControlShapesDestination) },
           onNavigateToDesignSystem = { backStack.add(DesignSystemDemoDestination) },
           onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
         ),

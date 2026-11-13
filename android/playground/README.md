@@ -35,6 +35,7 @@ The app includes a Docs Demo Index screen (Home > Demos) with deterministic demo
 - Pointer probe that logs tool type, source, pressure, tilt and buttons of every touch/hover
   MotionEvent (stylus and hover injection experiments)
 - Shared row id list: an XML RecyclerView of 60 rows that all share one resource id
+- Control shapes: flat Text/Switch siblings, switches sharing one resource id and a readout-less slider
 
 Demo screens use stable labels and Compose test tags for repeatable automation. Deep links are
 listed in `android/docs/playground-deep-links.md`.

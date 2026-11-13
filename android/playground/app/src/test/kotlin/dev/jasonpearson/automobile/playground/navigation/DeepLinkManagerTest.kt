@@ -155,6 +155,14 @@ class DeepLinkManagerTest {
   }
 
   @Test
+  fun testParseDemoControlShapesDeepLink() {
+    val uri = Uri.parse("automobile://playground/demos/controls/shapes")
+    assertTrue(DeepLinkManager.isValidDeepLink(uri))
+    assertEquals(DemoControlShapesDestination, DeepLinkManager.parseDeepLink(uri))
+    assertEquals("Demo Control Shapes", DeepLinkManager.getDestinationName(uri))
+  }
+
+  @Test
   fun testParseInvalidScheme() {
     val uri = Uri.parse("https://playground/onboarding")
     val destination = DeepLinkManager.parseDeepLink(uri)
@@ -233,7 +241,7 @@ class DeepLinkManagerTest {
   @Test
   fun testGetAllDeepLinks() {
     val allLinks = DeepLinkManager.getAllDeepLinks()
-    assertEquals(27, allLinks.size)
+    assertEquals(28, allLinks.size)
 
     val linkUrls = allLinks.map { it.second }
     assertTrue(linkUrls.all { it.startsWith("automobile://playground/") })
@@ -253,5 +261,6 @@ class DeepLinkManagerTest {
     assertTrue(linkUrls.contains("automobile://playground/demos/input/pointer_probe"))
     assertTrue(linkUrls.contains("automobile://playground/demos/input/collapsing_composer"))
     assertTrue(linkUrls.contains("automobile://playground/demos/lists/shared_row_id"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/controls/shapes"))
   }
 }

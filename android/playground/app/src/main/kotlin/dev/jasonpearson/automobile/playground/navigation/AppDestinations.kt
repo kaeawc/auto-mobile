@@ -58,4 +58,6 @@ data class HomeDestination(
 
 @Serializable data object DemoSharedRowIdListDestination : AppDestination
 
+@Serializable data object DemoControlShapesDestination : AppDestination
+
 @Serializable data object DesignSystemDemoDestination : AppDestination

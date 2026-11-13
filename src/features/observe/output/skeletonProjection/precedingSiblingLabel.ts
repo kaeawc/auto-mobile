@@ -56,18 +56,22 @@ export function attributePrecedingSiblingLabels(
       )
       .sort((a, b) => a.provenance!.enter - b.provenance!.enter)[0];
     if (acc.label === undefined && !preceding) {
-      for (const text of texts) {
-        const bare =
-          text.provenance!.group === own.group && text.provenance!.enter === own.exit + 1;
-        if (bare || graph?.followsInWrapper(acc, text)) {
-          trailing.add(text);
-        }
-      }
+      texts
+        .filter((text) => followsToggle(acc, text) || graph?.followsInWrapper(acc, text))
+        .forEach((text) => trailing.add(text));
     }
     if (acc.label === undefined) {
       acc.label = preceding?.label;
     }
   }
+}
+
+/** Whether `text` starts right after `toggle`'s subtree in the same root/window. */
+function followsToggle(toggle: SkeletonAccumulator, text: SkeletonAccumulator): boolean {
+  return (
+    text.provenance!.group === toggle.provenance!.group &&
+    text.provenance!.enter === toggle.provenance!.exit + 1
+  );
 }
 
 /** Captured entry ancestry for rows; non-provenance producers supply none. */

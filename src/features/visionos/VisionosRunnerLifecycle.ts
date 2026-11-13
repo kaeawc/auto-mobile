@@ -10,6 +10,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../utils/PortManager";
 import { VisionosRunnerArtifacts } from "./VisionosRunnerArtifacts";
+import { VisionosRunnerReleaseProvider } from "./VisionosRunnerReleaseProvider";
 import {
   XcodebuildVisionosRunnerLauncher,
   type VisionosRunnerLauncher,
@@ -273,6 +274,7 @@ export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
   if (!defaultLifecycle) {
     defaultLifecycle = new VisionosRunnerLifecycle({
       artifacts: new VisionosRunnerArtifacts({
+        release: new VisionosRunnerReleaseProvider(),
         builder: createVisionosArtifactBuilder(getDefaultBuilder),
       }),
       launcher: new XcodebuildVisionosRunnerLauncher({

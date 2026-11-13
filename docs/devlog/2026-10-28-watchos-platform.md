@@ -30,7 +30,8 @@ directions and a 30-move limit fail with actionable guidance. Press replies sync
 navigation without sleeps. Touch gestures are refused with focus-navigation guidance;
 long press and text input are unsupported. A tvOS handshake is required before registration.
 `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` overrides artifact discovery; otherwise `TvosRunnerArtifacts`
-uses local appletvsimulator products, then `TvosRunnerReleaseProvider`, then builds the
+uses local appletvsimulator products, then `TvosRunnerReleaseProvider` (a
+`SimulatorRunnerReleaseProvider`), then builds the
 `AutoMobileTVTest` scheme with a 120-second limit. The provider verifies the pinned
 `tvos-runner-macos.zip` checksum before worker extraction, stages `Build/Products` in a secure
 cache, and publishes by rename. A matching metadata SHA and an existing template xctestrun are
@@ -120,7 +121,11 @@ unavailable, and a broker binding never reuses one.
   hierarchy read. Startup retries connection/readiness for a bounded budget. Process exit or
   the returned stop handle closes the client and removes the registration. After boot, before session
   binding, `startDevice` discovers a watchsimulator xctestrun in the configured CtrlProxy derived
-  data, building the `CtrlProxyWatch` scheme with `build-for-testing` if absent. The project is
+  data, then asks `WatchRunnerReleaseProvider` for the release's pinned `watchos-runner-macos.zip`,
+  and builds the `CtrlProxyWatch` scheme with `build-for-testing` only when both are absent. The
+  provider shares `SimulatorRunnerReleaseProvider` with tvOS and visionOS: verify before
+  extraction, a SHA-keyed secure cache, fail closed on a mismatch, and fall through to the source
+  build only when the download itself fails or the release pins no checksum. The project is
   looked up under `AUTOMOBILE_PROJECT_ROOT` (default: process working directory), then the
   daemon launch directory, then the running AutoMobile package root, because the detached
   daemon runs in the home directory; when none has it, the error lists every path checked.

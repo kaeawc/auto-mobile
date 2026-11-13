@@ -255,6 +255,23 @@ jobs:
       upload-artifact: true
       artifact-retention-days: 90
 
+  # Unsigned simulator runners like tvOS (#18136); they need no secrets.
+  build-candidate-watchos-runner:
+    needs: prepare-version
+    uses: ./.github/workflows/build-watchos-runner.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: true
+      artifact-retention-days: 90
+
+  build-candidate-visionos-runner:
+    needs: prepare-version
+    uses: ./.github/workflows/build-visionos-runner.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: true
+      artifact-retention-days: 90
+
   # Ad-hoc-signed universal iOS simulator prototype agent; needs no secrets.
   build-candidate-prototype-agent:
     needs: prepare-version
@@ -343,6 +360,8 @@ jobs:
         build-candidate-screen-capture-helper,
         build-candidate-audio-loopback-helper,
         build-candidate-tvos-runner,
+        build-candidate-watchos-runner,
+        build-candidate-visionos-runner,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
         build-candidate-network-filter-identity-probe,
@@ -376,6 +395,8 @@ jobs:
           SCREEN_CAPTURE_HELPER_SHA256: ${{ needs.build-candidate-screen-capture-helper.outputs.sha256 }}
           AUDIO_LOOPBACK_HELPER_SHA256: ${{ needs.build-candidate-audio-loopback-helper.outputs.sha256 }}
           TVOS_RUNNER_SHA256: ${{ needs.build-candidate-tvos-runner.outputs.sha256 }}
+          WATCHOS_RUNNER_SHA256: ${{ needs.build-candidate-watchos-runner.outputs.sha256 }}
+          VISIONOS_RUNNER_SHA256: ${{ needs.build-candidate-visionos-runner.outputs.sha256 }}
           PROTOTYPE_AGENT_SHA256: ${{ needs.build-candidate-prototype-agent.outputs.sha256 }}
           PROTOTYPE_VIEWER_SHA256: ${{ needs.build-candidate-prototype-viewer.outputs.sha256 }}
           NETWORK_FILTER_SHA256: ${{ needs.build-candidate-network-filter-identity-probe.outputs.sha256 }}
@@ -488,6 +509,8 @@ jobs:
         build-candidate-screen-capture-helper,
         build-candidate-audio-loopback-helper,
         build-candidate-tvos-runner,
+        build-candidate-watchos-runner,
+        build-candidate-visionos-runner,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
         build-candidate-protoviewer-artifact-policy,
@@ -560,6 +583,18 @@ jobs:
           name: tvos-runner
           path: /tmp
 
+      - name: "Download watchos-runner"
+        uses: actions/download-artifact@v7
+        with:
+          name: watchos-runner
+          path: /tmp
+
+      - name: "Download visionos-runner"
+        uses: actions/download-artifact@v7
+        with:
+          name: visionos-runner
+          path: /tmp
+
       - name: "Download prototype-agent"
         uses: actions/download-artifact@v7
         with:
@@ -610,6 +645,8 @@ jobs:
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
           bash scripts/ci/verify-artifact-sha256.sh /tmp/audio-loopback-helper-macos-universal.zip audioloopbackhelper
           bash scripts/ci/verify-artifact-sha256.sh /tmp/tvos-runner-macos.zip tvosrunner
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/watchos-runner-macos.zip watchosrunner
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/visionos-runner-macos.zip visionosrunner
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeAgent.dylib prototypeagent
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeViewer.zip prototypeviewer
           # Structural prototype-agent checks (lipo/vtool/codesign) run in the macOS builder
@@ -694,7 +731,7 @@ jobs:
             --arg tag_sha "$TAG_SHA" \
             --arg prepare_run_id "$PREPARE_RUN_ID" \
             '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
-              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "lmk-pressure", "screen-capture-helper", "audio-loopback-helper", "tvos-runner", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
+              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "lmk-pressure", "screen-capture-helper", "audio-loopback-helper", "tvos-runner", "watchos-runner", "visionos-runner", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
             > /tmp/release-artifact-provenance.json
 
       - name: Upload release artifact provenance

@@ -10,7 +10,7 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/working
 
 const VISION_SCHEME = "AutoMobileVisionTest";
 
-/** Finds local visionos artifacts, building the checked-in visionos scheme when necessary. */
+/** Resolves overrides, local products, and released visionos runners before building from source. */
 export class VisionosRunnerArtifacts {
   private readonly builds = new SingleFlight<string, string>();
   constructor(
@@ -22,6 +22,7 @@ export class VisionosRunnerArtifacts {
             "projectRoot" | "derivedDataPath"
           >;
         };
+      release?: { ensure(signal?: AbortSignal): Promise<string | null> };
       xcodebuild?: Pick<Xcodebuild, "executeCommand">;
       override?: () => string | undefined;
       access?: (file: string) => Promise<unknown>;
@@ -43,6 +44,11 @@ export class VisionosRunnerArtifacts {
     if (existing) {
       return existing;
     }
+    const released = await this.dependencies.release?.ensure(signal);
+    signal?.throwIfAborted();
+    if (released) {
+      return released;
+    }
     const paths = builder.getConfig();
     return await this.builds.run(
       paths.derivedDataPath,
@@ -60,7 +66,7 @@ export class VisionosRunnerArtifacts {
               await (this.dependencies.access ?? access)(projectPath);
             } catch (cause) {
               throw new ActionableError(
-                `Visionos runner project is unavailable; set ${ENV.VISIONOS_RUNNER_XCTESTRUN.name} to a prebuilt visionos runner xctestrun. The published package does not include the visionos project.`,
+                `Visionos runner project is unavailable; set ${ENV.VISIONOS_RUNNER_XCTESTRUN.name} to a prebuilt visionos runner xctestrun. This release has no published visionOS runner, and the published package does not include the visionos project.`,
                 { cause },
               );
             }

@@ -62,6 +62,10 @@ export interface ReleaseChecksumEntry {
   audioLoopbackHelperSha256?: string;
   /** SHA-256 of the tvOS simulator runner Build/Products archive. */
   tvosRunnerSha256?: string;
+  /** SHA-256 of the watchOS simulator runner Build/Products archive (#18136). */
+  watchosRunnerSha256?: string;
+  /** SHA-256 of the visionOS simulator runner Build/Products archive (#18136). */
+  visionosRunnerSha256?: string;
   /**
    * SHA-256 of the universal ad-hoc-signed iOS-simulator prototype-agent dylib
    * (`AutoMobilePrototypeAgent.dylib`, #10564/#10565). Optional: releases that
@@ -1106,6 +1110,12 @@ export const AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME = "audio-loopback-helper-mac
 /** Fixed GitHub Release asset for the tvOS simulator runner. */
 export const TVOS_RUNNER_ARCHIVE_FILENAME = "tvos-runner-macos.zip";
 
+/** Fixed GitHub Release asset for the watchOS simulator runner. */
+export const WATCHOS_RUNNER_ARCHIVE_FILENAME = "watchos-runner-macos.zip";
+
+/** Fixed GitHub Release asset for the visionOS simulator runner. */
+export const VISIONOS_RUNNER_ARCHIVE_FILENAME = "visionos-runner-macos.zip";
+
 /** Fixed GitHub Release asset for the signed, notarized macOS Network Filter app. */
 export const NETWORK_FILTER_ARCHIVE_FILENAME = "automobile-network-filter-macos-universal.zip";
 
@@ -1247,6 +1257,48 @@ export function resolveTvosRunnerChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.tvosRunnerSha256 ?? "";
+}
+
+/** Download URL for the watchOS simulator runner archive. */
+export function resolveWatchosRunnerUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    WATCHOS_RUNNER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected archive SHA-256 for the selected watchOS runner release; "" when unknown. */
+export function resolveWatchosRunnerChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.watchosRunnerSha256 ?? "";
+}
+
+/** Download URL for the visionOS simulator runner archive. */
+export function resolveVisionosRunnerUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    VISIONOS_RUNNER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected archive SHA-256 for the selected visionOS runner release; "" when unknown. */
+export function resolveVisionosRunnerChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.visionosRunnerSha256 ?? "";
 }
 
 /** Download URL for the signed macOS Network Filter app archive. */

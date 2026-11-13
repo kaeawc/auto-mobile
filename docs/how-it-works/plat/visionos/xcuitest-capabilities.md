@@ -13,6 +13,10 @@ the runner can observe and act on, and what it cannot.
 - `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and `listApps` use `simctl`.
   Screenshots use `simctl`.
 - `observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner on demand.
+  Its xrsimulator xctestrun comes from `AUTOMOBILE_VISIONOS_RUNNER_XCTESTRUN`, then local
+  `AutoMobileVisionTest` products, then the release's pinned `visionos-runner-macos.zip` through
+  `VisionosRunnerReleaseProvider` (the tvOS `SimulatorRunnerReleaseProvider` contract), then a
+  source build. The iOS runner is not reused: visionOS is its own scheme and SDK.
 - All other device tools are disabled.
 
 ## Runner target and observation

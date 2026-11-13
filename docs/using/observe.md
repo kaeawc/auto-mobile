@@ -10,9 +10,10 @@ returns the hierarchy. Bounds tuples are `[left, top, right, bottom]`.
 A toggle row with no label of its own or from its enclosing row takes the text
 shown immediately before it, such as the `Dark mode` text beside a `Switch`; that
 text still appears in `context`. Text that follows a toggle with no label and no
-text before it, directly or inside a plain container, is that toggle's trailing
-label and never labels the next toggle; when a toggle has its own label or is
-labelled by the text before it, the text after it labels the next toggle.
+text before it, in the same coordinate space (window or ornament), directly or
+inside a plain container, is that toggle's trailing label and never labels the
+next toggle; when a toggle has its own label or is labelled by the text before
+it, the text after it labels the next toggle. Text selectors match the same label.
 
 For an Android XR app with an embedded SpatialPanel, `xrPanelSpace` identifies
 the panel's `windowId` and window `bounds`. Elements and skeleton/context rows

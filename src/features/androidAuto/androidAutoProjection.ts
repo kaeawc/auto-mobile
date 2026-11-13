@@ -14,6 +14,9 @@ export const ANDROID_AUTO_NOTIFICATION_LISTENER =
 /** DHU console command that gives the headless head unit video focus; `screenshot` fails without it. */
 export const DHU_FOCUS_VIDEO_COMMAND = "focus video";
 
+/** Line a `--headless` DHU prints instead of writing a `screenshot` while it has no video focus. */
+export const DHU_NO_VIDEO_FOCUS_MARKER = "Don't have video focus";
+
 /** Line the DHU prints once its transport reaches the phone (it prints it even when the server is down). */
 export const DHU_CONNECTED_MARKER = "connected.";
 

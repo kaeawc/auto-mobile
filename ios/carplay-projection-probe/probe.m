@@ -2,6 +2,11 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <unistd.h>
+
+// Self-deadline below the host's 15 s xcrun timeout: killing xcrun does not
+// necessarily kill this process inside the simulator, so SIGALRM ends it.
+static const unsigned int kProbeDeadlineSeconds = 10;
 
 static NSString *displayIdentity(long long tag, int displayId) {
     NSString *kind;
@@ -20,6 +25,7 @@ static NSString *displayIdentity(long long tag, int displayId) {
 }
 
 int main(void) {
+    alarm(kProbeDeadlineSeconds);
     @autoreleasepool {
         Class displayClass = NSClassFromString(@"CADisplay");
         SEL displaysSelector = sel_registerName("displays");

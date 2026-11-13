@@ -38,19 +38,19 @@ scroll`), which was still owed.
 | 500 rows                                     | 1002         | 503             | 17.6-17.9 | 31.9-35.8 |
 
 Scenarios run in JUnit's method-name-hash order (trivial, 500, benchmark list, 87, 200), not
-the order above, so the first two carry more JIT/GC warm-up than the last two and the trivial
+the order above. The first two therefore carry more JIT/GC warm-up than the last two, and the trivial
 case reads slower than 87 rows for that reason. The numbers exclude spec-to-render-model mapping
-(the runtime's cached render model is reused) and draw. Cost is not linear in rows: 87 to 200
-rows adds under 1 ms, 200 to 500 rows adds roughly 13 ms (about 42-45 us per row, inflated by the
+(the runtime's cached render model is reused) and draw. Cost is not linear in rows. Going from 87 to 200
+rows adds under 1 ms. Going from 200 to 500 rows adds roughly 13 ms (about 42-45 us per row, inflated by the
 500-row case running early), and only 500 rows reaches a median of about 18 ms. Every row text is
-present in the semantics tree in every scenario (asserted). Robolectric numbers are not device frame times:
-the on-device figure for the benchmark list (`scripts/android/prototype-frame-benchmark.sh
+present in the semantics tree in every scenario (asserted). Robolectric numbers are not device frame times.
+The on-device figure for the benchmark list (`scripts/android/prototype-frame-benchmark.sh
 --scenario scroll`) is still owed before any deferral is built.
 
 ### Feed baseline
 
-Feed baseline (2026-10-26, 1,000 rows, debug CtrlProxy on an API 37 arm64 emulator with
-software rendering, host load average above 140): `feed-scroll-down` p95 250 ms and
+The feed baseline ran on 2026-10-26 with 1,000 rows, debug CtrlProxy on an API 37 arm64 emulator with
+software rendering, and a host load average above 140. Results: `feed-scroll-down` p95 250 ms and
 `feed-fling-roundtrip` p95 300 ms (about 98% janky), `feed-idle` no frames. This is a
 smoke baseline, not a verdict: it misses the 16 ms target, but the debug build, software
 GL and a saturated host dominate it. Re-measure a release build on an idle host or device.

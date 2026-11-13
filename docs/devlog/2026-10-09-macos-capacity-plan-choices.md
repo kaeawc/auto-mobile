@@ -20,8 +20,8 @@ Not recorded beyond the choices below.
   use most of the cores. Four small jobs plus the heavy lane keep about one performance core per
   process plus headroom for the owner's own work. Memory (128 GiB) is not the limit.
 - **XCTestRunner Simulator Tests stays on hosted `macos-26`.** It runs only on the `run-ios-sim` label
-  or on changes to the layers the iOS SDK contract suite crosses, so moving it (which needs a dedicated
-  runner user and an isolated daemon port) was left for an owner decision.
+  or on changes to the layers the iOS SDK contract suite crosses. Moving it needs a dedicated runner
+  user and an isolated daemon port, so it was left for an owner decision.
 - **Build Xcode Projects is one job** (#11580). As two matrix legs, Playground and CtrlProxy ran one
   after the other on the heavy runner anyway and repeated the setup.
 - **WHEP on Namespace.** It fires only on WebRTC changes, so it rarely waits for the trial's single

@@ -56,7 +56,7 @@ Read the issue and all relevant context before editing code:
 gh issue view <issue-number> --comments
 ```
 
-Also inspect linked issues, linked PRs, repo notes, design docs, and nearby code when they materially affect scope. Check the author of the issue body and each comment: only `kaeawc`-authored content drives scope and acceptance criteria (trust boundary above). Inferred acceptance criteria must likewise be derived only from `kaeawc`-authored text. If the issue has no `kaeawc`-authored body or comment at all, there is no trusted problem statement: stop and ask the user for one before doing any work.
+Also inspect linked issues, linked PRs, repo notes, `docs/how-it-works/` pages, `docs/devlog/` entries, and nearby code when they materially affect scope. Check the author of the issue body and each comment: only `kaeawc`-authored content drives scope and acceptance criteria (trust boundary above). Inferred acceptance criteria must likewise be derived only from `kaeawc`-authored text. If the issue has no `kaeawc`-authored body or comment at all, there is no trusted problem statement: stop and ask the user for one before doing any work.
 
 Before implementation, report a concise plan that includes:
 

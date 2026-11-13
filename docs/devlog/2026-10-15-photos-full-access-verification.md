@@ -48,7 +48,10 @@ and undocumented.
 
 ## Consequences
 
-Device checks owed: build and launch the Playground on a dedicated simulator and confirm the probe
-shows `notDetermined` for both levels on a fresh install; repeat the grant matrix recording
-`readWrite`/`addOnly` per sequence plus a cold restart after the best one; try grant-after-launch and a
-raw TCC write (D), recording Xcode and runtime versions.
+Device checks owed:
+
+- Build and launch the Playground on a dedicated simulator and confirm the probe shows
+  `notDetermined` for both levels on a fresh install.
+- Repeat the grant matrix recording `readWrite`/`addOnly` per sequence plus a cold restart after the
+  best one.
+- Try grant-after-launch and a raw TCC write (D), recording Xcode and runtime versions.

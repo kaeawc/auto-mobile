@@ -4,6 +4,29 @@ import Foundation
 /// seconds): a result written after the host's timeout already removed its own copy, or a stray push.
 let prototypeMcpOrphanMaxAge: TimeInterval = 10 * 60
 
+/// What this build can render, published as `mcp/capabilities.json` for the host's pre-save check
+/// (#16469). Same shape as Android's: `versionCode` is `CFBundleVersion`, `versionName` is
+/// `CFBundleShortVersionString`, and `capabilities` is what the importer gates on.
+struct PrototypeMcpCapabilitiesReport: Encodable, Equatable {
+    let versionCode: Int
+    let versionName: String
+    let capabilities: [String]
+
+    /// Nil when `CFBundleVersion` is not an integer: the host then cannot compare it, so nothing is published.
+    init?(info: [String: Any], capabilities: [String] = AutoMobilePrototypeCapabilities.supported) {
+        guard let code = (info["CFBundleVersion"] as? String).flatMap({ Int($0) }), code >= 0 else { return nil }
+        versionCode = code
+        versionName = String((info["CFBundleShortVersionString"] as? String ?? "").prefix(64))
+        self.capabilities = capabilities
+    }
+
+    func encoded() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(self)
+    }
+}
+
 /// Serializes whole MCP attempts. No store crosses executors; closures construct it on this actor.
 actor PrototypeMcpInbox {
     private let root: URL
@@ -12,6 +35,7 @@ actor PrototypeMcpInbox {
     private let entries: @Sendable () throws -> [PrototypeLibraryEntry]
     private let warning: @Sendable (String) -> Void
     private let now: @Sendable () -> Date
+    private let report: PrototypeMcpCapabilitiesReport?
     private var pending: [String: String] = [:]
 
     init(
@@ -20,10 +44,12 @@ actor PrototypeMcpInbox {
         importBundle: @escaping @Sendable (URL, String?) throws -> PrototypeLibraryEntry,
         entries: @escaping @Sendable () throws -> [PrototypeLibraryEntry],
         now: @escaping @Sendable () -> Date = { Date() },
+        report: PrototypeMcpCapabilitiesReport? = nil,
         warning: @escaping @Sendable (String) -> Void
     ) {
         self.root = root
         self.now = now
+        self.report = report
         files = makeFiles()
         self.importBundle = importBundle
         self.entries = entries
@@ -32,10 +58,11 @@ actor PrototypeMcpInbox {
 
     init(
         root: URL, libraryRoot: URL, storageRoot: URL, now: @escaping @Sendable () -> Date = { Date() },
-        warning: @escaping @Sendable (String) -> Void
+        report: PrototypeMcpCapabilitiesReport? = nil, warning: @escaping @Sendable (String) -> Void
     ) {
         self.root = root
         self.now = now
+        self.report = report
         files = PrototypeLibraryDiskFileSystem()
         importBundle = { url, label in
             let bytes = try PrototypeLibraryFileReader().read(url)
@@ -50,6 +77,9 @@ actor PrototypeMcpInbox {
         try files.createDirectory(root.appendingPathComponent("inbox", isDirectory: true))
         try files.createDirectory(root.appendingPathComponent("results", isDirectory: true))
         try files.writeAtomic(root.appendingPathComponent("delivery"), bytes: Data("file-inbox-v1".utf8))
+        if let report {
+            try files.writeAtomic(root.appendingPathComponent("capabilities.json"), bytes: report.encoded())
+        }
     }
 
     /// Deletes regular files in `inbox` and `results` not modified for [prototypeMcpOrphanMaxAge].

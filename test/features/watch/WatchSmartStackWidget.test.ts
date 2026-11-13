@@ -4,7 +4,9 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import {
   addWatchSmartStackWidget,
   findUnnamedAddedWidget,
+  hasNamelessSmartStackWidget,
   hasSmartStackWidget,
+  isSmartStackWidgetPresent,
   verifySmartStackWidget,
 } from "../../../src/features/watch/WatchSmartStackWidget";
 import { readSmartStackEditTap } from "../../../src/features/watch/WatchSmartStack";
@@ -45,6 +47,21 @@ function withoutCell(dump: string, cellId: string): string {
 }
 const oneEmptyCell = withoutCell(emptyNames, LOWER_CELL);
 const noWidgetCells = withoutCell(oneEmptyCell, TOP_CELL);
+const identity = { hostBundleId: "dev.probe.app", widgetKind: "probe" };
+
+/** The dump with the Edit button from the with-edit capture, so it can open the stack. */
+function withEditButton(dump: string): string {
+  const lines = dump.split("\n");
+  const editLines = withEdit.split("\n");
+  const editStart = editLines.findIndex((line) => line.includes("{{46.4, 195.8}, {94.2, 20.2}}"));
+  const header = lines.findIndex((line) => line.includes("identifier: 'Smart Stack Header'"));
+  const end = lines.findIndex((line, index) => index > header && /^ {18}\S/.test(line));
+  return [
+    ...lines.slice(0, end),
+    ...editLines.slice(editStart, editStart + 4),
+    ...lines.slice(end),
+  ].join("\n");
+}
 
 class FakeClient implements Pick<WatchRunnerClient, "request"> {
   readonly commands: WatchCommand[] = [];
@@ -150,9 +167,7 @@ describe("Smart Stack widget", () => {
         hostBundleId: "dev.probe.app",
         widgetKind: "probe",
       });
-      expect(verifySmartStackWidget(dump, baseline, options.appName, options.widgetName)).toBe(
-        true,
-      );
+      expect(verifySmartStackWidget(dump, baseline, options)).toBe(true);
     },
   );
   test.each([
@@ -165,7 +180,9 @@ describe("Smart Stack widget", () => {
     ["the cell is named for another widget", captures[0].replace(/Cell, .*\n/, ""), captures[0]],
   ])("rejects an empty-name readback when %s", (_label, baseline, dump) => {
     expect(findUnnamedAddedWidget(dump, baseline, options.appName)).toBeUndefined();
-    expect(verifySmartStackWidget(dump, baseline, "OtherApp", "OtherWidget")).toBe(false);
+    expect(
+      verifySmartStackWidget(dump, baseline, { appName: "OtherApp", widgetName: "OtherWidget" }),
+    ).toBe(false);
   });
   test("rejects a new empty-name cell whose labels do not hold the app name", () => {
     expect(findUnnamedAddedWidget(oneEmptyCell, noWidgetCells, "OtherApp")).toBeUndefined();
@@ -212,6 +229,93 @@ describe("Smart Stack widget", () => {
     );
     expect(result).toMatchObject({ success: false, attempts: 1, verificationAttempts: 10 });
     expect(result.reason).toContain("Widget cell did not appear");
+  });
+  test("matches a nameless cell by host bundle id and widget kind", () => {
+    expect(hasNamelessSmartStackWidget(emptyNames, identity)).toBe(true);
+    expect(isSmartStackWidgetPresent(emptyNames, { ...options, ...identity })).toBe(true);
+    expect(hasNamelessSmartStackWidget(emptyNames, { ...identity, widgetKind: "other" })).toBe(
+      false,
+    );
+    expect(
+      hasNamelessSmartStackWidget(emptyNames, { ...identity, hostBundleId: "dev.other.app" }),
+    ).toBe(false);
+    expect(hasNamelessSmartStackWidget(emptyNames, { hostBundleId: "dev.probe.app" })).toBe(false);
+    expect(hasNamelessSmartStackWidget(noWidgetCells, identity)).toBe(false);
+    expect(hasNamelessSmartStackWidget("container", identity)).toBe(false);
+    // A named cell for the same descriptor is matched by names, never as a nameless cell.
+    expect(hasNamelessSmartStackWidget(captures[0], identity)).toBe(false);
+    expect(verifySmartStackWidget(emptyNames, emptyNames, { ...options, ...identity })).toBe(true);
+  });
+  test("the edit-button helper keeps the cells and opens the stack", () => {
+    const header = withEditButton(emptyNames);
+    expect(readSmartStackEditTap(header)).toEqual(readSmartStackEditTap(withEdit));
+    expect(hasNamelessSmartStackWidget(header, identity)).toBe(true);
+  });
+  test("verifies a nameless readback by identity when the cell was already counted", async () => {
+    const { client, timer } = arrange([withEditButton(noWidgetCells), emptyNames]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, ...identity, maxAttempts: 1 },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: true, alreadyPresent: false, attempts: 1 });
+    expect(client.commands).toEqual(widgetAttempt(1));
+  });
+  test.each([
+    ["a named cell", withEditButton(captures[0]), options],
+    [
+      "a nameless cell with a matching identity",
+      withEditButton(emptyNames),
+      { ...options, ...identity },
+    ],
+  ])("adds nothing when %s is already on the stack", async (_label, header, target) => {
+    const { client, timer } = arrange([header]);
+    const result = await addWatchSmartStackWidget(client, target, { timer });
+    expect(result).toMatchObject({
+      success: true,
+      alreadyPresent: true,
+      attempts: 1,
+      headerAttempts: 1,
+      verificationAttempts: 0,
+    });
+    expect(result.reason).toContain("no widget was added");
+    expect(client.commands).toEqual(openingRound(1));
+  });
+  test("a retry adds no duplicate when the first attempt's nameless cell landed late", async () => {
+    const { client, timer } = arrange([
+      withEditButton(noWidgetCells),
+      ...Array(10).fill(withEditButton(noWidgetCells)),
+      withEditButton(oneEmptyCell),
+    ]);
+    const result = await addWatchSmartStackWidget(client, options, { timer });
+    expect(result).toMatchObject({ success: true, alreadyPresent: true, attempts: 2 });
+    expect(client.commands).toEqual([...widgetAttempt(10), ...openingRound(1)]);
+  });
+  test("a retry still edits when the nameless cell was already there before the first attempt", async () => {
+    const { client, timer } = arrange([
+      withEditButton(oneEmptyCell),
+      ...Array(10).fill(withEditButton(oneEmptyCell)),
+      withEditButton(oneEmptyCell),
+      withEditButton(emptyNames),
+    ]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, maxAttempts: 2 },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: true, alreadyPresent: false, attempts: 2 });
+    expect(client.commands).toEqual([...widgetAttempt(10), ...widgetAttempt(1)]);
+  });
+  test.each([
+    [{ hostBundleId: "dev.probe.app" }],
+    [{ widgetKind: "probe" }],
+    [{ hostBundleId: " ", widgetKind: "probe" }],
+  ])("rejects a partial widget identity %p", async (partial) => {
+    const { client, timer } = arrange([]);
+    await expect(
+      addWatchSmartStackWidget(client, { ...options, ...partial }, { timer }),
+    ).rejects.toThrow("Provide both hostBundleId and widgetKind");
+    expect(client.commands).toEqual([]);
   });
   test("uses clockface commands in order and polls past container-only dumps", async () => {
     const { client, timer } = arrange(["container", withEdit, "container", captures[1]]);

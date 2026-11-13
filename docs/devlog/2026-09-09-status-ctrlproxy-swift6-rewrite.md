@@ -9,7 +9,7 @@
 ## Outcome
 
 The rewrite completed: it became the sole `CtrlProxy` implementation, the reference oracle and the
-differential-parity harness were removed, and the production XCUITest runner compiles and runs it.
+differential-parity harness went away, and the production XCUITest runner compiles and runs it.
 Goals were idiomatic concurrency and closing the real races behind production iOS flakiness. The
 target, runner app, xctest bundle and `testRunService` identifier were kept across the cutover so the
 TS layer and `scripts/ios/ctrl-proxy-*.sh` needed no change.

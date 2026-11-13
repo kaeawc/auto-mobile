@@ -31,4 +31,4 @@ marked "device check" are owed to the API 37 emulator lane (#12273).
 - After a long soak, `ApplicationExitInfo` shows no `MemoryLimiter:AnonSwap` exits.
 - `MainActivity` and the IME keyboard in multi-window and large-screen configurations.
 
-Reflective call sites owned by #12271 were not touched. A non-test re-grep of `android/control-proxy/src/main` and `android/playground` at bump time (2026-10-15) found no `IntentSender`, `MODE_BACKGROUND_ACTIVITY_START`, `setAccessible`, `MessageQueue`, `System.load`, `ContactsContract` or `TrustManager`, and the `SavedPrototypeActivity` manifest entry has no orientation, resizability or aspect-ratio locks.
+Reflective call sites owned by #12271 were not touched. A non-test re-grep of `android/control-proxy/src/main` and `android/playground` at bump time (2026-10-15) found no `IntentSender`, `MODE_BACKGROUND_ACTIVITY_START`, `setAccessible`, `MessageQueue`, `System.load`, `ContactsContract` or `TrustManager`. The `SavedPrototypeActivity` manifest entry has no orientation, resizability or aspect-ratio locks.

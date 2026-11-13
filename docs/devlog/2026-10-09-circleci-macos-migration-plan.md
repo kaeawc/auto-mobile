@@ -23,9 +23,9 @@ Actions shim jobs under the existing names that wait for the CircleCI status).
 ## Decision
 
 The plan recommended Option B and keeping release/signing on GitHub. It was superseded on 2026-10-09
-by the [macOS CI capacity plan](../how-it-works/ci/macos-capacity-plan.md) (#11010, #11011, #11012):
+by the [macOS CI capacity plan](../how-it-works/ci/macos-capacity-plan.md) (#11010, #11011, #11012).
 CircleCI carries one PR job (Playground) plus all post-merge and nightly macOS work, and the PR mirrors
-were removed.
+are gone.
 
 ## Consequences
 
@@ -68,8 +68,8 @@ Measured from 100 PR runs (2026-10-08/09, ~4.4 h) and 15 nightly runs:
 - **PR load:** XCTestRunner Simulator Tests (21.6 min/run, 20 of 100 runs) dominated at ≈ 510
   hosted macOS minutes per 100 PR runs (≈ 102,000 credits, 3.4 months of allowance). It now runs
   nightly, on `run-ios-sim` PRs (#10895) and on PRs that touch an iOS SDK contract input, and is
-  not mirrored on CircleCI. The remaining PR lanes (device capture ~10, Swift Packages ~5, Xcode builds ~3.3, root SPM ~1.3 min/run) are
-  ≈ 78 min per 100 PR runs ≈ 15,600 credits; this capacity estimate excludes PR runs triggered
+  not mirrored on CircleCI. The remaining PR lanes are device capture ~10, Swift Packages ~5, Xcode builds ~3.3 and root SPM ~1.3 min/run.
+  Together they are ≈ 78 min per 100 PR runs ≈ 15,600 credits. This capacity estimate excludes PR runs triggered
   by contract-input changes.
 - **Nightly load:** ≈ 34 min/night plus ~1.5 min VM start per job ≈ 49 min ≈ 9,800 credits/night
   ≈ 294,000 credits/month, 10× the allowance (≈ $176/month at overage price).
@@ -199,11 +199,14 @@ Estimates: CircleCI minutes = GitHub mean + ~1.5 min VM start; credits = minutes
 by concurrency, so moving them gains nothing. Moving them would copy the Developer
 ID certificate, keychain password and App Store Connect key into a second vendor,
 which means two places to rotate and audit. If they ever move, use one context,
-for example `automobile-apple-signing`, with all three restriction types: a
-security group (a team containing only the owner), a project restriction (this
-project only), and an expression restriction such as
-`pipeline.git.branch == "main" or pipeline.git.tag starts-with "v"`. The context
-must be attached only in workflows whose jobs carry `filters: { branches: { only:
+for example `automobile-apple-signing`, with all three restriction types:
+
+- a security group (a team containing only the owner);
+- a project restriction (this project only);
+- an expression restriction such as
+  `pipeline.git.branch == "main" or pipeline.git.tag starts-with "v"`.
+
+The context must be attached only in workflows whose jobs carry `filters: { branches: { only:
 main } }` / tag filters. CircleCI fails the workflow as `Unauthorized` when a
 restriction does not match
 ([Contexts](https://circleci.com/docs/guides/security/contexts/)).
@@ -241,6 +244,6 @@ from `circleci-app[bot]`. The remaining steps are all in the CircleCI web app.
 ### Validation
 
 `test/scripts/circleciMacosMigrationPolicy.test.ts` checks that the `run-webrtc` mapping equals
-the glob-for-glob translation of the GitHub filter, that no `run-ios-integration` parameter or
+the glob-for-glob translation of the GitHub filter. It also checks that no `run-ios-integration` parameter or
 XCTestRunner job exists (#10895), that the mirrors keep their GitHub names, that no workflow uses
 a context, and that the executor pins signing off.

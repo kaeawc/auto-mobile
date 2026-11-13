@@ -15,11 +15,11 @@ Dependencies: the `androidx.baselineprofile` Gradle plugin
 ## Decision
 
 CtrlProxy's release APK packages a baseline profile. The hand-authored rules cover the known hot
-paths, and the AndroidX tooling records exact rules on a device: the plugin wires a Macrobenchmark
-producer module to the app, adds the release-like build types the producer needs, and writes
-recorded rules into the `generated/baselineProfiles/` directory of the app's `main` source set. `profileinstaller` is declared directly
-because CtrlProxy is installed with `adb install`, where only that library hands the packaged
-profile to ART; relying on Compose to bring it in transitively would silently drop it if that
+paths, and the AndroidX tooling records exact rules on a device. The plugin wires a Macrobenchmark
+producer module to the app and adds the release-like build types the producer needs. It writes
+recorded rules into the `generated/baselineProfiles/` directory of the app's `main` source set.
+CtrlProxy declares `profileinstaller` directly because it is installed with `adb install`, where
+only that library hands the packaged profile to ART. Relying on Compose to bring it in transitively would silently drop it if that
 dependency changed.
 
 ## Alternatives checked

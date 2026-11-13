@@ -88,8 +88,8 @@ Risks:
    `requires` turn that into an update hint before anything is pushed.
 
 Device test plan: Device (manual-test skill; Android API 37, iOS
-27.x on the owner's iPhone): MCP save to library; switch among three; relaunch; reset; delete; share and
-re-import across platforms; adb push plus VIEW import; invalid-spec error; offline with stored values;
+27.x on the owner's iPhone). Steps: MCP save to library; switch among three; relaunch; reset; delete; share and
+re-import across platforms. Further steps: adb push plus VIEW import; invalid-spec error; offline with stored values;
 localhost request blocked and LAN request allowed with the switch on.
 
 Coverage-guided Jazzer/libFuzzer import-fuzzing harnesses and a nightly CI job were left as future

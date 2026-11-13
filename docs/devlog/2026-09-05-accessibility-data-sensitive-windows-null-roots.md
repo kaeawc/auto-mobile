@@ -8,8 +8,8 @@
 ## Context
 
 Issue #6151: `observe` returned only the `com.android.systemui` status bar, and `tapOn` had nothing
-to hit, whenever a runtime permission dialog or the Settings Wi-Fi picker was in front, while
-`uiautomator dump` at the same moment saw the full window.
+to hit, whenever a runtime permission dialog or the Settings Wi-Fi picker was in front.
+At the same moment, `uiautomator dump` saw the full window.
 
 Ground truth captured on `am-api34-ga-arm64`:
 

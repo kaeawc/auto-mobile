@@ -623,18 +623,10 @@ or holding a launch slot. Retry the observe shortly.
 | `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`, `AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER`           | Local screen-capture helper executable; filesystem path.                                                         | released helper                        |
 | `AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER`                                                    | Local audio-loopback helper executable for iOS Simulator `injectAudioInput` and `captureAudio`; filesystem path. | unset: simulator audio unavailable     |
 | `AUTOMOBILE_CARPLAY_POWER_HELPER_PATH`                                                    | Local carplay-power-helper executable that powers on the iOS Simulator CarPlay screen; filesystem path.          | unset: helper unavailable              |
-| `AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH`                                                | Local CarPlay projection probe executable; absolute filesystem path.                                             | unset: probe unavailable               |
+| `AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH`                                                | Local CarPlay projection probe executable; absolute path. Not yet read by any tool.                              | unset: probe unavailable               |
 | `AUTOMOBILE_NETWORK_FILTER_APP_PATH`                                                      | Local signed Network Filter `.app` for `auto-mobile --ios-network-filter install`.                               | release download                       |
 | `AUTOMOBILE_NETWORK_FILTER_TEAM_ID`                                                       | Apple Team ID the Network Filter app and its provider must both be signed by.                                    | shared Developer ID team required      |
 | `AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS`                                              | How long to wait to find the simulator window for capture; positive integer milliseconds.                        | `2000` ms                              |
-
-### CarPlay projection readiness
-
-The projection probe distinguishes an attached CarPlay screen from one projecting CarPlay.
-A “not projecting” result such as `AirPlay[3]` means capture would produce a black frame;
-the projection guard skips capture. Open the CarPlay window in Simulator.app. If the screen
-is missing or untagged, enable CarPlay and power it on with the CarPlay power helper first.
-Power alone does not establish projection. These helpers do not add a CarPlay observation tool.
 
 </div>
 

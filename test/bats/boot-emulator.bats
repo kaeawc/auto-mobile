@@ -261,9 +261,10 @@ bump() { local n=0; [[ -f "$STATE_DIR/$1" ]] && n="$(<"$STATE_DIR/$1")"; n=$((n 
 case "$*" in
   *"dumpsys window windows")
     checks="$(bump dialog-checks)"
-    if (( checks > DIALOG_SHOWN_CHECKS && DIALOG_SHOWN_CHECKS < 10 )); then
+    if (( DIALOG_SHOWN_CHECKS > 0 && checks > DIALOG_SHOWN_CHECKS && DIALOG_SHOWN_CHECKS < 10 )); then
       # The dialog only goes away because the (backgrounded) broadcast was delivered; wait for it
-      # so a loaded runner cannot let the script kill the broadcast before adb logs it.
+      # so a loaded runner cannot let the script kill the broadcast before adb logs it. A boot that
+      # never showed a dialog sends no broadcast, so it must not wait the full 5 s for one.
       for ((i = 0; i < 500; i++)); do
         [[ -f "$STATE_DIR/broadcast" ]] && break
         sleep 0.01
@@ -377,7 +378,8 @@ MOCK
 
 @test "settle runs the background dexopt job once before the keyguard check" {
   write_settle_adb_mock 1 0
-  run env AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=30 bash "$SCRIPT"
+  # A short poll keeps the 1 s production poll from setting this test's floor.
+  run env AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=30 AUTOMOBILE_POST_BOOT_SETTLE_POLL_SECONDS=0.05 bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(grep -c 'cmd package bg-dexopt-job' "$ADB_LOG_FILE")" -eq 1 ]
   [ "$(grep -n 'bg-dexopt-job' "$ADB_LOG_FILE" | head -1 | cut -d: -f1)" -lt "$(grep -n 'dumpsys window policy' "$ADB_LOG_FILE" | head -1 | cut -d: -f1)" ]

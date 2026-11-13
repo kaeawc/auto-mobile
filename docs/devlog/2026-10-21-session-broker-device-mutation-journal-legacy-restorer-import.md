@@ -7,12 +7,12 @@
 
 ## Deferred
 
-Importing legacy restorers into the journal (AC3) was deferred. Shared `device` keys hold
+The change deferred importing legacy restorers into the journal (AC3). Shared `device` keys hold
 incompatible values (tool clock priors `{ instant, automaticTime }` vs `ClockSessionState`
 `{ initialAutomaticTime, clockChangedByUs, rootedByUs }`; tool network priors
 `values ?? observedValues ?? profile` vs `{ initialProfile, iosAppRule }`), which would fail the
 deep-equality check, and a captured clock instant ages before restore. Normalization and
-clock-restore semantics must be resolved first.
+clock-restore semantics have to come first.
 
 Retirement pruning of baselines, journals and per-session recorder rows was left as follow-up:
 there was no fenced native retirement owner.

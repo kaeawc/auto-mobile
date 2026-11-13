@@ -26,14 +26,20 @@ code as of the survey; later work (live observe shell, elicitation, opt-in moder
 
 ### What 2026-07-28 changed
 
-Stateless protocol (no `initialize`, no `Mcp-Session-Id`; version and capabilities in
-every request's `_meta`); `server/discover`; `subscriptions/listen` replacing
-`resources/subscribe` and the GET stream; multi round-trip requests (`input_required`
-results instead of server-initiated elicitation, sampling and roots requests);
-`ttlMs` / `cacheScope` on list and read results; Tasks moved to the
-`io.modelcontextprotocol/tasks` extension with polling and `tasks/update`; SSE
-resumability removed; `ping`, `logging/setLevel` and `roots/list_changed` removed;
-Roots, Sampling and Logging deprecated; trace-context `_meta` keys; routing headers.
+- Stateless protocol (no `initialize`, no `Mcp-Session-Id`; version and capabilities in
+  every request's `_meta`)
+- `server/discover`
+- `subscriptions/listen` replacing `resources/subscribe` and the GET stream
+- multi round-trip requests (`input_required` results instead of server-initiated
+  elicitation, sampling and roots requests)
+- `ttlMs` / `cacheScope` on list and read results
+- Tasks moved to the `io.modelcontextprotocol/tasks` extension with polling and
+  `tasks/update`
+- SSE resumability removed
+- `ping`, `logging/setLevel` and `roots/list_changed` removed
+- Roots, Sampling and Logging deprecated
+- trace-context `_meta` keys
+- routing headers
 
 ## Usage map
 
@@ -98,10 +104,12 @@ completion), trace-context propagation (needs an exporter first).
 
 ### Not recommended
 
-SSE resumption or an event store (removed from the spec; a broken stream means
-re-issuing the request, and tasks already give a durable handle), sampling and roots
-(deprecated), per-request log level (logging is deprecated), server-side request
-batching, and taskifying short interaction tools (`tapOn`, `inputText`, `pressButton`).
+- SSE resumption or an event store (removed from the spec; a broken stream means
+  re-issuing the request, and tasks already give a durable handle)
+- sampling and roots (deprecated)
+- per-request log level (logging is deprecated)
+- server-side request batching
+- taskifying short interaction tools (`tapOn`, `inputText`, `pressButton`)
 
 ## Tunnels
 

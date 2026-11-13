@@ -21,8 +21,8 @@ still owed. The section headings of these features carried "not device-verified"
   restrictions; checking them needs a userdebug or eng AAOS image, since user builds refuse
   driving-state emulation.
 - **Custom shaders (`needs-device-verify`):** real API 33+ compilation and rendering, procedural
-  sources with an unused content input, isolation of each node's sampled content and uniforms,
-  shader output clipped to node bounds, lifecycle/background and capture-hide sampling gaps,
+  sources with an unused content input, and isolation of each node's sampled content and uniforms.
+  Also shader output clipped to node bounds, lifecycle/background and capture-hide sampling gaps,
   frame-budget fallback under sustained and spaced load, and status/inspect reporting after a real
   rendering failure. JVM tests use fake compilers and frame clocks and give no GPU/rendering proof.
 - **Haptics and sound (`needs-device-verify`):** an Android emulator tap appearing in `feedbackLog`
@@ -41,7 +41,7 @@ still owed. The section headings of these features carried "not device-verified"
 - **Effects:** goldens on API 30, 33 and 36 (`effects_all_types`, pending in
   `PrototypeSpecContentScreenshotTest`) and a real-GPU look at the AGSL effects. Robolectric covers
   decoding, API planning, the clock and budget on fakes, and bounds stability.
-- **Rich text and linkify:** advertise the capability only after renderer support; verify mixed span
+- **Rich text and linkify:** advertise the capability only after renderer support. Verify mixed span
   styles, resolved concatenated observe text, per-span actions without URL navigation, Android
   semanticLinks and both selectors across windows, and iOS tapAt-only links plus platformNotes. Host
   tests do not verify device rendering.

@@ -17,6 +17,11 @@ const MAX_ID_VALUE_BYTES = 1024;
 
 type Phase = "key" | "colon" | "value";
 
+/** Finds `byte` in `chunk` at or after `from`; returns -1 when absent. Same contract as `Buffer.indexOf`. */
+export type FindByte = (chunk: Buffer, byte: number, from: number) => number;
+
+const nativeFindByte: FindByte = (chunk, byte, from) => chunk.indexOf(byte, from);
+
 /**
  * Streams the bytes of one JSON object and records the value of its top-level
  * `id` member, without holding the object. The stdio transport uses it on a
@@ -27,7 +32,10 @@ type Phase = "key" | "colon" | "value";
  * `params` or inside a string never matches. The captured value is decoded with
  * `JSON.parse`; only a string or a number is accepted as an id. Bytes inside a
  * string that is not being captured are skipped with `indexOf`, so a large
- * base64 member costs one native scan rather than a per-byte loop.
+ * base64 member costs one native scan rather than a per-byte loop. The next
+ * quote and backslash found in the current chunk are remembered and searched for
+ * again only once the scan has passed them, so each delimiter search moves
+ * forward through the chunk once and an escape-heavy string stays linear.
  */
 export class JsonRpcTopLevelIdScanner {
   private depth = 0;
@@ -39,6 +47,11 @@ export class JsonRpcTopLevelIdScanner {
   private currentKey: string | null = null;
   private valueBytes: number[] | null = null;
   private found: string | number | undefined;
+  /** Next quote and backslash positions in the current chunk; `chunk.length` when absent. */
+  private nextQuote = -1;
+  private nextBackslash = -1;
+
+  constructor(private readonly findByte: FindByte = nativeFindByte) {}
 
   /** The top-level `id`, once its value has ended; undefined if absent or not a string/number. */
   get id(): string | number | undefined {
@@ -46,6 +59,8 @@ export class JsonRpcTopLevelIdScanner {
   }
 
   push(chunk: Buffer): void {
+    this.nextQuote = -1;
+    this.nextBackslash = -1;
     let index = 0;
     while (index < chunk.length && !this.notAnObject) {
       if (this.inString && !this.capturing()) {
@@ -68,19 +83,27 @@ export class JsonRpcTopLevelIdScanner {
       this.escape = false;
       return from + 1;
     }
-    const quote = chunk.indexOf(QUOTE, from);
-    const backslash = chunk.indexOf(BACKSLASH, from);
-    const candidates = [quote, backslash].filter((position) => position !== -1);
-    if (candidates.length === 0) {
+    if (this.nextQuote < from) {
+      this.nextQuote = this.locate(chunk, QUOTE, from);
+    }
+    if (this.nextBackslash < from) {
+      this.nextBackslash = this.locate(chunk, BACKSLASH, from);
+    }
+    const next = Math.min(this.nextQuote, this.nextBackslash);
+    if (next === chunk.length) {
       return chunk.length;
     }
-    const next = Math.min(...candidates);
-    if (next === backslash) {
+    if (next === this.nextBackslash) {
       this.escape = true;
     } else {
       this.inString = false;
     }
     return next + 1;
+  }
+
+  private locate(chunk: Buffer, byte: number, from: number): number {
+    const position = this.findByte(chunk, byte, from);
+    return position === -1 ? chunk.length : position;
   }
 
   private consume(byte: number): void {

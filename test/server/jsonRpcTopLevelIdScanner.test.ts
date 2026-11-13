@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { JsonRpcTopLevelIdScanner } from "../../src/server/jsonRpcTopLevelIdScanner";
+import { type FindByte, JsonRpcTopLevelIdScanner } from "../../src/server/jsonRpcTopLevelIdScanner";
 
 function scan(...chunks: string[]): string | number | undefined {
   const scanner = new JsonRpcTopLevelIdScanner();
@@ -47,5 +47,25 @@ describe("JsonRpcTopLevelIdScanner", () => {
 
   test("does not mistake a long key for id", () => {
     expect(scan(`{"${"k".repeat(100)}":3,"id":4}`)).toBe(4);
+  });
+
+  test("skips an escape-heavy string with linear work and still reads the id after it", () => {
+    let visited = 0;
+    const countingFind: FindByte = (chunk, byte, from) => {
+      const position = chunk.indexOf(byte, from);
+      visited += (position === -1 ? chunk.length : position + 1) - from;
+      return position;
+    };
+    const scanner = new JsonRpcTopLevelIdScanner(countingFind);
+    const chunkBytes = 64 * 1024;
+    const escapes = "\\n".repeat(chunkBytes / 2);
+    const message = `{"method":"x","params":{"text":"${escapes.repeat(4)}"},"id":11}`;
+    const buffer = Buffer.from(message, "utf8");
+    for (let offset = 0; offset < buffer.length; offset += chunkBytes) {
+      scanner.push(buffer.subarray(offset, offset + chunkBytes));
+    }
+    expect(scanner.id).toBe(11);
+    // Each delimiter search moves forward once per chunk: at most two passes over the bytes.
+    expect(visited).toBeLessThanOrEqual(2 * buffer.length);
   });
 });

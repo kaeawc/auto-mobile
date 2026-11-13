@@ -19,5 +19,11 @@ Base64 content travels inside the message and is about 4/3 of the file size, so 
 
 When AutoMobile runs on the same host as your files, pass `sourcePath` instead.
 AutoMobile then reads the file from disk, and the message carries only the path.
-Otherwise, split large files across separate `putAppFile` calls so each request
-stays under the limit.
+Otherwise, send several smaller files in separate `putAppFile` calls so each
+request stays under the limit.
+
+Each `putAppFile` call writes every file it names as one complete payload. There
+is no append, offset, or chunk field, so a later call to the same
+`destinationPath` replaces the file instead of adding to it. You cannot split one
+file across calls: each file must fit under the limit on its own. For a single
+file larger than that, use `sourcePath`.

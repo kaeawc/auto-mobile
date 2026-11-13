@@ -7,6 +7,8 @@
 Dependency: `mdast-util-from-markdown`
 Dependency: `mdast-util-gfm-table`
 Dependency: `micromark-extension-gfm-table`
+Dependency: `mdast-util-gfm-strikethrough`
+Dependency: `micromark-extension-gfm-strikethrough`
 
 ## Context
 
@@ -26,11 +28,13 @@ definition span checks that went quadratic on 600 definition-like lines in a cod
 - No Markdown parser with positions was installed (checked `package.json`, `bun.lock`, `src/` and
   `scripts/lib/`).
 - `mdast-util-from-markdown` (micromark): a CommonMark parser whose every node has a start and end
-  position. GFM tables need `micromark-extension-gfm-table` and `mdast-util-gfm-table`.
+  position. GFM tables and strikethrough need their `micromark-extension-gfm-*` and `mdast-util-gfm-*`
+  packages.
 
 ## Decision
 
-Parse with `mdast-util-from-markdown` plus the GFM table extension, all as dev dependencies used
+Parse with `mdast-util-from-markdown` plus the GFM table and strikethrough extensions,
+all as dev dependencies used
 only by `scripts/docs/`. Text nodes keep soft line breaks as newlines, so each character's line is
 the node's start line plus the newlines before it. Definitions, link destinations, titles and
 reference labels are never text nodes, so the hand scanner is deleted.

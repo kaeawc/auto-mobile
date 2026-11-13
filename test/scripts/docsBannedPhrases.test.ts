@@ -262,6 +262,10 @@ describe("findBannedPhrases source lines", () => {
     expect(performance.now() - started).toBeLessThan(100);
   });
 
+  test("joins strikethrough text with the surrounding prose", () => {
+    expect(linesOf("It's worth ~~noting~~ that.\n")).toEqual([["worth-noting", 1]]);
+  });
+
   test("keeps a soft break that ends a text node before a link", () => {
     expect(linesOf("It's worth\n[noting](/u) that.\n")).toEqual([["worth-noting", 1]]);
   });

@@ -2,14 +2,16 @@
  * Banned-phrase lint for docs/ prose (#18143).
  *
  * Markdown is parsed into an mdast tree (`mdast-util-from-markdown` with the
- * GFM table extension), so fenced and indented code blocks, inline code, raw
+ * GFM table and strikethrough extensions), so fenced and indented code blocks, inline code, raw
  * HTML, link destinations and titles, and link reference definitions are
  * excluded by the parser rather than by line regexes. Every prose text node
  * carries its source position, and a soft line break inside it is a literal
  * newline, so each character's source line is exact (#18196).
  */
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
 import { gfmTable } from "micromark-extension-gfm-table";
 
 export interface BannedPhraseRule {
@@ -144,8 +146,8 @@ function walk(node: MdastNode, collector: ProseCollector): void {
 /** Splits the document's prose into blocks of text with per-character source lines. */
 function proseBlocks(source: string): ProseBlock[] {
   const tree = fromMarkdown(source, {
-    extensions: [gfmTable()],
-    mdastExtensions: [gfmTableFromMarkdown()],
+    extensions: [gfmTable(), gfmStrikethrough()],
+    mdastExtensions: [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown()],
   });
   const collector = new ProseCollector();
   walk(tree, collector);

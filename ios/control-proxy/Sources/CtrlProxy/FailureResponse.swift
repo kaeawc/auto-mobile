@@ -76,6 +76,12 @@ extension HingeAngleResponse: FailureResponse {
     }
 }
 
+extension RefreshGeometryResponse: FailureResponse {
+    static func failure(requestId: String?, error: String, totalTimeMs: Int64?) -> Self {
+        Self(requestId: requestId, success: false, error: error, totalTimeMs: totalTimeMs ?? 0)
+    }
+}
+
 extension CommandHandler {
     func respond<R: FailureResponse>(
         requestId: String?,

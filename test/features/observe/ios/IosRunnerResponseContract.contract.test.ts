@@ -80,6 +80,20 @@ const typedResults: Record<string, Record<string, unknown>> = {
     rotationPerformed: true,
   },
   hinge_angle_result: { success: false, angle: 90, error: "unsupported", totalTimeMs: 17 },
+  refresh_geometry_result: {
+    success: true,
+    refreshed: true,
+    rotation: 1,
+    appWidth: 669,
+    appHeight: 951,
+    screenWidth: 466,
+    screenHeight: 678,
+    observationWidth: 951,
+    observationHeight: 669,
+    foregroundBundleId: "com.example.fixture",
+    error: undefined,
+    totalTimeMs: 17,
+  },
   accessibility_audit_result: {
     success: true,
     issues: [

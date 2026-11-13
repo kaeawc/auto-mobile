@@ -117,6 +117,14 @@
       }
     },
     {
+      "name": "refresh_geometry",
+      "builder": "sendCommand (shared delegate envelope; no dedicated builder yet)",
+      "wire": {
+        "type": "refresh_geometry",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
       "name": "set_network_error_simulation",
       "builder": "CtrlProxyNetworkSync.setNetworkErrorSimulation",
       "wire": {

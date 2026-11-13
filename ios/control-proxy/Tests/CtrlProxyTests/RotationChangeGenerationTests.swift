@@ -26,6 +26,41 @@ private final class FakeRotationSampler: RotationSampling {
 }
 
 final class RotationChangeGenerationTests: XCTestCase {
+    func testObservedGeometryIsNotReusedAfterOrientationChangeEvenWhenRotationReturnsToPortrait() {
+        let signal = FakeRotationChangeSignal()
+        let sampler = FakeRotationSampler(rotation: 0)
+        let monitor = RotationChangeMonitor(signal: signal)
+        let size = GestureSize(width: 402, height: 874)
+        let geometry = GestureCoordinateGeometry(app: size, screen: size, observation: size, rotation: 0)
+        let cached = ObservedGestureGeometry(
+            geometry: geometry, bundleId: "com.test.app", generation: monitor.captureSample(using: sampler).generation
+        )
+        XCTAssertEqual(cached.current(bundleId: "com.test.app", generation: monitor.generation), geometry)
+        XCTAssertNil(cached.current(bundleId: "com.other.app", generation: monitor.generation))
+
+        signal.sendOrientationChange()
+        signal.sendOrientationChange()
+
+        XCTAssertNil(cached.current(bundleId: "com.test.app", generation: monitor.generation))
+        let refreshed = ObservedGestureGeometry(
+            geometry: geometry, bundleId: "com.test.app", generation: monitor.captureSample(using: sampler).generation
+        )
+        XCTAssertEqual(refreshed.current(bundleId: "com.test.app", generation: monitor.generation), geometry)
+    }
+
+    func testGeometryCapturedAcrossOrientationChangeCannotBeReused() {
+        let signal = FakeRotationChangeSignal()
+        let monitor = RotationChangeMonitor(signal: signal)
+        let generationBeforeCapture = monitor.generation
+        signal.sendOrientationChange()
+        let size = GestureSize(width: 951, height: 669)
+        let cached = ObservedGestureGeometry(
+            geometry: GestureCoordinateGeometry(app: size, screen: size, observation: size, rotation: 0),
+            bundleId: "com.test.app", generation: generationBeforeCapture
+        )
+        XCTAssertNil(cached.current(bundleId: "com.test.app", generation: monitor.generation))
+    }
+
     func testCapturesRotationUsingInjectedSampler() {
         let signal = FakeRotationChangeSignal()
         let sampler = FakeRotationSampler(rotation: 1)

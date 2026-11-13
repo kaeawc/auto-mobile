@@ -292,6 +292,34 @@ function decodeHingeAngleResult(message: WebSocketMessage): unknown {
   };
 }
 
+function decodeRefreshGeometryResult(message: WebSocketMessage): unknown {
+  const geometry = message as {
+    refreshed?: boolean;
+    rotation?: number | null;
+    appWidth?: number;
+    appHeight?: number;
+    screenWidth?: number;
+    screenHeight?: number;
+    observationWidth?: number;
+    observationHeight?: number;
+    foregroundBundleId?: string | null;
+  };
+  return {
+    success: message.success ?? false,
+    refreshed: geometry.refreshed === true,
+    rotation: geometry.rotation ?? null,
+    appWidth: geometry.appWidth ?? null,
+    appHeight: geometry.appHeight ?? null,
+    screenWidth: geometry.screenWidth ?? null,
+    screenHeight: geometry.screenHeight ?? null,
+    observationWidth: geometry.observationWidth ?? null,
+    observationHeight: geometry.observationHeight ?? null,
+    foregroundBundleId: geometry.foregroundBundleId ?? null,
+    error: message.error,
+    totalTimeMs: message.totalTimeMs ?? 0,
+  };
+}
+
 function decodeLocationResult(message: WebSocketMessage): unknown {
   return {
     success: message.success ?? false,
@@ -635,6 +663,7 @@ const messageDecoders = new Map<
   ["keyboard_result", decodeKeyboardResult],
   ["rotate_result", decodeRotateResult],
   ["hinge_angle_result", decodeHingeAngleResult],
+  ["refresh_geometry_result", decodeRefreshGeometryResult],
   ["location_result", decodeLocationResult],
   ["siri_result", decodeLocationResult],
   ["appearance_result", decodeAppearanceResult],

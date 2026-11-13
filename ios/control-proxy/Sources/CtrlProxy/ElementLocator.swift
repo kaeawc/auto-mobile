@@ -20,6 +20,17 @@ import Foundation
     }
 #endif
 
+/// A completed observation is reusable only for its app and rotation-change epoch.
+struct ObservedGestureGeometry {
+    let geometry: GestureCoordinateGeometry
+    let bundleId: String?
+    let generation: UInt64
+
+    func current(bundleId: String?, generation: UInt64) -> GestureCoordinateGeometry? {
+        self.bundleId == bundleId && self.generation == generation ? geometry : nil
+    }
+}
+
 @MainActor
 public final class ElementLocator: ElementLocating, HierarchyExtracting {
     /// Generic class names that are typically structural wrappers
@@ -57,12 +68,20 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         var tracker = ForegroundTracker()
         var appSwitcherMayBeVisible = false
-        private var gestureGeometryBundleId: String?
-        private var gestureGeometry: GestureCoordinateGeometry?
+        private var gestureGeometry: ObservedGestureGeometry?
 
         /// Reuse the last completed observation without XCUI reads on the legacy gesture path.
         var observedGestureGeometry: GestureCoordinateGeometry? {
-            gestureGeometryBundleId == foregroundBundleId ? gestureGeometry : nil
+            gestureGeometry?.current(bundleId: foregroundBundleId, generation: DeviceRotation.changeGeneration)
+        }
+
+        public func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
+            // Invalidate before any foreground probing or capture that can fail.
+            gestureGeometry = nil
+            _ = try getViewHierarchy()
+            return observedGestureGeometry.map {
+                RefreshGeometryResponse.Geometry(geometry: $0, foregroundBundleId: foregroundBundleId)
+            }
         }
 
         /// Recent apps is SpringBoard UI even while its cards report their apps as foreground.
@@ -498,7 +517,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 width: Double((innerPanelFrame ?? frame).width),
                 height: Double((innerPanelFrame ?? frame).height)
             )
-            gestureGeometry = GestureCoordinateGeometry(
+            let geometry = GestureCoordinateGeometry(
                 app: appSize,
                 screen: GestureSize(
                     width: Double(currentScreenMetrics.fallbackWidth),
@@ -511,7 +530,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 // Live SpringBoard reads see only the cover's frame; keep the observed panel.
                 pinnedToObservation: innerPanelFrame != nil
             )
-            gestureGeometryBundleId = bundleId
+            gestureGeometry = ObservedGestureGeometry(
+                geometry: geometry,
+                bundleId: bundleId,
+                generation: beforeHierarchyCapture.generation
+            )
 
             return ViewHierarchy(
                 packageName: bundleId,
@@ -535,6 +558,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         public init() {}
 
         var observedGestureGeometry: GestureCoordinateGeometry? { nil }
+
+        public func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
+            _ = try getViewHierarchy()
+            return nil
+        }
 
         func noteAppSwitcherOpened() {}
         func clearAppSwitcherHint() {}

@@ -20,7 +20,7 @@ final class ConnectedEventCapabilityTests: XCTestCase {
 
         // These commands use the minimal RequestEnvelope payload, so the same
         // discriminator can also be checked through the wire decoder.
-        for requestType in [RequestType.requestScreenshot, .getSdkCapabilities, .getCurrentFocus] {
+        for requestType in [RequestType.requestScreenshot, .getSdkCapabilities, .getCurrentFocus, .refreshGeometry] {
             let envelope = #"{"type":"\#(requestType.rawValue)","requestId":"capability-test"}"#
             let decoded = try? JSONDecoder().decode(WebSocketRequest.self, from: Data(envelope.utf8))
             XCTAssertEqual(decoded?.requestType, requestType)
@@ -35,6 +35,8 @@ final class ConnectedEventCapabilityTests: XCTestCase {
         XCTAssertTrue(device.contains(RequestType.setVoiceOverState.rawValue))
         XCTAssertTrue(simulator.contains(RequestType.setHingeAngle.rawValue))
         XCTAssertFalse(device.contains(RequestType.setHingeAngle.rawValue))
+        XCTAssertTrue(simulator.contains("refresh_geometry"))
+        XCTAssertTrue(device.contains("refresh_geometry"))
 
         // The button request remains supported in both environments: Home and
         // Back can succeed even when some button payloads cannot.

@@ -6,6 +6,10 @@ public protocol ElementLocating: Sendable {
     /// - Parameter disableAllFiltering: when `true`, skip optimization and return the raw hierarchy.
     func getViewHierarchy(disableAllFiltering: Bool) throws -> ViewHierarchy
 
+    /// Discard gesture geometry and rebuild it from a fresh hierarchy capture.
+    /// Returns nil when capture completes without usable geometry.
+    func refreshGeometry() throws -> RefreshGeometryResponse.Geometry?
+
     /// Find an element by resource id / accessibility identifier. Returns an opaque
     /// `XCUIElement` (or `nil`); the caller treats it as a token to act on.
     func findElement(byResourceId resourceId: String) -> Any?

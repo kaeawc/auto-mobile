@@ -16,6 +16,15 @@ the test helper is `test/helpers/fakeServerContext.ts`. Tests drive our servers 
 plain v2 `Client`, so client error assertions see the SDK's unprefixed errors; the boundary
 checker rejects a v1-error-shape test client.
 
+The stdio transport frames stdin itself (`src/server/stdioRequestFramer.ts`) because the
+SDK's read buffer closes the transport on a message over 10 MB (#18330). It admits a
+message up to `STDIO_REQUEST_MAX_BYTES` (the 256 MiB HTTP and control-socket cap less
+64 KiB of proxy envelope) and answers a larger request with JSON-RPC `-32600` by its
+top-level id, discarding the bytes and keeping the session open. When that id cannot
+be read (a notification, a batch, an `id` of `null`, or an id that is not a string or
+number), no response is sent: the transport reports the request through `onerror`, so a
+caller must not wait for a reply.
+
 ## Stateless daemon MCP layer
 
 The daemon's HTTP endpoint (`/auto-mobile/streamable`) serves the desktop app's Kotlin client

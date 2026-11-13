@@ -27,6 +27,8 @@ Use `putAppFile` to write text, base64, or a host file into an app container:
 }
 ```
 
+For large files, see [MCP message size](mcp-message-size.md).
+
 `putAppFile` never terminates the app. After an `app_containers` write,
 `result.warning` says the app may not see the change until it re-reads the file
 or relaunches. It appears only when AutoMobile knows the app is running (on

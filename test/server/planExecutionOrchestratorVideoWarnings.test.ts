@@ -180,6 +180,49 @@ describe("plan video warnings and completed recording recovery", () => {
     expect(result.videoWarnings?.join(" ")).toContain("Video gap: 25600ms");
   });
 
+  // #18276: a 4.1s file for a 30.4s run, from a recorder whose device side died early.
+  test.each([
+    { recordedMs: 4128, planMs: 30_430, warned: true },
+    { recordedMs: 25_900, planMs: 29_000, warned: false },
+    { recordedMs: 1000, planMs: 2500, warned: false },
+    { recordedMs: undefined, planMs: 30_430, warned: false },
+  ])(
+    "Android recorder that ended at $recordedMs ms of a $planMs ms plan warns=$warned",
+    async ({ recordedMs, planMs, warned }) => {
+      start.mockRestore();
+      finalize.mockRestore();
+      const timer = new FakeTimer();
+      const filePath = path.join(archive, "video.mp4");
+      const video = recorder();
+      video.startVideoRecording = async () => ({
+        recordingId: "rec-1",
+        outputPath: filePath,
+        fileName: metadata.fileName,
+        startedAt: metadata.startedAt,
+        config: metadata.config,
+      });
+      // The fake recorder stops cleanly but reports only what it captured before it exited.
+      video.stopVideoRecording = async () => ({
+        metadata: { ...metadata, filePath, videoDurationMs: recordedMs },
+        evictedRecordingIds: [],
+      });
+      execute.mockImplementation(async () => {
+        timer.advanceTime(planMs);
+        return success;
+      });
+      const result = await run("android", video, timer);
+      expect(result.success).toBe(true);
+      expect(result.videoFilePaths).toEqual([filePath]);
+      if (warned) {
+        expect(result.videoWarnings).toEqual([
+          "Video truncated: the recording covers 4.1s of the 30.4s plan run; the recorder ended early and the rest of the plan was not recorded.",
+        ]);
+      } else {
+        expect(result.videoWarnings).toBeUndefined();
+      }
+    },
+  );
+
   test("finalize failure is returned as a video warning", async () => {
     finalize.mockRejectedValue(new Error("finalization failed"));
     const result = await run("android");

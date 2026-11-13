@@ -52,6 +52,11 @@ data class AutoMobilePlanExecutionResult(
   val aiRecoverySuccessful: Boolean = false,
   val parametersUsed: Map<String, Any> = emptyMap(),
   val toolResults: List<ToolResultEntry> = emptyList(),
+  /**
+   * The daemon's warnings about the plan's auto-recorded video, such as a recording that ended
+   * before the plan did (#18276). Empty when the video is complete or none was recorded.
+   */
+  val videoWarnings: List<String> = emptyList(),
 ) {
   /**
    * The entry for the plan step at [stepIndex] (0-based, as in the plan YAML). The daemon returns

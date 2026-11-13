@@ -61,6 +61,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "request_rotate",
   "request_location",
   "set_hinge_angle",
+  "refresh_geometry",
   "request_appearance",
   "request_siri",
 

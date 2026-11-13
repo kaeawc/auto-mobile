@@ -1,3 +1,5 @@
+import type { ObserveResult } from "../../models/ObserveResult";
+import { rangeValueChange } from "./rangeValueChange";
 import { rejectTvosTouch } from "../tvos/TvosActions";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange } from "./BaseVisualChange";
@@ -57,8 +59,10 @@ export class SwipeOnElement extends BaseVisualChange {
     logger.info(`[SwipeOnElement] Options: ${JSON.stringify(options)}`);
     let iosDispatchTimestamp: number | undefined;
 
-    return this.observedInteraction(
-      async () => {
+    let previous: ObserveResult | null = null;
+    const result = await this.observedInteraction(
+      async (observation) => {
+        previous = observation;
         throwIfAborted(signal);
         logger.info(`[SwipeOnElement] In observedInteraction callback`);
 
@@ -109,5 +113,13 @@ export class SwipeOnElement extends BaseVisualChange {
         observationTimestampProvider: () => iosDispatchTimestamp,
       },
     );
+    const value = rangeValueChange(element, result.observation);
+    if (value) {
+      result.effect ??= this.deriveInteractionEffect(previous, result.observation);
+      if (result.effect) {
+        result.effect.value = value;
+      }
+    }
+    return result;
   }
 }

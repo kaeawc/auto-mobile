@@ -8,7 +8,7 @@ import { getHierarchyNodeSource } from "../elementProvenance";
 import type { SkeletonAccumulator } from "./rowModel";
 
 /**
- * Label a still-unlabelled toggle from the text node that immediately precedes it
+ * Label a still-unlabelled toggle or range widget from the text node that immediately precedes it
  * in its tree (issue #17955). A Compose `Row { Text("Dark mode"); Switch() }` gives
  * the `Switch` no labelled ancestor for `attributeContainerLabels`, so the row came
  * through with no label. The rule itself, including trailing-text reservation
@@ -24,7 +24,9 @@ export function attributePrecedingSiblingLabels(
   foldedIntoClickable: (text: SkeletonAccumulator) => boolean,
   entries?: readonly SearchableEntry[],
 ): void {
-  const toggles = accumulators.filter((acc) => acc.provenance && acc.affordances.has("toggle"));
+  const toggles = accumulators.filter(
+    (acc) => acc.provenance && (acc.affordances.has("toggle") || acc.affordances.has("adjust")),
+  );
   const texts = accumulators.filter(
     (acc) =>
       acc.affordances.size === 0 &&

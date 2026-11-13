@@ -1,6 +1,9 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { SwipeOnElement } from "../../../src/features/action/SwipeOnElement";
+import { composeControlShapesObservation } from "../../helpers/composeControlShapesFixture17955";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import type { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import type { BootedDevice, Element, ObserveResult, SwipeResult } from "../../../src/models";
@@ -91,5 +94,24 @@ describe("SwipeOnElement", () => {
     expect(gesture.calls).toHaveLength(1);
     expect(gesture.calls[0]?.slice(0, 2)).toEqual([{ x1: 200, y1: 700, x2: 200, y2: 200 }, {}]);
     expect(gesture.calls[0]?.slice(3)).toEqual([]);
+  });
+});
+
+test("SwipeOnElement reports captured range state through the shared effect", async () => {
+  const before = composeControlShapesObservation();
+  const after = composeControlShapesObservation("after");
+  const slider = new SearchableHierarchy()
+    .project(before.viewHierarchy!)
+    .find((entry) => entry.nativeId === "readout_less_slider")!.element!;
+  const swipe = new TestSwipeOnElement(new RecordingGesture(), new FakeElementGeometry());
+  swipe.observedInteraction = runBlockWithEnvelope(before, { observation: after });
+  const result = await swipe.execute(slider, "right");
+  expect(result.effect).toEqual({
+    screenChanged: true,
+    basis: "viewHierarchy changed",
+    value: {
+      before: { current: 0.5, min: 0, max: 1 },
+      after: { current: 0.8, min: 0, max: 1 },
+    },
   });
 });

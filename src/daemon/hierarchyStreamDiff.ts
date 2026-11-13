@@ -83,6 +83,7 @@ function nodeSignature(node: ViewHierarchyNode): string {
     get("focused"),
     get("selected"),
     get("checked"),
+    get("range-info"),
     get("scrollable"),
   ].join("\u0000");
 }

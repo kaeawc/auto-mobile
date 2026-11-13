@@ -111,8 +111,8 @@ export function boundedEntryPositions(
 
 /**
  * Whether `text` sits inside the non-actionable, toggle-free wrapper that is `toggle`'s
- * next sibling (`Switch, LinearLayout { Text("Wi-Fi") }`). A wrapper holding a toggle is
- * that toggle's row, so its leading text labels that toggle instead. A bare next-sibling
+ * next sibling (`Switch, LinearLayout { Text("Wi-Fi") }`). A wrapper holding a toggle or range control is
+ * that control's row, so its leading text labels that toggle instead. A bare next-sibling
  * text is the interval case in {@link precedingSiblingLabelSources}.
  */
 export function followsToggleInPlainWrapper(
@@ -151,7 +151,7 @@ function isPlainWrapper(entries: readonly SearchableEntry[], node: SearchableEnt
     return false;
   }
   for (let i = node.index + 1; i < entries.length && entries[i].depth > node.depth; i++) {
-    if (entries[i].affordances.includes("toggle")) {
+    if (entries[i].affordances.some((action) => action === "toggle" || action === "adjust")) {
       return false;
     }
   }

@@ -34,6 +34,7 @@ import { registerGlassesInputTools } from "./glassesInputTool";
 import { registerRotaryScrollTools } from "./rotaryScrollTool";
 import { registerRotateCrownTools } from "./rotateCrownTool";
 import { registerWindowModeTools } from "./windowModeTools";
+import { defaultPrototypeAssetCache } from "../features/prototype/prototypeAssetCache";
 import { registerPrototypeTools } from "./prototypeTools/registration";
 import { registerPrototypeWebExportTool } from "./prototypeWebExportTool";
 import { registerBlePeripheralTool } from "./blePeripheralTool";
@@ -143,6 +144,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
       prototypeViewerConnections,
       prototypeAgentRegistry,
     ),
+    iosAssetCache: defaultPrototypeAssetCache(),
   });
   registerPrototypeWebExportTool();
   registerBlePeripheralTool();

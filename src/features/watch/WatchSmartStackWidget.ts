@@ -13,6 +13,12 @@ import type { WatchCommand, WatchRunnerClient } from "./WatchRunnerClient";
 export interface WatchSmartStackWidgetOptions {
   appName: string;
   widgetName: string;
+  /**
+   * Host app bundle id and widget kind from the cell descriptor; together they identify a cell
+   * whose identifier lost its app and widget names (#17793).
+   */
+  hostBundleId?: string;
+  widgetKind?: string;
   galleryStepsFromBottom?: number;
   maxAttempts?: number;
   retryDelayMs?: number;
@@ -25,7 +31,17 @@ export interface WatchSmartStackWidgetResult {
   attempts: number;
   headerAttempts: number;
   verificationAttempts: number;
+  /** True when a matching cell was on the stack before an edit, so no widget was added. */
+  alreadyPresent: boolean;
   reason: string;
+}
+
+/** The widget to find: display names, plus the descriptor identity for a nameless cell. */
+export interface SmartStackWidgetTarget {
+  appName: string;
+  widgetName: string;
+  hostBundleId?: string;
+  widgetKind?: string;
 }
 
 export const GALLERY_SCROLL_SETTLE_MS = 1500;
@@ -103,16 +119,59 @@ export function findUnnamedAddedWidget(
     : undefined;
 }
 
-/** Exact names identify the widget; a nameless cell counts only as the one just added. */
+/**
+ * A cell whose app and widget names are both empty but whose host bundle id and widget kind
+ * equal the target's. Needs both identity fields; without them a nameless cell is not matched.
+ */
+export function hasNamelessSmartStackWidget(
+  dump: string,
+  { hostBundleId, widgetKind }: Pick<SmartStackWidgetTarget, "hostBundleId" | "widgetKind">,
+): boolean {
+  if (hostBundleId === undefined || widgetKind === undefined) {
+    return false;
+  }
+  return (readWidgetCells(dump) ?? []).some(
+    ({ card }) =>
+      card.appName === "" &&
+      card.widgetName === "" &&
+      card.hostBundleId === hostBundleId &&
+      card.widgetKind === widgetKind,
+  );
+}
+
+/** The target is on the stack by exact names or, for a nameless cell, by descriptor identity. */
+export function isSmartStackWidgetPresent(dump: string, target: SmartStackWidgetTarget): boolean {
+  return (
+    hasSmartStackWidget(dump, target.appName, target.widgetName) ||
+    hasNamelessSmartStackWidget(dump, target)
+  );
+}
+
+/** A present target verifies; otherwise a nameless cell counts only as the one just added. */
 export function verifySmartStackWidget(
   dump: string,
   baselineDump: string,
-  appName: string,
-  widgetName: string,
+  target: SmartStackWidgetTarget,
 ): boolean {
   return (
-    hasSmartStackWidget(dump, appName, widgetName) ||
-    findUnnamedAddedWidget(dump, baselineDump, appName) !== undefined
+    isSmartStackWidgetPresent(dump, target) ||
+    findUnnamedAddedWidget(dump, baselineDump, target.appName) !== undefined
+  );
+}
+
+/**
+ * Before an edit: the target is already on the stack, or (on a retry) an earlier attempt's
+ * nameless cell is the one cell added since the first attempt's header dump.
+ */
+function isAlreadyOnStack(
+  headerDump: string,
+  firstHeaderDump: string,
+  target: SmartStackWidgetTarget,
+): boolean {
+  return (
+    isSmartStackWidgetPresent(headerDump, target) ||
+    (headerDump !== firstHeaderDump &&
+      findUnnamedAddedWidget(headerDump, firstHeaderDump, target.appName) !== undefined)
   );
 }
 
@@ -133,8 +192,21 @@ function validateWidgetOptions(options: WatchSmartStackWidgetOptions): void {
   ) {
     throw new ActionableError("galleryStepsFromBottom must be an integer from 0 to 100.");
   }
+  validateIdentity(options);
   validateMaxAttempts(options.maxAttempts);
   validateRetryDelay(options.retryDelayMs);
+}
+
+function validateIdentity({ hostBundleId, widgetKind }: WatchSmartStackWidgetOptions): void {
+  const isBlank = (value: unknown) => typeof value !== "string" || !value.trim();
+  if (
+    (hostBundleId !== undefined || widgetKind !== undefined) &&
+    (isBlank(hostBundleId) || isBlank(widgetKind))
+  ) {
+    throw new ActionableError(
+      "Provide both hostBundleId and widgetKind as non-empty strings, or neither.",
+    );
+  }
 }
 
 function validateMaxAttempts(maxAttempts = 3): void {
@@ -260,6 +332,61 @@ async function selectGalleryWidget(
   await gesture({ type: "face", op: "tap", x: 0.16, y: 0.14 });
 }
 
+interface WidgetAttempt {
+  /** Set when the flow ends with this attempt. */
+  final?: WatchSmartStackWidgetResult;
+  headerDump?: string;
+}
+
+/** One open, check and add round; `firstHeaderDump` is the first attempt's header dump. */
+async function runWidgetAttempt(
+  actions: WidgetActions,
+  result: WatchSmartStackWidgetResult,
+  target: SmartStackWidgetTarget & { galleryStepsFromBottom: number },
+  firstHeaderDump: string | undefined,
+): Promise<WidgetAttempt> {
+  const editableStack = await openSmartStack(actions);
+  if (editableStack === undefined) {
+    return {
+      final: {
+        ...result,
+        reason:
+          "Smart Stack header and Edit button did not appear after 3 home/swipe rounds; start from the watch face and retry.",
+      },
+    };
+  }
+  const headerDump = editableStack.dump;
+  // A retry after a failed readback must not add a duplicate of a widget that did land.
+  if (isAlreadyOnStack(headerDump, firstHeaderDump ?? headerDump, target)) {
+    return {
+      headerDump,
+      final: {
+        ...result,
+        success: true,
+        alreadyPresent: true,
+        reason: "The requested widget cell is already in the Smart Stack; no widget was added.",
+      },
+    };
+  }
+  await selectGalleryWidget(actions, target.galleryStepsFromBottom, editableStack.editTap);
+  const readback = await actions.poll(
+    "verificationAttempts",
+    (dump) => verifySmartStackWidget(dump, headerDump, target),
+    10,
+  );
+  if (readback === undefined) {
+    return { headerDump };
+  }
+  return {
+    headerDump,
+    final: {
+      ...result,
+      success: true,
+      reason: "The requested widget cell is present in the Smart Stack.",
+    },
+  };
+}
+
 /** Drives the calibrated first-widget gallery path; success requires a clockface cell readback. */
 export async function addWatchSmartStackWidget(
   client: Pick<WatchRunnerClient, "request">,
@@ -269,6 +396,8 @@ export async function addWatchSmartStackWidget(
   const {
     appName,
     widgetName,
+    hostBundleId,
+    widgetKind,
     signal,
     galleryStepsFromBottom = 1,
     maxAttempts = 3,
@@ -281,32 +410,26 @@ export async function addWatchSmartStackWidget(
     attempts: 0,
     headerAttempts: 0,
     verificationAttempts: 0,
+    alreadyPresent: false,
     reason: "",
   };
+  const target: SmartStackWidgetTarget = { appName, widgetName, hostBundleId, widgetKind };
+  let firstHeaderDump: string | undefined;
   const actions = createWidgetActions(client, result, deps.timer ?? defaultTimer, signal);
   try {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       signal?.throwIfAborted();
       result.attempts++;
-      const editableStack = await openSmartStack(actions);
-      if (editableStack === undefined) {
-        return {
-          ...result,
-          reason:
-            "Smart Stack header and Edit button did not appear after 3 home/swipe rounds; start from the watch face and retry.",
-        };
+      const { final, headerDump } = await runWidgetAttempt(
+        actions,
+        result,
+        { ...target, galleryStepsFromBottom },
+        firstHeaderDump,
+      );
+      if (final !== undefined) {
+        return final;
       }
-      await selectGalleryWidget(actions, galleryStepsFromBottom, editableStack.editTap);
-      result.success =
-        (await actions.poll(
-          "verificationAttempts",
-          (dump) => verifySmartStackWidget(dump, editableStack.dump, appName, widgetName),
-          10,
-        )) !== undefined;
-      if (result.success) {
-        result.reason = "The requested widget cell is present in the Smart Stack.";
-        return result;
-      }
+      firstHeaderDump ??= headerDump;
       if (attempt < maxAttempts - 1) {
         await actions.settle(retryDelayMs);
       }

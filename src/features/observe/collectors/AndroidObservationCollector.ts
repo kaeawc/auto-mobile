@@ -125,7 +125,8 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     const hierarchy = result.viewHierarchy;
     if (hierarchy?.screenWidth && hierarchy?.screenHeight) {
       result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
-      await this.xrDisplaySize.prime(result, hierarchy, signal, context.displayId);
+      // Each observe re-reads `wm size` so a mid-instance override is not hidden (#17915).
+      await this.xrDisplaySize.refresh(result, hierarchy, signal, context.displayId);
       this.xrDisplaySize.applyCached(result, hierarchy, context.displayId);
       this.applyHierarchyDeviceMetadata(result, hierarchy);
       const parallelTasks = this.startDeviceStateTasks(context, !hierarchy.wakefulness);

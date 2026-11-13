@@ -1,5 +1,7 @@
 import { z } from "zod/v4";
 import { shellQuote } from "../../../utils/shellQuote";
+import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
 
 /**
  * Host side of the ProtoViewer MCP inbox (#13621). The Android twin is `McpActivity` in
@@ -160,6 +162,26 @@ export const protoViewerCapabilitiesSchema = z.object({
   capabilities: z.array(z.string().max(128)).max(1024),
 });
 export type ProtoViewerCapabilitiesFile = z.infer<typeof protoViewerCapabilitiesSchema>;
+
+/** Parses the report text; undefined (with a warning) when it is not JSON or has the wrong shape. */
+export function parseProtoViewerCapabilities(
+  text: string,
+): ProtoViewerCapabilitiesFile | undefined {
+  let parsed: ReturnType<typeof protoViewerCapabilitiesSchema.safeParse>;
+  try {
+    parsed = protoViewerCapabilitiesSchema.safeParse(JSON.parse(text));
+  } catch (error) {
+    logger.warn(`[protoviewer] unreadable capabilities report: ${errorMessage(error)}`);
+    return undefined;
+  }
+  if (!parsed.success) {
+    logger.warn(
+      `[protoviewer] capabilities report has an unexpected shape: ${parsed.error.message}`,
+    );
+    return undefined;
+  }
+  return parsed.data;
+}
 
 /** Store page for an update hint; the store app ID is fixed, so the link is stable. */
 export const PROTOVIEWER_PLAY_STORE_URL = `https://play.google.com/store/apps/details?id=${PROTOVIEWER_PACKAGE}`;

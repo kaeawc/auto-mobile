@@ -160,6 +160,47 @@ test("pre-kill shutdown marks the confirmed AVD rather than an unknown entry nam
   expect(markers.calls).toEqual(["write:Pixel"]);
 });
 
+for (const runtime of ["Pixel_AVD", undefined, "Missing_AVD"] as const) {
+  test(`pre-kill shutdown falls back to the running AVD name: runtime=${runtime}`, async () => {
+    const { context, applier, timer } = setup();
+    applier.stopDesktopHeadUnit = async () => true;
+    const markers = new FakeAvdColdBootMarkerStore();
+    markers.knownAvds = new Set(["Pixel_AVD"]);
+    const probes: Array<{ deviceId: string; timeoutMs: number }> = [];
+    await stopAndroidAutoBeforeShutdown(context, {
+      timer,
+      androidAutoProjection: applier,
+      avdColdBootMarkers: markers,
+      resolveRunningAndroidAvdName: async (device, timeoutMs) => {
+        probes.push({ deviceId: device.deviceId, timeoutMs });
+        return runtime;
+      },
+    });
+    expect(probes).toEqual([{ deviceId: "emulator-5554", timeoutMs: 3_000 }]);
+    expect(markers.calls).toEqual(runtime ? ["write:Pixel", `write:${runtime}`] : ["write:Pixel"]);
+    expect([...markers.marked]).toEqual(runtime === "Pixel_AVD" ? ["Pixel_AVD"] : []);
+  });
+}
+
+test("pre-kill shutdown does not probe the runtime name when the AVD resolves", async () => {
+  const { context, applier, timer } = setup();
+  applier.stopDesktopHeadUnit = async () => true;
+  const markers = new FakeAvdColdBootMarkerStore();
+  markers.knownAvds = new Set(["Pixel"]);
+  let probed = false;
+  await stopAndroidAutoBeforeShutdown(context, {
+    timer,
+    androidAutoProjection: applier,
+    avdColdBootMarkers: markers,
+    resolveRunningAndroidAvdName: async () => {
+      probed = true;
+      return "Other";
+    },
+  });
+  expect(probed).toBe(false);
+  expect([...markers.marked]).toEqual(["Pixel"]);
+});
+
 test("marker write failure does not fail pre-kill shutdown", async () => {
   const { context, applier, timer } = setup();
   applier.stopDesktopHeadUnit = async () => true;

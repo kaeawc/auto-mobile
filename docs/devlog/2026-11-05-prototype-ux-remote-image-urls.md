@@ -19,9 +19,9 @@ Not recorded.
 Owner decision of 2026-10-31 (#14180):
 
 - `image` may take a `url`, including a data-bound one.
-- A URL image uses the same egress policy as `request` in its runtime: the overlay as `request`,
-  ProtoViewer behind its network switch and filter (image loads count as network), and the
-  disposable app as decided in #14184 / #14289.
+- A URL image uses the same egress policy as `request` in its runtime. The overlay follows `request`,
+  ProtoViewer sits behind its network switch and filter (image loads count as network), and the
+  disposable app follows #14184 / #14289.
 - Only https is allowed outside dev flavors; cleartext only on loopback through `adb reverse` for
   fixtures.
 - An optional `via: "host"` lets the host fetch a static URL at show/patch time and upload it as a

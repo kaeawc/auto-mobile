@@ -10,11 +10,11 @@
 ## Status when written
 
 Status: draft design for prototyping, not implemented. Nothing in this document exists in the
-ProtoViewer apps today; every section that describes behavior is planned unless it says "landed".
+ProtoViewer apps today; every section that describes behavior is a plan unless it says "landed".
 The accepted design lists an editor as a non-goal for the first release, so this work is post-first-release
-exploration; if it is accepted it amends that non-goal and the `source` values in
+exploration. If accepted, it amends that non-goal and the `source` values in
 [ProtoViewer](../how-it-works/protoviewer.md) section 4.
-No issues are filed yet. It builds on the accepted [ProtoViewer](../how-it-works/protoviewer.md) design (epic
+There are no filed issues yet. It builds on the accepted [ProtoViewer](../how-it-works/protoviewer.md) design (epic
 #13625), which it must not contradict, and on the platform vocabulary contract (#14294).
 
 ## Design
@@ -26,7 +26,7 @@ any AutoMobile host (no daemon, no MCP server, no adb):
 - **Path A, authoring agent.** A Koog agent inside ProtoViewer generates and edits prototypes on
   the device. Its write tools reuse the MCP `prototype` tool's `patch` and `inspect`, and add
   read tools that tool does not have (section 4.1).
-- **Path B, tool surfaces.** Tools the user needs are exposed as platform modules, and the
+- **Path B, tool surfaces.** Tools the user needs are exposed as platform modules. The
   surfaces for those tools are themselves prototype specs: generated from the tool's argument
   schema, or composed by the Path A agent for the task at hand.
 
@@ -38,8 +38,8 @@ paths and both kinds of model prototyped (2026-10-22).
 **ProtoViewer apps (landed under epic #13625)**
 
 - Android: the `:protoviewer` module (`dev.jasonpearson.automobile.protoviewer`, minSdk 26) with the
-  library list, per-prototype task, relaunch and reset (#14963), import, share and delete (#14969),
-  the global network switch and local-network permission (#14972), and hardening: switch
+  library list, per-prototype task, relaunch and reset (#14963), and import, share and delete (#14969).
+  It also has the global network switch and local-network permission (#14972), and hardening: switch
   revocation, the 100 MiB library cap and the 10 s render watchdog (#14975, #15011, #15063). It
   builds on `:prototype-compose` (renderer, `AutoMobilePrototype`), `:prototype-saved` (saved store
   and device HTTP transport, #13617) and `:protocol`.
@@ -49,9 +49,10 @@ paths and both kinds of model prototyped (2026-10-22).
   spec's bounds while the network switch is on.
 - Bundle format and the strict zip reader in TypeScript, Kotlin and Swift (#14867), and the Swift
   `PrototypeSpecStrictValidator` with the shared corpus (#14866, closing #13620).
-- Library-mode rules in all three validators: `library: true` rejects privileged windows, `via:
-  "host"` requests and secure (password) values bound into requests, data writes, `emit` context,
-  `platform` arguments or `storage` (`via: "host"` and privileged windows: #14944, #14866; secure bindings: #14970, #15011).
+- Library-mode rules in all three validators (`via: "host"` and privileged windows: #14944, #14866;
+  secure bindings: #14970, #15011). In library mode (`library: true`), the validators reject
+  privileged windows, `via: "host"` requests and secure (password) values bound into requests, data
+  writes, `emit` context, `platform` arguments or `storage`.
 - Still open under the epic: MCP routing of `prototype save` and `open` (#13621), the rest of the
   shared hardening (#13622) and the release (#13623). The ProtoViewer apps are not yet exercised by
   CI (#15064) and have no device verification for the permission flows.
@@ -66,8 +67,8 @@ library store layout, the bundle format or the import flow.
   validator (`PrototypeSpecValidator`) and the patch applier (`PrototypePatch`) live in
   `android/protocol`. `PrototypeRuntime.patch()` applies a patch to a running prototype.
 - Patch scope matters for the agent: `PrototypePatch` writes only under `/data` and `/state`
-  (`add`, `replace`, `test`, `remove`), and `replaceNode` is the only way to change the node tree.
-  `root`, `window` and `theme` are not patchable, and `replaceNode` cannot replace the root; those
+  (`add`, `replace`, `test`, `remove`). Only `replaceNode` can change the node tree. The `root`,
+  `window` and `theme` fields are not patchable, and `replaceNode` cannot replace the root; those
   changes are a whole-spec `show`.
 - iOS: `PrototypePatch.swift` and `PrototypeSession` in `AutoMobilePrototypeAgentCore`, and the
   `PrototypeModel(mode: .standalone)` used by ProtoViewer. The Swift validator has landed, so iOS
@@ -129,10 +130,16 @@ Goals
    spec.
 7. Android and iOS share the tool contracts, even where the model runtime differs.
 
-Non-goals: running code from a model (specs stay declarative), privileged windows, accounts or
-sync, store listings in the first release (GitHub releases only, as in [ProtoViewer](../how-it-works/protoviewer.md) section 8),
-porting Pocket's tool catalog (Pocket lives in a separate repository; only its patterns are
-reused), and replacing MCP-driven authoring from a host.
+Non-goals:
+
+- running code from a model (specs stay declarative);
+- privileged windows;
+- accounts or sync;
+- store listings in the first release (GitHub releases only, as in
+  [ProtoViewer](../how-it-works/protoviewer.md) section 8);
+- porting Pocket's tool catalog (Pocket lives in a separate repository; only its patterns are
+  reused);
+- replacing MCP-driven authoring from a host.
 
 ### 3. Architecture
 
@@ -149,7 +156,7 @@ ProtoViewer
     └── Consent sheet drawn by the app, outside the spec's bounds
 ```
 
-Everything in the diagram except the library and viewer is planned. Both paths share one rule: **the model writes only through spec tools, and every write is
+Only the library and viewer in the diagram exist today. Both paths share one rule: **the model writes only through spec tools, and every write is
 validated.** The agent never gets a raw "write file" or "set spec" escape hatch.
 
 ### 4. Path A: authoring agent
@@ -190,9 +197,9 @@ then a series of patches, so small models are never asked to produce 1 MiB of JS
   structural change is an open question (section 10).
 - A prototype created by the agent gets a new `source` value, `generated`, in `library.json`. Today
   the source is one of `mcp`, `file`, `share` or `paste`, always written by the importing code and
-  never read from bundle bytes; `generated` follows the same rule. `LibrarySource` (Kotlin) and the Swift entry's source are closed
-  enums, so an older build skips such an entry, as it skips any unreadable `library.json` entry
-  (not fatal); a downgrade hides generated prototypes and does not break the library. It follows the
+  never read from bundle bytes; `generated` follows the same rule. The Kotlin `LibrarySource` and the
+  Swift entry's source are closed enums, so an older build skips such an entry. It already skips any
+  unreadable `library.json` entry (not fatal). A downgrade hides generated prototypes and does not break the library. It follows the
   imported-prototype policy: network off unless the global switch is on, `via: "host"` rejected, no
   privileged window.
 - Exported bundles stay canonical: revision history, drafts and instructions are never exported.
@@ -316,7 +323,7 @@ restyle like any other.
 #### 5.3 Agent-composed surfaces
 
 With Path A, the user can describe a task and the agent composes a surface for it, wiring
-`platform` calls to registered modules: for example "split this bill" composes amount, people and
+`platform` calls to registered modules. For example, "split this bill" composes amount, people and
 tip fields and shows the result from a module that does the arithmetic. The agent may use only modules the build advertises
 (`capabilities` tool), and the validator enforces `requires`, so a composed surface cannot call a
 module it did not declare.
@@ -386,9 +393,9 @@ Account-backed and side-effecting modules come after the consent sheet is proven
 - The surface generator has golden specs per argument type, and every generated spec must pass
   the validator.
 - Tool modules get `FakePlatformModule` tests from #14295.
-- **Model evaluation is separate from unit tests:** a fixed set of authoring tasks (create a login
-  screen, add a tab, make a list editable), each scored by first-try validity, retries, patches
-  per task, latency and tokens. It runs on demand on a device per model tier, never in the unit
+- **Model evaluation is separate from unit tests.** It uses a fixed set of authoring tasks (create a
+  login screen, add a tab, make a list editable). Each task is scored by first-try validity,
+  retries, patches per task, latency and tokens. It runs on demand on a device per model tier, never in the unit
   lane.
 
 ### 9. Prototyping plan

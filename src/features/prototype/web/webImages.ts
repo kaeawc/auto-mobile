@@ -1,7 +1,7 @@
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
-import { resolvePrototypeColor } from "../prototypeContrast";
-import { cssColor, rgbaCss, rowZeroesInlinePadding, type WebStyleContext } from "./webStyle";
+import { resolvePrototypeColor, type Rgba } from "../prototypeContrast";
+import { cssColor, rowZeroesInlinePadding, type WebStyleContext } from "./webStyle";
 import type { NodeRenderer, WebRenderScope } from "./webRender";
 
 /** How an image fits its box, as both devices read `contentScale` (default `fit`). */
@@ -311,60 +311,76 @@ export function webImageContentCss(
   };
 }
 
+/** A colour-matrix coefficient, rounded so the page bytes stay stable. */
+function matrixValue(value: number): string {
+  return String(Number(value.toFixed(4)));
+}
+
 /**
- * The drawn image and its filter: the image saturates first, then a separate tint layer
- * multiplies it (Android's `BlendMode.Modulate` on an offscreen layer), masked by the image so
- * transparent pixels stay clear. The tint layer is invisible until the page inlines the asset.
- * `Modulate` multiplies alpha too, so the tint draws its opaque colour and a translucent tint
- * wraps both layers in a group at the tint's alpha (`#00FFFFFF` hides the image, as on Android).
+ * The SVG filter for a tint: Android's `BlendMode.Modulate`, which multiplies each channel by the
+ * tint's, alpha included (#17241). `sRGB` interpolation multiplies the encoded values, as Android
+ * does, and keeps a partly transparent pixel's alpha at `a × tint.a` with its colour times the
+ * tint's; blending a masked tint layer over the image would leave it at `2a − a²`.
+ */
+function webImageTintFilter(tint: Rgba): { id: string; element: WebElement } {
+  const channels = [tint.r / 255, tint.g / 255, tint.b / 255, tint.a];
+  const hex = channels
+    .map((c) =>
+      Math.round(c * 255)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("");
+  const id = `pa-tint-${hex}`;
+  const values = channels
+    .map((c, row) => [0, 1, 2, 3, 4].map((col) => matrixValue(col === row ? c : 0)).join(" "))
+    .join(" ");
+  const matrix = el("fecolormatrix", { attrs: { type: "matrix", values } });
+  const filter = el("filter", { attrs: { id, "color-interpolation-filters": "sRGB" } }, [matrix]);
+  const svg = el(
+    "svg",
+    {
+      attrs: { width: "0", height: "0", "aria-hidden": "true", focusable: "false" },
+      style: { position: "absolute", overflow: "hidden" },
+    },
+    [filter],
+  );
+  return { id, element: svg };
+}
+
+/**
+ * The drawn image and its filter: the image saturates first, then its colour-matrix tint
+ * multiplies every channel (Android's saturation colour matrix, then its `Modulate` tint layer).
+ * `#00FFFFFF` hides the image, as on Android. An asset the page does not inline draws nothing, so
+ * neither filter shows.
  */
 export function webImageLayers(slot: number, node: Raw, context: WebStyleContext): WebElement[] {
   const image = `var(${webImageVar(slot)})`;
   const size = BACKGROUND_SIZE[webImageScale(node.contentScale)];
   const filter = record(node.filter);
   const saturation = typeof filter?.saturation === "number" ? filter.saturation : 1;
-  const layers = [
-    el("div", {
-      attrs: { "data-image": "" },
-      style: {
-        position: "absolute",
-        inset: "0",
-        "background-image": image,
-        "background-size": size,
-        "background-position": "center",
-        "background-repeat": "no-repeat",
-        ...(saturation === 1 ? {} : { filter: `saturate(${saturation})` }),
-      },
-    }),
-  ];
   const tint =
     filter?.tint === undefined
       ? undefined
       : resolvePrototypeColor(filter.tint, context.mode, context.palette);
-  if (tint) {
-    layers.push(
-      el("div", {
-        attrs: { "data-image-tint": "" },
-        style: {
-          position: "absolute",
-          inset: "0",
-          "background-color": rgbaCss({ ...tint, a: 1 }),
-          "mix-blend-mode": "multiply",
-          "mask-image": image,
-          "mask-size": size,
-          "mask-position": "center",
-          "mask-repeat": "no-repeat",
-          opacity: `var(${webImageVar(slot, "-on")}, 0)`,
-        },
-      }),
-    );
-  }
-  if (tint && tint.a < 1) {
-    // Opacity isolates the group, so the tint multiplies only the image beneath it.
-    const style = { position: "absolute", inset: "0", opacity: String(Number(tint.a.toFixed(3))) };
-    return [el("div", { attrs: { "data-image-alpha": "" }, style }, layers)];
-  }
-  return layers;
+  const tintFilter = tint ? webImageTintFilter(tint) : undefined;
+  const filters = [
+    ...(saturation === 1 ? [] : [`saturate(${saturation})`]),
+    ...(tintFilter ? [`url(#${tintFilter.id})`] : []),
+  ];
+  const layer = el("div", {
+    attrs: { "data-image": "" },
+    style: {
+      position: "absolute",
+      inset: "0",
+      "background-image": image,
+      "background-size": size,
+      "background-position": "center",
+      "background-repeat": "no-repeat",
+      ...(filters.length === 0 ? {} : { filter: filters.join(" ") }),
+    },
+  });
+  return tintFilter ? [tintFilter.element, layer] : [layer];
 }
 
 /** The page rule that inlines one image into its slot's custom properties. */
@@ -374,7 +390,7 @@ export function webImageRule(slot: number, image: PrototypeWebImage): string {
     image.bytes.byteOffset,
     image.bytes.byteLength,
   ).toString("base64");
-  return `:root{${webImageVar(slot)}:url(data:image/webp;base64,${base64});${webImageVar(slot, "-bg")}:transparent;${webImageVar(slot, "-ar")}:${image.width}/${image.height};${webImageVar(slot, "-on")}:1}`;
+  return `:root{${webImageVar(slot)}:url(data:image/webp;base64,${base64});${webImageVar(slot, "-bg")}:transparent;${webImageVar(slot, "-ar")}:${image.width}/${image.height}}`;
 }
 
 /**

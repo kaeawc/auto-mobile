@@ -1,4 +1,5 @@
 import { FileAvdColdBootMarkerStore, type AvdColdBootMarkerStore } from "./AvdColdBootMarkerStore";
+import { PendingColdBootMarkerClears } from "./PendingColdBootMarkerClears";
 import {
   DefaultNetsimInstanceLauncher,
   type NetsimInstanceLauncher,
@@ -343,6 +344,8 @@ export interface AndroidEmulatorClientOptions {
   launcher?: EmulatorLauncher;
   netsimInstanceLauncher?: NetsimInstanceLauncher;
   avdColdBootMarkers?: AvdColdBootMarkerStore;
+  /** Markers applied to launches, consumed when that launch reaches readiness (for testing). */
+  pendingColdBootMarkerClears?: PendingColdBootMarkerClears;
   readinessPoller?: EmulatorReadinessPoller;
   /** Resolves the `emulator` binary path (for testing; defaults to filesystem/shell detection) */
   emulatorPathLocator?: () => Promise<string>;
@@ -383,6 +386,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private spawnFn: SpawnFn;
   private readonly netsimInstanceLauncher: NetsimInstanceLauncher;
   private readonly avdColdBootMarkers: AvdColdBootMarkerStore;
+  private readonly pendingColdBootMarkerClears: PendingColdBootMarkerClears;
   private emulatorPath: string;
   private readonly emulatorPathLocator: () => Promise<string>;
   private timer: Timer;
@@ -459,6 +463,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     this.adbFactory = adbFactory;
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
     this.avdColdBootMarkers = options.avdColdBootMarkers ?? new FileAvdColdBootMarkerStore();
+    this.pendingColdBootMarkerClears =
+      options.pendingColdBootMarkerClears ??
+      new PendingColdBootMarkerClears(() => this.avdColdBootMarkers);
     this.platform = platform;
     this.hostArchitecture = hostArchitecture;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
@@ -555,7 +562,15 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     wait?: EmulatorReadyWait,
   ): Promise<BootedDevice> {
     // Not `async`: adopting the poller promise would add microtask turns the launch-exit timing tests pin.
-    return this.readinessPoller.waitForEmulatorReady(avdName, timeoutMs, childProcess, wait);
+    const ready = this.readinessPoller.waitForEmulatorReady(avdName, timeoutMs, childProcess, wait);
+    if (!this.pendingColdBootMarkerClears.isPending(avdName)) {
+      return ready;
+    }
+    // The launch that applied the AVD's cold boot marker reached readiness: consume it (#17929).
+    return ready.then(async (device) => {
+      await this.pendingColdBootMarkerClears.clearAfterReady(avdName);
+      return device;
+    });
   }
 
   private createLauncherHost(): EmulatorLauncherHost {
@@ -567,6 +582,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       emulatorPath: () => this.emulatorPath,
       spawnFn: () => this.spawnFn,
       avdColdBootMarkers: () => this.avdColdBootMarkers,
+      pendingColdBootMarkerClears: () => this.pendingColdBootMarkerClears,
       netsimInstanceLauncher: () => this.netsimInstanceLauncher,
       platform: () => this.platform,
       avdConfigReader: () => this.avdConfigReader,

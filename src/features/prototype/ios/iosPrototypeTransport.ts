@@ -54,6 +54,7 @@ import {
   prototypeAssetUploadProblem,
   type PrototypeAssetUpload,
 } from "../prototypeAssets";
+import type { PrototypeAssetCache } from "../prototypeAssetCache";
 import type { PrototypeSpec } from "../prototypeSpec";
 import { prototypeClearStorageUnsupportedMessage } from "../prototypeStorage";
 import type {
@@ -175,7 +176,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class IosPrototypeTransport implements PrototypeTransport {
-  constructor(private readonly agent: PrototypeAgentClient) {}
+  /**
+   * `assetCache` records each confirmed upload under the device's id, so the web page can inline
+   * the image as it does for Android; without it uploads are not cached.
+   */
+  constructor(
+    private readonly agent: PrototypeAgentClient,
+    private readonly assetCache?: {
+      readonly serial: string;
+      readonly cache: Pick<PrototypeAssetCache, "put" | "remove">;
+    },
+  ) {}
 
   /**
    * Whether the agent's handshake advertised `capability`: a request type, or a spec feature it
@@ -368,12 +379,19 @@ export class IosPrototypeTransport implements PrototypeTransport {
     const dataBase64 = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString(
       "base64",
     );
-    return this.assetRequest(
+    const snapshot = { ...asset, bytes: Uint8Array.from(asset.bytes) };
+    const reply = await this.assetRequest(
       "put_prototype_asset",
       { id: asset.id, mimeType: asset.mimeType, dataBase64 },
       `Upload of prototype asset '${asset.id}'`,
       options,
     );
+    if (reply.success && !reply.error) {
+      await this.cacheAsset(`cache prototype asset ${asset.id}`, (cache, serial) =>
+        cache.put(serial, snapshot),
+      );
+    }
+    return reply;
   }
 
   async removeAsset(
@@ -384,12 +402,33 @@ export class IosPrototypeTransport implements PrototypeTransport {
     if (problem !== null) {
       throw new ActionableError(`Invalid prototype asset: ${problem}`);
     }
-    return this.assetRequest(
+    const reply = await this.assetRequest(
       "remove_prototype_asset",
       { id },
       `Removal of prototype asset '${id}'`,
       options,
     );
+    if (reply.success && !reply.error) {
+      await this.cacheAsset(`remove cached prototype asset ${id}`, (cache, serial) =>
+        cache.remove(serial, id),
+      );
+    }
+    return reply;
+  }
+
+  /** A cache failure never fails an upload the device confirmed; the image keeps its placeholder. */
+  private async cacheAsset(
+    what: string,
+    run: (cache: Pick<PrototypeAssetCache, "put" | "remove">, serial: string) => Promise<void>,
+  ): Promise<void> {
+    if (!this.assetCache) {
+      return;
+    }
+    try {
+      await run(this.assetCache.cache, this.assetCache.serial);
+    } catch (error) {
+      logger.warn(`[prototype-agent] Failed to ${what}: ${errorMessage(error)}`, error);
+    }
   }
 
   async status(): Promise<PrototypeDeviceStatus> {

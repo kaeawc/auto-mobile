@@ -23,7 +23,7 @@ and CJS to ESM risk were later replaced by owner decisions. What still explains 
 - **v2 API shape:** `registerTool`/`registerResource` replace v1
   `setRequestHandler(ListTools|CallTool…)`; `serveStdio` takes a factory
   `(ctx) => McpServer` (per connection on stdio, per request on the
-  `createMcpHandler` HTTP path); a stateful `StreamableHTTPServerTransport`
+  `createMcpHandler` HTTP path). A stateful `StreamableHTTPServerTransport`
   (`sessionIdGenerator`, `onsessioninitialized`) still exists, so the SDK does not
   force every leg stateless. Zod 4 (the v2 schema requirement) was already a dependency.
 - **Four stateful mechanisms keyed off a connection-scoped identity**, which is why a
@@ -66,14 +66,14 @@ and CJS to ESM risk were later replaced by owner decisions. What still explains 
 | 8   | Control-socket forwards run in process; the HTTP endpoint serves only the desktop app and external clients.                                                                                                   | Landed (#11820)                 |
 
 - **Handlers stay ours.** Moving to `registerTool` would change what clients see: schemas would
-  be produced by Zod 4 rather than the advertised definitions, error texts would come from the
+  be produced by Zod 4 rather than the advertised definitions. Error texts would come from the
   SDK, and per-session tool filtering would need re-expressing in its dispatch. If revisited, a
   Zod 4 upgrade of the tool schemas is the prerequisite.
 - **Session key precedence** (owner decision, #13315): the header wins, except for the daemon's
   own in-process forward.
 - **Tasks** (owner decisions, 2026-10-18): stored in SQLite so a restarted daemon still answers
-  `tasks/get` and `tasks/cancel`; a task holding a device keeps its session lease alive while
-  `working` or `input_required`; finished tasks stay readable for minutes (10 by default);
+  `tasks/get` and `tasks/cancel`. A task holding a device keeps its session lease alive while
+  `working` or `input_required`. Finished tasks stay readable for minutes (10 by default).
   `startDevice` was the first tool converted.
 - **Legacy Tasks advertisement** (#13143): retaining the conditional `initialize` advertisement
   lets existing clients negotiate Tasks while modern HTTP serving is opt-in.

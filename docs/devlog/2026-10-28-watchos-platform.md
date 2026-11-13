@@ -154,34 +154,34 @@ unavailable, and a broker binding never reuses one.
   like `startDevice`, and a watch it created is deleted again if boot or bind fails. `resources`,
   `enableTools` and `readiness: "automation"` are refused; readiness defaults to `"none"`.
   `deleteDevice` with `target.platform: "watchos"` resolves the watch by UDID from the watch
-  listing (absent means already deleted), applies killDevice's caller checks under the
-  `deleteDevice` name, stops a running watch through killDevice before taking its teardown lease
-  (killDevice's own lease would otherwise wait on it), then runs `simctl delete` and requires a
+  listing (absent means already deleted), applies `killDevice`'s caller checks under the
+  `deleteDevice` name, stops a running watch through `killDevice` before taking its teardown lease
+  (`killDevice`'s own lease would otherwise wait on it), then runs `simctl delete` and requires a
   fresh watch listing that no longer shows it.
 - **Shared limits.** A watch is charged wherever a host limit counts devices: the broker's
   managed-device limit (`totalDeviceCap`) counts `watchos` bindings and running daemon-named
   watches in one total with Android and iOS devices, and a cold watch boot is admitted through the
   simulator boot gate.
 - **Broker watch bindings.** A `watchos` binding holds one unpaired watch (never `simctl pair`, no
-  companion iPhone). Its requested spec is provisionDevice's watch spec: exact `runtime` and
+  companion iPhone). Its requested spec is `provisionDevice`'s watch spec: exact `runtime` and
   `deviceType`, nothing else. The resolver checks it against the watch catalog before any native
   work (an unlisted runtime or device type is `spec_unsupported` naming the listed ones; a listed
   but unavailable runtime is `runtime_incompatible`; a host without simctl refuses it). The
   matcher compares runtime and device type only, never an AVD config or iOS form-factor inference.
-  The reconciler creates an `ambroker-` watch through provisionDevice's watch path (fresh
+  The reconciler creates an `ambroker-` watch through `provisionDevice`'s watch path (fresh
   `simctl create`, never cloned), boots it through the simulator gate (a replacement reserves its
-  slot against the old watch's UDID), and publishes it at readiness `booted` (provisionDevice's
+  slot against the old watch's UDID), and publishes it at readiness `booted` (`provisionDevice`'s
   `none` / `device_ready`): the automation-readiness gate accepts that for `watchos` only. Between
   executions a watch follows the iOS binding policy: the release keeps it assigned and booted, and
   the next execution ends any leftover session and reuses it with a fresh one. A spec change
   replaces the watch; replacement,
-  eviction and abandoned-binding cleanup delete it through the daemon's deleteDevice watch path
+  eviction and abandoned-binding cleanup delete it through the daemon's `deleteDevice` watch path
   (stop, `simctl delete`, then a fresh watch listing must not show it), and a failed delete
   leaves the binding `cleanup_pending`. Legacy slot rows never held watches, so legacy slot
   retirement refuses a watch target.
 - **Session-broker watch requests.** A session request names a watch exactly:
   `{ schemaVersion: 1, platform: "watchos", spec: { runtime, deviceType } }`, the spec parsed by
-  provisionDevice's watch schema. There are no host defaults, archetypes or OS predicates. Before
+  `provisionDevice`'s watch schema. There are no host defaults, archetypes or OS predicates. Before
   anything is reserved, the request is checked against the session watch catalog (installed
   watchOS runtimes and Apple Watch device types from `WatchSimulatorInventory.readCatalog`): an
   unlisted device type is `unsupported_hardware`, an unlisted or unavailable runtime is
@@ -195,7 +195,7 @@ unavailable, and a broker binding never reuses one.
 - **Watch release resets follow the iOS reuse mode.** `reuse.ios.mode` (and
   `reuseCleanDevices`) decide a released watch's fate as they do an iPhone's; the iOS idle TTL,
   reset-boot queue and wait-for-a-resetting-device admission apply to it too. `off`: destroyed. `erase`: the watch is stopped through
-  killDevice, `simctl erase`d while shut down, booted again through the simulator boot gate and
+  `killDevice`, `simctl erase`d while shut down, booted again through the simulator boot gate and
   confirmed Booted with its exact runtime and device type; a redrive that finds it shut down
   erases it again. `keep-booted`: the iOS cleaning replays the session's mutation journal against
   a pool-entry app baseline and probes CtrlProxy health; a watch has none of these, so that step

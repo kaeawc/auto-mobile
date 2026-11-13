@@ -88,12 +88,16 @@ internal object PrototypeCollectionRules {
     val screens = value as? JsonObject ?: return fail(path, "Expected object")
     if (screens.size !in 1..MAX_PROTOTYPE_STACK_SCREENS)
       return fail(path, "Screen count out of range")
+    context.screens.enterStack()
     for (name in screens.keys.sorted()) {
       val at = "$path[${canonicalString(name)}]"
       if (name.isEmpty()) return fail(at, "Empty screen name")
+      context.screens.enterScreen()
       val error = walk(screens.getValue(name), rule.getValue("item").jsonObject, at, context, depth)
       if (error != null) return error
+      context.screens.exitScreen()
     }
+    context.screens.exitStack()
     return null
   }
 

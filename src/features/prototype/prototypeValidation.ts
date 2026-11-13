@@ -53,6 +53,7 @@ import {
   bound,
 } from "./prototypeBindingValidation";
 export { type PrototypeValidationError } from "./prototypeBindingValidation";
+import { PrototypeScreenBudget, prototypeScreenBudgetMessage } from "./prototypeScreenBudget";
 import {
   horizontalLazyError,
   pagerNodeError,
@@ -64,7 +65,8 @@ export type PrototypeValidationResult =
 interface Context {
   nodes: Located[];
   actions: Located[];
-  images: number;
+  /** Node and image budgets per stack screen and for the whole spec (#14213). */
+  budget: PrototypeScreenBudget;
   effects: number;
   animatedEffects: number;
   keyframeNodes: number;
@@ -117,11 +119,9 @@ function visitReference(
     return visitNested(value, rule, path, { context, depth, nested });
   }
   const itemImages = rule.name === "item" ? imageSlotUses(object(value)?.image) : 0;
-  if (itemImages > 0) {
-    context.images += itemImages;
-    if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
-      return fail(`${path}.image`, "Image limit exceeded");
-    }
+  const itemOverflow = itemImages > 0 ? context.budget.charge(0, itemImages) : undefined;
+  if (itemOverflow) {
+    return fail(`${path}.image`, prototypeScreenBudgetMessage(itemOverflow));
   }
   return rule.name === "node"
     ? visitNodeReference(value, rule, path, { context, depth })
@@ -141,8 +141,9 @@ function visitNodeReference(
     return fail(`${path}.onAppear`, "onAppear requires visibleWhen or the root");
   }
   context.nodes.push({ value: node, path });
-  if (context.nodes.length > contract.limits.MAX_PROTOTYPE_NODES) {
-    return fail(path, "Node limit exceeded");
+  const nodeOverflow = context.budget.charge(1, 0);
+  if (nodeOverflow) {
+    return fail(path, prototypeScreenBudgetMessage(nodeOverflow));
   }
   if (depth + 1 > contract.limits.MAX_PROTOTYPE_DEPTH) {
     return fail(path, "Tree depth limit exceeded");
@@ -153,15 +154,15 @@ function visitNodeReference(
   }
   return walk(value, refRule(rule), path, { context, depth: depth + 1 });
 }
-/** Adds a node's images and `style.effects` to the spec-wide totals; the node that crosses a limit is reported. */
+/** Adds a node's images to its screen budget and `style.effects` to the spec-wide totals; the node that crosses a limit is reported. */
 function chargeNodeBudgets(
   node: Record<string, unknown>,
   path: string,
   context: Context,
 ): PrototypeValidationError | undefined {
-  context.images += nodeImageUses(node);
-  if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
-    return fail(path, "Image limit exceeded");
+  const imageOverflow = context.budget.charge(0, nodeImageUses(node));
+  if (imageOverflow) {
+    return fail(path, prototypeScreenBudgetMessage(imageOverflow));
   }
   const motionLimit = chargeMotionNode(node, context, contract.limits, path);
   if (motionLimit) {
@@ -427,16 +428,20 @@ function visitScreenMap(
   if (names.length < 1 || names.length > contract.limits.MAX_PROTOTYPE_STACK_SCREENS) {
     return fail(path, "Screen count out of range");
   }
+  context.budget.enterStack();
   for (const name of names) {
     const at = `${path}[${JSON.stringify(name)}]`;
     if (!name.length) {
       return fail(at, "Empty screen name");
     }
+    context.budget.enterScreen();
     const error = walk(screens[name], rule.item!, at, { context, depth });
     if (error) {
       return error;
     }
+    context.budget.exitScreen();
   }
+  context.budget.exitStack();
   return undefined;
 }
 function recordSizeError(
@@ -798,7 +803,7 @@ function platformArgumentError(
   const context: Context = {
     nodes: [],
     actions: [],
-    images: 0,
+    budget: new PrototypeScreenBudget(),
     effects: 0,
     animatedEffects: 0,
     keyframeNodes: 0,
@@ -868,7 +873,7 @@ function validateValue(
   const context: Context = {
     nodes: [],
     actions: [],
-    images: 0,
+    budget: new PrototypeScreenBudget(),
     effects: 0,
     animatedEffects: 0,
     keyframeNodes: 0,

@@ -12,20 +12,18 @@ final class AsyncExecutorTests: XCTestCase {
             let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery(), timeout: configured)
             _ = try await executor.execute()
             XCTAssertEqual(client.initializeTimeouts, [configured])
-            XCTAssertEqual(client.toolTimeouts, [configured, expected])
+            XCTAssertEqual(client.toolTimeouts, [configured, configured, expected])
         }
     }
 
     func testExecutePlanReturnsResultAndPassesOneSessionAndMetadataAcrossAwait() async throws {
         let client = AsyncExecutorClient()
-        let generator = ExecutorSessionProbe()
         let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery())
         let testCase = HermeticPlanTestCase(selector: #selector(HermeticPlanTestCase.planBody))
         testCase.executorFactory = { configuration in
             XCTAssertEqual(configuration.planPath, "unused")
             return executor
         }
-        testCase.idGenerator = { generator.generate() }
         try testCase.setUpWithError()
         defer { try? testCase.tearDownWithError() }
         let observer = AutoMobileTestObserver()
@@ -36,8 +34,8 @@ final class AsyncExecutorTests: XCTestCase {
 
         XCTAssertTrue(result.success)
         XCTAssertEqual(result.executedSteps, 2)
-        XCTAssertEqual(generator.calls, 1)
-        XCTAssertEqual(client.sessions, ["generated-session-1", "generated-session-1"])
+        XCTAssertEqual(client.acquisitions, 1)
+        XCTAssertEqual(client.sessions, ["issued-session-1", "issued-session-1"])
         XCTAssertEqual(client.testClasses, ["HermeticPlanTestCase"])
         XCTAssertEqual(client.testMethods, ["planBody"])
         XCTAssertEqual(observer.getTimingData().map(\.testName), [testCase.name])
@@ -45,11 +43,9 @@ final class AsyncExecutorTests: XCTestCase {
 
     func testCancellingAsyncTestBodyPropagatesThroughExecutePlanToClient() async throws {
         let client = AsyncExecutorClient(pauseCall: true)
-        let generator = ExecutorSessionProbe()
         let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery())
         let testCase = HermeticPlanTestCase(selector: #selector(HermeticPlanTestCase.planBody))
         testCase.executorFactory = { _ in executor }
-        testCase.idGenerator = { generator.generate() }
         try testCase.setUpWithError()
         defer { try? testCase.tearDownWithError() }
 
@@ -60,54 +56,48 @@ final class AsyncExecutorTests: XCTestCase {
 
         XCTAssertEqual(client.cancellations.count, 1)
         XCTAssertEqual(client.executions.count, 1)
-        XCTAssertEqual(generator.calls, 1)
-        XCTAssertEqual(client.sessions, ["generated-session-1", "generated-session-1"])
+        XCTAssertEqual(client.acquisitions, 1)
+        XCTAssertEqual(client.sessions, ["issued-session-1", "issued-session-1"])
         XCTAssertEqual(client.resetSessionCount, 0)
     }
 
-    func testAsyncDefaultUsesGeneratorOncePerExecution() async throws {
-        let generator = ExecutorSessionProbe()
+    func testAsyncDefaultAcquiresOncePerExecution() async throws {
         let client = AsyncExecutorClient()
         let executor = makeExecutor(
             client: client,
-            handler: AsyncExecutorRecovery(),
-            idGenerator: { generator.generate() }
+            handler: AsyncExecutorRecovery()
         )
 
         _ = try await executor.execute()
         _ = try await executor.execute()
 
         XCTAssertEqual(client.sessions, [
-            "generated-session-1", "generated-session-1",
-            "generated-session-2", "generated-session-2",
+            "issued-session-1", "issued-session-1",
+            "issued-session-2", "issued-session-2",
         ])
-        XCTAssertEqual(generator.calls, 2, "each execution generates exactly one ID")
+        XCTAssertEqual(client.acquisitions, 2, "each execution acquires an issued session")
     }
 
-    func testDefaultGeneratorProducesDistinctUUIDs() async throws {
+    func testSeparateExecutionsAcquireDistinctSessions() async throws {
         let client = AsyncExecutorClient()
         let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery())
         _ = try await executor.execute()
         _ = try await executor.execute()
         let first = try XCTUnwrap(client.sessions[0])
         let second = try XCTUnwrap(client.sessions[2])
-        XCTAssertNotNil(UUID(uuidString: first))
-        XCTAssertNotNil(UUID(uuidString: second))
         XCTAssertNotEqual(first, second)
     }
 
-    func testExplicitSessionOverridesGenerator() async throws {
+    func testExplicitSessionSkipsAcquisition() async throws {
         let client = AsyncExecutorClient()
-        let generator = ExecutorSessionProbe()
         let executor = makeExecutor(
             client: client,
-            handler: AsyncExecutorRecovery(),
-            idGenerator: { generator.generate() }
+            handler: AsyncExecutorRecovery()
         )
         let result = try await executor.execute(sessionUuid: "explicit-xctest-session")
         XCTAssertTrue(result.success)
         XCTAssertEqual(client.sessions, ["explicit-xctest-session", "explicit-xctest-session"])
-        XCTAssertEqual(generator.calls, 0)
+        XCTAssertEqual(client.acquisitions, 0)
     }
 
     func testBlockedPreflightAllowsOtherTasksToProgressAndCompletesWhenReleased() async throws {
@@ -206,7 +196,7 @@ final class AsyncExecutorTests: XCTestCase {
         let handler = AsyncExecutorRecovery()
         let result = try await makeExecutor(client: client, handler: handler).execute()
         XCTAssertTrue(result.success)
-        XCTAssertEqual(client.names, ["setToolEnabled", "executePlan"])
+        XCTAssertEqual(client.names, ["getApple", "setToolEnabled", "executePlan"])
         XCTAssertEqual(client.resetSessionCount, 0)
         XCTAssertEqual(handler.calls.count, 0)
     }
@@ -358,20 +348,18 @@ final class AsyncExecutorTests: XCTestCase {
         XCTAssertEqual(client.resetSessionCount, resetsBeforeCancellation, "cancellation must not add a reset")
     }
 
-    func testSessionIsCapturedBeforeSuspensionAndARetryRunsUnderAFreshOneThatSurvivesRecoveryAndResume() async throws {
+    func testSessionIsAcquiredAfterInitializeAndRetryAcquiresOneThatSurvivesRecoveryAndResume() async throws {
         let scheduler = VirtualDeadlineScheduler()
-        let provider = ExecutorSessionProbe()
         let client = AsyncExecutorClient(failures: 1, planFailure: true, pauseInitialize: true)
         let handler = AsyncExecutorRecovery()
         let executor = makeExecutor(
             client: client,
             handler: handler,
-            scheduler: scheduler,
-            idGenerator: { provider.generate() }
+            scheduler: scheduler
         )
         let task = Task { try await executor.execute() }
         try await client.initializations.wait(for: 1)
-        XCTAssertEqual(provider.calls, 1, "identity must be captured before initialize suspends")
+        XCTAssertEqual(client.acquisitions, 0, "acquisition must follow initialization")
         client.initializeGate.resume(returning: ())
         try await scheduler.registered.wait(for: 1)
         scheduler.advance(by: 10)
@@ -379,12 +367,12 @@ final class AsyncExecutorTests: XCTestCase {
         XCTAssertTrue(result.success)
         XCTAssertTrue(result.aiRecoverySuccessful)
         // The transient retry runs under a fresh session (#11072); recovery and the resume keep it.
-        XCTAssertEqual(provider.calls, 2)
+        XCTAssertEqual(client.acquisitions, 2)
         XCTAssertEqual(
             client.sessions,
-            ["generated-session-1", "generated-session-1"] + Array(repeating: "generated-session-2", count: 4)
+            ["issued-session-1", "issued-session-1"] + Array(repeating: "issued-session-2", count: 4)
         )
-        XCTAssertEqual(handler.sessions, ["generated-session-2"])
+        XCTAssertEqual(handler.sessions, ["issued-session-2"])
         XCTAssertEqual(client.executions.count, 3, "initial error, retry failure, recovery resume")
         XCTAssertEqual(client.resetSessionCount, 1)
     }
@@ -396,8 +384,7 @@ final class AsyncExecutorTests: XCTestCase {
         timeout: TimeInterval = 300,
         scheduler: any DeadlineScheduler = VirtualDeadlineScheduler(),
         transport: AutoMobilePlanExecutor.Transport = .daemonUnixSocket(path: "/unused/async-executor.sock"),
-        daemonEnsurer: any AutoMobileDaemonEnsuring = AsyncExecutorDaemonEnsurer(),
-        idGenerator: @escaping @Sendable () -> String = { UUID().uuidString }
+        daemonEnsurer: any AutoMobileDaemonEnsuring = AsyncExecutorDaemonEnsurer()
     )
         -> AutoMobilePlanExecutor
     {
@@ -407,6 +394,7 @@ final class AsyncExecutorTests: XCTestCase {
             configuration: .init(
                 transport: transport,
                 planPath: "unused",
+                deviceId: "fake-device",
                 retryCount: retries,
                 timeoutSeconds: timeout,
                 retryDelaySeconds: 10
@@ -420,7 +408,6 @@ final class AsyncExecutorTests: XCTestCase {
             recoveryModelConfig: nil,
             daemonEnsurer: daemonEnsurer,
             deadlineScheduler: scheduler,
-            idGenerator: idGenerator,
             heldSessionController: RecordingHeldSessionController()
         )
     }
@@ -486,18 +473,6 @@ private final class BlockingExecutorDaemonEnsurer: AutoMobileDaemonEnsuring {
     func release() { semaphore.signal() }
 }
 
-private final class ExecutorSessionProbe: Sendable {
-    private let state = OSAllocatedUnfairLock(initialState: 0)
-    var calls: Int { state.withLock { $0 } }
-
-    func generate() -> String {
-        state.withLock {
-            $0 += 1
-            return "generated-session-\($0)"
-        }
-    }
-}
-
 private final class AsyncExecutorRecovery: PlanRecoveryHandler {
     let calls = TransportEvents()
     let gate = SingleResumeCell<Void>()
@@ -533,6 +508,7 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
         var names: [String] = []
         var sessions: [String?] = []
         var resetSessionCount = 0
+        var acquisitions = 0
         var failures: Int
         var planFailure: Bool
         var pauseNextInitialization: Bool
@@ -552,6 +528,7 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
     var testMethods: [String?] { state.withLock { $0.testMethods } }
     var names: [String] { state.withLock { $0.names } }
     var sessions: [String?] { state.withLock { $0.sessions } }
+    var acquisitions: Int { state.withLock { $0.acquisitions } }
     var resetSessionCount: Int { state.withLock { $0.resetSessionCount } }
 
     init(
@@ -592,6 +569,12 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
         let response = state.withLock { current -> Result<MCPToolResponse, any Error> in
             current.toolTimeouts.append(timeout)
             current.names.append(name)
+            if name == "getApple" || name == "getAndroid" {
+                current.acquisitions += 1
+                return .success(MCPToolResponse(
+                    text: "{\"runtime\":{\"session\":{\"sessionUuid\":\"issued-session-\(current.acquisitions)\"}}}"
+                ))
+            }
             current.sessions.append(sessionUuid)
             if name != "executePlan" { return .success(MCPToolResponse(text: "{}")) }
             current.testClasses.append(testClass)

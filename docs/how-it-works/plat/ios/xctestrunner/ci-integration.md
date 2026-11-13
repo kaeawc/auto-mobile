@@ -8,7 +8,18 @@ the `ios-build` repository.
 
 AutoMobile tests need a pre-built `.xctestrun` containing the `YourAppAutoMobileTests` bundle, a
 booted iOS Simulator, a running AutoMobile daemon reachable over the Unix socket, and the CtrlProxy
-iOS app installed in the simulator.
+iOS app installed in the simulator. A device identifier is required unless the caller passes an
+explicit issued session. Set `AUTOMOBILE_DEVICE_ID` (or the `AUTOMOBILE_DEVICE_UDID` alias)
+to its UDID, override `AutoMobileTestCase.deviceId`, or set `Configuration.deviceId` directly.
+After initialization, `AutoMobilePlanExecutor` acquires an issued session with `getApple`
+(`udid`) for iOS or `getAndroid` (`deviceId`) for Android. Missing or empty identifiers fail
+before either acquisition tool is called.
+It then enables and executes `executePlan` with `runtime.session.sessionUuid` from that response.
+An explicit caller-supplied
+session skips acquisition on the initial attempt. Retries and device waits acquire new sessions;
+AI recovery resumes reuse the held session, and the daemon releases it when the plan completes.
+Typed acquisition refusals retain the existing device-wait and retry policy; other daemon tool
+errors preserve the response text in the test failure.
 
 The iOS Simulator test bundle supports plan execution without AI-assisted recovery. The
 `XCTestRunner` target links Tachikoma only on macOS, and its executor leaves the recovery handler
@@ -90,7 +101,9 @@ automobile-tests:
       run: auto-mobile --cli observe --platform ios
 
     - name: Run AutoMobile tests
-      run: xcodebuild test-without-building -xctestrun "$xctestrun_file" -destination "platform=iOS Simulator,id=$booted_udid" -only-testing:YourAppAutoMobileTests -enableCodeCoverage NO -skipMacroValidation
+      run: |
+        export TEST_RUNNER_AUTOMOBILE_DEVICE_UDID="$booted_udid"
+        xcodebuild test-without-building -xctestrun "$xctestrun_file" -destination "platform=iOS Simulator,id=$booted_udid" -only-testing:YourAppAutoMobileTests -enableCodeCoverage NO -skipMacroValidation
 
     - name: Stop AutoMobile daemon
       if: always()

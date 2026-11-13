@@ -998,7 +998,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "setAppPermissions",
-    "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
+    "Grant or revoke app permissions. userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     {
       handler: setAppPermissionsHandler,

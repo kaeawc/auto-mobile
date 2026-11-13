@@ -125,10 +125,12 @@ fun prototypeOpaqueSurface(model: PrototypeRenderModel): Boolean =
  */
 @InternalAutoMobilePrototypeApi
 fun guardPrototypeTree(root: PrototypeNode) {
-  var count = 0
+  // Nodes are budgeted per stack screen and for the whole spec, as the validator does (#14213).
+  val budget = PrototypeScreenBudget()
   var scrollBindings = 0
   fun visit(node: PrototypeNode, path: String, depth: Int) {
-    require(++count <= PrototypeSpecValidator.MAX_PROTOTYPE_NODES) { "$path: Node limit exceeded" }
+    val overflow = budget.charge(1, 0)
+    require(overflow == null) { "$path: ${overflow?.message}" }
     scrollBindings += listOfNotNull(node.scrollLinked, node.scrollTransition).size
     require(scrollBindings <= PrototypeScrollMotion.MAX_PROTOTYPE_SCROLL_BINDINGS) {
       "$path: Scroll binding limit exceeded"
@@ -140,7 +142,14 @@ fun guardPrototypeTree(root: PrototypeNode) {
     node.styleWhen?.forEachIndexed { index, entry ->
       requirePrototypeRenderSizes(entry.style, "$path.styleWhen[$index]")
     }
-    prototypeChildEntries(node, path, bind = false).forEach { visit(it.node, it.path, depth + 1) }
+    val stack = node is PrototypeStackNode
+    if (stack) budget.enterStack()
+    prototypeChildEntries(node, path, bind = false).forEach {
+      if (stack) budget.enterScreen()
+      visit(it.node, it.path, depth + 1)
+      if (stack) budget.exitScreen()
+    }
+    if (stack) budget.exitStack()
   }
   visit(root, "root", 1)
 }

@@ -11,8 +11,7 @@ private let _moduleLoadLog: Void = {
 /// Base XCTestCase for executing AutoMobile YAML automation plans via MCP.
 ///
 /// Concurrency: nonisolated XCTest lifecycle hooks prepare an executor synchronously; executePlan
-/// awaits it directly and propagates cancellation. Session identity is an explicit value generated
-/// once per execution, independent of which thread runs the async body.
+/// awaits it directly and propagates cancellation. The executor acquires an issued device session.
 open class AutoMobileTestCase: XCTestCase {
     override open class var defaultTestSuite: XCTestSuite {
         // Ensure module load logging is triggered
@@ -77,6 +76,10 @@ open class AutoMobileTestCase: XCTestCase {
         return DaemonManager.findRepoRoot(startingAt: #filePath)
     }
 
+    open var deviceId: String? {
+        environment.firstNonEmpty(["AUTOMOBILE_DEVICE_ID", "AUTOMOBILE_DEVICE_UDID"])
+    }
+
     open var retryCount: Int {
         return environment.intValue(["AUTOMOBILE_TEST_RETRY_COUNT", "RETRY_COUNT"]) ?? 0
     }
@@ -125,18 +128,17 @@ open class AutoMobileTestCase: XCTestCase {
     open func setUpAutoMobile() throws {}
     open func tearDownAutoMobile() throws {}
 
-    /// Internal construction and identity seams keep hermetic tests on the public execution path.
+    /// Internal construction seam keeps hermetic tests on the public execution path.
     var executorFactory: (AutoMobilePlanExecutor.Configuration) -> AutoMobilePlanExecutor = {
         AutoMobilePlanExecutor(configuration: $0)
     }
-
-    var idGenerator: @Sendable () -> String = { UUID().uuidString }
 
     /// Suite construction precedes test execution, so prefetch needs its own explicit filter value.
     class var timingSessionIdGenerator: @Sendable () -> String { { UUID().uuidString } }
 
     private var executor: AutoMobilePlanExecutor?
-    private let environment = AutoMobileEnvironment()
+    /// Inject a snapshot in tests without changing the process-wide environment.
+    var environment = AutoMobileEnvironment()
 
     override open func setUpWithError() throws {
         PerfTimer.log("setUpWithError START for \(name)")
@@ -175,9 +177,8 @@ open class AutoMobileTestCase: XCTestCase {
             buildTestMetadata()
         }
         PerfTimer.log("Executing with metadata: testClass=\(metadata.testClass), testMethod=\(metadata.testMethod)")
-        let sessionUuid = idGenerator()
         let result = try await PerfTimer.measureAsync("executor.execute") {
-            try await executor.execute(testMetadata: metadata, sessionUuid: sessionUuid)
+            try await executor.execute(testMetadata: metadata, sessionUuid: nil)
         }
         PerfTimer.log("executePlan END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)")
         return result
@@ -214,6 +215,7 @@ open class AutoMobileTestCase: XCTestCase {
         return AutoMobilePlanExecutor.Configuration(
             transport: transport,
             planPath: planPath,
+            deviceId: deviceId,
             daemonRepoRoot: daemonRepoRoot,
             retryCount: retryCount,
             timeoutSeconds: timeoutSeconds,

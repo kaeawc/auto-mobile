@@ -24,7 +24,7 @@
             client.queueExecutePlan(planJSON(
                 success: false, executedSteps: 2, totalSteps: 4,
                 failedStep: ["stepIndex": 2, "tool": "tapOn", "error": "no element", "device": "sim-1"]
-            ))
+            ), isError: true)
             client.queueExecutePlan(planJSON(success: true, executedSteps: 4, totalSteps: 4))
 
             let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
@@ -315,7 +315,11 @@
                 await assertAsyncThrowsError { try await executor.execute(testMetadata: metadata) }
 
                 XCTAssertNil(client.executePlanCalls[0].arguments["holdSessionOnFailure"])
-                XCTAssertEqual(heldSessions.events, [], "nothing held, nothing to heartbeat or release")
+                XCTAssertEqual(
+                    heldSessions.events,
+                    [.released("acquired-session")],
+                    "release the acquisition without a hold"
+                )
             }
         }
 
@@ -386,7 +390,7 @@
             XCTAssertEqual(sessions.count, 2)
             XCTAssertEqual(sessions[0], "first-session")
             XCTAssertNotEqual(sessions[1], "first-session", "a released UUID is terminal on the daemon")
-            XCTAssertEqual(heldSessions.releasedSessions, ["first-session"])
+            XCTAssertEqual(heldSessions.releasedSessions, ["first-session", "acquired-session"])
         }
 
         // MARK: - Helpers
@@ -404,6 +408,7 @@
             let config = AutoMobilePlanExecutor.Configuration(
                 transport: .daemonUnixSocket(path: "/tmp/xctestrunner-recovery-test.sock"),
                 planPath: "recovery-plan.yaml",
+                deviceId: "fake-device",
                 retryCount: retryCount,
                 timeoutSeconds: 5,
                 retryDelaySeconds: 0,
@@ -1269,6 +1274,7 @@
             let config = AutoMobilePlanExecutor.Configuration(
                 transport: .daemonUnixSocket(path: "/tmp/xctestrunner-redaction-test.sock"),
                 planPath: "redaction-plan.yaml",
+                deviceId: "fake-device",
                 retryCount: 0,
                 timeoutSeconds: 5,
                 retryDelaySeconds: 0,
@@ -2199,8 +2205,8 @@
         var onSetToolEnabled: (() -> Void)?
         private var setToolEnabledCount = 0
 
-        func queueExecutePlan(_ text: String) {
-            executePlanResponses.append(MCPToolResponse(text: text))
+        func queueExecutePlan(_ text: String, isError: Bool = false) {
+            executePlanResponses.append(MCPToolResponse(text: text, isError: isError))
         }
 
         func initialize(timeout _: TimeInterval) async throws {}
@@ -2213,6 +2219,9 @@
             async throws -> MCPToolResponse
         {
             calls.append(Call(name: name, arguments: arguments))
+            if name == "getApple" || name == "getAndroid" {
+                return MCPToolResponse(text: #"{"runtime":{"session":{"sessionUuid":"acquired-session"}}}"#)
+            }
             if name == "setToolEnabled" {
                 onSetToolEnabled?()
                 defer { setToolEnabledCount += 1 }

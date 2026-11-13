@@ -217,8 +217,8 @@ final class PrototypeLazyListTests: XCTestCase {
         var repeats = PrototypeStrictRepeats(data: spec["data"]?.objectFields)
         try repeats.templates(node, path: "root")
         try repeats.expanded(node, path: "root")
-        XCTAssertEqual(repeats.nodes, 7)
-        XCTAssertEqual(repeats.images, 5)
+        XCTAssertEqual(repeats.budget.totalNodes, 7)
+        XCTAssertEqual(repeats.budget.totalImages, 5)
         let raw = JSONValue.object(node)
         XCTAssertNoThrow(try PrototypeLimits.guardAuthoredTree(raw))
         XCTAssertNoThrow(try PrototypeLimits.guardTree(PrototypeDataResolver.resolveRoot(

@@ -20,10 +20,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -36,6 +38,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
+import dev.jasonpearson.automobile.protocol.PrototypeWebView
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
@@ -72,16 +75,22 @@ class ViewerActivity : ComponentActivity() {
   private var libraryId: String? = null
   private val restart: suspend (Boolean) -> Unit = { reset -> relaunch(reset) }
 
+  private val watchRender: () -> Unit = {
+    if (watchdog == null)
+      watchdog =
+        services.renderWatchdog.start(lifecycleScope) {
+          if (content?.importError != null && !services.settings.allowNetwork.value) return@start
+          if (!renderFailed && !isFinishing && !restarting) watchdogTripped = true
+          failRender(ViewerFailure.Watchdog)
+        }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     libraryId = intent.getStringExtra(ViewerLaunch.LIBRARY_ID)
     libraryId?.let { services.register(it, restart) }
     setContent { ProtoViewerTheme { ViewerScreen() } }
-    watchdog =
-      services.renderWatchdog.start(lifecycleScope) {
-        if (!renderFailed && !isFinishing && !restarting) watchdogTripped = true
-        failRender(ViewerFailure.Watchdog)
-      }
+    watchRender()
     lifecycleScope.launch {
       val loaded = withContext(services.io) { loadViewer(libraryId, services.repository) }
       if (!isFinishing && !restarting && !renderFailed) {
@@ -97,7 +106,10 @@ class ViewerActivity : ComponentActivity() {
       EmbeddedPrototypeHost(lifecycleScope, interactions, services.io).apply {
         clock = services.clock::nowMillis
         flushScope = services.flushScope
-        isCurrent = { content?.host === this && !isFinishing && !restarting && !renderFailed }
+        isCurrent = {
+          content?.host === this && !isFinishing && !restarting && !renderFailed &&
+            (content?.importError == null || services.settings.allowNetwork.value)
+        }
         onRuntime = { opened -> if (isCurrent()) runtime = opened else opened.close() }
         onReady = { if (isCurrent()) stopWatchdog() }
       }
@@ -127,28 +139,32 @@ class ViewerActivity : ComponentActivity() {
       // layers. Clip that whole surface, including its scrims, below the app-owned provenance.
       Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("viewer-content")) {
         val current = content
-        if (current == null) ViewerStatus(state) { finish() }
-        else
-          services.renderer.Render(
-            onFailure = { failRender(ViewerFailure.Render) },
-            content = {
-              ProvideEmbeddedPrototypeHost(current.host) {
-                AutoMobilePrototype(
-                  spec = current.prototype.saved.specJson,
-                  modifier = Modifier.fillMaxSize().testTag("viewer-ready"),
-                  assets = current.assets,
-                  storage = current.storage,
-                  network = current.network,
-                  handleBack = true,
-                  onDismiss = { finish() },
-                  onError = { error: PrototypeLoadError ->
-                    SideEffect { failRender(ViewerFailure.of(error)) }
-                  },
-                )
+        val refusal = remember(current, allowNetwork) {
+          current?.importError?.takeUnless { allowNetwork }
+        }
+        if (current != null)
+          DisposableEffect(current, refusal) {
+            if (refusal != null) {
+              stopWatchdog()
+              // Unmount closes the runtime. Serialize its final flush before any restored renderer opens.
+              val target = runtime
+              runtime = null
+              services.flushScope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
+                interactions.withLock { target?.flushAfterRefusal() }
               }
-            },
+            } else watchRender()
+            onDispose { stopWatchdog() }
+          }
+        if (current == null) ViewerStatus(state) { finish() }
+        else if (refusal != null) ViewerImportRefusal(refusal)
+        else
+          current.Render(
+            services.renderer,
+            onFailure = { failRender(ViewerFailure.Render) },
+            onDismiss = { finish() },
+            onError = { failRender(ViewerFailure.of(it)) },
           )
-        runtime?.let { ViewerEffectsNote(it) }
+        if (refusal == null) runtime?.let { ViewerEffectsNote(it) }
       }
     }
     if (confirmReset)
@@ -165,6 +181,7 @@ class ViewerActivity : ComponentActivity() {
 
   private fun failRender(failure: ViewerFailure) {
     if (renderFailed || isFinishing || restarting) return
+    if (content?.importError != null && !services.settings.allowNetwork.value) return
     renderFailed = true
     lastFailure = failure
     stopWatchdog()
@@ -269,6 +286,7 @@ private class ViewerContent(
   val host: EmbeddedPrototypeHost,
   client: PrototypeHttpClient,
 ) {
+  val importError = viewerImportError(prototype.saved.specJson, networkAllowed = false)
   val assets =
     PrototypeAssets(image = prototype.saved::assetBytes, font = prototype.saved::assetBytes)
   // The embedded renderer exposes a read-only request facade; the saved transport consumes
@@ -290,6 +308,32 @@ private class ViewerContent(
           )
         },
     )
+
+  @Composable
+  fun Render(
+    renderer: ViewerRenderer,
+    onFailure: () -> Unit,
+    onDismiss: () -> Unit,
+    onError: (PrototypeLoadError) -> Unit,
+  ) {
+    renderer.Render(
+      onFailure = onFailure,
+      content = {
+        ProvideEmbeddedPrototypeHost(host) {
+          AutoMobilePrototype(
+            spec = prototype.saved.specJson,
+            modifier = Modifier.fillMaxSize().testTag("viewer-ready"),
+            assets = assets,
+            storage = storage,
+            network = network,
+            handleBack = true,
+            onDismiss = { onDismiss() },
+            onError = { error: PrototypeLoadError -> SideEffect { onError(error) } },
+          )
+        }
+      },
+    )
+  }
 }
 
 @Composable
@@ -339,4 +383,30 @@ internal fun ViewerChrome(
       modifier = Modifier.fillMaxWidth().testTag("network-provenance"),
     )
   if (actionFailed) Text(stringResource(R.string.action_error))
+}
+
+/** Pure library-render decision; only validated saved specs reach this boundary. */
+internal fun viewerImportError(specJson: String, networkAllowed: Boolean): PrototypeWebView.ImportError? =
+  PrototypeWebView.importError(specJson, networkAllowed)
+
+@Composable
+@Suppress("UNUSED_PARAMETER")
+internal fun ViewerImportRefusal(error: PrototypeWebView.ImportError) {
+  // Paths can contain authored stack screen names, so the UI deliberately uses fixed text.
+  Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    Text(
+      stringResource(R.string.webview_import_refused),
+      modifier = Modifier.fillMaxWidth().testTag("viewer-import-refused").semantics { heading() },
+    )
+  }
+}
+
+private suspend fun PrototypeRuntime.flushAfterRefusal() {
+  try {
+    flushStorage()
+  } catch (error: IOException) {
+    Log.w("ProtoViewer", "Cannot flush prototype storage", error)
+  } catch (error: SecurityException) {
+    Log.w("ProtoViewer", "Cannot flush prototype storage", error)
+  }
 }

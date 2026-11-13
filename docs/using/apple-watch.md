@@ -145,6 +145,10 @@ Every other tool refuses a watch before doing anything, with:
   app is not foreground, `tapOn` matches a widget's exact text or cell identifier on the watch face.
   Only cards wholly on screen match: text that only an off-screen widget shows is refused, with a
   hint to scroll the Smart Stack first.
+
+  A widget you just added to the Smart Stack shows up with its text about 2 seconds after the
+  final Done tap. Wait about 2 seconds once before you match it.
+
 - `tapAt` takes absolute coordinates in points, including for widgets when the Smart Stack is open.
   Tapping a widget with `tapOn` or `tapAt` opens its host app, so the normal tools work afterwards.
   While the Smart Stack is open, `observe` returns `hierarchyUnavailable` and no hierarchy fields.
@@ -218,6 +222,13 @@ Every other tool refuses a watch before doing anything, with:
 - `launchApp` reports an app that is not installed without launching anything. `prototype: true`
   is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch. It does not
   observe the launched app: `verified` stays unset with `verificationSkipped: "platform"`.
+
+  `launchApp` hands `launchArguments` to the watch app. To refresh a widget on demand, make the
+  host app reload its widget timelines when it sees a launch argument you choose. Then call
+  `terminateApp` and `launchApp` with that argument, for example `launchArguments: ["-reload"]`.
+  The widget shows the new content within about 2 seconds of the launch. You do not need to tap
+  anything in the host app.
+
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
 - `crashApp` sends SIGABRT to the running watch app named by `appId`, as on an iOS simulator, and
   checks the watch's unified log and the host crash reports for fresh crash evidence. The result

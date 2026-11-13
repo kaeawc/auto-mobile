@@ -83,8 +83,20 @@ function asReplayable(edge: NavigationEdge, backEvidence: boolean): NavigationEd
 }
 
 /**
+ * Whether `a` was recorded after `b`. Row id decides before the device event timestamp, the
+ * rule path finding uses (#10031, #18321): ids only grow, while device clocks can move backwards.
+ */
+function recencyOrder(a: NavigationEdge, b: NavigationEdge): number {
+  if (a.id !== undefined && b.id !== undefined && a.id !== b.id) {
+    return b.id - a.id;
+  }
+  return b.timestamp - a.timestamp;
+}
+
+/**
  * The recorded edge to replay for `pin`, or why there is none. Only edges for this exact
- * transition qualify; among them an edge with no failed replay ranks first, then the newest.
+ * transition qualify; among them an edge with no failed replay ranks first, then the most
+ * recently recorded (see {@link recencyOrder}).
  */
 export async function resolvePinnedEdge(
   pin: TransitionPin,
@@ -102,7 +114,7 @@ export async function resolvePinnedEdge(
   const candidates = matching.flatMap((edge) => asReplayable(edge, backEvidence) ?? []);
   const ranked = candidates
     .map((edge) => ({ edge, failed: graph.hasEdgeReplayFailure(edge) }))
-    .sort((a, b) => Number(a.failed) - Number(b.failed) || b.edge.timestamp - a.edge.timestamp);
+    .sort((a, b) => Number(a.failed) - Number(b.failed) || recencyOrder(a.edge, b.edge));
   return (
     ranked[0]?.edge ??
     `No replayable recorded transition ${describePin(pin)} in the navigation graph`

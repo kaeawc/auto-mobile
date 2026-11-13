@@ -140,6 +140,8 @@ export interface NavigationNode {
  * Represents a transition between screens in the navigation graph.
  */
 export interface NavigationEdge {
+  /** The stored row id; absent for an edge not read from the database. Ids only grow. */
+  id?: number;
   from: string;
   to: string;
   interaction?: ToolCallInteraction;

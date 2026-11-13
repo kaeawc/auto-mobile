@@ -462,6 +462,7 @@ export class NavigationGraphQueries {
 
     for (const dbEdge of dbEdges) {
       const edge: NavigationEdge = {
+        id: dbEdge.id,
         from: dbEdge.from_screen,
         to: dbEdge.to_screen,
         timestamp: dbEdge.timestamp,

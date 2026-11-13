@@ -24,21 +24,50 @@ object PrototypeWebView {
   /** An imported page cannot load subresources while the library's network switch is off. */
   data class ImportError(val path: String)
 
-  /** Checks authored node positions, including unexpanded repeat templates, in tree order. */
+  /**
+   * Checks authored node positions, including unexpanded repeat templates, depth first in a fixed
+   * order shared with Swift: adaptive slots (adaptive only), `header` then `footer` (list only),
+   * `child`, `children`, then `screens` by UTF-16 key order. JSON key order never matters.
+   */
   fun importError(spec: JsonObject, networkAllowed: Boolean): ImportError? {
     if (networkAllowed) return null
     val root = spec["root"] as? JsonObject ?: return null
     fun first(node: JsonObject, path: String): ImportError? =
       if (node.text("type") == "webView") ImportError(path)
-      else
-        PrototypeRepeatTree.childrenOf(node, path).firstNotNullOfOrNull { first(it.node, it.path) }
+      else importChildren(node, path).firstNotNullOfOrNull { (child, at) -> first(child, at) }
     return first(root, "root")
   }
 
-  /** Convenience for an already validated saved library spec. */
-  fun importError(spec: String, networkAllowed: Boolean): ImportError? =
-    if (networkAllowed) null
-    else importError(Json.parseToJsonElement(spec) as JsonObject, networkAllowed)
+  /**
+   * Convenience for an already validated saved library spec. Malformed data returns null, as in
+   * Swift: the loader reports it, so this rule never throws.
+   */
+  fun importError(spec: String, networkAllowed: Boolean): ImportError? {
+    if (networkAllowed) return null
+    val parsed = runCatching { Json.parseToJsonElement(spec) }.getOrNull() as? JsonObject
+    return parsed?.let { importError(it, networkAllowed) }
+  }
+
+  private val adaptiveSlots = listOf("list", "detail", "content", "main", "supporting")
+
+  private fun importChildren(node: JsonObject, path: String): List<Pair<JsonObject, String>> =
+    buildList {
+      fun slot(key: String) {
+        (node[key] as? JsonObject)?.let { add(it to "$path.$key") }
+      }
+      when (node.text("type")) {
+        "adaptive" -> adaptiveSlots.forEach(::slot)
+        "list" -> listOf("header", "footer").forEach(::slot)
+      }
+      slot("child")
+      (node["children"] as? JsonArray).orEmpty().forEachIndexed { index, child ->
+        (child as? JsonObject)?.let { add(it to "$path.children[$index]") }
+      }
+      val screens = node["screens"] as? JsonObject
+      screens?.keys?.sorted()?.forEach { name ->
+        (screens[name] as? JsonObject)?.let { add(it to "$path.screens[${JsonPrimitive(name)}]") }
+      }
+    }
 
   private val webViewCalls = setOf("webview.back", "webview.reload")
 

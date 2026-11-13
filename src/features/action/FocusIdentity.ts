@@ -1,11 +1,12 @@
 /**
- * How FocusNavigate tells, across reads, whether a D-pad press moved focus (#17315, #17739).
+ * How FocusNavigate tells, across reads, whether a D-pad press moved focus (#17315, #17739, #17209).
  */
 
 import type { Element } from "../../models/Element";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { boundsEqual, intersectBounds } from "../../utils/bounds";
 import type { FocusPathEntry, FocusScreen } from "./FocusNavigate";
+import type { FocusNavigateDirection } from "./FocusNavigateDirections";
 import { stringProp } from "./FocusNavigateMatching";
 
 /**
@@ -149,8 +150,17 @@ interface ReadIdentity {
   position: string;
   surroundings: Surroundings;
   label: string;
+  /** The press that last changed the focused label, carried across refused presses. */
+  changedBy?: FocusNavigateDirection;
   key: string;
 }
+
+const OPPOSITE: Record<FocusNavigateDirection, FocusNavigateDirection> = {
+  up: "down",
+  down: "up",
+  left: "right",
+  right: "left",
+};
 
 function changedInPlace(
   previous: ReadIdentity | undefined,
@@ -167,28 +177,68 @@ function changedInPlace(
   );
 }
 
+/**
+ * Whether the control's label went back to what it read two presses ago while it kept its place
+ * and the screen around it stayed put both times (#17209): a press and its opposite toggled a
+ * value (a slider with no readout on screen, so {@link showsValueChange} has no evidence). A
+ * multi-slot list stepped down and back up shifts its rows on each press, so it fails
+ * {@link surroundingsStayed} and still reads as moving. A one-slot list leaves nothing outside
+ * focus, and its items can repeat a label (A, B, A) while the same press keeps advancing, so the
+ * label must come back on the press opposite to the one that changed it.
+ */
+function toggledInPlace(
+  older: ReadIdentity | undefined,
+  previous: ReadIdentity | undefined,
+  next: Omit<ReadIdentity, "key">,
+  entry: FocusPathEntry,
+): previous is ReadIdentity {
+  return (
+    older !== undefined &&
+    previous !== undefined &&
+    entry.resourceId !== undefined &&
+    older.position === next.position &&
+    previous.position === next.position &&
+    older.label === next.label &&
+    previous.label !== next.label &&
+    previous.changedBy !== undefined &&
+    next.changedBy === OPPOSITE[previous.changedBy] &&
+    surroundingsStayed(older.surroundings, previous.surroundings) &&
+    surroundingsStayed(previous.surroundings, next.surroundings)
+  );
+}
+
 export function createFocusIdentity() {
   const adjustable = new Set<string>();
+  let older: ReadIdentity | undefined;
   let previous: ReadIdentity | undefined;
   return (
     entry: FocusPathEntry | undefined,
     screen: Pick<FocusScreen, "focused" | "elements">,
+    pressed?: FocusNavigateDirection,
   ): FocusIdentity => {
     if (!entry) {
+      older = undefined;
       previous = undefined;
       return { key: "" };
     }
+    const before = previous;
+    const label = focusKey(entry);
     const read = {
       position: positionKey(entry, screen.focused),
       surroundings: readSurroundings(screen),
-      label: focusKey(entry),
+      label,
+      changedBy: label === before?.label ? before.changedBy : pressed,
     };
-    const before = previous;
-    const inPlace = changedInPlace(before, read, entry);
+    const inPlace =
+      changedInPlace(before, read, entry) || toggledInPlace(older, before, read, entry);
     if (inPlace) {
       adjustable.add(read.position);
     }
     const key = adjustable.has(read.position) ? `adjustable|${read.position}` : read.label;
+    // A refused press re-reads the same label; the toggle compares against the label before it.
+    if (read.label !== before?.label) {
+      older = previous;
+    }
     previous = { ...read, key };
     return inPlace ? { key, replaces: before.key, changedInPlace: true } : { key };
   };

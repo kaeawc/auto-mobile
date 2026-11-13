@@ -20,11 +20,14 @@ public protocol ShapingRuleSource {
     func shapingRule(for target: NetworkRuleTarget) -> ShapingRule?
     func watches(_ target: NetworkRuleTarget) -> Bool
     func commitOfflineDrop(for target: NetworkRuleTarget, existingFlow: Bool) -> Bool
+    /// Read-only: whether an offline rule is active, without committing a drop.
+    func isOffline(_ target: NetworkRuleTarget) -> Bool
 }
 
 extension ShapingRuleSource {
     public func watches(_: NetworkRuleTarget) -> Bool { false }
     public func commitOfflineDrop(for _: NetworkRuleTarget, existingFlow _: Bool) -> Bool { false }
+    public func isOffline(_: NetworkRuleTarget) -> Bool { false }
 }
 
 /// A timer token, not buffered payload. IDs never repeat during a shaper's life.

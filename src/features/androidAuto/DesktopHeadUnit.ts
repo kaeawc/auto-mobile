@@ -10,6 +10,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import {
   DHU_CONNECTED_MARKER,
   DHU_FOCUS_VIDEO_COMMAND,
+  DHU_NO_VIDEO_FOCUS_MARKER,
   DHU_PING_TIMEOUT_MARKER,
 } from "./androidAutoProjection";
 
@@ -38,6 +39,11 @@ export interface DesktopHeadUnitSession {
    */
   isAlive(): boolean;
   /**
+   * False once the DHU printed that it has no video focus, until a `focus video` command is sent
+   * again. Absent when the session cannot tell, so callers treat focus as possible.
+   */
+  hasVideoFocus?(): boolean;
+  /**
    * Ends the DHU and resolves once its process exited: SIGTERM, then SIGKILL after
    * `stopTimeoutMs`. Rejects when the process still has not exited, so a caller never
    * launches a replacement next to a live DHU.
@@ -53,7 +59,10 @@ export interface HeadUnitPanel {
 }
 
 /** The part of a DHU session an action may use: write console commands, never start or stop it. */
-export type DesktopHeadUnitConsole = Pick<DesktopHeadUnitSession, "sendCommand" | "isRunning"> & {
+export type DesktopHeadUnitConsole = Pick<
+  DesktopHeadUnitSession,
+  "sendCommand" | "isRunning" | "hasVideoFocus"
+> & {
   /** Absent when the caller cannot tell which DHU process this is. */
   panel?: HeadUnitPanel;
 };
@@ -126,6 +135,8 @@ interface ChildSession {
   session: DesktopHeadUnitSession;
   /** Writes one console command and settles once the pipe accepted or rejected it. */
   write(command: string): Promise<void>;
+  /** Reads one DHU output line for session state (video focus). */
+  observeLine(line: string): void;
 }
 
 /**
@@ -140,6 +151,14 @@ interface ChildSession {
 function childSession(child: DhuChildProcess, timer: Timer, stopTimeoutMs: number): ChildSession {
   let healthy = true;
   let exited = false;
+  // A headless DHU starts without video focus; the launcher's `focus video` write grants it.
+  let videoFocus = false;
+  const noteCommand = (command: string) => {
+    // `focus video toggle` may also remove focus; the next refused capture reports that.
+    if (command.startsWith(DHU_FOCUS_VIDEO_COMMAND)) {
+      videoFocus = true;
+    }
+  };
   const exitWaiters = new Set<() => void>();
   const markExited = () => {
     exited = true;
@@ -193,9 +212,11 @@ function childSession(child: DhuChildProcess, timer: Timer, stopTimeoutMs: numbe
       sendCommand(command) {
         assertRunning(command);
         child.stdin.write(`${command}\n`);
+        noteCommand(command);
       },
       isRunning,
       isAlive: () => !exited,
+      hasVideoFocus: () => videoFocus,
       async stop() {
         healthy = false;
         if ((await terminate("SIGTERM")) || (await terminate("SIGKILL"))) {
@@ -209,8 +230,20 @@ function childSession(child: DhuChildProcess, timer: Timer, stopTimeoutMs: numbe
     write(command) {
       return new Promise<void>((resolve, reject) => {
         assertRunning(command);
-        child.stdin.write(`${command}\n`, (error) => (error ? reject(error) : resolve()));
+        child.stdin.write(`${command}\n`, (error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          noteCommand(command);
+          resolve();
+        });
       });
+    },
+    observeLine(line) {
+      if (line.includes(DHU_NO_VIDEO_FOCUS_MARKER)) {
+        videoFocus = false;
+      }
     },
   };
 }
@@ -290,6 +323,7 @@ function watchLaunch(
     };
     const onLine = (line: string) => {
       logger.debug(`[DHU] ${line}`);
+      dhuConsole.observeLine(line);
       if (phase === "connecting" && line.includes(DHU_CONNECTED_MARKER)) {
         phase = "settling";
         arm(timing.settleMs, succeed);

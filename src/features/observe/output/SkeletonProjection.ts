@@ -919,8 +919,10 @@ export function projectSkeleton(
   // hoisting deliberately never folds into (issue #6871).
   attributeContainerLabels(accumulators);
   // A toggle with no labelled owner row takes its preceding sibling text (#17955).
-  attributePrecedingSiblingLabels(accumulators, (acc) =>
-    clickable.some((container) => containerEnclosesText(container, acc)),
+  attributePrecedingSiblingLabels(
+    accumulators,
+    (acc) => clickable.some((container) => containerEnclosesText(container, acc)),
+    getSearchableEntries(elements),
   );
 
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));

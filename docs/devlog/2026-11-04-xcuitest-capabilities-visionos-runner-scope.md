@@ -8,8 +8,8 @@
 ## Context
 
 A probe on Xcode 26.6 with the visionOS 26.5 runtime (`xrOS-26-5`) and device type
-`Apple-Vision-Pro-4K` recorded what an XCUITest runner can observe and act on in a window app, to
-decide the visionOS runner in #16852 (part of #16851). One test took about 38 s including app
+`Apple-Vision-Pro-4K` recorded what an XCUITest runner can observe and act on in a window app. It
+informed the decision on the visionOS runner in #16852 (part of #16851). One test took about 38 s including app
 launch.
 
 ## Options

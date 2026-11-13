@@ -126,11 +126,11 @@ jobs:
           path: scratch/docs-site-screenshots
           if-no-files-found: ignore
 
-  # Advisory readability report (#18145): sentence, paragraph and page length
-  # and passive-heavy paragraphs against the per-section budgets in
-  # scripts/docs/readability-budgets.json. Not a required check and always
-  # passes; findings land as warning annotations and in the job summary. It
-  # becomes a gate (`--strict`) once main meets the budgets.
+  # Readability report (#18145): sentence, paragraph and page length and
+  # passive-heavy paragraphs against the per-section budgets in
+  # scripts/docs/readability-budgets.json. Findings land as annotations and in
+  # the job summary. The job fails only on findings in a section marked
+  # `"enforced": true` (clean on main); other sections stay advisory warnings.
   readability:
     name: "Docs Readability Report"
     runs-on: ubuntu-latest
@@ -153,9 +153,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p scratch
-          bun scripts/docs/check-readability.ts --github | tee scratch/docs-readability.txt
+          status=0
+          bun scripts/docs/check-readability.ts --github > scratch/docs-readability.txt || status=$?
+          cat scratch/docs-readability.txt
           {
-            echo "## Docs readability (advisory)"
+            echo "## Docs readability"
             echo
             echo '```text'
             sed -n '/^Docs readability summary/,$p' scratch/docs-readability.txt
@@ -164,10 +166,11 @@ jobs:
             echo "<details><summary>All findings</summary>"
             echo
             echo '```text'
-            grep -v '^::warning' scratch/docs-readability.txt | sed '/^$/,$d'
+            grep -v '^::' scratch/docs-readability.txt | sed '/^$/,$d'
             echo '```'
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   deploy-docs:
     name: "Deploy Documentation"

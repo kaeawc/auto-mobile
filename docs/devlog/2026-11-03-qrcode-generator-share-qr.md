@@ -13,8 +13,8 @@ Dependency: `qrcode-generator`
 `prototype share` encodes `automobile-proto://import?url=…&sha256=…` as a QR code: a PNG for the
 screen or a slide, and a block-character rendering for the terminal. The QR grid comes from
 `qrcode-generator` (MIT, no dependencies, ships its own types), pinned to an exact version as a
-devDependency that the build bundles, like `pngjs`. Only `addData`, `make`, `getModuleCount` and
-`isDark` are used. The PNG is written with `pngjs`, which is already a direct dependency, and the
+devDependency that the build bundles, like `pngjs`. The share code calls only `addData`, `make`,
+`getModuleCount` and `isDark`. The `pngjs` package, already a direct dependency, writes the PNG, and the
 terminal rendering is a few lines in `protoViewerShareQr.ts`. A unit test checks the finder patterns
 and the quiet zone, and the encoded link was decoded with an independent reader (OpenCV) while the
 change was written.

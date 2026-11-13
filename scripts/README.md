@@ -440,7 +440,7 @@ Root-level validation scripts:
 - `validate_codex_skills.sh` - Validate `skills/*/SKILL.md` metadata, optional `agents/openai.yaml` interface metadata (colocated with both the canonical skill and the discoverable `.agents/skills/<name>` wrapper, since Codex reads metadata next to the wrapper it discovers), `.agents/skills` Codex discovery wrappers, and `AGENTS.md` inventory consistency
 - `validate_dependabot.sh` - Validate Dependabot config YAML
 - `validate_mkdocs_nav.sh` - Validate MkDocs nav configuration
-- `scripts/docs/check-readability.ts` - Advisory report of docs pages over the per-section sentence, paragraph, page-length and passive-voice budgets in `scripts/docs/readability-budgets.json`; `--strict` exits 1 on any finding
+- `scripts/docs/check-readability.ts` - Report of docs pages over the per-section sentence, paragraph, page-length and passive-voice budgets in `scripts/docs/readability-budgets.json`; exits 1 on findings in a section marked `"enforced": true` (the rest are advisory), and `--strict` exits 1 on any finding
 
 Run `scripts/<category>/validate_*.sh` for validation or `scripts/<category>/apply_*.sh` for auto-formatting.
 

@@ -30,9 +30,9 @@ Not recorded.
   holds such a view, not on the whole spec, and reported in `degradedEffects`.
 - **2026-10-26 (#15244, full list in `prototype-ux.md`).** `theme.design` defaults to `platform` (native
   SwiftUI controls where covered; segmented `Picker`, `TabView` and `Menu` keep the custom drawing
-  because they lose per-item identifiers); an `android: {...}` namespace block is ignored with a
-  `platformNotes` entry; system Reduce Motion and `prefersCrossFadeTransitions` map to the reduced
-  motion profile (crossfades), superseding earlier "instant" wording; iOS reports only the horizontal
+  because they lose per-item identifiers). An `android: {...}` namespace block is ignored with a
+  `platformNotes` entry. System Reduce Motion and `prefersCrossFadeTransitions` map to the reduced
+  motion profile (crossfades), superseding earlier "instant" wording. iOS reports only the horizontal
   size class.
 
 ## Consequences

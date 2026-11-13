@@ -46,8 +46,12 @@ override fun onGetTemplate(): Template =
 ## Stack walk
 
 Screen stacks are main-thread state. The provider runs on a binder thread, so the walk posts to the
-main looper and waits at most one second. A timeout returns `enabled: true` with
-`error: "main_thread_timeout"`, never a partial stack. Sessions are the distinct `ScreenManager`s of
+main looper and waits at most one second. The posted block copies the recorded templates itself, so
+the stacks and the templates reported for them come from one state. A timeout drops the posted block
+from the main-thread queue and returns `enabled: true` with `error: "main_thread_timeout"`, never a
+partial stack; a main looper that is already gone returns `error: "main_thread_unavailable"`.
+Recording is rechecked while the write is held, so a template returned as `disable()` runs is
+dropped rather than kept past the clear. Sessions are the distinct `ScreenManager`s of
 recorded screens. Each is numbered in first-record order and dropped when its stack is empty.
 `ScreenManager.getScreenStack()` iterates from the top down, and the snapshot reverses it so the root
 comes first.

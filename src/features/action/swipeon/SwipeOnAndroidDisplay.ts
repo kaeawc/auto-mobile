@@ -239,12 +239,14 @@ export class SwipeOnAndroidDisplay {
       options: requestedOptions,
       observation,
     });
-    const { x1, y1, x2, y2, targetType, warning } = this.resolveDisplaySwipeCoordinates({
-      options,
-      decision,
-      observation,
-      androidXr,
-    });
+    // The resolved container rides on the result so the range comparison can report effect.value.
+    const { x1, y1, x2, y2, targetType, warning, ...resolved } =
+      this.resolveDisplaySwipeCoordinates({
+        options,
+        decision,
+        observation,
+        androidXr,
+      });
     const duration = resolveSwipeDuration({ ...options, geometry: this.ctx().geometry });
     const boomerang = resolveBoomerangConfig(options);
     const spatialPanel = isXrSpatialPanelApp(observation, androidXr);
@@ -263,7 +265,7 @@ export class SwipeOnAndroidDisplay {
         signal,
       });
       return this.ctx().autoTargeting.withAutoTargetDecision({
-        result: { ...swipe, targetType, warning },
+        result: { ...swipe, targetType, warning, ...resolved },
         decision,
       });
     }
@@ -315,6 +317,7 @@ export class SwipeOnAndroidDisplay {
             y2,
             duration: totalDuration,
             warning,
+            ...resolved,
           },
           decision,
         });
@@ -330,6 +333,7 @@ export class SwipeOnAndroidDisplay {
         y2,
         duration: totalDuration,
         warning,
+        ...resolved,
         ...(talkBack.unknownWarning ? { warnings: [talkBack.unknownWarning] } : {}),
       },
       decision,
@@ -424,7 +428,7 @@ export class SwipeOnAndroidDisplay {
     decision: AutoTargetDecision;
     observation: ObserveResult;
     androidXr: boolean;
-  }): Pick<SwipeOnResult, "x1" | "y1" | "x2" | "y2" | "targetType" | "warning"> {
+  }): Pick<SwipeOnResult, "x1" | "y1" | "x2" | "y2" | "targetType" | "warning" | "element"> {
     const xrWarning = xrDefaultPoseWarning(observation, androidXr);
     if (decision.element && observation.viewHierarchy) {
       const coordinates = this.ctx().resolveContainerSwipeCoordinates(
@@ -440,9 +444,11 @@ export class SwipeOnAndroidDisplay {
         y2: coordinates.endY,
         targetType: "element",
         warning: appendWarning(coordinates.warning, xrWarning),
+        element: decision.element,
       };
     }
-    const bounds = this.selectedDisplayContainerElement(options, observation)?.bounds;
+    const container = this.selectedDisplayContainerElement(options, observation);
+    const bounds = container?.bounds;
     if (options.container && !bounds) {
       throw new ActionableError("Swipe container not found on selected display");
     }
@@ -457,6 +463,7 @@ export class SwipeOnAndroidDisplay {
         panelBounds ?? this.resolveDisplaySwipeBounds(options, observation, bounds),
       ),
       targetType: bounds ? "element" : "screen",
+      ...(container ? { element: container } : {}),
       ...(xrWarning ? { warning: xrWarning } : {}),
     };
   }

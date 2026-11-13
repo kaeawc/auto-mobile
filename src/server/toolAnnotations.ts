@@ -135,8 +135,6 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   accessibilityAction: entry("Run Accessibility Action", destructiveDevice),
   // Recording a wcag baseline can replace an existing host-side baseline.
   accessibilityAudit: entry("Audit Accessibility", destructiveDevice),
-  // Recording an audit baseline can replace an existing host-side baseline.
-  audit: entry("Audit Current Screen", destructiveDevice),
   backgroundWork: entry("Control Background Jobs", destructiveDevice),
   // start/stop is a mixed-action tool: stop pulls the trace and deletes the device copy.
   captureTrace: entry("Capture Trace", destructiveDevice),

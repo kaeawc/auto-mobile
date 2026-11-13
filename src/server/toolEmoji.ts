@@ -153,7 +153,6 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   accessibilityFocus: tool("🔲"),
   accessibilityAction: tool("🫶"),
   accessibilityAudit: tool("✅", "docs/using/audits.md"),
-  audit: tool("🧾"),
   setToolEnabled: tool("🧩"),
 });
 

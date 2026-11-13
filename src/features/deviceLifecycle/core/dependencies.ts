@@ -3,6 +3,7 @@ import type { IosCameraPosterDylibProvider } from "../../utility/ios/IosCameraPo
 import type { AvdColdBootMarkerStore } from "../../../utils/android-cmdline-tools/AvdColdBootMarkerStore";
 import type { SimulatorPairService } from "../../../utils/ios-cmdline-tools/SimulatorPairs";
 import type { AndroidAutoProjectionApplier } from "../../androidAuto/AndroidAutoProjectionService";
+import type { HeadUnitInventoryEntry } from "../../androidAuto/HeadUnitInventory";
 import type { AppleVisionSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorProvisioner";
 import type { AppleVisionSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorBoot";
 import type { PendingImeRestoreRegistry } from "../../action/sendkeys/PendingImeRestore";
@@ -178,6 +179,11 @@ export interface DeviceToolsDependencies {
    * which drives adb, `uiautomator dump` and the host Desktop Head Unit.
    */
   androidAutoProjection?: AndroidAutoProjectionApplier;
+  /**
+   * The head unit `listDevices` reports for an Android phone (#17840); defaults to the DHU this
+   * daemon runs for it and that DHU's config file.
+   */
+  headUnitInventory?: (deviceId: string) => Promise<HeadUnitInventoryEntry | undefined>;
   avdColdBootMarkers?: AvdColdBootMarkerStore;
   /**
    * Keeps the session provisionDevice minted from the missing-first-heartbeat reap while its

@@ -37,6 +37,13 @@ import { hydrateRequiredDisplayInventories } from "../devices/DisplayInventoryPr
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../daemon/adbOfflineHeldDevices";
 import type { TransitionalHold } from "../daemon/inventoryDeviceDescription";
+import { existingDesktopHeadUnitConsole } from "../features/androidAuto/AndroidAutoProjectionService";
+import {
+  type HeadUnitInventoryEntry,
+  readHeadUnitInventoryEntry,
+  withHeadUnitEntries,
+} from "../features/androidAuto/HeadUnitInventory";
+import { DefaultFileSystem } from "../utils/filesystem/DefaultFileSystem";
 import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
 import {
   ListDeviceImagesArgs,
@@ -49,6 +56,21 @@ import {
   initializedDevicePool,
   listDevicePayloads,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
+
+/** The DHU this daemon runs for a phone, sized from its config file (#17840). */
+function defaultHeadUnitInventory(deviceId: string) {
+  const files = new DefaultFileSystem();
+  return readHeadUnitInventoryEntry(deviceId, {
+    consoleFor: existingDesktopHeadUnitConsole,
+    readConfig: (configPath) => files.readFile(configPath),
+  });
+}
+
+function headUnitReader(
+  injected: ((deviceId: string) => Promise<HeadUnitInventoryEntry | undefined>) | undefined,
+) {
+  return injected ?? defaultHeadUnitInventory;
+}
 
 /** Held Android devices adb lists offline and held simulators simctl lists Booting / Shutting Down. */
 async function transitionalHeldListing(input: {
@@ -332,13 +354,16 @@ export function createListingHandlers() {
     );
     // Refresh the broker binding snapshot so held devices are not reported as free.
     await pool?.refreshInventoryOwnership();
-    const devices = listDevicePayloads(matchingBooted, pool, configured.images, {
-      aliasesForDevice: (deviceId) =>
-        pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
-      transportAvdNameForDevice: (deviceId) =>
-        pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
-      transitionalHolds,
-    });
+    const devices = await withHeadUnitEntries(
+      listDevicePayloads(matchingBooted, pool, configured.images, {
+        aliasesForDevice: (deviceId) =>
+          pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
+        transportAvdNameForDevice: (deviceId) =>
+          pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
+        transitionalHolds,
+      }),
+      headUnitReader(deps.headUnitInventory),
+    );
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createStructuredToolResponse({

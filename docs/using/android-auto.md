@@ -274,9 +274,14 @@ default values, the same as `default.ini`: 800x480 at 160 dpi and 30 fps.
   `projecting: true`, `projectedBy`, `templateHosts` (Android Auto's bound template host services)
   and `apps[]`, each bound app whose template route answered, with its `userId` and bound `services`.
   No app is marked visible: an app stays bound while another app is on the head unit, so check
-  `carAppTemplates.projected[]` and the head unit itself. Apps without the template route, the head
-  unit's config and resolution, and a head unit screenshot are not reported. Without a projection,
-  `observe` has no `androidAuto` block.
+  `carAppTemplates.projected[]` and the head unit itself. Apps without the template route and a head
+  unit screenshot are not reported. Without a projection, `observe` has no `androidAuto` block.
+- `listDevices` reports the head unit on the phone's entry as `headUnit`, while AutoMobile runs a
+  healthy DHU for it: `display` (`"headUnit"`, the value `tapAt` and `pressButton` take), `role`
+  (`projected`), `projectedBy` (`androidAuto`), `console` (the DHU process; it changes when the DHU
+  restarts), `configPath` and `sizePx` (head-unit pixels from the config's `resolution`, 800x480 when
+  it sets none, absent when the config cannot be read). It is not one of the phone's
+  `displays.panels`.
 - The first `observe` on a fresh emulator installs AutoMobile's on-device service. If the DHU is
   connected through `adb forward`, a dropped adb connection at that point ends the projection; use the
   emulator redirect.

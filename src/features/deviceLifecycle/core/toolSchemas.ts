@@ -144,11 +144,30 @@ const iosBootCapacitySchema = bootCapacitySchema.extend({
     .optional(),
 });
 
+/** The Android Auto head unit a listed phone projects to (#17840). */
+const headUnitInventorySchema = z
+  .object({
+    display: z.literal("headUnit").describe("The display value tapAt and pressButton take."),
+    role: z.literal("projected"),
+    projectedBy: z.literal("androidAuto"),
+    console: z.string().describe("The DHU process this daemon owns; changes when it restarts."),
+    configPath: z.string().optional(),
+    sizePx: z
+      .object({ width: z.number(), height: z.number() })
+      .strict()
+      .optional()
+      .describe("Head-unit pixels from the config; absent when the config could not be read."),
+  })
+  .strict();
+
 export const listDevicesOutputSchema = z.object({
   simulatorPairs: z.array(simulatorPairSchema).optional(),
   message: z.string(),
   devices: z.array(
-    listDevicesEntrySchema.extend({ transportAliases: z.array(z.string()).optional() }),
+    listDevicesEntrySchema.extend({
+      transportAliases: z.array(z.string()).optional(),
+      headUnit: headUnitInventorySchema.optional(),
+    }),
   ),
   count: z.number(),
   discovery: z.unknown(),

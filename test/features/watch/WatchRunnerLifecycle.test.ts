@@ -120,6 +120,7 @@ test("retarget restarts an owned runner with the new bundle and preserves sessio
     "com.example.second",
   ]);
   expect(f.launcher.calls).toEqual(["launch", "stop", "launch"]);
+  expect(f.owner.targetBundleId(f.request.deviceId)).toBe("com.example.second");
   expect(first.closed).toBe(true);
   expect(watchRunners.get(f.request.deviceId)).toBe(second);
   expect(second.closed).toBe(false);
@@ -132,6 +133,7 @@ test("retarget restarts an owned runner with the new bundle and preserves sessio
   expect(f.launcher.stops).toBe(2);
   expect(second.closed).toBe(true);
   expect(watchRunners.get(f.request.deviceId)).toBeUndefined();
+  expect(f.owner.targetBundleId(f.request.deviceId)).toBeUndefined();
 });
 
 test("retarget to the current bundle does not restart the runner", async () => {

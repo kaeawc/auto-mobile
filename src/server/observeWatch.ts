@@ -27,6 +27,11 @@ import type { VisionosRunnerClient } from "../features/visionos/VisionosRunnerCl
 import { WatchRunnerError } from "../features/watch/WatchRunnerError";
 import { watchRunners } from "../features/watch/WatchRunnerRegistry";
 import { normalizeWatchHierarchy } from "../features/watch/WatchHierarchy";
+import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
+import {
+  LaunchctlWatchTargetAppProbe,
+  type WatchTargetAppProbe,
+} from "../features/watch/WatchTargetAppProbe";
 import path from "path";
 import { NON_IOS_APPLE_PLATFORM_LABELS } from "../models/Platform";
 import type { DisplayRef } from "../models/DisplayPanel";
@@ -34,6 +39,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
   WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
   WATCH_APP_NOT_FOREGROUND_MESSAGE,
+  watchAppNotRunningMessage,
   TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
   TVOS_RUNNER_UNAVAILABLE_MESSAGE,
   VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
@@ -100,7 +106,14 @@ export interface WatchObserveDependencies {
   pathProtection?: ScreenshotPathProtection;
   /** The retained screenshot directory; defaults to the shared observe screenshot cache. */
   cacheDir?: () => string;
+  /** watchOS: whether the runner's target app still has a process; defaults to launchctl. */
+  watchTargetApp?: WatchTargetAppProbe;
 }
+
+const defaultWatchTargetAppProbe: WatchTargetAppProbe = new LaunchctlWatchTargetAppProbe({
+  targetBundleId: (deviceId) => getWatchRunnerLifecycle().targetBundleId(deviceId),
+  simctl: (device) => new SimCtlClient(device),
+});
 
 /** The simctl display key the iOS simulator observer uses for a single-screen simulator. */
 const SIMCTL_DEFAULT_DISPLAY = "main";
@@ -230,6 +243,8 @@ type HierarchyOutcome = {
   hierarchy?: ViewHierarchyResult;
   unavailableReason?: string;
   appNotForeground?: true;
+  /** watchOS: the runner's target app, when it has no process (it exited or crashed). */
+  appNotRunning?: string;
   /** visionOS: the window app the runner that returned `hierarchy` was started for. */
   hierarchyBundleId?: string;
 };
@@ -390,10 +405,11 @@ export async function observeWatch(
   const platform = screenshotOnlyPlatform(device);
   const display = watchDisplay(device);
   const timer = dependencies.timer ?? defaultTimer;
-  const { waitOutcome, ...hierarchyOutcome } = await observedHierarchy(device, args, signal, {
+  const { waitOutcome, ...observed } = await observedHierarchy(device, args, signal, {
     ...dependencies,
     timer,
   });
+  const hierarchyOutcome = await withWatchAppNotRunning(device, observed, signal, dependencies);
   const idGenerator = dependencies.idGenerator ?? defaultIdGenerator;
   const protection = dependencies.pathProtection ?? screenshotPathProtection;
   const directory = (dependencies.cacheDir ?? (() => TakeScreenshot.getCacheDir()))();
@@ -449,6 +465,45 @@ export async function observeWatch(
     : createObserveResponse(payload, args.includeScreenshotImage, { signal, protection });
 }
 
+/** True for a watch read with no target-app content: backgrounded, or an empty tree (#18052). */
+function lacksTargetAppContent(outcome: HierarchyOutcome): boolean {
+  if (outcome.appNotForeground) {
+    return true;
+  }
+  if (!outcome.hierarchy) {
+    return false;
+  }
+  const elements = new ObserveElementsBuilder().build(outcome.hierarchy, "ios");
+  return (
+    !elements ||
+    (elements.clickable.length === 0 &&
+      elements.scrollable.length === 0 &&
+      elements.text.length === 0)
+  );
+}
+
+/**
+ * After a crash the runner reports the app as not foreground, or an empty tree. One process list
+ * read tells an exited app apart, so observe can say it is not running (#18052).
+ */
+async function withWatchAppNotRunning(
+  device: BootedDevice,
+  outcome: HierarchyOutcome,
+  signal: AbortSignal | undefined,
+  dependencies: WatchObserveDependencies,
+): Promise<HierarchyOutcome> {
+  if (screenshotOnlyPlatform(device) !== "watchos" || !lacksTargetAppContent(outcome)) {
+    return outcome;
+  }
+  const probe = dependencies.watchTargetApp ?? defaultWatchTargetAppProbe;
+  const bundleId = await probe.notRunningTarget(device, signal);
+  if (!bundleId) {
+    return outcome;
+  }
+  // The tree, if any, is not the app's: report a screenshot-only read that names the exit.
+  return { appNotRunning: bundleId };
+}
+
 /**
  * The runner hierarchy for this observe; with `waitFor`, the hierarchy of the poll that matched
  * (or the last one before the timeout) plus the wait metadata (#17309).
@@ -486,9 +541,20 @@ function watchObservationPayload(
     hierarchy: viewHierarchy,
     unavailableReason,
     appNotForeground,
+    appNotRunning,
     hierarchyBundleId,
   }: HierarchyOutcome,
 ): WatchObservation | ObserveResult {
+  if (!viewHierarchy && platform === "watchos" && appNotRunning) {
+    return {
+      ...capture,
+      hierarchyUnavailable: {
+        platform,
+        message: watchAppNotRunningMessage(appNotRunning),
+        appNotRunning: { bundleId: appNotRunning },
+      },
+    };
+  }
   if (!viewHierarchy) {
     const message =
       platform === "watchos" && appNotForeground

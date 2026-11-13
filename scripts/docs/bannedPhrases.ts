@@ -7,7 +7,10 @@
  * to its source line by scanning the source forward from the previous leaf,
  * which is exact because md4c emits leaves in document order. Link reference
  * definitions are not rendered, so they are blanked out of the searched copy
- * of the source first; otherwise a leaf could be located inside one.
+ * of the source first; otherwise a leaf could be located inside one. After a
+ * link's or image's text, the search skips its inline `](destination "title")`
+ * syntax for the same reason, and a newline inside that syntax is not a prose
+ * line break.
  */
 
 export interface BannedPhraseRule {
@@ -50,6 +53,8 @@ interface Leaf {
   excluded: boolean;
   /** True when a block (paragraph, heading, cell, ...) ends after this leaf. */
   blockEnd: boolean;
+  /** Number of links or images whose text ends with this leaf. */
+  linkCloses: number;
 }
 
 interface ProseSegment {
@@ -58,12 +63,16 @@ interface ProseSegment {
   offset: number;
   /** Source line used when the exact offset is unknown. */
   fallbackLine: number;
+  /** Source offset after the segment and any link syntax closing it, or -1. */
+  end: number;
 }
 
 /** Renderer callbacks whose content is not prose and is never linted. */
 const EXCLUDED_NODES = new Set(["code", "codespan", "html"]);
 /** Inline callbacks that keep the surrounding block open. */
 const INLINE_NODES = new Set(["emphasis", "strong", "strikethrough", "link", "image", "text"]);
+/** Inline callbacks followed in the source by `](destination "title")` syntax. */
+const LINK_NODES = new Set(["link", "image"]);
 
 function excludeTrailingLeaves(leaves: Leaf[], children: string): void {
   let remaining = children.length;
@@ -85,7 +94,9 @@ function collectLeaves(markdown: string): Leaf[] {
         const name = String(key);
         const content = typeof children === "string" ? children : "";
         if (name === "text") {
-          leaves.push({ text: content, excluded: false, blockEnd: false });
+          leaves.push({ text: content, excluded: false, blockEnd: false, linkCloses: 0 });
+        } else if (LINK_NODES.has(name) && content.length > 0 && leaves.length > 0) {
+          leaves[leaves.length - 1].linkCloses++;
         } else if (EXCLUDED_NODES.has(name)) {
           excludeTrailingLeaves(leaves, content);
         } else if (!INLINE_NODES.has(name) && leaves.length > 0) {
@@ -125,8 +136,6 @@ function lineStartsOf(source: string): number[] {
 
 /** Opening line of a possible link reference definition; md4c confirms it. */
 const REFERENCE_DEFINITION_START = /^ {0,3}\[[^\]\n]+\]:/;
-/** Longest definition span tried: label, destination and title lines. */
-const MAX_DEFINITION_LINES = 3;
 
 function sameLeaves(a: Leaf[], b: Leaf[]): boolean {
   return (
@@ -135,7 +144,8 @@ function sameLeaves(a: Leaf[], b: Leaf[]): boolean {
       (leaf, i) =>
         leaf.text === b[i].text &&
         leaf.excluded === b[i].excluded &&
-        leaf.blockEnd === b[i].blockEnd,
+        leaf.blockEnd === b[i].blockEnd &&
+        leaf.linkCloses === b[i].linkCloses,
     )
   );
 }
@@ -153,7 +163,9 @@ function blank(source: string, start: number, end: number): string {
  * regex only proposes a span; md4c accepts it only if blanking the span in
  * place and re-appending it at the end of the document (definitions are
  * document-wide, so links that use it still resolve) renders the same leaves.
- * That rejects look-alikes inside code blocks or paragraph continuations.
+ * That rejects look-alikes inside code blocks or paragraph continuations. A
+ * span must also render nothing on its own, so a paragraph that merely starts
+ * like a definition is never blanked whole.
  */
 function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
   const lineStarts = lineStartsOf(source);
@@ -162,14 +174,20 @@ function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
   const lineText = (line: number) => source.slice(lineStarts[line], lineEnd(line));
   let searchable = source;
   let moved = "";
-  /** Number of lines of the definition starting at `line` md4c accepts, or 0. */
+  /**
+   * Number of lines of the definition starting at `line` md4c accepts, or 0.
+   * A title may span any number of lines but not a blank one, so the span
+   * grows until md4c accepts it or the paragraph ends.
+   */
   const acceptedSpan = (line: number): number => {
-    for (let span = 1; span <= MAX_DEFINITION_LINES; span++) {
-      const last = line + span - 1;
-      if (last >= lineStarts.length || lineText(last).trim() === "") {
-        return 0;
-      }
+    for (let last = line; last < lineStarts.length && lineText(last).trim() !== ""; last++) {
+      const span = last - line + 1;
       const definition = source.slice(lineStarts[line], lineEnd(last));
+      // A paragraph that only starts like a definition renders prose of its
+      // own; relocating the whole paragraph would keep the leaves unchanged.
+      if (collectLeaves(definition).length > 0) {
+        continue;
+      }
       const candidate = blank(searchable, lineStarts[line], lineEnd(last));
       if (sameLeaves(collectLeaves(`${candidate}\n\n${moved}${definition}\n`), leaves)) {
         searchable = candidate;
@@ -187,6 +205,48 @@ function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
   return searchable;
 }
 
+/** Closing emphasis or code delimiters, then the `](` opening inline link syntax. */
+const INLINE_LINK_OPEN = /[*_~`]*\]\(/y;
+
+/**
+ * Returns the offset after the inline `](destination "title")` syntax at
+ * `start`, or `start` when there is none (a reference link or an autolink).
+ * Parentheses nest, backslash escapes are skipped, and a `<...>` destination
+ * or quoted title may contain parentheses. The syntax cannot cross a blank
+ * line, so the scan gives up at one.
+ */
+function skipInlineLinkSyntax(source: string, start: number): number {
+  INLINE_LINK_OPEN.lastIndex = start;
+  if (!INLINE_LINK_OPEN.test(source)) {
+    return start;
+  }
+  let depth = 1;
+  let quote = "";
+  let index = INLINE_LINK_OPEN.lastIndex;
+  const destinationStart = /^[ \t]*\n?[ \t]*/.exec(source.slice(index))?.[0].length ?? 0;
+  if (source[index + destinationStart] === "<") {
+    const close = source.indexOf(">", index + destinationStart);
+    index = close >= 0 ? close + 1 : index;
+  }
+  for (; index < source.length; index++) {
+    const char = source[index];
+    if (char === "\\") {
+      index++;
+    } else if (source.startsWith("\n\n", index)) {
+      return start;
+    } else if (quote) {
+      quote = char === quote ? "" : quote;
+    } else if (/["']/.test(char) && /\s/.test(source[index - 1] ?? "")) {
+      quote = char;
+    } else if (char === "(") {
+      depth++;
+    } else if (char === ")" && --depth === 0) {
+      return index + 1;
+    }
+  }
+  return start;
+}
+
 /** Splits the document's prose into blocks of located text segments. */
 function proseBlocks(source: string): ProseSegment[][] {
   const lineStarts = lineStartsOf(source);
@@ -200,6 +260,9 @@ function proseBlocks(source: string): ProseSegment[][] {
     const fallbackLine = lineAt(lineStarts, cursor);
     if (found >= 0) {
       cursor = found + leaf.text.length;
+      for (let closes = 0; closes < leaf.linkCloses; closes++) {
+        cursor = skipInlineLinkSyntax(searchable, cursor);
+      }
     }
     if (leaf.excluded) {
       if (current.length > 0) {
@@ -207,7 +270,7 @@ function proseBlocks(source: string): ProseSegment[][] {
       }
       current = [];
     } else {
-      current.push({ text: leaf.text, offset: found, fallbackLine });
+      current.push({ text: leaf.text, offset: found, fallbackLine, end: found >= 0 ? cursor : -1 });
     }
     if (leaf.blockEnd && current.length > 0) {
       blocks.push(current);
@@ -251,7 +314,7 @@ export function findBannedPhrases(
       }
       starts.push(joined.length);
       joined += segment.text;
-      previousEnd = segment.offset >= 0 ? segment.offset + segment.text.length : -1;
+      previousEnd = segment.end;
     }
     for (const { rule, regex } of compiled) {
       for (const match of joined.matchAll(regex)) {

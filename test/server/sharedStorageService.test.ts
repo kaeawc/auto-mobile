@@ -1,3 +1,4 @@
+import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
@@ -62,6 +63,7 @@ describe("SharedStorageService", () => {
         return execute(...args);
       });
       const service = createSharedStorageServiceForTesting({
+        diagnostics: new FakeSharedStorageDiagnostics(),
         adbFactory: adbFactoryFor(executor),
         timer,
         fileSystem: {
@@ -143,6 +145,7 @@ describe("SharedStorageService", () => {
         return execute(...args);
       });
       const service = createSharedStorageServiceForTesting({
+        diagnostics: new FakeSharedStorageDiagnostics(),
         adbFactory: adbFactoryFor(executor),
         timer,
         fileSystem: {
@@ -209,6 +212,7 @@ describe("SharedStorageService", () => {
       rm: async () => {},
     };
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer,
       fileSystem,
@@ -227,13 +231,13 @@ describe("SharedStorageService", () => {
           ],
         }),
       ),
-    ).rejects.toThrow(/aborted.*Rolled back: first.png.*Rollback failures: none/);
+    ).rejects.toThrow(/aborted[\s\S]*Rolled back: second.png, first.png.*Rollback failures: none/);
     expect(controller.signal.aborted).toBe(true);
-    // The cancelled second file never reached its destination: only its hidden temp copy is
-    // removed, then the committed first file, both detached from the cancelled request.
+    // Clean up the hidden temp and both attempted destinations, detached from cancellation.
+    // Removing the second destination is safe even when its rename never ran.
     expect(removed).toEqual([
       "shell rm -f '/storage/emulated/0/Download/cancelled-media/.automobile-t-4.part'",
-      "shell rm -f '/storage/emulated/0/Download/cancelled-media/first.png'",
+      "shell rm -f '/storage/emulated/0/Download/cancelled-media/second.png' '/storage/emulated/0/Download/cancelled-media/first.png'",
     ]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
@@ -285,6 +289,7 @@ describe("SharedStorageService", () => {
           return execute(...args);
         });
         const service = createSharedStorageServiceForTesting({
+          diagnostics: new FakeSharedStorageDiagnostics(),
           adbFactory: adbFactoryFor(executor),
           timer,
           fileSystem: {
@@ -390,6 +395,7 @@ describe("SharedStorageService", () => {
       return execute(...args);
     });
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer,
       fileSystem: {
@@ -474,7 +480,10 @@ describe("SharedStorageService", () => {
   test("resets only the declared Downloads namespace, stages every file, and indexes documents and media", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
-    const service = createSharedStorageServiceForTesting({ adbFactory: adbFactoryFor(executor) });
+    const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
+      adbFactory: adbFactoryFor(executor),
+    });
 
     const result = await service.stage({
       device: androidDevice,
@@ -517,7 +526,7 @@ describe("SharedStorageService", () => {
     expect(commands[1]).toBe("shell rm -rf '/storage/emulated/0/Download/run-42'");
     expect(
       executor.getCommandCalls().find((call) => call.command.startsWith("shell rm -rf"))?.timeoutMs,
-    ).toBe(120_000);
+    ).toBe(10_000);
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42'");
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42/docs'");
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42/media'");
@@ -540,7 +549,7 @@ describe("SharedStorageService", () => {
         .getCommandCalls()
         .filter((call) => call.command.startsWith("push "))
         .map((call) => call.timeoutMs),
-    ).toEqual([120_000, 120_000]);
+    ).toEqual([90_000, 90_000]);
     expect(
       commands.some(
         (command) =>
@@ -578,6 +587,7 @@ describe("SharedStorageService", () => {
     const executor = new FakeAdbExecutor();
     const requests: UserTargetRequest[] = [];
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
         resolve: async (request) => {
@@ -622,6 +632,7 @@ describe("SharedStorageService", () => {
     const executor = new FakeAdbExecutor();
     const requests: UserTargetRequest[] = [];
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
         resolve: async (request) => {
@@ -654,6 +665,7 @@ describe("SharedStorageService", () => {
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
     const requests: UserTargetRequest[] = [];
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
         resolve: async (request) => {
@@ -687,6 +699,7 @@ describe("SharedStorageService", () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer: new FakeTimer(),
     });
@@ -721,6 +734,7 @@ describe("SharedStorageService", () => {
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
     executor.setCommandResponse("getprop ro.build.version.sdk", execResult("28"));
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer: new FakeTimer(),
     });
@@ -752,6 +766,7 @@ describe("SharedStorageService", () => {
     timer.enableAutoAdvance();
     executor.setCommandResponse("content query", execResult(""));
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer,
     });
@@ -778,7 +793,10 @@ describe("SharedStorageService", () => {
 
   test("reports why indexing was not requested when the caller opts out", async () => {
     const adbFactory = new FakeAdbClientFactory();
-    const service = createSharedStorageServiceForTesting({ adbFactory });
+    const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
+      adbFactory,
+    });
     const result = await service.stage({
       device: androidDevice,
       namespace: "run-42",
@@ -800,7 +818,10 @@ describe("SharedStorageService", () => {
 
   test("rejects non-Android devices before issuing commands", async () => {
     const adbFactory = new FakeAdbClientFactory();
-    const service = createSharedStorageServiceForTesting({ adbFactory });
+    const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
+      adbFactory,
+    });
     await expect(
       service.stage({
         device: { deviceId: "ios", name: "iPhone", platform: "ios" },
@@ -813,7 +834,10 @@ describe("SharedStorageService", () => {
 
   test("validates every source before resetting the existing namespace", async () => {
     const adbFactory = new FakeAdbClientFactory();
-    const service = createSharedStorageServiceForTesting({ adbFactory });
+    const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
+      adbFactory,
+    });
     await expect(
       service.stage({
         device: androidDevice,
@@ -830,6 +854,7 @@ describe("SharedStorageService", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer,
     });
@@ -853,7 +878,10 @@ describe("SharedStorageService", () => {
 
   test("rejects prefix-conflicting destinations before touching shared storage", async () => {
     const adbFactory = new FakeAdbClientFactory();
-    const service = createSharedStorageServiceForTesting({ adbFactory });
+    const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
+      adbFactory,
+    });
     await expect(
       service.stage({
         device: androidDevice,
@@ -870,7 +898,10 @@ describe("SharedStorageService", () => {
 
   test("rejects duplicate normalized destinations before touching shared storage", async () => {
     const adbFactory = new FakeAdbClientFactory();
-    const service = createSharedStorageServiceForTesting({ adbFactory });
+    const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
+      adbFactory,
+    });
     await expect(
       service.stage({
         device: androidDevice,
@@ -906,7 +937,11 @@ describe("SharedStorageService", () => {
         },
       };
       const adbFactory = new FakeAdbClientFactory();
-      const service = createSharedStorageServiceForTesting({ fileSystem, adbFactory });
+      const service = createSharedStorageServiceForTesting({
+        diagnostics: new FakeSharedStorageDiagnostics(),
+        fileSystem,
+        adbFactory,
+      });
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         await expect(
@@ -952,6 +987,7 @@ describe("SharedStorageService", () => {
       },
     };
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       fileSystem,
       createUserResolver: () => ({
         resolve: async () => {

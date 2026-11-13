@@ -11,6 +11,11 @@ import { getAdbAbortError } from "./adbTransportRecovery";
 import { type AdbExecuteOptions } from "./interfaces/AdbExecutor";
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 const PROCESS_SETTLEMENT_GRACE_MS = 1_000;
+/**
+ * Longest an aborted `waitForProcessSettlementAfterAbort` command stays pending: the SIGTERM grace,
+ * then the SIGKILL exit wait, each bounded by PROCESS_SETTLEMENT_GRACE_MS.
+ */
+export const ADB_ABORT_SETTLEMENT_MAX_MS = 2 * PROCESS_SETTLEMENT_GRACE_MS;
 /** Per-command buffer, deadline, cancellation and stdout observation for one ADB process. */
 export type AdbSignalExecOptions = Pick<
   AdbExecuteOptions,

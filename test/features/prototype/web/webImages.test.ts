@@ -534,6 +534,21 @@ describe("nav item images", () => {
     });
   }
 
+  for (const type of ["bottomNav", "tabBar"] as const) {
+    test(`${type} lists each item image as an image node is`, () => {
+      const rendered = nav(type, items);
+      expect(rendered.unsupportedNodes).toEqual([
+        { type: "image", path: "root.items[0].image", reason: "assetOverBudget", asset: "photo" },
+        {
+          type: "image",
+          path: "root.items[1].image",
+          reason: "assetNotInlined",
+          asset: "missing",
+        },
+      ]);
+    });
+  }
+
   test("a light/dark pair draws the mode's asset", () => {
     const rendered = nav("bottomNav", [
       { label: "Home", image: { light: "photo", dark: "other" } },

@@ -272,6 +272,8 @@ export interface NavItem {
   readonly image: boolean;
   /** The bound asset id of the item's image in the current mode, when it authors one. */
   readonly asset?: string;
+  /** Where the item's image sits in the spec (`<nav path>.items[i].image`), when it authors one. */
+  readonly imagePath?: string;
 }
 
 /** Nav item images draw in a 24 dp square, as Android's navigation icons do. */
@@ -281,14 +283,21 @@ function optionalAsset(asset: string | undefined): { asset?: string } {
   return asset === undefined ? {} : { asset };
 }
 
-export function navItems(node: Raw, scope: WebRenderScope, kit: WebRenderKit): NavItem[] {
+export function navItems(
+  node: Raw,
+  scope: WebRenderScope,
+  kit: WebRenderKit,
+  path: string,
+): NavItem[] {
   const items = Array.isArray(node.items) ? node.items : [];
-  return items.map((entry) => {
+  return items.map((entry, index) => {
     const item = record(entry) ?? {};
+    const image = item.image !== undefined;
     return {
       label: kit.bound(item.label, scope),
       ...(typeof item.icon === "string" ? { icon: item.icon } : {}),
-      image: item.image !== undefined,
+      image,
+      ...(image ? { imagePath: `${path}.items[${index}].image` } : {}),
       ...optionalAsset(
         webImageAsset(item.image, scope.style.mode, (text) => kit.bound(text, scope)),
       ),
@@ -320,6 +329,16 @@ export function navSelection(
  * 24 px surfaceVariant placeholder square.
  */
 export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebElement {
+  const slot = item.asset === undefined ? undefined : scope.imageSlots?.get(item.asset);
+  if (item.imagePath !== undefined) {
+    // Listed as an `image` node is: over budget until the page inlines it and drops the entry.
+    scope.unsupported.push({
+      type: "image",
+      path: item.imagePath,
+      reason: slot === undefined ? "assetNotInlined" : "assetOverBudget",
+      ...optionalAsset(item.asset),
+    });
+  }
   if (item.asset !== undefined) {
     scope.imageDraws?.push({
       asset: item.asset,
@@ -327,7 +346,6 @@ export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit)
       heightDp: NAV_IMAGE_DP,
       scale: "fit",
     });
-    const slot = scope.imageSlots?.get(item.asset);
     if (slot !== undefined) {
       return el(
         "span",
@@ -440,8 +458,8 @@ export function withBottomInset(
 /** A Material 3 navigation bar: 80 px on surfaceContainer, each item an icon in a pill over a label. */
 const bottomNavRenderer =
   (kit: WebRenderKit): NodeRenderer =>
-  (node, scope) => {
-    const items = navItems(node, scope, kit);
+  (node, scope, path) => {
+    const items = navItems(node, scope, kit, path);
     const selected = navSelection(node, items.length, scope, kit);
     const { attrs, style: barStyle } = barBase(node, scope, kit, {
       [MIN_HEIGHT]: "80px",
@@ -500,8 +518,8 @@ function tab(item: NavItem, selected: boolean, layout: TabLayout) {
  */
 const tabBarRenderer =
   (kit: WebRenderKit): NodeRenderer =>
-  (node, scope) => {
-    const items = navItems(node, scope, kit);
+  (node, scope, path) => {
+    const items = navItems(node, scope, kit, path);
     const selected = navSelection(node, items.length, scope, kit);
     const layout: TabLayout = {
       scrollable: node.scrollable === true,

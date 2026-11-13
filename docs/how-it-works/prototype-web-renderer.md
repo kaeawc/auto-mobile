@@ -456,7 +456,7 @@ the host, so the page's script only switches between views it was given and neve
   selected tab takes `primary` and a 3 px `primary` indicator, the rest `onSurfaceVariant`, and a
   `scrollable` one starts after 52 px with 90 px minimum tabs and clips the rest. Both bars select
   their linked `pager`'s initial page, else their numeric `stateKey`, else the first item. A nav item
-  draws its image in a 24 dp box when the page inlines it (recorded as a draw like an `image` node), else its named icon, else a 24 px `surfaceVariant` square. An
+  draws its image in a 24 dp box when the page inlines it (recorded as a draw and listed at `<path>.items[i].image` like an `image` node), else its named icon, else a 24 px `surfaceVariant` square. An
   icon button draws its icon in a 40 px circle inside a 48 px target: `standard` and
   `outlined` (an `outlineVariant` outline) tint it `onSurfaceVariant`, `filled` sits on `primary` and
   `tonal` on `secondaryContainer`; the icon name labels it when no label is authored. A chip with no
@@ -569,7 +569,7 @@ the host, so the page's script only switches between views it was given and neve
   `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
   shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint
   layer. `Modulate` multiplies alpha too, so a translucent tint wraps both layers in a group at the
-  tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Item images (nav items) are not inlined. Any other node draws a
+  tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Posture.** A foldable frame draws the panel its `posture` lights (default `opened`, else its
   first posture; a frame without postures takes none, and an unknown posture is an error listing

@@ -6,6 +6,10 @@ import type {
 } from "./prototypeDeviceStatusReference";
 import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformStateEntry } from "./prototypePlatform";
 import {
+  PROTOTYPE_LOCATION_UPDATED_EVENT,
+  prototypeLocationEventSummary,
+} from "./prototypeLocationPrivacy";
+import {
   prototypePlatformDeliveredEventOf,
   type PrototypePlatformDeliveredEventPayload,
 } from "./prototypePlatformEvent";
@@ -28,8 +32,14 @@ export interface PrototypeDeviceStatusReading {
   simulated?: true;
 }
 
+/**
+ * A mirrored module: a device status module, or `location`, whose reading is only the accuracy-only
+ * summary of the last delivered `location.updated` (#16463), never coordinates.
+ */
+export type PrototypeMirroredModule = PrototypeStatusModule | "location";
+
 export type PrototypeDeviceStatusMirror = Partial<
-  Record<PrototypeStatusModule, PrototypeDeviceStatusReading>
+  Record<PrototypeMirroredModule, PrototypeDeviceStatusReading>
 >;
 
 function statusModule(name: string): PrototypeStatusModule | undefined {
@@ -70,14 +80,19 @@ function stateValid(
 }
 
 /**
- * The module and values a delivered `battery|power|audio.changed` event carries, or undefined for any
- * other event. Data that names a key outside the module's state table, or a value its contract rule
+ * The module and values a delivered `battery|power|audio.changed` event carries, the accuracy-only
+ * `location` reading a delivered `location.updated` carries, or undefined for any other event. Data that names a key outside the module's state table, or a value its contract rule
  * refuses, is not a reading: the mirror keeps the previous one rather than report malformed state.
  */
 export function prototypeDeviceStatusOf(
   event: Pick<PrototypeEvent, "kind" | "name" | "payload">,
-): { module: PrototypeStatusModule; values: PrototypeStatusValues; simulated?: true } | undefined {
+):
+  | { module: PrototypeMirroredModule; values: PrototypeStatusValues; simulated?: true }
+  | undefined {
   const delivered = prototypePlatformDeliveredEventOf(event);
+  if (delivered?.event === PROTOTYPE_LOCATION_UPDATED_EVENT) {
+    return locationReading(delivered);
+  }
   const module = changedModule(delivered);
   const data = object(delivered?.data);
   const state = module ? PROTOTYPE_PLATFORM_MODULES[module]?.state : undefined;
@@ -88,5 +103,32 @@ export function prototypeDeviceStatusOf(
     module,
     values: { ...(data as PrototypeStatusValues) },
     ...(delivered?.simulated ? { simulated: true as const } : {}),
+  };
+}
+
+/**
+ * The presence-and-accuracy reading a delivered, untruncated `location.updated` carries: a finite,
+ * non-negative `accuracyM` and a boolean `approximate`. Only those two fields are kept, whatever else
+ * the data holds, so the mirror never reports coordinates.
+ */
+function locationReading(
+  delivered: PrototypePlatformDeliveredEventPayload,
+): { module: "location"; values: PrototypeStatusValues; simulated?: true } | undefined {
+  const data = object(delivered.data);
+  const accuracyM = data?.accuracyM;
+  const approximate = data?.approximate;
+  if (
+    delivered.truncated ||
+    typeof accuracyM !== "number" ||
+    !Number.isFinite(accuracyM) ||
+    accuracyM < 0 ||
+    typeof approximate !== "boolean"
+  ) {
+    return undefined;
+  }
+  return {
+    module: "location",
+    values: { ...prototypeLocationEventSummary({ accuracyM, approximate }) },
+    ...(delivered.simulated ? { simulated: true as const } : {}),
   };
 }

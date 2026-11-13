@@ -2308,7 +2308,10 @@ only when the spec emits them or writes them into `/data`. `prototypeLocationEve
 (`prototypeLocationPrivacy.ts`) is the reference the runtimes copy, with shared cases in
 `test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
 the Android and iOS transports, reduces any decoded `location.updated` data to those two fields and logs the
-names (never the values) of anything it dropped.
+names (never the values) of anything it dropped. The host mirrors the last delivered `location.updated` as `platformStatus.location`
+in `prototype status` and `inspect`, like the status modules above, with `values` holding only `accuracyM` and
+`approximate`: it shows that a fix is present and how accurate it is, never its coordinates. An event without a
+finite, non-negative `accuracyM` and a boolean `approximate`, or cut by the emit budget, is not mirrored.
 
 **BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
 of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,

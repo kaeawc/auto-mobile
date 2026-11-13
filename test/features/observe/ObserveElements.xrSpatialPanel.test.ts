@@ -477,3 +477,88 @@ test("captured Switch stays unlabelled when no text precedes it (#17955)", async
   expect(row).toBeDefined();
   expect(row).not.toHaveProperty("label");
 });
+
+type CapturedNode = Record<string, unknown> & { node?: CapturedNode | CapturedNode[] };
+
+/**
+ * Rebuild the captured panel root's leading `title, switch` children (both tree
+ * copies) as `rows(title, switch, second title, second switch)`. The second pair
+ * is a copy of the captured pair with a new id and text; the only node built here
+ * is the minimal row container in `wrapRow`.
+ */
+function restructureSwitchRows(
+  observation: ObserveResult,
+  rows: (
+    title: CapturedNode,
+    toggle: CapturedNode,
+    title2: CapturedNode,
+    toggle2: CapturedNode,
+  ) => CapturedNode[],
+): void {
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as CapturedNode;
+    const children = Array.isArray(record.node) ? record.node : undefined;
+    if (children?.[1]?.["view-id"] === SWITCH_ID) {
+      const [title, toggle, ...rest] = children;
+      const title2 = {
+        ...structuredClone(title),
+        text: "XrPanel subtitle",
+        "view-id": "s2-title-2",
+      };
+      const toggle2 = { ...structuredClone(toggle), "view-id": SECOND_SWITCH_ID };
+      record.node = [...rows(title, toggle, title2, toggle2), ...rest];
+      return;
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(observation.viewHierarchy);
+}
+
+const SECOND_SWITCH_ID = "s2-switch-2";
+
+function wrapRow(id: string, ...children: CapturedNode[]): CapturedNode {
+  return { "view-id": id, bounds: children[0].bounds, node: children };
+}
+
+async function switchLabels(
+  rows: Parameters<typeof restructureSwitchRows>[1],
+): Promise<(string | undefined)[]> {
+  const output = await switchScrollSkeleton((observation) =>
+    restructureSwitchRows(observation, rows),
+  );
+  return [SWITCH_ID, SECOND_SWITCH_ID].map(
+    (id) => output.skeleton!.find((row) => row.elementId === id)?.label,
+  );
+}
+
+test("flat `Text, Switch, Text, Switch` siblings label every switch (#18227)", async () => {
+  expect(await switchLabels((t1, s1, t2, s2) => [t1, s1, t2, s2])).toEqual([
+    "XrPanel title",
+    "XrPanel subtitle",
+  ]);
+});
+
+test("flat `Switch, Text, Switch, Text` siblings never borrow the previous trailing text (#18227)", async () => {
+  expect(await switchLabels((t1, s1, t2, s2) => [s1, t1, s2, t2])).toEqual([undefined, undefined]);
+});
+
+test("separate `Row { Text; Switch }` containers label each switch (#18227)", async () => {
+  expect(
+    await switchLabels((t1, s1, t2, s2) => [
+      wrapRow("s2-row-1", t1, s1),
+      wrapRow("s2-row-2", t2, s2),
+    ]),
+  ).toEqual(["XrPanel title", "XrPanel subtitle"]);
+});
+
+test("separate `Row { Switch; Text }` containers never borrow the previous row's text (#18227)", async () => {
+  expect(
+    await switchLabels((t1, s1, t2, s2) => [
+      wrapRow("s2-row-1", s1, t1),
+      wrapRow("s2-row-2", s2, t2),
+    ]),
+  ).toEqual([undefined, undefined]);
+});

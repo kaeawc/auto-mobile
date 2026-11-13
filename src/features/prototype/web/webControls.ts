@@ -27,7 +27,7 @@ import { defaultFillAxes, filling, linkedPagerPage } from "./webCollections";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
 import { cssColor, textCss } from "./webStyle";
-import { webImageAsset, webImageLayers } from "./webImages";
+import { webImageAsset, webImageLayers, webImageVar } from "./webImages";
 
 type Css = Record<string, string>;
 
@@ -324,9 +324,10 @@ export function navSelection(
 }
 
 /**
- * An item's visual: its image when the page inlines one (the image takes precedence over the icon,
- * and the draw is recorded so the page encodes it at 24 dp), else its named icon, else Android's
- * 24 px surfaceVariant placeholder square.
+ * An item's visual: its image when the asset has a slot (the image takes precedence over the icon,
+ * and the draw is recorded so the page encodes it at 24 dp) over its fallback, which shows until
+ * the page inlines the image's rule; else the fallback alone: its named icon, else Android's 24 px
+ * surfaceVariant placeholder square.
  */
 export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebElement {
   const slot = item.asset === undefined ? undefined : scope.imageSlots?.get(item.asset);
@@ -347,6 +348,21 @@ export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit)
       scale: "fit",
     });
     if (slot !== undefined) {
+      // The page may drop the image's rule over budget while keeping this view, so the icon or
+      // placeholder stays underneath until the rule sets the slot's `-on` flag, as an image node
+      // keeps its placeholder background.
+      const fallback = el(
+        "span",
+        {
+          style: {
+            display: "block",
+            position: "absolute",
+            inset: "0",
+            opacity: `calc(1 - var(${webImageVar(slot, "-on")}, 0))`,
+          },
+        },
+        [navFallback(item, scope, kit)],
+      );
       return el(
         "span",
         {
@@ -359,10 +375,15 @@ export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit)
             [FLEX_SHRINK]: "0",
           },
         },
-        webImageLayers(slot, {}, scope.style),
+        [fallback, ...webImageLayers(slot, {}, scope.style)],
       );
     }
   }
+  return navFallback(item, scope, kit);
+}
+
+/** The item's named icon, else Android's 24 px surfaceVariant placeholder square. */
+function navFallback(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebElement {
   if (item.icon !== undefined) {
     return kit.icon({ type: "icon", name: item.icon }, scope, "");
   }

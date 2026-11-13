@@ -535,6 +535,27 @@ describe("nav item images", () => {
   }
 
   for (const type of ["bottomNav", "tabBar"] as const) {
+    test(`${type} keeps the icon or placeholder under a slotted image until its rule is inlined`, () => {
+      // A still carries no image rules, as a page whose budget dropped the slot's rule does.
+      const rendered = nav(type, [
+        { label: "Home", image: "photo", icon: "home" },
+        { label: "Bare", image: "photo" },
+      ]);
+      const images = find(rendered.element, (e) => e.attrs["data-part"] === "image");
+      expect(images).toHaveLength(2);
+      for (const image of images) {
+        const fallback = image.children[0] as WebElement;
+        expect(fallback.style.opacity).toBe("calc(1 - var(--pa-3-on, 0))");
+        expect(fallback.style.position).toBe("absolute");
+      }
+      const [withIcon, bare] = images.map((image) => image.children[0] as WebElement);
+      expect(find(withIcon!, (e) => e.attrs["data-part"] === "placeholder")).toHaveLength(0);
+      expect(toHtml(withIcon!)).not.toBe(toHtml(bare!));
+      expect(find(bare!, (e) => e.attrs["data-part"] === "placeholder")).toHaveLength(1);
+    });
+  }
+
+  for (const type of ["bottomNav", "tabBar"] as const) {
     test(`${type} lists each item image as an image node is`, () => {
       const rendered = nav(type, items);
       expect(rendered.unsupportedNodes).toEqual([

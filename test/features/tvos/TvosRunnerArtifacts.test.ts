@@ -124,7 +124,18 @@ test("resolves a relative override against the daemon launch directory", async (
 
 test("a missing source project requires a prebuilt override without building", async () => {
   const f = fixture({ missingProject: true });
-  await expect(f.artifacts.resolve()).rejects.toThrow("AUTOMOBILE_TVOS_RUNNER_XCTESTRUN");
+  const error = await f.artifacts.resolve().then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+  expect(error).toBeInstanceOf(Error);
+  const message = error instanceof Error ? error.message : "";
+  expect(message).toContain("AUTOMOBILE_TVOS_RUNNER_XCTESTRUN");
+  // Names the path it checked and the project-root setting that fixes it (#18016).
+  expect(message).toContain(
+    `${path.join("/repo", "ios", "control-proxy", "CtrlProxy.xcodeproj")} was not found`,
+  );
+  expect(message).toContain("set AUTOMOBILE_PROJECT_ROOT to the checkout root");
   expect(f.accesses).toEqual([path.join("/repo", "ios", "control-proxy", "CtrlProxy.xcodeproj")]);
   expect(f.commands).toEqual([]);
 });

@@ -35,9 +35,10 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
         XCTAssertFalse(registry.snapshot().connected)
     }
 
-    func testOnlyCarPlayGetBypassesPhoneForegroundGate() {
+    func testOnlyCarPlayRoutesBypassPhoneForegroundGate() {
         XCTAssertFalse(SdkRouteTable.requiresApplicationActive(for: .matched(.carPlayTemplates)))
-        for route in SdkRouteTable.Route.allCases where route != .carPlayTemplates {
+        XCTAssertFalse(SdkRouteTable.requiresApplicationActive(for: .matched(.carPlayAction)))
+        for route in SdkRouteTable.Route.allCases where route != .carPlayTemplates && route != .carPlayAction {
             XCTAssertTrue(SdkRouteTable.requiresApplicationActive(for: .matched(route)))
         }
         XCTAssertTrue(SdkRouteTable.requiresApplicationActive(for: .notFound))
@@ -46,6 +47,19 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
     }
 
     func testCarPlayRouteMethods() {
+        XCTAssertEqual(
+            SdkRouteTable.route(forRequestLine: "POST /carplay/action HTTP/1.1"),
+            .matched(.carPlayAction)
+        )
+        XCTAssertEqual(
+            SdkRouteTable.route(forRequestLine: "GET /carplay/action HTTP/1.1"),
+            .methodNotAllowed(allowed: ["POST"])
+        )
+        guard let entry = SdkRouteTable.entries.first(where: { $0.route == .carPlayAction }),
+              case .body = entry.handler
+        else {
+            return XCTFail("CarPlay actions must use the request-body reader")
+        }
         XCTAssertEqual(
             SdkRouteTable.route(forRequestLine: "GET /carplay/templates HTTP/1.1"),
             .matched(.carPlayTemplates)
@@ -70,6 +84,9 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
                 title: "Chargers",
                 sections: [CPListSection(items: [item], header: "Nearby", sectionIndexTitle: nil)]
             )
+            list.leadingNavigationBarButtons = [CPBarButton(title: "Leading", handler: nil)]
+            list.trailingNavigationBarButtons = [CPBarButton(title: "Trailing", handler: nil)]
+            list.backButton = CPBarButton(title: "Back", handler: nil)
             let grid = CPGridTemplate(
                 title: "Actions",
                 gridButtons: [CPGridButton(titleVariants: ["Start"], image: UIImage(), handler: nil)]
@@ -86,13 +103,61 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
             XCTAssertEqual(row.hasImage, false)
             XCTAssertEqual(children[1].template?.buttons?.first?.titleVariants, ["Start"])
             XCTAssertEqual(document.templates[1].id, "stack/1")
+            XCTAssertEqual(document.templates[1].leadingNavigationBarButtons?.first?.title, "Leading")
+            XCTAssertEqual(document.templates[1].trailingNavigationBarButtons?.first?.title, "Trailing")
+            XCTAssertEqual(document.templates[1].backButton?.title, "Back")
+            XCTAssertNil(document.templates[0].leadingNavigationBarButtons)
+            XCTAssertNil(document.templates[0].trailingNavigationBarButtons)
+            XCTAssertNil(document.templates[0].backButton)
             XCTAssertFalse(document.truncated)
             let encoded = try JSONEncoder().encode(document)
             let decoded = try JSONDecoder().decode(CarPlayTemplateDocument.self, from: encoded)
             XCTAssertEqual(decoded.templates.first?.tabs?.first?.template?.sections?.first?.items?.first?.text, "North")
         }
 
-        func testInformationAlertSheetAndUnknown() {
+        func testBarButtonsForGridInformationAndPointOfInterest() {
+            let grid = CPGridTemplate(title: "Grid", gridButtons: [])
+            let info = CPInformationTemplate(title: "Info", layout: .leading, items: [], actions: [])
+            let poi = CPPointOfInterestTemplate(title: "Nearby", pointsOfInterest: [], selectedIndex: NSNotFound)
+            let leading = CPBarButton(title: "Leading", handler: nil)
+            let trailing = CPBarButton(title: "Trailing", handler: nil)
+            let back = CPBarButton(title: "Back", handler: nil)
+            grid.leadingNavigationBarButtons = [leading]
+            grid.trailingNavigationBarButtons = [trailing]
+            grid.backButton = back
+            info.leadingNavigationBarButtons = [leading]
+            info.trailingNavigationBarButtons = [trailing]
+            info.backButton = back
+            poi.leadingNavigationBarButtons = [leading]
+            poi.trailingNavigationBarButtons = [trailing]
+            poi.backButton = back
+            var mapper = CarPlayTemplateMapper()
+            let document = mapper.document(templates: [grid, info, poi])
+            XCTAssertEqual(document.templates.count, 3)
+            for (index, node) in document.templates.enumerated() {
+                XCTAssertEqual(node.leadingNavigationBarButtons?.first?.title, "Leading")
+                XCTAssertEqual(node.trailingNavigationBarButtons?.first?.title, "Trailing")
+                XCTAssertEqual(node.backButton?.title, "Back")
+                XCTAssertEqual(
+                    node.leadingNavigationBarButtons?.first?.id,
+                    "stack/\(index)/leadingNavigationBarButtons/0"
+                )
+                XCTAssertEqual(
+                    node.trailingNavigationBarButtons?.first?.id,
+                    "stack/\(index)/trailingNavigationBarButtons/0"
+                )
+                XCTAssertEqual(node.backButton?.id, "stack/\(index)/backButton/0")
+            }
+            grid.leadingNavigationBarButtons = []
+            grid.trailingNavigationBarButtons = []
+            grid.backButton = nil
+            let empty = mapper.document(templates: [grid])
+            XCTAssertEqual(empty.templates.first?.leadingNavigationBarButtons?.count, 0)
+            XCTAssertEqual(empty.templates.first?.trailingNavigationBarButtons?.count, 0)
+            XCTAssertNil(empty.templates.first?.backButton)
+        }
+
+        func testInformationAndTemplatesWithoutBarButtons() {
             let info = CPInformationTemplate(
                 title: "Info",
                 layout: .leading,
@@ -106,13 +171,21 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
                 actions: [CPAlertAction(title: "Done", style: .default, handler: { _ in })]
             )
             var mapper = CarPlayTemplateMapper()
-            let document = mapper.document(templates: [info, sheet, CPTemplate()], presented: alert)
+            let document = mapper.document(
+                templates: [info, sheet, CPTemplate(), CPSearchTemplate(), CPNowPlayingTemplate.shared],
+                presented: alert
+            )
             XCTAssertEqual(document.templates[0].items?.first?.detail, "Ready")
             XCTAssertEqual(document.templates[1].actions?.first?.title, "Done")
             XCTAssertEqual(document.templates[2].type, "unknown")
             XCTAssertNotNil(document.templates[2].className)
             XCTAssertEqual(document.presented?.id, "presented")
             XCTAssertEqual(document.presented?.titleVariants, ["Notice"])
+            for node in document.templates.dropFirst() + [document.presented].compactMap({ $0 }) {
+                XCTAssertNil(node.leadingNavigationBarButtons)
+                XCTAssertNil(node.trailingNavigationBarButtons)
+                XCTAssertNil(node.backButton)
+            }
         }
 
         func testBudgetsIncludeSectionsRowsAndDepth() {

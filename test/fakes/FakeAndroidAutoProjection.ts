@@ -113,6 +113,8 @@ export class FakeSession implements DesktopHeadUnitSession {
   /** The DHU process has not exited; an unhealthy session can still be alive. */
   alive = true;
   readonly commands: string[] = [];
+  /** Unset models a session that cannot tell whether the DHU has video focus. */
+  hasVideoFocus?: () => boolean;
   sendCommand(command: string) {
     this.commands.push(command);
   }

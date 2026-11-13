@@ -22,7 +22,7 @@ import {
   PROTOVIEWER_REQUEST_ID,
   preferredProtoViewerPackage,
   protoViewerCapabilitiesPath,
-  protoViewerCapabilitiesSchema,
+  parseProtoViewerCapabilities,
   protoViewerProviderUri,
   protoViewerProviderCommand,
   protoViewerProviderWriteCommand,
@@ -167,20 +167,7 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     if (text === "") {
       return undefined;
     }
-    let parsed: ReturnType<typeof protoViewerCapabilitiesSchema.safeParse>;
-    try {
-      parsed = protoViewerCapabilitiesSchema.safeParse(JSON.parse(text));
-    } catch (error) {
-      logger.warn(`[protoviewer] unreadable capabilities report: ${errorMessage(error)}`);
-      return undefined;
-    }
-    if (!parsed.success) {
-      logger.warn(
-        `[protoviewer] capabilities report has an unexpected shape: ${parsed.error.message}`,
-      );
-      return undefined;
-    }
-    return parsed.data;
+    return parseProtoViewerCapabilities(text);
   }
 
   async importBundle(

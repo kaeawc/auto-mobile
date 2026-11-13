@@ -58,3 +58,25 @@ test("a caller pinned to the store build ignores a .dev build", async () => {
   expect(await launchedBundle([{ bundleId: DEV }, { bundleId: STORE }], [STORE])).toBe(STORE);
   expect(await launchedBundle([{ bundleId: DEV }], [STORE])).toBeUndefined();
 });
+
+test("reads the installed CFBundleVersion of the driven build as the version code", async () => {
+  const simctl = new DefaultIosProtoViewerSimctl(
+    new FakeSimctl([
+      { bundleId: STORE, CFBundleVersion: "3" },
+      { bundleId: "other", CFBundleVersion: "9" },
+    ]),
+  );
+  await simctl.installed(UDID);
+  expect(await simctl.installedVersionCode(UDID)).toBe(3);
+});
+
+test("an absent or non-numeric CFBundleVersion is an unknown version code", async () => {
+  const simctl = new DefaultIosProtoViewerSimctl(
+    new FakeSimctl([{ bundleId: STORE, CFBundleVersion: "1.2.3" }]),
+  );
+  await simctl.installed(UDID);
+  expect(await simctl.installedVersionCode(UDID)).toBeUndefined();
+  const missing = new DefaultIosProtoViewerSimctl(new FakeSimctl([{ bundleId: STORE }]));
+  await missing.installed(UDID);
+  expect(await missing.installedVersionCode(UDID)).toBeUndefined();
+});

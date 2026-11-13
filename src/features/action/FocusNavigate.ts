@@ -545,7 +545,11 @@ function createFocusProgress(): FocusProgress {
           memory.adjusted.add(lastDirection);
         }
       }
-      stall.observe(distance, didNotMove ? undefined : lastDirection);
+      if (!didNotMove) {
+        // A refused press in between (down off a slider) does not end a run of presses that keep
+        // changing the control without getting closer (#17209).
+        stall.observe(distance, lastDirection);
+      }
       arrivedBy = didNotMove ? arrivedBy : lastDirection;
       previousKey = key;
       lastDirection = undefined;

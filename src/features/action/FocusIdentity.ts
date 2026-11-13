@@ -1,5 +1,5 @@
 /**
- * How FocusNavigate tells, across reads, whether a D-pad press moved focus (#17315, #17739).
+ * How FocusNavigate tells, across reads, whether a D-pad press moved focus (#17315, #17739, #17209).
  */
 
 import type { Element } from "../../models/Element";
@@ -167,14 +167,42 @@ function changedInPlace(
   );
 }
 
+/**
+ * Whether the control's label went back to what it read two presses ago while it kept its place
+ * and the screen around it stayed put both times (#17209): a press and its opposite toggled a
+ * value (a slider with no readout on screen, so {@link showsValueChange} has no evidence). A
+ * multi-slot list stepped down and back up shifts its rows on each press, so it fails
+ * {@link surroundingsStayed} and still reads as moving.
+ */
+function toggledInPlace(
+  older: ReadIdentity | undefined,
+  previous: ReadIdentity | undefined,
+  next: Omit<ReadIdentity, "key">,
+  entry: FocusPathEntry,
+): previous is ReadIdentity {
+  return (
+    older !== undefined &&
+    previous !== undefined &&
+    entry.resourceId !== undefined &&
+    older.position === next.position &&
+    previous.position === next.position &&
+    older.label === next.label &&
+    previous.label !== next.label &&
+    surroundingsStayed(older.surroundings, previous.surroundings) &&
+    surroundingsStayed(previous.surroundings, next.surroundings)
+  );
+}
+
 export function createFocusIdentity() {
   const adjustable = new Set<string>();
+  let older: ReadIdentity | undefined;
   let previous: ReadIdentity | undefined;
   return (
     entry: FocusPathEntry | undefined,
     screen: Pick<FocusScreen, "focused" | "elements">,
   ): FocusIdentity => {
     if (!entry) {
+      older = undefined;
       previous = undefined;
       return { key: "" };
     }
@@ -184,11 +212,16 @@ export function createFocusIdentity() {
       label: focusKey(entry),
     };
     const before = previous;
-    const inPlace = changedInPlace(before, read, entry);
+    const inPlace =
+      changedInPlace(before, read, entry) || toggledInPlace(older, before, read, entry);
     if (inPlace) {
       adjustable.add(read.position);
     }
     const key = adjustable.has(read.position) ? `adjustable|${read.position}` : read.label;
+    // A refused press re-reads the same label; the toggle compares against the label before it.
+    if (read.label !== before?.label) {
+      older = previous;
+    }
     previous = { ...read, key };
     return inPlace ? { key, replaces: before.key, changedInPlace: true } : { key };
   };

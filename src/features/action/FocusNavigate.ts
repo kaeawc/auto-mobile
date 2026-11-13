@@ -685,7 +685,7 @@ export class FocusNavigate {
       );
       const { focused } = screen;
       progress.observe(
-        identify(focusedElement, screen),
+        identify(focusedElement, screen, lastDirection),
         distanceToNearest(focused, onScreen),
         containsTarget,
       );

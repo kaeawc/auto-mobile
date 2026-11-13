@@ -1,16 +1,21 @@
+import {
+  SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+  SHARED_STORAGE_COMMIT_TIMEOUT_MS,
+} from "../../src/features/storage/fileTransferTimeout";
+import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { logger } from "../../src/utils/logger";
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   createSharedStorageServiceForTesting,
-  SHARED_STORAGE_PUSH_TIMEOUT_MS,
   type SharedStorageFileSystem,
   type StageSharedStorageRequest,
 } from "../../src/server/sharedStorageService";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { shellQuote } from "../../src/utils/shellQuote";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, ExecResult } from "../../src/models";
 
 // A failed batch must put back the files it overwrote instead of deleting them (#9965).
 
@@ -46,6 +51,7 @@ function fileAt(name: string) {
 
 function setup(existingIndexes: number[] = []) {
   const executor = new FakeAdbExecutor();
+  const timer = new FakeTimer();
   executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
   if (existingIndexes.length > 0) {
     executor.setCommandResponse(
@@ -54,16 +60,17 @@ function setup(existingIndexes: number[] = []) {
     );
   }
   const service = createSharedStorageServiceForTesting({
+    diagnostics: new FakeSharedStorageDiagnostics(),
     adbFactory: { create: () => executor },
     fileSystem,
-    timer: new FakeTimer(),
+    timer,
     idGenerator: new CountingIdGenerator("t"),
   });
   const stage = (
     request: Partial<StageSharedStorageRequest> & Pick<StageSharedStorageRequest, "files">,
   ) =>
     service.stage({ device: androidDevice, namespace: "ns", rollbackOnFailure: true, ...request });
-  return { executor, stage };
+  return { executor, timer, stage };
 }
 
 function rollbackScript(created: string[], restores: string[]): string {
@@ -92,8 +99,7 @@ describe("sharedStorageService rollback of overwritten files", () => {
     await expect(
       stage({ files: [fileAt("first.png"), fileAt("second.png"), fileAt("third.png")] }),
     ).rejects.toThrow(
-      "failed for third.png: Android shared-storage operation failed: push failed " +
-        "Rolled back: second.png, first.png. Rollback failures: none.",
+      /failed for third\.png:[\s\S]*stage=push; command: adb 'push'[\s\S]*push failed[\s\S]*Rolled back: second.png, first.png. Rollback failures: none./,
     );
 
     const backup = `${DIR}/.automobile-t-1.bak`;
@@ -179,6 +185,50 @@ describe("sharedStorageService rollback of overwritten files", () => {
     ]);
   });
 
+  test("removes a new destination and lists it in rollback when its commit times out", async () => {
+    const { executor, timer, stage } = setup();
+    const execute = executor.executeCommand.bind(executor);
+    let commitSignal: AbortSignal | undefined;
+    let commandSettled = false;
+    const commit = spyOn(executor, "executeCommand").mockImplementation((command, options) => {
+      if (command.startsWith("shell mv -f")) {
+        commitSignal = options?.signal;
+        expect(options?.timeoutMs).toBe(SHARED_STORAGE_COMMIT_TIMEOUT_MS);
+        return new Promise<ExecResult>((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              commandSettled = true;
+              reject(new Error("adb terminated after abort"));
+            },
+            { once: true },
+          );
+        });
+      }
+      return execute(command, options);
+    });
+    try {
+      const failure = stage({ files: [fileAt("new.txt")] }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await drainUntil(() => commitSignal !== undefined, { description: "commit command" });
+      timer.advanceTime(SHARED_STORAGE_COMMIT_TIMEOUT_MS);
+      const error = await failure;
+      expect(error).toBeInstanceOf(Error);
+      expect(error instanceof Error ? error.message : "").toMatch(
+        /stage=commit;[\s\S]*timed out[\s\S]*Rolled back: new\.txt\. Rollback failures: none\./,
+      );
+
+      expect(commitSignal?.aborted).toBe(true);
+      expect(commandSettled).toBe(true);
+      expect(executor.getExecutedCommands()).toContain(`shell rm -f ${q("new.txt")}`);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      commit.mockRestore();
+    }
+  });
+
   test("discards the saved copy of a file the batch never reached instead of restoring it", async () => {
     const { executor, stage } = setup([1]);
     executor.setCommandError("push /fixtures/a.txt", new Error("push failed"));
@@ -260,7 +310,7 @@ describe("sharedStorageService rollback of overwritten files", () => {
     executor.setCommandError(MARKER, new Error("cp failed"));
 
     await expect(stage({ files: [fileAt("a.txt"), fileAt("b.txt")] })).rejects.toThrow(
-      "failed for previous-content backup: Android shared-storage operation failed: cp failed",
+      /failed for previous-content backup:[\s\S]*stage=backup; command: adb shell sh -c[\s\S]*cp failed/,
     );
 
     const commands = executor.getExecutedCommands();
@@ -378,23 +428,23 @@ describe("sharedStorageService rollback of overwritten files", () => {
         .filter((call) => call.command.includes(MARKER))
         .map((call) => call.timeoutMs);
 
-    test("scales with the number of files copied, one push budget per file", async () => {
+    test("caps a multi-file backup below the caller budget", async () => {
       const { executor, stage } = setup();
 
       await stage({ files: [fileAt("a.png"), fileAt("b.png")] });
 
-      expect(probeTimeouts(executor)).toEqual([2 * SHARED_STORAGE_PUSH_TIMEOUT_MS]);
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_BACKUP_TIMEOUT_MS]);
     });
 
-    test("a single-file backup gets one push budget, not the 15 s default", async () => {
+    test("a single-file backup gets the explicit backup budget", async () => {
       const { executor, stage } = setup();
 
       await stage({ files: [fileAt("a.png")] });
 
-      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_PUSH_TIMEOUT_MS]);
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_BACKUP_TIMEOUT_MS]);
     });
 
-    test("each chunk of 64 is budgeted for its own size", async () => {
+    test("each chunk of 64 gets the bounded backup budget", async () => {
       const { executor, stage } = setup();
 
       await stage({
@@ -402,8 +452,8 @@ describe("sharedStorageService rollback of overwritten files", () => {
       });
 
       expect(probeTimeouts(executor)).toEqual([
-        64 * SHARED_STORAGE_PUSH_TIMEOUT_MS,
-        SHARED_STORAGE_PUSH_TIMEOUT_MS,
+        SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+        SHARED_STORAGE_BACKUP_TIMEOUT_MS,
       ]);
     });
   });

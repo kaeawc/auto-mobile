@@ -70,7 +70,8 @@ Using Claude Code? Install the AutoMobile plugin from this repository's marketpl
 
 - **[Full Documentation](docs/index.md)** - Complete guide with examples
 - **[FAQ](docs/faq.md)** - Common questions answered
-- **[Design Docs](docs/how-it-works/index.md)** - Architecture and implementation details
+- **[How It Works](docs/how-it-works/index.md)** - Architecture and implementation details
+- **[Devlog](docs/devlog/index.md)** - Dated decision records and ideas
 
 ## Contributing
 

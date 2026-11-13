@@ -5,7 +5,27 @@ import Foundation
 /// an IP literal or `localhost`; a literal URL authority that is one of the allowed origins; and
 /// navigation, title and back keys that name declared state of the right type. Contract only: no
 /// runtime draws a web view.
-enum PrototypeWebView {
+public enum PrototypeWebView {
+    public struct ImportError: Error, Equatable, Sendable {
+        public let path: String
+    }
+
+    /// Checks authored node positions, including unexpanded repeat templates, in tree order.
+    public static func importError(_ spec: JSONValue, networkAllowed: Bool) -> ImportError? {
+        guard !networkAllowed, let root = spec.objectFields?["root"]?.objectFields else { return nil }
+        func first(_ node: PrototypeLocatedValue) -> ImportError? {
+            if node.value["type"] == .string("webView") { return ImportError(path: node.path) }
+            return PrototypeStrictRepeats.children(node.value, path: node.path).lazy.compactMap(first).first
+        }
+        return first(.init(value: root, path: "root"))
+    }
+
+    /// Convenience for an already validated saved library spec; malformed data is handled by the loader.
+    public static func importError(_ spec: Data, networkAllowed: Bool) -> ImportError? {
+        guard !networkAllowed, let value = try? JSONDecoder().decode(JSONValue.self, from: spec) else { return nil }
+        return importError(value, networkAllowed: networkAllowed)
+    }
+
     private static let webViewCalls: Set<String> = ["webview.back", "webview.reload"]
     private static let stateKeys: [(field: String, boolean: Bool)] = [
         ("navigationStateKey", false), ("titleKey", false), ("canGoBackKey", true),
@@ -52,7 +72,9 @@ enum PrototypeWebView {
 
     private static func validateNode(
         _ node: [String: JSONValue], path: String, declared: Bool, state: [String: JSONValue]
-    ) throws {
+    )
+        throws
+    {
         guard declared else {
             throw PrototypeLimits.violation(path, "webView requires webview in requires.platform")
         }

@@ -702,6 +702,45 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertFalse(unfocused.contains("value stayed"))
     }
 
+    func testCrownFocusedValuePrefersInnermostReadableFocusedElement() {
+        let outer = WatchCrownCandidate(
+            identifier: "screen", frame: CGRect(x: 0, y: 0, width: 200, height: 240), value: "page"
+        )
+        let inner = WatchCrownCandidate(
+            identifier: "level", frame: CGRect(x: 20, y: 40, width: 120, height: 40), value: "0"
+        )
+        XCTAssertEqual(watchCrownFocusedValue([outer, inner])?.identifier, "level")
+        XCTAssertEqual(watchCrownFocusedValue([inner, outer])?.value, "0")
+        XCTAssertEqual(watchCrownFocusedValue([inner, inner])?.value, "0")
+    }
+
+    func testCrownFocusedValueRejectsAmbiguousOrUnreadableFocus() {
+        let left = WatchCrownCandidate(identifier: "a", frame: CGRect(x: 0, y: 0, width: 40, height: 40), value: "1")
+        let right = WatchCrownCandidate(identifier: "b", frame: CGRect(x: 60, y: 0, width: 40, height: 40), value: "2")
+        XCTAssertNil(watchCrownFocusedValue([left, right]))
+        XCTAssertNil(watchCrownFocusedValue([]))
+        XCTAssertNil(watchCrownFocusedValue([WatchCrownCandidate(value: "")]))
+        XCTAssertNil(watchCrownFocusedValue([WatchCrownCandidate(value: "3", isEnabled: false)]))
+    }
+
+    func testCrownFocusedValueUsesSingleReadableDescendantOutsideScrollViews() {
+        let child = WatchCrownCandidate(
+            identifier: "level", frame: CGRect(x: 20, y: 40, width: 120, height: 40), value: "5"
+        )
+        let focusable = WatchCrownCandidate(identifier: "focusable", value: nil, children: [
+            WatchCrownCandidate(elementType: 48, children: [child]),
+        ])
+        XCTAssertEqual(watchCrownFocusedValue([focusable])?.identifier, "level")
+        var scroll = focusable
+        scroll.elementType = 46
+        XCTAssertNil(watchCrownFocusedValue([scroll]))
+        let wrapper = WatchCrownCandidate(identifier: "wrapper", value: nil, children: [scroll])
+        XCTAssertNil(watchCrownFocusedValue([wrapper, scroll]))
+        var twoValues = focusable
+        twoValues.children.append(WatchCrownCandidate(identifier: "other", value: "9"))
+        XCTAssertNil(watchCrownFocusedValue([twoValues]))
+    }
+
     func testWarmCrownValueChangeSucceedsWithoutWake() {
         let source = ScriptedCrownSource(labels: ["crown 0", "crown 0", "crown 8"])
         source.focusedValues = [crownValue("0"), crownValue("0"), crownValue("8")]

@@ -55,6 +55,22 @@ class Files implements IosProtoViewerFiles {
     this.reads++;
     return this.reads <= this.pending ? "" : this.result;
   }
+  reportModifiedAt: number | undefined;
+  /** Publishes `report` (a fresh mtime) once this many report reads have passed. */
+  publishAfterReads?: { reads: number; report: string };
+  reportReads = 0;
+  async modifiedAt(path: string) {
+    if (!path.endsWith("/capabilities.json")) {
+      return undefined;
+    }
+    this.reportReads++;
+    if (this.publishAfterReads && this.reportReads > this.publishAfterReads.reads) {
+      this.report = this.publishAfterReads.report;
+      this.reportModifiedAt = (this.reportModifiedAt ?? 0) + 1;
+      this.publishAfterReads = undefined;
+    }
+    return this.reportModifiedAt;
+  }
   async remove(path: string) {
     this.events.push(`remove:${path}`);
   }
@@ -358,6 +374,39 @@ test("iOS capabilities: a refresh request foregrounds even when the report match
   files.report = report(2, ["a"]);
   await viewer.capabilities({ timeoutMs: 1000, refresh: true });
   expect(simctl.calls).toEqual([`launch:${UDID}`]);
+});
+test("iOS capabilities: a forced refresh waits for the delayed rewrite when CFBundleVersion is unchanged", async () => {
+  const { viewer, files, simctl, timer } = setup();
+  files.report = report(2, ["a"]);
+  files.reportModifiedAt = 100;
+  // A debug rebuild keeps versionCode 2; the app republishes a few polls after foregrounding.
+  simctl.onLaunch = () => {
+    files.publishAfterReads = { reads: 4, report: report(2, ["a", "b"]) };
+  };
+  const started = timer.now();
+  const result = await viewer.capabilities({ timeoutMs: 1000, refresh: true });
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+  expect([...(result?.capabilities ?? [])]).toEqual(["a", "b"]);
+  expect(timer.now() - started).toBeLessThan(1000);
+});
+test("iOS capabilities: a forced refresh accepts an identical rewrite by its new mtime", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(2, ["a"]);
+  files.reportModifiedAt = 100;
+  simctl.onLaunch = () => {
+    files.publishAfterReads = { reads: 2, report: report(2, ["a"]) };
+  };
+  expect(
+    (await viewer.capabilities({ timeoutMs: 1000, refresh: true }))?.capabilities.has("a"),
+  ).toBe(true);
+});
+test("iOS capabilities: a forced refresh the app never republishes is unknown after the timeout", async () => {
+  const { viewer, files, timer } = setup();
+  files.report = report(2, ["a"]);
+  files.reportModifiedAt = 100;
+  const started = timer.now();
+  expect(await viewer.capabilities({ timeoutMs: 1000, refresh: true })).toBeUndefined();
+  expect(timer.now() - started).toBeGreaterThanOrEqual(1000);
 });
 test("iOS capabilities: an unreadable report and an unknown installed version", async () => {
   const bad = setup();

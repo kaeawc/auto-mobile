@@ -6,6 +6,7 @@ import {
   connectPrototypeAgent,
   PROTOTYPE_AGENT_PROTOCOL_VERSION,
 } from "../../../src/features/prototype/ios/prototypeAgentClient";
+import type { PrototypeAssetCache } from "../../../src/features/prototype/prototypeAssetCache";
 import type { PrototypeAssetUpload } from "../../../src/features/prototype/prototypeAssets";
 import type { PrototypeSpec } from "../../../src/features/prototype/prototypeSpec";
 import {
@@ -206,6 +207,49 @@ describe("IosPrototypeTransport", () => {
     const reply = await transport.putAsset({ ...asset, bytes: Uint8Array.from([9, 9]) });
     expect(reply.success).toBe(true);
     expect(await cache.get("sim-1", "shot")).toBeUndefined();
+  });
+
+  test("a failed cache put keeps a newer queued put for the same id", async () => {
+    const agent = new FakePrototypeAgentClient();
+    const store = new FakePrototypeAssetCache();
+    let failFirstPut: (error: Error) => void = () => undefined;
+    const firstPutGate = new Promise<void>((_resolve, reject) => {
+      failFirstPut = reject;
+    });
+    let pending: Promise<void> = Promise.resolve();
+    let puts = 0;
+    // Serializes like FilePrototypeAssetCache: each operation waits for the previous one.
+    const serialize = (work: () => Promise<void>): Promise<void> => {
+      const next = pending.then(work);
+      pending = next.then(
+        () => undefined,
+        () => undefined,
+      );
+      return next;
+    };
+    const cache: Pick<PrototypeAssetCache, "put" | "remove"> = {
+      put: (serial, upload) =>
+        serialize(async () => {
+          puts += 1;
+          if (puts === 1) {
+            await firstPutGate;
+          }
+          await store.put(serial, upload);
+        }),
+      remove: (serial, id) => serialize(() => store.remove(serial, id)),
+    };
+    const transport = new IosPrototypeTransport(agent, { serial: "sim-1", cache });
+    const newer = { ...asset, bytes: Uint8Array.from([9, 9]) };
+    const first = transport.putAsset(asset);
+    const second = transport.putAsset(newer);
+    while (puts === 0) {
+      await Promise.resolve();
+    }
+    failFirstPut(new Error("disk full"));
+    expect((await first).success).toBe(true);
+    expect((await second).success).toBe(true);
+    await pending;
+    expect(await store.get("sim-1", "shot")).toEqual(newer);
   });
 
   test("an aborted upload sends nothing; an unanswered one is indeterminate", async () => {

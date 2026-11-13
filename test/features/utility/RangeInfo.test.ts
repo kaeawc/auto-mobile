@@ -77,20 +77,26 @@ test("range state survives overlapping element categories in canonical affordanc
   ]);
 });
 
+function collectAndroid(hierarchy: ViewHierarchyResult | undefined) {
+  const elements = hierarchy && new DefaultObserveElementCollector().collect(hierarchy, "android");
+  if (!elements) {
+    throw new Error("captured fixture has no collectable hierarchy");
+  }
+  return elements;
+}
+
 // Collected once at load: the captured trees are large, and each test only reads the result.
-const playgroundIndicators = new DefaultObserveElementCollector().collect(
+const playgroundIndicators = collectAndroid(
   JSON.parse(
     readFileSync(
       new URL("../../fixtures/android-focus/playground-slider-value-49.json", import.meta.url),
       "utf8",
     ),
   ) as ViewHierarchyResult,
-  "android",
 );
 const playgroundProjection = projectSkeleton(playgroundIndicators);
-const composeObservation = composeControlShapesObservation();
 const composeProjection = projectSkeleton(
-  new DefaultObserveElementCollector().collect(composeObservation.viewHierarchy!, "android"),
+  collectAndroid(composeControlShapesObservation().viewHierarchy),
 );
 
 test("a captured passive ProgressBar keeps its range without an adjust affordance", () => {

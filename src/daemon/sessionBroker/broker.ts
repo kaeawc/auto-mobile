@@ -2,6 +2,7 @@ import { AvdSnapshotCleanupFence, trackPoolOperation } from "./avdSnapshotCleanu
 import type { AvdSnapshotCleanupReport } from "./AvdSnapshotCleanup";
 import { SessionBrokerMaintenanceError } from "./SessionBrokerMaintenanceError";
 import { brokerAdmissionInput } from "./brokerAdmission";
+import { brokerRequirementCapability } from "./requirementCapability";
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
 import {
   abortedByBrokerStop,
@@ -132,6 +133,11 @@ export class SessionBroker {
 
   stats(windowMs = 24 * 60 * 60 * 1000, limit = 5000): Promise<SessionBrokerStats> {
     return readBrokerTimingStats(this.options.store, () => this.now(), windowMs, limit);
+  }
+
+  /** Read-only (#18180): what a requirement would resolve to here; no lock, row or device. */
+  requirementCapability(device: unknown, signal?: AbortSignal) {
+    return brokerRequirementCapability(this.options, device, signal);
   }
 
   /** Operator drain of idle pooled devices through the durable destroy journal (#15653). */

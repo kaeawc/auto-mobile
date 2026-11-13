@@ -88,14 +88,17 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
   test("launches through a pid-reporting shell and keeps the recorder argv", async () => {
     await startRecording("4321\n");
     expect(factory.getFakeClient().getSpawnCalls()).toEqual([
-      ["shell", `echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}`],
+      [
+        "shell",
+        `if command -v setsid >/dev/null 2>&1; then exec setsid sh -c 'echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}'; fi; echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}`,
+      ],
     ]);
   });
 
   describe("known pid", () => {
     test("stop verifies then SIGINTs only that pid, with no pkill", async () => {
       const handle = await startRecording("4321\n");
-      factory.getFakeClient().setCommandResult(PROBE, OUR_CMDLINE);
+      factory.getFakeClient().setCommandResultSequence(PROBE, [OUR_CMDLINE, ""]);
       await fsPromises.writeFile(handle.outputPath, "fake-video");
 
       await backend.stop(handle);
@@ -172,9 +175,9 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
       expectNoNameBasedKill();
     });
 
-    test("stop proceeds when the pid kill fails, without falling back to pkill", async () => {
+    test("stop proceeds after a failed pid kill once that recorder exits, without falling back to pkill", async () => {
       const handle = await startRecording("4321\n");
-      factory.getFakeClient().setCommandResult(PROBE, OUR_CMDLINE);
+      factory.getFakeClient().setCommandResultSequence(PROBE, [OUR_CMDLINE, ""]);
       factory.getFakeClient().setCommandError("shell kill -2 4321", new Error("device offline"));
       await fsPromises.writeFile(handle.outputPath, "fake-video");
 

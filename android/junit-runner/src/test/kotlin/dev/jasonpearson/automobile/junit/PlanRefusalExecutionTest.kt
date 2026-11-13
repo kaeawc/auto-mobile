@@ -81,6 +81,11 @@ internal class PlanRefusalExecutionTest : PlanExecutorTestFixture() {
     assertTrue(result.errorMessage, result.errorMessage.contains("device_owned_by_other_session"))
     assertTrue(result.errorMessage, result.errorMessage.contains("held by another session"))
     assertTrue(result.errorMessage, result.errorMessage.contains("waited 3000ms"))
+    assertTrue(
+      result.errorMessage,
+      result.errorMessage.contains("auto-mobile --daemon release-session <sessionUuid>"),
+    )
+    assertTrue(result.errorMessage, result.errorMessage.contains("--daemon active-sessions"))
   }
 
   @Test

@@ -167,6 +167,13 @@ Multi-device plans (section 4) choose their own devices and ignore
 `ANDROID_SERIAL`. The test acquires that device with `getAndroid` before the
 plan runs and releases it afterwards; if the device cannot be acquired (for
 example another session holds it), `result.output` says so.
+A device you acquired yourself with `getAndroid` over MCP stays held by that
+session while your MCP connection is open, so the test cannot acquire it. Before
+running the test, release it with
+`auto-mobile --daemon release-session <sessionUuid>` (the `sessionUuid` from the
+`getAndroid` result, or from `auto-mobile --daemon active-sessions`) against the
+same daemon; the device stays booted. Or point `ANDROID_SERIAL` at a device no
+session holds.
 
 **Daemon.** The runner uses the daemon on `AUTOMOBILE_DAEMON_SOCKET_PATH` when
 it is set, or the default per-user daemon otherwise, and starts one only if

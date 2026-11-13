@@ -159,8 +159,23 @@ internal object DeviceWaitPolicy {
       (parsed.daemonMessage?.let { ": $it" } ?: "") +
       "\nThe runner waited ${waitedMs}ms for it to be released. Another test attempt or tool " +
       "session is using this device; give each concurrent test its own device, or run them " +
-      "serially."
+      "serially." +
+      (if (parsed.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) "\n$OWN_SESSION_RELEASE_REMEDY"
+      else "")
   }
+
+  /**
+   * The remedy for a device the caller's own MCP connection holds (#18275): that connection's
+   * session holds it until the connection ends, and no MCP tool releases it. The daemon CLI
+   * releases it and leaves the device booted.
+   */
+  internal const val OWN_SESSION_RELEASE_REMEDY =
+    "If you acquired this device yourself (getAndroid over MCP), that session holds it while " +
+      "your MCP connection stays open. Release it first with `auto-mobile --daemon " +
+      "release-session <sessionUuid>`, using the sessionUuid from your getAndroid result or " +
+      "from `auto-mobile --daemon active-sessions`, against the same daemon as this runner (same " +
+      "AUTOMOBILE_* environment). The device stays booted. Or set ANDROID_SERIAL to a device no " +
+      "session holds."
 
   internal fun isTransientError(errorMessage: String?): Boolean {
     if (errorMessage.isNullOrBlank()) return false

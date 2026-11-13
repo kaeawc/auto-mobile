@@ -162,7 +162,7 @@ it inlined per variant.
   reported `assetOverBudget`; the page budget decides which of the rest fit. An image draws more markup than a placeholder, so when the
   second build's always-kept views no longer fit, the first build stands, its images reported
   `assetOverBudget`. The resource reads assets from the host asset cache of each device currently
-  showing one of the variants (Android caches its uploads); without one, images stay placeholders.
+  showing one of the variants (Android and iOS cache their uploads); without one, images stay placeholders.
   Asset ids are chosen per device and the page holds one image per id, so an id two of those
   devices cached with different bytes stays a placeholder.
   It snapshots the shown variant's revisions before encoding, so a revision landing meanwhile does
@@ -456,7 +456,7 @@ the host, so the page's script only switches between views it was given and neve
   selected tab takes `primary` and a 3 px `primary` indicator, the rest `onSurfaceVariant`, and a
   `scrollable` one starts after 52 px with 90 px minimum tabs and clips the rest. Both bars select
   their linked `pager`'s initial page, else their numeric `stateKey`, else the first item. A nav item
-  draws its named icon, else a 24 px `surfaceVariant` square, since item images are not inlined. An
+  draws its image in a 24 dp box when the page inlines it (recorded as a draw like an `image` node), else its named icon, else a 24 px `surfaceVariant` square. An
   icon button draws its icon in a 40 px circle inside a 48 px target: `standard` and
   `outlined` (an `outlineVariant` outline) tint it `onSurfaceVariant`, `filled` sits on `primary` and
   `tonal` on `secondaryContainer`; the icon name labels it when no label is authored. A chip with no

@@ -13,6 +13,7 @@ import {
   prototypeEventSource,
   type PrototypeTransport,
 } from "../../../src/features/prototype/PrototypeTransport";
+import { FakePrototypeAssetCache } from "../../fakes/FakePrototypeAssetCache";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import {
   FAKE_PROTOTYPE_AGENT_CAPABILITIES,
@@ -172,6 +173,28 @@ describe("IosPrototypeTransport", () => {
         },
       },
     ]);
+  });
+
+  test("a confirmed upload is cached under the device and a removal drops it", async () => {
+    const agent = new FakePrototypeAgentClient();
+    const cache = new FakePrototypeAssetCache();
+    const transport = new IosPrototypeTransport(agent, { serial: "sim-1", cache });
+    await transport.putAsset(asset);
+    expect(await cache.get("sim-1", "shot")).toEqual(asset);
+    await transport.removeAsset("shot");
+    expect(await cache.get("sim-1", "shot")).toBeUndefined();
+  });
+
+  test("a refused or unanswered upload is not cached, and a cache failure keeps the reply", async () => {
+    const agent = new FakePrototypeAgentClient();
+    const cache = new FakePrototypeAssetCache();
+    const transport = new IosPrototypeTransport(agent, { serial: "sim-1", cache });
+    agent.queueReplies({ success: false, error: "store full" }, new Error("no answer"));
+    await transport.putAsset(asset);
+    await transport.putAsset(asset);
+    expect(await cache.ids("sim-1")).toEqual(new Set());
+    cache.putError = new Error("disk full");
+    expect((await transport.putAsset(asset)).success).toBe(true);
   });
 
   test("an aborted upload sends nothing; an unanswered one is indeterminate", async () => {

@@ -182,25 +182,30 @@ describe("plan video warnings and completed recording recovery", () => {
 
   // #18276: a 4.1s file for a 30.4s run, from a recorder whose device side died early.
   test.each([
-    { recordedMs: 4128, planMs: 30_430, warned: true },
-    { recordedMs: 25_900, planMs: 29_000, warned: false },
-    { recordedMs: 1000, planMs: 2500, warned: false },
-    { recordedMs: undefined, planMs: 30_430, warned: false },
+    { recordedMs: 4128, planMs: 30_430, startupMs: 0, warned: true },
+    { recordedMs: 25_900, planMs: 29_000, startupMs: 0, warned: false },
+    { recordedMs: 1000, planMs: 2500, startupMs: 0, warned: false },
+    { recordedMs: undefined, planMs: 30_430, startupMs: 0, warned: false },
+    // Slow recorder startup happens before capture begins and is not part of the plan window.
+    { recordedMs: 1000, planMs: 1000, startupMs: 4000, warned: false },
   ])(
-    "Android recorder that ended at $recordedMs ms of a $planMs ms plan warns=$warned",
-    async ({ recordedMs, planMs, warned }) => {
+    "Android recorder that ended at $recordedMs ms of a $planMs ms plan after $startupMs ms startup warns=$warned",
+    async ({ recordedMs, planMs, startupMs, warned }) => {
       start.mockRestore();
       finalize.mockRestore();
       const timer = new FakeTimer();
       const filePath = path.join(archive, "video.mp4");
       const video = recorder();
-      video.startVideoRecording = async () => ({
-        recordingId: "rec-1",
-        outputPath: filePath,
-        fileName: metadata.fileName,
-        startedAt: metadata.startedAt,
-        config: metadata.config,
-      });
+      video.startVideoRecording = async () => {
+        timer.advanceTime(startupMs);
+        return {
+          recordingId: "rec-1",
+          outputPath: filePath,
+          fileName: metadata.fileName,
+          startedAt: metadata.startedAt,
+          config: metadata.config,
+        };
+      };
       // The fake recorder stops cleanly but reports only what it captured before it exited.
       video.stopVideoRecording = async () => ({
         metadata: { ...metadata, filePath, videoDurationMs: recordedMs },

@@ -695,10 +695,11 @@ export class PlanExecutionOrchestrator {
         // the hook; the session's own timer rotates instead, and one session-level timer cannot
         // be raced by several tracks.
         state.androidTimerDriven = PlanPartitioner.isMultiDevicePlan(plan);
-        const recordingStartMs = this.timer.now();
         await (state.androidTimerDriven ? session.start() : session.startFirstSegment());
         state.androidSession = session;
-        state.androidStartedAtMs = recordingStartMs;
+        // Read the clock once startup resolves: capture begins here, so recorder setup time
+        // (device cleanup, config reads, display resolution) is not counted in the plan window.
+        state.androidStartedAtMs = this.timer.now();
         this.perfLog("Android segmented video recording started");
       } else {
         const recording = await this.videoRecorder.startVideoRecording({

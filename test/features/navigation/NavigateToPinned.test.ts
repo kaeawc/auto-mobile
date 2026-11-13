@@ -143,6 +143,53 @@ describe("navigateTo viaTransition (#16982)", () => {
     expect(graph.getMethodCallArgs("recordEdgeReplayOutcome")?.[1]).toBe(false);
   });
 
+  for (const via of [{ toolName: null }, { edgeId: 1 }]) {
+    test(`a recorded Back transition with depth evidence is replayed as Back (${JSON.stringify(via)})`, async () => {
+      ToolRegistry.register(
+        "pressButton",
+        "Fake",
+        z.object({ button: z.string() }),
+        async (args) => {
+          dispatched.push(`press:${args.button}`);
+          return { success: true };
+        },
+      );
+      graph.setCurrentScreenValue("Details");
+      graph.addNode({
+        screenName: "Details",
+        firstSeenAt: 0,
+        lastSeenAt: 0,
+        visitCount: 1,
+        backStackDepth: 2,
+      });
+      graph.addNode({
+        screenName: "Home",
+        firstSeenAt: 0,
+        lastSeenAt: 0,
+        visitCount: 1,
+        backStackDepth: 1,
+      });
+      // As getEdgesFrom reports a no-tool edge: unclassified.
+      graph.addEdge({ from: "Details", to: "Home", timestamp: 0, edgeType: "unknown" });
+
+      const result = await makeNav().execute(pinned({ from: "Details", to: "Home", ...via }));
+
+      expect(result.success).toBe(true);
+      expect(dispatched).toEqual(["press:back"]);
+    });
+  }
+
+  test("a no-tool transition without depth evidence is not replayed", async () => {
+    graph.setCurrentScreenValue("Details");
+    graph.addEdge({ from: "Details", to: "Home", timestamp: 0, edgeType: "unknown" });
+
+    const result = await makeNav().execute(pinned({ from: "Details", to: "Home", toolName: null }));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No replayable recorded transition");
+    expect(dispatched).toEqual([]);
+  });
+
   test("a missing transition is not reached and dispatches nothing", async () => {
     graph.addEdge(edge("B", "C", "tapOn"));
 

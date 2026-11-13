@@ -20,7 +20,7 @@ export interface TransitionPin {
 export interface PinnedNavigationHost {
   graph: Pick<
     NavigationGraphService,
-    "getCurrentScreen" | "getEdgesFrom" | "exportGraphSummary" | "hasEdgeReplayFailure"
+    "getCurrentScreen" | "getEdgesFrom" | "getNode" | "exportGraphSummary" | "hasEdgeReplayFailure"
   >;
   now(): number;
   /** Unpinned navigateTo to `targetScreen`: any known path. */
@@ -60,6 +60,29 @@ function matchesTool(edge: NavigationEdge, tool: string | null | undefined): boo
 }
 
 /**
+ * Whether a no-tool `from` → `to` edge is replayable as Back: the same evidence path finding
+ * uses (#10196), a target shallower than its source in the recorded back-stack depth.
+ * `getEdgesFrom` does not classify Back edges, so pinned candidates are classified here.
+ */
+async function hasBackEvidence(
+  pin: TransitionPin,
+  graph: PinnedNavigationHost["graph"],
+): Promise<boolean> {
+  const [source, target] = await Promise.all([graph.getNode(pin.from), graph.getNode(pin.to)]);
+  const sourceDepth = source?.backStackDepth;
+  const targetDepth = target?.backStackDepth;
+  return sourceDepth !== undefined && targetDepth !== undefined && targetDepth < sourceDepth;
+}
+
+/** `edge` as replayable, or undefined when nothing says what action caused it. */
+function asReplayable(edge: NavigationEdge, backEvidence: boolean): NavigationEdge | undefined {
+  if (edge.interaction !== undefined || edge.edgeType === "back") {
+    return edge;
+  }
+  return backEvidence ? { ...edge, edgeType: "back" } : undefined;
+}
+
+/**
  * The recorded edge to replay for `pin`, or why there is none. Only edges for this exact
  * transition qualify; among them an edge with no failed replay ranks first, then the newest.
  */
@@ -71,12 +94,12 @@ export async function resolvePinnedEdge(
   if ("missing" in selector) {
     return selector.missing;
   }
-  const candidates = (await graph.getEdgesFrom(pin.from)).filter(
-    (edge) =>
-      edge.to === pin.to &&
-      matchesTool(edge, selector.tool) &&
-      (edge.interaction !== undefined || edge.edgeType === "back"),
+  const matching = (await graph.getEdgesFrom(pin.from)).filter(
+    (edge) => edge.to === pin.to && matchesTool(edge, selector.tool),
   );
+  const backEvidence =
+    matching.some((edge) => edge.interaction === undefined) && (await hasBackEvidence(pin, graph));
+  const candidates = matching.flatMap((edge) => asReplayable(edge, backEvidence) ?? []);
   const ranked = candidates
     .map((edge) => ({ edge, failed: graph.hasEdgeReplayFailure(edge) }))
     .sort((a, b) => Number(a.failed) - Number(b.failed) || b.edge.timestamp - a.edge.timestamp);

@@ -1,6 +1,6 @@
 # Android XR glasses input
 
-Enable the opt-in `glassesInput` tool to move and click app focus on Android XR glasses.
+Enable the opt-in `glassesInput` tool to move and click app focus on Android XR glasses. To create and start a glasses emulator, see [Android XR emulators](android-xr.md).
 
 Call `glassesInput({ gesture: "swipeForward" })` to move down, `swipeBack` to move up, or `tap` to click the focused item. Set `axis: "horizontal"` for right/left movement; the default is `vertical`, and tap ignores the axis. `count` repeats any gesture, including tap, from 1 to 20 times (default 1).
 

@@ -41,6 +41,17 @@ function boundsText({ left, top, right, bottom }: ElementBounds): string {
 }
 
 /**
+ * Where a node outside focus sits for {@link Surroundings.layout}. A labelled node is as wide as
+ * its label (a value readout, `Slider Value: 49%`, grows or shrinks a pixel with its digits), so
+ * only its origin counts; an unlabelled node keeps its full bounds, so a scroll or resize still
+ * changes the layout (#17209).
+ */
+function layoutBounds(element: Element): string {
+  const { left, top } = element.bounds;
+  return labelOf(element) === "|" ? boundsText(element.bounds) : `${left},${top}`;
+}
+
+/**
  * The screen around focus: where each node outside the focused element sits, and where each label
  * is shown, the focused element's own labels included.
  */
@@ -82,7 +93,7 @@ function readSurroundings(screen: Pick<FocusScreen, "focused" | "elements">): Su
   }
   return {
     layout: outside
-      .map((element) => `${stringProp(element, "resource-id")}@${boundsText(element.bounds)}`)
+      .map((element) => `${stringProp(element, "resource-id")}@${layoutBounds(element)}`)
       .join("\n"),
     outside: outside.map((element) => ({
       resourceId: stringProp(element, "resource-id"),

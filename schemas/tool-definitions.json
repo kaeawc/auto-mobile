@@ -46988,12 +46988,12 @@
                 "motion": {
                   "type": "string",
                   "enum": ["parked", "driving", "unset"],
-                  "description": "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset."
+                  "description": "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset. On a phone projecting to a Desktop Head Unit: 'driving' sends restrict all, 'parked' and reset restrict none."
                 },
                 "nightMode": {
                   "type": "string",
                   "enum": ["on", "off", "unset"],
-                  "description": "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override."
+                  "description": "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override. On a phone projecting to a Desktop Head Unit: 'on' sends night, 'off' and reset send day."
                 }
               },
               "additionalProperties": false,
@@ -57313,7 +57313,7 @@
           ]
         },
         "display": {
-          "description": "Target panel key, role, or active",
+          "description": "Target panel key, role, or active; \"headUnit\" finds the text in the projected Car App templates and reports it without tapping",
           "type": "string"
         },
         "layer": {

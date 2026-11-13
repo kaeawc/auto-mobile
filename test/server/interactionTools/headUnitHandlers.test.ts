@@ -11,7 +11,11 @@ import {
 } from "../../../src/server/interactionTools";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { defaultHeadUnitInteractionFactory } from "../../../src/server/interactionTools/headUnitHandlers";
-import type { PressButtonArgs, TapAtArgs } from "../../../src/server/interactionToolTypes";
+import type {
+  PressButtonArgs,
+  TapAtArgs,
+  TapOnArgs,
+} from "../../../src/server/interactionToolTypes";
 import { FakeSession } from "../../fakes/FakeAndroidAutoProjection";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { fixtureProjectedTemplates } from "../../helpers/androidAutoProjectionFixtures";
@@ -33,9 +37,9 @@ afterAll(() => {
 
 /** Calls the registered tool, which is where display "headUnit" is routed. */
 function callTool(
-  name: "tapAt" | "pressButton",
+  name: "tapAt" | "pressButton" | "tapOn",
   device: BootedDevice,
-  args: Partial<TapAtArgs> | Partial<PressButtonArgs>,
+  args: Partial<TapAtArgs> | Partial<PressButtonArgs> | Partial<TapOnArgs>,
 ) {
   const handler = ToolRegistry.getTool(name)?.deviceAwareHandler;
   if (!handler) {
@@ -157,6 +161,56 @@ describe('tapAt and pressButton with display "headUnit"', () => {
   test("the default factory refuses a device this daemon runs no DHU for, and starts none", () => {
     expect(() => defaultHeadUnitInteractionFactory(phone)).toThrow(
       "No Desktop Head Unit is running for emulator-5554",
+    );
+  });
+});
+
+describe('tapOn with display "headUnit"', () => {
+  /** The projected templates read for tapOn, and a phone tapOn that must not run. */
+  function templates(read: CarAppProjectedTemplates | undefined) {
+    const phonePathCalls: string[] = [];
+    Object.assign(deps, {
+      headUnitTemplateSourceFactory: () => ({ read: async () => read }),
+      tapOnElementFactory: () => ({
+        execute: async () => {
+          phonePathCalls.push("tapOn");
+          throw new Error("phone tapOn must not run");
+        },
+      }),
+    } satisfies InteractionToolDependencies);
+    return { phonePathCalls };
+  }
+
+  test("text on the fixture's menu names the row it found and says how to reach it", async () => {
+    const { phonePathCalls } = templates(MENU);
+    const args = { selector: { text: "List template" }, display: "headUnit" } as TapOnArgs;
+    await expect(callTool("tapOn", phone, args)).rejects.toThrow(
+      /found "List template" \(row 1 of 5 in ListTemplate "AutoMobile Templates" on TemplateMenuScreen.*Use tapAt display "headUnit"/,
+    );
+    expect(phonePathCalls).toEqual([]);
+  });
+
+  test("text that matches nothing lists what the top templates show", async () => {
+    templates(MENU);
+    const args = { selector: { text: "Radio" }, display: "headUnit" } as TapOnArgs;
+    await expect(callTool("tapOn", phone, args)).rejects.toThrow(
+      /no row, tab or action matching "Radio".*"List template", "Grid template"/,
+    );
+  });
+
+  test("with no projected template snapshot, the error says to use tapAt or dpad", async () => {
+    templates(undefined);
+    const args = { selector: { text: "List template" }, display: "headUnit" } as TapOnArgs;
+    await expect(callTool("tapOn", phone, args)).rejects.toThrow(
+      /no projected app reported one.*pressButton display "headUnit"/,
+    );
+  });
+
+  test("an elementId selector is refused: templates carry no resource ids", async () => {
+    templates(MENU);
+    const args = { selector: { elementId: "com.app:id/row" }, display: "headUnit" } as TapOnArgs;
+    await expect(callTool("tapOn", phone, args)).rejects.toThrow(
+      "takes selector.text or selector.textAny",
     );
   });
 });

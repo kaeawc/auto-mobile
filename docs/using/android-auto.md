@@ -159,6 +159,39 @@ template route, so a switch to an app without it is not caught.
 
 `dpad back` pops the current screen on the head unit, so `pressButton back` needs no fallback.
 
+`tapOn` with `display: "headUnit"` and a `selector.text` or `selector.textAny` looks for the text in
+the top template of each projected app (`carAppTemplates.projected[]`): row titles and their secondary
+lines, tab titles and titled actions. It never sends input, because the template data does not say
+where the head unit draws a row. It always fails, with one of these messages:
+
+- The match and where it is: its row number and the row count, the template type and title, the
+  app's screen and the app's package. Tap it with `tapAt` at its head-unit pixels, or move focus to
+  it with `pressButton` `down` and `select`.
+- No match, with up to ten labels the top templates show.
+- No projected app reported a template, because none enabled the AutoMobile template route. Use
+  `tapAt` or `pressButton`.
+
+`elementId`, `testTag` and `accessibilityLink` selectors are refused.
+
+## Head unit day, night and driving restrictions
+
+With a DHU running for the phone, `setDeviceState` with `deviceCondition.vehicle` sends the DHU's
+console commands instead of changing the phone (see
+[Simulating driving and night mode](android-automotive.md#simulating-driving-and-night-mode) for the
+call):
+
+| Value               | DHU command     |
+| ------------------- | --------------- |
+| `nightMode: "on"`   | `night`         |
+| `nightMode: "off"`  | `day`           |
+| `motion: "driving"` | `restrict all`  |
+| `motion: "parked"`  | `restrict none` |
+
+The DHU does not report these back, so the result's `detail` says which command was sent, not what
+the head unit shows. Reset or `unset` sends `day` and `restrict none`, the state a DHU starts in; if
+the DHU exited before the reset, nothing is sent. Without a running DHU, a phone is refused as
+`unsupported`.
+
 | Error                                          | What to do                                                                                                    |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | No Desktop Head Unit is running for the device | Start one with `startDevice` and `androidAuto.headUnit`, or `provisionDevice` with `androidAuto`, then retry. |
@@ -259,7 +292,7 @@ default values, the same as `default.ini`: 800x480 at 160 dpi and 30 fps.
 - Android Auto renders the projected UI on virtual displays on the phone. `observe` lists them under
   `otherDisplays` (for example `TemplateCarFragment`, `Dashboard` and `GhFacetBar`) and may report the
   projection display as the active one, with a warning that it has no accessible content. The projected
-  UI is not in the accessibility tree; `observe`, `tapOn` and other tools act only on the phone screen.
+  UI is not in the accessibility tree; `observe` and other tools act only on the phone screen.
   To act on the head unit, use `tapAt` or `pressButton` with `display: "headUnit"` (see
   [Acting on the head unit](#acting-on-the-head-unit)).
 - While projecting, the phone's foreground app is Android Auto, not your app. If your app enabled the

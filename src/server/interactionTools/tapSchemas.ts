@@ -88,7 +88,12 @@ export const tapOnSchema = withJsonSchemaOverride(
     z
       .object({
         selector: tapOnSelectorSchema,
-        display: z.string().optional().describe("Target panel key, role, or active"),
+        display: z
+          .string()
+          .optional()
+          .describe(
+            'Target panel key, role, or active; "headUnit" finds the text in the projected Car App templates and reports it without tapping',
+          ),
         layer: hierarchyLayerSchema.optional(),
         exactText: z
           .boolean()

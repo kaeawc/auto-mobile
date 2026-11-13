@@ -70,6 +70,7 @@ const exploreResult: ExploreResult = {
 const dryRunResult: ExploreDryRunResult = {
   success: true,
   dryRun: true,
+  inputMode: "touch",
   currentScreen: { name: "Home", interactableElements: 1 },
   plannedInteractions: [
     {

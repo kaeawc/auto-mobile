@@ -615,6 +615,7 @@ export class Explore extends BaseVisualChange {
         timer: this.timer,
         targetPackageName: this.targetPackageName,
         exploredElements: this.exploredElements,
+        inputMode: await awaitWhileRequestIsLive(this.inputMode(), signal),
       },
       { perf, startTime },
     );

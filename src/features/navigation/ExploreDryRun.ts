@@ -19,6 +19,7 @@ import {
 import { rankElementsForDryRun } from "./ExploreElementScoring";
 import { withoutImeWindows } from "./ExploreImeFilter";
 import type { ExploreDryRunResult, ExploreOptions, TrackedElement } from "./ExploreTypes";
+import type { InteractionInputMode } from "./focusDrivenInput";
 
 interface DryRunPlanningContext {
   maxInteractions: number;
@@ -27,6 +28,8 @@ interface DryRunPlanningContext {
   timer: Timer;
   targetPackageName: string | null;
   exploredElements: Map<string, TrackedElement>;
+  /** How a run on this device would carry out the plan. */
+  inputMode: InteractionInputMode;
 }
 export function getObservationPackageName(observation: ObserveResult): string | null {
   const packageName =
@@ -78,7 +81,12 @@ export async function planExplorationDryRun(
   const viewHierarchy = observation.viewHierarchy;
   if (!viewHierarchy || viewHierarchy.hierarchy.error) {
     warnings.push("Unable to inspect view hierarchy for dry run planning.");
-    return unreadableDryRunResult(observation, warnings, context.timer.now() - startTime);
+    return unreadableDryRunResult(
+      observation,
+      warnings,
+      context.timer.now() - startTime,
+      context.inputMode,
+    );
   }
 
   warnings.push(
@@ -113,6 +121,7 @@ export async function planExplorationDryRun(
   return {
     success: true,
     dryRun: true,
+    inputMode: context.inputMode,
     currentScreen: {
       name: currentScreen,
       interactableElements: safeCandidates.length,

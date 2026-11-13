@@ -1,3 +1,4 @@
+import { rangeValueChange } from "../rangeValueChange";
 import { isVisibleAutoScrollTarget } from "./SwipeOnAutoTargeting";
 import { observedAndroidXr, withXrPoseWarning, xrScreenSwipeBounds } from "../../xr/xrPanelSpace";
 import { rejectTvosTouch } from "../../tvos/TvosActions";
@@ -675,6 +676,10 @@ export class SwipeOn extends BaseVisualChange {
       return result;
     }
     result.effect = this.deriveInteractionEffect(previous, result.observation);
+    const value = rangeValueChange(result.element, result.observation);
+    if (result.effect && value) {
+      result.effect.value = value;
+    }
     // Boomerangs return to the start, or only focus/announce a container in TalkBack mode.
     if (diagnostics.boomerang) {
       return result;

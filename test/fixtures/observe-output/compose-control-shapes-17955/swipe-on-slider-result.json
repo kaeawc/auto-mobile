@@ -1,0 +1,462 @@
+{
+  "message": "Swiped right",
+  "observation": {
+    "observationId": "221cccab-17d5-4741-82ae-f76e91f5011f",
+    "deviceId": "emulator-5702",
+    "display": {
+      "key": "0",
+      "role": "unknown",
+      "posture": "unknown",
+      "generation": 0
+    },
+    "updatedAt": 1794579546984,
+    "screenSize": {
+      "width": 1080,
+      "height": 2400,
+      "units": "physical-pixels"
+    },
+    "systemInsets": {
+      "top": 168,
+      "bottom": 84,
+      "left": 78,
+      "right": 78
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 136,
+          "bottom": 63,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 136,
+          "bottom": 63,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 136,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "unknown",
+        "bounds": [
+          [
+            480,
+            0,
+            625,
+            136
+          ]
+        ]
+      },
+      "systemGestures": {
+        "top": 168,
+        "bottom": 84,
+        "left": 78,
+        "right": 78
+      },
+      "mandatorySystemGestures": {
+        "top": 168,
+        "bottom": 84,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 136,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "visible",
+        "statusBar": "visible",
+        "navigationBar": "visible",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "rotation": 0,
+    "wakefulness": "Awake",
+    "wakefulnessSource": "hierarchy",
+    "backStack": {
+      "depth": 0,
+      "activities": [
+        {
+          "name": "dev.jasonpearson.automobile.playground.MainActivity",
+          "taskId": 8,
+          "userId": 0,
+          "taskAffinity": "10207:dev.jasonpearson.automobile.playground",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+          "taskId": 7,
+          "userId": 0,
+          "isTaskRoot": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": 8,
+          "userId": 0,
+          "affinity": "10207:dev.jasonpearson.automobile.playground",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.shell",
+          "rootActivity": "dev.jasonpearson.automobile.playground/.MainActivity",
+          "packageName": "dev.jasonpearson.automobile.playground",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            1080,
+            2400
+          ]
+        },
+        {
+          "id": 7,
+          "userId": 0,
+          "rootActivity": "com.google.android.apps.nexuslauncher/.NexusLauncherActivity",
+          "packageName": "com.google.android.apps.nexuslauncher",
+          "numActivities": 1,
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            1080,
+            2400
+          ]
+        }
+      ],
+      "currentActivity": {
+        "name": "dev.jasonpearson.automobile.playground.MainActivity",
+        "taskId": 8,
+        "userId": 0
+      },
+      "displayCount": 1,
+      "currentTaskId": 8,
+      "capturedAt": 1794579547121,
+      "source": "adb"
+    },
+    "activeWindow": {
+      "appId": "dev.jasonpearson.automobile.playground",
+      "activityName": "dev.jasonpearson.automobile.playground.MainActivity",
+      "layoutSeqSum": 851
+    },
+    "screenIdentity": {
+      "platform": "android",
+      "source": "sdk",
+      "confidence": "high",
+      "key": "[[\"bundle\",\"dev.jasonpearson.automobile.playground\"],[\"route\",\"DemoControlShapesDestination\"]]",
+      "components": {
+        "bundleId": "dev.jasonpearson.automobile.playground",
+        "navigationRoute": "DemoControlShapesDestination"
+      }
+    },
+    "deviceLock": {
+      "locked": false,
+      "keyguardShowing": false,
+      "secure": false
+    },
+    "accessibilityState": {
+      "enabled": false,
+      "service": "unknown",
+      "detectionSkipped": false
+    },
+    "freshness": {
+      "requestedAfter": 1794579546341,
+      "actualTimestamp": 1794579546984,
+      "ageMs": 48,
+      "verified": true,
+      "isFresh": true
+    },
+    "gfxMetrics": {
+      "packageName": "dev.jasonpearson.automobile.playground",
+      "percentile50thMs": 4950,
+      "percentile90thMs": 4950,
+      "percentile95thMs": 4950,
+      "percentile99thMs": 4950,
+      "missedVsyncCount": 0,
+      "slowUiThreadCount": 0,
+      "frameDeadlineMissedCount": 0,
+      "pollCount": 3,
+      "stabilityWaitMs": 173,
+      "isStable": true
+    },
+    "settled": false,
+    "skeleton": [
+      {
+        "bounds": [
+          42,
+          423,
+          179,
+          549
+        ],
+        "affordances": [
+          "tap",
+          "toggle"
+        ],
+        "elementId": "s2-54a37556722ca76a-1",
+        "label": "Flat Wi-Fi",
+        "checked": false
+      },
+      {
+        "bounds": [
+          42,
+          612,
+          179,
+          738
+        ],
+        "affordances": [
+          "tap",
+          "toggle"
+        ],
+        "elementId": "s2-54a37556722ca76a-2",
+        "label": "Flat Bluetooth",
+        "checked": false
+      },
+      {
+        "bounds": [
+          901,
+          836,
+          1038,
+          962
+        ],
+        "affordances": [
+          "tap",
+          "toggle"
+        ],
+        "elementId": "duplicate_id_switch",
+        "label": "Duplicate A",
+        "checked": false,
+        "index": 0
+      },
+      {
+        "bounds": [
+          901,
+          962,
+          1038,
+          1088
+        ],
+        "affordances": [
+          "tap",
+          "toggle"
+        ],
+        "elementId": "duplicate_id_switch",
+        "label": "Duplicate B",
+        "checked": false,
+        "index": 1
+      },
+      {
+        "bounds": [
+          901,
+          1088,
+          1038,
+          1214
+        ],
+        "affordances": [
+          "tap",
+          "toggle"
+        ],
+        "elementId": "duplicate_id_switch",
+        "label": "Duplicate C",
+        "checked": false,
+        "index": 2
+      },
+      {
+        "bounds": [
+          12,
+          158,
+          138,
+          284
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "control_shapes_back",
+        "label": "Back"
+      }
+    ],
+    "context": [
+      {
+        "bounds": [
+          42,
+          304,
+          298,
+          360
+        ],
+        "affordances": [],
+        "elementId": "s2-eb78b6e325e4d734",
+        "label": "Flat siblings"
+      },
+      {
+        "bounds": [
+          42,
+          360,
+          252,
+          423
+        ],
+        "affordances": [],
+        "elementId": "s2-30bc83aaa726eb7c",
+        "label": "Flat Wi-Fi"
+      },
+      {
+        "bounds": [
+          42,
+          549,
+          349,
+          612
+        ],
+        "affordances": [],
+        "elementId": "s2-c78489fd1d748077",
+        "label": "Flat Bluetooth"
+      },
+      {
+        "bounds": [
+          42,
+          780,
+          313,
+          836
+        ],
+        "affordances": [],
+        "elementId": "s2-d7b28d7e4e7569ba",
+        "label": "Duplicate ids"
+      },
+      {
+        "bounds": [
+          42,
+          868,
+          287,
+          931
+        ],
+        "affordances": [],
+        "elementId": "s2-3804fa5dc3f94b92",
+        "label": "Duplicate A"
+      },
+      {
+        "bounds": [
+          42,
+          994,
+          282,
+          1057
+        ],
+        "affordances": [],
+        "elementId": "s2-4b807ce5603d5df5",
+        "label": "Duplicate B"
+      },
+      {
+        "bounds": [
+          42,
+          1120,
+          283,
+          1183
+        ],
+        "affordances": [],
+        "elementId": "s2-e2a8e6e3c041ada0",
+        "label": "Duplicate C"
+      },
+      {
+        "bounds": [
+          42,
+          1256,
+          449,
+          1312
+        ],
+        "affordances": [],
+        "elementId": "s2-61c977876b14bdc0",
+        "label": "Readout-less slider"
+      },
+      {
+        "bounds": [
+          148,
+          181,
+          564,
+          259
+        ],
+        "affordances": [],
+        "elementId": "s2-3563a3cda32007b8",
+        "label": "Control Shapes"
+      },
+      {
+        "bounds": [
+          151,
+          1,
+          209,
+          136
+        ],
+        "affordances": [],
+        "elementId": "s2-11743fc6defd147c",
+        "label": "Android System notification: Serial console enabled"
+      },
+      {
+        "bounds": [
+          930,
+          39,
+          969,
+          97
+        ],
+        "affordances": [],
+        "elementId": "com.android.systemui:id/mobile_combo",
+        "label": "Phone signal full."
+      },
+      {
+        "bounds": [
+          47,
+          47,
+          1005,
+          90
+        ],
+        "affordances": [],
+        "elementId": "com.android.systemui:status-bar-summary",
+        "label": "Status bar: 8:19, Wifi signal full., Battery charging, 100 percent."
+      }
+    ]
+  },
+  "success": true,
+  "x1": 170,
+  "y1": 1375,
+  "x2": 909,
+  "y2": 1375,
+  "duration": 300,
+  "targetType": "element",
+  "element": {
+    "actions": [
+      "focus",
+      "accessibility_focus",
+      "scroll_forward",
+      "scroll_backward"
+    ],
+    "resource-id": "readout_less_slider",
+    "visible-to-user": true,
+    "state-description": "0.5",
+    "range-info": "current:0.5,min:0.0,max:1.0",
+    "view-id": "readout_less_slider",
+    "class": "android.widget.SeekBar",
+    "className": "android.widget.SeekBar",
+    "focusable": "true",
+    "bounds": {
+      "left": 16,
+      "top": 1317,
+      "right": 1064,
+      "bottom": 1433
+    }
+  },
+  "effect": {
+    "screenChanged": true,
+    "basis": "viewHierarchy changed"
+  },
+  "velocityPxPerSecond": 2463,
+  "observationDiff": {
+    "mode": "full",
+    "reason": "disabled",
+    "hint": "Set --actions-diff-observe to receive diffs."
+  }
+}

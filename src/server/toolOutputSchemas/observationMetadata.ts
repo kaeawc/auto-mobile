@@ -1,3 +1,4 @@
+import { rangeValueSchema } from "./elements";
 import { z } from "zod/v4";
 import { elementBoundsSchema } from "./display";
 
@@ -87,6 +88,7 @@ export const toolOutputArtifactMetadataSchema = z
 export const tapEffectSchema = z
   .object({
     screenChanged: z.boolean(),
+    value: z.object({ before: rangeValueSchema, after: rangeValueSchema }).optional(),
     basis: z.enum([
       "screenIdentity changed",
       "screenIdentity unchanged",

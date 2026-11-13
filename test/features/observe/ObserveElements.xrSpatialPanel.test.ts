@@ -97,7 +97,7 @@ test("XR skeleton sanitization preserves its input", async () => {
   expect(observation).toEqual(original);
 });
 
-test("non-XR full and skeleton output stay byte-identical", () => {
+test("non-XR output includes range controls without XR coordinate metadata", () => {
   const observation = spatialPanelObservation();
   observation.elements = new ObserveElementsBuilder().build(
     observation.viewHierarchy!,
@@ -106,8 +106,8 @@ test("non-XR full and skeleton output stay byte-identical", () => {
     observation,
   );
   for (const [project, digest] of [
-    ["full", "5076eef69a06ddd1de991084ab8bb3b37ec2bce8697b0d8cc546966965d3e779"],
-    ["skeleton", "a870556b6f4c3ea679320ebdef816263ba97a442feb096f0891be2566f904593"],
+    ["full", "2c974fcdbe4aefea2b82b9d1062a757842091394eb526f09a28e5836d9627ffd"],
+    ["skeleton", "afb5ec3caf40d69b074af04c135195d6953e5b68bc5fb623cd1e39b9ae24e8e5"],
   ] as const) {
     const serialized = JSON.stringify(
       sanitizeObserveResult(observation, { dropElements: false, compact: true, project }),

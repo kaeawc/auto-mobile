@@ -6,6 +6,8 @@ import {
   compactBoundsTupleSchema,
 } from "./display";
 
+export const rangeValueSchema = z.object({ current: z.number(), min: z.number(), max: z.number() });
+
 // Android accessibility returns boolean attributes as strings ("true"/"false")
 // This schema accepts both for compatibility
 const booleanOrString = z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional();
@@ -287,7 +289,7 @@ export const skeletonElementSchema = z
       "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
         "for skeleton entries. boundsSpace identifies Android XR panel/owning-window coordinates; space identifies visionOS ornament coordinates. Neither is screen space.",
     ),
-    affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
+    affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle", "adjust"])),
     occluded: z
       .literal(true)
       .optional()
@@ -295,6 +297,7 @@ export const skeletonElementSchema = z
         "Fully covered by the Android IME window or the visible iOS keyboard, or an iOS row with no visible tap area: off screen, under a navigation/status/tab bar, scrolled out of its scroll container, or covered by another control; this row has no actionable affordance.",
       ),
     checked: z.boolean().optional(),
+    range: rangeValueSchema.optional(),
     selected: z
       .literal(true)
       .optional()

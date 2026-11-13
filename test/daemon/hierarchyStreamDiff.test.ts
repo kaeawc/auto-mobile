@@ -272,3 +272,12 @@ describe("nodeSignature alias folding", () => {
     expect(summary.changed).toBe(1);
   });
 });
+
+test("range-only changes update the streamed hierarchy signature", () => {
+  const attributes = { "resource-id": "slider", "range-info": "current:0.5,min:0,max:1" };
+  const before = hierarchy(node(attributes));
+  const after = hierarchy(node({ ...attributes, "range-info": "current:0.8,min:0,max:1" }));
+  const result = annotateHierarchyDiff(before, after);
+  expect(result.summary.changed).toBe(1);
+  expect(diffState(result.hierarchy.hierarchy.node)).toBe("changed");
+});

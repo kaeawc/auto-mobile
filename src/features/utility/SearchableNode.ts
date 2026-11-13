@@ -1,3 +1,4 @@
+import { isRangeWidget } from "./RangeInfo";
 import {
   displayedSearchableLabel,
   foldSearchableLabels,
@@ -29,7 +30,6 @@ import { nodeBounds } from "../../models/ViewHierarchyResult";
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
-  isClickableElementProperties,
   isCollectionElementProperties,
   isEditableElementProperties,
 } from "./elementProperties";
@@ -185,6 +185,9 @@ function deriveAffordances(properties: SearchableProperties): Affordance[] {
   if (isTruthy(properties.checkable)) {
     affordances.push("toggle");
   }
+  if (isRangeWidget(properties)) {
+    affordances.push("adjust");
+  }
   return affordances;
 }
 
@@ -251,7 +254,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     affordances,
     categoryText,
     categories: {
-      clickable: isClickableElementProperties(properties) || isTruthy(properties.checkable),
+      clickable: affordances.some((action) => ["tap", "toggle", "adjust"].includes(action)),
       scrollable: isTruthy(properties.scrollable),
       text: nonEmptyString(categoryText) !== undefined,
     },
@@ -528,7 +531,7 @@ function attributeSearchableLabels(entries: SearchableEntry[]): void {
 }
 
 /**
- * The searchable twin of the skeleton's preceding-sibling toggle label (#17955), so the
+ * The searchable twin of the skeleton's preceding-sibling toggle/range label (#17955), so the
  * resolver's `displayedLabel` matches the emitted row and duplicate indexes still apply.
  * Both projections run the one rule in `precedingSiblingLabelSources` (#18286), including
  * trailing-text reservation and coordinate space, over the same nodes: only bounded nodes
@@ -545,7 +548,9 @@ function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): 
   const hoisted = new Set(entries.flatMap((entry) => entry.hoistedSources ?? []));
   const positions = boundedEntryPositions(entries);
   const toggles = entries.filter(
-    (entry) => entry.element !== undefined && entry.affordances.includes("toggle"),
+    (entry) =>
+      entry.element !== undefined &&
+      (entry.affordances.includes("toggle") || entry.affordances.includes("adjust")),
   );
   const byCopy = new Map<string, SearchableEntry>();
   const firstCopy = new Map<SearchableEntry, SearchableEntry>();

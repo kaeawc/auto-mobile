@@ -1,3 +1,4 @@
+import { parseRangeInfo } from "../../utility/RangeInfo";
 import { isSystemUiStatusBarId } from "../../../utils/androidStatusBar";
 import {
   displayedSearchableLabel,
@@ -114,7 +115,14 @@ export type { ImeOccluder } from "./skeletonProjection/ime";
  */
 
 /** Canonical emit order for affordances (matches the {@link Affordance} union). */
-const AFFORDANCE_ORDER: readonly Affordance[] = ["tap", "long-press", "input", "scroll", "toggle"];
+const AFFORDANCE_ORDER: readonly Affordance[] = [
+  "tap",
+  "long-press",
+  "input",
+  "scroll",
+  "toggle",
+  "adjust",
+];
 
 /** Class names alone do not make an unfocusable field an actionable input. */
 function toSkeletonSearchable(el: Element): ReturnType<typeof toSearchable> {
@@ -137,9 +145,16 @@ function deriveSublabel(el: Element, label: string | undefined): string | undefi
 
 /** Preserve coordinate space and explicit disabled state on a row or its accumulator. */
 function copyElementState(
-  element: Pick<Element, "enabled" | "space" | "boundsSpace">,
-  row: Pick<SkeletonElement, "enabled" | "space" | "boundsSpace">,
+  element: Pick<Element, "enabled" | "space" | "boundsSpace"> & {
+    range?: SkeletonElement["range"];
+    "range-info"?: unknown;
+  },
+  row: Pick<SkeletonElement, "enabled" | "space" | "boundsSpace" | "range">,
 ): void {
+  const range = element.range ?? parseRangeInfo(element["range-info"]);
+  if (range) {
+    row.range = range;
+  }
   if (element.boundsSpace) {
     row.boundsSpace = element.boundsSpace;
   }
@@ -805,6 +820,7 @@ function isBareRow(acc: SkeletonAccumulator): boolean {
     acc.sublabel === undefined &&
     acc.editableHint === undefined &&
     acc.checked === undefined &&
+    acc.range === undefined &&
     acc.selected === undefined &&
     acc.stateDescription === undefined &&
     acc.semanticLinks === undefined

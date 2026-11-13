@@ -342,3 +342,4 @@ schemas/prototype-spec-contract.json text eol=lf
 schemas/prototype-ios-icon-symbols.json text eol=lf
 docs/using/prototype-icons.md text eol=lf
 test/fixtures/android-xr-sendkeys/*.txt text eol=lf
+test/fixtures/observe-output/compose-control-shapes-17955/*.json text eol=lf

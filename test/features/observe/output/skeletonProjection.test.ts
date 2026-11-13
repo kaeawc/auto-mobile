@@ -622,7 +622,7 @@ describe("toSkeleton — acceptance criteria", () => {
       expect("checked" in (findById(before, "plain") as SkeletonElement)).toBe(false);
     });
 
-    test("multiple affordances emit in canonical order tap,long-press,input,scroll,toggle", () => {
+    test("multiple affordances emit in canonical order tap,long-press,input,scroll,toggle,adjust", () => {
       const kitchenSink: Element = {
         bounds: bounds(0, 0, 10, 10),
         "resource-id": "everything",
@@ -632,9 +632,17 @@ describe("toSkeleton — acceptance criteria", () => {
         "input-type": "text",
         scrollable: "true",
         checkable: "true",
+        "range-info": "current:0.5,min:0,max:1",
       };
       const skeleton = toSkeleton(makeElements({ clickable: [kitchenSink] }));
-      expect(skeleton[0].affordances).toEqual(["tap", "long-press", "input", "scroll", "toggle"]);
+      expect(skeleton[0].affordances).toEqual([
+        "tap",
+        "long-press",
+        "input",
+        "scroll",
+        "toggle",
+        "adjust",
+      ]);
     });
   });
 

@@ -8,7 +8,12 @@ import {
   createSessionRequirementCapabilityHandler,
   sessionRequirementCapabilitySchema,
 } from "../../../src/server/sessionRequirementCapabilityTool";
-import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import {
+  androidCatalog,
+  androidDefaults,
+  iosCatalog,
+  iosDefaults,
+} from "../../devices/sessionRequirements/fixtures";
 
 const IOS_OMITTED = {
   schemaVersion: 1,
@@ -50,6 +55,29 @@ describe("brokerRequirementCapability (#18180)", () => {
       },
     });
     expect(fake.reads).toEqual(["ios"]);
+  });
+
+  test("a non-emulatable deviceProfile answers requires_real_device, as admission refuses", async () => {
+    const options = {
+      catalog: async () => androidCatalog(),
+      defaults: () => androidDefaults(),
+    };
+    const answer = await brokerRequirementCapability(options, {
+      schemaVersion: 1,
+      platform: "android",
+      hardware: { kind: "omitted" },
+      os: { kind: "omitted" },
+      deviceProfile: { manufacturerProfile: "samsung-oneui", requires: ["knox"] },
+    });
+    expect(answer).toMatchObject({
+      ok: true,
+      value: {
+        satisfiable: false,
+        defaultOsSatisfiable: false,
+        anyOsSatisfiable: false,
+        reason: { code: "requires_real_device", transient: false },
+      },
+    });
   });
 
   test("an unconfigured platform is invalid_config and reads no catalog", async () => {

@@ -1,0 +1,29 @@
+{
+  "success": false,
+  "status": "stuck",
+  "steps": 2,
+  "path": [
+    {
+      "descendantLabel": "readout_less_slider",
+      "resourceId": "readout_less_slider",
+      "bounds": {
+        "left": 16,
+        "top": 1317,
+        "right": 1064,
+        "bottom": 1433
+      }
+    }
+  ],
+  "focusedElement": {
+    "descendantLabel": "readout_less_slider",
+    "resourceId": "readout_less_slider",
+    "bounds": {
+      "left": 16,
+      "top": 1317,
+      "right": 1064,
+      "bottom": 1433
+    }
+  },
+  "message": "id=nonexistent_target was not on screen in any read and no on-screen row holds labels like it, so the walk pressed down until focus stopped moving; focus ended on \"readout_less_slider\". If it sits further along a row, move focus into that row and call focusNavigate with direction \"right\"; the target was not focused. Observe before retrying.",
+  "selected": false
+}

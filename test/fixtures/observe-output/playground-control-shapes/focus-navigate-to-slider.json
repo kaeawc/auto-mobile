@@ -1,0 +1,84 @@
+{
+  "success": true,
+  "status": "focused",
+  "steps": 7,
+  "path": [
+    {
+      "descendantLabel": "Back",
+      "resourceId": "control_shapes_back",
+      "bounds": {
+        "left": 12,
+        "top": 158,
+        "right": 138,
+        "bottom": 284
+      }
+    },
+    {
+      "bounds": {
+        "left": 42,
+        "top": 423,
+        "right": 179,
+        "bottom": 549
+      }
+    },
+    {
+      "bounds": {
+        "left": 42,
+        "top": 612,
+        "right": 179,
+        "bottom": 738
+      }
+    },
+    {
+      "descendantLabel": "duplicate_id_switch",
+      "resourceId": "duplicate_id_switch",
+      "bounds": {
+        "left": 901,
+        "top": 836,
+        "right": 1038,
+        "bottom": 962
+      }
+    },
+    {
+      "descendantLabel": "duplicate_id_switch",
+      "resourceId": "duplicate_id_switch",
+      "bounds": {
+        "left": 901,
+        "top": 962,
+        "right": 1038,
+        "bottom": 1088
+      }
+    },
+    {
+      "descendantLabel": "duplicate_id_switch",
+      "resourceId": "duplicate_id_switch",
+      "bounds": {
+        "left": 901,
+        "top": 1088,
+        "right": 1038,
+        "bottom": 1214
+      }
+    },
+    {
+      "descendantLabel": "readout_less_slider",
+      "resourceId": "readout_less_slider",
+      "bounds": {
+        "left": 16,
+        "top": 1317,
+        "right": 1064,
+        "bottom": 1433
+      }
+    }
+  ],
+  "focusedElement": {
+    "descendantLabel": "readout_less_slider",
+    "resourceId": "readout_less_slider",
+    "bounds": {
+      "left": 16,
+      "top": 1317,
+      "right": 1064,
+      "bottom": 1433
+    }
+  },
+  "selected": false
+}

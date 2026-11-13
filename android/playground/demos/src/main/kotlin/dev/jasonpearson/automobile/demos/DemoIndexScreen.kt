@@ -53,6 +53,7 @@ data class DemoIndexNavigation(
   val onNavigateToPointerProbe: () -> Unit = {},
   val onNavigateToCollapsingComposer: () -> Unit = {},
   val onNavigateToSharedRowIdList: () -> Unit = {},
+  val onNavigateToControlShapes: () -> Unit = {},
   val onNavigateBack: () -> Unit = {},
 )
 
@@ -83,6 +84,7 @@ fun DemoIndexScreen(navigation: DemoIndexNavigation) {
           navigation.onNavigateToPointerProbe,
           navigation.onNavigateToCollapsingComposer,
           navigation.onNavigateToSharedRowIdList,
+          navigation.onNavigateToControlShapes,
         )
 
     Scaffold(
@@ -264,6 +266,7 @@ private fun toolingDemos(
   onNavigateToPointerProbe: () -> Unit,
   onNavigateToCollapsingComposer: () -> Unit,
   onNavigateToSharedRowIdList: () -> Unit,
+  onNavigateToControlShapes: () -> Unit,
 ): List<DemoEntry> =
   listOf(
     DemoEntry(
@@ -294,5 +297,12 @@ private fun toolingDemos(
       description = "XML RecyclerView of 60 rows that all share one resource id.",
       buttonLabel = "Open Shared Row Id List",
       onClick = onNavigateToSharedRowIdList,
+    ),
+    DemoEntry(
+      id = "demo_control_shapes",
+      title = "Control Shapes",
+      description = "Flat Text/Switch siblings, switches sharing one id and a readout-less slider.",
+      buttonLabel = "Open Control Shapes",
+      onClick = onNavigateToControlShapes,
     ),
   )

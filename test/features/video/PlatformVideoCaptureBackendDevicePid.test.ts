@@ -92,7 +92,7 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
     expect(factory.getFakeClient().getSpawnCalls()).toEqual([
       [
         "shell",
-        `if command -v setsid >/dev/null 2>&1; then setsid sh -c 'echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}`,
+        `trap '' HUP; if command -v setsid >/dev/null 2>&1; then setsid sh -c 'echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}`,
       ],
     ]);
   });

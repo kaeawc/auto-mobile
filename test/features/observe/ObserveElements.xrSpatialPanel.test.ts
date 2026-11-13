@@ -523,7 +523,7 @@ function wrapRow(id: string, ...children: CapturedNode[]): CapturedNode {
   return { "view-id": id, bounds: children[0].bounds, node: children };
 }
 
-async function switchLabels(
+async function twoSwitchLabels(
   rows: Parameters<typeof restructureSwitchRows>[1],
 ): Promise<(string | undefined)[]> {
   const output = await switchScrollSkeleton((observation) =>
@@ -535,19 +535,22 @@ async function switchLabels(
 }
 
 test("flat `Text, Switch, Text, Switch` siblings label every switch (#18227)", async () => {
-  expect(await switchLabels((t1, s1, t2, s2) => [t1, s1, t2, s2])).toEqual([
+  expect(await twoSwitchLabels((t1, s1, t2, s2) => [t1, s1, t2, s2])).toEqual([
     "XrPanel title",
     "XrPanel subtitle",
   ]);
 });
 
 test("flat `Switch, Text, Switch, Text` siblings never borrow the previous trailing text (#18227)", async () => {
-  expect(await switchLabels((t1, s1, t2, s2) => [s1, t1, s2, t2])).toEqual([undefined, undefined]);
+  expect(await twoSwitchLabels((t1, s1, t2, s2) => [s1, t1, s2, t2])).toEqual([
+    undefined,
+    undefined,
+  ]);
 });
 
 test("separate `Row { Text; Switch }` containers label each switch (#18227)", async () => {
   expect(
-    await switchLabels((t1, s1, t2, s2) => [
+    await twoSwitchLabels((t1, s1, t2, s2) => [
       wrapRow("s2-row-1", t1, s1),
       wrapRow("s2-row-2", t2, s2),
     ]),
@@ -556,7 +559,7 @@ test("separate `Row { Text; Switch }` containers label each switch (#18227)", as
 
 test("separate `Row { Switch; Text }` containers never borrow the previous row's text (#18227)", async () => {
   expect(
-    await switchLabels((t1, s1, t2, s2) => [
+    await twoSwitchLabels((t1, s1, t2, s2) => [
       wrapRow("s2-row-1", s1, t1),
       wrapRow("s2-row-2", s2, t2),
     ]),
@@ -565,13 +568,13 @@ test("separate `Row { Switch; Text }` containers never borrow the previous row's
 
 test("text after an already-labelled toggle still labels the next switch (#18227)", async () => {
   expect(
-    await switchLabels((t1, s1, t2, s2) => [{ ...s1, "content-desc": "Wi-Fi" }, t2, s2, t1]),
+    await twoSwitchLabels((t1, s1, t2, s2) => [{ ...s1, "content-desc": "Wi-Fi" }, t2, s2, t1]),
   ).toEqual(["Wi-Fi", "XrPanel subtitle"]);
 });
 
 test("trailing text inside a non-actionable wrapper never labels the next switch (#18227)", async () => {
   expect(
-    await switchLabels((t1, s1, t2, s2) => [
+    await twoSwitchLabels((t1, s1, t2, s2) => [
       s1,
       wrapRow("s2-wrap-1", t1),
       s2,
@@ -582,7 +585,7 @@ test("trailing text inside a non-actionable wrapper never labels the next switch
 
 test("leading text inside a wrapper still labels the switch after it (#18227)", async () => {
   expect(
-    await switchLabels((t1, s1, t2, s2) => [
+    await twoSwitchLabels((t1, s1, t2, s2) => [
       wrapRow("s2-wrap-1", t1),
       s1,
       wrapRow("s2-wrap-2", t2),

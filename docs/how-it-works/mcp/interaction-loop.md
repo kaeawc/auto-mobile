@@ -200,6 +200,10 @@ the matching screenshot path; observe preserves its existing freshness meaning
 of `screenshotCaptureSource`. Stream screenshot updates forward the same optional
 stage timings alongside their backend source and fallback fields. Each one-shot
 capture logs its source, fallback reason and stage durations.
+After an Android hierarchy sync exhausts its budget with at least 3000 ms of
+waiting and no reply, later reads on that client probe for at most 2000 ms until
+a read succeeds or the 60,000 ms cooldown expires; shorter caller budgets are
+preserved (#18151).
 
 ## Default compact action metadata
 

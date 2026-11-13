@@ -10,21 +10,34 @@ import type { SkeletonAccumulator } from "./rowModel";
  * outermost one (smallest `enter`) wins, so it is the preceding sibling itself
  * rather than a nested descendant. Without provenance the order is unknown and the
  * toggle keeps no label. The text row itself stays in `context`.
+ *
+ * A text that starts right after another toggle's subtree ends is that toggle's
+ * trailing label (`Row { Switch(); Text("Wi-Fi") }`), so it never labels the next
+ * toggle (issue #18227). This covers a flattened list of `Switch, Text` pairs and
+ * a previous row whose last child is its text.
  */
 export function attributePrecedingSiblingLabels(
   accumulators: SkeletonAccumulator[],
   foldedIntoClickable: (text: SkeletonAccumulator) => boolean,
 ): void {
+  const toggles = accumulators.filter((acc) => acc.provenance && acc.affordances.has("toggle"));
+  const trailsToggle = (text: SkeletonAccumulator): boolean =>
+    toggles.some(
+      (toggle) =>
+        toggle.provenance!.group === text.provenance!.group &&
+        toggle.provenance!.exit === text.provenance!.enter - 1,
+    );
   const texts = accumulators.filter(
     (acc) =>
       acc.affordances.size === 0 &&
       acc.label?.trim() &&
       acc.provenance &&
-      !foldedIntoClickable(acc),
+      !foldedIntoClickable(acc) &&
+      !trailsToggle(acc),
   );
-  for (const acc of accumulators) {
-    const own = acc.provenance;
-    if (acc.label !== undefined || !own || !acc.affordances.has("toggle")) {
+  for (const acc of toggles) {
+    const own = acc.provenance!;
+    if (acc.label !== undefined) {
       continue;
     }
     const preceding = texts

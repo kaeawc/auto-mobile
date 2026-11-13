@@ -5,7 +5,8 @@ Call `observe` to read the current screen before choosing a target. The default
 returns the hierarchy. Bounds tuples are `[left, top, right, bottom]`.
 A toggle row with no label of its own or from its enclosing row takes the text
 shown immediately before it, such as the `Dark mode` text beside a `Switch`; that
-text still appears in `context`.
+text still appears in `context`. Text that follows another toggle belongs to that
+toggle's row and never labels the next one.
 
 For an Android XR app with an embedded SpatialPanel, `xrPanelSpace` identifies
 the panel's `windowId` and window `bounds`. Elements and skeleton/context rows

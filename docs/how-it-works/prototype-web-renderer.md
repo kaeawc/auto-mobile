@@ -168,7 +168,7 @@ it inlined per variant.
   It snapshots the shown variant's revisions before encoding, so a revision landing meanwhile does
   not change the page's `_meta`.
 - **Image budget.** Each image is one `:root` rule in the head defining `--pa-<slot>` (its
-  `data:image/webp` URI), `-bg` (transparent), `-ar` (its aspect ratio) and `-on` (1); views only
+  `data:image/webp` URI), `-bg` (transparent) and `-ar` (its aspect ratio); views only
   reference the slot, so view bytes do not depend on which images fit and every orientation and
   revision shares one copy. A rule is charged once, in this order: the images of the shown
   revision's start screen, then of the other pinned start screens, then each screen's images right
@@ -564,12 +564,12 @@ the host, so the page's script only switches between views it was given and neve
   `aspect-ratio` on an axis it leaves to wrap (so a weighted share carries it to the other axis,
   as before the content box existed); with padding (safe-area insets included) it is an in-flow
   child inside the padding that carries the ratio and the 48 px minimum. A zeroed row child's box
-  drops its inline padding, so its draw and minimums take none out either. The layers are an image layer (the slot's image as a centred background, `contain`, `cover` or
-  `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
-  `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
-  shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint
-  layer. `Modulate` multiplies alpha too, so a translucent tint wraps both layers in a group at the
-  tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Item images (nav items) are not inlined. Any other node draws a
+  drops its inline padding, so its draw and minimums take none out either. The layer is the slot's image as a centred background (`contain`, `cover` or
+  `100% 100%` for `fit`, `crop` and `fill`), filtered by `saturate()` for `filter.saturation` and
+  then, for `filter.tint`, an inline SVG `feColorMatrix` (`sRGB` interpolation, id
+  `pa-tint-<rrggbbaa>`) that multiplies every channel, alpha included, by the tint's, as Android's
+  saturation colour matrix then its `Modulate` tint layer (a fully transparent tint hides the
+  image, and a partly transparent pixel keeps alpha `a × tint.a`); a corner radius clips it. Item images (nav items) are not inlined. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Posture.** A foldable frame draws the panel its `posture` lights (default `opened`, else its
   first posture; a frame without postures takes none, and an unknown posture is an error listing

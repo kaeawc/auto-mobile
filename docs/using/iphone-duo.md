@@ -29,7 +29,7 @@ Each archetype (`phone`, `tablet`, `duo`) may appear at most once; a duplicate f
 loading. An entry applies only when the request omits `os`; a request that passes an `os`
 selector gets exactly that selector. Alternatively, pass `os` in the Duo request.
 
-## Reading the posture with getDeviceState
+## Reading the posture with `getDeviceState`
 
 `getDeviceState` is not listed in `tools/list` by default. A client that picks tools from
 discovery must enable it first with

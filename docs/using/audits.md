@@ -4,7 +4,7 @@ Two tools check the current screen on demand and can fail a plan step: `accessib
 accessibility and `performanceAudit` for UI performance and memory. Neither changes feature-flag
 state. Both are off by default; enable them with `setToolEnabled`.
 
-## accessibilityAudit
+## `accessibilityAudit`
 
 | Parameter         | Engine   | Meaning                                                                                                     |
 | ----------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
@@ -44,7 +44,7 @@ iOS runner predates the audit command: restart the daemon so it installs the cur
     failOn: error
 ```
 
-## performanceAudit
+## `performanceAudit`
 
 Android only.
 

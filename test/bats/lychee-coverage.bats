@@ -186,3 +186,92 @@ own_repo_fixture() {
   [ "$status" -eq 0 ]
   [ "$output" = "504" ]
 }
+
+# --- own-site absolute URLs resolve against the fresh build (#18185) ---
+# docs.yml republishes the live site nightly, so a link to a page added on this
+# commit must be checked against the build, not the live site.
+
+REMAPS="scripts/lychee/own_site_remaps.sh"
+SITE="https://kaeawc.github.io/auto-mobile"
+
+own_site_fixture() {
+  BUILT="$BATS_TEST_TMPDIR/built"
+  mkdir -p "$BUILT/new-section" "$BUILT/assets" "$BATS_TEST_TMPDIR/src"
+  printf '<html><body><h1 id="intro">Home</h1></body></html>\n' >"$BUILT/index.html"
+  printf '<html><body><h2 id="topic">T</h2></body></html>\n' >"$BUILT/new-section/index.html"
+  printf '{}\n' >"$BUILT/assets/data.json"
+  REMAP_ARGS=()
+  local rule
+  while IFS= read -r rule; do
+    REMAP_ARGS+=(--remap "$rule")
+  done < <("$REMAPS" "$SITE/" "$BUILT")
+}
+
+@test "own_site_remaps.sh prints a directory rule then a file rule" {
+  run "$REMAPS" "$SITE/" /tmp/built
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  [[ "${lines[0]}" == '^https://kaeawc\.github\.io/auto-mobile/'*' file:///tmp/built/${1}index.html${2}' ]]
+  [[ "${lines[1]}" == '^https://kaeawc\.github\.io/auto-mobile/'*' file:///tmp/built/${1}${2}' ]]
+  # site_url without its trailing slash yields the same rules.
+  local with_slash="$output"
+  run "$REMAPS" "$SITE" /tmp/built/
+  [ "$status" -eq 0 ]
+  [ "$output" = "$with_slash" ]
+}
+
+@test "own_site_remaps.sh rejects arguments the remap syntax cannot carry" {
+  run "$REMAPS" "$SITE/"
+  [ "$status" -eq 1 ]
+  run "$REMAPS" "not a url" /tmp/built
+  [ "$status" -eq 1 ]
+  run "$REMAPS" "$SITE/" relative/built
+  [ "$status" -eq 1 ]
+  run "$REMAPS" "$SITE/" "/tmp/with space"
+  [ "$status" -eq 1 ]
+}
+
+@test "own-site links resolve against the build: new pages, files and anchors pass" {
+  command -v lychee >/dev/null 2>&1 || skip "lychee not installed"
+  own_site_fixture
+  printf '[a](%s/)\n[b](%s/#intro)\n[c](%s/new-section/)\n[d](%s/new-section/#topic)\n[e](%s/new-section)\n[f](%s/assets/data.json)\n[g](%s/new-section/?q=1#topic)\n' \
+    "$SITE" "$SITE" "$SITE" "$SITE" "$SITE" "$SITE" "$SITE" >"$BATS_TEST_TMPDIR/src/ok.md"
+  run lychee --no-progress --offline --include-fragments "${REMAP_ARGS[@]}" "$BATS_TEST_TMPDIR/src/ok.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"7 OK"* ]]
+}
+
+@test "own-site links resolve against the build: missing pages and anchors fail" {
+  command -v lychee >/dev/null 2>&1 || skip "lychee not installed"
+  own_site_fixture
+  printf '[a](%s/gone/)\n[b](%s/new-section/#missing)\n[c](%s/assets/gone.json)\n' \
+    "$SITE" "$SITE" "$SITE" >"$BATS_TEST_TMPDIR/src/bad.md"
+  run lychee --no-progress --offline --include-fragments "${REMAP_ARGS[@]}" "$BATS_TEST_TMPDIR/src/bad.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"3 Errors"* ]]
+}
+
+@test "own-site remap leaves other hosts and sibling paths to the network check" {
+  command -v lychee >/dev/null 2>&1 || skip "lychee not installed"
+  own_site_fixture
+  # Offline, an unremapped https link is excluded rather than resolved; a
+  # remapped one would be reported as a missing file.
+  printf '[a](https://kaeawc.github.io/auto-mobile-other/x/)\n[b](https://example.org/auto-mobile/x/)\n' >"$BATS_TEST_TMPDIR/src/other.md"
+  run lychee --no-progress --offline "${REMAP_ARGS[@]}" "$BATS_TEST_TMPDIR/src/other.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 Excluded"* ]]
+  [[ "$output" != *"file://"* ]]
+}
+
+@test "validate_lychee.sh builds first, remaps both passes, and keeps remapped results out of the cache" {
+  local build_line pass1_line
+  build_line=$(grep -n '^build_site$' "$SCRIPT" | cut -d: -f1)
+  pass1_line=$(grep -n '^run_lychee_pass .*"docs/"' "$SCRIPT" | cut -d: -f1)
+  [ -n "$build_line" ] && [ -n "$pass1_line" ]
+  [ "$build_line" -lt "$pass1_line" ]
+  grep -Fq 'own_site_remaps.sh' "$SCRIPT"
+  [ "$(grep -c 'OWN_SITE_REMAP\[@\]+' "$SCRIPT")" -eq 2 ]
+  # lychee caches a remapped result under the original URL and reads a cached
+  # failure back as Excluded, so each remapped pass starts without those rows.
+  [ "$(grep -c '^ *drop_own_site_cache_rows$' "$SCRIPT")" -ge 3 ]
+}

@@ -8,11 +8,18 @@
 #      docs deploy copies to the site's Contributing page). Checks internal and
 #      external links, including #fragments and links inside MkDocs content
 #      tabs (see include_fragments / include_verbatim in .lycherc.toml).
-#   2. Built-site pass: builds the MkDocs site into a temp dir and checks it
-#      offline (local targets + fragments only; external URLs were already
-#      checked in pass 1). This covers what only exists after the build:
-#      directory-style URLs from the redirect shims, nav links, and heading
-#      anchors as MkDocs slugifies them.
+#   2. Built-site pass: checks the MkDocs site built into a temp dir offline
+#      (local targets + fragments only; external URLs were already checked in
+#      pass 1). This covers what only exists after the build: directory-style
+#      URLs from the redirect shims, nav links, and heading anchors as MkDocs
+#      slugifies them.
+#
+# The site is built before pass 1. Both passes then resolve absolute links to
+# the docs site itself (site_url, e.g. https://kaeawc.github.io/auto-mobile/...)
+# against that build instead of the live site (own_site_remaps.sh), because
+# docs.yml republishes the live site only nightly: a link to a page added on
+# this commit would otherwise 404 until the next deploy (#18185). Without a
+# build, pass 1 checks those links against the live site.
 #
 # The built-site pass needs MkDocs (via `uv run --project scripts/github`, or
 # `mkdocs` on PATH). Without it the pass is skipped with a warning, unless
@@ -202,11 +209,33 @@ cleanup() {
     if [[ ${#STAGED_DOCS[@]} -gt 0 ]]; then
         rm -f "${STAGED_DOCS[@]}"
     fi
+    drop_own_site_cache_rows
     rm -rf "$LYCHEE_OUTPUT" "$LYCHEE_ERRORS" "$SITE_STAGE"
 }
 # Static reference for indirect callers; this branch never executes.
 if false; then cleanup "$@"; fi
 trap 'cleanup' EXIT
+
+# lychee's .lycheecache (cache = true) keys a remapped link by its ORIGINAL URL,
+# and a cached failure reads back as "Excluded", not an error. So a build-resolved
+# own-site result must never outlive the pass that produced it: a later pass or
+# run would otherwise pass a broken link, or reuse a result from another build or
+# from the live site. Drops every cached row for an own-site URL (only while the
+# own-site remap is active). Always returns 0.
+OWN_SITE_PREFIX=""
+LYCHEE_CACHE_FILE="$PROJECT_ROOT/.lycheecache"
+drop_own_site_cache_rows() {
+    if [[ -z "$OWN_SITE_PREFIX" || ! -f "$LYCHEE_CACHE_FILE" ]]; then
+        return 0
+    fi
+    local kept="$LYCHEE_CACHE_FILE.tmp.$$"
+    if PREFIX="$OWN_SITE_PREFIX" awk 'index($0, ENVIRON["PREFIX"]) != 1' "$LYCHEE_CACHE_FILE" >"$kept"; then
+        mv "$kept" "$LYCHEE_CACHE_FILE"
+    else
+        rm -f "$kept" "$LYCHEE_CACHE_FILE"
+    fi
+    return 0
+}
 
 OVERALL_STATUS=0
 record_status() {
@@ -249,6 +278,7 @@ run_lychee_pass() {
 # the working tree is left clean. Sets BUILD_STATUS: 0 on success, 3 when MkDocs
 # is unavailable, 1 when the build fails. Always returns 0 so set -e stays armed.
 BUILD_STATUS=0
+SITE_URL=""
 SITE_BASE=""
 build_site() {
     local -a mkdocs_cmd python_cmd
@@ -285,14 +315,19 @@ build_site() {
     ( cd "$PROJECT_ROOT" && "${mkdocs_cmd[@]}" build --quiet \
         --config-file "$PROJECT_ROOT/mkdocs.yml" --site-dir "$SITE_STAGE/built" ) || BUILD_STATUS=1
 
-    # The Pages base path (the path of site_url, e.g. /auto-mobile/), read through
-    # MkDocs' own config loader in the same environment that built the site. Pages
+    # site_url and its Pages base path (e.g. /auto-mobile/), read through MkDocs'
+    # own config loader in the same environment that built the site. Pages
     # (404.html in particular) link to root-absolute /auto-mobile/... URLs, so the
-    # lychee pass must resolve those under the base path, as GitHub Pages does.
-    # Empty when site_url is unset or MkDocs cannot be imported (no base mapping).
-    SITE_BASE=$(cd "$PROJECT_ROOT" && "${python_cmd[@]}" -c \
-        'import sys; from urllib.parse import urlsplit; from mkdocs.config import load_config; print(urlsplit(load_config(sys.argv[1]).site_url or "").path)' \
-        "$PROJECT_ROOT/mkdocs.yml" 2>/dev/null) || SITE_BASE=""
+    # lychee pass must resolve those under the base path, as GitHub Pages does;
+    # site_url itself keys the own-site remap. Both are empty when site_url is
+    # unset or MkDocs cannot be imported (no base mapping, no remap).
+    SITE_URL=$(cd "$PROJECT_ROOT" && "${python_cmd[@]}" -c \
+        'import sys; from mkdocs.config import load_config; print(load_config(sys.argv[1]).site_url or "")' \
+        "$PROJECT_ROOT/mkdocs.yml" 2>/dev/null) || SITE_URL=""
+    SITE_BASE=""
+    if [[ "$SITE_URL" =~ ^[a-z]+://[^/]+(/.*)?$ ]]; then
+        SITE_BASE="${BASH_REMATCH[1]:-/}"
+    fi
 }
 
 # Directory lychee resolves root-absolute links against. GitHub Pages serves the
@@ -318,16 +353,36 @@ own_status=0
 "$SCRIPT_DIR/check_own_repo_links.sh" || own_status=$?
 record_status "$own_status"
 
+print_status "Building MkDocs site for the own-site remap and the built-site pass"
+build_site
+# --remap rules sending the docs site's own absolute URLs to the build. Empty
+# (live-site check) when there is no build or no usable site_url.
+OWN_SITE_REMAP=()
+if [[ "$BUILD_STATUS" -eq 0 && -n "$SITE_URL" ]]; then
+    remap_rules=""
+    if remap_rules=$("$SCRIPT_DIR/own_site_remaps.sh" "$SITE_URL" "$SITE_STAGE/built"); then
+        while IFS= read -r rule; do
+            OWN_SITE_REMAP+=(--remap "$rule")
+        done <<<"$remap_rules"
+        OWN_SITE_PREFIX="${SITE_URL%/}/"
+        print_status "Resolving ${SITE_URL} links against the built site (reported as file:// paths under it)"
+    else
+        print_warning "Cannot remap ${SITE_URL} links to the build; checking them against the live site"
+    fi
+fi
+
 print_status "Pass 1/2: source files (docs/, root *.md, .github/CONTRIBUTING.md)"
-run_lychee_pass "docs/" ./*.md ".github/CONTRIBUTING.md"
+drop_own_site_cache_rows
+run_lychee_pass ${OWN_SITE_REMAP[@]+"${OWN_SITE_REMAP[@]}"} "docs/" ./*.md ".github/CONTRIBUTING.md"
 
 echo ""
 print_status "Pass 2/2: built MkDocs site (offline: local targets and anchors)"
-build_site
 if [[ "$BUILD_STATUS" -eq 0 ]]; then
     # External URLs were checked in pass 1; this pass only resolves the site's
     # own pages, assets, directory URLs (via index.html), and #fragments.
+    drop_own_site_cache_rows
     OFFLINE_FLAG="--offline" run_lychee_pass \
+        ${OWN_SITE_REMAP[@]+"${OWN_SITE_REMAP[@]}"} \
         --index-files index.html \
         --extensions html \
         --root-dir "$(site_root_dir)" \
@@ -376,6 +431,15 @@ if [[ -s "$LYCHEE_ERRORS" ]]; then
         # Extract the file path from the error
         if [[ "$error_line" =~ file://([^[:space:]|]+) ]]; then
             broken_path="${BASH_REMATCH[1]}"
+            if [[ "$broken_path" == "$SITE_STAGE/"* ]]; then
+                # A link into the temp build (own-site remap or built-site
+                # pass); name the site path, since source-tree matches for a
+                # built file are noise.
+                built_rel="${broken_path#"$SITE_STAGE/built/"}"
+                echo "  ✗ ${SITE_URL:-<site>/}${built_rel#"$SITE_STAGE/"} (not in the built site)"
+                echo ""
+                continue
+            fi
             echo "  ✗ $broken_path"
             suggest_similar_files "$broken_path"
             echo ""

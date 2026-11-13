@@ -14,7 +14,7 @@ and view any prototype that is a valid AutoMobile JSON SDUI spec (epic #13625).
   `specVersion`**: older and newer shapes are rejected, never migrated (see
   [Android prototype specification](plat/android/prototype-ux.md)). Evolution is by device
   capabilities (`PROTOTYPE_SPEC_CAPABILITY_GATES` in `prototypeCapabilityGates.ts`).
-- **Limits:** 1 MiB spec, 2000 nodes, depth 24, 32 images, data 256 KiB, storage 64 keys / 256 KiB,
+- **Limits:** 1 MiB spec, 2000 nodes and 32 images per stack screen (10000 and 160 per spec), depth 24, data 256 KiB, storage 64 keys / 256 KiB,
   4 requests in flight, 30 s timeout. `readPrototypeSpecFile` does stat-then-read size caps, BOM strip
   and JSON parse for `specPath`.
 - **Showing from a host.** MCP `prototype` tool (`src/server/prototypeTools.ts`): `show` (inline

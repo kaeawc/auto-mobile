@@ -23,7 +23,7 @@ device uses an AVD snapshot that a person signed in to once.
 | `AndroidAutoProjectionProvisioner` | Runs the steps in order and owns one DHU session per emulator. One instance per host; it resolves each emulator's phone-side adapters per request.              |
 | `AndroidAutoProjectionApplier`     | The `provisionDevice` seam: resolves the host inputs (APK directory, DHU binary, config) and runs the provisioner on the bound device.                          |
 
-## provisionDevice entry point
+## `provisionDevice` entry point
 
 - **Inputs first.** `provisionDevice` resolves the host inputs before any lease, creation or boot,
   and refuses with one `unsupported` error naming every missing path, because the run could only
@@ -90,7 +90,7 @@ until the phone reads `device`: right after boot adb can still report the emulat
 every step needs a working transport. The wait also stops one state check (plus a margin) before
 the caller's deadline, and the deadline's abort cuts a re-check delay short, so a short deadline
 still ends in the offline error rather than a generic timeout. A phone that stays offline fails
-the run before any step, so nothing on it changed: provisionDevice reports that error as
+the run before any step, so nothing on it changed: `provisionDevice` reports that error as
 `device_offline` even when the rollback of a device it created then fails, which `cleanup` still
 reports.
 

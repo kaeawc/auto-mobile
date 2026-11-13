@@ -39,10 +39,13 @@ test("tool references name registered tools", () => {
   for (const tool of allowed) {
     expect(names.has(tool)).toBe(true);
   }
+  // startDevice is registered hidden, so it is absent from tool-definitions.json.
+  const hidden = ["startDevice"];
+  expect(hidden.filter((tool) => names.has(tool))).toEqual([]);
   for (const impact of Object.values(iosDeviceResourceImpact)) {
     for (const item of [...impact.automobileImpact, ...impact.appImpact]) {
       for (const reference of item.description.matchAll(/`([^`]+)`/g)) {
-        expect(allowed).toContain(reference[1]!);
+        expect([...allowed, ...hidden]).toContain(reference[1]!);
       }
     }
   }

@@ -85,16 +85,20 @@ Source breaks in this step and their replacements:
   Await the async methods instead, and implement native async methods in transport doubles.
   `resetSession()` remains synchronous.
 - `AutoMobilePlanExecutor.init` no longer accepts `sessionIdProvider`. Pass `sessionUuid:` to
-  `execute`, or inject the initializer's `idGenerator` for a fresh id per execution.
+  `execute`, or omit it to acquire an issued device session from the daemon.
 - The public `AutoMobileSession` type (including `shared`, `currentSessionUuid`, `setSessionUuid`,
   and `setCurrentSessionUuid`) is removed. Keep the id explicitly and pass it to the executor;
   there is no thread-local or task-local session storage.
 
-Session identity is one explicit value owned by the executor. The test case generates it once per
-execution with its internal `idGenerator` and passes it to `execute(testMetadata:sessionUuid:)`.
-For direct executor calls, an explicit `sessionUuid` wins; otherwise its injectable `idGenerator`
-creates one id before suspension. That value survives all tool calls, retries, recovery, and resumed
-attempts. The observer tracks test objects and timestamps, without consuming session ids.
+The executor initializes the MCP client and acquires a device session with `getApple` for iOS
+or `getAndroid` for Android before enabling and running `executePlan`. A device identifier is
+required unless the caller passes an explicit issued session. Set `AUTOMOBILE_DEVICE_ID`
+(`AUTOMOBILE_DEVICE_UDID` is a fallback), override `AutoMobileTestCase.deviceId`, or set
+`Configuration.deviceId` directly. Missing or empty identifiers fail before either acquisition call.
+A caller-supplied issued `sessionUuid` skips acquisition on the initial attempt.
+Transient retries and device waits acquire new issued
+sessions; recovery and its resumed plan retain the held session. The daemon releases the session
+when the plan completes. The observer tracks test objects and timestamps without consuming session ids.
 Independent concurrent runs need distinct transport clients to isolate transport session lifetimes.
 
 `XCTestCase.defaultTestSuite` is the sole synchronous fetch boundary. XCTest constructs the suite

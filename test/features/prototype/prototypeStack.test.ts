@@ -16,7 +16,7 @@ const spec = (root: unknown) => ({
 });
 
 describe("prototype stack validation", () => {
-  test.each([0, 33])("refuses %s screens in both schemas", (count) => {
+  test.each([0, 65])("refuses %s screens in both schemas", (count) => {
     const value = spec({
       ...stack,
       screens: Object.fromEntries(Array.from({ length: count }, (_, i) => [String(i), text])),
@@ -27,8 +27,8 @@ describe("prototype stack validation", () => {
     });
     expect(prototypeSpecSchema.safeParse(value).success).toBe(false);
   });
-  test("accepts 32 screens and arbitrary nonempty names", () => {
-    const screens = Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`screen ${i}`, text]));
+  test("accepts 64 screens and arbitrary nonempty names", () => {
+    const screens = Object.fromEntries(Array.from({ length: 64 }, (_, i) => [`screen ${i}`, text]));
     const value = spec({ ...stack, start: "screen 0", screens });
     expect(validatePrototypeSpec(value).success).toBe(true);
     expect(prototypeSpecSchema.safeParse(value).success).toBe(true);

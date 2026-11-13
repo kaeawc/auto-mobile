@@ -12,8 +12,8 @@ struct PrototypeStrictRepeats {
 
     var scopes: [Scope] = []
     let data: [String: JSONValue]?
-    var nodes = 0
-    var images = 0
+    /// Expanded nodes and images, per stack screen and for the whole spec (#14213).
+    var budget = PrototypeScreenBudget()
     var effects = PrototypeEffectUses()
     var loopNodes = 0
     var keyframeNodes = 0
@@ -257,19 +257,15 @@ struct PrototypeStrictRepeats {
 
     mutating func expanded(_ node: [String: JSONValue], path: String, repeatPath: String? = nil) throws {
         let at = repeatPath ?? path
-        nodes += 1
         let nodeImages: Int = switch node["type"] {
         case .string("image"): max(1, imageUses(node["asset"]))
         case .string("videoPlayer"): imageUses(node["poster"])
         default: PrototypeStrictBindings.array(node["items"])
             .reduce(0) { $0 + imageUses($1.objectFields?["image"]) }
         }
-        images += nodeImages
-        if nodes > PrototypeLimits.maxNodes { throw PrototypeContractValidator.invalid(
-            at,
-            "Expanded node limit exceeded"
-        ) }
-        if images > 32 { throw PrototypeContractValidator.invalid(at, "Expanded image limit exceeded") }
+        if let overflow = budget.charge(nodes: 1, images: 0) ?? budget.charge(nodes: 0, images: nodeImages) {
+            throw PrototypeContractValidator.invalid(at, overflow.expandedMessage)
+        }
         if node["keyframes"] != nil { keyframeNodes += 1 }
         if keyframeNodes > PrototypeContractValidator.limit("MAX_PROTOTYPE_KEYFRAME_NODES") {
             throw PrototypeContractValidator.invalid("\(path).keyframes", "Keyframe node limit exceeded")
@@ -287,14 +283,20 @@ struct PrototypeStrictRepeats {
             throw PrototypeContractValidator.invalid(at, "Expanded animated effect limit exceeded")
         }
         let scope = scopes.first { $0.path == path }
+        let stack = node["screens"]?.objectFields != nil
         for _ in 0 ..< (node["type"] == .string("list") ? 1 : (scope?.items.count ?? 1)) {
+            if stack { budget.enterStack() }
             for child in Self.children(node, path: path) {
+                let screen = stack && child.path.hasPrefix("\(path).screens[")
+                if screen { budget.enterScreen() }
                 try expanded(
                     child.value,
                     path: child.path,
                     repeatPath: scope == nil ? repeatPath : "\(path).repeat"
                 )
+                if screen { budget.exitScreen() }
             }
+            if stack { budget.exitStack() }
         }
     }
 

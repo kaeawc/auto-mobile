@@ -112,7 +112,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         let result = try await requestWithSession(method: "tools/call", params: params, timeout: timeout)
         let text = try MCPJSONRPCHelpers.extractTextContent(from: result)
         PerfTimer.log("HTTPClient.callTool END: responseLength=\(text.count)")
-        return MCPToolResponse(text: text)
+        return MCPToolResponse(text: text, isError: result["isError"] as? Bool ?? false)
     }
 
     public func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {

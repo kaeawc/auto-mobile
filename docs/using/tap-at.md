@@ -1,4 +1,4 @@
-# tapAt
+# `tapAt`
 
 `tapAt` taps, long presses, or double taps at `x`, `y`. Absolute coordinates use
 platform-native units; `coordinateSpace: "normalized"` uses 0–1 and `"percent"`

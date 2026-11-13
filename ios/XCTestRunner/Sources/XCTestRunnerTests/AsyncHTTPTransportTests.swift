@@ -38,6 +38,26 @@ final class AsyncHTTPTransportTests: XCTestCase {
         XCTAssertEqual(response.text, "ok")
     }
 
+    func testToolErrorFlagAndDaemonTextSurviveTheHttpTransport() async throws {
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
+        try await initialize(client, performer)
+        let task = Task { try await client.callTool(name: "executePlan", arguments: [:], timeout: 5) }
+        try await performer.requests.wait(for: 2)
+        let id = AsyncFakeHTTPPerformer.requestId(performer.captured[1].request)
+        performer.reply(
+            1,
+            data: Data(
+                #"{"jsonrpc":"2.0","id":\#(id),"result":{"isError":true,"content":[{"type":"text","text":"Session is not active"}]}}"#
+                    .utf8
+            ),
+            headers: ["Content-Type": "application/json"]
+        )
+        let response = try await task.value
+        XCTAssertTrue(response.isError)
+        XCTAssertEqual(response.text, "Session is not active")
+    }
+
     func testTransportErrorMapsToRequestFailed() async throws {
         let performer = AsyncFakeHTTPPerformer()
         let client = try makeClient(performer)

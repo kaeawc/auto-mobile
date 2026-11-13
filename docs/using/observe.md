@@ -1,5 +1,9 @@
 # observe
 
+| Tool                    | What it does                                                                                                 | Requires                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| 👁️ <code>observe</code> | Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display | Android, iOS, watchOS, tvOS, visionOS |
+
 Call `observe` to read the current screen before choosing a target. The default
 `skeleton` and `context` rows describe controls and visible text; `project: "full"`
 returns the hierarchy. Bounds tuples are `[left, top, right, bottom]`.

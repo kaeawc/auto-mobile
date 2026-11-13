@@ -176,6 +176,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class IosPrototypeTransport implements PrototypeTransport {
+  /** The latest cache put started per asset id, so a failed put only cleans up its own entry (#18256). */
+  private readonly cachePutGenerations = new Map<string, number>();
+  private nextCachePutGeneration = 0;
+
   /**
    * `assetCache` records each confirmed upload under the device's id, so the web page can inline
    * the image as it does for Android; without it uploads are not cached.
@@ -387,11 +391,18 @@ export class IosPrototypeTransport implements PrototypeTransport {
       options,
     );
     if (reply.success && !reply.error) {
+      const generation = ++this.nextCachePutGeneration;
+      this.cachePutGenerations.set(asset.id, generation);
       const cached = await this.cacheAsset(`cache prototype asset ${asset.id}`, (cache, serial) =>
         cache.put(serial, snapshot),
       );
-      if (!cached) {
+      const latest = this.cachePutGenerations.get(asset.id) === generation;
+      if (latest) {
+        this.cachePutGenerations.delete(asset.id);
+      }
+      if (!cached && latest) {
         // An older entry under this id would otherwise let the web page inline the previous bytes.
+        // A newer put started meanwhile owns the entry, so removing it would drop the newer bytes.
         await this.cacheAsset(`drop stale cached prototype asset ${asset.id}`, (cache, serial) =>
           cache.remove(serial, asset.id),
         );

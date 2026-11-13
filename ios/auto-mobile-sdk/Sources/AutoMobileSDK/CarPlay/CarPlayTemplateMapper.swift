@@ -198,6 +198,15 @@
                 return (info.leadingNavigationBarButtons, info.trailingNavigationBarButtons, info.backButton)
             case let poi as CPPointOfInterestTemplate:
                 return (poi.leadingNavigationBarButtons, poi.trailingNavigationBarButtons, poi.backButton)
+            case let map as CPMapTemplate:
+                return (map.leadingNavigationBarButtons, map.trailingNavigationBarButtons, map.backButton)
+            case let contact as CPContactTemplate:
+                return (contact.leadingNavigationBarButtons, contact.trailingNavigationBarButtons, contact.backButton)
+            case let voice as CPVoiceControlTemplate:
+                if #available(iOS 26.4, *) {
+                    return (voice.leadingNavigationBarButtons, voice.trailingNavigationBarButtons, voice.backButton)
+                }
+                return nil
             default:
                 return nil
             }

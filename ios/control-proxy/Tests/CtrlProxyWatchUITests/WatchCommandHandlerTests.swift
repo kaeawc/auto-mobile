@@ -734,6 +734,8 @@ final class WatchCommandHandlerTests: XCTestCase {
         var scroll = focusable
         scroll.elementType = 46
         XCTAssertNil(watchCrownFocusedValue([scroll]))
+        let wrapper = WatchCrownCandidate(identifier: "wrapper", value: nil, children: [scroll])
+        XCTAssertNil(watchCrownFocusedValue([wrapper, scroll]))
         var twoValues = focusable
         twoValues.children.append(WatchCrownCandidate(identifier: "other", value: "9"))
         XCTAssertNil(watchCrownFocusedValue([twoValues]))

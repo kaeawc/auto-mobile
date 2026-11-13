@@ -155,8 +155,12 @@ struct WatchCrownCandidate {
         return WatchCrownValue(elementType: elementType, identifier: identifier, frame: frame, value: value)
     }
 
+    /// Scrolling subtrees are pruned: the crown scrolls them, so their children's values are not the target.
     var readableDescendants: [WatchCrownValue] {
-        children.flatMap { child in (child.readable.map { [$0] } ?? []) + child.readableDescendants }
+        children.flatMap { child -> [WatchCrownValue] in
+            guard !watchCrownScrollTypes.contains(child.elementType) else { return [] }
+            return (child.readable.map { [$0] } ?? []) + child.readableDescendants
+        }
     }
 }
 

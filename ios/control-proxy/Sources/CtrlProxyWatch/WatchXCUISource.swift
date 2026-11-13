@@ -241,7 +241,7 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
         let count = focused.count
         // A larger set is not a single crown target; skip the per-element snapshots.
-        guard count > 0, count <= 8 else { return nil }
+        guard (1 ... 8).contains(count) else { return nil }
         let candidates = try (0 ..< count).map { try crownCandidate(focused.element(boundBy: $0).snapshot()) }
         return watchCrownFocusedValue(candidates)
     }

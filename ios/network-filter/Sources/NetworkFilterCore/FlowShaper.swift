@@ -139,7 +139,8 @@ public final class FlowShaper {
         }
         if flows.count >= Self.maximumFlows {
             let candidate = flows.filter { _, value in
-                !value.watched && value.pending == nil && now - value.lastActive >= Self.idleEvictionNanoseconds
+                !value.watched && value.pending == nil && now - value.lastActive >= Self.idleEvictionNanoseconds &&
+                    !ruleSource.watches(value.target)
             }.min { lhs, rhs in
                 (lhs.value.lastActive, lhs.key.uuidString) < (rhs.value.lastActive, rhs.key.uuidString)
             }
@@ -182,6 +183,7 @@ public final class FlowShaper {
         }
         if ruleSource.watches(tracked.target) {
             tracked.lastActive = now
+            tracked.watched = true
             flows[flow] = tracked
             return .pass(bytes: max(0, availableBytes), peekBytes: 65536)
         }

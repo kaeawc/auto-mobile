@@ -17,8 +17,8 @@ Not recorded.
 ## Decision
 
 - **Glass (2026-10-27).** `style.surface: "glass"` requires real glass and `prototype_glass_v1`:
-  iOS 26+ Liquid Glass, and Android API 31+ real backdrop blur once its renderer exists. iOS 17–25
-  and Android below API 31 refuse glass by not advertising the capability. There is no simulated
+  iOS 26+ Liquid Glass, and Android API 31+ real backdrop blur once its renderer exists. Android below API 31
+  and iOS 17–25 refuse glass by not advertising the capability. There is no simulated
   translucent fill, `ultraThinMaterial` substitute or fallback capability. Android rendering and
   device verification remain with the Android renderer slice.
 - **Custom shaders (2026-10-26).** Android-only custom AGSL shaders require

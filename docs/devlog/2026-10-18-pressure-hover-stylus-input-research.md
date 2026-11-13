@@ -21,7 +21,7 @@ Not recorded.
   `swipeAt` and `dragPath`, not on the element tools (`tapOn`, `swipeOn`): a stylus has no
   accessibility-element meaning.
 - **Fail loudly instead of downgrading.** A device or path that cannot honour a requested pointer
-  returns an actionable error and never falls back to a finger touch: a silent downgrade is the
+  returns an actionable error and never falls back to a finger touch. A silent downgrade is the
   failure reported for Appium pressure actions, and it makes a stylus-only UI test pass for the
   wrong reason.
 - **Hover is its own tool.** `hoverAt` has different semantics from a gesture (no contact, no
@@ -51,7 +51,7 @@ Verification plan at the time:
    panel key or role maps onto `-d DISPLAY_ID`, and whether two shell invocations hold a
    double-tap interval.
 2. iOS simulator: the #13083 probe (Xcode 26.6, iPad Pro 13-inch (M5), iOS 26.5, base
-   `f8d061423c9`) established pressure and Pencil injection as a no-go; mouse pointer hover
-   produced `UIHoverGestureRecognizer` begin/end, Pencil hover was not observed.
+   `f8d061423c9`) established pressure and Pencil injection as a no-go. Mouse pointer hover
+   produced `UIHoverGestureRecognizer` begin/end; Pencil hover was not observed.
 3. Physical iOS device: repeat the probe if a device is available; otherwise record Pencil as out
    of scope.

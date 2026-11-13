@@ -19,14 +19,13 @@ behind one typed client so manager tests could run without USB hardware.
 
 ## Decision
 
-Option 1. `DefaultIosTunnelClient` and `FakeIosTunnelClient` were added; no new dependency or
-transport fallback. Options 2–4 were dropped. The refactor preserved existing lifecycle log lines
+Option 1. The change added `DefaultIosTunnelClient` and `FakeIosTunnelClient`, with no new
+dependency or transport fallback. Options 2–4 were dropped. The refactor preserved existing lifecycle log lines
 and levels, process-liveness readiness, supervisor timings, unlimited retries and the cleanup signal
 sequence, and added no redaction or attempt limit.
 
 ## Consequences
 
-The change was verified only with fake executors and `FakeTimer`, for local and remote-runner
-tunnel paths. No physical-device, Xcode, iOS or libusbmuxd version matrix was exercised, so it
-established no new supported Xcode/iOS combinations. Binary provenance and version pinning were not
-addressed.
+Verification used only fake executors and `FakeTimer`, for local and remote-runner tunnel paths.
+No physical-device, Xcode, iOS or libusbmuxd version matrix ran, so the change established no new
+supported Xcode/iOS combinations. Binary provenance and version pinning were not addressed.

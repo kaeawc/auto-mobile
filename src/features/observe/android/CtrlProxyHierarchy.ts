@@ -5,6 +5,10 @@ import { AccessibilityHierarchyConverter } from "./AccessibilityHierarchyConvert
 import { AndroidHierarchyRequestSender } from "./AndroidHierarchyRequestSender";
 import { AndroidHierarchySyncRunner } from "./AndroidHierarchySyncRunner";
 import {
+  type CtrlProxyCaptureCooldown,
+  InMemoryCtrlProxyCaptureCooldown,
+} from "./CtrlProxyCaptureCooldown";
+import {
   AndroidHierarchyWaiter,
   type FreshDataWaitOptions,
   type PendingHierarchyReply,
@@ -63,6 +67,13 @@ const WEBSOCKET_TIMEOUT_COOLDOWN_MS = 500;
  *  it, silently degrading results to stale cache. See issue #2285. */
 const DEFAULT_FRESH_WAIT_MS = 1000;
 
+/** After a sync read exhausts its budget without a reply, probe for 2s until a read
+ * succeeds or the per-client 60s cooldown expires, rather than waiting another 10s. */
+export const HIERARCHY_SYNC_RECENT_TIMEOUT_BUDGET_MS = 2000;
+
+/** Short-budget keyboard and poll reads cannot mark the hierarchy service unresponsive. */
+export const HIERARCHY_SYNC_UNRESPONSIVE_MIN_WAIT_MS = 3000;
+
 type HierarchyLookupResult = AccessibilityHierarchyResponse & {
   /** Internal cache-serving policy; never exposed as verification freshness. */
   withinCacheServeWindow?: boolean;
@@ -109,7 +120,12 @@ export class CtrlProxyHierarchy {
   private recompositionTrackingEnabled: boolean = false;
   private readonly hierarchySyncFlights = new Set<HierarchySyncFlight>();
 
-  constructor(context: HierarchyDelegateContext) {
+  constructor(
+    context: HierarchyDelegateContext,
+    private readonly syncCooldown: CtrlProxyCaptureCooldown = new InMemoryCtrlProxyCaptureCooldown(
+      context.timer,
+    ),
+  ) {
     this.context = context;
     this.converter = new AccessibilityHierarchyConverter(context);
     this.sender = new AndroidHierarchyRequestSender(context);
@@ -826,14 +842,20 @@ export class CtrlProxyHierarchy {
       options;
     const preserveDisplayState = options.preserveDisplayState === true;
     const startTime = this.context.timer.now();
-    const effectiveTimeoutMs = Math.max(0, timeoutMs);
+    const effectiveTimeoutMs = Math.max(
+      0,
+      this.syncCooldown.hasRecentFailure(this.context.device.deviceId)
+        ? Math.min(timeoutMs, HIERARCHY_SYNC_RECENT_TIMEOUT_BUDGET_MS)
+        : timeoutMs,
+    );
 
     try {
       throwIfAborted(signal);
       if (options.onRequestId) {
         // Suppression belongs to one caller and one wire response. Isolate these requests from
         // shared flights in BOTH directions so an ordinary caller cannot lose its stream push.
-        return await awaitWhileRequestIsLive(
+        const syncDiagnostics = diagnostics ?? {};
+        const result = await awaitWhileRequestIsLive(
           this.syncRunner.runHierarchySync(
             perf,
             disableAllFiltering,
@@ -845,11 +867,13 @@ export class CtrlProxyHierarchy {
               observerMode,
               preserveDisplayState,
               onRequestId: options.onRequestId,
-              diagnostics: diagnostics ?? {},
+              diagnostics: syncDiagnostics,
             },
           ),
           signal,
         );
+        this.updateSyncCooldown(result, startTime, signal, syncDiagnostics);
+        return result;
       }
       // The wait accepts cache entries received at or after its dispatch floor. A flight with
       // an earlier floor could return data too old for this caller, so it cannot be joined.
@@ -896,6 +920,7 @@ export class CtrlProxyHierarchy {
       try {
         const result = await awaitWhileRequestIsLive(flight.promise, signal);
         this.copyFlightDiagnostics(flight.diagnostics, diagnostics);
+        this.updateSyncCooldown(result, startTime, signal, flight.diagnostics);
         return result;
       } finally {
         flight.waiters -= 1;
@@ -913,6 +938,24 @@ export class CtrlProxyHierarchy {
       }
       logger.warn(`[CTRL_PROXY] Sync hierarchy caller stopped: ${errorMessage(error)}`, error);
       return null;
+    }
+  }
+
+  private updateSyncCooldown(
+    result: HierarchySyncResult,
+    startTime: number,
+    signal: AbortSignal | undefined,
+    diagnostics: HierarchySyncDiagnostics,
+  ): void {
+    const deviceId = this.context.device.deviceId;
+    if (result !== null) {
+      this.syncCooldown.clear(deviceId);
+    } else if (
+      !signal?.aborted &&
+      !diagnostics.runnerError &&
+      this.context.timer.now() - startTime >= HIERARCHY_SYNC_UNRESPONSIVE_MIN_WAIT_MS
+    ) {
+      this.syncCooldown.recordFailure(deviceId);
     }
   }
 

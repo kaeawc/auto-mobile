@@ -4,6 +4,7 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import {
   addWatchSmartStackWidget,
   CLOCKFACE_RELAUNCH_SETTLE_MS,
+  GALLERY_SCROLL_SETTLE_MS,
   hasGalleryAppRow,
   findUnnamedAddedWidget,
   hasNamelessSmartStackWidget,
@@ -44,6 +45,21 @@ const galleryMissingApp = readFileSync(
   new URL("../../fixtures/watch/fixture-face-gallery-missing-app-row.txt", import.meta.url),
   "utf8",
 );
+const [longTop, longApostrophe, longApostropheNudged, longMiddle, longEnd, longEndSettled] = [
+  "top",
+  "apostrophe-row",
+  "apostrophe-row-nudged",
+  "middle",
+  "end",
+  "end-settled",
+].map((suffix) =>
+  readFileSync(
+    new URL(`../../fixtures/watch/fixture-face-gallery-long-${suffix}.txt`, import.meta.url),
+    "utf8",
+  ),
+);
+// An unchanged row set ends the later search; a captured stack dump has no gallery rows.
+const missingGalleryDumps = [galleryMissingApp, galleryMissingApp, withEdit];
 const TOP_CELL = "6FFE7596-8496-4E83-91C4-563745BD75F9";
 const LOWER_CELL = "2FB3A58A-0DA1-4EA7-8D32-C9B36220B980";
 
@@ -141,10 +157,304 @@ function widgetAttempt(verificationDumps: number): WatchCommand[] {
   ];
 }
 
-const missingRowAttempt = [...openingRound(1), ...galleryCommands.slice(0, 4)];
-const missingRowSleeps = [250, 250, 250, 250, 1500];
+function gallerySearchCommands(later: number, earlier = 0): WatchCommand[] {
+  return [
+    ...Array.from(
+      { length: later },
+      () =>
+        [
+          { type: "face", op: "drag", fromX: 0.5, fromY: 0.6, toX: 0.5, toY: 0.4 },
+          { type: "face", op: "dump" },
+        ] satisfies WatchCommand[],
+    ).flat(),
+    ...Array.from(
+      { length: earlier },
+      () =>
+        [
+          { type: "face", op: "drag", fromX: 0.5, fromY: 0.5, toX: 0.5, toY: 0.6 },
+          { type: "face", op: "dump" },
+        ] satisfies WatchCommand[],
+    ).flat(),
+  ];
+}
+const galleryOpening = [...openingRound(1), ...galleryCommands.slice(0, 4)];
+const galleryOpeningSleeps = [250, 250, 250, 250, GALLERY_SCROLL_SETTLE_MS];
+const missingRowAttempt = [...galleryOpening, ...gallerySearchCommands(1, 1)];
+const missingRowSleeps = [...galleryOpeningSleeps, 1500, 1500];
 
 describe("Smart Stack gallery rows", () => {
+  test.each([
+    ["top", longTop, "Gecko", "Zebra Probe"],
+    ["apostrophe", longApostrophe, "Jason's Probe", "Zebra Probe"],
+    ["middle", longMiddle, "News", "Jason's Probe"],
+    ["end", longEnd, "Zebra Probe", "Jason's Probe"],
+    ["end settled", longEndSettled, "Zebra Probe", "Gecko"],
+  ])("reads captured long-gallery rows (%s)", (_fixture, dump, present, absent) => {
+    expect(hasGalleryAppRow(dump, present)).toBe(true);
+    expect(hasGalleryAppRow(dump, absent)).toBe(false);
+    expect(hasGalleryAppRow(dump, "ProbeApp")).toBe(false);
+  });
+  test("matches apostrophes exactly without accepting prefixes or suffixes", () => {
+    expect(hasGalleryAppRow(longApostrophe, "Jason's Probe")).toBe(true);
+    for (const name of ["Jason", "Jason's", "Jason's Probe2"]) {
+      expect(hasGalleryAppRow(longApostrophe, name)).toBe(false);
+    }
+  });
+  test.each([
+    [
+      "Zebra Probe",
+      { dumps: [longApostrophe, longMiddle, longEnd], later: 3, earlier: 0, y: 168 / 223 },
+    ],
+    [
+      "Jason's Probe",
+      { dumps: [longApostrophe, longApostropheNudged], later: 1, earlier: 1, y: 71.25 / 223 },
+    ],
+  ] as const)(
+    "scrolls to %s and taps its visible row centre",
+    async (appName, { dumps, later, earlier, y }) => {
+      const { client, timer } = arrange([withEdit, longTop, ...dumps, emptyNames]);
+      let relaunches = 0;
+      const result = await addWatchSmartStackWidget(
+        client,
+        { ...options, ...identity, appName },
+        {
+          timer,
+          relaunchClockface: async () => {
+            relaunches++;
+          },
+        },
+      );
+      expect(result).toMatchObject({ success: true, attempts: 1, galleryRowMisses: 0 });
+      expect(relaunches).toBe(0);
+      expect(client.commands).toEqual([
+        ...galleryOpening,
+        ...gallerySearchCommands(later, earlier),
+        { type: "face", op: "tap", x: 0.5, y },
+        ...galleryCommands.slice(-2),
+        { type: "face", op: "dump" },
+      ]);
+      expect(timer.getSleepHistory()).toEqual([
+        ...galleryOpeningSleeps,
+        ...Array(dumps.length).fill(GALLERY_SCROLL_SETTLE_MS),
+        250,
+        250,
+        250,
+      ]);
+    },
+  );
+  test.each([
+    ["fully visible", "Zebra Probe", longEnd, 168 / 223],
+    [
+      "24 points visible at the bottom",
+      "Zebra Probe",
+      longEnd.replace("{{2.0, 144.0}, {183.0, 48.0}}", "{{2.0, 199.0}, {183.0, 48.0}}"),
+      211 / 223,
+    ],
+    [
+      "no navigation bar",
+      "Jason's Probe",
+      longApostrophe.replaceAll("NavigationBar,", "Other,"),
+      45.5 / 223,
+    ],
+  ] as const)("uses the visible-range midpoint: %s", async (_case, appName, dump, y) => {
+    const { client, timer } = arrange([withEdit, longTop, dump, emptyNames]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, ...identity, appName },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: true, galleryRowMisses: 0 });
+    expect(client.commands).toEqual([
+      ...galleryOpening,
+      ...gallerySearchCommands(1),
+      { type: "face", op: "tap", x: 0.5, y },
+      ...galleryCommands.slice(-2),
+      { type: "face", op: "dump" },
+    ]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...galleryOpeningSleeps,
+      GALLERY_SCROLL_SETTLE_MS,
+      250,
+      250,
+      250,
+    ]);
+  });
+  test("never taps a top-covered row after three unsuccessful corrective drags", async () => {
+    const { client, timer } = arrange([withEdit, longTop, ...Array(4).fill(longApostrophe)]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, appName: "Jason's Probe" },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: false, galleryRowMisses: 1, verificationAttempts: 0 });
+    expect(client.commands).toEqual([...galleryOpening, ...gallerySearchCommands(1, 3)]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...galleryOpeningSleeps,
+      ...Array(4).fill(GALLERY_SCROLL_SETTLE_MS),
+    ]);
+  });
+  test("counts corrective drags toward the direction's eight-step cap", async () => {
+    const changing = Array.from({ length: 6 }, (_, index) =>
+      index % 2 === 0 ? longMiddle : longTop,
+    );
+    const { client, timer } = arrange([
+      withEdit,
+      longTop,
+      ...changing,
+      longApostrophe,
+      longMiddle,
+      ...Array(3).fill(longApostrophe),
+    ]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, appName: "Jason's Probe" },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: false, galleryRowMisses: 1, verificationAttempts: 0 });
+    expect(client.commands).toEqual([...galleryOpening, ...gallerySearchCommands(7, 4)]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...galleryOpeningSleeps,
+      ...Array(11).fill(GALLERY_SCROLL_SETTLE_MS),
+    ]);
+  });
+  test("searches earlier after the later boundary and taps the row found there", async () => {
+    const { client, timer } = arrange([
+      withEdit,
+      longMiddle,
+      longEnd,
+      longEndSettled,
+      longTop,
+      longTop.replace("{{2.0, 30.5}, {183.0, 48.0}}", "{{2.0, 38.5}, {183.0, 48.0}}"),
+      emptyNames,
+    ]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, ...identity, appName: "Gecko" },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: true, galleryRowMisses: 0 });
+    expect(client.commands).toEqual([
+      ...galleryOpening,
+      ...gallerySearchCommands(2, 2),
+      { type: "face", op: "tap", x: 0.5, y: 71.25 / 223 },
+      ...galleryCommands.slice(-2),
+      { type: "face", op: "dump" },
+    ]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...galleryOpeningSleeps,
+      1500,
+      1500,
+      1500,
+      1500,
+      250,
+      250,
+      250,
+    ]);
+  });
+  test("stops at repeated row sets and an empty earlier dump before relaunching once", async () => {
+    const { client, timer } = arrange([
+      withEdit,
+      longTop,
+      longApostrophe,
+      longMiddle,
+      longEnd,
+      longEndSettled,
+      longTop,
+      withEdit,
+      withEdit,
+      galleryWithApp,
+      captures[1],
+    ]);
+    const commandsAtRelaunch: number[] = [];
+    const result = await addWatchSmartStackWidget(client, options, {
+      timer,
+      relaunchClockface: async () => {
+        commandsAtRelaunch.push(client.commands.length);
+      },
+    });
+    const search = [...galleryOpening, ...gallerySearchCommands(4, 2)];
+    expect(result).toMatchObject({ success: true, attempts: 2, galleryRowMisses: 1 });
+    expect(commandsAtRelaunch).toEqual([search.length]);
+    expect(client.commands).toEqual([...search, ...widgetAttempt(1)]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...galleryOpeningSleeps,
+      ...Array(6).fill(GALLERY_SCROLL_SETTLE_MS),
+      CLOCKFACE_RELAUNCH_SETTLE_MS,
+      ...widgetAttemptSleeps(1),
+    ]);
+  });
+  test("bounds changing row sets at eight scrolls in each direction", async () => {
+    const changing = Array.from({ length: 16 }, (_, index) =>
+      index % 2 === 0 ? longMiddle : longTop,
+    );
+    const { client, timer } = arrange([withEdit, longTop, ...changing]);
+    const result = await addWatchSmartStackWidget(client, options, { timer });
+    expect(result).toMatchObject({ success: false, attempts: 1, galleryRowMisses: 1 });
+    expect(result.reason).toContain("Smart Stack gallery has no row for ProbeApp");
+    expect(client.commands).toEqual([...galleryOpening, ...gallerySearchCommands(8, 8)]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...galleryOpeningSleeps,
+      ...Array(16).fill(GALLERY_SCROLL_SETTLE_MS),
+    ]);
+  });
+  test("continues later when a bottom-clipped row has less than 24 points visible", async () => {
+    const clipped = longEnd.replace(
+      "{{2.0, 144.0}, {183.0, 48.0}}",
+      "{{2.0, 200.0}, {183.0, 48.0}}",
+    );
+    const { client, timer } = arrange([withEdit, longTop, clipped, clipped, withEdit, withEdit]);
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, appName: "Zebra Probe" },
+      { timer },
+    );
+    expect(result).toMatchObject({ success: false, galleryRowMisses: 1, verificationAttempts: 0 });
+    expect(client.commands).toEqual([...galleryOpening, ...gallerySearchCommands(3, 1)]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...galleryOpeningSleeps,
+      ...Array(4).fill(GALLERY_SCROLL_SETTLE_MS),
+    ]);
+  });
+  test("keeps the calibrated flow when the app row is already visible", async () => {
+    const { client, timer } = arrange([withEdit, galleryWithApp, captures[1]]);
+    const result = await addWatchSmartStackWidget(client, options, { timer });
+    expect(result).toMatchObject({ success: true, galleryRowMisses: 0 });
+    expect(client.commands).toEqual(widgetAttempt(1));
+    expect(timer.getSleepHistory()).toEqual(widgetAttemptSleeps(1));
+  });
+  test("skips recovery when only the third and final attempt misses the row", async () => {
+    const unverified = [withEdit, galleryWithApp, ...Array(10).fill(withEdit)];
+    const { client, timer } = arrange([
+      ...unverified,
+      ...unverified,
+      withEdit,
+      ...missingGalleryDumps,
+    ]);
+    let relaunches = 0;
+    const result = await addWatchSmartStackWidget(client, options, {
+      timer,
+      relaunchClockface: async () => {
+        relaunches++;
+      },
+    });
+    expect(result).toMatchObject({ success: false, attempts: 3, galleryRowMisses: 1 });
+    expect(result.reason).toContain("never appeared during 1 of 3 attempts");
+    expect(result.reason).toContain("xcrun simctl terminate <udid> com.apple.clockface");
+    expect(relaunches).toBe(0);
+    expect(client.commands).toEqual([
+      ...widgetAttempt(10),
+      ...widgetAttempt(10),
+      ...missingRowAttempt,
+    ]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...widgetAttemptSleeps(10),
+      20000,
+      ...widgetAttemptSleeps(10),
+      20000,
+      ...missingRowSleeps,
+    ]);
+    expect(timer.getSleepHistory()).not.toContain(CLOCKFACE_RELAUNCH_SETTLE_MS);
+  });
   test("distinguishes present, missing and unknown gallery rows in real dumps", () => {
     expect(hasGalleryAppRow(galleryWithApp, "ProbeApp")).toBe(true);
     expect(hasGalleryAppRow(galleryMissingApp, "ProbeApp")).toBe(false);
@@ -185,7 +495,7 @@ describe("Smart Stack gallery rows", () => {
   test("relaunches once after a miss and succeeds on the next attempt without retry delay", async () => {
     const { client, timer } = arrange([
       withEdit,
-      galleryMissingApp,
+      ...missingGalleryDumps,
       withEdit,
       galleryWithApp,
       captures[1],
@@ -212,7 +522,7 @@ describe("Smart Stack gallery rows", () => {
     ]);
   });
   test("stops on a missing row without a relaunch dependency before any blind gestures", async () => {
-    const { client, timer } = arrange([withEdit, galleryMissingApp]);
+    const { client, timer } = arrange([withEdit, ...missingGalleryDumps]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result).toMatchObject({
       success: false,
@@ -229,7 +539,7 @@ describe("Smart Stack gallery rows", () => {
   test("keeps a missed attempt's header for the next already-present check", async () => {
     const { client, timer } = arrange([
       withEditButton(noWidgetCells),
-      galleryMissingApp,
+      ...missingGalleryDumps,
       withEditButton(oneEmptyCell),
     ]);
     let relaunches = 0;
@@ -256,7 +566,7 @@ describe("Smart Stack gallery rows", () => {
     ]);
   });
   test("surfaces relaunch rejection through the existing failure path", async () => {
-    const { client, timer } = arrange([withEdit, galleryMissingApp]);
+    const { client, timer } = arrange([withEdit, ...missingGalleryDumps]);
     const result = await addWatchSmartStackWidget(client, options, {
       timer,
       relaunchClockface: async () => {
@@ -276,7 +586,7 @@ describe("Smart Stack gallery rows", () => {
   test.each([true, false])(
     "requires widget readback after mixed gallery and verification failures (miss first: %s)",
     async (missFirst) => {
-      const missing = [withEdit, galleryMissingApp];
+      const missing = [withEdit, ...missingGalleryDumps];
       const unverified = [withEdit, galleryWithApp, ...Array(10).fill("container")];
       const { client, timer } = arrange(
         missFirst ? [...missing, ...unverified] : [...unverified, ...missing],
@@ -304,7 +614,7 @@ describe("Smart Stack gallery rows", () => {
   test.each(["dump", "relaunch", "settle"])(
     "honors cancellation during gallery %s",
     async (phase) => {
-      const { client, timer } = arrange([withEdit, galleryMissingApp]);
+      const { client, timer } = arrange([withEdit, ...missingGalleryDumps]);
       const controller = new AbortController();
       let relaunches = 0;
       const cancel = () => controller.abort(new ActionableError("Cancelled gallery recovery"));
@@ -346,7 +656,7 @@ describe("Smart Stack gallery rows", () => {
   );
   test.each([1, 3, 5])("bounds persistent gallery misses at %i attempts", async (maxAttempts) => {
     const { client, timer } = arrange(
-      Array.from({ length: maxAttempts }, () => [withEdit, galleryMissingApp]).flat(),
+      Array.from({ length: maxAttempts }, () => [withEdit, ...missingGalleryDumps]).flat(),
     );
     let relaunches = 0;
     const result = await addWatchSmartStackWidget(
@@ -366,14 +676,15 @@ describe("Smart Stack gallery rows", () => {
       verificationAttempts: 0,
     });
     expect(result.reason).toContain("gallery row for ProbeApp never appeared");
-    expect(relaunches).toBe(maxAttempts);
+    expect(relaunches).toBe(maxAttempts - 1);
+    expect(result.reason).toContain("xcrun simctl terminate <udid> com.apple.clockface");
     expect(client.commands).toEqual(
       Array.from({ length: maxAttempts }, () => missingRowAttempt).flat(),
     );
     expect(timer.getSleepHistory()).toEqual(
-      Array.from({ length: maxAttempts }, () => [
+      Array.from({ length: maxAttempts }, (_, attempt) => [
         ...missingRowSleeps,
-        CLOCKFACE_RELAUNCH_SETTLE_MS,
+        ...(attempt < maxAttempts - 1 ? [CLOCKFACE_RELAUNCH_SETTLE_MS] : []),
       ]).flat(),
     );
   });

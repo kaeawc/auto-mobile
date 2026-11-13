@@ -129,6 +129,18 @@ AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public protoco
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public static let key = "allowImportedPrototypeNetwork"
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public struct PrototypeLibraryUserDefaultsSettingStore: PrototypeLibraryNetworkSettingStore
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public var enabled: Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public enum PrototypePlatformPermissions
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let android: PrototypeAndroidPermissionMapping
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let grant: String
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let ios: PrototypeIosPermissionMapping
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let manifest: [String]
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let simctlService: String?
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let usageKey: String?
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public static func mapping(for name: String) -> PrototypePermissionMapping?
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public static let names: [String] = {
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public struct PrototypeAndroidPermissionMapping: Decodable, Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public struct PrototypeIosPermissionMapping: Decodable, Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public struct PrototypePermissionMapping: Decodable, Equatable, Sendable
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case needsPermission([String])
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case ready
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case unavailable(String)

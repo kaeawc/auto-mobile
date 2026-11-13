@@ -8,7 +8,14 @@ hierarchy, tap and screenshot operations; these are its capabilities and limits.
 - The runner's `face` command targets `com.apple.clockface` for normalized taps, 0.1-second
   press-and-drag gestures, directional swipes and text dumps.
 - The Smart Stack widget driver (`scripts/watch/addSmartStackWidget.ts`) uses a calibrated gallery
-  position (steps from the bottom, default one) and the first widget preview. App and widget
+  position (steps from the bottom, default one) and the first widget preview. After the gallery
+  swipe settles, a dump checks for the exact `AppGroupCell -- <appName>` identifier. When gallery
+  rows are readable but the app row is missing, the driver skips the calibrated gestures. With
+  `--udid <simulator UDID>`, the host relaunches clockface using
+  `xcrun simctl terminate <udid> com.apple.clockface`, waits 3000 ms for respawn, and retries
+  within `maxAttempts` without the retry delay. Without a relaunch dependency it stops with
+  that command as recovery guidance. Dumps with no gallery row identifiers preserve the
+  calibrated flow. The result's `galleryRowMisses` counts missing-row attempts. App and widget
   display names verify the resulting cell identifier. When the face leaves both name fields
   empty, a cell verifies when its host bundle id and widget kind equal `hostBundleId` and
   `widgetKind` (`--host-bundle-id`, `--widget-kind`, given together), or otherwise only as the

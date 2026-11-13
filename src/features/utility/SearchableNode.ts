@@ -453,6 +453,7 @@ export class SearchableHierarchy {
     }
     hoistSearchableLabels(entries);
     attributeSearchableLabels(entries);
+    attributeSearchablePrecedingSiblingLabels(entries);
     this.captures.set(capture, entries);
     return entries;
   }
@@ -517,6 +518,40 @@ function attributeSearchableLabels(entries: SearchableEntry[]): void {
         break;
       }
       parent = ancestor.parentIndex;
+    }
+  }
+}
+
+/**
+ * The searchable twin of the skeleton's preceding-sibling toggle label (#17955), so the
+ * resolver's `displayedLabel` matches the emitted row and duplicate indexes still apply.
+ * A still-unlabelled toggle takes the outermost text node whose subtree ends right before
+ * the toggle in the same window (a window's top-level children are separate roots, so
+ * both serialized copies agree), unless a tappable ancestor already hoisted that text.
+ */
+function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): void {
+  const hoisted = new Set(entries.flatMap((entry) => entry.hoistedSources ?? []));
+  const isText = (entry: SearchableEntry) =>
+    entry.affordances.length === 0 &&
+    entry.bounds !== undefined &&
+    entry.label?.trim() &&
+    !hoisted.has(entry);
+  for (const entry of entries) {
+    if (entry.label !== undefined || !entry.affordances.includes("toggle")) {
+      continue;
+    }
+    let preceding: SearchableEntry | undefined;
+    let cursor: SearchableEntry | undefined = entries[entry.index - 1];
+    while (cursor && cursor.index !== entry.parentIndex && cursor.windowRank === entry.windowRank) {
+      if (isText(cursor)) {
+        preceding = cursor;
+      }
+      cursor = cursor.parentIndex === undefined ? undefined : entries[cursor.parentIndex];
+    }
+    if (preceding) {
+      entry.label = preceding.label;
+      entry.displayedLabel = preceding.displayedLabel;
+      entry.textFields = [...entry.textFields, preceding.displayedLabel!];
     }
   }
 }

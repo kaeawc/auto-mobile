@@ -722,7 +722,8 @@ call is bounded by `XR_SMOKE_SDKMANAGER_TIMEOUT_SECONDS` (default 900) and uses 
 labelled `run-wear`; it is not a required check. `scripts/ci/wear-smoke/run-wear-smoke.sh` installs
 the x86_64 API 37 `android-wear-signed` image and leaves the round watch AVD to `startDevice`
 `createIfMissing` (`WEAR_SMOKE_CREATE_VIA=avdmanager` creates a named `wearos_small_round` AVD with
-avdmanager instead), builds the Wear fixture app (Gradle module `:wear-fixture`) when that module
+avdmanager instead), pins `ANDROID_AVD_HOME` (default `$HOME/.android/avd`) so avdmanager and the
+emulator read one AVD directory, builds the Wear fixture app (Gradle module `:wear-fixture`) when that module
 exists, and runs `scripts/ci/wear-smoke/wearSmoke.ts`. The plan observes the watch (hierarchy and
 `isScreenRound: true`), then with the fixture installs it with its permissions granted, launches
 it, scrolls to a list row, taps it, goes back, moves the rotary picker with `rotaryScroll`, posts
@@ -733,7 +734,8 @@ a summary note. The fixture texts the plan expects live in `WEAR_FIXTURE` in `we
 mirror `WearFixtureCatalog` in the fixture. Step JSON, screenshots, `summary.md`, the fixture build log and emulator diagnostics land in
 `WEAR_SMOKE_OUT_DIR` (default `scratch/wear-smoke`); `WEAR_SMOKE_BREAK_ASSERTION=1` (the
 `break-assertion` dispatch input) swaps in an impossible assertion. All three smoke lanes share
-`scripts/ci/emulator-smoke/` (the step runner and the bounded `sdkmanager` install).
+`scripts/ci/emulator-smoke/` (the step runner and the bounded `sdkmanager` install);
+`avd-home.sh` there pins the AVD directory and records it in `avd-homes.txt`.
 
 ### Android TV Emulator Smoke (advisory)
 

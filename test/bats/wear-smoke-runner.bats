@@ -11,7 +11,8 @@ setup() {
   ROOT="$BATS_TEST_TMPDIR/root"
   mkdir -p "$ROOT/scripts/ci/wear-smoke" "$ROOT/scripts/ci/emulator-smoke" "$ROOT/scripts/ios" "$ROOT/android"
   cp "$REAL_SCRIPT" "$ROOT/scripts/ci/wear-smoke/run-wear-smoke.sh"
-  cp "$REPO_ROOT/scripts/ci/emulator-smoke/install-system-image.sh" "$ROOT/scripts/ci/emulator-smoke/"
+  cp "$REPO_ROOT/scripts/ci/emulator-smoke/install-system-image.sh" \
+    "$REPO_ROOT/scripts/ci/emulator-smoke/avd-home.sh" "$ROOT/scripts/ci/emulator-smoke/"
   cp "$REPO_ROOT/scripts/ios/run_with_timeout.sh" "$ROOT/scripts/ios/"
   SCRIPT="$ROOT/scripts/ci/wear-smoke/run-wear-smoke.sh"
 
@@ -32,6 +33,7 @@ STUB
   cat > "$FAKE_BIN/bun" <<'STUB'
 #!/usr/bin/env bash
 printf '%s avd=%s apk=%s\n' "${1##*/}" "${WEAR_SMOKE_AVD_NAME:-}" "${WEAR_SMOKE_FIXTURE_APK:-}" >> "$BUN_LOG"
+printf 'avd_home=%s\n' "${ANDROID_AVD_HOME:-}" >> "$BUN_LOG"
 if [[ -n "${FAKE_SMOKE_SUMMARY:-}" ]]; then : > "$WEAR_SMOKE_OUT_DIR/summary.md"; fi
 exit "${FAKE_SMOKE_STATUS:-0}"
 STUB
@@ -45,6 +47,7 @@ STUB
   cat > "$SDK/cmdline-tools/latest/bin/avdmanager" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$AVD_LOG"
+printf 'avd_home=%s\n' "${ANDROID_AVD_HOME:-}" >> "$AVD_LOG"
 exit "${FAKE_AVD_STATUS:-0}"
 STUB
   chmod +x "$BATS_TEST_TMPDIR/diagnostics.sh" "$FAKE_BIN/bun" \
@@ -55,6 +58,10 @@ STUB
   export WEAR_SMOKE_OUT_DIR="$OUT"
   export WEAR_SMOKE_DIAGNOSTICS_SCRIPT="$BATS_TEST_TMPDIR/diagnostics.sh"
   export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/step-summary.md"
+  # A throwaway HOME keeps the default AVD directory off the host's ~/.android.
+  export HOME="$BATS_TEST_TMPDIR/home"
+  export XDG_CONFIG_HOME="$HOME/.config"
+  unset ANDROID_AVD_HOME ANDROID_USER_HOME
   unset WEAR_SMOKE_SYSTEM_IMAGE WEAR_SMOKE_CREATE_VIA WEAR_SMOKE_FIXTURE_APK \
     WEAR_SMOKE_FIXTURE_MODULE WEAR_SMOKE_SKIP_IMAGE_INSTALL WEAR_SMOKE_AVD_NAME ANDROID_SDK_ROOT
 }
@@ -152,4 +159,27 @@ STUB
   FAKE_SMOKE_SUMMARY=1 FAKE_SMOKE_STATUS=1 WEAR_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [ ! -e "$GITHUB_STEP_SUMMARY" ]
+}
+
+@test "avdmanager and the smoke share one pinned AVD directory, not the XDG one" {
+  WEAR_SMOKE_CREATE_VIA=avdmanager run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -d "$HOME/.android/avd" ]
+  grep -qx "avd_home=$HOME/.android/avd" "$AVD_LOG"
+  grep -qx "avd_home=$HOME/.android/avd" "$BUN_LOG"
+  grep -qx "$HOME/.android/avd:" "$OUT/avd-homes.txt"
+  grep -qx "$XDG_CONFIG_HOME/.android/avd:" "$OUT/avd-homes.txt"
+}
+
+@test "ANDROID_USER_HOME places the AVD directory" {
+  ANDROID_USER_HOME="$BATS_TEST_TMPDIR/user-home" WEAR_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx "avd_home=$BATS_TEST_TMPDIR/user-home/avd" "$BUN_LOG"
+}
+
+@test "an existing ANDROID_AVD_HOME is kept" {
+  ANDROID_AVD_HOME="$BATS_TEST_TMPDIR/avds" WEAR_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -d "$BATS_TEST_TMPDIR/avds" ]
+  grep -qx "avd_home=$BATS_TEST_TMPDIR/avds" "$BUN_LOG"
 }

@@ -58,10 +58,10 @@ Other reachable-but-useless members at API 36: `Display.getType()` is `test-api,
 returns `TYPE_INTERNAL` for both panels; `Display.getAddress()`, `DisplayAddress.Physical`,
 `DisplayInfo.address` and `DisplayInfo.deviceProductInfo` are `blocked`; `DisplayInfo.uniqueId` is
 `max-target-o`. The public `Display.toString()` embeds `DisplayInfo.toString()`, which printed the
-unique id in Android 10 but since Android 12 returns before `type`, `uniqueId` and `address` unless
+unique id in Android 10. Since Android 12 it returns before `type`, `uniqueId` and `address` unless
 the caller is `system_server` (`if (Process.myUid() != Process.SYSTEM_UID)`,
 `frameworks/base/core/java/android/view/DisplayInfo.java`, line 755 in android-12.0.0_r1 and line
-999 in android-16.0.0_r1), so that is not a source either.
+999 in android-16.0.0_r1). That is not a source either.
 
 ### Rejected alternatives
 
@@ -97,12 +97,12 @@ window in which a stale logical-id map is trusted after a swap. It is exactly as
 the inventory's own role assignment, which is also by size: wherever the host can say "inner" and
 "cover", the fingerprint resolves.
 
-If device captures show `DeviceProductInfo` is populated and distinct on hardware, adding its
-name, PnP id and product id to the fingerprint (and to the inventory parser, which already sees
-the same `deviceProductInfo` text in `dumpsys display`) would close two of the page's known limits: same-size panels, and an external display with a
-built-in panel's native size.
-That is deliberately not built yet: it changes the published `displays.panels` shape and rests on
-a field whose contents on real foldables are unverified.
+If device captures show `DeviceProductInfo` is populated and distinct on hardware, the fingerprint
+and the inventory parser could add its name, PnP id and product id. That would close two of the
+page's known limits: same-size panels, and an external display with a built-in panel's native size.
+The inventory parser already sees the same `deviceProductInfo` text in `dumpsys display`.
+The fingerprint deliberately leaves it out for now: it changes the published `displays.panels` shape
+and rests on a field whose contents on real foldables nobody has verified.
 
 ### Device checks owed
 
@@ -113,7 +113,7 @@ API 36 Pixel Fold AVD (two real panels) and one API 34 or 35 foldable AVD:
    `DisplayDeviceInfo` size of the panel that `cmd display get-displays` reports for logical
    display 0. They must be equal, in natural orientation, in both postures and after a rotation.
 2. Fold and unfold: the pushed `display_transition` for display 0 carries the new panel's
-   fingerprint, the host's transition tracker reports the new panel key without an adb call, and
+   fingerprint. The host's transition tracker reports the new panel key without an adb call, and
    the first observation after the swap names the same panel as `get-displays`.
 3. `wm size 1080x1920` then observe: the fingerprint is unchanged.
 4. Rear-display mode and a state override (`cmd device_state state <id>`): the fingerprint follows

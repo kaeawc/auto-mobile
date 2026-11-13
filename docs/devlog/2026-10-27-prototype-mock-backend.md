@@ -30,7 +30,7 @@ Status: accepted for #14271.
   does not answer would.
 - The mock never proxies to the network and is not subject to the ProtoViewer egress switch.
 - A channel joins a room by its URL path. Membership is per room path (`/rooms/a` and `/rooms/b` of
-  one `/rooms/:roomId` definition are separate rooms), and a `timeline` runs per connection from its
+  one `/rooms/:roomId` definition are separate rooms). A `timeline` runs per connection from its
   open, so every viewer of a scripted feed sees it from the start.
 - A collection broadcast binds the stored item (`{item}`), not the request body, so generated ids
   reach the other devices.

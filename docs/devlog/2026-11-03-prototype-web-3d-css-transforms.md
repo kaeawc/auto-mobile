@@ -42,14 +42,14 @@ family, with no dependency and no network, inside the script budget.
 
 - No WebGL fallback to maintain; the toggle is hidden where `@supports (transform-style:
   preserve-3d)` fails.
-- Device fidelity is flat leaves from the registry's geometry. Third-party device models were
-  ruled out: manufacturer CAD and renders carry copyright and trade dress, and the registry already
+- Device fidelity is flat leaves from the registry's geometry. The design ruled out third-party device
+  models: manufacturer CAD and renders carry copyright and trade dress, and the registry already
   avoids brand imagery. Device thickness could be added as edge strips per leaf; rounded edges in
   CSS 3D are approximations and are not needed to read a posture.
-- Mirroring a live device's posture into the page was not built: the page is a static, hash-pinned
+- The page does not mirror a live device's posture: the page is a static, hash-pinned
   resource, and a posture change on a device is not a new spec revision. A posture mirror belongs
-  with any future live viewer, where the device's display state is already observed.
+  with any future live viewer, which already observes the device's display state.
 - Open questions at the time: WebKit and Gecko rendering of nested `preserve-3d` with
-  `overflow: hidden` leaves (the prototype was checked only in Chromium), and whether arrow-key
+  `overflow: hidden` leaves (the prototype was checked only in Chromium). Also, whether arrow-key
   orbit should move to explicit buttons, since the viewport has no other keyboard handling to share
   keys with.

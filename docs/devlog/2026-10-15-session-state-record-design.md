@@ -12,10 +12,10 @@ Section references (§) point at the design note as it was written; its current-
 
 Design note for #11798 (one explicit state record per session UUID) and the two
 "Not verified" questions of #11799 (one per-UUID row writer with deadline-bounded
-serialization). `SessionSlots` (Part A, S1-S9) is implemented; the `SessionRowWriter`
+serialization). Part A, `SessionSlots` (S1-S9), is implemented; the `SessionRowWriter`
 migration (Part B) is partly implemented, see §6. Function names refer to
-`src/daemon/sessionManager.ts` unless a path says otherwise; line numbers are
-deliberately omitted because they rot.
+`src/daemon/sessionManager.ts` unless a path says otherwise; the note deliberately
+omits line numbers because they rot.
 
 - A session UUID's lifecycle was the conjunction of membership in ~17 maps and sets
   plus flags on three records, read by six hand-written predicates each using a
@@ -76,8 +76,8 @@ Only `endedLabelBases` is touched by a transition.
 
 "Releasing" was tracked three ways (by object, id, operation). `waitOutRecreationOf`
 is a workaround for the scatter (yields because another continuation clears the
-maps). `getSession` is not a query: `getSessionInternal` starts a release when it
-finds an expired session (`releaseExpiredSessionLazily`); it had 31 in-class and ~84
+maps). The `getSession` call is not a query: `getSessionInternal` starts a release when it
+finds an expired session (`releaseExpiredSessionLazily`). It had 31 in-class and ~84
 external callers, versus the side-effect-free `peekSession`.
 
 #### 1.3 Durable row writes (the row facet)
@@ -101,7 +101,7 @@ Guards live in SQL, not memory (`src/db/deviceSessionRepository.ts`):
 its session-clock sequence is not older, and `recordActivity` matches only
 `status = active`. Activity writes are therefore commutative and cannot revive a
 terminal row; they need no writer serialization, only a way to report "row not
-active". #12465 made every `DeviceSessionPersistence` method required, so a writer
+active". Issue #12465 made every `DeviceSessionPersistence` method required, so a writer
 builds on one complete interface and one complete fake
 (`test/fakes/FakeDeviceSessionPersistence.ts`).
 
@@ -116,7 +116,7 @@ same-shaped retry record types (`TerminalReleaseRetry`, `OwedSupersededRowReasse
 1. Teardown, then the first supersede fence.
 2. Terminal only: `persistTerminalReleaseWithinDeadline` raises the in-memory fence
    (`terminalReleaseSnapshots.set`), then `persistSessionRelease` records the journal
-   intent **before** issuing `markReleased`, bounded by
+   intent **before** issuing `markReleased`. The bound is
    `SESSION_RELEASE_PERSIST_TIMEOUT_MS` = `SESSION_RELEASE_DRAIN_TIMEOUT_MS` (5 s) + 1 s
    = **6 s** (not the 10 s `SESSION_RELEASE_TEARDOWN_CAP_MS`, a different bound). At
    the deadline the device is freed anyway.
@@ -187,11 +187,14 @@ journal-only).
 the proposal makes it the single path for terminal releases and adds the missing
 condition.**
 
-Already happens: the terminal deadline path (device freed after 6 s with the row
-unwritten; the in-memory fence keeps the UUID from routing;
-`sessionManager.releasePersistDeadline.test.ts` asserts held 1 ms before the
-deadline, freed at it, snapshot kept); `forceStuckRelease`; every non-terminal
-release.
+Already happens:
+
+- the terminal deadline path: the device is freed after 6 s with the row unwritten,
+  and the in-memory fence keeps the UUID from routing. The test
+  `sessionManager.releasePersistDeadline.test.ts` asserts held 1 ms before the
+  deadline, freed at it, snapshot kept.
+- `forceStuckRelease`.
+- every non-terminal release.
 
 Why safe:
 
@@ -304,9 +307,9 @@ terminal retry scheduling and the non-terminal snapshot map (adapter surface:
 `noteRelease`, `noteLive`, `canIssueRelease`, `scheduleRetry`; in production
 `pending(uuid)` means only "retry owed"). W3 moved create/rebind upserts, activity and
 ownership statements behind `upsertLive`, `recordLiveActivity`,
-`replaceLiveOwnership` (pass-through, same await sequence), and moved the
+`replaceLiveOwnership` (pass-through, same await sequence). It also moved the
 superseded-row state into `SessionRowWriter.superseded`
-(`src/daemon/supersededRowReasserts.ts`: remembered superseded reasons, release-reason
+(`src/daemon/supersededRowReasserts.ts`). That state covers remembered superseded reasons, release-reason
 predecessors, refused release writes, pending-rewrite counts, rows under pending
 non-terminal releases, owed rewrites with backoff/timers/drain attempt, keyed off the
 writer's drain flag). Row policy stays with the manager as per-entry callbacks
@@ -343,16 +346,19 @@ hops.
 `liftTerminalFence` performs deletion, volatile-intent clearing, journal resolution and
 writer cancellation in one synchronous turn. Successful writes, refusals,
 rejected-creation fence adoption and startup replay keep the terminal admission fence
-(resolving an intent must not make an ended UUID reusable) and cancel only the matching
+(resolving an intent must not make an ended UUID reusable). They cancel only the matching
 snapshot without eagerly removing the manager retry entry. Actual lifts remove the
 snapshot and cancel terminal desires and scheduled retries together. Plan-label minting
 keeps its shadow probe and reason-state deletion between snapshot deletion and journal
-resolution; startup keeps recovered-intent/probe/adopted-owner deletion before
-resolution; retry-drop keeps cancel-retry and superseded bookkeeping before resolution.
-A durable `record` clearing the volatile signal is not a fence lift. Two behavior
-changes: a non-terminal commit now also deletes the volatile intent, resolves the
-journal and cancels a terminal retry (skipped when no terminal snapshot is fenced); and
-forced terminal snapshots now capture `expectedRowGeneration` and `releaseRowSessions`.
+resolution. Startup keeps recovered-intent/probe/adopted-owner deletion before
+resolution. Retry-drop keeps cancel-retry and superseded bookkeeping before resolution.
+A durable `record` clearing the volatile signal is not a fence lift.
+
+Two behavior changes:
+
+- a non-terminal commit now also deletes the volatile intent, resolves the
+  journal and cancels a terminal retry (skipped when no terminal snapshot is fenced);
+- forced terminal snapshots now capture `expectedRowGeneration` and `releaseRowSessions`.
 
 At most one unexpired standalone desire per UUID may issue; parked statements stay
 tracked for callbacks and drain. Production bun:sqlite is synchronous, so the
@@ -360,8 +366,8 @@ overwrite regression parks injected statements and retry/precondition work aroun
 actual manager lift/publication. Fault tests use in-memory persistence and journal
 files only. The synchronous journal fake models hang/delay as a whole-process pause
 (an injected supervisor advances FakeTimer without firing JS callbacks; an in-process
-rebind cannot run inside it); rejected journal syscalls yield the W1 volatile result;
-persistence hang/delay suspends across FakeTimer turns; crash cases discard the manager
+rebind cannot run inside it). Rejected journal syscalls yield the W1 volatile result.
+Persistence hang/delay suspends across FakeTimer turns. Crash cases discard the manager
 and replay the committed disk prefix via `rehydratePersistedSessions`.
 
 | #   | Step                                                                                                                                                                                                                                                                                     | Size | Test plan                                                                                                                                                                                                                                                       |
@@ -376,11 +382,11 @@ and replay the committed disk prefix via `rehydratePersistedSessions`.
 
 A terminal release whose `journal.record` returned `durable` now fences and records its intent
 synchronously (`fenceTerminalRelease`), runs the final supersede fence, commits the removal, and only
-then writes the row (`persistCommittedTerminalRelease`). The device is freed (`notifySessionRelease`)
+then writes the row (`persistCommittedTerminalRelease`). The manager frees the device (`notifySessionRelease`)
 without waiting for the row; the release still awaits the row afterwards, bounded by the persist
 deadline, so `drainReleasePromises` and the late-write tracking are unchanged. A final fence that
-declines lifts the fence and resolves the intent in one turn and has nothing to undo, so
-`abandonReleaseSupersededAfterPersist` is called with `rowWritten = false` and rewrites nothing.
+declines lifts the fence and resolves the intent in one turn and has nothing to undo. The manager
+therefore calls `abandonReleaseSupersededAfterPersist` with `rowWritten = false`, and it rewrites nothing.
 
 A row write that fails after the commit cannot keep the session: the device is already freed, the
 retry is scheduled (`scheduleTerminalReleaseRetry`), and the release rejects with the write error.
@@ -388,43 +394,52 @@ Before W4 the session stayed published and the device held until a later release
 
 A `volatile` intent keeps the write-first order exactly as before, including the final fence after
 the row landed and the rewrite chain behind it. Decision (open decision 2, Windows): `volatile` is the
-right answer where the directory fsync is skipped; no weaker guarantee is documented. W5 removes the
-chain by dropping the post-persist re-check for volatile releases (a supersede after the row landed
-is refused: the release already won) and deleting `supersededRows.ts`' release-driven half; the
-rebind and activity overlap repair stays and is re-modelled as the writer replacing an unwritten
-`live` desire.
+right answer where the journal skips the directory fsync; the design documents no weaker guarantee.
+W5 removes the chain by dropping the post-persist re-check for volatile releases (the writer refuses
+a supersede after the row landed: the release already won). It also deletes `supersededRows.ts`'
+release-driven half. The rebind and activity overlap repair stays, re-modelled as the writer
+replacing an unwritten `live` desire.
 
-W5a (decided by the owner, 2026-10-26, #11799): no supersede fence is evaluated once a row
-statement is issued, for any intent: the volatile one included. This is a behaviour change, not a dead-code removal: a volatile release
-whose row statement was issued has won, so a newer identity confirmation that arrives during that
-write is too late, where before it ended with the live session rewritten over the terminal row. A
-durable release still declines at the one fence before its row exists. A faulted journal write
-reports `volatile`, so this reaches durable-journal daemons too whenever that write fails, not only
-Windows. `abandonReleaseSupersededAfterPersist`
-is deleted. The release-driven rewrite chain (`reassertSupersededLiveRow` and the owed-retry
-machinery) is now unreachable from a release; it stays until the next slice, whose tests drive it
-directly, and the rebind/activity overlap repair keeps using it.
+W5a (decided by the owner, 2026-10-26, #11799): once the writer issues a row statement, no
+supersede fence runs, for any intent: the volatile one included. This is a behaviour change, not a
+dead-code removal. A volatile release whose row statement went out has won. A newer identity
+confirmation that arrives during that write is too late; before, it ended with the live session
+rewritten over the terminal row. A durable release still declines at the one fence before its row
+exists. A faulted journal write reports `volatile`, so this reaches durable-journal daemons too
+whenever that write fails, not only Windows. W5a deletes `abandonReleaseSupersededAfterPersist`.
+The release-driven rewrite chain (`reassertSupersededLiveRow` and the owed-retry machinery) is now
+unreachable from a release. It stays until the next slice, whose tests drive it directly, and the
+rebind/activity overlap repair keeps using it.
 
-W5b: the release-driven half of that chain is deleted: `restoreNonTerminalRowOverSupersededRelease`
-and its `Later` form, `replaceSupersededReleaseRow`, the ledger's row-under-pending-release record,
-and the three call sites that reasserted a live row when a late terminal write landed
-(`trackLateReleaseWrite`), when a non-terminal commit settled, or after a fence's row was
-rewritten. What remains is the rebind/activity overlap repair (`oweSupersededRowReassert(session,
-[])`, its retries, drain and activity hook). The superseded-reason plumbing that the overlap repair
-still carries (`remember`, `expectReassert`'s reasons, the statement guard's `supersededReasons`)
-was always empty from production callers, and W5c removes it: the ledger no longer remembers reasons
-(`remember`, `isOwedFor`, `isBeingRewritten`, the owed entry's reasons), `reassertSupersededLiveRow`
-takes only the session, and the live-row rewrite's statement guard refuses every terminal row. What
-stays is the release write's `supersededReasons`, which carries only a terminal upgrade's own earlier
-reasons (`predecessors`). W5c also closes the gap the W5b review found: a finishing rewrite restores
-a terminal fence's row only for a volatile release (whose row was written first) or one that has
-committed, never for a durable release that has not committed and may still decline.
+W5b deletes the release-driven half of that chain:
+
+- `restoreNonTerminalRowOverSupersededRelease` and its `Later` form
+- `replaceSupersededReleaseRow`
+- the ledger's row-under-pending-release record
+- the three call sites that reasserted a live row when a late terminal write landed
+  (`trackLateReleaseWrite`), when a non-terminal commit settled, or after a fence's row was
+  rewritten
+
+What remains is the rebind/activity overlap repair (`oweSupersededRowReassert(session,
+[])`, its retries, drain and activity hook).
+
+The superseded-reason plumbing that the overlap repair still carries (`remember`,
+`expectReassert`'s reasons, the statement guard's `supersededReasons`) was always empty from
+production callers, and W5c removes it. The ledger no longer remembers reasons (`remember`,
+`isOwedFor`, `isBeingRewritten`, the owed entry's reasons). After W5c,
+`reassertSupersededLiveRow` takes only the session, and the live-row rewrite's statement guard
+refuses every terminal row. What stays is the release write's `supersededReasons`, which carries
+only a terminal upgrade's own earlier reasons (`predecessors`).
+
+W5c also closes the gap the W5b review found. A finishing rewrite restores a terminal fence's row
+only for a volatile release (whose row was written first) or one that has committed. It never does
+so for a durable release that has not committed and may still decline.
 
 ### Risks
 
 - Concurrency core: orderings that exist only as comments (a non-terminal release must
   not yield after freezing its reason; the fence "with no await in between") become
-  methods that must stay synchronous, each with a test asserting no microtask boundary
+  methods that must stay synchronous. Each has a test asserting no microtask boundary
   (the S2 harness counts awaits).
 - Dual representation during S3-S6 could disagree; mitigated by the S2 agreement test
   and deleting each group's legacy maps in the PR that made its slice authoritative.
@@ -432,7 +447,7 @@ committed, never for a durable release that has not committed and may still decl
   test in S6).
 - `settled` promises can hide unhandled rejections; they resolve, never reject.
 - W4 changes durability semantics. It is gated on `durable` (Noop and failed append
-  keep today's order), W1 lands first, and a bug in the `durable` signal is the worst
+  keep today's order), and W1 lands first. A bug in the `durable` signal is the worst
   case (a revived UUID), so the fault-injection test fails the signal itself.
 - Multi-daemon rows: no SQL guard is removed in any step; W2 adds the generation guard
   against late parked statements. A wedged write delays that UUID's next issued row only

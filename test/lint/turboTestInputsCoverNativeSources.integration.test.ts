@@ -111,6 +111,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // generateMdmProfile.test.ts reads the bundle identifiers from the network-filter
     // Info.plists to pin the profile payloads to the shipped app.
     "ios/network-filter/Packaging/**",
+    // carPlayProjection.test.ts checks probe.m JSON keys against the TS schema.
+    "ios/carplay-projection-probe/probe.m",
     // Prototype icon tests read the Swift capability declaration, generated symbol data and doc.
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",

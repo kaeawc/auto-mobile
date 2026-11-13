@@ -1,4 +1,8 @@
 import type { SearchableEntry } from "../../../utility/SearchableNode";
+import {
+  followsToggleInPlainWrapper,
+  precedingSiblingLabelSources,
+} from "../../../utility/SiblingToggleLabels";
 import { uniqueBySource } from "../../ApplicationWindowCover";
 import { getHierarchyNodeSource } from "../elementProvenance";
 import type { SkeletonAccumulator } from "./rowModel";
@@ -6,36 +10,21 @@ import type { SkeletonAccumulator } from "./rowModel";
 /**
  * Label a still-unlabelled toggle from the text node that immediately precedes it
  * in its tree (issue #17955). A Compose `Row { Text("Dark mode"); Switch() }` gives
- * the `Switch` no labelled ancestor for `attributeContainerLabels`, so the
- * row came through with no label. The text qualifies only when its subtree ends
- * right before the toggle starts in the same root/window (provenance `exit ===
- * enter - 1`) and no clickable row has already folded it in. Among such nodes the
- * outermost one (smallest `enter`) wins, so it is the preceding sibling itself
- * rather than a nested descendant. Without provenance the order is unknown and the
- * toggle keeps no label. The text row itself stays in `context`.
- *
- * Toggles are walked in tree order. A toggle with no label of its own and no
- * preceding text is a label-after row (`Row { Switch(); Text("Wi-Fi") }`), so the
- * text right after it is its trailing label and never labels the next toggle
- * (issue #18227). That trailing text is the toggle's next sibling, or a text inside
- * that sibling when it is a non-actionable wrapper (`Switch, LinearLayout {
- * Text("Wi-Fi") }`); the wrapper case needs the captured entry graph. A wrapper
- * that contains another toggle is that toggle's row (`Switch, Row { Text; Switch }`),
- * so its text is never claimed as trailing. A toggle that
- * already has a label, or has a preceding text, claims nothing, so the text after
- * it is the next row's leading label: a flat `Text A, Switch A, Text B, Switch B`
- * list and `Switch(content-desc="Wi-Fi"), Text("Bluetooth"), Switch` both label
- * every switch. Rows in separate containers never qualify, since a sibling
- * container ends after its own last child.
+ * the `Switch` no labelled ancestor for `attributeContainerLabels`, so the row came
+ * through with no label. The rule itself, including trailing-text reservation
+ * (#18227) and coordinate space, is `precedingSiblingLabelSources`, which the
+ * searchable projection shares (#18286). Here a text qualifies only when no
+ * clickable row has already folded it in, and ancestry comes from collector
+ * provenance; without it the order is unknown and the toggle keeps no label. The
+ * wrapper case (`Switch, LinearLayout { Text("Wi-Fi") }`) needs the captured entry
+ * graph. The text row itself stays in `context`.
  */
 export function attributePrecedingSiblingLabels(
   accumulators: SkeletonAccumulator[],
   foldedIntoClickable: (text: SkeletonAccumulator) => boolean,
   entries?: readonly SearchableEntry[],
 ): void {
-  const toggles = accumulators
-    .filter((acc) => acc.provenance && acc.affordances.has("toggle"))
-    .sort((a, b) => a.provenance!.enter - b.provenance!.enter);
+  const toggles = accumulators.filter((acc) => acc.provenance && acc.affordances.has("toggle"));
   const texts = accumulators.filter(
     (acc) =>
       acc.affordances.size === 0 &&
@@ -43,91 +32,37 @@ export function attributePrecedingSiblingLabels(
       acc.provenance &&
       !foldedIntoClickable(acc),
   );
-  const graph = entries && entryGraph(entries);
-  const trailing = new Set<SkeletonAccumulator>();
-  for (const acc of toggles) {
-    const own = acc.provenance!;
-    const preceding = texts
-      .filter(
-        (text) =>
-          !trailing.has(text) &&
-          text.space === acc.space &&
-          text.boundsSpace === acc.boundsSpace &&
-          text.provenance!.group === own.group &&
-          text.provenance!.exit === own.enter - 1,
-      )
-      .sort((a, b) => a.provenance!.enter - b.provenance!.enter)[0];
-    if (acc.label === undefined && !preceding) {
-      const claimed = texts.filter(
-        (text) => followsToggle(acc, text) || graph?.followsInWrapper(acc, text),
-      );
-      for (const text of claimed) {
-        trailing.add(text);
-      }
-    }
-    if (acc.label === undefined) {
-      acc.label = preceding?.label;
-    }
+  const entryOf = entries && entryLookup(entries);
+  const labels = precedingSiblingLabelSources(
+    toggles,
+    texts,
+    (acc) => ({
+      position: acc.provenance!,
+      space: acc.space,
+      boundsSpace: acc.boundsSpace,
+      labelled: acc.label !== undefined,
+    }),
+    entryOf &&
+      ((toggle, text) => {
+        const toggleEntry = entryOf(toggle);
+        const textEntry = entryOf(text);
+        return (
+          toggleEntry !== undefined &&
+          textEntry !== undefined &&
+          followsToggleInPlainWrapper(entries!, toggleEntry, textEntry)
+        );
+      }),
+  );
+  for (const [toggle, text] of labels) {
+    toggle.label = text.label;
   }
 }
 
-/** Whether `text` starts right after `toggle`'s subtree in the same root/window. */
-function followsToggle(toggle: SkeletonAccumulator, text: SkeletonAccumulator): boolean {
-  return (
-    text.provenance!.group === toggle.provenance!.group &&
-    text.provenance!.enter === toggle.provenance!.exit + 1
-  );
-}
-
-/** Captured entry ancestry for rows; non-provenance producers supply none. */
-function entryGraph(entries: readonly SearchableEntry[]) {
+/** Captured entry for a row; non-provenance producers supply no entries. */
+function entryLookup(entries: readonly SearchableEntry[]) {
   const bySource = new Map(uniqueBySource(entries).map((entry) => [entry.source, entry]));
-  const entryOf = (acc: SkeletonAccumulator): SearchableEntry | undefined => {
+  return (acc: SkeletonAccumulator): SearchableEntry | undefined => {
     const source = acc.target && getHierarchyNodeSource(acc.target);
     return source ? bySource.get(source) : undefined;
-  };
-  // Entries are pre-order, so the first later entry no deeper than `node` is the
-  // node right after its subtree; it is a sibling when it shares the parent.
-  const nextSibling = (node: SearchableEntry): SearchableEntry | undefined => {
-    const next = entries.slice(node.index + 1).find((entry) => entry.depth <= node.depth);
-    return next?.parentIndex === node.parentIndex && next?.rootGroup === node.rootGroup
-      ? next
-      : undefined;
-  };
-  // A plain wrapper has no affordances and holds no toggle: a wrapper holding a
-  // toggle is that toggle's row, so its leading text labels that toggle and is
-  // never the previous toggle's trailing text.
-  const isPlainWrapper = (node: SearchableEntry): boolean => {
-    if (node.affordances.length > 0) {
-      return false;
-    }
-    for (let i = node.index + 1; i < entries.length && entries[i].depth > node.depth; i++) {
-      if (entries[i].affordances.includes("toggle")) {
-        return false;
-      }
-    }
-    return true;
-  };
-  return {
-    /**
-     * Whether `text` sits inside the non-actionable, toggle-free wrapper that is
-     * `toggle`'s next sibling. A bare next-sibling text is the provenance case above.
-     */
-    followsInWrapper(toggle: SkeletonAccumulator, text: SkeletonAccumulator): boolean {
-      const toggleEntry = entryOf(toggle);
-      const textEntry = entryOf(text);
-      const wrapper = toggleEntry && nextSibling(toggleEntry);
-      if (!textEntry || !wrapper || wrapper === textEntry || !isPlainWrapper(wrapper)) {
-        return false;
-      }
-      let cursor: SearchableEntry | undefined = textEntry;
-      while (cursor && cursor.index > wrapper.index) {
-        cursor = cursor.parentIndex === undefined ? undefined : entries[cursor.parentIndex];
-        if (cursor && cursor !== wrapper && cursor.affordances.length > 0) {
-          return false;
-        }
-      }
-      return cursor === wrapper;
-    },
   };
 }

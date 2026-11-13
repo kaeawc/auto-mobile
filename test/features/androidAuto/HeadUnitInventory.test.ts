@@ -61,6 +61,12 @@ describe("parseDhuConfigResolution", () => {
     expect(parseDhuConfigResolution("[general]\ntouch = true\n")).toBeNull();
     expect(parseDhuConfigResolution("[general]\nresolution = huge\n")).toBeUndefined();
   });
+
+  test("inherited object keys are not named resolutions", () => {
+    for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect(parseDhuConfigResolution(`[general]\nresolution = ${name}\n`)).toBeUndefined();
+    }
+  });
 });
 
 describe("readHeadUnitInventoryEntry", () => {

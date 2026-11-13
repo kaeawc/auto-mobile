@@ -46,9 +46,9 @@ export function parseDhuConfigResolution(
   if (value === undefined) {
     return null;
   }
-  const named = NAMED_RESOLUTIONS[value.toLowerCase()];
-  if (named) {
-    return { ...named };
+  const name = value.toLowerCase();
+  if (Object.hasOwn(NAMED_RESOLUTIONS, name)) {
+    return { ...NAMED_RESOLUTIONS[name] };
   }
   const size = SIZE_VALUE.exec(value);
   return size ? { width: Number(size[1]), height: Number(size[2]) } : undefined;

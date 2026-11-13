@@ -34,7 +34,13 @@ import {
   startScreenrecordProcess,
   type ScreenrecordStartContext,
 } from "./androidScreenrecord";
-import { isOwnRecorderCmdline, type DeviceRecorderPid } from "./androidRecorderPid";
+import {
+  isOwnRecorderCmdline,
+  parseRecorderLookup,
+  RECORDER_LOOKUP_COMMAND,
+  type DeviceRecorderPid,
+  type RecorderLookup,
+} from "./androidRecorderPid";
 import {
   defaultRecordingCodecProbe,
   probeDurationMs,
@@ -379,11 +385,19 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     adb: AdbExecutor,
     backendHandle: AndroidBackendHandle,
   ): Promise<void> {
-    const pid = backendHandle.devicePid?.pid;
+    const lookup = await this.resolveDeviceRecorderPid(adb, backendHandle);
     try {
-      if (pid !== undefined) {
-        const outcome = await this.signalDeviceRecorder(adb, backendHandle, pid, { signal: 2 });
-        logger.info(`[VideoCapture] Device recorder pid ${pid} SIGINT: ${outcome}`);
+      if (lookup.kind === "found") {
+        const outcome = await this.signalDeviceRecorder(adb, backendHandle, lookup.pid, {
+          signal: 2,
+        });
+        logger.info(`[VideoCapture] Device recorder pid ${lookup.pid} SIGINT: ${outcome}`);
+        return;
+      }
+      if (lookup.kind === "none") {
+        logger.info(
+          `[VideoCapture] No device screenrecord writes ${backendHandle.deviceTempPath}; nothing to signal`,
+        );
         return;
       }
       const pk = await adb.executeCommand("shell pkill -2 screenrecord", SCREENRECORD_MS.pkillOpts);
@@ -394,6 +408,44 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       logger.warn(
         `[VideoCapture] Device-side SIGINT of screenrecord failed; will check device finalization before pulling: ${errorMessage(error)}`,
       );
+    }
+  }
+
+  /**
+   * The recorder's device pid: the one the launch shell reported, or else the running
+   * `screenrecord` whose cmdline names this recording's unique output file (#18243). A
+   * detached recorder outlives its host session, so host exit proves nothing; a found pid
+   * is kept on the handle so later stop, finalize and teardown steps use it. Never throws.
+   */
+  private async resolveDeviceRecorderPid(
+    adb: AdbExecutor,
+    backendHandle: AndroidBackendHandle,
+  ): Promise<RecorderLookup> {
+    const known = backendHandle.devicePid?.pid;
+    if (known !== undefined) {
+      return { kind: "found", pid: known };
+    }
+    try {
+      const result = await adb.executeCommand(RECORDER_LOOKUP_COMMAND, {
+        timeoutMs: SCREENRECORD_MS.probe,
+        noRetry: true,
+      });
+      const lookup = result.error
+        ? ({ kind: "unknown" } as const)
+        : parseRecorderLookup(result.stdout, backendHandle.deviceTempPath);
+      if (lookup.kind === "found") {
+        logger.info(
+          `[VideoCapture] Found device recorder pid ${lookup.pid} by its output file ${backendHandle.deviceTempPath}`,
+        );
+        backendHandle.devicePid = { pid: lookup.pid };
+      }
+      return lookup;
+    } catch (error) {
+      logger.warn(
+        `[VideoCapture] Could not look up the device recorder by output file: ${errorMessage(error)}`,
+        error,
+      );
+      return { kind: "unknown" };
     }
   }
 
@@ -462,7 +514,14 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     recordingId: string,
     options?: ForceStopOptions,
   ): Promise<string | undefined> {
-    const pid = backendHandle.devicePid?.pid;
+    const lookup = await this.resolveDeviceRecorderPid(adb, backendHandle);
+    if (lookup.kind === "none") {
+      logger.info(
+        `[VideoCapture] No device screenrecord writes ${backendHandle.deviceTempPath}; nothing to kill for ${recordingId}`,
+      );
+      return undefined;
+    }
+    const pid = lookup.kind === "found" ? lookup.pid : undefined;
     if (pid === undefined && options?.deviceWide === false) {
       // Without our pid, `pkill -9 screenrecord` would signal every recorder on the
       // device, and the device may now belong to another session. The host `adb shell`
@@ -548,13 +607,18 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
   }
 
-  /** A detached recorder can survive host adb exit; wait for its known pid before file polling. */
+  /**
+   * A detached recorder can survive host adb exit; wait for its pid (reported at launch or
+   * found by output file) before file polling. Only an unidentifiable recorder relies on
+   * the file size alone.
+   */
   private async waitForDeviceFileToFinalize(
     adb: AdbExecutor,
     backendHandle: AndroidBackendHandle,
   ): Promise<boolean> {
-    const pid = backendHandle.devicePid?.pid;
-    if (pid !== undefined) {
+    const lookup = await this.resolveDeviceRecorderPid(adb, backendHandle);
+    if (lookup.kind === "found") {
+      const pid = lookup.pid;
       for (let attempt = 0; attempt < DEVICE_FILE_FINALIZE_POLL_ATTEMPTS; attempt++) {
         if (await this.confirmDeviceRecorderPidExited(adb, backendHandle, pid)) {
           return this.waitForStableDeviceFile(adb, backendHandle);

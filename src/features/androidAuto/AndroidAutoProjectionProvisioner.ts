@@ -132,6 +132,9 @@ export class AndroidAutoProjectionProvisioner {
   private readonly retired = new WeakSet<DesktopHeadUnitSession>();
   /** The config each tracked DHU was launched with. */
   private readonly launchConfigs = new WeakMap<DesktopHeadUnitSession, string>();
+  /** A per-process label for each DHU a console was handed out for, so a restart is visible. */
+  private readonly panelInstances = new WeakMap<DesktopHeadUnitSession, string>();
+  private panelCount = 0;
   /**
    * The host port 5277 redirect this provisioner added, if any: one object per `redir add`, so a
    * late removal clears only the redirect it was removing, never one added after it.
@@ -185,12 +188,25 @@ export class AndroidAutoProjectionProvisioner {
       return undefined;
     }
     const session = this.reusableSession(deviceId);
-    return session
-      ? {
-          sendCommand: (command) => session.sendCommand(command),
-          isRunning: () => session.isRunning(),
-        }
-      : undefined;
+    if (!session) {
+      return undefined;
+    }
+    const configPath = this.launchConfigs.get(session);
+    return {
+      sendCommand: (command) => session.sendCommand(command),
+      isRunning: () => session.isRunning(),
+      panel: { instance: this.panelInstance(session), ...(configPath ? { configPath } : {}) },
+    };
+  }
+
+  private panelInstance(session: DesktopHeadUnitSession): string {
+    const known = this.panelInstances.get(session);
+    if (known) {
+      return known;
+    }
+    const instance = `dhu-${++this.panelCount}`;
+    this.panelInstances.set(session, instance);
+    return instance;
   }
 
   private async runProvisioning(

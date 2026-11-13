@@ -251,6 +251,23 @@ posixTest("derives two isolated daemons with one shared ADB registry", () => {
     expect(spec.env.MT_PORT).toBe(String(spec.port));
   }
 });
+test("private daemons default the project root to the harness checkout and --env wins", () => {
+  const root = resolve("/checkout");
+  expect(
+    derivePrivateDaemonBatch({ ...options, projectRoot: root }).map(
+      (spec) => spec.env.AUTOMOBILE_PROJECT_ROOT,
+    ),
+  ).toEqual([root, root]);
+  expect(
+    derivePrivateDaemonBatch({
+      ...options,
+      projectRoot: root,
+      extraEnv: { AUTOMOBILE_PROJECT_ROOT: "/other" },
+      daemonEnv: { "2": { AUTOMOBILE_PROJECT_ROOT: "/second" } },
+    }).map((spec) => spec.env.AUTOMOBILE_PROJECT_ROOT),
+  ).toEqual(["/other", "/second"]);
+  expect(derivePrivateDaemonBatch(options)[0].env.AUTOMOBILE_PROJECT_ROOT).toBeUndefined();
+});
 posixTest("split mode deliberately separates ADB registries", () => {
   const specs = derivePrivateDaemonBatch({ ...options, splitAdbCoordination: true });
   expect(specs[0].adbServerCoordinationDir).toBe(join(specs[0].dir, "adb-servers"));

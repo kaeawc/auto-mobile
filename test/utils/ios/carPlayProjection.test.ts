@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   assertCarPlayProjecting,
+  carPlayProjectionStateSchema,
   DefaultCarPlayProjectionProbe,
   parseCarPlayProjectionState,
   requireCarPlayProjection,
@@ -131,11 +134,11 @@ describe("CarPlay projection", () => {
     for (const message of [
       "attached but not projecting (AirPlay[3])",
       "Capture was skipped because the frame would be black",
-      "Simulator.app CarPlay window",
-      "#17561",
+      "Open the CarPlay window in Simulator.app, then retry.",
     ]) {
       expect(() => assertCarPlayProjecting(state)).toThrow(message);
     }
+    expect(() => assertCarPlayProjecting(state)).toThrow(/^(?![\s\S]*(#\d|\]\(|https?:))/);
   });
 
   test("requires enablement and screen power for untagged or missing wireless0", () => {
@@ -168,5 +171,25 @@ describe("CarPlay projection", () => {
     fake.error = new ActionableError("probe failed");
     await expect(requireCarPlayProjection("three", fake)).rejects.toBe(fake.error);
     expect(fake.calls).toEqual(["one", "two", "three"]);
+  });
+
+  test("probe.m emits exactly the schema's keys in both branches, with a self-deadline", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../../ios/carplay-projection-probe/probe.m"),
+      "utf8",
+    );
+    // Each `state = @{ ... }` literal is one JSON branch the probe can print.
+    const literals = [...source.matchAll(/state = @\{([^}]*)\}/g)].map((match) =>
+      [...match[1].matchAll(/@"(\w+)":/g)].map((key) => key[1]).sort(),
+    );
+    const schemaKeys = carPlayProjectionStateSchema.options.map((option) =>
+      Object.keys(option.shape).sort(),
+    );
+    expect(literals).toHaveLength(2);
+    expect(literals).toEqual(schemaKeys.toReversed());
+    expect(source).toContain("NSJSONWritingSortedKeys");
+    const deadline = Number(/kProbeDeadlineSeconds = (\d+);/.exec(source)?.[1]);
+    expect(source).toContain("alarm(kProbeDeadlineSeconds)");
+    expect(deadline * 1000).toBeLessThan(15000);
   });
 });

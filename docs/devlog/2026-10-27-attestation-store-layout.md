@@ -30,7 +30,7 @@ variety belongs.
 **No cache in v1.** A PR makes a handful of lookups (one per gated job, at job start). Neon in the same
 region as the service answers a primary-key index lookup in single-digit milliseconds. The cost that
 can matter is a scale-to-zero cold start, which a cache does not fix (the first request after idle
-still pays it); the answer to that is keeping the compute warm or a pooled connection. If a cache is
+still pays it). The answer to that is keeping the compute warm or a pooled connection. If a cache is
 needed later it stays in-process in the Go service: anything outside the process boundary is the same
 trust class as the GitHub-side caches already refused.
 

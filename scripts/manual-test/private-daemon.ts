@@ -87,6 +87,7 @@ const optionsSchema = z
     basePort: z.number(),
     auxRoot: z.string().optional(),
     serverPath: z.string(),
+    projectRoot: z.string().optional(),
     splitAdbCoordination: z.boolean().optional(),
     protectedDevices: z
       .array(
@@ -315,6 +316,7 @@ function initOptions(state: ParsedValues): PrivateDaemonCommand | { error: strin
     count: Number(values["--count"]),
     basePort: Number(values["--base-port"]),
     serverPath: values["--server"] ?? resolve(import.meta.dir, "../../dist/src/index.js"),
+    projectRoot: resolve(import.meta.dir, "../.."),
     extraEnv: state.extraEnv,
     daemonEnv: state.daemonEnv,
     daemonArgs: state.daemonArgs,

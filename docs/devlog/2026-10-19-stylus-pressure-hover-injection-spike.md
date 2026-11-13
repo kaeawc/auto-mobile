@@ -21,9 +21,9 @@ At the start of the spike:
   hover or Pencil. Non-touch IOHID injection had precedent (keyboard events in
   `GesturePerformer+HardwareButtons.swift`; the hinge-angle event in `DefaultHingeAngleSetter.swift`).
 - Candidate Android routes also included hidden `InputManager.injectInputEvent` (`INJECT_EVENTS`
-  signature permission, reachable via `app_process` as shell uid, greylisted on recent releases)
-  and `sendevent` into an existing `/dev/input/eventN` node (root, slow per-line events, useful
-  only if the digitizer already advertises pen axes).
+  signature permission, reachable via `app_process` as shell uid, greylisted on recent releases).
+  Another was `sendevent` into an existing `/dev/input/eventN` node (root, slow per-line events,
+  useful only if the digitizer already advertises pen axes).
 
 ## Options
 
@@ -52,7 +52,7 @@ Android routes behind one interface, chosen by required features: `ctrlproxy-a11
   behind a runner `hover_input_v1` flag absent when neither resolves.
 - **Instrumentation route (#13097): GO.** On an API 37 `google_apis` userdebug AVD the Pointer
   Probe (#13096) received strokes as `TOOL_TYPE_STYLUS`, source `STYLUS(0x4002)`, with planned
-  pressure and tilt, orientation, and `buttons: 32` as `STYLUS_PRIMARY`; non-root hover arrived as
+  pressure and tilt, orientation, and `buttons: 32` as `STYLUS_PRIMARY`. Non-root hover arrived as
   STYLUS, or MOUSE with tool `"mouse"`.
 - **uinput route (#13105): PASS** on Android 17 / API 37 userdebug: `SOURCE_STYLUS` with X/Y,
   normalized PRESSURE 0..1, ORIENTATION, DISTANCE and TILT 0..1.571 radians, without idc/keylayout
@@ -65,14 +65,16 @@ Android routes behind one interface, chosen by required features: `ctrlproxy-a11
 - Route selection (#13098), the uinput route (#13105), the instrumentation route (#13097), rich
   stylus on `tapAt`/`swipeAt`/`dragPath` (#13099) and recorder pen parsing (#13101) followed.
 - Instrumentation latency on a loaded API 37 AVD host: a one-point hover took 132-162 ms from
-  `am instrument` start to exit, injection itself 3-10 ms; a 1 s, 65-event stroke ran in 1.1-2.1 s.
+  `am instrument` start to exit, injection itself 3-10 ms. A 1 s, 65-event stroke ran in 1.1-2.1 s.
   These are not a budget.
 - Planned recorder work at the time: surface `distance`, a sampled `pressure` array for strokes,
   and new `hover` and `stroke` event types, with replay failing loudly if a route cannot honour
   them.
-- Open experiments at the time: a physical pen device; a rooted physical device's `uinput` pen;
-  emulator gRPC pen and console `event send` against the probe; and, on a physical iPad,
-  `pressDownWithPressure:atOffset:` and raw `XCPointerEvent.pressure` against `UITouch.force`
-  (an IOHID digitizer event through the `dlsym` pattern was not tried; Pencil also needs
-  entitlement checks).
+- Open experiments at the time:
+  - a physical pen device;
+  - a rooted physical device's `uinput` pen;
+  - emulator gRPC pen and console `event send` against the probe;
+  - on a physical iPad, `pressDownWithPressure:atOffset:` and raw `XCPointerEvent.pressure` against
+    `UITouch.force`. An IOHID digitizer event through the `dlsym` pattern was not tried; Pencil also
+    needs entitlement checks.
 - #16028 stayed open for device acceptance of the stuck-pointer host protection.

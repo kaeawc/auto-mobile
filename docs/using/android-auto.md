@@ -141,13 +141,21 @@ The result gains a `headUnit` block:
 - `effect`: `screenChanged` and its `basis`. The change is read from the projected apps' template
   stacks (`carAppTemplates.projected[]`): each app's top screen class and stack depth, and the top
   template's content, so a tab switch or a changed item on the same screen counts as a change. A
-  list scroll counts only when the app's template reports different items. Without the AutoMobile template route in any projected app, `basis` is
-  `no template data` and `screenChanged` is absent: the input was sent, but whether it changed the
-  screen is unknown.
-- `idle`: whether two template reads in a row agreed (`stable`) and how long the wait took
-  (`waitedMs`). A screen that still looks the same is waited on for about a second, so a slow screen
+  list scroll counts only when the app's template reports different items. Without the AutoMobile template route in any projected app, the change is read from a DHU
+  screenshot instead: `basis` is `screenshot changed` or `screenshot unchanged`, which tells changed
+  pixels from unchanged ones but not which screen is shown. When no screenshot arrives either (a
+  `--headless` DHU without video focus), `basis` is `no template data` and `screenChanged` is
+  absent: the input was sent, but whether it changed the screen is unknown.
+- `idle`: whether two reads in a row agreed (`stable`), what they were (`basis`: `carAppTemplates`,
+  `screenshot` or `none`) and how long the wait took (`waitedMs`). A screen that still looks the same is waited on for about a second, so a slow screen
   push is not reported as no change. The wait ends after about three seconds either way.
 - `before` and `after`: the top screen of each projected session, read before and after the input.
+  Absent with the screenshot fallback.
+
+Before sending input, the action checks that the head unit is still the one the previous head-unit
+action left: the same DHU process, the same config, and the same projected apps and car sessions.
+If any of them changed, nothing is sent and the action fails. The check counts only apps with the
+template route, so a switch to an app without it is not caught.
 
 `dpad back` pops the current screen on the head unit, so `pressButton back` needs no fallback.
 
@@ -156,6 +164,7 @@ The result gains a `headUnit` block:
 | No Desktop Head Unit is running for the device | Start one with `startDevice` and `androidAuto.headUnit`, or `provisionDevice` with `androidAuto`, then retry. |
 | The Desktop Head Unit is not running           | The DHU exited. Call `startDevice` with `androidAuto.headUnit` again.                                         |
 | A button or field has no head unit equivalent  | Use one of the inputs in the table above.                                                                     |
+| Head unit input not sent                       | The DHU restarted, its config changed, or the projected apps changed. Observe again, then retry the input.    |
 
 ## Setting up projection by hand
 

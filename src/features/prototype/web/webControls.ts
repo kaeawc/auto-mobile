@@ -27,6 +27,7 @@ import { defaultFillAxes, filling, linkedPagerPage } from "./webCollections";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
 import { cssColor, textCss } from "./webStyle";
+import { webImageAsset, webImageLayers } from "./webImages";
 
 type Css = Record<string, string>;
 
@@ -269,6 +270,15 @@ export interface NavItem {
   readonly label: string;
   readonly icon?: string;
   readonly image: boolean;
+  /** The bound asset id of the item's image in the current mode, when it authors one. */
+  readonly asset?: string;
+}
+
+/** Nav item images draw in a 24 dp square, as Android's navigation icons do. */
+const NAV_IMAGE_DP = 24;
+
+function optionalAsset(asset: string | undefined): { asset?: string } {
+  return asset === undefined ? {} : { asset };
 }
 
 export function navItems(node: Raw, scope: WebRenderScope, kit: WebRenderKit): NavItem[] {
@@ -279,6 +289,9 @@ export function navItems(node: Raw, scope: WebRenderScope, kit: WebRenderKit): N
       label: kit.bound(item.label, scope),
       ...(typeof item.icon === "string" ? { icon: item.icon } : {}),
       image: item.image !== undefined,
+      ...optionalAsset(
+        webImageAsset(item.image, scope.style.mode, (text) => kit.bound(text, scope)),
+      ),
     };
   });
 }
@@ -302,10 +315,36 @@ export function navSelection(
 }
 
 /**
- * An item's icon: its named icon, else (an image is not inlined, or none is given) Android's 24 px
- * surfaceVariant placeholder square.
+ * An item's visual: its image when the page inlines one (the image takes precedence over the icon,
+ * and the draw is recorded so the page encodes it at 24 dp), else its named icon, else Android's
+ * 24 px surfaceVariant placeholder square.
  */
 export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebElement {
+  if (item.asset !== undefined) {
+    scope.imageDraws?.push({
+      asset: item.asset,
+      widthDp: NAV_IMAGE_DP,
+      heightDp: NAV_IMAGE_DP,
+      scale: "fit",
+    });
+    const slot = scope.imageSlots?.get(item.asset);
+    if (slot !== undefined) {
+      return el(
+        "span",
+        {
+          attrs: { [DATA_PART]: "image", role: "img" },
+          style: {
+            display: "block",
+            position: "relative",
+            width: `${NAV_IMAGE_DP}px`,
+            height: `${NAV_IMAGE_DP}px`,
+            [FLEX_SHRINK]: "0",
+          },
+        },
+        webImageLayers(slot, {}, scope.style),
+      );
+    }
+  }
   if (item.icon !== undefined) {
     return kit.icon({ type: "icon", name: item.icon }, scope, "");
   }

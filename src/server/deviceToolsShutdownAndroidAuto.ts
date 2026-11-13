@@ -1,9 +1,15 @@
-import { FileAvdColdBootMarkerStore } from "../utils/android-cmdline-tools/AvdColdBootMarkerStore";
+import {
+  FileAvdColdBootMarkerStore,
+  type AvdColdBootMarkerStore,
+} from "../utils/android-cmdline-tools/AvdColdBootMarkerStore";
 import type {
   DeviceToolsDependencies,
   ShutdownDeadlineContext,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
-import { runWithinShutdownDeadline } from "../features/deviceLifecycle/deviceLifecycleCore";
+import {
+  POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
+  runWithinShutdownDeadline,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { stopProvisionedAndroidAuto } from "./provisioning/provisioningAndroidAuto";
@@ -14,14 +20,21 @@ import { stopProvisionedAndroidAuto } from "./provisioning/provisioningAndroidAu
  * the emulator, and its redirect, in place. Other platforms have no DHU, so their deadline
  * errors keep naming their own step (#17877). `avdName` is the AVD the kill confirmed, which can
  * differ from the entry device's name (an `Unknown (emulator-NNNN)` placeholder); the cold boot
- * marker is written for it.
+ * marker is written for it. When that name resolves to no AVD directory (a runtime name), the
+ * marker goes to the AVD the running emulator reports instead, the name EmulatorLauncher
+ * launches it by (#17929).
+ *
+ * The marker is written before the kill, while the console can still name the AVD, so a kill
+ * that then fails leaves a marker for a still-running emulator. That costs at most one cold
+ * boot: the next launch of that AVD that reaches readiness consumes it.
  */
 export async function stopAndroidAutoBeforeShutdown(
   shutdownContext: ShutdownDeadlineContext,
   dependencies: Pick<
     DeviceToolsDependencies,
     "timer" | "androidAutoProjection" | "avdColdBootMarkers"
-  >,
+  > &
+    Partial<Pick<DeviceToolsDependencies, "resolveRunningAndroidAvdName">>,
   avdName: string = shutdownContext.device.name,
 ): Promise<void> {
   const { device } = shutdownContext;
@@ -31,11 +44,11 @@ export async function stopAndroidAutoBeforeShutdown(
   await runWithinShutdownDeadline(device, dependencies.timer, shutdownContext.deadlineMs, {
     detail: "Desktop Head Unit stop did not complete",
     requestAbortSignal: shutdownContext.requestAbortSignal,
-    operation: async () => {
+    operation: async (signal) => {
       const stopped = await stopProvisionedAndroidAuto(dependencies, device);
       if (stopped) {
         try {
-          await (dependencies.avdColdBootMarkers ?? new FileAvdColdBootMarkerStore()).mark(avdName);
+          await markColdBoot(dependencies, shutdownContext, avdName, signal);
         } catch (error) {
           logger.warn(
             `[AndroidAuto] Failed to mark AVD '${avdName}' for a cold boot: ${errorMessage(error)}`,
@@ -46,6 +59,34 @@ export async function stopAndroidAutoBeforeShutdown(
     },
     timeoutMs: shutdownContext.timeoutMs,
   });
+}
+
+async function markColdBoot(
+  dependencies: Pick<DeviceToolsDependencies, "avdColdBootMarkers" | "timer"> &
+    Partial<Pick<DeviceToolsDependencies, "resolveRunningAndroidAvdName">>,
+  shutdownContext: ShutdownDeadlineContext,
+  avdName: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const markers: AvdColdBootMarkerStore =
+    dependencies.avdColdBootMarkers ?? new FileAvdColdBootMarkerStore();
+  if (await markers.mark(avdName)) {
+    return;
+  }
+  const probeMs = Math.min(
+    POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
+    shutdownContext.deadlineMs - dependencies.timer.now(),
+  );
+  const runtimeAvdName =
+    probeMs > 0
+      ? await dependencies.resolveRunningAndroidAvdName?.(shutdownContext.device, probeMs, signal)
+      : undefined;
+  if (runtimeAvdName && runtimeAvdName !== avdName && (await markers.mark(runtimeAvdName))) {
+    return;
+  }
+  logger.warn(
+    `[AndroidAuto] No AVD directory for '${avdName}'${runtimeAvdName && runtimeAvdName !== avdName ? ` or running AVD '${runtimeAvdName}'` : ""}; the next launch may load its quickboot snapshot`,
+  );
 }
 
 type AfterKillDependencies = Pick<DeviceToolsDependencies, "androidAutoProjection" | "timer">;

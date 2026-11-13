@@ -13,6 +13,16 @@ export const WATCH_APP_NOT_FOREGROUND_MESSAGE =
   "do not mean the screen is empty. Call launchApp to bring the app back, or post a notification " +
   "and retry observe: system alerts and notification looks are readable. Read the screenshot meanwhile.";
 
+/** The runner's target app has no process: it exited or crashed (#18052). */
+export function watchAppNotRunningMessage(bundleId: string): string {
+  return (
+    `The target app ${bundleId} is not running on the watch: it exited or crashed. ` +
+    "This observation carries only a screenshot of what is on screen now, usually the watch face. " +
+    "Absent hierarchy fields do not mean the app's screen is empty. Read getLogs for the crash and " +
+    "call launchApp to start the app again."
+  );
+}
+
 export type AppleScreenshotOnlyPlatform = "watchos" | "tvos" | "visionos";
 
 export const TVOS_HIERARCHY_UNAVAILABLE_MESSAGE =
@@ -37,6 +47,8 @@ export interface WatchHierarchyUnavailable<
 > {
   platform: P;
   message: string;
+  /** watchOS: the runner's target app, present only when it has no process (#18052). */
+  appNotRunning?: { bundleId: string };
 }
 
 /**

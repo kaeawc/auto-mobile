@@ -7,7 +7,8 @@ struct PrototypeScreen: View {
     let store: PrototypeLibraryStore
     let entry: PrototypeLibraryEntry
     let networkSwitch: PrototypeLibraryNetworkSwitch
-    /// MCP `open` reports success on the first render and failure on any load error or watchdog expiry.
+    /// MCP `open` reports success on the first render and failure on any load error, refusal or
+    /// watchdog expiry, at most once per load (`PrototypeLoadReport`).
     let onLoaded: @MainActor () -> Void
     let onLoadFailed: @MainActor () -> Void
     /// Closes the prototype: pops the phone stack, or empties the detail pane at regular width.
@@ -18,6 +19,7 @@ struct PrototypeScreen: View {
     @State private var rendererActive = false
     @State private var firstRender = false
     @State private var waitingForStop = false
+    @State private var loadReport = PrototypeLoadReport()
     @State private var pending: Action?
     @State private var content: PrototypeLibraryContent?
     @State private var storage: URL?
@@ -125,7 +127,7 @@ struct PrototypeScreen: View {
                     .onAppear {
                         watchdog.cancel()
                         waitingForStop = rendererActive
-                        onLoadFailed()
+                        reportLoad(.failed)
                     }
             } else if waitingForStop {
                 ProgressView()
@@ -140,7 +142,7 @@ struct PrototypeScreen: View {
                         diagnostics.record(ViewerFailure(rendererError: $0))
                         error = $0
                         self.content = nil
-                        onLoadFailed()
+                        reportLoad(.failed)
                     }
                 )
                 .onAppearanceChange { chromeAppearance = $0 }
@@ -148,7 +150,7 @@ struct PrototypeScreen: View {
                     guard importRefusal == nil else { return }
                     firstRender = true
                     watchdog.cancel()
-                    onLoaded()
+                    reportLoad(.loaded)
                 }
                 .onStopped {
                     PrototypeAssetRegistrar.releaseProcessFonts()
@@ -193,6 +195,7 @@ struct PrototypeScreen: View {
     private func finishRelaunch() {
         guard let action = pending else { return }
         pending = nil
+        loadReport.begin()
         do {
             if action == .reset { try store.resetStorage(entry.libraryId) }
             revision += 1
@@ -201,11 +204,12 @@ struct PrototypeScreen: View {
         } catch {
             diagnostics.record(.libraryStorage)
             self.error = error
-            onLoadFailed()
+            reportLoad(.failed)
         }
     }
 
     private func load() {
+        loadReport.begin()
         var failure = ViewerFailure.libraryCorrupt
         do {
             let loaded = try store.load(entry.libraryId)
@@ -220,7 +224,15 @@ struct PrototypeScreen: View {
         } catch {
             diagnostics.record(failure)
             self.error = error
-            onLoadFailed()
+            reportLoad(.failed)
+        }
+    }
+
+    private func reportLoad(_ outcome: PrototypeLoadReport.Outcome) {
+        guard loadReport.settle(outcome) else { return }
+        switch outcome {
+        case .loaded: onLoaded()
+        case .failed: onLoadFailed()
         }
     }
 
@@ -237,7 +249,7 @@ struct PrototypeScreen: View {
                 )
             )
             content = nil
-            onLoadFailed()
+            reportLoad(.failed)
         }
     }
 }

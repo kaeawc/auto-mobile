@@ -3,7 +3,9 @@ import { EventEmitter } from "node:events";
 import {
   buildPidReportingScreenrecordArgs,
   isOwnRecorderCmdline,
+  parseRecorderLookup,
   trackDeviceRecorderPid,
+  type RecorderLookup,
 } from "../../../src/features/video/androidRecorderPid";
 
 function streamOf(): { emit(chunk: string): void; stream: EventEmitter } {
@@ -17,7 +19,7 @@ describe("buildPidReportingScreenrecordArgs", () => {
       buildPidReportingScreenrecordArgs(["screenrecord", "--bit-rate", "1", "/sdcard/a.mp4"]),
     ).toEqual([
       "shell",
-      "if command -v setsid >/dev/null 2>&1; then exec setsid sh -c 'echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4'; fi; echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4",
+      "if command -v setsid >/dev/null 2>&1; then setsid sh -c 'echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4",
     ]);
   });
 
@@ -82,5 +84,24 @@ describe("isOwnRecorderCmdline", () => {
     ["", false],
   ])("cmdline %j -> %p", (cmdline, expected) => {
     expect(isOwnRecorderCmdline(cmdline, deviceFile)).toBe(expected);
+  });
+});
+
+describe("parseRecorderLookup", () => {
+  const deviceFile = "/sdcard/auto-mobile-rec-1.mp4";
+  const ours = `pid:4321:screenrecord\u0000--bit-rate\u0000100\u0000${deviceFile}\u0000`;
+  const other = "pid:9999:screenrecord\u0000/sdcard/auto-mobile-other.mp4\u0000";
+
+  test.each<[string, RecorderLookup]>([
+    [`${other}\n${ours}\npidof-status:0\n`, { kind: "found", pid: 4321 }],
+    [`${ours}\r\npidof-status:0\r\n`, { kind: "found", pid: 4321 }],
+    [`${other}\npidof-status:0\n`, { kind: "none" }],
+    ["pid:4321:\npidof-status:0\n", { kind: "none" }],
+    ["pidof-status:1\n", { kind: "none" }],
+    [`${ours}\n`, { kind: "unknown" }],
+    ["sh: pidof: not found\npidof-status:127\n", { kind: "unknown" }],
+    ["", { kind: "unknown" }],
+  ])("parses %j", (stdout, expected) => {
+    expect(parseRecorderLookup(stdout, deviceFile)).toEqual(expected);
   });
 });

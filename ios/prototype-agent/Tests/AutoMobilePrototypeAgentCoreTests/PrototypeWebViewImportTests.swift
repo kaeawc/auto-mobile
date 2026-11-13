@@ -2,11 +2,32 @@ import AutoMobilePrototypeAgentCore
 import XCTest
 
 final class PrototypeWebViewImportTests: XCTestCase {
-    private func fixture() throws -> Data {
+    private func fixture(_ name: String = "valid/webview-node.json") throws -> Data {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        return try Data(contentsOf: root.appendingPathComponent("test/fixtures/prototype-spec/valid/webview-node.json"))
+        return try Data(contentsOf: root.appendingPathComponent("test/fixtures/prototype-spec/\(name)"))
+    }
+
+    private struct ImportCase: Decodable {
+        let name: String
+        let spec: JSONValue
+        let path: String?
+    }
+
+    func testSharedCasesPinFirstReportedPathIndependentOfKeyOrder() throws {
+        let cases = try JSONDecoder().decode([ImportCase].self, from: fixture("webview-import/cases.json"))
+        XCTAssertFalse(cases.isEmpty)
+        for item in cases {
+            XCTAssertEqual(PrototypeWebView.importError(item.spec, networkAllowed: false)?.path, item.path, item.name)
+            let data = try JSONEncoder().encode(item.spec)
+            XCTAssertEqual(PrototypeWebView.importError(data, networkAllowed: false)?.path, item.path, item.name)
+        }
+    }
+
+    func testMalformedSavedDataReturnsNilAsInKotlin() {
+        XCTAssertNil(PrototypeWebView.importError(Data("{not json".utf8), networkAllowed: false))
+        XCTAssertNil(PrototypeWebView.importError(Data("[]".utf8), networkAllowed: false))
     }
 
     func testNetworkSwitchRefusesFirstPageAndAllowsSameFixtureWhenEnabled() throws {

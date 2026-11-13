@@ -74,7 +74,6 @@ fields identified by secure metadata, always redact their values.
 | `accessibilityFocus`          | not-supported     | Needs runner work.                                                                                                                               |
 | `ambient`                     | refused-by-design | Wear OS only.                                                                                                                                    |
 | `appLifecycle`                | not-supported     |                                                                                                                                                  |
-| `audit`                       | not-supported     | Deprecated alias of `accessibilityAudit` and `performanceAudit`.                                                                                 |
 | `backgroundWork`              | refused-by-design | Android-only.                                                                                                                                    |
 | `barrier`                     | not-supported     | Plan-only multi-device primitive.                                                                                                                |
 | `biometricAuth`               | refused-by-design | Apple TV has no biometric sensor.                                                                                                                |

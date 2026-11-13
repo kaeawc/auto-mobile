@@ -8,6 +8,16 @@ import os
     import XCTest
 #endif
 
+extension GesturePerformer {
+    nonisolated static func requireTapApplicationFrame(origin: GesturePoint, size: GestureSize) throws {
+        guard size.isValid, origin.x.isFinite, origin.y.isFinite else {
+            throw GestureError.gestureFailed(
+                "the foreground app has no accessibility snapshot / empty frame; observe again then retry"
+            )
+        }
+    }
+}
+
 #if canImport(XCTest) && os(iOS)
     extension GesturePerformer {
         // MARK: - Tap Gestures
@@ -49,7 +59,7 @@ import os
                 ?? TapDiagnostics(requested: requested, sampleErrors: ["sampler: no sample returned"])
         }
 
-        /// Cached observation geometry keeps the single-panel opt-out path free of new platform reads.
+        /// Reject an unavailable app snapshot before constructing or delivering an XCUICoordinate tap.
         private func performTap(
             x: Double, y: Double, duration: TimeInterval, requested: TapDiagnostics.Requested?,
             forced: TapCoordinateStrategy?, doubleTap: Bool = false
@@ -81,6 +91,11 @@ import os
 
             return try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
+                let frame = app.frame
+                try Self.requireTapApplicationFrame(
+                    origin: GesturePoint(x: Double(frame.origin.x), y: Double(frame.origin.y)),
+                    size: GestureSize(width: Double(frame.size.width), height: Double(frame.size.height))
+                )
                 let provider = XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
                 let factory = try DisplayGestureFactory(provider: provider, forced: forced)
                 var diagnostics: TapDiagnostics?

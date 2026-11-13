@@ -38,6 +38,7 @@ class TwoDevicePlainPlanTest {
     capturingClient = MultiDeviceCapturingFakeDaemonToolClient()
     collaborators =
       PlanExecutorCollaborators(
+        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
         deviceChecker = TwoDeviceFakeChecker(),
         daemon = capturingClient,
         heartbeat = MultiDeviceFakeDaemonHeartbeat(),
@@ -240,6 +241,7 @@ class TwoDeviceCriticalSectionPlanTest {
     capturingClient = MultiDeviceCapturingFakeDaemonToolClient()
     collaborators =
       PlanExecutorCollaborators(
+        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
         deviceChecker = TwoDeviceFakeChecker(),
         daemon = capturingClient,
         heartbeat = MultiDeviceFakeDaemonHeartbeat(),

@@ -29,6 +29,7 @@ internal abstract class PlanExecutorTestFixture {
       AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = false))
     collaborators =
       PlanExecutorCollaborators(
+        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
         agent = { agent },
         deviceChecker = fakeDeviceChecker,
         daemon = fakeDaemonClient,

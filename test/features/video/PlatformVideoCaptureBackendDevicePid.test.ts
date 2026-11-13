@@ -10,6 +10,7 @@ import type {
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import { VideoCaptureFinalizationError } from "../../../src/features/video/VideoRecorderService";
+import { RECORDER_LOOKUP_COMMAND } from "../../../src/features/video/androidRecorderPid";
 import { logger } from "../../../src/utils/logger";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -26,6 +27,7 @@ const DEVICE_FILE = `/sdcard/auto-mobile-${RECORDING_ID}.mp4`;
 const OUR_CMDLINE = `screenrecord\u0000--bit-rate\u0000100\u0000--time-limit\u0000180\u0000${DEVICE_FILE}\u0000`;
 const PROBE = "shell 'cat /proc/4321/cmdline 2>/dev/null; true'";
 const STAT = `shell stat -c %s ${DEVICE_FILE}`;
+const LOOKUP = RECORDER_LOOKUP_COMMAND;
 const PIDOF = 'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'';
 
 describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
@@ -90,7 +92,7 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
     expect(factory.getFakeClient().getSpawnCalls()).toEqual([
       [
         "shell",
-        `if command -v setsid >/dev/null 2>&1; then exec setsid sh -c 'echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}'; fi; echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}`,
+        `if command -v setsid >/dev/null 2>&1; then setsid sh -c 'echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; echo $$; exec screenrecord --bit-rate 1000000 --time-limit 180 ${DEVICE_FILE}`,
       ],
     ]);
   });
@@ -258,16 +260,66 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
   });
 
   describe("unknown pid", () => {
+    // #18243: the recorder is detached, so with no launch pid it is found by its output file.
+    const FOUND = `pid:4321:${OUR_CMDLINE}\npidof-status:0\n`;
+    const OTHER_ONLY =
+      "pid:9999:screenrecord\u0000/sdcard/auto-mobile-other.mp4\u0000\npidof-status:0\n";
+
     test.each([
       ["no launch output", undefined],
       ["a non-pid first line", "warning: something\n"],
-    ])("stop keeps today's pkill -2 with %s", async (_why, stdout) => {
-      const handle = await startRecording(stdout);
+    ])(
+      "stop keeps today's pkill -2 with %s when the lookup is unanswered",
+      async (_why, stdout) => {
+        const handle = await startRecording(stdout);
+        await fsPromises.writeFile(handle.outputPath, "fake-video");
+
+        await backend.stop(handle);
+
+        expect(commands().slice(0, 2)).toEqual([LOOKUP, "shell pkill -2 screenrecord"]);
+      },
+    );
+
+    test("stop finds the recorder by output file, SIGINTs that pid and waits for its exit", async () => {
+      const handle = await startRecording();
+      const client = factory.getFakeClient();
+      client.setCommandResult(LOOKUP, FOUND);
+      client.setCommandResultSequence(PROBE, [OUR_CMDLINE, ""]);
+      client.setCommandResult(STAT, "100");
+      await fsPromises.writeFile(handle.outputPath, "fake-video");
+
+      const result = await backend.stop(handle);
+
+      expect(result.recordingId).toBe(RECORDING_ID);
+      expect(commands().slice(0, 4)).toEqual([LOOKUP, PROBE, "shell kill -2 4321", PROBE]);
+      expect(commands().filter((command) => command === LOOKUP)).toHaveLength(1);
+      expectNoNameBasedKill();
+      expect(backend.describeCaptureTeardown(handle)?.devicePid).toBe(4321);
+    });
+
+    test("stop retains the device file while the found recorder is still writing", async () => {
+      const handle = await startRecording();
+      const client = factory.getFakeClient();
+      client.setCommandResult(LOOKUP, FOUND);
+      client.setCommandResult(PROBE, OUR_CMDLINE);
+      // A stable size alone must not prove the file finished.
+      client.setCommandResult(STAT, "100");
+
+      await expect(backend.stop(handle)).rejects.toMatchObject({ retainOwnership: true });
+      expect(commands()).not.toContain(STAT);
+      expect(client.wasSpawned(`pull ${DEVICE_FILE}`)).toBe(false);
+      expect(client.wasSpawned(`rm ${DEVICE_FILE}`)).toBe(false);
+    });
+
+    test("stop signals nothing when no recorder writes this recording's file", async () => {
+      const handle = await startRecording();
+      factory.getFakeClient().setCommandResult(LOOKUP, OTHER_ONLY);
+      factory.getFakeClient().setCommandResult(STAT, "100");
       await fsPromises.writeFile(handle.outputPath, "fake-video");
 
       await backend.stop(handle);
 
-      expect(commands()[0]).toBe("shell pkill -2 screenrecord");
+      expect(commands().filter((command) => command.includes("kill"))).toEqual([]);
     });
 
     test("forceStop keeps today's pkill -9 when the caller allows device-wide", async () => {
@@ -275,16 +327,56 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
 
       await backend.forceStop(handle);
 
-      expect(commands()).toEqual(["shell pkill -9 screenrecord", `shell rm -f ${DEVICE_FILE}`]);
+      expect(commands()).toEqual([
+        LOOKUP,
+        "shell pkill -9 screenrecord",
+        `shell rm -f ${DEVICE_FILE}`,
+      ]);
     });
 
-    test("forceStop with deviceWide:false skips the device kill and warns", async () => {
+    test.each([{ deviceWide: false }, undefined])(
+      "forceStop %j kills the recorder found by output file, never by name",
+      async (options) => {
+        const handle = await startRecording();
+        factory.getFakeClient().setCommandResult(LOOKUP, FOUND);
+        factory.getFakeClient().setCommandResult(PROBE, OUR_CMDLINE);
+        const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+        try {
+          await backend.forceStop(handle, options);
+
+          expect(commands()).toEqual([
+            LOOKUP,
+            PROBE,
+            "shell kill -9 4321",
+            `shell rm -f ${DEVICE_FILE}`,
+          ]);
+          expect(warnings(warn)).not.toContain("own time limit");
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test.each(["pidof-status:1\n", OTHER_ONLY])(
+      "forceStop kills nothing when the lookup shows no recorder for this file (%j)",
+      async (stdout) => {
+        const handle = await startRecording();
+        factory.getFakeClient().setCommandResult(LOOKUP, stdout);
+
+        await backend.forceStop(handle);
+
+        expect(commands()).toEqual([LOOKUP, `shell rm -f ${DEVICE_FILE}`]);
+      },
+    );
+
+    test("forceStop with deviceWide:false skips the device kill and warns when the lookup fails", async () => {
       const handle = await startRecording();
+      factory.getFakeClient().setCommandError(LOOKUP, new Error("device offline"));
       const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
       try {
         await backend.forceStop(handle, { deviceWide: false });
 
-        expect(commands()).toEqual([`shell rm -f ${DEVICE_FILE}`]);
+        expect(commands()).toEqual([LOOKUP, `shell rm -f ${DEVICE_FILE}`]);
         expect(warnings(warn)).toContain("device pid is unknown");
       } finally {
         warn.mockRestore();

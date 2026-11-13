@@ -76,6 +76,7 @@
     "test/fixtures/android-launcher/*.json",
     "test/fixtures/observe-output/ios-keyboard-tabbar/*.json",
     "test/fixtures/observe-output/ios-keyboard-states/*.json",
+    "test/fixtures/observe-output/ios-keyboard-duo-inner/*.json",
     "test/fixtures/observe-output/ios-prototype-sheet/*.json",
     "test/fixtures/observe-output/ios-alert-over-table/*.json",
     "test/fixtures/ios/ctrlproxy-golden/**",

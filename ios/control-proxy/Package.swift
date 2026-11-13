@@ -62,7 +62,12 @@ let package = Package(
             name: "TVCommandPolicy",
             dependencies: ["CtrlProxy"],
             path: "Tests/CtrlProxyTVUITests",
-            exclude: ["CtrlProxyTVUITests.swift", "TVCommandRouter.swift", "TVWebSocketServer.swift"],
+            exclude: [
+                "CtrlProxyTVUITests.swift",
+                "TVCommandRouter.swift",
+                "TVWebSocketServer.swift",
+                "TVCommandRouterSmokeTests.swift",
+            ],
             sources: ["TVCommandPolicy.swift", "ConnectedEvent.swift"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

@@ -19,7 +19,9 @@ import type { SkeletonAccumulator } from "./rowModel";
  * text right after it is its trailing label and never labels the next toggle
  * (issue #18227). That trailing text is the toggle's next sibling, or a text inside
  * that sibling when it is a non-actionable wrapper (`Switch, LinearLayout {
- * Text("Wi-Fi") }`); the wrapper case needs the captured entry graph. A toggle that
+ * Text("Wi-Fi") }`); the wrapper case needs the captured entry graph. A wrapper
+ * that contains another toggle is that toggle's row (`Switch, Row { Text; Switch }`),
+ * so its text is never claimed as trailing. A toggle that
  * already has a label, or has a preceding text, claims nothing, so the text after
  * it is the next row's leading label: a flat `Text A, Switch A, Text B, Switch B`
  * list and `Switch(content-desc="Wi-Fi"), Text("Bluetooth"), Switch` both label
@@ -92,16 +94,30 @@ function entryGraph(entries: readonly SearchableEntry[]) {
       ? next
       : undefined;
   };
+  // A plain wrapper has no affordances and holds no toggle: a wrapper holding a
+  // toggle is that toggle's row, so its leading text labels that toggle and is
+  // never the previous toggle's trailing text.
+  const isPlainWrapper = (node: SearchableEntry): boolean => {
+    if (node.affordances.length > 0) {
+      return false;
+    }
+    for (let i = node.index + 1; i < entries.length && entries[i].depth > node.depth; i++) {
+      if (entries[i].affordances.includes("toggle")) {
+        return false;
+      }
+    }
+    return true;
+  };
   return {
     /**
-     * Whether `text` sits inside the non-actionable wrapper that is `toggle`'s
-     * next sibling. A bare next-sibling text is the provenance case above.
+     * Whether `text` sits inside the non-actionable, toggle-free wrapper that is
+     * `toggle`'s next sibling. A bare next-sibling text is the provenance case above.
      */
     followsInWrapper(toggle: SkeletonAccumulator, text: SkeletonAccumulator): boolean {
       const toggleEntry = entryOf(toggle);
       const textEntry = entryOf(text);
       const wrapper = toggleEntry && nextSibling(toggleEntry);
-      if (!textEntry || !wrapper || wrapper === textEntry || wrapper.affordances.length > 0) {
+      if (!textEntry || !wrapper || wrapper === textEntry || !isPlainWrapper(wrapper)) {
         return false;
       }
       let cursor: SearchableEntry | undefined = textEntry;

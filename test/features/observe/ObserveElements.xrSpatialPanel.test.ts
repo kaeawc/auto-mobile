@@ -594,6 +594,23 @@ test("leading text inside a wrapper still labels the switch after it (#18227)", 
   ).toEqual(["XrPanel title", "XrPanel subtitle"]);
 });
 
+test("leading text in the next toggle's `Row { Text; Switch }` labels that toggle (#18237)", async () => {
+  expect(await twoSwitchLabels((_t1, s1, t2, s2) => [s1, wrapRow("s2-row-2", t2, s2)])).toEqual([
+    undefined,
+    "XrPanel subtitle",
+  ]);
+});
+
+test("trailing wrapper text stays claimed before the next toggle's own row (#18237)", async () => {
+  expect(
+    await twoSwitchLabels((t1, s1, t2, s2) => [
+      s1,
+      wrapRow("s2-wrap-1", t1),
+      wrapRow("s2-row-2", t2, s2),
+    ]),
+  ).toEqual([undefined, "XrPanel subtitle"]);
+});
+
 const SHARED_SWITCH_ID = "dev.jasonpearson.xrpanel:id/switch";
 
 /** Repeat the captured title + Switch pair beside the original; both Switches take one resource id. */

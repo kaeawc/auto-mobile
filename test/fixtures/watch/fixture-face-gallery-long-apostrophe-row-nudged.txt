@@ -1,0 +1,187 @@
+Attributes: Application, 0x101cb8500, pid: 9830, label: 'ClockFace'
+Element subtree:
+ →Application, 0x101cb8500, pid: 9830, label: 'ClockFace'
+    Window, 0x101cb8000, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x101cb8280, {{0.0, 0.0}, {187.0, 223.0}}
+        Other, 0x101cb8640, {{0.0, 0.0}, {187.0, 223.0}}
+          Other, 0x101cb8140, {{0.0, 0.0}, {187.0, 223.0}}
+            NavigationBar, 0x101cb88c0, {{0.0, 0.0}, {187.0, 56.0}}, identifier: 'NTKStarbearPickerView'
+              StaticText, 0x101cb8780, {{0.0, 0.0}, {0.0, 0.0}}
+              Button, 0x101cb83c0, {{13.0, 16.0}, {32.0, 32.0}}, label: 'Done'
+              Other, 0x101cb8c80, {{51.0, 0.0}, {123.0, 48.0}}, label: 'Your Widgets'
+            Other, 0x101cb8b40, {{0.0, 0.0}, {187.0, 223.0}}
+              Other, 0x101cb8dc0, {{0.0, 0.0}, {187.0, 223.0}}
+                Other, 0x101cb8a00, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x101cb9180, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x101cb9040, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x101cb8f00, {{0.0, 0.0}, {187.0, 223.0}}
+                    CollectionView, 0x101cb9540, {{0.0, 0.0}, {187.0, 223.0}}
+                      Other, 0x101cb9400, {{0.0, 0.0}, {187.0, 223.0}}
+                      Other, 0x101cb9680, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x101cb97c0, {{0.0, 0.0}, {187.0, 83.1}}
+                          Image, 0x101cb92c0, {{-60.0, -48.0}, {307.0, 96.0}}
+                          Other, 0x101cb9b80, {{0.0, 0.0}, {187.0, 48.0}}
+                          Other, 0x101cb9cc0, {{0.0, 0.0}, {187.0, 83.1}}
+                            Other, 0x101cb9a40, {{0.0, 0.0}, {187.0, 83.1}}
+                          Other, 0x101cb9e00, {{0.0, 0.0}, {187.0, 83.1}}
+                            Other, 0x101cb9f40, {{0.0, 0.0}, {187.0, 83.1}}
+                          Other, 0x101cba080, {{0.0, 0.0}, {187.0, 83.1}}
+                            Other, 0x101cba1c0, {{0.0, 0.0}, {187.0, 83.1}}
+                            Other, 0x101cba300, {{0.0, 0.0}, {187.0, 83.1}}
+                      Other, 0x101cba440, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x101cba580, {{0.0, 0.0}, {187.0, 223.0}}
+                          Other, 0x101cba6c0, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x101cba800, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x101cba940, {{0.0, 0.0}, {176.0, 72.5}}
+                        Other, 0x101cbaa80, {{0.0, 0.0}, {187.0, 223.0}}
+                          Other, 0x101cbabc0, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x101cbad00, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x101cbae40, {{0.0, 0.0}, {187.0, 223.0}}
+                                Other, 0x101cbaf80, {{0.0, 0.0}, {187.0, 223.0}}
+                            Other, 0x101cbb0c0, {{0.0, 0.0}, {187.0, 223.0}}
+                              Other, 0x101cbb200, {{0.0, 0.0}, {176.0, 72.5}}
+                      Cell, 0x101cbb340, {{13.0, 64.5}, {161.0, 66.5}}, label: 'Add widget'
+                        Other, 0x101cbb480, {{13.0, 64.5}, {161.0, 66.5}}
+                        Other, 0x101cbb5c0, {{13.0, 64.5}, {161.0, 66.5}}
+                          Image, 0x101cbb700, {{13.0, 64.5}, {161.0, 66.5}}, identifier: 'plus.circle.fill', label: 'add'
+                      Cell, 0x101cbb840, {{5.5, 136.0}, {176.0, 72.5}}, identifier: 'StackCollectionViewComplicationCell -- 80BBA2E7-547E-42B2-AB27-3859CC425804 -- Zebra Probe -- ProbeWidget -- dev.l18251.p12 -- dev.l18251.p12-dev.l18251.p12.widget-ProbeWidget-0', label: 'ProbeWidget', value: Widget
+                        Other, 0x101cbb980, {{5.5, 136.0}, {176.0, 72.5}}
+                          Button, 0x101cbbac0, {{5.0, 133.5}, {17.5, 17.5}}, identifier: 'StackCollectionViewCell-LeadingButton-Remove', label: 'remove'
+                          Button, 0x101cbbc00, {{164.5, 133.5}, {17.5, 17.5}}, identifier: 'StackCollectionViewCell-TrailingButton-Unpinned', label: 'pin'
+                          Other, 0x101cbbd40, {{13.0, 142.1}, {161.0, 66.5}}
+                            Other, 0x101cbbe80, {{13.0, 142.1}, {161.0, 66.5}}
+                              Other, 0x101cd4000, {{13.0, 142.1}, {161.0, 66.5}}
+                                Other, 0x101cd48c0, {{13.0, 142.1}, {161.0, 66.5}}, label: 'Zebra Probe'
+                                  Other, 0x101cd5540, {{13.0, 142.1}, {161.0, 66.5}}
+                                    Other, 0x101cd4c80, {{13.0, 142.1}, {161.0, 66.5}}
+                                      Other, 0x101cd4140, {{13.0, 142.1}, {161.0, 66.5}}
+                                      Other, 0x101cd5900, {{13.0, 142.1}, {161.0, 66.5}}
+                                        Other, 0x101cd5180, {{13.0, 142.1}, {161.0, 66.5}}
+                      Cell, 0x101cd7480, {{5.5, 213.5}, {176.0, 72.5}}, identifier: 'StackCollectionViewTriPlatterCell', label: 'Music, Workout, Messages', value: Widget group
+                        Other, 0x101cd75c0, {{5.5, 213.5}, {176.0, 72.5}}
+                          Button, 0x101cd4780, {{164.5, 211.0}, {17.5, 17.5}}, identifier: 'StackCollectionViewCell-TrailingButton-Unpinned', label: 'pin'
+                          Other, 0x101cd5400, {{13.0, 219.6}, {161.0, 66.5}}
+                            Other, 0x101cd6bc0, {{13.0, 219.6}, {161.0, 66.5}}
+                              Other, 0x101cd4640, {{19.4, 219.6}, {148.2, 66.5}}
+                                Other, 0x101cd57c0, {{19.4, 232.4}, {41.2, 41.3}}, identifier: 'LeadingPlatter'
+                                  Button, 0x101cd4a00, {{16.8, 229.9}, {16.0, 16.1}}, label: 'remove'
+                                  Button, 0x101cd4280, {{19.4, 232.4}, {41.2, 41.3}}, label: 'add'
+                                  Other, 0x101cd5cc0, {{22.3, 235.3}, {35.4, 35.5}}
+                                  Other, 0x101cd4f00, {{23.9, 236.9}, {32.3, 32.3}}
+                                    Other, 0x101cd5680, {{23.9, 236.9}, {32.3, 32.3}}
+                                      Other, 0x101cd5e00, {{23.9, 236.9}, {32.3, 32.3}}
+                                Other, 0x101cd7d40, {{72.9, 232.4}, {41.2, 41.3}}, identifier: 'MiddlePlatter'
+                                  Button, 0x101cd61c0, {{70.4, 229.9}, {16.0, 16.1}}, label: 'remove'
+                                  Button, 0x101cd4b40, {{72.9, 232.4}, {41.2, 41.3}}, label: 'add'
+                                  Other, 0x101cd6080, {{75.8, 235.3}, {35.4, 35.5}}
+                                  Other, 0x101cd6300, {{77.4, 236.9}, {32.3, 32.3}}
+                                    Other, 0x101cd7c00, {{77.4, 236.9}, {32.3, 32.3}}
+                                      Other, 0x101cd5040, {{77.4, 236.9}, {32.3, 32.3}}
+                                Other, 0x101cd4500, {{126.4, 232.4}, {41.2, 41.3}}, identifier: 'TrailingPlatter'
+                                  Button, 0x101cd5a40, {{123.9, 229.9}, {16.0, 16.1}}, label: 'remove'
+                                  Button, 0x101cd5f40, {{126.4, 232.4}, {41.2, 41.3}}
+                                  Other, 0x101cd6d00, {{129.3, 235.3}, {35.4, 35.5}}
+                                  Other, 0x101cd43c0, {{130.9, 236.9}, {32.3, 32.3}}
+                                    Other, 0x101cd6a80, {{130.9, 236.9}, {32.3, 32.3}}, label: 'No unread messages'
+                                      Other, 0x101cd5b80, {{130.9, 236.9}, {32.3, 32.3}}, label: 'No unread messages'
+                  Other, 0x101cdae40, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x101cdabc0, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x101cd9900, {{0.0, 0.0}, {187.0, 223.0}}
+        Other, 0x101cdaf80, {{0.0, 0.0}, {187.0, 223.0}}
+          Other, 0x101cdb480, {{0.0, 0.0}, {187.0, 223.0}}
+            Other, 0x101cdb340, {{0.0, 0.0}, {187.0, 223.0}}
+            Other, 0x101cdb0c0, {{0.0, 0.0}, {187.0, 223.0}}
+              NavigationBar, 0x101cd9680, {{0.0, 0.0}, {187.0, 56.0}}, identifier: 'NTKStarbearPickerView'
+                Other, 0x101cd8640, {{0.0, 0.0}, {0.0, 0.0}}
+                Button, 0x101cda800, {{13.0, 16.0}, {32.0, 32.0}}, label: 'Close'
+              Other, 0x101cda940, {{0.0, 0.0}, {187.0, 223.0}}
+                Other, 0x101cd8dc0, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x101cdaa80, {{0.0, 0.0}, {187.0, 223.0}}
+                    CollectionView, 0x101cd9a40, {{0.0, 0.0}, {187.0, 223.0}}
+                      Cell, 0x101cdb840, {{2.0, -14.5}, {183.0, 48.0}}, identifier: 'AppGroupCell -- Jaguar', label: 'Jaguar'
+                        Other, 0x101cdad00, {{2.0, -14.5}, {183.0, 48.0}}
+                          Other, 0x101cda080, {{2.0, -14.5}, {183.0, 48.0}}
+                            Other, 0x101cd8140, {{2.0, -14.5}, {183.0, 48.0}}
+                        Other, 0x101cda6c0, {{2.0, -14.5}, {183.0, 48.0}}
+                          Other, 0x101cd9540, {{2.0, -10.5}, {183.0, 40.0}}
+                            Other, 0x101cda1c0, {{11.0, -1.5}, {22.0, 22.0}}
+                              Other, 0x101cd8000, {{11.0, -1.5}, {22.0, 22.0}}
+                                Other, 0x101cd9b80, {{11.0, -1.5}, {22.0, 22.0}}
+                                Image, 0x101cda440, {{11.0, -1.5}, {22.0, 22.0}}
+                                Other, 0x101cda580, {{11.0, -1.5}, {22.0, 22.0}}
+                            StaticText, 0x101cdb200, {{41.0, 0.0}, {135.0, 19.5}}, label: 'Jaguar'
+                      Other, 0x101cda300, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x101cd97c0, {{0.0, 0.0}, {187.0, 83.1}}
+                      Other, 0x101cdb5c0, {{0.0, 0.0}, {187.0, 223.0}}
+                        Other, 0x101cd9cc0, {{0.0, 0.0}, {187.0, 83.1}}
+                          Image, 0x101cd92c0, {{-60.0, -48.0}, {307.0, 96.0}}
+                          Other, 0x101cd83c0, {{0.0, 0.0}, {187.0, 48.0}}
+                          Other, 0x101cdb700, {{0.0, 0.0}, {187.0, 83.1}}
+                            Other, 0x101cd9400, {{0.0, 0.0}, {187.0, 83.1}}
+                          Other, 0x101cd8b40, {{0.0, 0.0}, {187.0, 83.1}}
+                            Other, 0x101cd8780, {{0.0, 0.0}, {187.0, 83.1}}
+                          Other, 0x101cd8a00, {{0.0, 0.0}, {187.0, 83.1}}
+                            Other, 0x101cd9e00, {{0.0, 0.0}, {187.0, 83.1}}
+                            Other, 0x101cdb980, {{0.0, 0.0}, {187.0, 83.1}}
+                      Cell, 0x101cd8c80, {{2.0, 38.5}, {183.0, 48.0}}, identifier: 'AppGroupCell -- Jason's Probe', label: 'Jason's Probe'
+                        Other, 0x101cd9180, {{2.0, 38.5}, {183.0, 48.0}}
+                          Other, 0x101cd88c0, {{2.0, 38.5}, {183.0, 48.0}}
+                            Other, 0x101cd8280, {{2.0, 38.5}, {183.0, 48.0}}
+                        Other, 0x101cd8f00, {{2.0, 38.5}, {183.0, 48.0}}
+                          Other, 0x101cd9040, {{2.0, 42.5}, {183.0, 40.0}}
+                            Other, 0x101cd9f40, {{11.0, 51.5}, {22.0, 22.0}}
+                              Other, 0x101cdbc00, {{11.0, 51.5}, {22.0, 22.0}}
+                                Other, 0x101cdbe80, {{11.0, 51.5}, {22.0, 22.0}}
+                                Image, 0x101cdbd40, {{11.0, 51.5}, {22.0, 22.0}}
+                                Other, 0x101cdbac0, {{11.0, 51.5}, {22.0, 22.0}}
+                            StaticText, 0x101c197c0, {{41.0, 53.0}, {135.0, 19.5}}, label: 'Jason's Probe'
+                      Cell, 0x101c1b0c0, {{2.0, 91.5}, {183.0, 48.0}}, identifier: 'AppGroupCell -- Koala', label: 'Koala'
+                        Other, 0x101ccde00, {{2.0, 91.5}, {183.0, 48.0}}
+                          Other, 0x101ccd900, {{2.0, 91.5}, {183.0, 48.0}}
+                            Other, 0x101cccb40, {{2.0, 91.5}, {183.0, 48.0}}
+                        Other, 0x101cc88c0, {{2.0, 91.5}, {183.0, 48.0}}
+                          Other, 0x101cc8140, {{2.0, 95.5}, {183.0, 40.0}}
+                            Other, 0x101cc8b40, {{11.0, 104.5}, {22.0, 22.0}}
+                              Other, 0x101cc8780, {{11.0, 104.5}, {22.0, 22.0}}
+                                Other, 0x101cc8280, {{11.0, 104.5}, {22.0, 22.0}}
+                                Image, 0x101cc8640, {{11.0, 104.5}, {22.0, 22.0}}
+                                Other, 0x101cc8a00, {{11.0, 104.5}, {22.0, 22.0}}
+                            StaticText, 0x101cc83c0, {{41.0, 106.0}, {135.0, 19.5}}, label: 'Koala'
+                      Cell, 0x101cc8000, {{2.0, 144.5}, {183.0, 48.0}}, identifier: 'AppGroupCell -- Lemur', label: 'Lemur'
+                        Other, 0x101cc8500, {{2.0, 144.5}, {183.0, 48.0}}
+                          Other, 0x101cb4000, {{2.0, 144.5}, {183.0, 48.0}}
+                            Other, 0x101cb4140, {{2.0, 144.5}, {183.0, 48.0}}
+                        Other, 0x101cb4280, {{2.0, 144.5}, {183.0, 48.0}}
+                          Other, 0x101cb43c0, {{2.0, 148.5}, {183.0, 40.0}}
+                            Other, 0x101cb4500, {{11.0, 157.5}, {22.0, 22.0}}
+                              Other, 0x101cb4640, {{11.0, 157.5}, {22.0, 22.0}}
+                                Other, 0x101cb4780, {{11.0, 157.5}, {22.0, 22.0}}
+                                Image, 0x101cb48c0, {{11.0, 157.5}, {22.0, 22.0}}
+                                Other, 0x101cb4a00, {{11.0, 157.5}, {22.0, 22.0}}
+                            StaticText, 0x101cb4b40, {{41.0, 159.0}, {135.0, 19.5}}, label: 'Lemur'
+                      Cell, 0x101cb4c80, {{2.0, 197.5}, {183.0, 48.0}}, identifier: 'AppGroupCell -- Medications', label: 'Medications'
+                        Other, 0x101cb4dc0, {{10.5, 197.5}, {165.9, 43.5}}
+                          Other, 0x101cb4f00, {{10.5, 197.5}, {165.9, 43.5}}
+                            Other, 0x101cb5040, {{10.5, 197.5}, {165.9, 43.5}}
+                        Other, 0x101cb5180, {{10.5, 197.5}, {165.9, 43.5}}
+                          Other, 0x101cb52c0, {{10.5, 201.1}, {165.9, 36.3}}
+                            Other, 0x101cb5400, {{18.7, 209.3}, {19.9, 19.9}}
+                              Other, 0x101cb5540, {{18.7, 209.3}, {19.9, 19.9}}
+                                Other, 0x101cb5680, {{18.7, 209.3}, {19.9, 19.9}}
+                                Image, 0x101cb57c0, {{18.7, 209.3}, {19.9, 19.9}}
+                                Other, 0x101cb5900, {{18.7, 209.3}, {19.9, 19.9}}
+                            StaticText, 0x101cb5a40, {{45.9, 210.6}, {122.4, 17.7}}, label: 'Medications'
+    Window, 0x101cb5b80, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x101cb5cc0, {{0.0, 0.0}, {187.0, 223.0}}
+    Window (Main), 0x101cb5e00, {{179.0, 37.5}, {6.0, 46.5}}
+    Window, 0x101cb5f40, {{0.0, 0.0}, {187.0, 223.0}}
+      StatusBar, 0x101cb6080, {{0.0, 0.0}, {187.0, 35.0}}
+        Other, 0x101cb61c0, {{0.0, 0.0}, {187.0, 35.0}}
+        Other, 0x101cb6300, {{0.0, 0.0}, {187.0, 35.0}}
+Path to element:
+ →Application, 0x101cb8500, pid: 9830, label: 'ClockFace'
+Query chain:
+ →Find: Application 'com.apple.clockface'
+  Output: {
+    Application, 0x101cb6440, pid: 9830, label: 'ClockFace'
+  }

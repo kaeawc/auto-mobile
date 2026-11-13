@@ -6,9 +6,16 @@ import {
   parseWatchClockFaceDump,
   readSmartStackEditTap,
   readSmartStackWidgetCells,
+  WATCH_CLOCK_FACE_BUNDLE_ID,
   type SmartStackWidgetCellReading,
 } from "./WatchSmartStack";
 import type { WatchCommand, WatchRunnerClient } from "./WatchRunnerClient";
+import type { WatchHierarchyNode } from "./WatchHierarchy";
+import {
+  parseXcuiDebugDescription,
+  parseXcuiDebugLine,
+  type XcuiDebugLine,
+} from "./WatchXcuiDebugDescription";
 
 export interface WatchSmartStackWidgetOptions {
   appName: string;
@@ -47,23 +54,29 @@ export interface SmartStackWidgetTarget {
 
 export const GALLERY_SCROLL_SETTLE_MS = 1500;
 export const CLOCKFACE_RELAUNCH_SETTLE_MS = 3000;
+const MAX_GALLERY_SEARCH_STEPS = 8;
+const MAX_GALLERY_CORRECTIVE_DRAGS = 3;
+const MIN_GALLERY_VISIBLE_HEIGHT = 24;
+const GALLERY_ROW_PREFIX = "AppGroupCell -- ";
 
-/** Exact gallery cell identifier match; undefined means no readable gallery rows. */
-export function hasGalleryAppRow(dump: string, appName: string): boolean | undefined {
-  let hasRows = false;
+function readGalleryRows(dump: string): Map<string, XcuiDebugLine> {
+  const rows = new Map<string, XcuiDebugLine>();
   for (const line of dump.split("\n")) {
     if (!line.trimStart().startsWith("Cell,")) {
       continue;
     }
-    const identifier = /, identifier: 'AppGroupCell -- ([^']*)'/.exec(line)?.[1];
-    if (identifier !== undefined) {
-      hasRows = true;
-      if (identifier === appName) {
-        return true;
-      }
+    const row = parseXcuiDebugLine(line);
+    if (row?.identifier?.startsWith(GALLERY_ROW_PREFIX)) {
+      rows.set(row.identifier, row);
     }
   }
-  return hasRows ? false : undefined;
+  return rows;
+}
+
+/** Exact gallery cell identifier match; undefined means no readable gallery rows. */
+export function hasGalleryAppRow(dump: string, appName: string): boolean | undefined {
+  const rows = readGalleryRows(dump);
+  return rows.size > 0 ? rows.has(`${GALLERY_ROW_PREFIX}${appName}`) : undefined;
 }
 
 function hasEditableSmartStack(dump: string): boolean {
@@ -337,18 +350,139 @@ async function openSmartStack(actions: WidgetActions): Promise<EditableStack | u
   return undefined;
 }
 
-async function selectGalleryWidget(
-  { gesture, readDump }: WidgetActions,
-  galleryStepsFromBottom: number,
-  editTap: { x: number; y: number },
-  appName: string,
-) {
-  await gesture({ type: "face", op: "tap", ...editTap });
-  await gesture({ type: "face", op: "tap", x: 0.5, y: 0.44 });
-  await gesture({ type: "face", op: "swipe", direction: "up" }, GALLERY_SCROLL_SETTLE_MS);
-  if (hasGalleryAppRow(await readDump(), appName) === false) {
-    return "gallery-row-missing";
+function readGalleryNavigationBottom(root: WatchHierarchyNode): number {
+  let bottom = 0;
+  const nodes = [root];
+  for (const node of nodes) {
+    if (node.className === "NavigationBar") {
+      bottom = Math.max(bottom, node.bounds.bottom);
+    }
+    nodes.push(...(node.children ?? []));
   }
+  return bottom;
+}
+
+function readGalleryRowTap(dump: string, row?: XcuiDebugLine) {
+  if (!row?.frame) {
+    return undefined;
+  }
+  try {
+    const tree = parseXcuiDebugDescription(dump, {
+      bundleId: WATCH_CLOCK_FACE_BUNDLE_ID,
+      timestamp: 0,
+    });
+    if (tree.screenWidth <= 0 || tree.screenHeight <= 0) {
+      return undefined;
+    }
+    const { left, right, top, bottom } = row.frame;
+    const navBottom = readGalleryNavigationBottom(tree.root);
+    const visibleTop = Math.max(top, navBottom);
+    const visibleBottom = Math.min(bottom, tree.screenHeight);
+    if (visibleBottom - visibleTop < MIN_GALLERY_VISIBLE_HEIGHT) {
+      return { needsEarlierDrag: top < navBottom, tap: undefined };
+    }
+    const x = (left + right) / 2 / tree.screenWidth;
+    const y = (visibleTop + visibleBottom) / 2 / tree.screenHeight;
+    return { needsEarlierDrag: false, tap: x > 0 && x < 1 ? { x, y } : undefined };
+  } catch (error) {
+    // A transitional dump without a window cannot supply a safe row tap.
+    logger.debug(`Smart Stack gallery row tap skipped: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
+interface GallerySearch {
+  appName: string;
+  direction: "later" | "earlier";
+  correctiveDrags: number;
+}
+
+function gallerySearchDrag(
+  search: GallerySearch,
+  needsEarlierDrag = false,
+): WatchCommand | undefined {
+  if (needsEarlierDrag && search.correctiveDrags >= MAX_GALLERY_CORRECTIVE_DRAGS) {
+    return undefined;
+  }
+  search.correctiveDrags += Number(needsEarlierDrag);
+  const earlier = needsEarlierDrag || search.direction === "earlier";
+  return {
+    type: "face",
+    op: "drag",
+    fromX: 0.5,
+    toX: 0.5,
+    fromY: earlier ? 0.5 : 0.6,
+    toY: earlier ? 0.6 : 0.4,
+  };
+}
+
+/** Row frames may jitter by a fraction of a point between dumps of a settled list. */
+const GALLERY_FRAME_TOLERANCE = 1;
+
+function sameGalleryFrame(a: XcuiDebugLine["frame"], b: XcuiDebugLine["frame"]): boolean {
+  if (!a || !b) {
+    return a === b;
+  }
+  return (["left", "top", "right", "bottom"] as const).every(
+    (edge) => Math.abs(a[edge] - b[edge]) <= GALLERY_FRAME_TOLERANCE,
+  );
+}
+
+/** A drag reached a list boundary only when the same rows sit at the same frames. */
+function galleryRowsUnchanged(
+  rows: Map<string, XcuiDebugLine>,
+  nextRows: Map<string, XcuiDebugLine>,
+): boolean {
+  return (
+    rows.size === nextRows.size &&
+    [...rows].every(([id, row]) => {
+      const next = nextRows.get(id);
+      return next !== undefined && sameGalleryFrame(row.frame, next.frame);
+    })
+  );
+}
+
+async function searchGalleryDirection(
+  { gesture, readDump }: WidgetActions,
+  dump: string,
+  search: GallerySearch,
+) {
+  const identifier = `${GALLERY_ROW_PREFIX}${search.appName}`;
+  let rows = readGalleryRows(dump);
+  let reading = readGalleryRowTap(dump, rows.get(identifier));
+  for (let step = 0; step < MAX_GALLERY_SEARCH_STEPS; step++) {
+    const drag = gallerySearchDrag(search, reading?.needsEarlierDrag);
+    if (!drag) {
+      break;
+    }
+    await gesture(drag, GALLERY_SCROLL_SETTLE_MS);
+    dump = await readDump();
+    const nextRows = readGalleryRows(dump);
+    const row = nextRows.get(identifier);
+    reading = readGalleryRowTap(dump, row);
+    if (reading?.tap) {
+      return { dump, tap: reading.tap };
+    }
+    if (nextRows.size === 0 || (!row && galleryRowsUnchanged(rows, nextRows))) {
+      break;
+    }
+    // A listed row needs at least 24 points clear of the navigation bar and window edges.
+    rows = nextRows;
+  }
+  return { dump, tap: undefined };
+}
+
+async function findGalleryRowTap(actions: WidgetActions, dump: string, appName: string) {
+  const search: GallerySearch = { appName, direction: "later", correctiveDrags: 0 };
+  const later = await searchGalleryDirection(actions, dump, search);
+  if (later.tap) {
+    return later.tap;
+  }
+  search.direction = "earlier";
+  return (await searchGalleryDirection(actions, later.dump, search)).tap;
+}
+
+async function tapCalibratedGalleryRow({ gesture }: WidgetActions, galleryStepsFromBottom: number) {
   for (let step = 0; step < galleryStepsFromBottom; step++) {
     await gesture(
       { type: "face", op: "drag", fromX: 0.5, fromY: 0.5, toX: 0.5, toY: 0.6 },
@@ -356,6 +490,28 @@ async function selectGalleryWidget(
     );
   }
   await gesture({ type: "face", op: "tap", x: 0.5, y: 0.65 });
+}
+
+async function selectGalleryWidget(
+  actions: WidgetActions,
+  galleryStepsFromBottom: number,
+  editTap: { x: number; y: number },
+  appName: string,
+) {
+  const { gesture, readDump } = actions;
+  await gesture({ type: "face", op: "tap", ...editTap });
+  await gesture({ type: "face", op: "tap", x: 0.5, y: 0.44 });
+  await gesture({ type: "face", op: "swipe", direction: "up" }, GALLERY_SCROLL_SETTLE_MS);
+  const dump = await readDump();
+  if (hasGalleryAppRow(dump, appName) === false) {
+    const tap = await findGalleryRowTap(actions, dump, appName);
+    if (!tap) {
+      return "gallery-row-missing";
+    }
+    await gesture({ type: "face", op: "tap", ...tap });
+  } else {
+    await tapCalibratedGalleryRow(actions, galleryStepsFromBottom);
+  }
   await gesture({ type: "face", op: "tap", x: 0.5, y: 0.5 });
   await gesture({ type: "face", op: "tap", x: 0.16, y: 0.14 });
   return "selected";
@@ -428,7 +584,7 @@ async function runWidgetAttempt(
 async function recoverMissingGalleryRow(
   actions: WidgetActions,
   result: WatchSmartStackWidgetResult,
-  { appName, signal }: WatchSmartStackWidgetOptions,
+  { appName, signal, maxAttempts = 3 }: WatchSmartStackWidgetOptions,
   relaunchClockface?: () => Promise<void>,
 ): Promise<WatchSmartStackWidgetResult | undefined> {
   result.galleryRowMisses++;
@@ -438,6 +594,9 @@ async function recoverMissingGalleryRow(
       ...result,
       reason: `Smart Stack gallery has no row for ${appName}. Relaunch com.apple.clockface (xcrun simctl terminate <udid> com.apple.clockface) and retry.`,
     };
+  }
+  if (result.attempts === maxAttempts) {
+    return undefined;
   }
   await relaunchClockface();
   await actions.settle(CLOCKFACE_RELAUNCH_SETTLE_MS);
@@ -516,7 +675,7 @@ export async function addWatchSmartStackWidget(
     }
     result.reason =
       result.galleryRowMisses > 0
-        ? `Smart Stack gallery row for ${appName} never appeared during ${result.galleryRowMisses} of ${result.attempts} attempts; widget cell was not verified. Check widget availability and retry.`
+        ? `Smart Stack gallery row for ${appName} never appeared during ${result.galleryRowMisses} of ${result.attempts} attempts; widget cell was not verified. Check widget availability, relaunch com.apple.clockface (xcrun simctl terminate <udid> com.apple.clockface), and retry.`
         : "Widget cell did not appear; check the display names and galleryStepsFromBottom before retrying.";
     return result;
   } catch (error) {

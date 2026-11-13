@@ -592,9 +592,17 @@ describe("web still navigation bars (#16382)", () => {
     expect(tabsOf(scrollable)[0]!.style).toMatchObject({ "min-width": "90px" });
   });
 
-  test("an item image falls back to its icon, or the placeholder, since assets are not inlined", () => {
+  test("an item image falls back to its icon, or the placeholder, and is listed as not inlined", () => {
     const still = renderPrototypeStill(fixture("media-tab-item-data"));
-    expect(still.unsupportedNodes).toEqual([]);
+    expect(still.unsupportedNodes).toEqual([
+      { type: "image", path: "root.items[0].image", reason: "assetNotInlined" },
+      {
+        type: "image",
+        path: "root.items[1].image",
+        reason: "assetNotInlined",
+        asset: "uploaded-icon",
+      },
+    ]);
     const tabs = find(still.element, (element) => element.attrs.role === "tab");
     expect(tabs.map((tab) => byPart(tab, "placeholder").length)).toEqual([1, 1]);
   });

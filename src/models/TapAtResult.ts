@@ -1,4 +1,5 @@
 import { BaseActionResult } from "./BaseActionResult";
+import type { TapEffect } from "./TapOnElementResult";
 
 /** Result of a platform-native absolute coordinate tap. */
 export interface TapAtResult extends BaseActionResult {
@@ -11,4 +12,8 @@ export interface TapAtResult extends BaseActionResult {
   warning?: string;
   /** Gesture requested, including on a failed dispatch. */
   action?: "tap" | "longPress" | "doubleTap";
+  /** iOS: observed screen change after a successful tap. */
+  effect?: TapEffect;
+  /** The route the runner reports, e.g. "xcuiCoordinate" / "displayTargetedRecord"; absent when unreported. */
+  dispatchRoute?: string;
 }

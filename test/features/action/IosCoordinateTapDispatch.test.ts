@@ -78,6 +78,28 @@ function scriptedClient(options: {
 }
 
 describe("dispatchIosCoordinateTap (#9971)", () => {
+  for (const dispatch of [dispatchIosCoordinateTap, dispatchIosDoubleTap]) {
+    test.each(["xcuiCoordinate", "displayTargetedRecord", undefined] as const)(
+      `${dispatch.name} returns runner route=%s`,
+      async (route) => {
+        const client = scriptedClient({
+          dispatch: true,
+          reply: { success: true, ...(route ? { tapDiagnostics: { route } } : {}) },
+        });
+        expect(await dispatch(client, { x: 1, y: 2 }, { durationMs: 50 })).toEqual(
+          route === undefined ? {} : { route },
+        );
+      },
+    );
+
+    test(`${dispatch.name} ignores a non-string runner route`, async () => {
+      const tapDiagnostics = {};
+      Object.defineProperty(tapDiagnostics, "route", { value: 42 });
+      const client = scriptedClient({ dispatch: true, reply: { success: true, tapDiagnostics } });
+      expect(await dispatch(client, { x: 1, y: 2 }, { durationMs: 50 })).toEqual({});
+    });
+  }
+
   test("an unconfirmed tap logs the point, budget and that the runner may stay busy (#15296)", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {

@@ -40,9 +40,12 @@ data class EdgeNavigationResult(
   val message: String? = null,
 )
 
-/** Drives a pane's device to a screen. Live panes back it with the daemon's `navigateTo` tool. */
+/**
+ * Drives a pane's device along one transition: to its source, then that transition only (#16982).
+ * Live panes back it with the daemon's `navigateTo` tool.
+ */
 fun interface EdgeNavigator {
-  suspend fun navigateTo(deviceId: String, targetScreen: String): EdgeNavigationResult
+  suspend fun navigateTo(deviceId: String, transition: ScreenTransition): EdgeNavigationResult
 }
 
 /** What one attempt along a transition came to, as shown after it runs. */
@@ -101,7 +104,7 @@ object EdgeNavigation {
   ): EdgeNavigationOutcome {
     require(availability != EdgeNavigateAvailability.Disabled) { "navigate is disabled" }
     val speculative = availability == EdgeNavigateAvailability.Speculative
-    val result = navigator.navigateTo(deviceId, transition.toScreen)
+    val result = navigator.navigateTo(deviceId, transition)
     return if (result.success && result.currentScreen == transition.toScreen) {
       EdgeNavigationOutcome.Reached(transition, speculative)
     } else {
@@ -152,8 +155,12 @@ class DaemonEdgeNavigator(
   private val clientProvider: () -> AutoMobileClient?,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : EdgeNavigator {
-  override suspend fun navigateTo(deviceId: String, targetScreen: String): EdgeNavigationResult =
+  override suspend fun navigateTo(
+    deviceId: String,
+    transition: ScreenTransition,
+  ): EdgeNavigationResult =
     withContext(ioDispatcher) {
+      val targetScreen = transition.toScreen
       val client =
         clientProvider()
           ?: return@withContext EdgeNavigationResult(false, null, "No daemon connection")
@@ -165,6 +172,7 @@ class DaemonEdgeNavigator(
             buildJsonObject {
               put("targetScreen", targetScreen)
               put("deviceId", deviceId)
+              put("viaTransition", viaTransitionArgs(transition))
             },
           )
         parseNavigateToResponse(response)
@@ -185,6 +193,17 @@ class DaemonEdgeNavigator(
     LOG.warn("navigateTo $targetScreen on $deviceId failed", error)
     return EdgeNavigationResult(false, null, error.message ?: error::class.simpleName)
   }
+}
+
+/**
+ * `navigateTo`'s `viaTransition` for [transition]: its screens, plus its graph edge id when the id
+ * is one (`getNavigationGraph` edge ids are numeric), so parallel edges between the same screens
+ * stay distinct.
+ */
+internal fun viaTransitionArgs(transition: ScreenTransition): JsonObject = buildJsonObject {
+  put("from", transition.fromScreen)
+  put("to", transition.toScreen)
+  transition.id.toLongOrNull()?.let { put("edgeId", it) }
 }
 
 /**

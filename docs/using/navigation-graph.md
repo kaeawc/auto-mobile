@@ -189,6 +189,27 @@ focus moves and select.
 If the device is already on the target, the call succeeds with
 `"Already on target screen"` and no steps.
 
+### Through one transition
+
+```json
+{
+  "name": "navigateTo",
+  "arguments": {
+    "targetScreen": "Settings",
+    "viaTransition": { "from": "Home", "to": "Settings", "toolName": "tapOn" }
+  }
+}
+```
+
+`viaTransition` makes the last step exactly that recorded transition. The call
+first goes to `from` by any known path, then replays only that transition, even
+when other transitions also join the two screens. `to` must equal
+`targetScreen`. Pick the transition by `toolName` (`null` for a Back
+transition) or by a `getNavigationGraph` edge `edgeId`; with neither, any
+transition from `from` to `to` qualifies. A pinned call never tries another
+transition: if the transition is missing or its replay does not land on `to`,
+`success` is `false` and `currentScreen` says where the device stopped.
+
 ## Limits
 
 - A path is only as good as its recorded actions. Changed UI, dynamic content,
@@ -202,13 +223,14 @@ If the device is already on the target, the call succeeds with
 
 ## Errors and what to do
 
-| Error                                                                               | What to do                                                                                                                                                                                                |
-| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Package not installed: <app>`                                                      | Install the app, then call `explore` again.                                                                                                                                                               |
-| `Could not confirm that <app> is installed`                                         | The installed-app listing was incomplete. Retry.                                                                                                                                                          |
-| `Cannot determine current screen. No navigation events recorded yet.`               | Interact with the app once (or run `explore`), and confirm the app embeds the SDK and the server runs with `--embedded-sdk`.                                                                              |
-| `No known path from "A" to "B". Known screens: ...`                                 | Check the target name against the list. If it is right, walk from A to B once by hand or run `explore` from A to record a path. A note about ignored transitions means some edges had no recorded action. |
-| `Failed to execute step N: ...` or `Navigation did not reach "B"; currently on "C"` | A recorded step no longer works. Call `observe`, recover to a known screen, and run `explore` with `mode: "validate"` to refresh the graph.                                                               |
-| `Not trying a fallback edge: ... no longer confirmed on "A"`                        | A dialog or other app is in the way. Dismiss it, then call `navigateTo` again.                                                                                                                            |
-| `Navigation timeout (30 seconds)`                                                   | The replay took too long. Check `partialPath` and `currentScreen`, then retry from there.                                                                                                                 |
-| `stopReason` starts with `Left target app`                                          | Exploration kept leaving the app (for example, through an external link) and could not get back. Check the app opens with `launchApp`, then run again with a lower `maxInteractions`.                     |
+| Error                                                                                          | What to do                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Package not installed: <app>`                                                                 | Install the app, then call `explore` again.                                                                                                                                                               |
+| `Could not confirm that <app> is installed`                                                    | The installed-app listing was incomplete. Retry.                                                                                                                                                          |
+| `Cannot determine current screen. No navigation events recorded yet.`                          | Interact with the app once (or run `explore`), and confirm the app embeds the SDK and the server runs with `--embedded-sdk`.                                                                              |
+| `No known path from "A" to "B". Known screens: ...`                                            | Check the target name against the list. If it is right, walk from A to B once by hand or run `explore` from A to record a path. A note about ignored transitions means some edges had no recorded action. |
+| `Failed to execute step N: ...` or `Navigation did not reach "B"; currently on "C"`            | A recorded step no longer works. Call `observe`, recover to a known screen, and run `explore` with `mode: "validate"` to refresh the graph.                                                               |
+| `Not trying a fallback edge: ... no longer confirmed on "A"`                                   | A dialog or other app is in the way. Dismiss it, then call `navigateTo` again.                                                                                                                            |
+| `No replayable recorded transition ...` or `Transition N (...) is not in the navigation graph` | The pinned transition is not recorded for this app. Call `getNavigationGraph` and pick a listed edge.                                                                                                     |
+| `Navigation timeout (30 seconds)`                                                              | The replay took too long. Check `partialPath` and `currentScreen`, then retry from there.                                                                                                                 |
+| `stopReason` starts with `Left target app`                                                     | Exploration kept leaving the app (for example, through an external link) and could not get back. Check the app opens with `launchApp`, then run again with a lower `maxInteractions`.                     |

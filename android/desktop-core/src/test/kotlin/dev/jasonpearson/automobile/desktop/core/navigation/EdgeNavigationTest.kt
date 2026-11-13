@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.navigation
 
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.navigation.MultiBuildNavigationFixture.ACTIVE_DEVICE
 import dev.jasonpearson.automobile.desktop.core.navigation.MultiBuildNavigationFixture.activeContext
@@ -8,8 +9,10 @@ import dev.jasonpearson.automobile.desktop.core.navigation.MultiBuildNavigationF
 import dev.jasonpearson.automobile.desktop.domain.NavigationGraph
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
@@ -21,8 +24,15 @@ class EdgeNavigationTest {
   private class FakeEdgeNavigator(private val landsOn: (String) -> String?) : EdgeNavigator {
     val requests = mutableListOf<Pair<String, String>>()
 
-    override suspend fun navigateTo(deviceId: String, targetScreen: String): EdgeNavigationResult {
+    val transitions = mutableListOf<ScreenTransition>()
+
+    override suspend fun navigateTo(
+      deviceId: String,
+      transition: ScreenTransition,
+    ): EdgeNavigationResult {
+      val targetScreen = transition.toScreen
       requests += deviceId to targetScreen
+      transitions += transition
       val current = landsOn(targetScreen)
       return EdgeNavigationResult(current == targetScreen, current, null)
     }
@@ -74,6 +84,7 @@ class EdgeNavigationTest {
         EdgeNavigateAvailability.Speculative,
       )
     assertEquals(listOf(ACTIVE_DEVICE to "Login"), navigator.requests)
+    assertEquals(listOf(toLogin), navigator.transitions)
     assertEquals(EdgeNavigationOutcome.Reached(toLogin, speculative = true), outcome)
     assertEquals(
       "Speculative attempt reached Login — waiting for the active build to record it",
@@ -119,6 +130,62 @@ class EdgeNavigationTest {
     val text = EdgeNavigation.outcomeText(outcome, EdgeVerification.Verified)
     assertEquals("Navigation reached Search", text)
     assertTrue(EdgeNavigation.SPECULATIVE_LABEL !in text)
+  }
+
+  @Test
+  fun `daemon navigator pins the attempt to the selected transition`() = runTest {
+    val calls = mutableListOf<Pair<String, JsonObject>>()
+    val client =
+      object : AutoMobileClient by FakeAutoMobileClient() {
+        override fun setToolEnabled(toolName: String, enabled: Boolean) {
+          calls += "setToolEnabled" to JsonObject(mapOf("toolName" to JsonPrimitive(toolName)))
+        }
+
+        override fun callTool(name: String, arguments: JsonObject): JsonElement {
+          calls += name to arguments
+          val payload = """{"success":true,"currentScreen":"Login"}"""
+          return JsonObject(
+            mapOf(
+              "content" to
+                JsonArray(
+                  listOf(
+                    JsonObject(
+                      mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(payload)),
+                    ),
+                  ),
+                ),
+            ),
+          )
+        }
+      }
+    val transition = ScreenTransition("42", "Home", "Login", "tapOn", null, 0, 0f)
+
+    val result =
+      DaemonEdgeNavigator({ client }, StandardTestDispatcher(testScheduler))
+        .navigateTo(ACTIVE_DEVICE, transition)
+
+    assertEquals(EdgeNavigationResult(true, "Login", null), result)
+    val (_, arguments) = calls.single { it.first == "navigateTo" }
+    assertEquals(JsonPrimitive("Login"), arguments["targetScreen"])
+    assertEquals(
+      JsonObject(
+        mapOf(
+          "from" to JsonPrimitive("Home"),
+          "to" to JsonPrimitive("Login"),
+          "edgeId" to JsonPrimitive(42L),
+        ),
+      ),
+      arguments["viaTransition"],
+    )
+  }
+
+  @Test
+  fun `a non-numeric transition id pins only the screens`() {
+    val transition = ScreenTransition("toLogin", "Home", "Login", "tap", null, 0, 0f)
+    assertEquals(
+      JsonObject(mapOf("from" to JsonPrimitive("Home"), "to" to JsonPrimitive("Login"))),
+      viaTransitionArgs(transition),
+    )
   }
 
   @Test

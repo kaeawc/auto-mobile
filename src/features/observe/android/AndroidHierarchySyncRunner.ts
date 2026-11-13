@@ -50,6 +50,7 @@ export class AndroidHierarchySyncRunner {
     } & { effectiveTimeoutMs: number },
   ): Promise<HierarchySyncResult> {
     const { startTime, displayId, observerMode, preserveDisplayState, diagnostics } = request;
+    delete diagnostics.replyWaitTimedOutMs;
     try {
       logger.debug("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 
@@ -118,8 +119,10 @@ export class AndroidHierarchySyncRunner {
       const correlationRequestId = hierarchyRequestId ?? broadcastRequestId ?? undefined;
       const freshData = await this.hooks.awaitSyncReply(
         () =>
-          perf.track("waitForPush", () =>
-            this.hooks.waitForFreshData(effectiveTimeoutMs, startTime, false, {
+          perf.track("waitForPush", async () => {
+            // Measured from the reply wait itself, so connection setup cannot count as unresponsive.
+            const replyWaitStartedAt = this.context.timer.now();
+            const reply = await this.hooks.waitForFreshData(effectiveTimeoutMs, startTime, false, {
               signal,
               options: {
                 requestId: correlationRequestId,
@@ -135,8 +138,13 @@ export class AndroidHierarchySyncRunner {
                 displayId,
                 diagnostics,
               },
-            }),
-          ),
+            });
+            const replyWaitMs = this.context.timer.now() - replyWaitStartedAt;
+            if (reply === null && replyWaitMs >= effectiveTimeoutMs) {
+              diagnostics.replyWaitTimedOutMs = replyWaitMs;
+            }
+            return reply;
+          }),
         correlationRequestId,
         observerMode,
       );

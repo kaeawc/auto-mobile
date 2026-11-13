@@ -8,7 +8,10 @@ import {
   type HeadUnitInteractionResult,
 } from "../../features/androidAuto/HeadUnitInteraction";
 import { defaultHeadUnitFence } from "../../features/androidAuto/HeadUnitFence";
-import { DhuScreenshotHashSource } from "../../features/androidAuto/HeadUnitScreenshotHash";
+import {
+  DhuScreenshotHashSource,
+  headUnitScreenshotDirectories,
+} from "../../features/androidAuto/HeadUnitScreenshotHash";
 import { ActionableError, type BootedDevice } from "../../models";
 import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
@@ -45,7 +48,7 @@ export const defaultHeadUnitInteractionFactory: HeadUnitInteractionFactory = (de
         files: new DefaultFileSystem(),
         timer: defaultTimer,
         ids: defaultIdGenerator,
-        directory: os.tmpdir(),
+        directories: headUnitScreenshotDirectories(os.tmpdir(), process.env),
       }),
     },
   );

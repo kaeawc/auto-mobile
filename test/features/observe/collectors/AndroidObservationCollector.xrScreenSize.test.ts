@@ -97,10 +97,12 @@ test("XR IME process bounds use the display size and reconcile all hierarchy fie
     pixelHeight: 2558,
   });
   await collect();
-  expect(adb.getAllCommands().filter((command) => command === "shell wm size")).toHaveLength(1);
-  expect((await collect(1)).screenSize).toEqual({ width: 2558, height: 2560 });
-  await collect(3);
+  // Each observe re-reads wm size so a mid-instance override is not hidden (#17915).
   expect(adb.getAllCommands().filter((command) => command === "shell wm size")).toHaveLength(2);
+  adb.setCommandResult("shell wm size", "Physical size: 2560x2558\nOverride size: 2000x1900");
+  expect((await collect()).screenSize).toEqual({ width: 2000, height: 1900 });
+  expect((await collect(1)).screenSize).toEqual({ width: 1900, height: 2000 });
+  expect(adb.getAllCommands().filter((command) => command === "shell wm size")).toHaveLength(4);
 });
 
 test("non-XR and non-default displays retain captured size without wm size", async () => {

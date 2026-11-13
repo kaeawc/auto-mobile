@@ -313,6 +313,7 @@ function prototypeTargets(
   clientFactory: (device: BootedDevice) => PrototypeClient,
   agentConnections: PrototypeAgentConnections,
   transports: PrototypeTransportCache,
+  iosAssetCache?: PrototypeToolDependencies["iosAssetCache"],
 ): {
   androidTarget: (device: BootedDevice) => PrototypeTarget;
   iosTarget: (device: BootedDevice) => PrototypeTarget | undefined;
@@ -335,7 +336,10 @@ function prototypeTargets(
     }
     let transport = transports.ios.get(agent);
     if (transport === undefined) {
-      transport = new IosPrototypeTransport(agent);
+      transport = new IosPrototypeTransport(
+        agent,
+        iosAssetCache === undefined ? undefined : { serial: device.deviceId, cache: iosAssetCache },
+      );
       transports.ios.set(agent, transport);
       requestWiring.attachIosPrototypeRequests(agent, device.deviceId, transports.requests);
       channelWiring.attachIosPrototypeChannels(agent, device.deviceId, transports.channels);
@@ -654,6 +658,7 @@ export function createPrototypeToolRuntime(
     clientFactory,
     agentConnections,
     host.transports,
+    dependencies.iosAssetCache,
   );
   const cacheInvalidator =
     dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();

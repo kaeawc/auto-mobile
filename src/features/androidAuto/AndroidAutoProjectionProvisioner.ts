@@ -195,6 +195,7 @@ export class AndroidAutoProjectionProvisioner {
     return {
       sendCommand: (command) => session.sendCommand(command),
       isRunning: () => session.isRunning(),
+      hasVideoFocus: () => session.hasVideoFocus?.() ?? true,
       panel: { instance: this.panelInstance(session), ...(configPath ? { configPath } : {}) },
     };
   }

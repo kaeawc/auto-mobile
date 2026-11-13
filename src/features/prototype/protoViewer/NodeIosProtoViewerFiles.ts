@@ -1,4 +1,4 @@
-import { mkdir, writeFile, rename, readFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, rename, readFile, rm, stat } from "node:fs/promises";
 import { logger } from "../../../utils/logger";
 import type { IosProtoViewerFiles } from "./IosProtoViewer";
 export class NodeIosProtoViewerFiles implements IosProtoViewerFiles {
@@ -18,6 +18,18 @@ export class NodeIosProtoViewerFiles implements IosProtoViewerFiles {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {
         logger.debug("ProtoViewer result pending");
         return "";
+      }
+      throw error;
+    }
+  }
+  async modifiedAt(path: string): Promise<number | undefined> {
+    try {
+      return (await stat(path)).mtimeMs;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        // A missing report is a pending or pre-handshake one, not a failure.
+        logger.debug("ProtoViewer capabilities report absent");
+        return undefined;
       }
       throw error;
     }

@@ -480,8 +480,11 @@ There is no per-host consent. MCP-direct `show` is unaffected. When on:
   report, or a report still for another version leaves the decision to the app's import gate
   (section 5 step 5); unusable storage keeps the platform save path, as for an import. A secondary
   Android user also defers to the app: its MCP storage is reached only through the app's provider,
-  which serves inbox writes and result reads, not the report. The iOS simulator path has no report
-  yet and always defers to the app.
+  which serves inbox writes and result reads, not the report. On an iOS simulator the app writes the
+  same report whenever it creates its MCP folders, and the host compares it with simctl's
+  `CFBundleVersion`. The app publishes asynchronously after it is foregrounded, so a refresh accepts
+  only a rewrite (a new modification time or new content) within the timeout; a refresh the app
+  never republishes is unknown and defers to the app.
 - Trust model for store-installed builds. The host cannot pin a store binary's
   checksum the way it pins CtrlProxy, and the Play-signed binary differs from the GitHub one
   (#14145). It accepts any ProtoViewer signed with the expected certificate (Android) or team

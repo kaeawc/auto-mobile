@@ -801,4 +801,16 @@ describe("AndroidAutoProjectionProvisioner", () => {
     const restarted = provisioner.desktopHeadUnitConsole("emulator-5554")?.panel;
     expect(restarted?.instance).not.toBe(first?.instance);
   });
+
+  test("a console reports the DHU's video focus, and focus when the session cannot tell", async () => {
+    const session = new FakeSession();
+    let videoFocus = false;
+    const { provisioner } = setup([{ status: "connected", session }]);
+    await provisioner.provision(request());
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")?.hasVideoFocus?.()).toBe(true);
+    session.hasVideoFocus = () => videoFocus;
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")?.hasVideoFocus?.()).toBe(false);
+    videoFocus = true;
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")?.hasVideoFocus?.()).toBe(true);
+  });
 });

@@ -1758,7 +1758,6 @@ test/server/appTools.launchAppResponse.test.ts
 test/server/appTools.outputSchema.test.ts
 test/server/appTools.signingGuards.test.ts
 test/server/appToolsReadiness.test.ts
-test/server/auditTool.test.ts
 test/server/barrierCoordinator.test.ts
 test/server/barrierDeepLinkBiometricTools.outputSchema.test.ts
 test/server/bootedDeviceTraits.test.ts

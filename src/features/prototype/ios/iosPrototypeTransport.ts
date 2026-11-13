@@ -387,9 +387,15 @@ export class IosPrototypeTransport implements PrototypeTransport {
       options,
     );
     if (reply.success && !reply.error) {
-      await this.cacheAsset(`cache prototype asset ${asset.id}`, (cache, serial) =>
+      const cached = await this.cacheAsset(`cache prototype asset ${asset.id}`, (cache, serial) =>
         cache.put(serial, snapshot),
       );
+      if (!cached) {
+        // An older entry under this id would otherwise let the web page inline the previous bytes.
+        await this.cacheAsset(`drop stale cached prototype asset ${asset.id}`, (cache, serial) =>
+          cache.remove(serial, asset.id),
+        );
+      }
     }
     return reply;
   }
@@ -416,18 +422,23 @@ export class IosPrototypeTransport implements PrototypeTransport {
     return reply;
   }
 
-  /** A cache failure never fails an upload the device confirmed; the image keeps its placeholder. */
+  /**
+   * A cache failure never fails an upload the device confirmed; the image keeps its placeholder.
+   * Returns whether the cache step succeeded (true when there is no cache).
+   */
   private async cacheAsset(
     what: string,
     run: (cache: Pick<PrototypeAssetCache, "put" | "remove">, serial: string) => Promise<void>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!this.assetCache) {
-      return;
+      return true;
     }
     try {
       await run(this.assetCache.cache, this.assetCache.serial);
+      return true;
     } catch (error) {
       logger.warn(`[prototype-agent] Failed to ${what}: ${errorMessage(error)}`, error);
+      return false;
     }
   }
 

@@ -28,6 +28,7 @@ class RecoveryLoopTest {
     fakeAgent = RecoveryFakeAutoMobileAgent()
     collaborators =
       PlanExecutorCollaborators(
+        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
         agent = { fakeAgent },
         deviceChecker = RecoveryFakeDeviceChecker(),
         daemon = fakeDaemonClient,

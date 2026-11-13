@@ -187,14 +187,13 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## ♿ Accessibility & tooling
 
-| Tool                                                  | What it does                                                                                             | Requires                |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------- |
-| 🦮 <code>accessibility</code>                         | Check or control accessibility services                                                                  | —                       |
-| 🔲 <code>accessibilityFocus</code>                    | Set accessibility focus on Android and iOS by resourceId, text, or contentDesc                           | <code>debugBuild</code> |
-| 🫶 <code>accessibilityAction</code>                   | Perform an Android accessibility action on an element, the way TalkBack or Switch Access does            | —                       |
-| ✅ [<code>accessibilityAudit</code>](using/audits.md) | Audit the accessibility of the current screen                                                            | —                       |
-| 🧾 <code>audit</code>                                 | Deprecated: use `accessibilityAudit` for accessibility and `performanceAudit` for performance and memory | —                       |
-| 🧩 <code>setToolEnabled</code>                        | Control tools/list discovery for this MCP session                                                        | —                       |
+| Tool                                                  | What it does                                                                                  | Requires                |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------- |
+| 🦮 <code>accessibility</code>                         | Check or control accessibility services                                                       | —                       |
+| 🔲 <code>accessibilityFocus</code>                    | Set accessibility focus on Android and iOS by resourceId, text, or contentDesc                | <code>debugBuild</code> |
+| 🫶 <code>accessibilityAction</code>                   | Perform an Android accessibility action on an element, the way TalkBack or Switch Access does | —                       |
+| ✅ [<code>accessibilityAudit</code>](using/audits.md) | Audit the accessibility of the current screen                                                 | —                       |
+| 🧩 <code>setToolEnabled</code>                        | Control tools/list discovery for this MCP session                                             | —                       |
 
 ## 📺 TV focus navigation
 

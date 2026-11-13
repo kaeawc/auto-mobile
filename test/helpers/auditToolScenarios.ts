@@ -7,8 +7,8 @@ import { FakeOnDemandAuditEngines } from "../fakes/FakeOnDemandAuditEngines";
 import { deviceAwareHandler } from "./registeredHandler";
 
 /**
- * Fixed audit scenarios (#17279): the `audit` tool's output for each is pinned, and the
- * accessibilityAudit (wcag engine) and performanceAudit tools must reproduce it.
+ * Fixed audit scenarios (#17279): the output the removed `audit` tool returned for each is pinned,
+ * and the accessibilityAudit (wcag engine) and performanceAudit tools must reproduce it.
  */
 
 export const AUDIT_ANDROID: BootedDevice = {
@@ -91,7 +91,7 @@ export function performanceScenarioEngines(): FakeOnDemandAuditEngines {
 const OLD = auditViolation("old", "error");
 const ADDED = auditViolation("added", "warning");
 
-/** `audit` with scope card, baseline compare `home` and failOn warning, over the a11y scenario. */
+/** Removed `audit` with scope card, baseline compare `home` and failOn warning, over the a11y scenario. */
 export const PINNED_ACCESSIBILITY = {
   success: false,
   failed: true,
@@ -108,7 +108,7 @@ export const PINNED_ACCESSIBILITY = {
 
 const PINNED_MEMORY = { passed: true };
 
-/** `audit` kinds performance+memory with failOn error, over the performance scenario. */
+/** Removed `audit` kinds performance+memory with failOn error, over the performance scenario. */
 export const PINNED_PERFORMANCE = {
   success: false,
   failed: true,
@@ -124,7 +124,7 @@ export const PINNED_PERFORMANCE = {
   memory: PINNED_MEMORY,
 };
 
-/** `audit` kinds performance+memory for a background appId, over the performance scenario. */
+/** Removed `audit` kinds performance+memory for a background appId, over the performance scenario. */
 export const PINNED_BACKGROUND_PERFORMANCE = {
   success: true,
   failed: false,

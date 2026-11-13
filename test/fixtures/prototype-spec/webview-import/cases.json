@@ -1,0 +1,70 @@
+[
+  {
+    "name": "list header is checked before children regardless of key order",
+    "spec": {
+      "root": {
+        "type": "list",
+        "children": [{ "type": "webView" }],
+        "footer": { "type": "webView" },
+        "header": { "type": "webView" }
+      }
+    },
+    "path": "root.header"
+  },
+  {
+    "name": "header and footer are nodes only on list",
+    "spec": {
+      "root": {
+        "type": "column",
+        "header": { "type": "webView" },
+        "footer": { "type": "webView" },
+        "children": [{ "type": "text" }]
+      }
+    },
+    "path": null
+  },
+  {
+    "name": "adaptive slots use the fixed slot order",
+    "spec": {
+      "root": {
+        "type": "adaptive",
+        "supporting": { "type": "webView" },
+        "detail": { "type": "webView" },
+        "list": { "type": "webView" }
+      }
+    },
+    "path": "root.list"
+  },
+  {
+    "name": "child is checked before children regardless of key order",
+    "spec": {
+      "root": { "type": "box", "children": [{ "type": "webView" }], "child": { "type": "webView" } }
+    },
+    "path": "root.child"
+  },
+  {
+    "name": "stack screens are checked in UTF-16 key order",
+    "spec": {
+      "root": {
+        "type": "stack",
+        "screens": {
+          "b": { "type": "webView" },
+          "B": { "type": "webView" },
+          "a": { "type": "webView" }
+        }
+      }
+    },
+    "path": "root.screens[\"B\"]"
+  },
+  {
+    "name": "children are checked before screens regardless of key order",
+    "spec": {
+      "root": {
+        "type": "stack",
+        "screens": { "a": { "type": "webView" } },
+        "children": [{ "type": "webView" }]
+      }
+    },
+    "path": "root.children[0]"
+  }
+]

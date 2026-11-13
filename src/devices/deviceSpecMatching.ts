@@ -5,7 +5,7 @@ import type { AvdConfigReader } from "../utils/android-cmdline-tools/AvdConfigRe
 import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import type { AppleDeviceRuntime, AppleDeviceType } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
-  evaluateRuntimeCompatibility,
+  evaluateDeviceTypeOnRuntime,
   type DeviceTypeRuntimeBounds,
 } from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import {
@@ -133,8 +133,10 @@ export interface IosPairIncompatibility {
 
 /**
  * Evaluate an exact iOS pair against a simctl catalog. Returns undefined unless the catalog
- * proves the pair incompatible: a runtime or device type missing from the catalog, or a model
- * without runtime-range metadata, is unknown, not unsupported, and simctl stays the authority.
+ * proves the pair incompatible: out of the model's runtime bounds, or left out of a runtime's
+ * reported `supportedDeviceTypes` (#18287). A runtime or device type missing from the catalog, or
+ * a model without runtime-range metadata that the runtime list does not exclude, is unknown, not
+ * unsupported, and simctl stays the authority.
  */
 export function evaluateIosPairCompatibility(
   spec: IosSpecConstraints,
@@ -146,7 +148,7 @@ export function evaluateIosPairCompatibility(
   if (!runtime || !deviceType) {
     return undefined;
   }
-  const evaluation = evaluateRuntimeCompatibility(deviceType, runtime.version);
+  const evaluation = evaluateDeviceTypeOnRuntime(deviceType, runtime);
   const unavailable = !runtime.isAvailable;
   if (!unavailable && evaluation.status !== "unsupported") {
     return undefined;
@@ -159,7 +161,7 @@ export function evaluateIosPairCompatibility(
       .filter(
         (entry) =>
           entry.isAvailable &&
-          evaluateRuntimeCompatibility(deviceType, entry.version).status === "supported",
+          evaluateDeviceTypeOnRuntime(deviceType, entry).status === "supported",
       )
       .map((entry) => ({ id: entry.identifier, version: entry.version })),
   };

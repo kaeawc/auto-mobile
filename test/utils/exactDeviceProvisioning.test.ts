@@ -1146,9 +1146,9 @@ describe("exact iOS provisioning runtime compatibility", () => {
         { id: RUNTIME("26.2"), version: "26.2" },
         { id: RUNTIME("26.5"), version: "26.5" },
         { id: RUNTIME("27.0"), version: "27.0" },
-        { id: RUNTIME("27.1"), version: "27.1" },
       ],
     });
+    // The captured iOS 27.1 runtime's supportedDeviceTypes lists only the iPhone Duo (#18287).
     expect(failure.message).toContain(RUNTIME("26.5"));
     expect(events).toEqual([]);
   });
@@ -1201,19 +1201,38 @@ describe("exact iOS provisioning runtime compatibility", () => {
         ? { ...deviceType, minRuntimeVersionString: "garbage" }
         : deviceType,
     );
-    for (const catalog of [
-      { getDeviceTypesChecked: async () => malformed },
-      { getDeviceTypesChecked: async () => [] },
-      {
-        getRuntimesChecked: async (): Promise<AppleDeviceRuntime[]> => {
-          throw new Error("simctl timed out");
+    // Malformed bounds use iOS 26.2, whose captured supportedDeviceTypes lists the model, so
+    // the bounds are the only evidence; the 18.6 list leaves it out, which is proof (#18287).
+    for (const [catalog, runtime] of [
+      [{ getDeviceTypesChecked: async () => malformed }, RUNTIME("26.2")],
+      [{ getDeviceTypesChecked: async () => [] }, RUNTIME("18.6")],
+      [
+        {
+          getRuntimesChecked: async (): Promise<AppleDeviceRuntime[]> => {
+            throw new Error("simctl timed out");
+          },
         },
-      },
-    ]) {
+        RUNTIME("18.6"),
+      ],
+    ] as const) {
       const { events, provision } = harness(catalog);
-      await provision(IPHONE_17_PRO, RUNTIME("18.6"));
+      await provision(IPHONE_17_PRO, runtime);
       expect(events).toEqual(["before-create", "create"]);
     }
+  });
+
+  test("malformed bounds still refuse a runtime whose supportedDeviceTypes leaves the model out", async () => {
+    const malformed = deviceTypes.map((deviceType) =>
+      deviceType.identifier === IPHONE_17_PRO
+        ? { ...deviceType, minRuntimeVersionString: "garbage" }
+        : deviceType,
+    );
+    const { events, provision } = harness({ getDeviceTypesChecked: async () => malformed });
+    const error = (await provision(IPHONE_17_PRO, RUNTIME("18.6")).catch(
+      (e: unknown) => e,
+    )) as ProvisionDeviceError;
+    expect(error.code).toBe("runtime_incompatible");
+    expect(events).toEqual([]);
   });
 
   test("an aborted discovery propagates cancellation instead of being treated as unknown", async () => {

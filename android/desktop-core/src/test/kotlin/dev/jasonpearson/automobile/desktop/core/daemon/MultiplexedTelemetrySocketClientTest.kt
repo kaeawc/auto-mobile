@@ -111,9 +111,17 @@ class MultiplexedTelemetrySocketClientTest {
     }
   }
 
-  private class Daemon(private val holdFirstSocket: Boolean = false) {
+  private class Daemon(
+    private val holdFirstSocket: Boolean = false,
+    private val holdFirstPublish: Boolean = false,
+  ) {
     private val opened = LinkedBlockingQueue<ScriptedSocket>()
     @Volatile var openCount = 0
+    private var publishCount = 0
+    /** Signalled when the first connection reaches publication while [holdFirstPublish]. */
+    val publishHeld = CountDownLatch(1)
+    /** Lets a held first connection go on to publish its socket. */
+    val releasePublish = CountDownLatch(1)
     val readerThreads = CountingReaderThreads()
     val retryDelays = LinkedBlockingQueue<Long>()
 
@@ -126,6 +134,12 @@ class MultiplexedTelemetrySocketClientTest {
         socketAvailable = { true },
         retryDelay = { retryDelays.add(it) },
         socketPath = { "/fake/telemetry-push.sock" },
+        beforePublish = {
+          if (holdFirstPublish && synchronized(this) { ++publishCount } == 1) {
+            publishHeld.countDown()
+            releasePublish.await()
+          }
+        },
       )
 
     /** The next socket the client opens. */
@@ -400,6 +414,34 @@ class MultiplexedTelemetrySocketClientTest {
       first.awaitCloses(2)
       second.send(log("telemetry-2", "b-after-cleanup", phoneB))
       assertEquals("b-after-cleanup", logsB.next())
+      client.close()
+    }
+
+  @Test
+  fun `a connection released before publishing its socket leaves its replacement routing`() =
+    runBlocking {
+      val daemon = Daemon(holdFirstPublish = true)
+      val client = client(daemon)
+      val a = client.subscribe(phoneA) {}
+      val first = daemon.nextSocket()
+      // The first connection has passed ensureActive() and waits to publish its socket.
+      assertTrue(daemon.publishHeld.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+      a.close()
+
+      val logsB = Sink()
+      val b = client.subscribe(phoneB) { logsB.events.add(it) }
+      val second = daemon.nextSocket()
+      val subB = second.nextRequest()
+      assertEquals("uuid-b", subB["deviceSessionUuid"])
+      second.send(ack(subB["id"], "telemetry-2"))
+      withTimeout(TIMEOUT_SECONDS * 1_000) { b.state.first { it is ConnectionState.Connected } }
+
+      // The retired connection resumes; its cleanup closes its socket last.
+      daemon.releasePublish.countDown()
+      first.awaitCloses(1)
+      second.send(log("telemetry-2", "b-after-retired", phoneB))
+      assertEquals("b-after-retired", logsB.next())
+      assertTrue(first.fromClient.isEmpty())
       client.close()
     }
 

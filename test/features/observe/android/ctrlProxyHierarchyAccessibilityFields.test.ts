@@ -149,6 +149,10 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
         throw new Error("Expected converted root");
       }
       expect(projection.cleanNodeProperties(converted.hierarchy.node)).toHaveProperty(key, value);
+      if (key === "range-info") {
+        // The skeleton deliberately lists a range widget (adjust + range, #17955).
+        return;
+      }
       const collector = new DefaultObserveElementCollector();
       expect(projectSkeleton(collector.collect(converted, "android")!).skeleton).toEqual(
         projectSkeleton(collector.collect(convert(filledField), "android")!).skeleton,

@@ -185,3 +185,8 @@ AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public func encode(to encoder:
 AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public init(from decoder: Decoder) throws
 AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public enum PrototypeSpecStrictValidator
 AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public static func validate(data: Data, supportedCapabilities: Set<String>? = nil, library: Bool = false, shareAssetIds: Set<String>? = nil) throws
+AutoMobilePrototypeAgentCore/PrototypeWebView.swift: public enum PrototypeWebView
+AutoMobilePrototypeAgentCore/PrototypeWebView.swift: public let path: String
+AutoMobilePrototypeAgentCore/PrototypeWebView.swift: public static func importError(_ spec: Data, networkAllowed: Bool) -> ImportError?
+AutoMobilePrototypeAgentCore/PrototypeWebView.swift: public static func importError(_ spec: JSONValue, networkAllowed: Bool) -> ImportError?
+AutoMobilePrototypeAgentCore/PrototypeWebView.swift: public struct ImportError: Error, Equatable, Sendable

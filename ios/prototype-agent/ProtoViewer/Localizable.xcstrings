@@ -529,6 +529,17 @@
           }
         }
       }
+    },
+    "This prototype contains a web page. Turn on Allow network for imported prototypes in Settings to open it.": {
+      "comment": "Refusal replacing the entire imported prototype while network is off. No placeholders; authored node paths are not displayed.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This prototype contains a web page. Turn on Allow network for imported prototypes in Settings to open it."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

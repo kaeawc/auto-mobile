@@ -254,12 +254,12 @@ describe("findBannedPhrases source lines", () => {
     expect(linesOf("[ok](<a\\>robust(c>)\nrobust\n")).toEqual([["robust", 2]]);
   });
 
-  test("checks 600 definition-like lines in a code block in under 100 ms", () => {
+  // A super-linear definition scan blows the per-test 100 ms unit budget on this input; that
+  // budget (with its isolated recheck) is the timing guard, not an in-test wall clock (#18326).
+  test("checks 600 definition-like lines in a code block within the unit budget", () => {
     const lines = Array.from({ length: 600 }, () => "[x]: /u").join("\n");
-    const started = performance.now();
     expect(linesOf(`\`\`\`\n${lines}\n\`\`\`\n\nrobust\n`)).toEqual([["robust", 604]]);
     expect(linesOf(`<div>\n${lines}\n</div>\n\nrobust\n`)).toEqual([["robust", 604]]);
-    expect(performance.now() - started).toBeLessThan(100);
   });
 
   test("joins strikethrough text with the surrounding prose", () => {

@@ -45,7 +45,9 @@ describe("sdkmanager execution boundary (issue #4052)", () => {
     lines.push("execFile(a40, []);");
     const start = Bun.nanoseconds();
     expect(directlyExecutesSdkManager(lines.join("\n"))).toBe(true);
-    expect((Bun.nanoseconds() - start) / 1e6).toBeLessThan(100);
+    // The linear walk takes milliseconds and the exponential one hours, so the bound is generous:
+    // a loaded runner has no contention recheck for an in-test wall clock (#18326).
+    expect((Bun.nanoseconds() - start) / 1e6).toBeLessThan(2_000);
   });
 
   test("detects resolved paths passed to supported launch APIs", () => {

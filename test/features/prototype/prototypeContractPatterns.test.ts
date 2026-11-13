@@ -33,9 +33,9 @@ for (const name of Object.keys(fixture) as (keyof typeof fixture)[]) {
   }
 }
 
+// Catastrophic backtracking blows the per-test 100 ms unit budget on this input; the budget is
+// the timing guard, not an in-test wall clock (#18326).
 test("bound keys reject long invalid route placeholder runs without backtracking", () => {
   const value = "{route.a}".repeat(40) + "-";
-  const started = performance.now();
   expect(prototypeContractPatterns.boundKey.test(value)).toBe(false);
-  expect(performance.now() - started).toBeLessThan(50);
 });

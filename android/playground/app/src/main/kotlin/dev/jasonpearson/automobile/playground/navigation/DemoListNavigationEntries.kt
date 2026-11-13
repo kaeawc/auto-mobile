@@ -39,7 +39,10 @@ private fun DemoSharedRowIdListEntry(
 }
 
 @Composable
-private fun DemoControlShapesEntry(destination: DemoControlShapesDestination, state: NavigationState) {
+private fun DemoControlShapesEntry(
+  destination: DemoControlShapesDestination,
+  state: NavigationState,
+) {
   val (backStack, _, analyticsTracker) = state
   Navigation3Adapter.TrackNavigation(destination)
   LaunchedEffect(Unit) {

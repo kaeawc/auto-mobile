@@ -68,7 +68,7 @@ fun ControlShapesScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

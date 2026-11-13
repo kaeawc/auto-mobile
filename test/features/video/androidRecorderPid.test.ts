@@ -19,7 +19,7 @@ describe("buildPidReportingScreenrecordArgs", () => {
       buildPidReportingScreenrecordArgs(["screenrecord", "--bit-rate", "1", "/sdcard/a.mp4"]),
     ).toEqual([
       "shell",
-      "if command -v setsid >/dev/null 2>&1; then setsid sh -c 'echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4",
+      "trap '' HUP; if command -v setsid >/dev/null 2>&1; then setsid sh -c 'echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4",
     ]);
   });
 

@@ -128,7 +128,9 @@ Every other tool refuses a watch before doing anything, with:
   foreground. If the hierarchy cannot be read, the result carries `hierarchyUnavailable` and no
   hierarchy fields. When the runner is connected but the target app is not in the foreground,
   the message says to call `launchApp` to bring it back, or post a notification and retry
-  `observe`; read the screenshot meanwhile. With a hierarchy, bounds and `screenSize` are in
+  `observe`; read the screenshot meanwhile. When the app `launchApp` started has exited or
+  crashed, `hierarchyUnavailable` carries `appNotRunning: { bundleId }` and the message says the
+  app is not running; read `getLogs` for the crash and call `launchApp` to start it again. With a hierarchy, bounds and `screenSize` are in
   points and `screenshotImageSize` is in pixels; a screenshot-only result reports `screenSize` in
   pixels. Check `screenSize.units` (`points` or `physical-pixels`) before using it for `tapAt`,
   which takes points. With the runner connected, an element `waitFor` re-reads the hierarchy until

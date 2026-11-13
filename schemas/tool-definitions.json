@@ -24528,6 +24528,17 @@
             },
             "message": {
               "type": "string"
+            },
+            "appNotRunning": {
+              "description": "watchOS only: the runner's target app has no process (it exited or crashed). Call launchApp to start it again.",
+              "type": "object",
+              "properties": {
+                "bundleId": {
+                  "type": "string"
+                }
+              },
+              "required": ["bundleId"],
+              "additionalProperties": false
             }
           },
           "required": ["platform", "message"],

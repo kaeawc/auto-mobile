@@ -52,9 +52,11 @@ device uses an AVD snapshot that a person signed in to once.
   and then failed on.
 - **`killDevice`.** Stops the emulator's DHU within the shutdown deadline and forgets its host port
   redirect only once the kill succeeds, since a failed kill leaves the emulator and its redirect in
-  place. Stopping an owned DHU before the kill writes a marker in the resolved AVD directory: the
-  next launch skips the unusable quickboot snapshot with `-no-snapshot-load` and consumes the marker
-  only after the process spawns, even across a daemon restart (#17903). A post-kill stop that
+  place. Stopping an owned DHU before the kill writes a marker in the resolved AVD directory (for a
+  kill target name with no AVD directory, the AVD the running emulator reports): the next launch
+  skips the unusable quickboot snapshot with `-no-snapshot-load` and consumes the marker only once
+  that launch reaches boot readiness, even across a daemon restart (#17903, #17929). A launch that
+  exits first keeps the marker; a kill that fails after the write costs at most one cold boot. A post-kill stop that
   outlives the deadline keeps the serial's shutdown reservation until it settles, whether the rest
   of the shutdown succeeds or fails, so a replacement never boots under it.
 - **Session end without a kill.** When the session holding the phone ends (release, heartbeat reap,
@@ -159,11 +161,19 @@ this path never enters `BaseVisualChange` or `AwaitIdle`:
 - **Change detection** compares the projected apps' template stacks before and after the input
   (`CarAppTemplateReader.readProjected`, the same reads as observe's projected block, which leaves
   observe's services snapshot alone). Each projected session contributes its top screen class,
-  template type and title, and stack depth. With no template data on either side the effect is
-  reported as unknown rather than unchanged.
-- **Idle** polls those reads until two consecutive ones agree with no template `loading`. A read that
-  still matches the screen before the input is accepted only after the unchanged settle window, so a
-  slow push is not read as a no-op; the wait ends at its timeout either way.
+  template type and title, and stack depth. When no projected app answers the template route before
+  the input, the action compares SHA-256 hashes of DHU `screenshot <file>` captures instead
+  (`DhuScreenshotHashSource`, written to the host temp directory and removed after hashing). With
+  no data on either side the effect is reported as unknown rather than unchanged.
+- **Idle** polls the same source until two consecutive reads agree with no template `loading`. A read
+  that still matches the screen before the input is accepted only after the unchanged settle window,
+  so a slow push is not read as a no-op; the wait ends at its timeout either way.
+- **Fence** (`HeadUnitFence`, one per daemon, keyed by serial) records the head unit each action left:
+  the console's panel (a per-process instance label and the DHU's launch config) and the
+  `package/carSessionId` set from the template read. The next action's pre-input read must match it,
+  or the action is refused before any command is sent; the refusal records the new state, so a retry
+  goes through. A screenshot read leaves the recorded apps as they were. Apps without the template
+  route are invisible to it, so a switch to one of them is not caught.
 
 ## Background
 

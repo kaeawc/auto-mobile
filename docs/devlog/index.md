@@ -13,6 +13,7 @@ To add one, copy the [template](template.md).
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-13 | decision | [Android TV explore: dry-run input mode and focus-only dispatch](2026-11-13-android-tv-explore-dry-run-and-focus-only-dispatch.md) |
+| 2026-11-13 | decision | [Docs readability gate per section](2026-11-13-docs-readability-section-gate.md)                                                   |
 | 2026-11-13 | decision | [Banned-phrase lint takes source lines from mdast positions](2026-11-13-banned-phrase-lint-mdast-positions.md)                     |
 | 2026-11-11 | decision | [Build the camera poster dylib on demand](2026-11-11-simulator-camera-poster-on-demand-build.md)                                   |
 | 2026-11-11 | decision | [Live preview server uses node:http and SSE, not Vite](2026-11-11-prototype-web-preview-server-no-vite.md)                         |

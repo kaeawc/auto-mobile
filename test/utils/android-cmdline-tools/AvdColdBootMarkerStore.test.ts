@@ -65,4 +65,20 @@ describe("FileAvdColdBootMarkerStore", () => {
       await expect(store[operation]("Pixel")).rejects.toThrow("permission denied");
     });
   }
+
+  test("mark resolves false and writes nothing for a name with no AVD directory", async () => {
+    const writes: string[] = [];
+    const store = new FileAvdColdBootMarkerStore(
+      { getAvdHome: () => "/test", resolveAvdDirectory: async () => null },
+      {
+        readFile: async () => "",
+        writeFile: async (target: string) => {
+          writes.push(target);
+        },
+        unlink: async () => {},
+      },
+    );
+    expect(await store.mark("Pixel_9_Runtime")).toBe(false);
+    expect(writes).toEqual([]);
+  });
 });

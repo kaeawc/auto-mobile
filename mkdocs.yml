@@ -398,6 +398,7 @@ nav:
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
       - "2026-11-13: Android TV explore: dry-run input mode and focus-only dispatch": devlog/2026-11-13-android-tv-explore-dry-run-and-focus-only-dispatch.md
+      - "2026-11-13: Docs readability gate per section": devlog/2026-11-13-docs-readability-section-gate.md
       - "2026-11-13: Banned-phrase lint takes source lines from mdast positions": devlog/2026-11-13-banned-phrase-lint-mdast-positions.md
       - "2026-11-11: Build the camera poster dylib on demand": devlog/2026-11-11-simulator-camera-poster-on-demand-build.md
       - "2026-11-11: Live preview server uses node:http and SSE, not Vite": devlog/2026-11-11-prototype-web-preview-server-no-vite.md

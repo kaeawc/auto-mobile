@@ -400,8 +400,8 @@ daemon: `provisionDevice --readiness none` with `platform: "visionos"`, runtime
 `com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K` (the plain
 `Apple-Vision-Pro` type is rejected). Never `simctl delete` anything but your own UDID.
 
-- Init the private daemon with `--env AUTOMOBILE_PROJECT_ROOT=<checkout>`,
-  `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true` and a private
+- Init the private daemon (it records `AUTOMOBILE_PROJECT_ROOT` as the checkout)
+  with `--env AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true` and a private
   `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`. Pre-build the runner through
   `heavy-build-slot.sh xcodebuild build-for-testing -scheme AutoMobileVisionTest
   -destination "generic/platform=visionOS Simulator"` into that derived data, so the

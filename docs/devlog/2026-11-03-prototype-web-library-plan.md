@@ -20,13 +20,14 @@ a device frame, beside the Compose library and the `AutoMobilePrototype` Swift p
 - `renderPrototypeStill` and `toHtml` bundle for the browser with no Node builtin, at about 111 KB
   minified (38 KB gzip). Element builders share repeated style-property names, attribute names
   and style values as identifiers from `webCss.ts`, so each long literal is bundled once, and
-  device-frame provenance lives in `deviceFrameSources.json`, outside the closure. The closure
-  reads only the contract values in the generated `prototypeRenderContract.generated.ts`, not the
-  whole contract JSON; the string-table zod schema lives in `prototypeStringsSchema.ts` and the frame schema in `deviceFrameSchema.ts`, outside
-  the closure; the derived-format path takes an optional injected logger instead of
-  importing the server's; and an invalid locale, text size or frame throws a plain
-  `PrototypeWebInputError`, which the server's page builder and resource readers rethrow as an
-  `ActionableError` with the same message. `stillBrowserBundle.test.ts` fails on any Node builtin,
+  device-frame provenance lives in `deviceFrameSources.json`, outside the closure.
+- The closure reads only the contract values in the generated
+  `prototypeRenderContract.generated.ts`, not the whole contract JSON. The string-table zod schema
+  lives in `prototypeStringsSchema.ts` and the frame schema in `deviceFrameSchema.ts`, outside the
+  closure. The derived-format path takes an optional injected logger instead of importing the
+  server's. An invalid locale, text size or frame throws a plain `PrototypeWebInputError`, which
+  the server's page builder and resource readers rethrow as an `ActionableError` with the same
+  message. The `stillBrowserBundle.test.ts` test fails on any Node builtin,
   on the contract JSON, zod, the server logger or `ActionableError` in the closure, and on the export
   budget below.
 - Shared JSON fixtures already drive parity across the TypeScript host, the Kotlin protocol and
@@ -80,9 +81,9 @@ wrappers are not shipped.
    runs in a worker or on a server for pre-rendering.
 2. **`mount(element, options)`**: attaches a shadow root to `element`, draws the frame and the
    chosen controls into it and returns a handle with `update(options)`, `destroy()` and the
-   current view state. The DOM is built with `createElement` and `style.setProperty`, never
+   current view state. It builds the DOM with `createElement` and `style.setProperty`, never
    `innerHTML`, so a host page with a strict CSP (`style-src` without `'unsafe-inline'`) or
-   Trusted Types can embed it; the shell stylesheet is a constructable stylesheet adopted by the
+   Trusted Types can embed it. The shell stylesheet is a constructable stylesheet adopted by the
    shadow root.
 3. **`<automobile-prototype>`**: a custom element registered by importing
    `@kaeawc/auto-mobile-prototype-web/element`. Attributes cover the scalar options (`frame`,
@@ -123,8 +124,8 @@ shell) is internal.
   against `theme.mode`, `styleWhen` and the Material baseline, on every platform.
 - **Events** are DOM `CustomEvent`s on the element and callbacks in `mount` options:
   `render` (with `unsupportedNodes`), `screenchange`, `orientationchange`, `zoomchange` and
-  `error` (with the refusal, see Versioning). `tap`, `statechange` and `navigate` belong to the
-  interactive stage and are not emitted by the static library.
+  `error` (with the refusal, see Versioning). The static library does not emit `tap`,
+  `statechange` or `navigate`, which belong to the interactive stage.
 
 ### Live updates
 
@@ -150,17 +151,17 @@ later, separately gated stage.
 - **What it takes.** The still renderer is pure, so an interactive runtime is a state store
   (state, `/data`, stack and pager positions, timers) plus re-rendering the affected subtree on
   each change. Of the 23 actions, the state, data-write, navigation, `setPage`, `scrollTo`,
-  timer, `dismiss`, `hideKeyboard` and `emit` actions are pure; `request` is refused (no mock
+  timer, `dismiss`, `hideKeyboard` and `emit` actions are pure. The `request` action is refused (no mock
   backend in a public page), and `platform` is refused with the module named, because there is
   no device. Transitions and motion are not animated; the runtime switches to the end state.
 - **Size.** The interactive runtime ships as a separate entry
   (`@kaeawc/auto-mobile-prototype-web/interactive`), so a static embed never pays for it.
-- **Parity.** Action semantics are tested by shared trace fixtures
-  (`test/fixtures/prototype-spec/action-traces/`): a spec, then steps that each run one tap's
+- **Parity.** Shared trace fixtures test action semantics
+  (`test/fixtures/prototype-spec/action-traces/`). Each holds a spec, then steps that each run one tap's
   actions or advance a fake clock, with the expected state, `/data`, stack paths, pager pages
   and shown flag after each step. The TypeScript tests, the Android runtime tests and the Swift
   agent tests each run every trace. A trace one platform cannot run yet is listed under that
-  platform in `action-trace-skips.json` with its issue, and a skipped trace that passes fails
+  platform in `action-trace-skips.json` with its issue. A skipped trace that passes fails
   the run, so a gap is visible rather than silent and the list only shrinks.
 - **Go criterion.** Build it only after the static library has an embedder asking for taps;
   the trace fixtures are worth adding first regardless, because they also tighten Android and
@@ -179,9 +180,9 @@ that needs more is refused whole, never half drawn.
 - **Refusal.** The library compares `requires` with its own advertised set and, on any missing
   capability, draws an error view and emits `error` with the missing capabilities and the
   library version. An unknown envelope `version` is refused the same way.
-- **Bare specs.** A spec without an envelope is accepted, with `requires` derived by the
-  library's bundled gate table. That table only knows the fields of its own release, so a newer
-  field it does not recognize is not detected; the README states that envelopes are the
+- **Bare specs.** The library accepts a spec without an envelope and derives `requires` from its
+  bundled gate table. That table only knows the fields of its own release, so it does not detect a
+  newer field it does not recognize. The README states that envelopes are the
   supported path for specs from a newer server.
 - **Unsupported but known.** A node type the library knows but cannot draw keeps today's dashed
   placeholder and appears in `unsupportedNodes`, as in the web page.
@@ -196,10 +197,10 @@ minified, whichever entries it imports (core `mount`, the custom `element`, the 
 action runtime). There is no separate gzip limit. The bundling test sums every build output of
 the core entry against it.
 
-- Per-node tree-shaking is not offered. Node renderers are dispatched by type from a spec only
-  known at runtime, so a bundler cannot drop any. Splitting renderers into opt-in groups would
-  make an embed silently show placeholders for nodes its author forgot to register; the budget
-  is met without it.
+- The library offers no per-node tree-shaking. It dispatches node renderers by type from a spec
+  only known at runtime, so a bundler cannot drop any. Splitting renderers into opt-in groups would
+  make an embed silently show placeholders for nodes its author forgot to register. The export
+  meets the budget without it.
 - The frame registry stays bundled (3 KB); frames are data, not code.
 
 ## Consequences

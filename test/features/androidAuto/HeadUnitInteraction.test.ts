@@ -8,6 +8,7 @@ import {
   headUnitTapCommand,
   type HeadUnitIdleTiming,
 } from "../../../src/features/androidAuto/HeadUnitInteraction";
+import { HeadUnitFence } from "../../../src/features/androidAuto/HeadUnitFence";
 import type { CarAppProjectedTemplates } from "../../../src/models/CarAppTemplates";
 import { FakeSession } from "../../fakes/FakeAndroidAutoProjection";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -52,7 +53,7 @@ function setup(
     },
     isRunning: () => session.isRunning(),
   };
-  const interaction = new HeadUnitInteraction(dhuConsole, templates, timer, TIMING);
+  const interaction = new HeadUnitInteraction(dhuConsole, templates, timer, { timing: TIMING });
   return { session, interaction, reads: () => readCount };
 }
 
@@ -283,5 +284,119 @@ describe("HeadUnitInteraction", () => {
     const result = await interaction.run(["tap 640 200"]);
     expect(result.idle.waitedMs).toBe(1_000);
     expect(result.after?.[0].loading).toBeUndefined();
+  });
+});
+
+/** A head unit with no template route whose screenshot hash moves to `afterCommand` on input. */
+function screenshotSetup(
+  beforeCommand: (string | undefined)[],
+  afterCommand: (string | undefined)[],
+) {
+  const session = new FakeSession();
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  let hashes = [...beforeCommand];
+  const dhuConsole = {
+    sendCommand: (command: string) => {
+      session.sendCommand(command);
+      hashes = [...afterCommand];
+    },
+    isRunning: () => session.isRunning(),
+  };
+  const screenshots = {
+    hash: async () => (hashes.length > 1 ? hashes.shift() : hashes[0]),
+  };
+  const interaction = new HeadUnitInteraction(dhuConsole, { read: async () => undefined }, timer, {
+    timing: TIMING,
+    screenshots,
+  });
+  return { session, interaction };
+}
+
+describe("HeadUnitInteraction screenshot fallback", () => {
+  test("without template data a changed screenshot hash reads as changed", async () => {
+    const { session, interaction } = screenshotSetup(["menu"], ["list", "list"]);
+    const result = await interaction.run(["tap 640 200"]);
+    expect(session.commands).toEqual(["tap 640 200"]);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "screenshot changed" });
+    expect(result.idle).toEqual({ basis: "screenshot", stable: true, waitedMs: 500 });
+    expect(result.before).toBeUndefined();
+  });
+
+  test("the same screenshot hash reads as unchanged after the settle window", async () => {
+    const { interaction } = screenshotSetup(["menu"], ["menu"]);
+    const result = await interaction.run(["tap 5 5"]);
+    expect(result.effect).toEqual({ screenChanged: false, basis: "screenshot unchanged" });
+    expect(result.idle.waitedMs).toBe(1_000);
+  });
+
+  test("no capture at all leaves the change unknown", async () => {
+    const { interaction } = screenshotSetup([undefined], [undefined]);
+    const result = await interaction.run(["dpad back"]);
+    expect(result.effect).toEqual({ basis: "no template data" });
+    expect(result.idle.basis).toBe("none");
+  });
+});
+
+describe("HeadUnitInteraction fence", () => {
+  const OTHER_APP = (() => {
+    const templates = fixtureProjectedTemplates(1);
+    templates.projected[0] = { ...templates.projected[0], packageName: "com.example.media" };
+    return templates;
+  })();
+
+  function fenced(panel: { instance: string; configPath?: string }) {
+    const session = new FakeSession();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const state = { current: MENU as CarAppProjectedTemplates, panel };
+    const fence = new HeadUnitFence();
+    const interaction = () =>
+      new HeadUnitInteraction(
+        {
+          sendCommand: (command) => session.sendCommand(command),
+          isRunning: () => session.isRunning(),
+          panel: state.panel,
+        },
+        { read: async () => state.current },
+        timer,
+        { timing: TIMING, fence: { deviceId: "emulator-5554", state: fence } },
+      );
+    return { session, state, interaction };
+  }
+
+  test("a tap after the head unit moved to another app is refused, and a retry goes through", async () => {
+    const { session, state, interaction } = fenced({ instance: "dhu-1" });
+    await interaction().run(["tap 640 200"]);
+    state.current = OTHER_APP;
+    await expect(interaction().run(["tap 640 200"])).rejects.toThrow(
+      "projected apps changed since the last head-unit action",
+    );
+    expect(session.commands).toEqual(["tap 640 200"]);
+    await interaction().run(["tap 640 200"]);
+    expect(session.commands).toEqual(["tap 640 200", "tap 640 200"]);
+  });
+
+  test("a restarted DHU or another config is refused before input", async () => {
+    const { session, state, interaction } = fenced({
+      instance: "dhu-1",
+      configPath: "default_720p.ini",
+    });
+    await interaction().run(["dpad down"]);
+    state.panel = { instance: "dhu-2", configPath: "default_720p.ini" };
+    await expect(interaction().run(["tap 1 1"])).rejects.toThrow("restarted");
+    state.panel = { instance: "dhu-3", configPath: "default_1080p.ini" };
+    await expect(interaction().run(["tap 1 1"])).rejects.toThrow("default_1080p.ini");
+    expect(session.commands).toEqual(["dpad down"]);
+  });
+
+  test("a navigation the action itself caused is not a violation", async () => {
+    const { session, state, interaction } = fenced({ instance: "dhu-1" });
+    const first = interaction();
+    const run = first.run(["tap 640 200"]);
+    state.current = LIST;
+    await run;
+    await interaction().run(["dpad back"]);
+    expect(session.commands).toEqual(["tap 640 200", "dpad back"]);
   });
 });

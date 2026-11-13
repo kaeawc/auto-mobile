@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { summarize } from "../../scripts/docs/check-readability";
+import { githubAnnotation, summarize } from "../../scripts/docs/check-readability";
 import {
   analyzeMarkdown,
   annotateLines,
   checkPage,
+  failingFindings,
   formatFinding,
   isPassive,
   parseConfig,
@@ -21,6 +22,7 @@ const BUDGET: SectionBudget = {
   maxParagraphWords: 20,
   maxPageWords: 30,
   passive: { minSentences: 2, maxRatio: 0.5 },
+  enforced: false,
 };
 
 const words = (count: number) => Array.from({ length: count }, (_, i) => `W${i}`).join(" ");
@@ -151,6 +153,28 @@ describe("docs readability budgets", () => {
     expect(() =>
       parseConfig({ sections: [{ ...BUDGET, passive: { minSentences: 2, maxRatio: 2 } }] }),
     ).toThrow("maxRatio must be at most 1");
+    expect(() => parseConfig({ sections: [{ ...BUDGET, enforced: "yes" }] })).toThrow(
+      "sections[0].enforced must be a boolean",
+    );
+  });
+
+  test("defaults enforced to false and fails only enforced sections unless strict", () => {
+    const advisory = { ...BUDGET, enforced: undefined };
+    const gated = { ...BUDGET, name: "devlog", paths: ["docs/devlog/"], enforced: true };
+    const config = parseConfig({ sections: [advisory, gated] });
+    expect(config.sections.map((section) => section.enforced)).toEqual([false, true]);
+    const findings = [
+      ...checkPage("docs/using/x.md", `${words(10)}.`, config.sections[0]),
+      ...checkPage("docs/devlog/y.md", `${words(10)}.`, config.sections[1]),
+    ];
+    expect(failingFindings(config, findings, false).map((finding) => finding.file)).toEqual([
+      "docs/devlog/y.md",
+    ]);
+    expect(failingFindings(config, findings, true)).toHaveLength(2);
+    expect(githubAnnotation(findings[0], false)).toStartWith(
+      "::warning file=docs/using/x.md,line=1",
+    );
+    expect(githubAnnotation(findings[1], true)).toStartWith("::error file=docs/devlog/y.md,line=1");
   });
 
   test("the committed budgets file covers using, how-it-works and devlog", () => {
@@ -161,6 +185,8 @@ describe("docs readability budgets", () => {
       "how-it-works",
       "devlog",
     ]);
+    // devlog is clean on main and gated; the others stay advisory until they are.
+    expect(config.sections.map((section) => section.enforced)).toEqual([false, false, true]);
     expect(sectionFor(config, "docs/design-docs/x.md")?.name).toBe("how-it-works");
     expect(sectionFor(config, "docs/how-it-works/x.md")?.name).toBe("how-it-works");
   });

@@ -22,13 +22,20 @@ teardown() {
   rm -rf "$STAGE"
 }
 
+# _fill <bytes> <file> -- a file of exactly <bytes> bytes. The manifest reads only
+# sizes, so the builtin printf (spaces, no fork) stands in for `head -c` from
+# /dev/zero: setup stages ~100 files per test, and one fork each dominated the file.
+_fill() {
+  printf '%*s' "$1" '' >"$2"
+}
+
 # _sidecars <file> -- the four checksum files Gradle writes next to every artifact.
 _sidecars() {
   local f="$1"
-  head -c 32 /dev/zero >"$f.md5"
-  head -c 40 /dev/zero >"$f.sha1"
-  head -c 64 /dev/zero >"$f.sha256"
-  head -c 128 /dev/zero >"$f.sha512"
+  _fill 32 "$f.md5"
+  _fill 40 "$f.sha1"
+  _fill 64 "$f.sha256"
+  _fill 128 "$f.sha512"
 }
 
 # stage_primary <artifact> <version> <filename> <bytes>
@@ -38,10 +45,10 @@ _sidecars() {
 stage_primary() {
   local art="$1" ver="$2" name="$3" bytes="$4"
   local dir="$STAGE/$GROUP_PATH/$art/$ver"
-  mkdir -p "$dir"
-  head -c "$bytes" /dev/zero >"$dir/$name"
+  [ -d "$dir" ] || mkdir -p "$dir"
+  _fill "$bytes" "$dir/$name"
   _sidecars "$dir/$name"
-  head -c 200 /dev/zero >"$dir/$name.asc"
+  _fill 200 "$dir/$name.asc"
   _sidecars "$dir/$name.asc"
 }
 
@@ -50,8 +57,8 @@ stage_primary() {
 stage_metadata() {
   local art="$1"
   local dir="$STAGE/$GROUP_PATH/$art"
-  mkdir -p "$dir"
-  head -c 358 /dev/zero >"$dir/maven-metadata.xml"
+  [ -d "$dir" ] || mkdir -p "$dir"
+  _fill 358 "$dir/maven-metadata.xml"
   _sidecars "$dir/maven-metadata.xml"
 }
 

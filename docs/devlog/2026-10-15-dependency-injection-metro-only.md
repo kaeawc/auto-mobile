@@ -22,8 +22,8 @@ module that owns a root graph; every other module uses manual constructor inject
 ## Consequences
 
 - If `control-proxy`'s `lateinit` plus `isInitialized` pattern is reduced (the CtrlProxy split
-  tracked in #11876), the replacement is a hand-written graph built in `onCreate`, not a framework,
-  unless the owner decides to align it with desktop on Metro. That is a separate decision.
+  tracked in #11876), the replacement is a hand-written graph built in `onCreate`, not a framework.
+  The exception is if the owner decides to align it with desktop on Metro. That is a separate decision.
 
 ### Evidence at decision time
 

@@ -57,7 +57,7 @@ side budgets half of what the AVDs are configured with (#15476).
 The iOS `minimal` profile saved a one-time first-boot burst by writing the launchd disabled
 database before first boot. An Android AVD with a quick-boot snapshot has little first-boot work,
 and package disabling needs a booted guest. The open Android costs are the host process (vCPU
-threads, renderer, RAM) and the disk traffic of snapshots, so the levers worth measuring are host
+threads, renderer, RAM) and the disk traffic of snapshots. The levers worth measuring are therefore host
 side: vCPU count, RAM, renderer, audio, cameras, `-no-boot-anim` and snapshot handling.
 
 Hypotheses to test, each with a basis and an expected direction, none measured here:
@@ -74,20 +74,21 @@ Hypotheses to test, each with a basis and an expected direction, none measured h
 
 ### Findings filed
 
-1. **Effective RAM differs from the configured RAM** (#15475). `config.ini` says 2G; the emulator
-   gave 2.5 GiB on API 35-36 and 4 GiB on API 37. `AvdConfig.effectiveRamMb` and `effectiveCpuCores` now
-   carry the launch-time values from `hardware-qemu.ini`, and the boot gate raises its per-emulator
+1. **Effective RAM differs from the configured RAM** (#15475). The `config.ini` file says 2G; the emulator
+   gave 2.5 GiB on API 35-36 and 4 GiB on API 37. Now `AvdConfig.effectiveRamMb` and `effectiveCpuCores`
+   carry the launch-time values from `hardware-qemu.ini`. The boot gate raises its per-emulator
    estimate to the AVD's effective RAM (never lowering it).
 2. **The boot gate's CPU budget disagrees with the AVD vCPU count** (#15476). Two cores per device
    against four vCPUs. The gate can budget the AVD's own vCPUs under
    `AUTOMOBILE_ANDROID_BOOT_BUDGET_VCPUS=configured`; the default stays two cores. A device run has to
    choose between that and creating AVDs with two vCPUs, which changes guest speed.
 3. **Quick-boot snapshots accumulate and are written at every exit** (#15477). Broker-provisioned emulators launch with
-   `-no-snapshot-save` when no snapshot reset can use the exit state: no `androidResetMode` (released
-   emulators are destroyed), or `keep-booted` without `androidKeepBootedFallback: "snapshot"` (a
-   non-clean release deletes the AVD; a clean one stays booted). `snapshot` hosts, `keep-booted` with
-   the snapshot fallback, user AVDs and `startDevice` keep the default. The broker baseline is saved
-   and loaded explicitly with `avd snapshot save|load`, which the flag does not disable. 74.6 GiB of
+   `-no-snapshot-save` when no snapshot reset can use the exit state. That covers no `androidResetMode`
+   (the broker destroys released emulators). It also covers `keep-booted` without
+   `androidKeepBootedFallback: "snapshot"` (a non-clean release deletes the AVD; a clean one stays
+   booted). `snapshot` hosts, `keep-booted` with the snapshot fallback, user AVDs and `startDevice`
+   keep the default. The broker saves and loads its baseline explicitly with `avd snapshot save|load`,
+   which the flag does not disable. 74.6 GiB of
    snapshots on this host, including for AVD kinds the broker destroys. Needs a device run for the
    saving and a check against `deviceSnapshot` and the keep-booted baseline (#14363).
 
@@ -112,13 +113,21 @@ page; the matrix, results format and decision rule follow.
 | 5    | Breakage per candidate (below)                                                                                                                | each candidate                                                                                                    |
 
 For the effective-RAM question (#15475), on API 35 and API 37 set `hw.ramSize` to 1536, 2048, 3072
-and 4096, launch once each, and record `hw.ramSize` from `hardware-qemu.ini` in the AVD directory
+and 4096 and launch once each. Record `hw.ramSize` from `hardware-qemu.ini` in the AVD directory
 and `MemTotal` from `adb shell cat /proc/meminfo`.
 
 **Step 5, breakage check.** Each candidate must pass these through a private daemon bound to the
-research serial, with every call naming its `deviceId`: `startDevice` and runner start; `observe`
-with a screenshot; `launchApp` and `terminateApp` on the Settings app; `tapOn`; `sendKeys` into a
-text field; `videoRecording` start and stop; a posted notification appearing in the tray. A candidate
+research serial, with every call naming its `deviceId`:
+
+- `startDevice` and runner start
+- `observe` with a screenshot
+- `launchApp` and `terminateApp` on the Settings app
+- `tapOn`
+- `sendKeys` into a text field
+- `videoRecording` start and stop
+- a posted notification appearing in the tray
+
+A candidate
 that fails or is flaky once in three is rejected, and the failing call goes in the results.
 
 #### Results

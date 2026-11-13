@@ -17,9 +17,9 @@ asks its local daemon for devices and then drives exactly those devices, without
 of the farm. The Desktop App talks only to its local daemon, and the daemon does all the
 networking.
 
-A single deployment is unaffected. A daemon on a laptop, or a single daemon on a remote server
-that agents call directly, behaves exactly as it does today unless it is explicitly given a farm
-role. See [Standalone guarantee](#standalone-guarantee).
+The farm does not change a single deployment. A daemon on a laptop, or a single daemon on a remote
+server that agents call directly, behaves exactly as it does today unless an operator explicitly
+gives it a farm role. See [Standalone guarantee](#standalone-guarantee).
 
 ### Goals and non-goals
 
@@ -49,8 +49,9 @@ Non-goals:
 | `host`                 | each farm machine with devices          | Outbound tunnel, capacity reports, warm-pool filling, loopback forwarding, plugin hooks, host-local device providers         |
 | `client`               | a developer machine that uses the farm  | OIDC sign-in, forwarding of farm requests, the local MCP endpoint for agents and the Desktop App                             |
 
-A daemon is `standalone` unless a farm role is set explicitly, by flag or config file. There is no
-discovery, no default organizer address and no automatic enrolment. Two combinations are allowed:
+A daemon is `standalone` unless an operator sets a farm role explicitly, by flag or config file.
+There is no discovery, no default organizer address and no automatic enrolment. The design allows
+two combinations:
 `client` with local devices (local requests never leave the machine), and `organizer` with `host`
 on one machine for a small organization.
 
@@ -116,12 +117,12 @@ flowchart LR
 ### Session flow
 
 1. The agent asks its local daemon for devices with `location: "farm"`. `startDevice` and session
-   requirements take `location: "local" | "farm"`, defaulting to `local`; the rest of the ask
+   requirements take `location: "local" | "farm"`, defaulting to `local`. The rest of the ask
    (platform, count, form factor, OS range, `requires`) is the vocabulary the broker already uses.
 2. The client daemon forwards the ask with the user's token.
 3. The organizer places the ask on **at most one host per platform**: Android devices share one host
-   and iOS devices share one host. An ask no host could ever satisfy is refused at once. One that
-   can't be satisfied yet waits in a first-come queue with a timeout.
+   and iOS devices share one host. The organizer refuses at once an ask no host could ever satisfy.
+   One that no host can satisfy yet waits in a first-come queue with a timeout.
 4. Each chosen host's session broker allocates the slots, preferring warm devices. The session is
    then **pinned**: every call for those devices is relayed to that host's broker, with no
    re-placement.
@@ -189,9 +190,9 @@ main agent clients speak 2026-07-28.
 ### Capacity and placement
 
 - **Host capacity:** each host measures what it can run (CPU, RAM, disk, installed Android images,
-  Xcode runtimes, macOS simulator limits, attached USB devices) and advertises a ceiling per
-  platform, form factor and OS when it connects, updating it when anything changes. An operator can
-  lower the ceiling but not raise it past the measurement.
+  Xcode runtimes, macOS simulator limits, attached USB devices). It advertises a ceiling per
+  platform, form factor and OS when it connects. It updates the ceiling when anything changes. An
+  operator can lower the ceiling but not raise it past the measurement.
 - **Warm pools:** the organizer asks hosts to keep warm devices up to recent demand, within each
   host's ceiling.
 - **Sharing:** first come, first served. The only limits are a 2-hour lease, renewable while the
@@ -260,9 +261,9 @@ The Desktop App stays network-unaware and talks only to its local daemon (see
 - **Alerts:** a device offline or stuck, the runner or CtrlProxy down, app crashes and ANRs, failed
   boots, lease leaks.
 - **Debugging:** session replay (tool calls, observations, screenshots and video on one timeline),
-  taking over and handing back with a note, fleet failures grouped by signature and linked to
-  replays, comparing one flow across devices, and debug bundle export. A GitHub issue is filed only
-  after the user confirms.
+  and taking over and handing back with a note. It also covers fleet failures grouped by signature
+  and linked to replays, comparing one flow across devices, and debug bundle export. A GitHub issue
+  is filed only after the user confirms.
 - **Factory:** a run matrix (one plan or agent task across a device set, with a live results grid)
   and build identity (which commit or build is installed on each device).
 

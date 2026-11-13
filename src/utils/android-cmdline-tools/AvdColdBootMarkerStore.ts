@@ -6,7 +6,8 @@ import { logger } from "../logger";
 /** One pending cold boot per AVD, persisted across daemon restarts. */
 export interface AvdColdBootMarkerStore {
   isMarked(avdName: string): Promise<boolean>;
-  mark(avdName: string): Promise<void>;
+  /** Resolves false, writing nothing, when `avdName` names no AVD directory on this host. */
+  mark(avdName: string): Promise<boolean>;
   clear(avdName: string): Promise<void>;
 }
 
@@ -44,8 +45,16 @@ export class FileAvdColdBootMarkerStore implements AvdColdBootMarkerStore {
     }
   }
 
-  async mark(avdName: string): Promise<void> {
-    await this.files.writeFile(await this.markerPath(avdName), "Android Auto projection stopped\n");
+  async mark(avdName: string): Promise<boolean> {
+    const directory = await this.directories.resolveAvdDirectory(avdName);
+    if (!directory) {
+      return false;
+    }
+    await this.files.writeFile(
+      join(directory, AVD_COLD_BOOT_MARKER),
+      "Android Auto projection stopped\n",
+    );
+    return true;
   }
 
   async clear(avdName: string): Promise<void> {

@@ -1,6 +1,7 @@
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 import type { AvdColdBootMarkerStore } from "./AvdColdBootMarkerStore";
+import type { PendingColdBootMarkerClears } from "./PendingColdBootMarkerClears";
 import { ActionableError, type DeviceInfo } from "../../models";
 import type { AdmitColdBoot, BootAdmission } from "../../models/BootAdmission";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
@@ -245,6 +246,7 @@ export type AndroidEmulatorLaunchOutcome =
 /** The slice of the emulator client the launcher needs: collaborators and the stderr classifiers. */
 export interface EmulatorLauncherHost {
   avdColdBootMarkers(): AvdColdBootMarkerStore;
+  pendingColdBootMarkerClears(): PendingColdBootMarkerClears;
   reservations(): EmulatorPortReservations;
   timer(): Timer;
   emulatorPath(): string;
@@ -372,7 +374,7 @@ export function createEmulatorLaunchState(): EmulatorLaunchState {
 }
 
 export async function applyColdBootMarker(
-  host: Pick<EmulatorLauncherHost, "avdColdBootMarkers">,
+  host: Pick<EmulatorLauncherHost, "avdColdBootMarkers" | "pendingColdBootMarkerClears">,
   avdName: string,
   args: string[],
   options: EmulatorProcessOptions,
@@ -400,10 +402,9 @@ export async function applyColdBootMarker(
     ? {
         ...options,
         onSpawn: (child: ChildProcess) => {
-          // A returned handle can still emit an asynchronous spawn error. Consume only on spawn.
-          child.once("spawn", () => {
-            void clearColdBootMarker(host, avdName);
-          });
+          // Consumed only once this launch reaches boot readiness; an early exit or an
+          // asynchronous spawn error leaves the marker for the next launch (#17929).
+          host.pendingColdBootMarkerClears().track(avdName, child);
           options.onSpawn?.(child);
         },
       }
@@ -422,19 +423,5 @@ async function readColdBootMarker(
       error,
     );
     return false;
-  }
-}
-
-async function clearColdBootMarker(
-  host: Pick<EmulatorLauncherHost, "avdColdBootMarkers">,
-  avdName: string,
-): Promise<void> {
-  try {
-    await host.avdColdBootMarkers().clear(avdName);
-  } catch (error) {
-    logger.warn(
-      `Failed to clear cold boot marker for AVD '${avdName}': ${errorMessage(error)}`,
-      error,
-    );
   }
 }

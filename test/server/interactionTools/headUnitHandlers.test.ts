@@ -63,7 +63,7 @@ function headUnit(before: CarAppProjectedTemplates, after: CarAppProjectedTempla
     },
     { read: async () => current },
     timer,
-    TIMING,
+    { timing: TIMING },
   );
   const phonePathCalls: string[] = [];
   Object.assign(deps, {

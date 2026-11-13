@@ -156,9 +156,9 @@ describe("secure key template matching", () => {
     expect(leak("tok{x}", ["state:mytoken"])).toBeUndefined();
   });
 
+  // Backtracking blows the per-test 100 ms unit budget on this input; the budget is the timing
+  // guard, not an in-test wall clock (#18326).
   test("many placeholders against a long key stay linear", () => {
-    const started = performance.now();
     expect(leak(`${"{row.id}".repeat(8)}z`, [`state:${"a".repeat(63)}b`])).toBeUndefined();
-    expect(performance.now() - started).toBeLessThan(50);
   });
 });

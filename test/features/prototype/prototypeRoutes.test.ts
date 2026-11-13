@@ -80,7 +80,6 @@ test("route validation scales across 60 stacks with 32 screens each", async () =
   };
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
-  const started = performance.now();
+  // The per-test 100 ms unit budget is the timing guard, not an in-test wall clock (#18326).
   expect(prototypeRoutesError(spec, nodes, [])).toBeUndefined();
-  expect(performance.now() - started).toBeLessThan(1000);
 });

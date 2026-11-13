@@ -141,6 +141,49 @@ struct WatchCrownValue: Equatable {
     let value: String
 }
 
+/// A `hasFocus` element snapshot reduced to what crown verification reads.
+struct WatchCrownCandidate {
+    var elementType: UInt = 1
+    var identifier = ""
+    var frame: CGRect = .zero
+    var value: String?
+    var isEnabled = true
+    var children: [WatchCrownCandidate] = []
+
+    var readable: WatchCrownValue? {
+        guard isEnabled, let value, !value.isEmpty else { return nil }
+        return WatchCrownValue(elementType: elementType, identifier: identifier, frame: frame, value: value)
+    }
+
+    var readableDescendants: [WatchCrownValue] {
+        children.flatMap { child in (child.readable.map { [$0] } ?? []) + child.readableDescendants }
+    }
+}
+
+/// Table, collection and scroll views: the crown scrolls them, so a child's value is not their value.
+private let watchCrownScrollTypes: Set<UInt> = [26, 32, 46]
+
+/// The value the crown should move among `hasFocus` elements. SwiftUI can report focus on a
+/// `.focusable()` view and its ancestors, so several candidates resolve to the innermost readable one.
+/// A focused non-scrolling element without its own value uses its single readable descendant.
+/// Ambiguous or missing values return nil, which leaves verification to the hierarchy comparison.
+func watchCrownFocusedValue(_ focused: [WatchCrownCandidate]) -> WatchCrownValue? {
+    let resolved = focused.compactMap { candidate -> WatchCrownValue? in
+        if let own = candidate.readable { return own }
+        guard !watchCrownScrollTypes.contains(candidate.elementType) else { return nil }
+        let descendants = candidate.readableDescendants
+        return descendants.count == 1 ? descendants[0] : nil
+    }
+    let distinct = resolved.reduce(into: [WatchCrownValue]()) { unique, value in
+        if !unique.contains(value) { unique.append(value) }
+    }
+    if distinct.count <= 1 { return distinct.first }
+    let innermost = distinct.filter { inner in
+        distinct.allSatisfy { $0 == inner || $0.frame.contains(inner.frame) }
+    }
+    return innermost.count == 1 ? innermost[0] : nil
+}
+
 /// XCUI raw types for controls that a touch can activate, including notification action cells.
 private let watchTapElementTypes: Set<UInt> = [
     9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 22, 23, 24, 27, 30, 33, 34, 37, 38, 39, 40, 41, 42,

@@ -76,6 +76,19 @@ export interface AppleDeviceRuntime {
   isAvailable: boolean;
   availabilityError?: string;
   name: string;
+  /**
+   * Device types this runtime ships, from `simctl list runtimes -j`. When present it is
+   * authoritative: a device type missing from it cannot be created on the runtime even
+   * inside the device type's own runtime bounds (#18279).
+   */
+  supportedDeviceTypes?: AppleRuntimeSupportedDeviceType[];
+}
+
+export interface AppleRuntimeSupportedDeviceType {
+  identifier: string;
+  name?: string;
+  productFamily?: string;
+  bundlePath?: string;
 }
 
 export interface AppleDeviceType {

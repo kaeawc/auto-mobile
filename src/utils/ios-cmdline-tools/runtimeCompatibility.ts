@@ -1,4 +1,4 @@
-import type { AppleDeviceType } from "./SimCtlClient";
+import type { AppleDeviceRuntime, AppleDeviceType } from "./SimCtlClient";
 import {
   compareSimctlVersions,
   decodeSimctlVersion,
@@ -113,4 +113,39 @@ export function evaluateRuntimeCompatibility(
     compareSimctlVersions(runtime, bounds.min) >= 0 &&
     compareSimctlVersions(runtime, bounds.max) <= 0;
   return { status: inside ? "supported" : "unsupported", bounds: projected };
+}
+
+/**
+ * Whether the runtime's own `supportedDeviceTypes` lists the device type: undefined when the
+ * runtime reports no list (older output), so callers fall back to the device type's bounds.
+ */
+export function runtimeListsDeviceType(
+  runtime: Pick<AppleDeviceRuntime, "identifier" | "supportedDeviceTypes">,
+  deviceTypeIdentifier: string,
+): boolean | undefined {
+  const supported = runtime.supportedDeviceTypes;
+  if (!Array.isArray(supported)) {
+    return undefined;
+  }
+  return supported.some((entry) => entry?.identifier === deviceTypeIdentifier);
+}
+
+/**
+ * Device-type bounds plus the runtime's `supportedDeviceTypes`: a runtime that reports the list
+ * and omits the device type is `unsupported` whatever the bounds say, since `simctl create`
+ * rejects that pair with "Incompatible device" (#18279).
+ */
+export function evaluateDeviceTypeOnRuntime(
+  deviceType: AppleDeviceType,
+  runtime: Pick<AppleDeviceRuntime, "identifier" | "version" | "supportedDeviceTypes">,
+): RuntimeCompatibilityEvaluation {
+  const evaluation = evaluateRuntimeCompatibility(deviceType, runtime.version);
+  if (runtimeListsDeviceType(runtime, deviceType.identifier) !== false) {
+    return evaluation;
+  }
+  return {
+    ...evaluation,
+    status: "unsupported",
+    reason: "runtime supportedDeviceTypes does not list the device type",
+  };
 }

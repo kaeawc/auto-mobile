@@ -20,7 +20,7 @@ import {
   inferIosFormFactor,
   isIosDuoDeviceType,
 } from "../../../utils/ios-cmdline-tools/iosDeviceType";
-import { evaluateRuntimeCompatibility } from "../../../utils/ios-cmdline-tools/runtimeCompatibility";
+import { evaluateDeviceTypeOnRuntime } from "../../../utils/ios-cmdline-tools/runtimeCompatibility";
 import type {
   AppleDeviceRuntime,
   AppleDeviceType,
@@ -570,8 +570,7 @@ export function chooseIosDeviceType(
         !isIosDuoDeviceType(entry.identifier)
       : inferIosFormFactor(entry.identifier) === family,
   );
-  const statusOf = (entry: AppleDeviceType) =>
-    evaluateRuntimeCompatibility(entry, runtime.version).status;
+  const statusOf = (entry: AppleDeviceType) => evaluateDeviceTypeOnRuntime(entry, runtime).status;
   const supported = candidates.filter((entry) => statusOf(entry) === "supported");
   const unknown = candidates.filter((entry) => statusOf(entry) === "unknown");
   return (

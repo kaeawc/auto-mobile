@@ -345,6 +345,11 @@ function chooseIosRelease(
     return noRuntimeResult(selector, releases, "ios");
   }
   if (selector.kind !== "exact") {
+    // A runtime that does not ship the model is skipped when another one satisfies (#18279).
+    const shipping = satisfying.filter((release) => !runtimeOmitsModel(release, model));
+    if (shipping.length > 0) {
+      satisfying = shipping;
+    }
     const minimum = compatibilityBound(model.minOsVersion, model, "minimum");
     const maximum = compatibilityBound(model.maxOsVersion, model, "maximum");
     // Invalid bounds and empty compatible sets retain the existing compatibility error path.
@@ -556,10 +561,19 @@ function outsideIosCompatibilityBounds(
   return maximum !== undefined && compareNumericVersions(osVersion, maximum) > 0;
 }
 
+/** True only when the runtime reports `supportedDeviceTypes` and the model is not in it. */
+function runtimeOmitsModel(release: IosCatalogRelease, model: IosCatalogModel): boolean {
+  return (
+    release.supportedDeviceTypeIds !== undefined &&
+    !release.supportedDeviceTypeIds.includes(model.simulatorDeviceTypeIdentifier)
+  );
+}
+
 function evaluateIosCompatibility(
   model: IosCatalogModel,
-  osVersion: string,
+  release: IosCatalogRelease & { osVersion: string },
 ): RequirementResult<"supported" | "unknown"> {
+  const osVersion = release.osVersion;
   const minimum = compatibilityBound(model.minOsVersion, model, "minimum");
   if (!minimum.ok) {
     return minimum;
@@ -573,6 +587,15 @@ function evaluateIosCompatibility(
       "runtime_incompatible",
       `Model '${model.name}' is incompatible with iOS ${osVersion}; the exact pair was preserved.`,
     );
+  }
+  if (runtimeOmitsModel(release, model)) {
+    return failure(
+      "runtime_incompatible",
+      `Model '${model.name}' is not in the supported device types of runtime ${release.runtimeId} (iOS ${osVersion}); the exact pair was preserved.`,
+    );
+  }
+  if (release.supportedDeviceTypeIds !== undefined) {
+    return success("supported");
   }
   return success(
     minimum.value !== undefined || maximum.value !== undefined ? "supported" : "unknown",
@@ -647,7 +670,7 @@ function resolveIos(
   if (!os.ok) {
     return os;
   }
-  const compatibility = evaluateIosCompatibility(hardware.value.model, os.value.release.osVersion);
+  const compatibility = evaluateIosCompatibility(hardware.value.model, os.value.release);
   if (!compatibility.ok) {
     return withArchetypeOsDefaultHint(compatibility, requirement, hardware.value.model);
   }

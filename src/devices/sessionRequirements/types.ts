@@ -142,6 +142,12 @@ export interface IosCatalogRelease {
   osVersion?: string;
   installed: boolean;
   metadataState: CatalogMetadataState;
+  /**
+   * Sorted simulator device-type identifiers the runtime ships. When present a model missing
+   * from it is incompatible with this runtime; omission keeps the model's bounds as the only
+   * compatibility evidence.
+   */
+  supportedDeviceTypeIds?: readonly string[];
 }
 
 export interface AndroidCatalogRelease {

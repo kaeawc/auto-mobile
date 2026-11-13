@@ -2,6 +2,7 @@ import type { Platform } from "../models";
 import type { AppleDeviceRuntime, AppleDeviceType } from "../utils/ios-cmdline-tools/SimCtlSupport";
 import {
   deviceTypeRuntimeBounds,
+  evaluateDeviceTypeOnRuntime,
   evaluateRuntimeCompatibility,
 } from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import { logger } from "../utils/logger";
@@ -144,7 +145,7 @@ function iosRuntimeCompatibility(
       .filter(
         ({ runtime, availability }) =>
           availability.available &&
-          evaluateRuntimeCompatibility(deviceType, runtime.version).status === "supported",
+          evaluateDeviceTypeOnRuntime(deviceType, runtime).status === "supported",
       )
       .map(({ runtime }) => runtime.identifier),
   };
@@ -163,8 +164,7 @@ function iosDeviceTypeAvailability(
     throw new Error("device type has an invalid runtime version range");
   }
   const matchingRuntimes = runtimeEntries.filter(
-    ({ runtime }) =>
-      evaluateRuntimeCompatibility(deviceType, runtime.version).status === "supported",
+    ({ runtime }) => evaluateDeviceTypeOnRuntime(deviceType, runtime).status === "supported",
   );
   const availableRuntime = matchingRuntimes.find(({ availability }) => availability.available);
   const unavailableRuntime = matchingRuntimes[0];

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { sendCommand } from "../../../../src/features/observe/DeviceServiceUtils";
 import { iosWireDeadlineParams } from "../../../../src/features/observe/ios/CtrlProxyDispatch";
 import { CtrlProxyNavigation } from "../../../../src/features/observe/ios/CtrlProxyNavigation";
+import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
 import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
 
 async function flushMicrotasks(): Promise<void> {
@@ -11,6 +12,37 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("iOS wire deadline (#10084)", () => {
+  test("coordinate taps send the wire timeout and settle on abort without advancing time", async () => {
+    const h = createIosDelegateHarness();
+    h.context.wireDeadlineParams = iosWireDeadlineParams;
+    const controller = new AbortController();
+    const pending = new CtrlProxyGestures(h.context).requestTapCoordinates({
+      x: 1.5,
+      y: 2.5,
+      timeoutMs: 1234,
+      signal: controller.signal,
+    });
+    await flushMicrotasks();
+    expect(h.sentMessages).toHaveLength(1);
+    expect(h.sentMessages[0]).toMatchObject({
+      type: "request_tap_coordinates",
+      x: 1.5,
+      y: 2.5,
+      timeoutMs: 1234,
+    });
+    controller.abort(new Error("tap cancelled"));
+    expect(await pending).toMatchObject({
+      success: false,
+      dispatched: true,
+      acknowledged: false,
+      retryable: false,
+      error: "tap cancelled",
+    });
+    expect(h.requestManager.getPendingCount()).toBe(0);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    expect(h.sentMessages).toHaveLength(1);
+  });
+
   test.each([
     "request_tap_coordinates",
     "request_rotate",

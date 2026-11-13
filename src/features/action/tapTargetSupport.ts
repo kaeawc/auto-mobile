@@ -41,7 +41,12 @@ export function pointInTapBounds(point: { x: number; y: number }, bounds: Elemen
 }
 
 export function hasTapArea(bounds: ElementBounds | undefined): bounds is ElementBounds {
-  return !!bounds && bounds.left < bounds.right && bounds.top < bounds.bottom;
+  return (
+    !!bounds &&
+    [bounds.left, bounds.top, bounds.right, bounds.bottom].every(Number.isFinite) &&
+    bounds.left < bounds.right &&
+    bounds.top < bounds.bottom
+  );
 }
 
 export interface TapPointContext {

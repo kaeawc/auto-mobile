@@ -25,20 +25,30 @@ export function sharedStoragePushTimeoutMs(byteCount: number): number {
 }
 
 /**
- * Backup budget for one chunk: scaled by the chunk's incoming byte total (the size of the content
- * being replaced is unknown before the copy) and capped at one per-file ceiling per file, which the
- * caller deadline also allots per file.
+ * Backup budget for one chunk, from the sizes of the EXISTING destinations the backup copies (not
+ * the incoming files). A known size is scaled like a push (an absent destination is 0); an unknown
+ * size gets the full per-file ceiling. The total is clamped between the floor and one per-file
+ * ceiling per file, which the caller deadline also allots per file.
  */
-export function sharedStorageBackupTimeoutMs(byteCounts: readonly number[]): number {
-  const total = byteCounts.reduce(
-    (sum, count) => sum + (Number.isFinite(count) && count > 0 ? count : 0),
-    0,
+export function sharedStorageBackupTimeoutMs(
+  existingByteCounts: ReadonlyArray<number | undefined>,
+): number {
+  const known = existingByteCounts.filter(
+    (count): count is number => count !== undefined && Number.isFinite(count) && count >= 0,
   );
-  return scaledTransferTimeoutMs(
-    total,
-    Math.max(1, byteCounts.length) * SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS,
+  const unknownCount = existingByteCounts.length - known.length;
+  const knownBytes = known.reduce((sum, count) => sum + count, 0);
+  const scaledMs =
+    Math.ceil((knownBytes / SHARED_STORAGE_MIN_TRANSFER_BYTES_PER_SECOND) * 1000) +
+    unknownCount * SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS;
+  return Math.min(
+    Math.max(scaledMs, SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS),
+    Math.max(1, existingByteCounts.length) * SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS,
   );
 }
+
+/** Bound on the per-chunk `stat` of existing destinations that sizes the backup budget. */
+export const SHARED_STORAGE_EXISTING_SIZE_TIMEOUT_MS = 5_000;
 
 export const SHARED_STORAGE_MKDIR_TIMEOUT_MS = 5_000;
 export const SHARED_STORAGE_COMMIT_TIMEOUT_MS = 5_000;

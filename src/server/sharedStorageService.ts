@@ -5,6 +5,7 @@ import {
   SHARED_STORAGE_COMMIT_TIMEOUT_MS,
   SHARED_STORAGE_RESET_TIMEOUT_MS,
   SHARED_STORAGE_MEDIA_SCAN_TIMEOUT_MS,
+  SHARED_STORAGE_EXISTING_SIZE_TIMEOUT_MS,
   SHARED_STORAGE_MEDIA_QUERY_TIMEOUT_MS,
   SHARED_STORAGE_MEDIA_INDEX_TIMEOUT_MS,
   SHARED_STORAGE_MEDIA_POLL_INTERVAL_MS,
@@ -42,6 +43,8 @@ import {
   androidRollbackScript,
   androidSaveBackupScript,
   androidStepsScript,
+  androidExistingSizesScript,
+  parseExistingSizes,
 } from "./androidFileBackup";
 import {
   normalizeSharedStorageNamespace,
@@ -65,6 +68,8 @@ const SHARED_STORAGE_ROLLBACK_PER_PATH_TIMEOUT_MS = 500;
 const SHARED_STORAGE_RESCAN_PER_FILE_TIMEOUT_MS = 3000;
 /** Printed by the backup script only when it saved the previous content of an existing file. */
 const SHARED_STORAGE_BACKUP_MARKER = "AUTOMOBILE_SHARED_STORAGE_BACKUP";
+/** Prefixes each line of the existing-destination size probe that sizes the backup budget. */
+const SHARED_STORAGE_EXISTING_SIZE_MARKER = "AUTOMOBILE_SHARED_STORAGE_EXISTING_SIZE";
 
 interface SharedStorageStats {
   size: number;
@@ -441,6 +446,7 @@ class DefaultSharedStorageService implements SharedStorageService {
     return saveExistingFiles(adb, this.planBackups(destinationDirectory, files), {
       signal: request.signal,
       stages: this.stages,
+      timer: this.timer,
     });
   }
 
@@ -454,7 +460,6 @@ class DefaultSharedStorageService implements SharedStorageService {
       return {
         path: file.destinationPath,
         destination,
-        byteCount: file.source.byteCount,
         // Dot-prefixed with a non-media extension so MediaStore never lists the saved copy.
         backup: posix.join(
           posix.dirname(destination),
@@ -502,8 +507,6 @@ class DefaultSharedStorageService implements SharedStorageService {
 interface BackupPlan {
   path: string;
   destination: string;
-  /** Incoming size; the best available estimate of the content the backup copies. */
-  byteCount: number;
   backup: string;
 }
 
@@ -669,7 +672,7 @@ async function rescanRestoredFiles(
 async function saveExistingFiles(
   adb: AdbExecutor,
   files: BackupPlan[],
-  { signal, stages }: { signal?: AbortSignal; stages: SharedStorageStages },
+  { signal, stages, timer }: { signal?: AbortSignal; stages: SharedStorageStages; timer: Timer },
 ): Promise<Map<string, string>> {
   const saved = new Map<string, string>();
   for (
@@ -688,13 +691,15 @@ async function saveExistingFiles(
       ),
     );
     try {
-      // Scale with the chunk's size, capped within the caller budget so a wedged copy is diagnosable.
+      // The backup copies the EXISTING destinations, so their sizes (not the incoming files')
+      // scale its budget, capped within the caller budget so a wedged copy is diagnosable.
+      const existingSizes = await probeExistingSizes(adb, chunk, { signal, timer });
       const result = await stages.run(adb, {
         destination: chunk.map((file) => file.destination).join(", "),
         stage: "backup",
         command: `shell sh -c ${shellQuote(script)}`,
         signal,
-        timeoutMs: sharedStorageBackupTimeoutMs(chunk.map((file) => file.byteCount)),
+        timeoutMs: sharedStorageBackupTimeoutMs(existingSizes),
       });
       for (const [path, backup] of copiedBackups(chunk, result.stdout)) {
         saved.set(path, backup);
@@ -713,6 +718,50 @@ async function saveExistingFiles(
     }
   }
   return saved;
+}
+
+/**
+ * One bounded, read-only `stat` of a chunk's destinations. Returns each one's size, 0 when it does
+ * not exist, or `undefined` when unknown; a failed or timed-out probe leaves every size unknown so
+ * the backup gets the per-file ceiling. Only caller cancellation is rethrown.
+ */
+async function probeExistingSizes(
+  adb: AdbExecutor,
+  chunk: BackupPlan[],
+  { signal, timer }: { signal?: AbortSignal; timer: Timer },
+): Promise<Array<number | undefined>> {
+  const script = androidExistingSizesScript(
+    chunk.map((file) => file.destination),
+    SHARED_STORAGE_EXISTING_SIZE_MARKER,
+  );
+  const controller = new AbortController();
+  try {
+    const result = await raceWithDeadline(
+      () =>
+        adb.executeCommand(`shell sh -c ${shellQuote(script)}`, {
+          timeoutMs: SHARED_STORAGE_EXISTING_SIZE_TIMEOUT_MS,
+          noRetry: true,
+          signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+        }),
+      {
+        timer,
+        timeoutMs: SHARED_STORAGE_EXISTING_SIZE_TIMEOUT_MS,
+        label: "Shared-storage existing-size probe",
+        onTimeout: () => controller.abort(),
+      },
+    );
+    return parseExistingSizes(result.stdout, chunk.length, SHARED_STORAGE_EXISTING_SIZE_MARKER);
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    // The probe only sizes the backup budget; unknown sizes fall back to the per-file ceiling.
+    logger.warn(
+      `[SharedStorage] Existing-size probe failed for ${chunk.map((file) => file.destination).join(", ")}; using the per-file backup ceiling`,
+      error,
+    );
+    return chunk.map(() => undefined);
+  }
 }
 
 /** The path-to-backup pairs whose copy the probe script confirmed with its per-file marker. */

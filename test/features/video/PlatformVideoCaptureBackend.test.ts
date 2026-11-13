@@ -247,7 +247,9 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     expect(calls[0]?.join(" ")).toContain("--display-id");
     expect(calls[1]?.join(" ")).not.toContain("--display-id");
     // The retry keeps the pid-reporting wrapper.
-    expect(calls[1]?.[1]).toStartWith("echo $$; exec screenrecord ");
+    expect(calls[1]?.[1]).toStartWith(
+      "if command -v setsid >/dev/null 2>&1; then exec setsid sh -c 'echo $$; exec screenrecord ",
+    );
     expect(handle.warning).toContain("rejected --display-id");
     expect(handle.physicalDisplayId).toBeUndefined();
   });
@@ -1062,7 +1064,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         });
         expect(factory.getFakeClient().getSpawnCalls()).toContainEqual([
           "shell",
-          "echo $$; exec screenrecord --bit-rate 1000 --time-limit 180 /sdcard/auto-mobile-clamp.mp4",
+          "if command -v setsid >/dev/null 2>&1; then exec setsid sh -c 'echo $$; exec screenrecord --bit-rate 1000 --time-limit 180 /sdcard/auto-mobile-clamp.mp4'; fi; echo $$; exec screenrecord --bit-rate 1000 --time-limit 180 /sdcard/auto-mobile-clamp.mp4",
         ]);
       },
     );

@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseCarPlayTemplateDocument } from "../../src/models/CarPlayTemplates";
+import {
+  carPlayActionRequestSchema,
+  parseCarPlayActionResponse,
+  parseCarPlayTemplateDocument,
+} from "../../src/models/CarPlayTemplates";
 
 // Inline contract examples, not captured simulator snapshots.
 const disabled = {
@@ -115,5 +119,73 @@ describe("captured CarPlay snapshots", () => {
       ["Status"],
     ]);
     expect(document.templates[1].title).toBe("Charger details");
+  });
+});
+
+// Unit envelope around the existing captured SDK document; this is not a captured action response.
+const actionFixture = {
+  schemaVersion: 1,
+  status: "ok",
+  simulated: "sdk",
+  id: "stack/0/tabs/1",
+  action: "select",
+  templates: parseCarPlayTemplateDocument(fixture("templates-tabbar-and-pushed-list.json")),
+};
+
+describe("CarPlay action contract", () => {
+  test("defaults selection and permits navigation without an id", () => {
+    expect(carPlayActionRequestSchema.parse({ id: actionFixture.id }).action).toBe("select");
+    for (const action of ["back", "popToRoot"]) {
+      expect(carPlayActionRequestSchema.parse({ action, future: true }).future).toBe(true);
+    }
+    for (const request of [
+      {},
+      { id: " " },
+      { action: "select" },
+      { action: "tap" },
+      { action: null },
+      { id: null },
+    ]) {
+      expect(carPlayActionRequestSchema.safeParse(request).success).toBe(false);
+    }
+  });
+
+  test("parses an envelope containing the captured template document and preserves additions", () => {
+    const response = parseCarPlayActionResponse({ ...actionFixture, future: true });
+    expect(response.templates).toEqual(actionFixture.templates);
+    expect(response.simulated).toBe("sdk");
+    expect(response.future).toBe(true);
+    expect(response.id).toBe(actionFixture.id);
+    expect(response.templates.templates[0].tabs?.[1].template?.type).toBe("grid");
+  });
+
+  test("parses all failure statuses and navigation responses", () => {
+    for (const status of ["unsupported", "not_found", "failed"] as const) {
+      const response = parseCarPlayActionResponse({
+        ...actionFixture,
+        status,
+        reason: "Unit example",
+      });
+      expect(response.status).toBe(status);
+      expect(response.reason).toBe("Unit example");
+    }
+    expect(
+      parseCarPlayActionResponse({ ...actionFixture, action: "back", id: undefined }).id,
+    ).toBeUndefined();
+  });
+
+  test("requires the SDK marker, post-action document, version, status and action", () => {
+    for (const change of [
+      { simulated: undefined },
+      { simulated: "phone" },
+      { templates: undefined },
+      { templates: { ...disabled, connected: "yes" } },
+      { schemaVersion: 2 },
+      { status: "success" },
+      { action: "tap" },
+      { id: 12 },
+    ]) {
+      expect(() => parseCarPlayActionResponse({ ...actionFixture, ...change })).toThrow();
+    }
   });
 });

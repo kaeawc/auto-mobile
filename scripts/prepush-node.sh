@@ -147,7 +147,7 @@ tool_definitions_drift_guard() {
 # check"), about 10s wall. Boundary checks that `bun run lint` already runs via
 # check-boundaries.sh are not repeated. Shell, Kotlin, XML and docs-syntax
 # checks belong to scripts/prepush-shell.sh and the platform gates.
-FAST_VALIDATION_CHECKS="yaml,schema-copy-drift,bun-version-coherence,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,workflow-assertion-triggers,mkdocs-nav,docs-assets,env-var-docs,debug-tags,datetime-now-literal,lfs-pointers"
+FAST_VALIDATION_CHECKS="yaml,schema-copy-drift,bun-version-coherence,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,workflow-assertion-triggers,mkdocs-nav,docs-assets,tool-emoji,env-var-docs,debug-tags,datetime-now-literal,lfs-pointers"
 
 fast_validation_static_checks() {
   local checks="$FAST_VALIDATION_CHECKS"

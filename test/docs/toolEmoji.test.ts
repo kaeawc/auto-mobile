@@ -93,6 +93,63 @@ describe("tool emoji docs check", () => {
     ]);
   });
 
+  test("checks the emoji and destination of a double-quote titled link", () => {
+    expect(checkDoc("docs/other.md", '🚀 [`observe`](wrong.md "Observe")', registry)).toEqual([
+      "docs/other.md:1: 🚀 is launchApp's emoji but is used with observe (use 👁️)",
+      "docs/other.md:1: 🚀 observe must link to docs/using/observe.md",
+    ]);
+  });
+
+  test("reads an emoji inside the link text as a linked reference", () => {
+    expect(
+      findToolEmojiReferences(
+        "[👁️ `observe`](observe.md) and [🚀 <code>tapOn</code>](x.md)",
+        names,
+      ),
+    ).toEqual([
+      { line: 1, emoji: "👁️", tool: "observe", link: "observe.md" },
+      { line: 1, emoji: "🚀", tool: "tapOn", link: "x.md" },
+    ]);
+    expect(checkDoc("docs/using/a.md", "[👁️ `observe`](observe.md)", registry)).toEqual([]);
+    expect(checkDoc("docs/using/a.md", "[🚀 `observe`](wrong.md)", registry)).toEqual([
+      "docs/using/a.md:1: 🚀 is launchApp's emoji but is used with observe (use 👁️)",
+      "docs/using/a.md:1: 🚀 observe must link to docs/using/observe.md",
+    ]);
+  });
+
+  test("keeps a shorter inner fence inside a longer code block", () => {
+    const markdown = [
+      "````markdown",
+      "```",
+      "👆 `tapOn`",
+      "```",
+      "🚀 `tapOn`",
+      "````",
+      "👁️ `observe`",
+    ].join("\n");
+    expect(findToolEmojiReferences(markdown, names)).toEqual([
+      { line: 7, emoji: "👁️", tool: "observe" },
+    ]);
+  });
+
+  test("reports source lines across paragraphs, lists and table rows", () => {
+    const markdown = [
+      "# Tools",
+      "",
+      "- 👆 `tapOn`",
+      "",
+      "| Tool | Use |",
+      "|---|---|",
+      "| 🚀 <code>launchApp</code> | open |",
+      "| 👁️ `observe` | look |",
+    ].join("\n");
+    expect(findToolEmojiReferences(markdown, names).map((ref) => [ref.line, ref.tool])).toEqual([
+      [3, "tapOn"],
+      [7, "launchApp"],
+      [8, "observe"],
+    ]);
+  });
+
   test("lists tools the tools page does not show with an emoji", () => {
     expect(
       missingFromToolsPage("| 👆 <code>tapOn</code> |\n| `launchApp` |", ["tapOn", "launchApp"]),

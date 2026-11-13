@@ -164,10 +164,9 @@ the top template of each projected app (`carAppTemplates.projected[]`): row titl
 lines, tab titles and titled actions. It never sends input, because the template data does not say
 where the head unit draws a row. It always fails, with one of these messages:
 
-- The match and where it is, for example
-  `"List template" (row 1 of 5 in ListTemplate "AutoMobile Templates" on TemplateMenuScreen, <package>)`.
-  Tap it with `tapAt` at its head-unit pixels, or move focus to it with `pressButton` `down` and
-  `select`.
+- The match and where it is: its row number and the row count, the template type and title, the
+  app's screen and the app's package. Tap it with `tapAt` at its head-unit pixels, or move focus to
+  it with `pressButton` `down` and `select`.
 - No match, with up to ten labels the top templates show.
 - No projected app reported a template, because none enabled the AutoMobile template route. Use
   `tapAt` or `pressButton`.

@@ -416,6 +416,32 @@ function gallerySearchDrag(
   };
 }
 
+/** Row frames may jitter by a fraction of a point between dumps of a settled list. */
+const GALLERY_FRAME_TOLERANCE = 1;
+
+function sameGalleryFrame(a: XcuiDebugLine["frame"], b: XcuiDebugLine["frame"]): boolean {
+  if (!a || !b) {
+    return a === b;
+  }
+  return (["left", "top", "right", "bottom"] as const).every(
+    (edge) => Math.abs(a[edge] - b[edge]) <= GALLERY_FRAME_TOLERANCE,
+  );
+}
+
+/** A drag reached a list boundary only when the same rows sit at the same frames. */
+function galleryRowsUnchanged(
+  rows: Map<string, XcuiDebugLine>,
+  nextRows: Map<string, XcuiDebugLine>,
+): boolean {
+  return (
+    rows.size === nextRows.size &&
+    [...rows].every(([id, row]) => {
+      const next = nextRows.get(id);
+      return next !== undefined && sameGalleryFrame(row.frame, next.frame);
+    })
+  );
+}
+
 async function searchGalleryDirection(
   { gesture, readDump }: WidgetActions,
   dump: string,
@@ -437,9 +463,7 @@ async function searchGalleryDirection(
     if (reading?.tap) {
       return { dump, tap: reading.tap };
     }
-    const unchanged =
-      rows.size === nextRows.size && [...rows.keys()].every((id) => nextRows.has(id));
-    if (nextRows.size === 0 || (unchanged && !row)) {
+    if (nextRows.size === 0 || (!row && galleryRowsUnchanged(rows, nextRows))) {
       break;
     }
     // A listed row needs at least 24 points clear of the navigation bar and window edges.

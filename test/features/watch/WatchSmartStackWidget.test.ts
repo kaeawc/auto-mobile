@@ -383,6 +383,19 @@ describe("Smart Stack gallery rows", () => {
       ...widgetAttemptSleeps(1),
     ]);
   });
+  test.each([
+    ["keeps scrolling when the same rows moved", [longApostropheNudged, longApostropheNudged], 2],
+    ["stops when rows and frames are unchanged", [longApostrophe], 1],
+  ] as const)("detects the later boundary by row frames: %s", async (_case, later, drags) => {
+    const { client, timer } = arrange([withEdit, longApostrophe, ...later, withEdit]);
+    const result = await addWatchSmartStackWidget(client, options, { timer });
+    expect(result).toMatchObject({ success: false, attempts: 1, galleryRowMisses: 1 });
+    expect(client.commands).toEqual([...galleryOpening, ...gallerySearchCommands(drags, 1)]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...galleryOpeningSleeps,
+      ...Array(drags + 1).fill(GALLERY_SCROLL_SETTLE_MS),
+    ]);
+  });
   test("bounds changing row sets at eight scrolls in each direction", async () => {
     const changing = Array.from({ length: 16 }, (_, index) =>
       index % 2 === 0 ? longMiddle : longTop,

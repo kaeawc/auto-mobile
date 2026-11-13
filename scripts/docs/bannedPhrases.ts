@@ -137,6 +137,55 @@ function lineStartsOf(source: string): number[] {
 /** Opening line of a possible link reference definition; md4c confirms it. */
 const REFERENCE_DEFINITION_START = /^ {0,3}\[[^\]\n]+\]:/;
 
+/**
+ * Spans of one definition that render nothing on their own: the definition
+ * before a title on a later line, then the whole definition. A third such
+ * span only adds separate definitions, so it is never needed.
+ */
+const MAX_DOCUMENT_CHECKS = 2;
+
+/**
+ * Returns the `lines` that sit inside a code block or raw HTML block, found
+ * with one render: each line gets a unique marker after its indentation, and
+ * a line is inside when its marker shows up in such a block's content. A
+ * candidate line cannot open a block or close a fence, so marking it does not
+ * move any block. (md4c reports only HTML blocks to `html`, not inline HTML.)
+ */
+function linesInCodeBlocks(source: string, lineStarts: number[], lines: number[]): Set<number> {
+  if (lines.length === 0) {
+    return new Set();
+  }
+  const marker = (line: number) => `\u{E000}${line}\u{E001}`;
+  const marked = new Set(lines);
+  const probe = lineStarts
+    .map((start, line) => {
+      const end = line + 1 < lineStarts.length ? lineStarts[line + 1] : source.length;
+      const text = source.slice(start, end);
+      if (!marked.has(line)) {
+        return text;
+      }
+      const indent = /^ */.exec(text)?.[0].length ?? 0;
+      return `${text.slice(0, indent)}${marker(line)}${text.slice(indent)}`;
+    })
+    .join("");
+  const code: string[] = [];
+  const callbacks = new Proxy(
+    {},
+    {
+      get: (_target, key) => (children: unknown) => {
+        const content = typeof children === "string" ? children : "";
+        if (key === "code" || key === "html") {
+          code.push(content);
+        }
+        return content;
+      },
+    },
+  );
+  Bun.markdown.render(probe, callbacks);
+  const codeText = code.join("\n");
+  return new Set(lines.filter((line) => codeText.includes(marker(line))));
+}
+
 function sameLeaves(a: Leaf[], b: Leaf[]): boolean {
   return (
     a.length === b.length &&
@@ -166,20 +215,30 @@ function blank(source: string, start: number, end: number): string {
  * That rejects look-alikes inside code blocks or paragraph continuations. A
  * span must also render nothing on its own, so a paragraph that merely starts
  * like a definition is never blanked whole.
+ *
+ * Each check re-renders the document, so the work is bounded (#18191): lines
+ * inside code and HTML blocks are skipped up front, and a candidate gets at most
+ * MAX_DOCUMENT_CHECKS spans that render nothing on their own.
  */
 function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
   const lineStarts = lineStartsOf(source);
   const lineEnd = (line: number) =>
     line + 1 < lineStarts.length ? lineStarts[line + 1] - 1 : source.length;
   const lineText = (line: number) => source.slice(lineStarts[line], lineEnd(line));
+  const candidates = lineStarts
+    .map((_start, line) => line)
+    .filter((line) => REFERENCE_DEFINITION_START.test(lineText(line)));
+  const inCode = linesInCodeBlocks(source, lineStarts, candidates);
   let searchable = source;
   let moved = "";
   /**
    * Number of lines of the definition starting at `line` md4c accepts, or 0.
    * A title may span any number of lines but not a blank one, so the span
-   * grows until md4c accepts it or the paragraph ends.
+   * grows until md4c accepts it, the paragraph ends, or the candidate has used
+   * its document checks.
    */
   const acceptedSpan = (line: number): number => {
+    let checks = 0;
     for (let last = line; last < lineStarts.length && lineText(last).trim() !== ""; last++) {
       const span = last - line + 1;
       const definition = source.slice(lineStarts[line], lineEnd(last));
@@ -187,6 +246,9 @@ function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
       // own; relocating the whole paragraph would keep the leaves unchanged.
       if (collectLeaves(definition).length > 0) {
         continue;
+      }
+      if (checks++ === MAX_DOCUMENT_CHECKS) {
+        return 0;
       }
       const candidate = blank(searchable, lineStarts[line], lineEnd(last));
       if (sameLeaves(collectLeaves(`${candidate}\n\n${moved}${definition}\n`), leaves)) {
@@ -197,10 +259,11 @@ function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
     }
     return 0;
   };
-  let line = 0;
-  while (line < lineStarts.length) {
-    const span = REFERENCE_DEFINITION_START.test(lineText(line)) ? acceptedSpan(line) : 0;
-    line += Math.max(span, 1);
+  let next = 0;
+  for (const line of candidates) {
+    if (line >= next && !inCode.has(line)) {
+      next = line + Math.max(acceptedSpan(line), 1);
+    }
   }
   return searchable;
 }

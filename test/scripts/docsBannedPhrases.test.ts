@@ -232,6 +232,19 @@ describe("findBannedPhrases source lines", () => {
     expect(linesOf("[ok][ref] robust\n\n[ref]: /url\n")).toEqual([["robust", 1]]);
   });
 
+  test("checks 600 definition-like lines in a code block in under 100 ms", () => {
+    const lines = Array.from({ length: 600 }, () => "[x]: /u").join("\n");
+    const started = performance.now();
+    expect(linesOf(`\`\`\`\n${lines}\n\`\`\`\n\nrobust\n`)).toEqual([["robust", 604]]);
+    expect(linesOf(`<div>\n${lines}\n</div>\n\nrobust\n`)).toEqual([["robust", 604]]);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  test("still skips a definition whose title follows its destination line", () => {
+    expect(linesOf("[ref]: /url\n'robust'\n\nrobust\n")).toEqual([["robust", 4]]);
+    expect(linesOf("[ref]:\n/url\n'robust'\n\nrobust\n")).toEqual([["robust", 5]]);
+  });
+
   test("locates front matter prose and the body after it", () => {
     expect(linesOf("---\ntitle: robust\n---\n\nrobust\n")).toEqual([
       ["robust", 2],

@@ -788,4 +788,17 @@ describe("AndroidAutoProjectionProvisioner", () => {
     await provisioner.stopDesktopHeadUnit("emulator-5554");
     expect(provisioner.desktopHeadUnitConsole("emulator-5554")).toBeUndefined();
   });
+
+  test("names the DHU process and config behind a console, so a restart is visible", async () => {
+    const { provisioner } = setup();
+    await provisioner.provision(request());
+    const first = provisioner.desktopHeadUnitConsole("emulator-5554")?.panel;
+    expect(first).toEqual({ instance: expect.any(String), configPath: "config/default_720p.ini" });
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")?.panel).toEqual(first);
+
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    await provisioner.provision(request());
+    const restarted = provisioner.desktopHeadUnitConsole("emulator-5554")?.panel;
+    expect(restarted?.instance).not.toBe(first?.instance);
+  });
 });

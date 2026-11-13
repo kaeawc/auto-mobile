@@ -116,3 +116,48 @@ describe("FocusNavigate on a fixed-slot recycler list (#17315)", () => {
     expect(result.steps).toBe(2);
   });
 });
+
+const ONE_SLOT_BOUNDS = { left: 0, top: 400, right: 1920, bottom: 520 };
+
+/** A one-slot recycler: nothing sits outside the focused row, and items can repeat a label. */
+class FakeOneSlotList implements FocusObserver, FocusKeyPresser {
+  index = 0;
+  readonly presses: InputKeyName[] = [];
+
+  constructor(private readonly items: readonly string[]) {}
+
+  async read(): Promise<FocusScreen> {
+    const row: Element = {
+      bounds: ONE_SLOT_BOUNDS,
+      "resource-id": "list_row",
+      text: this.items[this.index],
+      focusable: true,
+      class: "android.widget.TextView",
+    };
+    return { focused: row, elements: [row] };
+  }
+
+  async press(key: InputKeyName): Promise<{ success: boolean }> {
+    this.presses.push(key);
+    if (key === "arrow_down" && this.index < this.items.length - 1) {
+      this.index += 1;
+    }
+    return { success: true };
+  }
+}
+
+describe("FocusNavigate on a one-slot recycler whose labels repeat (#17209)", () => {
+  test("labels A, B, A on successive downward presses still read as moving", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const list = new FakeOneSlotList(["A", "B", "A", "C", "D", "E", "Target"]);
+    const result = await new FocusNavigate(list, list, timer).execute({
+      until: { text: "Target" },
+      direction: "down",
+    });
+
+    expect(result.status).toBe("focused");
+    expect(result.steps).toBe(6);
+    expect(list.presses.every((key) => key === "arrow_down")).toBe(true);
+  });
+});

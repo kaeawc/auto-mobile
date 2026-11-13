@@ -1,5 +1,6 @@
 import type { BindingRegistrySchemaProbe } from "../sessionBroker/registry/bindingRegistryMigrations";
 import type { SessionBrokerService } from "../sessionBroker/service";
+import type { SessionRequirementErrorCode } from "../../devices/sessionRequirements";
 import type { SessionBrokerProtocolErrorCode } from "../../devices/sessionBrokerResult";
 import type { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import type { BindingInputGate } from "../inputDeviceOwnership";
@@ -219,7 +220,9 @@ export type DaemonMethodResult = {
     /** `daemon/registerSession` managed-connection refusals (#11178). */
     | typeof DEVICE_OUTSIDE_BROKER_GRANT_CODE
     /** A device-count read while a discovery source that exists has not completed (#11605). */
-    | BootedDeviceDiscoveryIncompleteError["code"];
+    | BootedDeviceDiscoveryIncompleteError["code"]
+    /** `daemon/sessionRequirementCapability` refusals: the shared requirement codes (#18180). */
+    | SessionRequirementErrorCode;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */

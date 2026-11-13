@@ -31,6 +31,9 @@ final class CarPlayTemplateNode: Codable {
     var tabs: [CarPlayTemplateNode]?
     var template: CarPlayTemplateNode?
     var actions: [CarPlayTemplateNode]?
+    var leadingNavigationBarButtons: [CarPlayTemplateNode]?
+    var trailingNavigationBarButtons: [CarPlayTemplateNode]?
+    var backButton: CarPlayTemplateNode?
 
     init(id: String, type: String) {
         self.id = id

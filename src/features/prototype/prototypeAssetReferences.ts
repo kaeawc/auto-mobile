@@ -65,10 +65,7 @@ export function collectPrototypeAssetReferences(spec: unknown): {
     if (node.type === "image") {
       addImage(node.asset, images);
     }
-    const markerAsset = node.type === "map" ? prototypeMapMarkerAsset(node) : undefined;
-    if (markerAsset !== undefined) {
-      images.add(markerAsset);
-    }
+    addImage(prototypeMapMarkerAsset(node), images);
     for (const item of Array.isArray(node.items) ? node.items : []) {
       addImage(record(item)?.image, images);
     }

@@ -98,11 +98,11 @@ function markerTapContextError(actions: unknown, path: string): PrototypePlatfor
 const MARKER_PLACEHOLDER = /\{[^{}]+\}/;
 
 /**
- * The image asset id a map node's `markers.icon` names (#16491), or undefined for a Material icon
- * name. An id with a `{alias.field}` placeholder is a per-marker template, not an asset reference.
+ * The image asset id a map node's `markers.icon` names (#16491), or undefined for any other node
+ * or a Material icon name. An id with a `{alias.field}` placeholder is a per-marker template, not an asset reference.
  */
 export function prototypeMapMarkerAsset(node: Raw): string | undefined {
-  const asset = record(record(record(node.markers)?.icon))?.asset;
+  const asset = node.type === "map" ? record(record(node.markers)?.icon)?.asset : undefined;
   return typeof asset === "string" && !MARKER_PLACEHOLDER.test(asset) ? asset : undefined;
 }
 
@@ -113,7 +113,7 @@ export function prototypeMapMarkerAssetsError(
 ): PrototypePlatformError | undefined {
   let first: PrototypePlatformError | undefined;
   walkPrototypeNodes(spec, (node, path) => {
-    const asset = node.type === "map" ? prototypeMapMarkerAsset(node) : undefined;
+    const asset = prototypeMapMarkerAsset(node);
     if (!first && asset !== undefined && !assets.has(asset)) {
       first = { path: `${path}.markers.icon.asset`, message: "Unknown marker asset" };
     }

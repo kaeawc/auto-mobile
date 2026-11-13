@@ -30,9 +30,11 @@ resource IDs, content descriptions, or app-defined test tags over coordinates.
 
 The default observe skeleton marks a disabled Android or iOS control with
 `enabled: false`. Enabled rows omit the field. Toggle rows also carry their
-`checked` boolean. Range widgets (a finite `range-info` or the Android SeekBar
-class) carry `adjust`; valid numeric state is projected as `range: {current, min,
-max}`. Unlabelled range controls share the toggle's container and preceding-sibling
+`checked` boolean. Adjustable range widgets (an Android SeekBar, AbsSeekBar, RatingBar
+or Material Slider class, or a finite `range-info` with a `scroll_forward`,
+`scroll_backward` or `set_progress` action) carry `adjust`; a read-only ProgressBar
+does not. Valid numeric state is projected as `range: {current, min, max}` on every
+row that has it. Unlabelled range controls share the toggle's container and preceding-sibling
 label rules in both skeleton and searchable projections. `swipeOn` compares the
 resolved target's range with the post-action hierarchy by resource ID (falling
 back to element ID), using bounds to distinguish duplicate IDs; agreeing merged

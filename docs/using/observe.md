@@ -7,9 +7,10 @@
 Call `observe` to read the current screen before choosing a target. The default
 `skeleton` and `context` rows describe controls and visible text; `project: "full"`
 returns the hierarchy. Bounds tuples are `[left, top, right, bottom]`.
-Range controls, including sliders, carry the `adjust` affordance and a
-`range: {current, min, max}` when numeric state is available; use `swipeOn`
-with the row's `elementId` as the `container` to adjust it.
+Adjustable range controls, including sliders, carry the `adjust` affordance; any
+row with numeric state, including a read-only progress indicator, carries
+`range: {current, min, max}`. Use `swipeOn` with an `adjust` row's `elementId` as
+the `container` to adjust it.
 A toggle or range row with no label of its own or from its enclosing row takes the text
 shown immediately before it, such as the `Dark mode` text beside a `Switch`; that
 text still appears in `context`. Text that follows a toggle with no label and no

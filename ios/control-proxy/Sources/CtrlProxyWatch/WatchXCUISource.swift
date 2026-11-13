@@ -239,10 +239,15 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     private func focusedCrownValue() throws -> WatchCrownValue? {
         guard app.state == .runningForeground, systemAlerts().isEmpty else { return nil }
         let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
-        let count = focused.count
+        let focusedCount = focused.count
+        // SwiftUI's digitalCrownRotation does not set XCUI hasFocus (device-checked on watchOS 26.5,
+        // #17549), so with no focused element the app's single readable non-scrolling value is the target.
+        if focusedCount == 0 {
+            return try watchCrownFocusedValue([crownCandidate(app.snapshot())])
+        }
         // A larger set is not a single crown target; skip the per-element snapshots.
-        guard (1 ... 8).contains(count) else { return nil }
-        let candidates = try (0 ..< count).map { try crownCandidate(focused.element(boundBy: $0).snapshot()) }
+        guard (1 ... 8).contains(focusedCount) else { return nil }
+        let candidates = try (0 ..< focusedCount).map { try crownCandidate(focused.element(boundBy: $0).snapshot()) }
         return watchCrownFocusedValue(candidates)
     }
 

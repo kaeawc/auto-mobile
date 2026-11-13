@@ -714,6 +714,17 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(watchCrownFocusedValue([inner, inner])?.value, "0")
     }
 
+    /// Device capture, watchOS 26.5: a SwiftUI `digitalCrownRotation` view reports no `hasFocus` element,
+    /// so the app snapshot (a label without a value plus the one valued control) is the only candidate.
+    func testCrownFocusedValueFallsBackToSingleValuedControlInAppSnapshot() {
+        let label = WatchCrownCandidate(elementType: 48, identifier: "levelLabel")
+        let crown = WatchCrownCandidate(elementType: 48, value: "10")
+        let app = WatchCrownCandidate(elementType: 2, children: [
+            WatchCrownCandidate(elementType: 4, children: [label, crown]),
+        ])
+        XCTAssertEqual(watchCrownFocusedValue([app])?.value, "10")
+    }
+
     func testCrownFocusedValueRejectsAmbiguousOrUnreadableFocus() {
         let left = WatchCrownCandidate(identifier: "a", frame: CGRect(x: 0, y: 0, width: 40, height: 40), value: "1")
         let right = WatchCrownCandidate(identifier: "b", frame: CGRect(x: 60, y: 0, width: 40, height: 40), value: "2")

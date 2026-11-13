@@ -8,8 +8,10 @@
 // section (using, how-it-works, devlog). Every `.md` file under a section path
 // is checked; pages outside every section are skipped. Prints one
 // `file:line: rule: message [section]` row per finding and a per-section
-// summary. `--github` also emits workflow warning annotations. The check is
-// advisory: it exits 0 unless `--strict` is passed and there are findings.
+// summary. `--github` also emits workflow annotations: errors for findings in
+// a section marked `"enforced": true` (already clean on main), warnings for the
+// rest. It exits 1 when an enforced section has findings, or on any finding
+// with `--strict`; findings in other sections are advisory.
 // See scripts/docs/readability.ts for what each rule measures.
 
 import { readFileSync } from "node:fs";
@@ -17,6 +19,7 @@ import { join } from "node:path";
 import { Glob } from "bun";
 import {
   checkPage,
+  failingFindings,
   formatFinding,
   parseConfig,
   sectionFor,
@@ -47,9 +50,10 @@ export function summarize(config: ReadabilityConfig, findings: Finding[]): strin
   });
 }
 
-function githubAnnotation(finding: Finding): string {
+export function githubAnnotation(finding: Finding, failing: boolean): string {
   const message = `${finding.rule}: ${finding.message}`.replaceAll("%", "%25");
-  return `::warning file=${finding.file},line=${finding.line},title=Docs readability::${message}`;
+  const level = failing ? "error" : "warning";
+  return `::${level} file=${finding.file},line=${finding.line},title=Docs readability::${message}`;
 }
 
 if (import.meta.main) {
@@ -62,19 +66,21 @@ if (import.meta.main) {
   }
   const config = parseConfig(JSON.parse(readFileSync(configPath, "utf8")));
   const findings = checkRepository(ROOT, config);
+  const failing = new Set(failingFindings(config, findings, args.includes("--strict")));
   for (const finding of findings) {
     console.log(formatFinding(finding));
   }
   if (args.includes("--github")) {
     for (const finding of findings) {
-      console.log(githubAnnotation(finding));
+      console.log(githubAnnotation(finding, failing.has(finding)));
     }
   }
   console.log(`\nDocs readability summary (${findings.length} finding(s)):`);
   for (const row of summarize(config, findings)) {
     console.log(`  ${row}`);
   }
-  if (args.includes("--strict") && findings.length > 0) {
+  if (failing.size > 0) {
+    console.log(`${failing.size} finding(s) fail the check (enforced section or --strict).`);
     process.exit(1);
   }
 }

@@ -18,6 +18,8 @@ async function main(): Promise<void> {
       port: { type: "string" },
       app: { type: "string" },
       widget: { type: "string" },
+      "host-bundle-id": { type: "string" },
+      "widget-kind": { type: "string" },
       steps: { type: "string" },
       attempts: { type: "string" },
       "retry-delay-ms": { type: "string" },
@@ -27,12 +29,14 @@ async function main(): Promise<void> {
   const port = Number(values.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535 || !values.app || !values.widget) {
     throw new ActionableError(
-      "Usage: --port <1-65535> --app <name> --widget <name> [--steps <0-100>] [--attempts <1-5>] [--retry-delay-ms <0-120000>] [--session-uuid <uuid>]",
+      "Usage: --port <1-65535> --app <name> --widget <name> [--host-bundle-id <id> --widget-kind <kind>] [--steps <0-100>] [--attempts <1-5>] [--retry-delay-ms <0-120000>] [--session-uuid <uuid>]",
     );
   }
   const options = {
     appName: values.app,
     widgetName: values.widget,
+    hostBundleId: values["host-bundle-id"],
+    widgetKind: values["widget-kind"],
     maxAttempts: values.attempts === undefined ? undefined : Number(values.attempts),
     retryDelayMs:
       values["retry-delay-ms"] === undefined ? undefined : Number(values["retry-delay-ms"]),

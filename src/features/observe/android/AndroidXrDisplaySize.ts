@@ -15,6 +15,17 @@ export interface AndroidXrDisplaySize {
     signal?: AbortSignal,
     displayId?: number,
   ): Promise<void>;
+  /**
+   * Like prime, but re-reads `wm size` even when this rotation parity is cached, so an override
+   * set mid-instance (displayConfig or raw adb) reaches the next observe (#17915). A known XR
+   * verdict stays cached.
+   */
+  refresh(
+    result: Pick<ObserveResult, "backStack">,
+    hierarchy: ViewHierarchyResult,
+    signal?: AbortSignal,
+    displayId?: number,
+  ): Promise<void>;
   applyCached(
     result: Pick<ObserveResult, "screenSize">,
     hierarchy: ViewHierarchyResult,
@@ -61,31 +72,58 @@ export class CachedAndroidXrDisplaySize implements AndroidXrDisplaySize {
     return `${this.deps.device().deviceId}:${Number(hierarchy.rotation === 1 || hierarchy.rotation === 3)}`;
   }
 
-  async prime(
+  prime(
     result: Pick<ObserveResult, "backStack">,
     hierarchy: ViewHierarchyResult,
     signal?: AbortSignal,
     displayId = hierarchy.displayId ?? 0,
   ): Promise<void> {
+    return this.primeSize({ result, hierarchy, signal, displayId, reread: false });
+  }
+
+  refresh(
+    result: Pick<ObserveResult, "backStack">,
+    hierarchy: ViewHierarchyResult,
+    signal?: AbortSignal,
+    displayId = hierarchy.displayId ?? 0,
+  ): Promise<void> {
+    return this.primeSize({ result, hierarchy, signal, displayId, reread: true });
+  }
+
+  private async primeSize(request: {
+    result: Pick<ObserveResult, "backStack">;
+    hierarchy: ViewHierarchyResult;
+    signal?: AbortSignal;
+    displayId: number;
+    reread: boolean;
+  }): Promise<void> {
     const device = this.deps.device();
-    if (device.platform !== "android" || displayId !== 0 || !this.deps.readDisplaySize) {
+    if (device.platform !== "android" || request.displayId !== 0 || !this.deps.readDisplaySize) {
       return;
     }
-    const key = this.key(hierarchy);
     // A primed entry already established XR identity; action refreshes may lack back-stack evidence.
-    if (this.displaySizes.has(key)) {
+    const primed = this.displaySizes.has(this.key(request.hierarchy));
+    if (primed && !request.reread) {
       return;
     }
-    const xr = await this.isXr(result, signal);
+    const xr = primed || (await this.isXr(request.result, request.signal));
     this.xrDevices.set(device.deviceId, xr);
-    if (!xr) {
-      return;
+    if (xr) {
+      await this.readSize(this.deps.readDisplaySize, request.hierarchy);
     }
+  }
+
+  private async readSize(
+    readDisplaySize: () => Promise<{ width: number; height: number }>,
+    hierarchy: ViewHierarchyResult,
+  ): Promise<void> {
     try {
-      const physical = await this.deps.readDisplaySize();
+      const physical = await readDisplaySize();
       const rotated = hierarchy.rotation === 1 || hierarchy.rotation === 3;
+      // A fresh read supersedes the other rotation parity too; it re-reads on its next prime.
+      this.displaySizes.delete(`${this.deps.device().deviceId}:${Number(!rotated)}`);
       this.displaySizes.set(
-        key,
+        this.key(hierarchy),
         rotated ? { width: physical.height, height: physical.width } : physical,
       );
     } catch (error) {

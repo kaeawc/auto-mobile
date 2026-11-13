@@ -41,9 +41,11 @@ drove the process-per-file and cold-transpile-cache runs. CI data came from read
 of `Node Unit Tests` logs (green run 37710748903) and nightly `Node Randomized Unit Tests`.
 
 The probe logs `start` after the `bunfig.toml` preloads and before the test file is imported, and
-`end` in a global `afterAll`. Under `--isolate` that splits each file's cost into **gap** (previous
-`end` to this `start`: isolate teardown/setup plus preloads), **elapsed** (module import of the
-file's graph, hooks, tests) and **test time** (JUnit `<testcase time>` sum, excluding hooks and imports).
+`end` in a global `afterAll`. Under `--isolate` that splits each file's cost into three parts:
+
+- **gap**: previous `end` to this `start` (isolate teardown/setup plus preloads).
+- **elapsed**: module import of the file's graph, hooks, tests.
+- **test time**: JUnit `<testcase time>` sum, excluding hooks and imports.
 
 ### 1. Where the wall time goes
 
@@ -68,7 +70,7 @@ The `--isolate` run breaks down as follows:
   module graph once per file (~82 ms per file; ~122 ms on the sample).
 - Isolation also inflates test bodies: the JUnit sum falls from 34.0 s to 18.5 s without `--isolate`
   (cold JIT state and lazy imports are paid again in each fresh realm).
-- The slowest files by wall are `test/lint/*` suites (0.8-1.6 s, 1-33 ms of test time); their cost
+- The slowest files by wall are `test/lint/*` suites (0.8-1.6 s, 1-33 ms of test time). Their cost
   is in `beforeAll`, which scans `src/`, and the JUnit-based 100 ms gate does not see it.
 
 #### Sample of 101 files: process, isolate and transpile cache
@@ -101,7 +103,7 @@ duration, and "Completed test-file time" is the probe's elapsed sum.
   4 vCPU plus runner load slow every import. About 33% of CI shard time is inter-file isolate
   overhead (29% locally).
 - Timeouts and runner shutdowns dominate red runs: 11 of the 14 most recent ubuntu unit jobs in the
-  PR workflow (2026-10-07/08) died with `exit 143` (runner shutdown) or `124`; on every `124` all
+  PR workflow (2026-10-07/08) died with `exit 143` (runner shutdown) or `124`. On every `124` all
   three shards hit the budget together (758-785 s), i.e. a slow runner, not an unbalanced one.
 - The nightly randomized lane runs the whole suite in one non-isolated process in 76-95 s on ubuntu
   (~5.5x faster than the sharded lane's ~520 s shard wall). It surfaces ~6 order-dependent
@@ -146,9 +148,9 @@ passes only because an earlier file left state behind; the nightly randomized la
 shard is one `bun test --isolate` process.
 
 Simulated with measured per-file costs, LPT (longest-processing-time) assignment gains 2-6% at 3
-shards and only pays at 4-6 shards (round-robin max imbalance +5.9% at 2, +2.0% at 3, +14.7% at 4,
-+11.5% at 6). On CI at 3 shards the observed spread is **+6.4% / −12.6%** (521.7 s and 520.5 s vs
-428.5 s, mean 490 s); LPT would cut the critical path ~31 s, less when runner costs drift from the manifest.
+shards and only pays at 4-6 shards. Round-robin max imbalance is +5.9% at 2, +2.0% at 3, +14.7% at 4
+and +11.5% at 6. On CI at 3 shards the observed spread is **+6.4% / −12.6%** (521.7 s and 520.5 s vs
+428.5 s, mean 490 s). LPT would cut the critical path ~31 s, less when runner costs drift from the manifest.
 
 **Recommendation: do not adopt duration-based assignment now.**
 
@@ -178,10 +180,10 @@ The classifier therefore adds a tier B signal, `moduleState`: free-function `set
 `X.resetForTests()`, not methods on fakes or timer globals. It moved 93 files out of the shared
 group. The last pair writes state through a production default collaborator a static check cannot
 see, so both files are in `SHARED_PROCESS_EXCLUSIONS` with the reason. That leaves 1,079 shared
-files; nine further seeds (3, 7, 8, 11, 12, 13, 14, 15, 20261008) ran them in one process with 0 failures.
+files. Nine further seeds (3, 7, 8, 11, 12, 13, 14, 15, 20261008) ran them in one process with 0 failures.
 
 Residual risk: shard lists are round-robin over the sorted list, so adding or removing a file shifts
-which files share a process and their order, and a leak no seed has hit could surface on an unrelated
+which files share a process and their order. A leak no seed has hit could surface on an unrelated
 PR. The nightly random lane is the detector; fix a listed victim by excluding the victim or polluter
 (or fixing its reset), not by re-running.
 
@@ -210,10 +212,10 @@ every size, so the default is 30.
 
 ### 4. Change made: accurate per-shard wall time
 
-`test-ts: unit shard N/M wall=` used to be wrong: the parent reaped shards in index order and
-computed each wall at reap time, so every later shard reported the slowest earlier one's time
-(`wall=523s` for all three when Bun reported 520.5, 521.7 and 428.5 s). Each shard subshell now
-writes its own elapsed seconds to `scratch/test-ts-<mode>-shards/shard-N.wall`, and the parent reports
+`test-ts: unit shard N/M wall=` used to be wrong. The parent reaped shards in index order and
+computed each wall at reap time, so every later shard reported the slowest earlier one's time. All
+three showed `wall=523s` when Bun reported 520.5, 521.7 and 428.5 s. Each shard subshell now
+writes its own elapsed seconds to `scratch/test-ts-<mode>-shards/shard-N.wall`. The parent reports
 that, falling back to the reap-time measurement only when a killed shard wrote none. The bats test
 `unit shard wall time is each shard's own duration, not its reap time (#10583)` covers it.
 

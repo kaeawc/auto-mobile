@@ -35,6 +35,11 @@ simulator with `xcrun simctl spawn <udid> <absolute-probe-path>`. Build and ad-h
   display can segfault.
 - Unavailable selectors fail on stderr with a nonzero exit; no wireless0 is a successful
   `found: false`.
+- It arms `alarm(10)` on start. The host's 15 s timeout kills `xcrun`, which does not
+  necessarily end the process spawned inside the simulator; the alarm bounds it either way.
+- `scripts/ios/swift-build.sh` builds it in the macOS Swift CI job when the iphonesimulator SDK is
+  27 or later. A unit test checks that both JSON branches in `probe.m` carry exactly the schema's
+  keys. Running it needs a booted simulator, so CI does not execute it.
 
 Output is one JSON line: `found`, nullable `tag`, `displayId`, `displayType`, `identity`, and
 boolean `isCarDisplay` / `isCarInstrumentsDisplay`. Missing displays have null metadata and false

@@ -86,16 +86,16 @@ The implementation needs fakes for both seams:
 
 Run `scripts/ios/put-app-file-picker-smoke.sh [simulator-udid]` for the
 device-backed proof. On 2026-08-28 it passed on an iPhone 15 Pro simulator
-running iOS 17.5 with Xcode 26.3 (build 17C529): the picker identified the
+running iOS 17.5 with Xcode 26.3 (build 17C529). The picker identified the
 source as `com.apple.FileProvider.LocalStorage`, displayed the bounded fixture,
 and returned `automobile-files-probe.txt` after selection.
 
 ## Evidence
 
 Apple documents that the document picker accesses files outside an app's
-sandbox, that its `directoryURL` selects the initial location, and that enabling
-both File Sharing and open-in-place makes an app's Documents directory appear in
-Files. The `simctl` help on the tested Xcode exposes `get_app_container` and
+sandbox and that its `directoryURL` selects the initial location. It also
+documents that enabling both File Sharing and open-in-place makes an app's
+Documents directory appear in Files. The `simctl` help on the tested Xcode exposes `get_app_container` and
 media-only `addmedia`, but no command for Files-provider storage.
 
 - Apple: UIDocumentPickerViewController

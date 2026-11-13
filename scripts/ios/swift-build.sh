@@ -162,6 +162,23 @@ else
 fi
 echo ""
 
+# The CarPlay projection probe targets the iOS 27.0 simulator; build it whenever that SDK exists so
+# probe.m cannot rot unseen. Its JSON keys are checked against the TypeScript schema by unit tests.
+echo -e "${BLUE}Building CarPlay projection probe...${NC}"
+SIM_SDK_VERSION="$(xcrun --sdk iphonesimulator --show-sdk-version 2> /dev/null || true)"
+if [[ "${SIM_SDK_VERSION%%.*}" =~ ^[0-9]+$ ]] && (( ${SIM_SDK_VERSION%%.*} >= 27 )); then
+    if bash "${IOS_DIR}/carplay-projection-probe/build.sh" \
+        "${PROJECT_ROOT}/scratch/carplay-projection-probe-ci/carplay-projection-probe" 2>&1; then
+        print_status 0 "carplay-projection-probe built successfully"
+    else
+        print_status 1 "carplay-projection-probe build failed"
+        FAILED_PACKAGES+=("carplay-projection-probe")
+    fi
+else
+    print_info "Skipping carplay-projection-probe (needs iphonesimulator SDK 27+, found '${SIM_SDK_VERSION:-none}')"
+fi
+echo ""
+
 # Optional: sign XCTestRunner for iOS releases when credentials are available.
 if [[ "${IOS_SIGNING_ENABLED:-false}" == "true" ]]; then
     echo -e "${BLUE}Signing iOS frameworks for release builds...${NC}"

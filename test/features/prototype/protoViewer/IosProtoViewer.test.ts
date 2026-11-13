@@ -38,7 +38,14 @@ class Files implements IosProtoViewerFiles {
   async rename(from: string, to: string) {
     this.events.push(`rename:${from}:${to}`);
   }
+  report = "";
+  /** What the app writes on its next start, applied when it is foregrounded. */
+  reportAfterLaunch: string | undefined;
   async read(path: string) {
+    if (path.endsWith("/capabilities.json")) {
+      this.events.push(`read:${path}`);
+      return this.report;
+    }
     if (path.endsWith("/delivery")) {
       this.capabilityReads++;
       return this.capabilityReads <= this.capabilityPending ? "" : this.capability;
@@ -70,6 +77,10 @@ class Simctl implements IosProtoViewerSimctl {
   }
   async installed(_udid: string) {
     return this.present;
+  }
+  versionCode: number | undefined = 2;
+  async installedVersionCode(_udid: string) {
+    return this.versionCode;
   }
   async dataContainer(_udid: string) {
     return this.container;
@@ -307,4 +318,63 @@ test("iOS cancellation while polling removes the published command before its bu
   const removals = files.events.filter((event) => event.startsWith("remove:"));
   expect(removals[0]).toBe(`remove:${ROOT}/inbox/${REQUEST}.request`);
   expect(removals).toContain(`remove:${ROOT}/inbox/${REQUEST}.automobile-proto`);
+});
+
+const REPORT_PATH = `${ROOT}/capabilities.json`;
+const report = (versionCode: number, capabilities: string[], versionName = "1.2") =>
+  JSON.stringify({ versionCode, versionName, capabilities });
+test("iOS capabilities: a current report is returned without launching the app", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(2, ["a", "b"]);
+  const result = await viewer.capabilities({ timeoutMs: 1000 });
+  expect(result?.version).toBe("1.2");
+  expect([...(result?.capabilities ?? [])]).toEqual(["a", "b"]);
+  expect(files.events).toContain(`read:${REPORT_PATH}`);
+  expect(simctl.calls).toEqual([]);
+});
+test("iOS capabilities: a missing report means a build from before the handshake", async () => {
+  const { viewer, simctl } = setup();
+  expect(await viewer.capabilities({ timeoutMs: 1000 })).toBeUndefined();
+  expect(simctl.calls).toEqual([]);
+});
+test("iOS capabilities: a stale report foregrounds the app and reads the rewrite", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(1, ["old"]);
+  simctl.onLaunch = () => {
+    files.report = report(2, ["old", "new"]);
+  };
+  const result = await viewer.capabilities({ timeoutMs: 1000 });
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+  expect(result?.capabilities.has("new")).toBe(true);
+});
+test("iOS capabilities: a report the app never refreshes is unknown, not trusted", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(1, ["old"]);
+  expect(await viewer.capabilities({ timeoutMs: 1000 })).toBeUndefined();
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+});
+test("iOS capabilities: a refresh request foregrounds even when the report matches", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(2, ["a"]);
+  await viewer.capabilities({ timeoutMs: 1000, refresh: true });
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+});
+test("iOS capabilities: an unreadable report and an unknown installed version", async () => {
+  const bad = setup();
+  bad.files.report = "not json";
+  expect(await bad.viewer.capabilities({ timeoutMs: 1000 })).toBeUndefined();
+  const unknown = setup();
+  unknown.simctl.versionCode = undefined;
+  unknown.files.report = report(7, ["a"]);
+  expect((await unknown.viewer.capabilities({ timeoutMs: 1000 }))?.capabilities.has("a")).toBe(
+    true,
+  );
+  expect(unknown.simctl.calls).toEqual([]);
+});
+test("iOS capabilities: an unresolved container is a storage error", async () => {
+  const { viewer, simctl } = setup();
+  simctl.container = "";
+  await expect(viewer.capabilities({ timeoutMs: 1000 })).rejects.toBeInstanceOf(
+    ProtoViewerStorageError,
+  );
 });

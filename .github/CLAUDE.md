@@ -12,6 +12,7 @@ PR check does not fail:
 | XML resources                              | `scripts/all_fast_validate_checks.sh --only xml`                          |
 | Shell scripts under `scripts/`             | `scripts/all_fast_validate_checks.sh --only shellcheck` (or `shellcheck`) |
 | MkDocs nav / docs structure                | `scripts/all_fast_validate_checks.sh --only mkdocs-nav`                   |
+| Docs prose under `docs/`                   | `scripts/all_fast_validate_checks.sh --group docs`                        |
 | Kotlin sources                             | `scripts/all_fast_validate_checks.sh --only ktfmt`                        |
 
 Run the whole suite at once with `scripts/all_fast_validate_checks.sh` (it mirrors

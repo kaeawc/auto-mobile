@@ -10,8 +10,13 @@ hierarchy, tap and screenshot operations; these are its capabilities and limits.
 - The Smart Stack widget driver (`scripts/watch/addSmartStackWidget.ts`) uses a calibrated gallery
   position (steps from the bottom, default one) and the first widget preview. App and widget
   display names verify the resulting cell identifier. When the face leaves both name fields
-  empty, a cell verifies only as the one cell added since that attempt's header dump (every
-  earlier cell id still present, the count up by exactly one) whose labels hold the app name.
+  empty, a cell verifies when its host bundle id and widget kind equal `hostBundleId` and
+  `widgetKind` (`--host-bundle-id`, `--widget-kind`, given together), or otherwise only as the
+  one cell added since that attempt's header dump (every earlier cell id still present, the count
+  up by exactly one) whose labels hold the app name.
+- Before each edit the header dump is checked: a cell that already matches (or, on a retry, the
+  one nameless cell added since the first attempt's header dump) returns success with
+  `alreadyPresent: true` and adds nothing, so a retry after a missed readback adds no duplicate.
 - Home is lossy and non-idempotent, so opening the stack allows three home/swipe-up rounds. Each
   round polls twice after its first swipe; if the header and Edit button are not visible, it
   sends up to three more swipes, polling twice after each.

@@ -477,3 +477,47 @@ test("captured Switch stays unlabelled when no text precedes it (#17955)", async
   expect(row).toBeDefined();
   expect(row).not.toHaveProperty("label");
 });
+
+const SHARED_SWITCH_ID = "dev.jasonpearson.xrpanel:id/switch";
+
+/** Repeat the captured title + Switch pair beside the original; both Switches take one resource id. */
+function repeatTitledSwitch(observation: ObserveResult): void {
+  const shift = (node: unknown): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const bounds = (node as { bounds?: { left: number; right: number } }).bounds;
+    if (bounds) {
+      bounds.left += 600;
+      bounds.right += 600;
+    }
+    Object.values(node).forEach(shift);
+  };
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const children = Array.isArray(record.node) ? (record.node as Record<string, unknown>[]) : [];
+    const at = children.findIndex((child) => child.text === "XrPanel title");
+    if (at >= 0) {
+      children[at + 1]["resource-id"] = SHARED_SWITCH_ID;
+      const pair = structuredClone(children.slice(at, at + 2));
+      shift(pair);
+      children.splice(at + 2, 0, ...pair);
+      return;
+    }
+    Object.values(record).forEach(visit);
+  };
+  // The capture serializes the panel twice (merged tree and its window); repeat it in both.
+  visit(observation.viewHierarchy);
+}
+
+test("two captured Switches sharing an id keep their sibling labels and indexes (#17955)", async () => {
+  const output = await switchScrollSkeleton(repeatTitledSwitch);
+  const rows = output.skeleton!.filter((row) => row.elementId === SHARED_SWITCH_ID);
+  expect(rows.map(({ label, index, bounds }) => ({ label, index, bounds }))).toEqual([
+    { label: "XrPanel title", index: 0, bounds: [32, 65, 136, 161] },
+    { label: "XrPanel title", index: 1, bounds: [632, 65, 736, 161] },
+  ]);
+});

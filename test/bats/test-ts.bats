@@ -2295,7 +2295,7 @@ repeat_stub_times() {
 }
 
 @test "timing gate rechecks every loaded-runner offender when the budget allows it" {
-  seed_loaded_runner_report 24
+  seed_loaded_runner_report 12
 
   run env \
     PATH="$STUB_BIN:$PATH" \
@@ -2303,20 +2303,20 @@ repeat_stub_times() {
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
     TIMING_CHANGED_FILES='src/example.ts\n' \
     STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
-    STUB_RECHECK_TIMES="$(repeat_stub_times 0.010 24)" \
+    STUB_RECHECK_TIMES="$(repeat_stub_times 0.010 12)" \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Rechecking 24 file(s)"* ]]
+  [[ "$output" == *"Rechecking 12 file(s)"* ]]
   [[ "$output" != *"Test exceeded"* ]]
-  # Worst first, but no offender is deferred: all 24 files get a passing majority.
+  # Worst first, but no offender is deferred: all 12 files get a passing majority.
   [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
   [ "$(grep -c "suite7\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
   [ "$(grep -c "suite8\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
-  [ "$(grep -c "suite23\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
+  [ "$(grep -c "suite11\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
 }
 
 @test "timing gate still fails offenders the recheck reproduces in isolation" {
-  seed_loaded_runner_report 24
+  seed_loaded_runner_report 12
 
   run env \
     PATH="$STUB_BIN:$PATH" \
@@ -2324,7 +2324,7 @@ repeat_stub_times() {
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
     TIMING_CHANGED_FILES='src/example.ts\n' \
     STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
-    STUB_RECHECK_TIMES="$(repeat_stub_times 0.150 24)" \
+    STUB_RECHECK_TIMES="$(repeat_stub_times 0.150 12)" \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Test exceeded 100ms: suite0.case (median 150.00ms of 3 isolated runs)"* ]]

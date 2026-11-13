@@ -357,7 +357,7 @@ export class TapAnyElement extends BaseVisualChange {
     options: TapAnyElementOptions,
     viewHierarchy: ViewHierarchyResult,
     sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
-  ): { element: Element | null; containerFound: boolean } {
+  ): ReturnType<typeof findTapAnyClickableElement> {
     return findTapAnyClickableElement(
       {
         xr: this.selectionXr.get(options),
@@ -481,6 +481,7 @@ export class TapAnyElement extends BaseVisualChange {
     let requestCount = 0;
     let changeCount = 0;
     let element: Element | null = null;
+    let container = options.container;
     const polled = await pollSearchUntil({
       timer: this.timer,
       startTime,
@@ -516,6 +517,7 @@ export class TapAnyElement extends BaseVisualChange {
           display: observeResult.viewHierarchy,
         });
         element = found.element;
+        container = found.container;
         containerFoundEver = containerFoundEver || found.containerFound;
         return element !== null;
       },
@@ -526,7 +528,7 @@ export class TapAnyElement extends BaseVisualChange {
       throwMissingTapAnyElement(options, containerFoundEver);
     }
 
-    return { element, selectedCapture, startTime, requestCount, changeCount };
+    return { element, container, selectedCapture, startTime, requestCount, changeCount };
   }
 
   private async tapObservedElement({
@@ -598,20 +600,22 @@ export class TapAnyElement extends BaseVisualChange {
       display: observeResult.viewHierarchy,
     });
     let element = found.element;
+    let container = found.container;
     const containerFoundEver = found.containerFound;
 
     if (!element) {
-      ({ element, selectedCapture, requestCount, changeCount } = await this.pollClickableTarget({
-        options,
-        observeResult,
-        refresh,
-        signal,
-        selectedCapture,
-        searchDurationMs,
-        startTime,
-        lastHash,
-        containerFoundEver,
-      }));
+      ({ element, container, selectedCapture, requestCount, changeCount } =
+        await this.pollClickableTarget({
+          options,
+          observeResult,
+          refresh,
+          signal,
+          selectedCapture,
+          searchDurationMs,
+          startTime,
+          lastHash,
+          containerFoundEver,
+        }));
     }
     const cachedRefresh = await this.refreshCachedHierarchy(
       viewHierarchy,
@@ -638,23 +642,26 @@ export class TapAnyElement extends BaseVisualChange {
         display: viewHierarchy,
       });
       element = current.element;
+      container = current.container;
       if (!element) {
         // Start the same search window as a cache miss, from the fresh tree.
-        ({ element, selectedCapture, requestCount, changeCount } = await this.pollClickableTarget({
-          options,
-          observeResult,
-          refresh,
-          signal,
-          selectedCapture,
-          searchDurationMs,
-          startTime,
-          lastHash: hierarchyFingerprint(viewHierarchy),
-          containerFoundEver: current.containerFound,
-        }));
+        ({ element, container, selectedCapture, requestCount, changeCount } =
+          await this.pollClickableTarget({
+            options,
+            observeResult,
+            refresh,
+            signal,
+            selectedCapture,
+            searchDurationMs,
+            startTime,
+            lastHash: hierarchyFingerprint(viewHierarchy),
+            containerFoundEver: current.containerFound,
+          }));
       }
     }
     const target = capturedTapAnyTarget(options, observeResult, {
       element,
+      container,
       capture: selectedCapture,
       talkBackState,
     });

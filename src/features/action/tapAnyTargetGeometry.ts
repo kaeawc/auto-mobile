@@ -43,7 +43,7 @@ export function findTapAnyClickableElement(
   options: TapAnyElementOptions,
   viewHierarchy: ViewHierarchyResult,
   sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
-): { element: Element | null; containerFound: boolean } {
+): { element: Element | null; containerFound: boolean; container?: ElementContainerSelector } {
   viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
   if (context.xr) {
     viewHierarchy = xrTapAnyHierarchy(viewHierarchy, options);
@@ -80,7 +80,8 @@ export function findTapAnyClickableElement(
         : null)
     );
   };
-  let element = select(options.container);
+  let container = options.container;
+  let element = select(container);
   if (!element && context.xr) {
     // A two-pane heading can match before the actionable row carrying the same text (#17915).
     // Keep the first scope's behavior, then try the remaining scopes in XR reading order.
@@ -91,14 +92,15 @@ export function findTapAnyClickableElement(
     )) {
       element = select(alternative);
       if (element) {
+        container = alternative;
         break;
       }
     }
   }
   if (element && !hasVisibleScreenPart(element.bounds, effectiveScreenSize)) {
-    return { element: null, containerFound };
+    return { element: null, containerFound, container };
   }
-  return { element, containerFound };
+  return { element, containerFound, container };
 }
 
 function xrTextContainerAlternatives(

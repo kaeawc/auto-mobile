@@ -22,14 +22,13 @@ import {
 export function capturedTapAnyTarget(
   options: TapAnyElementOptions,
   observeResult: ObserveResult,
-  picked: Pick<CapturedTapTarget, "element" | "capture" | "talkBackState">,
+  picked: Pick<CapturedTapTarget, "element" | "capture" | "talkBackState" | "container">,
 ): CapturedTapTarget {
   return {
     ...picked,
     observationDisplay: observeResult.viewHierarchy,
     observationScreenSize: observeResult.screenSize,
     scoped: isStrictlyScoped(options),
-    container: options.container,
     layer: options.layer,
   };
 }

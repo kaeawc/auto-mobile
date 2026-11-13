@@ -633,6 +633,7 @@ describe("toSkeleton — acceptance criteria", () => {
         scrollable: "true",
         checkable: "true",
         "range-info": "current:0.5,min:0,max:1",
+        actions: ["scroll_forward"],
       };
       const skeleton = toSkeleton(makeElements({ clickable: [kitchenSink] }));
       expect(skeleton[0].affordances).toEqual([

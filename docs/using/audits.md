@@ -62,9 +62,3 @@ matched. When the app rendered no frames during the check (an idle screen), the 
 percentiles `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why; frame time is then
 not checked and does not fail the call. For raw captures use `performanceTrace`,
 `captureTrace`, `measureStartup` or `heapDump`.
-
-## audit (deprecated)
-
-`audit` still returns the same results: `kinds: ["accessibility"]` matches `accessibilityAudit`
-with engine `wcag` (nested under `accessibility`), and `kinds: ["performance", "memory"]` matches
-`performanceAudit`. It will be removed; move plans to the two tools above.

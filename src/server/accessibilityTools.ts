@@ -27,7 +27,6 @@ import type { ScreenReaderToggleOptions, TalkBackResult } from "../models/Access
 import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
 import { runSessionScreenReaderMutation } from "./sessionScreenReader";
 import { createAccessibilityAuditTool } from "./accessibilityAuditTool";
-import { createAuditTool } from "./auditTool";
 import { createPerformanceAuditTool } from "./performanceAuditTool";
 
 // `defineDeviceTool` applies `.strict()` and device targeting; the handler args below
@@ -285,6 +284,5 @@ export const accessibilitySchema = createAccessibilityTool(defaultDaemonContext)
 export function registerAccessibilityTools(daemon: SessionManagerSource = defaultDaemonContext) {
   createAccessibilityTool(daemon).register();
   createAccessibilityAuditTool().register();
-  createAuditTool().register();
   createPerformanceAuditTool().register();
 }

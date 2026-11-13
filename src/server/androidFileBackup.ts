@@ -60,3 +60,50 @@ export function androidRollbackScript(created: string[], restores: string[]): st
     ...restores,
   ]);
 }
+
+/**
+ * Prints `<marker>:<index>:<bytes>` for each destination that exists as a regular file and
+ * `<marker>:<index>:absent` for one that does not. A destination whose size cannot be read prints
+ * nothing, so its size stays unknown. Always exits 0: the output alone carries the answer.
+ */
+export function androidExistingSizesScript(
+  destinations: readonly string[],
+  marker: string,
+): string {
+  const steps = destinations.map((destination, index) => {
+    const quoted = shellQuote(destination);
+    return (
+      `if [ -f ${quoted} ]; then s=$(stat -c %s ${quoted} 2>/dev/null) && ` +
+      `echo "${marker}:${index}:$s"; else echo "${marker}:${index}:absent"; fi`
+    );
+  });
+  return `${steps.join("; ")}; exit 0`;
+}
+
+/**
+ * Sizes from {@link androidExistingSizesScript} output, one entry per destination: the byte count,
+ * 0 for an absent destination (nothing to copy), or `undefined` when the size is unknown.
+ */
+export function parseExistingSizes(
+  stdout: string,
+  count: number,
+  marker: string,
+): Array<number | undefined> {
+  const sizes = new Array<number | undefined>(count).fill(undefined);
+  for (const line of stdout.split(/\r?\n/)) {
+    const parts = line.trim().split(":");
+    if (parts.length !== 3 || parts[0] !== marker) {
+      continue;
+    }
+    const index = Number(parts[1]);
+    if (!Number.isInteger(index) || index < 0 || index >= count) {
+      continue;
+    }
+    const value = parts[2] ?? "";
+    const bytes = value === "absent" ? 0 : /^\d+$/.test(value) ? Number(value) : undefined;
+    if (bytes !== undefined && Number.isSafeInteger(bytes)) {
+      sizes[index] = bytes;
+    }
+  }
+  return sizes;
+}

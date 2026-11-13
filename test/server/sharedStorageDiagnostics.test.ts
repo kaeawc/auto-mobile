@@ -21,12 +21,14 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 const DESTINATION = "/storage/emulated/0/Download/fixtures/photo.png";
-const fileSystem: SharedStorageFileSystem = {
-  stat: async () => ({ size: 42, isFile: () => true }),
-  mkdtemp: async () => "/fake/unused",
-  writeFileBuffer: async () => {},
-  rm: async () => {},
-};
+function fileSystemOfSize(size: number): SharedStorageFileSystem {
+  return {
+    stat: async () => ({ size, isFile: () => true }),
+    mkdtemp: async () => "/fake/unused",
+    writeFileBuffer: async () => {},
+    rm: async () => {},
+  };
+}
 
 function result(stdout: string): ExecResult {
   return {
@@ -38,14 +40,21 @@ function result(stdout: string): ExecResult {
   };
 }
 
-function setup() {
+const EXISTING_SIZE_MARKER = "AUTOMOBILE_SHARED_STORAGE_EXISTING_SIZE";
+
+/** `existingBytes` is what the device reports for the destination; `null` reports nothing. */
+function setup(sourceBytes = 42, existingBytes: number | null = 42) {
   const adb = new FakeAdbExecutor();
   const timer = new FakeTimer();
   const diagnostics = new FakeSharedStorageDiagnostics();
   adb.setCommandResponse("content query", result("Row: 0 _id=42"));
+  adb.setCommandResponse(
+    EXISTING_SIZE_MARKER,
+    result(existingBytes === null ? "" : `${EXISTING_SIZE_MARKER}:0:${existingBytes}`),
+  );
   const service = createSharedStorageServiceForTesting({
     adbFactory: { create: () => adb },
-    fileSystem,
+    fileSystem: fileSystemOfSize(sourceBytes),
     timer,
     diagnostics,
     idGenerator: new CountingIdGenerator("staging"),
@@ -85,6 +94,164 @@ function capturedError(operation: Promise<unknown>): Promise<ActionableError> {
   );
 }
 
+const MIB = 1024 * 1024;
+
+describe("size-scaled shared-storage transfer budgets (#18328)", () => {
+  test("push budget is proportional to size between the floor and the ceiling", () => {
+    const rate = budgets.SHARED_STORAGE_MIN_TRANSFER_BYTES_PER_SECOND;
+    expect(budgets.sharedStoragePushTimeoutMs(0)).toBe(
+      budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
+    );
+    expect(budgets.sharedStoragePushTimeoutMs(Number.NaN)).toBe(
+      budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
+    );
+    expect(budgets.sharedStoragePushTimeoutMs(200 * rate)).toBe(
+      budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS,
+    );
+    const largeMs = budgets.sharedStoragePushTimeoutMs(100 * rate);
+    expect(largeMs).toBe(100_000);
+    expect(budgets.sharedStoragePushTimeoutMs(50 * rate) * 2).toBe(largeMs);
+    expect(budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS).toBeLessThanOrEqual(
+      budgets.APP_FILE_PUSH_TIMEOUT_MS,
+    );
+  });
+
+  test("backup budget scales with the existing bytes and caps at one ceiling per file", () => {
+    const rate = budgets.SHARED_STORAGE_MIN_TRANSFER_BYTES_PER_SECOND;
+    const ceiling = budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS;
+    const floor = budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS;
+    expect(budgets.sharedStorageBackupTimeoutMs([])).toBe(floor);
+    expect(budgets.sharedStorageBackupTimeoutMs([0, 0])).toBe(floor);
+    expect(budgets.sharedStorageBackupTimeoutMs([40 * rate, 60 * rate])).toBe(100_000);
+    expect(budgets.sharedStorageBackupTimeoutMs([1_000 * rate])).toBe(ceiling);
+    expect(budgets.sharedStorageBackupTimeoutMs([1_000 * rate, 1_000 * rate])).toBe(2 * ceiling);
+    // An unknown existing size gets the conservative per-file ceiling, never the floor.
+    expect(budgets.sharedStorageBackupTimeoutMs([undefined])).toBe(ceiling);
+    expect(budgets.sharedStorageBackupTimeoutMs([undefined, 0])).toBe(ceiling);
+    expect(budgets.sharedStorageBackupTimeoutMs([undefined, 10 * rate])).toBe(ceiling + 10_000);
+    expect(budgets.sharedStorageBackupTimeoutMs([undefined, undefined])).toBe(2 * ceiling);
+  });
+
+  test("a large file's push gets a proportionally larger budget and survives past the floor", async () => {
+    const bytes = 400 * MIB;
+    const expectedMs = (bytes / budgets.SHARED_STORAGE_MIN_TRANSFER_BYTES_PER_SECOND) * 1000;
+    expect(expectedMs).toBeGreaterThan(budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS);
+    const { adb, timer, stage } = setup(bytes);
+    const execute = adb.executeCommand.bind(adb);
+    let pushTimeout: number | undefined;
+    let finishPush: (() => void) | undefined;
+    spyOn(adb, "executeCommand").mockImplementation((value, options) => {
+      if (value.includes("push ")) {
+        pushTimeout = options?.timeoutMs;
+        return new Promise<ExecResult>((resolve) => {
+          finishPush = () => resolve(result("1 file pushed"));
+        });
+      }
+      return execute(value, options);
+    });
+    const staging = stage();
+    await drainUntil(() => finishPush !== undefined, { description: "large push" });
+    expect(pushTimeout).toBe(expectedMs);
+    // A healthy slow transfer outlives the floor that would have failed it.
+    timer.advanceTime(expectedMs - 1);
+    await drainMicrotasks(50);
+    finishPush?.();
+    const staged = await staging;
+    expect(staged.files[0]?.byteCount).toBe(bytes);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  /** Captures the backup command's budget; the backup stays pending until `finish` is called. */
+  function holdBackup(adb: FakeAdbExecutor) {
+    const execute = adb.executeCommand.bind(adb);
+    const backup: { timeoutMs?: number; signal?: AbortSignal; finish?: () => void } = {};
+    spyOn(adb, "executeCommand").mockImplementation((value, options) => {
+      if (value.includes("AUTOMOBILE_SHARED_STORAGE_BACKUP")) {
+        backup.timeoutMs = options?.timeoutMs;
+        backup.signal = options?.signal;
+        return new Promise<ExecResult>((resolve) => {
+          backup.finish = () => resolve(result("AUTOMOBILE_SHARED_STORAGE_BACKUP:0"));
+        });
+      }
+      return execute(value, options);
+    });
+    return backup;
+  }
+
+  test("a small replacement over a large existing file sizes the backup from the existing file", async () => {
+    const existingBytes = 400 * MIB;
+    const expectedMs =
+      (existingBytes / budgets.SHARED_STORAGE_MIN_TRANSFER_BYTES_PER_SECOND) * 1000;
+    const { adb, timer, stage } = setup(42, existingBytes);
+    const backup = holdBackup(adb);
+    const staging = stage({ rollbackOnFailure: true });
+    await drainUntil(() => backup.finish !== undefined, { description: "backup command" });
+    expect(backup.timeoutMs).toBe(expectedMs);
+    // A healthy 60 s copy of the large existing file outlives the floor the 42-byte input implies.
+    timer.advanceTime(60_000);
+    await drainMicrotasks(50);
+    expect(backup.signal?.aborted).toBe(false);
+    backup.finish?.();
+    const staged = await staging;
+    expect(staged.files[0]?.byteCount).toBe(42);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("an unknown existing size gets the per-file backup ceiling", async () => {
+    const { adb, stage } = setup(42, null);
+    const backup = holdBackup(adb);
+    const staging = stage({ rollbackOnFailure: true });
+    await drainUntil(() => backup.finish !== undefined, { description: "backup command" });
+    expect(backup.timeoutMs).toBe(budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS);
+    backup.finish?.();
+    await staging;
+  });
+
+  test("a failed existing-size probe gets the per-file backup ceiling", async () => {
+    const { adb, stage } = setup(42);
+    adb.setCommandError(EXISTING_SIZE_MARKER, new Error("device offline"));
+    spyOn(logger, "warn").mockImplementation(() => {});
+    const backup = holdBackup(adb);
+    const staging = stage({ rollbackOnFailure: true });
+    await drainUntil(() => backup.finish !== undefined, { description: "backup command" });
+    expect(backup.timeoutMs).toBe(budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS);
+    backup.finish?.();
+    await staging;
+  });
+
+  test("a small stalled push still fails at the floor with stage diagnostics", async () => {
+    const { adb, timer, diagnostics, stage } = setup(42);
+    const execute = adb.executeCommand.bind(adb);
+    let pushSignal: AbortSignal | undefined;
+    spyOn(adb, "executeCommand").mockImplementation((value, options) => {
+      if (value.includes("push ")) {
+        pushSignal = options?.signal;
+        return settlesOnAbort(options?.signal);
+      }
+      return execute(value, options);
+    });
+    let settled = false;
+    const failure = capturedError(stage()).finally(() => {
+      settled = true;
+    });
+    await drainUntil(() => pushSignal !== undefined, { description: "stalled push" });
+    timer.advanceTime(budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS - 1);
+    await drainMicrotasks(50);
+    expect(settled).toBe(false);
+    expect(pushSignal?.aborted).toBe(false);
+    timer.advanceTime(1);
+    const error = await failure;
+    const floor = budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS;
+    expect(error.message).toContain(`stage=push`);
+    expect(error.message).toContain(`timeout=${floor}ms; elapsed=${floor}ms`);
+    expect(error.message).toContain("Shared-storage push timed out");
+    expect(error.message).toContain(`Device state:\n${diagnostics.state}`);
+    expect(pushSignal?.aborted).toBe(true);
+    expect(adb.getExecutedCommands().at(-1)).toContain("shell rm -f");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+});
+
 describe("shared-storage stage failures", () => {
   const stages = [
     {
@@ -94,7 +261,7 @@ describe("shared-storage stage failures", () => {
       options: { reset: true },
     },
     { stage: "mkdir", match: "shell mkdir -p", timeout: budgets.SHARED_STORAGE_MKDIR_TIMEOUT_MS },
-    { stage: "push", match: "push ", timeout: budgets.SHARED_STORAGE_PUSH_TIMEOUT_MS },
+    { stage: "push", match: "push ", timeout: budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS },
     { stage: "commit", match: "shell mv -f", timeout: budgets.SHARED_STORAGE_COMMIT_TIMEOUT_MS },
     {
       stage: "media-scan",
@@ -109,7 +276,7 @@ describe("shared-storage stage failures", () => {
     {
       stage: "backup",
       match: "AUTOMOBILE_SHARED_STORAGE_BACKUP",
-      timeout: budgets.SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+      timeout: budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
       options: { rollbackOnFailure: true },
     },
   ];
@@ -177,7 +344,7 @@ describe("shared-storage stage failures", () => {
       settled = true;
     });
     await drainUntil(() => terminate !== undefined, { description: "push command" });
-    timer.advanceTime(budgets.SHARED_STORAGE_PUSH_TIMEOUT_MS);
+    timer.advanceTime(budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS);
     await drainMicrotasks(200);
     expect(pushSignal?.aborted).toBe(true);
     expect(cleanupStarted()).toBe(false);
@@ -189,7 +356,7 @@ describe("shared-storage stage failures", () => {
     const error = await failure;
     expect(error.message).toContain("stage=push");
     expect(error.message).toContain(
-      `elapsed=${budgets.SHARED_STORAGE_PUSH_TIMEOUT_MS}ms: Shared-storage push timed out`,
+      `elapsed=${budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS}ms: Shared-storage push timed out`,
     );
     expect(cleanupStarted()).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -212,7 +379,7 @@ describe("shared-storage stage failures", () => {
         budgets.SHARED_STORAGE_DIAGNOSTICS_TOTAL_TIMEOUT_MS,
       );
       expect(timer.now()).toBe(
-        budgets.SHARED_STORAGE_PUSH_TIMEOUT_MS +
+        budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS +
           budgets.SHARED_STORAGE_DIAGNOSTICS_TOTAL_TIMEOUT_MS,
       );
       expect(adb.getExecutedCommands().at(-1)).toContain("shell rm -f");

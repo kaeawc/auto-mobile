@@ -1,3 +1,4 @@
+import { SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS } from "../../src/features/storage/fileTransferTimeout";
 import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -549,7 +550,7 @@ describe("SharedStorageService", () => {
         .getCommandCalls()
         .filter((call) => call.command.startsWith("push "))
         .map((call) => call.timeoutMs),
-    ).toEqual([90_000, 90_000]);
+    ).toEqual([SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS, SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS]);
     expect(
       commands.some(
         (command) =>

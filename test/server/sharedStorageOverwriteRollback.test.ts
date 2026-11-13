@@ -1,6 +1,6 @@
 import {
-  SHARED_STORAGE_BACKUP_TIMEOUT_MS,
   SHARED_STORAGE_COMMIT_TIMEOUT_MS,
+  SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
 } from "../../src/features/storage/fileTransferTimeout";
 import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { logger } from "../../src/utils/logger";
@@ -26,6 +26,13 @@ const androidDevice: BootedDevice = {
 };
 const DIR = "/storage/emulated/0/Download/ns";
 const MARKER = "AUTOMOBILE_SHARED_STORAGE_BACKUP";
+const SIZE_MARKER = "AUTOMOBILE_SHARED_STORAGE_EXISTING_SIZE";
+/** What the existing-size probe reports for a 64-file chunk: 3 bytes for existing, else absent. */
+const sizeProbeOutput = (existingIndexes: number[]) =>
+  Array.from(
+    { length: 64 },
+    (_, index) => `${SIZE_MARKER}:${index}:${existingIndexes.includes(index) ? 3 : "absent"}\n`,
+  ).join("");
 const SCAN = "am broadcast --user 0 -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d";
 
 function execResult(stdout: string) {
@@ -53,6 +60,7 @@ function setup(existingIndexes: number[] = []) {
   const executor = new FakeAdbExecutor();
   const timer = new FakeTimer();
   executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+  executor.setCommandResponse(SIZE_MARKER, execResult(sizeProbeOutput(existingIndexes)));
   if (existingIndexes.length > 0) {
     executor.setCommandResponse(
       MARKER,
@@ -344,7 +352,7 @@ describe("sharedStorageService rollback of overwritten files", () => {
       return executor.getExecutedCommands();
     }
 
-    test("a multi-file batch adds only the probe to the previous commands", async () => {
+    test("a multi-file batch adds only the size and backup probes to the previous commands", async () => {
       const files = [fileAt("first.png"), fileAt("second.png")];
       const before = await commandsFor({ files, rollbackOnFailure: false });
       const after = await commandsFor({ files });
@@ -352,21 +360,27 @@ describe("sharedStorageService rollback of overwritten files", () => {
       // Temp names draw ids after the backup plan, so only the id differs between the runs.
       const sameIds = (commands: string[]) =>
         commands.map((command) => command.replace(/\.automobile-t-\d+\.part/g, ".part"));
-      const withoutProbe = after.filter((command) => !command.includes(MARKER));
+      const withoutProbe = after.filter(
+        (command) => !command.includes(MARKER) && !command.includes(SIZE_MARKER),
+      );
       expect(sameIds(withoutProbe)).toEqual(sameIds(before));
-      expect(after).toHaveLength(before.length + 1);
+      // The existing-size probe and the backup probe.
+      expect(after).toHaveLength(before.length + 2);
     });
 
-    test("a single-file batch adds only the probe to the previous commands", async () => {
+    test("a single-file batch adds only the size and backup probes to the previous commands", async () => {
       const files = [fileAt("only.png")];
       const before = await commandsFor({ files, rollbackOnFailure: false });
       const after = await commandsFor({ files });
 
       const sameIds = (commands: string[]) =>
         commands.map((command) => command.replace(/\.automobile-t-\d+\.part/g, ".part"));
-      const withoutProbe = after.filter((command) => !command.includes(MARKER));
+      const withoutProbe = after.filter(
+        (command) => !command.includes(MARKER) && !command.includes(SIZE_MARKER),
+      );
       expect(sameIds(withoutProbe)).toEqual(sameIds(before));
-      expect(after).toHaveLength(before.length + 1);
+      // The existing-size probe and the backup probe.
+      expect(after).toHaveLength(before.length + 2);
     });
 
     test("a reset batch sends the previous commands", async () => {
@@ -428,23 +442,23 @@ describe("sharedStorageService rollback of overwritten files", () => {
         .filter((call) => call.command.includes(MARKER))
         .map((call) => call.timeoutMs);
 
-    test("caps a multi-file backup below the caller budget", async () => {
+    test("a small multi-file backup chunk gets the floor budget", async () => {
       const { executor, stage } = setup();
 
       await stage({ files: [fileAt("a.png"), fileAt("b.png")] });
 
-      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_BACKUP_TIMEOUT_MS]);
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS]);
     });
 
-    test("a single-file backup gets the explicit backup budget", async () => {
+    test("a small single-file backup gets the floor budget", async () => {
       const { executor, stage } = setup();
 
       await stage({ files: [fileAt("a.png")] });
 
-      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_BACKUP_TIMEOUT_MS]);
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS]);
     });
 
-    test("each chunk of 64 gets the bounded backup budget", async () => {
+    test("each chunk of 64 small files gets its own floor budget", async () => {
       const { executor, stage } = setup();
 
       await stage({
@@ -452,8 +466,8 @@ describe("sharedStorageService rollback of overwritten files", () => {
       });
 
       expect(probeTimeouts(executor)).toEqual([
-        SHARED_STORAGE_BACKUP_TIMEOUT_MS,
-        SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+        SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
+        SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
       ]);
     });
   });

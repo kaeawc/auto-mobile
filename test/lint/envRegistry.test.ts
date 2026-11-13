@@ -48,6 +48,8 @@ const NON_ENV_LITERALS: Readonly<Record<string, string>> = {
   AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY:
     "Marker echoed by the on-device app-file save shell script.",
   AUTOMOBILE_SHARED_STORAGE_BACKUP: "Marker echoed by the on-device shared-storage backup script.",
+  AUTOMOBILE_SHARED_STORAGE_EXISTING_SIZE:
+    "Marker echoed by the on-device shared-storage existing-size probe.",
 };
 
 function staticName(node: Expression): string | undefined {

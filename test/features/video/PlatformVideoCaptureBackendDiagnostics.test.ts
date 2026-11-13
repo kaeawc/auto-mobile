@@ -247,6 +247,9 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
     [false, 3232, undefined, 255, null],
     [true, 20000, 1499, 255, null],
     [true, 3232, undefined, null, "SIGKILL"],
+    // Over the size floor, but the recorder died before finalizing: no mvhd duration (#18257).
+    [true, 20000, undefined, 255, null],
+    [false, 20000, undefined, 255, null],
   ] as const)(
     "stop retains the short-video early-exit warning without logging twice (watcher %p, bytes %p, duration %p, code %p, signal %p)",
     async (waitForWatcher, bytes, duration, code, signal) => {
@@ -280,7 +283,8 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
   );
 
   test.each([
-    [10000, undefined],
+    // A finalized recording always has a verifiable duration (#18257).
+    [10000, 3000],
     [20000, 1500],
   ] as const)(
     "host exit 255 still stops, finalizes and pulls a surviving recorder (%p bytes, %p ms) without a quality warning",

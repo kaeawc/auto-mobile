@@ -233,6 +233,9 @@ export class TapPointPlanner {
     screenSize?: ObserveResult["screenSize"],
     options?: TapOnElementOptions,
   ): boolean {
+    if (selection.element && !hasTapArea(selection.element.bounds)) {
+      return true;
+    }
     if (!isUsableScreenSize(screenSize)) {
       return false;
     }
@@ -296,7 +299,7 @@ export class TapPointPlanner {
     screenSize?: ObserveResult["screenSize"],
   ): boolean {
     const target = selection.element ?? selection.matchedElement;
-    if (!target) {
+    if (!target || !hasTapArea(target.bounds)) {
       return false;
     }
     const matched = selection.matchedElement ?? target;
@@ -321,7 +324,7 @@ export class TapPointPlanner {
     } = {},
   ): ElementBounds | null {
     const target = tapTarget ?? selection.element;
-    if (!target?.bounds) {
+    if (!target || !hasTapArea(target.bounds)) {
       return null;
     }
     const matched = matchedTapElement(selection, target, options);

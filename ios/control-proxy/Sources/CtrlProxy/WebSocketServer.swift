@@ -35,8 +35,8 @@ enum GestureExecutionBound {
     static let responseReserveMs: Int64 = 500
 }
 
-/// Only request_swipe's wire deadline bounds gesture execution. Tap/drag/pinch can legitimately
-/// run long, so every other gesture's wire `timeoutMs` only gates whether it may START
+/// request_swipe and request_tap_coordinates wire deadlines bound gesture execution. Drag/pinch
+/// can legitimately run long, so every other gesture's wire `timeoutMs` only gates whether it may START
 /// (see `queuedCommandDisposition`); it never cuts a running gesture short. Read-only
 /// hierarchy queries get their own response bound (`XCUIQueryBound`, #10640).
 func gestureExecutionBoundMs(deadlineMs: Int64?, executionStartedAtMs: Int64) -> Int64? {
@@ -434,22 +434,29 @@ final class WebSocketServer: @unchecked Sendable {
         isConnectionOpen: @escaping @Sendable () -> Bool = { true }
     ) {
         // Network.framework delivers this call on the server queue, never the main actor.
-        // Inspect the envelope and swipe budget here; malformed requests still take the
+        // Inspect the envelope and gesture budget here; malformed requests still take the
         // normal queued decode/error path. Keep send outside the lock and task-chain.
         let receivedAtMs = monotonicNowMs()
         let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let type = envelope?["type"] as? String ?? "unknown"
         let requestId = envelope?["requestId"] as? String
-        // Decode only swipe's optional budget here so queue wait counts against the client's
+        // Decode tap/swipe's optional budget here so queue wait counts against the client's
         // transport timeout. The normal decode/error path still handles malformed requests.
-        let swipeTimeoutMs = type == "request_swipe"
-            ? (try? JSONDecoder().decode(RequestSwipe.self, from: data))?.timeoutMs : nil
-        let deadlineMs: Int64? = swipeTimeoutMs.map { timeout in
+        let timeoutMs: Int?
+        switch type {
+        case "request_swipe":
+            timeoutMs = (try? JSONDecoder().decode(RequestSwipe.self, from: data))?.timeoutMs
+        case "request_tap_coordinates":
+            timeoutMs = (try? JSONDecoder().decode(RequestTapCoordinates.self, from: data))?.timeoutMs
+        default:
+            timeoutMs = nil
+        }
+        let deadlineMs: Int64? = timeoutMs.map { timeout in
             let (deadline, overflow) = receivedAtMs.addingReportingOverflow(Int64(timeout))
             return overflow ? Int64.max : deadline
         }
         // Every other command may carry the host's wait budget too. It only decides whether the
-        // command may still start; swipe keeps its own handler-level deadline error (#10084).
+        // command may still start; tap/swipe keep their own handler-level deadline error (#10084).
         let startExpiryMs = deadlineMs == nil
             ? commandExpiryMs(timeoutMs: envelope?["timeoutMs"] as? Int64, receivedAtMs: receivedAtMs) : nil
         let decision = commandState.withLock { state -> CommandAdmissionDecision in
@@ -653,7 +660,7 @@ final class WebSocketServer: @unchecked Sendable {
         }
     }
 
-    /// A swipe's wire deadline wins; read-only hierarchy queries fall back to `XCUIQueryBound`.
+    /// A tap/swipe wire deadline wins; read-only hierarchy queries fall back to `XCUIQueryBound`.
     private func executionBound(
         _ request: WebSocketRequest, deadlineMs: Int64?, startExpiryMs: Int64?, executionStartedAtMs: Int64
     )

@@ -11,6 +11,7 @@
 #
 # Environment Variables:
 #   AUTOMOBILE_TEST_PLAN   Test plan file to use (default: Plans/add-reminder.yaml)
+#   AUTOMOBILE_DEVICE_ID   Simulator id for AutoMobileTestCase (default: the booted simulator)
 #
 # Prerequisites:
 #   - CtrlProxy iOS artifacts must be built (run ctrl-proxy-build-for-testing.sh)
@@ -87,6 +88,8 @@ echo -e "${BLUE}Running integration tests...${NC}"
 echo ""
 
 cd "${XCTESTRUNNER_DIR}"
+# AutoMobileTestCase requires a device id; a caller-provided one wins.
+export AUTOMOBILE_DEVICE_ID="${AUTOMOBILE_DEVICE_ID:-${AUTOMOBILE_DEVICE_UDID:-${BOOTED_DEVICE}}}"
 AUTOMOBILE_TEST_PLAN="${TEST_PLAN}" swift test --filter "${TEST_FILTER}"
 
 echo ""

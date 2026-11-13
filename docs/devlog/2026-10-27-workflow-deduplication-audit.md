@@ -65,7 +65,7 @@ original 12-of-16 near-identical count has not shrunk since it was written, but 
 are now the ones with real differences, not copy-paste drift.
 
 Step-level repetition across the workflows: 117 `actions/checkout`, 29 `oven-sh/setup-bun` (all at
-`bun-version: 1.4.4`, written out in 12 workflow files), and four action versions that have drifted
+`bun-version: 1.4.4`, written out in 12 workflow files). Four action versions have drifted
 from the rest: `actions/cache@v4` (2, against 16 `@v5`), `actions/upload-artifact@v4` (2, against 83
 `@v6`), `actions/setup-java@v4` (1, against 8 `@v5`).
 

@@ -15,9 +15,9 @@ Dependency: `micromark-extension-gfm-strikethrough`
 `scripts/docs/bannedPhrases.ts` parsed docs with `Bun.markdown` (md4c), which emits rendered text
 without source offsets. Each text leaf was mapped back to its line by a hand-written forward
 scanner that blanked link reference definitions and skipped inline link syntax. Every review round
-found more Markdown it misread: quotes inside a parenthesized link title, multi-line definitions,
-full reference-link labels and an escaped `>` in an angle-bracket destination (#18189), and
-definition span checks that went quadratic on 600 definition-like lines in a code block (#18191).
+found more Markdown it misread. It mishandled quotes inside a parenthesized link title, multi-line
+definitions, full reference-link labels and an escaped `>` in an angle-bracket destination (#18189).
+Its definition span checks that went quadratic on 600 definition-like lines in a code block (#18191).
 
 ## Options
 

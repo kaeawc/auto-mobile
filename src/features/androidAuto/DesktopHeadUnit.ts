@@ -45,8 +45,18 @@ export interface DesktopHeadUnitSession {
   stop(): Promise<void>;
 }
 
+/** Which DHU process a console writes to, and the config it started with. */
+export interface HeadUnitPanel {
+  /** Distinct for each DHU process this daemon started. */
+  instance: string;
+  configPath?: string;
+}
+
 /** The part of a DHU session an action may use: write console commands, never start or stop it. */
-export type DesktopHeadUnitConsole = Pick<DesktopHeadUnitSession, "sendCommand" | "isRunning">;
+export type DesktopHeadUnitConsole = Pick<DesktopHeadUnitSession, "sendCommand" | "isRunning"> & {
+  /** Absent when the caller cannot tell which DHU process this is. */
+  panel?: HeadUnitPanel;
+};
 
 export interface DhuLaunchOptions {
   binaryPath: string;

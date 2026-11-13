@@ -80,7 +80,8 @@ group_path="${GROUP//.//}"
 # extension and a .asc signature extension, then matches the base against the
 # known primary set. Anything whose base is not a known primary is `unexpected`
 # -- which catches both novel classifiers (a -tests.jar) and stray sidecars
-# (a .asc.asc).
+# (a .asc.asc). Sets $classifier rather than printing it, so the per-file
+# loop does not fork a command substitution for every staged file.
 classify_versioned() {
   local name="$1" art="$2" ver="$3"
   local prefix="$art-$ver"
@@ -121,21 +122,21 @@ classify_versioned() {
       "$variant_prefix-debug-sources.jar" | "$variant_prefix-release-sources.jar") kind=sources-jar ;;
     esac
   fi
-  if [ "$kind" = unexpected ]; then echo unexpected; return; fi
-  if [ -n "$sig" ] && [ -n "$checksum" ]; then echo signature-checksum; return; fi
-  if [ -n "$sig" ]; then echo signature; return; fi
-  if [ -n "$checksum" ]; then echo checksum; return; fi
-  echo "$kind"
+  if [ "$kind" = unexpected ]; then classifier=unexpected; return; fi
+  if [ -n "$sig" ] && [ -n "$checksum" ]; then classifier=signature-checksum; return; fi
+  if [ -n "$sig" ]; then classifier=signature; return; fi
+  if [ -n "$checksum" ]; then classifier=checksum; return; fi
+  classifier="$kind"
 }
 
 # classify_metadata <filename> -- maven-metadata.xml and its checksums, which sit
 # one level above the version directory.
 classify_metadata() {
   case "$1" in
-    maven-metadata.xml) echo maven-metadata ;;
+    maven-metadata.xml) classifier=maven-metadata ;;
     maven-metadata.xml.md5|maven-metadata.xml.sha1|maven-metadata.xml.sha256|maven-metadata.xml.sha512)
-      echo checksum ;;
-    *) echo unexpected ;;
+      classifier=checksum ;;
+    *) classifier=unexpected ;;
   esac
 }
 
@@ -174,19 +175,21 @@ while IFS= read -r path; do
     if [ "$tail" = "$sub" ]; then
       classifier="unexpected" # file directly under the group dir
     elif [ "${tail#*/}" = "$tail" ]; then
-      classifier="$(classify_metadata "$tail")" # artifact/<file>
+      classify_metadata "$tail" # artifact/<file>
     else
       ver="${tail%%/*}"
       file="${tail#*/}"
       if [ "${file#*/}" != "$file" ]; then
         classifier="unexpected" # deeper than artifact/version/file
       else
-        classifier="$(classify_versioned "$file" "$art" "$ver")"
+        classify_versioned "$file" "$art" "$ver"
       fi
     fi
   fi
 
-  bytes="$(wc -c <"$path" | tr -d ' ')"
+  # One fork per file: BSD wc pads the count with spaces, which the expansion strips.
+  bytes="$(wc -c <"$path")"
+  bytes="${bytes//[[:space:]]/}"
   # Tab-delimited so a stray unexpected filename containing spaces cannot shift
   # the bytes field in the awk aggregation below (Maven names never contain
   # spaces, but the tool must still count an unexpected file correctly).

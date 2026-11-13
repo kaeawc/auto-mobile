@@ -22,7 +22,7 @@ v2 split packages, which are the official successors published from the same rep
 - `@modelcontextprotocol/client` 2.3.1: `Client`, the Streamable HTTP and stdio client
   transports used by the daemon's loopback forwarder and the harness scripts.
 - `@modelcontextprotocol/node` 2.1.1: `NodeStreamableHTTPServerTransport`, the `node:http`
-  adapter for the daemon's internal loopback MCP endpoint. v2 moved the Node Streamable HTTP
+  adapter for the daemon's internal loopback MCP endpoint. The v2 SDK moved the Node Streamable HTTP
   server transport out of the server package; this is the official replacement for the v1
   `server/streamableHttp.js` import.
 
@@ -31,7 +31,7 @@ SDK was, so the published runtime graph (`scripts/release/runtime-graph.json`) i
 
 `zod-to-json-schema` moves from a transitive dependency of the v1 SDK to a direct
 devDependency at the same locked version (3.25.1). The v1 SDK's `toJsonSchemaCompat` used it
-to advertise the Zod 3 prototype spec schema; v2 removed that helper, and calling the
+to advertise the Zod 3 prototype spec schema. v2 removed that helper. Calling the
 converter directly with the same options keeps `schemas/tool-definitions.json` unchanged.
 
 ## Alternatives checked
@@ -45,12 +45,12 @@ converter directly with the same options keeps `schemas/tool-definitions.json` u
 
 ## Consequences
 
-- Wire output is unchanged. The v2 behaviour differences are bridged in code, each in one
-  place: `McpError` (`src/daemon/mcpError.ts`) keeps the v1 `MCP error <code>: ` message prefix
-  on errors this server throws; `createStdioServerTransport`
+- Wire output is unchanged. The code bridges the v2 behaviour differences, each in one
+  place. The `McpError` class (`src/daemon/mcpError.ts`) keeps the v1 `MCP error <code>: ` message prefix
+  on errors this server throws. The `createStdioServerTransport` function
   (`src/server/stdioServerTransport.ts`) keeps the stdio transport open across stdin EOF so
-  requests received before EOF are still answered (#11951, #12049), and reads stdin only while
-  started, as v1 did; `createSdkMcpServer` (`src/server/sdkMcpServer.ts`) bridges the rest:
+  requests received before EOF are still answered (#11951, #12049). It also reads stdin only
+  while started, as v1 did. The `createSdkMcpServer` function (`src/server/sdkMcpServer.ts`) bridges the rest:
   - it keeps v2 from advertising `prompts.listChanged`. `tools.listChanged` and
     `resources.listChanged` are advertised under both SDKs (v1's `registerTool` merged the
     tools bit in too), so the `initialize` capabilities are identical;
@@ -62,8 +62,8 @@ converter directly with the same options keeps `schemas/tool-definitions.json` u
     `error.name === "AbortError"` checks in `src/` still match.
 
   `test/server/sdkMcpServerV1Wire.test.ts` pins these frames server side. Two differences
-  remain and are intentional: JSON-RPC notification frames serialize their keys in a
-  different order (`jsonrpc` first), which no JSON consumer observes; and a transport close
+  remain and are intentional. JSON-RPC notification frames serialize their keys in a
+  different order (`jsonrpc` first), which no JSON consumer observes. A transport close
   aborts in-flight handlers after the server's `onclose` hooks run, where v1 aborted first.
 
 - The daemon's loopback client (`LoopbackMcpClient`) maps SDK v2 client errors back to the v1

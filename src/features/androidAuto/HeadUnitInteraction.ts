@@ -4,6 +4,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import type { DesktopHeadUnitConsole } from "./DesktopHeadUnit";
+import type { HeadUnitFence } from "./HeadUnitFence";
+import type { HeadUnitScreenshotSource } from "./HeadUnitScreenshotHash";
 
 /**
  * Actions on the projected head unit (#17842). The phone's accessibility tree, `activeWindow` and
@@ -49,7 +51,12 @@ export interface HeadUnitScreen {
 export type HeadUnitEffectBasis =
   | "carAppTemplates changed"
   | "carAppTemplates unchanged"
+  | "screenshot changed"
+  | "screenshot unchanged"
   | "no template data";
+
+/** What the before and after reads came from. */
+export type HeadUnitReadSource = "carAppTemplates" | "screenshot";
 
 export interface HeadUnitEffect {
   /** Absent when either read had no template data, so a change cannot be told either way. */
@@ -58,7 +65,7 @@ export interface HeadUnitEffect {
 }
 
 export interface HeadUnitIdle {
-  basis: "carAppTemplates" | "none";
+  basis: HeadUnitReadSource | "none";
   /** Two consecutive reads agreed, with no template loading, before the timeout. */
   stable: boolean;
   waitedMs: number;
@@ -196,15 +203,18 @@ export function headUnitRead(templates: CarAppProjectedTemplates): HeadUnitRead 
 export function deriveHeadUnitEffect(
   before: HeadUnitRead | undefined,
   after: HeadUnitRead | undefined,
+  source: HeadUnitReadSource = "carAppTemplates",
 ): HeadUnitEffect {
   if (!before || !after) {
     return { basis: "no template data" };
   }
   const changed = before.key !== after.key;
-  return {
-    screenChanged: changed,
-    basis: changed ? "carAppTemplates changed" : "carAppTemplates unchanged",
-  };
+  return { screenChanged: changed, basis: `${source} ${changed ? "changed" : "unchanged"}` };
+}
+
+/** `package/carSessionId` of each projected session in a template read, sorted, for the fence. */
+function fenceApps(read: HeadUnitRead): string[] {
+  return read.screens.map((screen) => `${screen.packageName}/${screen.carSessionId}`).sort();
 }
 
 /**
@@ -231,13 +241,27 @@ function isSettled(
  * Sends console commands to the daemon's running DHU, then polls the projected templates until two
  * consecutive reads agree. It never starts or stops the DHU.
  */
+export interface HeadUnitInteractionOptions {
+  timing?: HeadUnitIdleTiming;
+  /** The phone whose head unit this is, and the fence its actions share. */
+  fence?: { deviceId: string; state: HeadUnitFence };
+  /** Read when no projected app answers the template route. */
+  screenshots?: HeadUnitScreenshotSource;
+}
+
+type HeadUnitReader = () => Promise<HeadUnitRead | undefined>;
+
 export class HeadUnitInteraction {
+  private readonly timing: HeadUnitIdleTiming;
+
   constructor(
     private readonly dhuConsole: DesktopHeadUnitConsole,
     private readonly templates: HeadUnitTemplateSource,
     private readonly timer: Timer,
-    private readonly timing: HeadUnitIdleTiming = DEFAULT_HEAD_UNIT_IDLE_TIMING,
-  ) {}
+    private readonly options: HeadUnitInteractionOptions = {},
+  ) {
+    this.timing = options.timing ?? DEFAULT_HEAD_UNIT_IDLE_TIMING;
+  }
 
   async run(commands: readonly string[], signal?: AbortSignal): Promise<HeadUnitInteractionResult> {
     signal?.throwIfAborted();
@@ -246,22 +270,68 @@ export class HeadUnitInteraction {
         "The Desktop Head Unit is not running. Start it with startDevice androidAuto.headUnit, then retry.",
       );
     }
-    const before = await this.readScreens();
+    const { source, read, before } = await this.readBefore(signal);
     signal?.throwIfAborted();
+    this.assertFence(source, before);
     commands.forEach((command) => this.dhuConsole.sendCommand(command));
-    const { idle, after } = await this.waitForIdle(before, signal);
+    const { idle, after } = await this.waitForIdle(before, read, source, signal);
+    this.recordFence(source, after);
+    const screens = source === "carAppTemplates";
     return {
       display: HEAD_UNIT_DISPLAY,
       commands: [...commands],
-      effect: deriveHeadUnitEffect(before, after),
+      effect: deriveHeadUnitEffect(before, after, source),
       idle,
-      ...(before ? { before: before.screens } : {}),
-      ...(after ? { after: after.screens } : {}),
+      ...(screens && before ? { before: before.screens } : {}),
+      ...(screens && after ? { after: after.screens } : {}),
     };
+  }
+
+  /** Template reads when any projected app answers the route, else the screenshot hash. */
+  private async readBefore(signal?: AbortSignal): Promise<{
+    source: HeadUnitReadSource;
+    read: HeadUnitReader;
+    before: HeadUnitRead | undefined;
+  }> {
+    const templates = await this.readScreens();
+    const screenshots = this.options.screenshots;
+    if (templates || !screenshots) {
+      return { source: "carAppTemplates", read: () => this.readScreens(), before: templates };
+    }
+    const read = () => this.readScreenshot(screenshots, signal);
+    return { source: "screenshot", read, before: await read() };
+  }
+
+  private async readScreenshot(
+    screenshots: HeadUnitScreenshotSource,
+    signal?: AbortSignal,
+  ): Promise<HeadUnitRead | undefined> {
+    const hash = await screenshots.hash(signal);
+    return hash === undefined ? undefined : { screens: [], key: hash };
+  }
+
+  private fenceRead(source: HeadUnitReadSource, read: HeadUnitRead | undefined) {
+    const panel = this.dhuConsole.panel;
+    return {
+      ...(panel ? { panel } : {}),
+      ...(source === "carAppTemplates" && read ? { apps: fenceApps(read) } : {}),
+    };
+  }
+
+  private assertFence(source: HeadUnitReadSource, before: HeadUnitRead | undefined): void {
+    const fence = this.options.fence;
+    fence?.state.assertCurrent(fence.deviceId, this.fenceRead(source, before));
+  }
+
+  private recordFence(source: HeadUnitReadSource, after: HeadUnitRead | undefined): void {
+    const fence = this.options.fence;
+    fence?.state.record(fence.deviceId, this.fenceRead(source, after));
   }
 
   private async waitForIdle(
     before: HeadUnitRead | undefined,
+    read: HeadUnitReader,
+    source: HeadUnitReadSource,
     signal?: AbortSignal,
   ): Promise<{ idle: HeadUnitIdle; after: HeadUnitRead | undefined }> {
     const { pollMs, unchangedSettleMs, timeoutMs } = this.timing;
@@ -273,22 +343,22 @@ export class HeadUnitInteraction {
     while (elapsed() < timeoutMs) {
       await this.timer.sleep(pollMs);
       signal?.throwIfAborted();
-      const current = await this.readScreens();
+      const current = await read();
       sawData ||= current !== undefined;
       if (isSettled(current, previous, beforeKey, elapsed() >= unchangedSettleMs)) {
         return {
-          idle: { basis: "carAppTemplates", stable: true, waitedMs: elapsed() },
+          idle: { basis: source, stable: true, waitedMs: elapsed() },
           after: current,
         };
       }
       if (!current && !sawData && !before) {
-        // Nothing to poll: no projected app answers the template route.
+        // Nothing to poll: no projected app answers the template route and no capture arrived.
         return { idle: { basis: "none", stable: false, waitedMs: elapsed() }, after: undefined };
       }
       previous = current;
     }
     return {
-      idle: { basis: sawData ? "carAppTemplates" : "none", stable: false, waitedMs: elapsed() },
+      idle: { basis: sawData ? source : "none", stable: false, waitedMs: elapsed() },
       after: previous,
     };
   }

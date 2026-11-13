@@ -548,6 +548,12 @@ export const observeResultSchema = z
       .object({
         platform: z.union([z.literal("watchos"), z.literal("tvos"), z.literal("visionos")]),
         message: z.string(),
+        appNotRunning: z
+          .object({ bundleId: z.string() })
+          .optional()
+          .describe(
+            "watchOS only: the runner's target app has no process (it exited or crashed). Call launchApp to start it again.",
+          ),
       })
       .optional()
       .describe(

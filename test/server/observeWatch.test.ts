@@ -10,6 +10,7 @@ import { ActionableError, type BootedDevice } from "../../src/models";
 import {
   WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
   WATCH_APP_NOT_FOREGROUND_MESSAGE,
+  watchAppNotRunningMessage,
   TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
   isWatchObservation,
   type WatchObservation,
@@ -24,6 +25,7 @@ import {
   type WatchScreenshotSource,
 } from "../../src/server/observeWatch";
 import { observeToolResultSchema } from "../../src/server/toolOutputSchemas";
+import type { WatchTargetAppProbe } from "../../src/features/watch/WatchTargetAppProbe";
 import { CountingIdGenerator } from "../../src/utils/CountingIdGenerator";
 import { FakeScreenshotFileWriter } from "../fakes/FakeScreenshotFileWriter";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
@@ -295,6 +297,78 @@ test("a backgrounded watch app returns actionable screenshot-only guidance", asy
   expect(result.screenshotPath).toBeDefined();
   expect(screenshots.captures).toHaveLength(1);
   expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+});
+
+class FakeWatchTargetAppProbe implements WatchTargetAppProbe {
+  calls = 0;
+  constructor(private readonly notRunning: string | undefined) {}
+  async notRunningTarget(): Promise<string | undefined> {
+    this.calls++;
+    return this.notRunning;
+  }
+}
+
+const CRASHED_APP = "dev.dogfood.factorywatch";
+
+test("a crashed watch app is reported as not running (#18052)", async () => {
+  const runner = new FakeWatchRunnerClient();
+  runner.failure = new WatchRunnerError("Watch app is not in the foreground", "app_not_foreground");
+  const probe = new FakeWatchTargetAppProbe(CRASHED_APP);
+  const { observe } = arrange(undefined, runner, { watchTargetApp: probe });
+
+  const result = getStructuredPayload<WatchObservation>(await observe())!;
+
+  expect(result.hierarchyUnavailable).toEqual({
+    platform: "watchos",
+    message: watchAppNotRunningMessage(CRASHED_APP),
+    appNotRunning: { bundleId: CRASHED_APP },
+  });
+  expect(HIERARCHY_FIELDS.filter((field) => Object.hasOwn(result, field))).toEqual([]);
+  expect(result.screenshotPath).toBeDefined();
+  expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+});
+
+test("an empty runner tree after a crash is replaced by the not-running note (#18052)", async () => {
+  const runner = new FakeWatchRunnerClient({
+    timestamp: NOW,
+    screenScale: 1,
+    screenWidth: 208,
+    screenHeight: 248,
+    root: { className: "XCUIElementType(2)", bounds: { left: 0, top: 0, right: 208, bottom: 248 } },
+  });
+  const probe = new FakeWatchTargetAppProbe(CRASHED_APP);
+  const { observe } = arrange(undefined, runner, { watchTargetApp: probe });
+
+  const result = getStructuredPayload<WatchObservation>(await observe())!;
+
+  expect(result.hierarchyUnavailable?.appNotRunning).toEqual({ bundleId: CRASHED_APP });
+  expect(HIERARCHY_FIELDS.filter((field) => Object.hasOwn(result, field))).toEqual([]);
+  expect(probe.calls).toBe(1);
+});
+
+test("a running app with a hierarchy never probes its process", async () => {
+  const probe = new FakeWatchTargetAppProbe(CRASHED_APP);
+  const { observe } = arrange(undefined, new FakeWatchRunnerClient(), { watchTargetApp: probe });
+
+  const result = getStructuredPayload(await observe())!;
+
+  expect(result).toHaveProperty("viewHierarchy");
+  expect(probe.calls).toBe(0);
+});
+
+test("a backgrounded app that still runs keeps the foreground guidance", async () => {
+  const runner = new FakeWatchRunnerClient();
+  runner.failure = new WatchRunnerError("Watch app is not in the foreground", "app_not_foreground");
+  const probe = new FakeWatchTargetAppProbe(undefined);
+  const { observe } = arrange(undefined, runner, { watchTargetApp: probe });
+
+  const result = getStructuredPayload<WatchObservation>(await observe())!;
+
+  expect(result.hierarchyUnavailable).toEqual({
+    platform: "watchos",
+    message: WATCH_APP_NOT_FOREGROUND_MESSAGE,
+  });
+  expect(probe.calls).toBe(1);
 });
 
 test.each([false, true])(

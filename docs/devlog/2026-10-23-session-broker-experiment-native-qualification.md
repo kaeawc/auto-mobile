@@ -16,13 +16,13 @@
 | Android zero pooling (API 35 arm64)         | passed: coarse phone/tablet resolved to `medium_phone`/`medium_tablet`; AVD absent after release; serial `emulator-5556` reused across sessions (the transport serial is not a session identity). Does not cover Android clean reuse, ADB restart, Linux/KVM |
 | Request abandonment (iOS)                   | passed: unknown, `acquiring`, and ready requests all reached terminal owner-bound receipts with exact native absence confirmed; late native claims are covered by deterministic tests                                                                        |
 
-The measured clean reset spent ~15 s stopping, 0.3 s erasing, 52 s booting: reset
+The measured clean reset spent ~15 s stopping, 0.3 s erasing, 52 s booting. Reset
 isolates by rebooting an erased simulator, so an idle-pool hit moves boot work to
 the preceding release rather than avoiding it. Keep zero pooling as the throughput
 baseline until a matched comparison shows a benefit. Not run: native Android
 two-session contamination and matched p50 timing. A Slack bundle that failed
 simulator install with a copy-permission error installed from a staged copy with
-readable directories and no xattrs/ACLs (contents identical); the disposable probe
+readable directories and no xattrs/ACLs (contents identical). The disposable probe
 uses simulator entitlement metadata rather than restricted entitlements in its ad
 hoc host signature.
 

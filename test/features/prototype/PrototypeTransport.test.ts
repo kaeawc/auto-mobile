@@ -197,6 +197,17 @@ describe("IosPrototypeTransport", () => {
     expect((await transport.putAsset(asset)).success).toBe(true);
   });
 
+  test("a failed cache put drops the older cached bytes under the same id", async () => {
+    const agent = new FakePrototypeAgentClient();
+    const cache = new FakePrototypeAssetCache();
+    const transport = new IosPrototypeTransport(agent, { serial: "sim-1", cache });
+    await transport.putAsset(asset);
+    cache.putError = new Error("disk full");
+    const reply = await transport.putAsset({ ...asset, bytes: Uint8Array.from([9, 9]) });
+    expect(reply.success).toBe(true);
+    expect(await cache.get("sim-1", "shot")).toBeUndefined();
+  });
+
   test("an aborted upload sends nothing; an unanswered one is indeterminate", async () => {
     const agent = new FakePrototypeAgentClient();
     const transport = new IosPrototypeTransport(agent);

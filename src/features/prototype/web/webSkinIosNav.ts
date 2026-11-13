@@ -113,8 +113,8 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
  */
 export const iosBottomNavRenderer =
   (kit: WebRenderKit): NodeRenderer =>
-  (node, scope) => {
-    const items = navItems(node, scope, kit);
+  (node, scope, path) => {
+    const items = navItems(node, scope, kit, path);
     const selected = navSelection(node, items.length, scope, kit);
     const dark = scope.style.mode === "dark";
     const { attrs, style: barStyle } = barBase(node, scope, kit, {
@@ -176,8 +176,8 @@ function tab(item: NavItem, selected: boolean, { minHeight, scope, kit }: TabLay
  */
 export const iosTabBarRenderer =
   (kit: WebRenderKit): NodeRenderer =>
-  (node: Raw, scope) => {
-    const items = navItems(node, scope, kit);
+  (node: Raw, scope, path) => {
+    const items = navItems(node, scope, kit, path);
     const selected = navSelection(node, items.length, scope, kit);
     const layout: TabLayout = {
       minHeight: node.onScroll === "minimize" ? "64px" : "44px",

@@ -5,6 +5,7 @@ import {
   type rankElementsForDryRun,
 } from "./ExploreElementScoring";
 import type { ExploreDryRunResult } from "./ExploreTypes";
+import type { InteractionInputMode } from "./focusDrivenInput";
 
 type RankedElements = ReturnType<typeof rankElementsForDryRun>;
 type PredictOutcomeEdges = Parameters<typeof predictOutcomeForElement>[1];
@@ -67,10 +68,12 @@ export function unreadableDryRunResult(
   observation: ObserveResult,
   warnings: string[],
   durationMs: number,
+  inputMode: InteractionInputMode,
 ): ExploreDryRunResult {
   return {
     success: true,
     dryRun: true,
+    inputMode,
     currentScreen: { name: "unknown", interactableElements: 0 },
     plannedInteractions: [],
     estimatedCoverage: {

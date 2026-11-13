@@ -3,7 +3,7 @@ import type { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import type { NavigationEdge } from "./NavigationGraphManager";
 import type { DialogTapActionFactory } from "./ExploreBlockerDetection";
 import type { FocusListAdvancer, FocusSelectNavigator } from "./ExploreElementActions";
-import type { InputModeResolver } from "./focusDrivenInput";
+import type { InputModeResolver, InteractionInputMode } from "./focusDrivenInput";
 
 /**
  * Exploration strategies for explore
@@ -122,6 +122,11 @@ export interface PlannedInteraction {
 export interface ExploreDryRunResult {
   success: true;
   dryRun: true;
+  /**
+   * How a run would carry out the plan: `touch` taps and swipes, `dpad` (an Android TV) moves
+   * focus to each planned target and selects it, and advances a planned list with D-pad presses.
+   */
+  inputMode: InteractionInputMode;
   currentScreen: {
     name: string;
     interactableElements: number;

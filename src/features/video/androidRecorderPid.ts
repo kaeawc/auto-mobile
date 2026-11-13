@@ -3,7 +3,7 @@
  *
  * Stopping the recorder by name (`pkill screenrecord`) signals every recorder on the
  * device, including ones this recording does not own. Instead the recorder is launched
- * as `echo $$; exec screenrecord ...`: the device shell prints its own pid and then
+ * in a detached session when `setsid` is available: the device shell prints its own pid and then
  * `exec`s into `screenrecord`, which keeps that pid, so the first stdout line of the
  * host `adb shell` process is the recorder's device-side pid.
  */
@@ -23,12 +23,21 @@ export interface PidOutputStream {
 const MAX_PID_LINE_LENGTH = 32;
 
 /**
- * Builds the single `adb shell` command string that prints the device shell's pid and
- * then replaces the shell with `screenrecord`. `$$` is expanded by the device shell
- * (adb passes the string through verbatim); `exec` keeps the pid.
+ * Builds one `adb shell` command that detaches with `setsid` so a dropped host adb
+ * session does not kill the recorder (#17951). Older images without `setsid` use the
+ * attached launch. In either case the innermost shell prints `$$` before `exec` keeps
+ * that pid for `screenrecord`. Tokens must not contain single quotes because the
+ * detached shell command is single-quoted; argv otherwise stays space-joined.
  */
 export function buildPidReportingScreenrecordArgs(screenrecordArgv: readonly string[]): string[] {
-  return ["shell", `echo $$; exec ${screenrecordArgv.join(" ")}`];
+  if (screenrecordArgv.some((arg) => arg.includes("'"))) {
+    throw new Error("Android screenrecord argv must not contain single quotes.");
+  }
+  const command = `echo $$; exec ${screenrecordArgv.join(" ")}`;
+  return [
+    "shell",
+    `if command -v setsid >/dev/null 2>&1; then exec setsid sh -c '${command}'; fi; ${command}`,
+  ];
 }
 
 function parsePidLine(line: string): number | undefined {

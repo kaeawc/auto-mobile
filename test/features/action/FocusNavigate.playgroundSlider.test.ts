@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
+  FOCUS_NAVIGATE_STALL_PRESSES,
   FocusNavigate,
   type FocusKeyPresser,
   type FocusNavigateDirection,
@@ -52,6 +53,8 @@ class FakePlaygroundHome implements FocusObserver, FocusKeyPresser {
     private readonly tabLeavesSlider: boolean,
     /** False: left/right are refused outright and the label never changes. */
     private readonly adjustable = true,
+    /** False: the value readouts are scrolled off screen, so only the slider's label changes. */
+    private readonly readouts = true,
   ) {}
 
   private readonly moves: Record<NodeId, Partial<Record<FocusNavigateDirection, NodeId>>> = {
@@ -106,6 +109,9 @@ class FakePlaygroundHome implements FocusObserver, FocusKeyPresser {
 
   /** The sibling readouts the Playground updates with the slider. */
   private valueReadouts(): Element[] {
+    if (!this.readouts) {
+      return [];
+    }
     return [
       {
         "resource-id": "slider_value_text",
@@ -181,6 +187,30 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
       'the focused control "slider_control" consumed left and right',
     );
     expect(result.message).toContain("pressing tab did not move focus out of it either");
+  });
+
+  test("with no value readout on screen, a value toggled back still reads as no movement (#17209)", async () => {
+    // The #17209 recheck: left/right ping-ponged the slider's value until max_steps because no
+    // readout outside the slider showed the change, so every press read as moving focus.
+    const home = new FakePlaygroundHome(true, true, false);
+    const result = await new FocusNavigate(home, home, timer).execute({
+      until: { text: "Settings" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    expect(result.steps).toBeLessThan(20);
+    expect(home.presses).toContain("tab");
+    expect(home.presses).toContain("arrow_up");
+    expect(home.valuePresses).toBeLessThanOrEqual(FOCUS_NAVIGATE_STALL_PRESSES * 2 + 1);
+  });
+
+  test("with no value readout and no way out, it ends stuck rather than at max_steps (#17209)", async () => {
+    const home = new FakePlaygroundHome(false, true, false);
+    const result = await new FocusNavigate(home, home, timer).execute({
+      until: { text: "Settings" },
+    });
+    expect(result).toMatchObject({ success: false, status: "stuck" });
+    expect(result.steps).toBeLessThan(30);
+    expect(result.message).toContain('the focused control "slider_control" consumed');
   });
 
   test("a slider whose label never changes still ends stuck without tab", async () => {

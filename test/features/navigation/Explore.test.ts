@@ -412,6 +412,44 @@ describe("Explore", () => {
       ]);
     });
 
+    for (const inputMode of ["touch", "dpad"] as const) {
+      test(`reports the ${inputMode} input mode on a dry-run plan`, async () => {
+        explore = new Explore(device, mockAdb, fakeTimer, {
+          navigationManager: fakeGraph,
+          inputMode: async () => inputMode,
+        });
+        explore.observeScreen = scriptedObserve({
+          execute: async () =>
+            createMockObservation([
+              createMockViewHierarchyNode({
+                text: "Settings",
+                "resource-id": "com.test:id/settings",
+              }),
+            ]),
+        });
+
+        const result = await runExploreDryRun(explore, { dryRun: true, maxInteractions: 1 });
+
+        expect(result.inputMode).toBe(inputMode);
+        expect(result.plannedInteractions.map((interaction) => interaction.action)).toEqual([
+          "tapOn",
+        ]);
+      });
+    }
+
+    test("reports the input mode when the dry run cannot read the hierarchy", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, {
+        navigationManager: fakeGraph,
+        inputMode: async () => "dpad",
+      });
+      explore.observeScreen = scriptedObserve({ execute: async () => ({}) as ObserveResult });
+
+      const result = await runExploreDryRun(explore, { dryRun: true });
+
+      expect(result.inputMode).toBe("dpad");
+      expect(result.plannedInteractions).toEqual([]);
+    });
+
     for (const mode of ["hybrid", "discover"] as const) {
       test(`should use graph stats instead of exporting the full graph for ${mode} progress node counts`, async () => {
         void fakeGraph.recordNavigationEvent({

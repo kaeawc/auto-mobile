@@ -4,6 +4,7 @@
 public enum SdkRoute: String, CaseIterable, Sendable {
     case cachedHierarchy = "/hierarchy"
     case freshHierarchy = "/hierarchy/fresh"
+    case carPlayAction = "/carplay/action"
     case carPlayTemplates = "/carplay/templates"
     case health = "/health"
     case networkMock = "/network/mock"

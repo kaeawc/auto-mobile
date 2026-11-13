@@ -18,9 +18,13 @@ import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeLoadResult
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -73,6 +77,41 @@ class ViewerWatchdogTest {
         .setup()
     compose.waitForIdle()
     return checkNotNull(controller).get()
+  }
+
+  @Test
+  fun webViewRefusalTracksLiveConsentWithoutRenderingOrWatchdogFailure() {
+    // JavaScript does not bypass consent; the app-owned provenance remains visible when enabled.
+    val spec = webViewFixture().replace("\"javaScript\": false", "\"javaScript\": true")
+    val decoded = (PrototypeSpecValidator.validate(spec) as PrototypeSpecValidation.Success).spec
+    repository.prototypes[FIRST] =
+      LibraryPrototype(
+        Fixtures.entry(),
+        SavedPrototypeLoadResult.Loaded(FIRST, "Example", "slug", 10, decoded, spec, emptyMap()),
+      )
+    renderer.waitForever = true
+    val activity = launch()
+    compose.onNodeWithTag("viewer-import-refused").assertIsDisplayed()
+    assertEquals(0, renderer.entries)
+    compose.runOnIdle { timer.advanceBy(RENDER_READY_BUDGET_MILLIS) }
+    assertFalse(activity.diagnostics.watchdogTripped)
+    compose.runOnIdle { settings.setAllowNetwork(true) }
+    compose.onNodeWithTag("viewer-import-refused").assertDoesNotExist()
+    compose.onNodeWithTag("network-provenance").assertIsDisplayed()
+    assertTrue(renderer.entries > 0)
+    compose.runOnIdle { settings.setAllowNetwork(false) }
+    compose.onNodeWithTag("viewer-import-refused").assertIsDisplayed()
+    val entries = renderer.entries
+    compose.runOnIdle { timer.advanceBy(RENDER_READY_BUDGET_MILLIS) }
+    assertEquals(entries, renderer.entries)
+    assertFalse(activity.diagnostics.watchdogTripped)
+    assertTrue(timer.tasks.all { it.cancelled })
+    compose.runOnIdle { settings.setAllowNetwork(true) }
+    compose.onNodeWithTag("viewer-import-refused").assertDoesNotExist()
+    assertTrue(renderer.entries > entries)
+    // A restored renderer gets a fresh watchdog budget rather than remaining unmonitored.
+    compose.runOnIdle { timer.advanceBy(RENDER_READY_BUDGET_MILLIS) }
+    assertTrue(activity.diagnostics.watchdogTripped)
   }
 
   @Test
@@ -220,6 +259,7 @@ class ViewerWatchdogTest {
 }
 
 private class FakeViewerRenderer : ViewerRenderer {
+  var entries = 0
   var waitForever = false
   var throwDuringComposition by mutableStateOf(false)
   var compositionError: Throwable? by mutableStateOf(null)
@@ -232,6 +272,7 @@ private class FakeViewerRenderer : ViewerRenderer {
     content: @androidx.compose.runtime.Composable () -> Unit,
     onFailure: () -> Unit,
   ) {
+    SideEffect { entries++ }
     if (!waitForever)
       GuardedViewerRenderer.Render(
         content = {

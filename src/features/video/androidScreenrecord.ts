@@ -80,7 +80,8 @@ export async function waitForStderrDrain(
 
 // How long a fresh recorder must stay alive before `start` reports a recording (#10186).
 // Every healthy start pays this much latency. The failure reported in #17951 exited
-// at 0.7 s, beyond the former 300 ms window; its cause has not been reproduced.
+// at 0.7 s, beyond the former 300 ms window, when the host adb session was lost.
+// The device recorder is now detached with setsid where available (#17951).
 const SCREENRECORD_STARTUP_SETTLE_MS = 1000;
 // The recorder can run for minutes, so the stderr kept for diagnostics is bounded to its
 // most recent output, and an error message carries only the tail of it.

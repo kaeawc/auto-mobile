@@ -6,7 +6,9 @@
  * HTML, link destinations and titles, and link reference definitions are
  * excluded by the parser rather than by line regexes. Every prose text node
  * carries its source position, and a soft line break inside it is a literal
- * newline, so each character's source line is exact (#18196).
+ * line ending, so each character's source line is exact (#18196). CRLF and CR
+ * count like LF, and a line ending decoded from a character reference such as
+ * `&#10;` is a space on the same source line (#18200).
  */
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
@@ -55,7 +57,7 @@ interface MdastNode {
   value?: string;
   alt?: string | null;
   children?: MdastNode[];
-  position?: { start: { line: number } };
+  position?: { start: { line: number; offset?: number }; end: { offset?: number } };
 }
 
 /** One block's prose, with the source line of every character. */
@@ -68,8 +70,55 @@ interface ProseBlock {
 const BLOCK_NODES = new Set(["paragraph", "heading", "tableCell"]);
 /** Nodes that are not prose and split the surrounding prose run. */
 const SPLIT_NODES = new Set(["code", "inlineCode", "html", "break"]);
-/** A soft line break and the whitespace around it. */
-const SOFT_BREAK = /[ \t]*\n[ \t]*/g;
+/** A soft line break (LF, CRLF or CR) and the whitespace around it. */
+const SOFT_BREAK = /[ \t]*(?:\r\n|\r|\n)[ \t]*/g;
+/** Source constructs that put a line-ending character into a decoded value. */
+const SOURCE_LINE_ENDING =
+  /\\[\s\S]|&(?:#[xX]([0-9a-fA-F]{1,6})|#(\d{1,7})|(NewLine));|\r\n|\r|\n/g;
+
+/**
+ * For each line-ending character a node's decoded value holds, in order,
+ * whether it came from a character reference (`&#10;`, `&#xD;`, `&NewLine;`)
+ * rather than a source line ending. A backslash escape is skipped so `\&#10;`
+ * stays literal text.
+ */
+function decodedLineEndings(source: string): boolean[] {
+  const kinds: boolean[] = [];
+  for (const match of source.matchAll(SOURCE_LINE_ENDING)) {
+    const [token, hex, decimal, named] = match;
+    if (token.startsWith("\\")) {
+      continue;
+    }
+    if (token.startsWith("&")) {
+      const code = named ? 10 : hex ? Number.parseInt(hex, 16) : Number(decimal);
+      if (code === 10 || code === 13) {
+        kinds.push(true);
+      }
+    } else {
+      kinds.push(...Array.from(token, () => false));
+    }
+  }
+  return kinds;
+}
+
+/**
+ * Replaces each line-ending character that a character reference decoded
+ * into `value` with a space, so only source line endings advance the line.
+ */
+function withoutDecodedLineEndings(value: string, source: string): string {
+  if (!/[\r\n]/.test(value) || !source.includes("&")) {
+    return value;
+  }
+  const decoded = decodedLineEndings(source);
+  let index = 0;
+  return value.replace(/[\r\n]/g, (char) => (decoded[index++] ? " " : char));
+}
+
+function sourceOf(node: MdastNode, source: string): string {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  return start === undefined || end === undefined ? "" : source.slice(start, end);
+}
 
 class ProseCollector {
   readonly blocks: ProseBlock[] = [];
@@ -121,12 +170,12 @@ class ProseCollector {
   }
 }
 
-function walk(node: MdastNode, collector: ProseCollector): void {
+function walk(node: MdastNode, source: string, collector: ProseCollector): void {
   const line = node.position?.start.line ?? 1;
   if (node.type === "text") {
-    collector.append(node.value ?? "", line);
+    collector.append(withoutDecodedLineEndings(node.value ?? "", sourceOf(node, source)), line);
   } else if (node.type === "image" || node.type === "imageReference") {
-    collector.append(node.alt ?? "", line);
+    collector.append(withoutDecodedLineEndings(node.alt ?? "", sourceOf(node, source)), line);
   } else if (SPLIT_NODES.has(node.type)) {
     collector.flush();
   } else {
@@ -135,7 +184,7 @@ function walk(node: MdastNode, collector: ProseCollector): void {
       collector.flush();
     }
     for (const child of node.children ?? []) {
-      walk(child, collector);
+      walk(child, source, collector);
     }
     if (block) {
       collector.flush();
@@ -150,7 +199,7 @@ function proseBlocks(source: string): ProseBlock[] {
     mdastExtensions: [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown()],
   });
   const collector = new ProseCollector();
-  walk(tree, collector);
+  walk(tree, source, collector);
   collector.flush();
   return collector.blocks;
 }

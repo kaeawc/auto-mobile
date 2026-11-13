@@ -44,7 +44,7 @@ export const smallCorpus = {
   cjk: "日本語",
 };
 const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
-const priorImeId = "com.example.keyboard/.Ime";
+export const priorImeId = "com.example.keyboard/.Ime";
 export type TextDelivery =
   | { kind: "insert" | "replace" | "commit"; text: string }
   | { kind: "keyevent" | "inputText"; text: string };

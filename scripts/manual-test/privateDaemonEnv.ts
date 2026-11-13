@@ -30,6 +30,8 @@ export interface PrivateDaemonBatchOptions {
   basePort: number;
   auxRoot?: string;
   serverPath: string;
+  /** Checkout root for local runner source builds; `--env AUTOMOBILE_PROJECT_ROOT` wins. */
+  projectRoot?: string;
   splitAdbCoordination?: boolean;
   protectedDevices?: string[];
   orphanIdleMs?: number;
@@ -265,6 +267,8 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
         ),
       ),
       ...protectedEmulatorPortEnv(options.protectedDevices),
+      // The daemon's cwd is not the checkout, so local runner builds need the root (#18016).
+      ...(options.projectRoot ? { AUTOMOBILE_PROJECT_ROOT: options.projectRoot } : {}),
       ...options.extraEnv,
       ...options.daemonEnv?.[String(index)],
       AUTOMOBILE_DATA_DIR: join(dir, "data"),

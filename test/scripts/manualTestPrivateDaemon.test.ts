@@ -85,6 +85,20 @@ posixTest("parses each command and exact start passthrough", () => {
       "0",
     ]).op,
   ).toBe("init");
+  const init = parsePrivateDaemonArgs([
+    "init",
+    "--batch-dir",
+    options.batchDir,
+    "--count",
+    "1",
+    "--base-port",
+    "3160",
+  ]);
+  // init records the checkout this harness runs from as the daemon project root (#18016).
+  expect(init).toMatchObject({
+    op: "init",
+    options: { projectRoot: resolve(import.meta.dir, "../..") },
+  });
   for (const op of ["start", "stop", "status", "env"] as const) {
     expect(parsed([op, "--batch-dir", options.batchDir, "--daemon", "1"]).op).toBe(op);
   }

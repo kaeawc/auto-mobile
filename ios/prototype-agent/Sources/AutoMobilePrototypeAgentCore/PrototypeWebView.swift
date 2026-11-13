@@ -10,14 +10,40 @@ public enum PrototypeWebView {
         public let path: String
     }
 
-    /// Checks authored node positions, including unexpanded repeat templates, in tree order.
+    /// Checks authored node positions, including unexpanded repeat templates, depth first in a fixed
+    /// order shared with Kotlin: adaptive slots (adaptive only), `header` then `footer` (list only),
+    /// `child`, `children`, then `screens` by UTF-16 key order. JSON key order never matters.
     public static func importError(_ spec: JSONValue, networkAllowed: Bool) -> ImportError? {
         guard !networkAllowed, let root = spec.objectFields?["root"]?.objectFields else { return nil }
         func first(_ node: PrototypeLocatedValue) -> ImportError? {
             if node.value["type"] == .string("webView") { return ImportError(path: node.path) }
-            return PrototypeStrictRepeats.children(node.value, path: node.path).lazy.compactMap(first).first
+            return importChildren(node.value, path: node.path).lazy.compactMap(first).first
         }
         return first(.init(value: root, path: "root"))
+    }
+
+    private static func importChildren(_ node: [String: JSONValue], path: String) -> [PrototypeLocatedValue] {
+        var result: [PrototypeLocatedValue] = []
+        func slot(_ key: String) {
+            if let child = node[key]?.objectFields { result.append(.init(value: child, path: "\(path).\(key)")) }
+        }
+        switch node["type"]?.stringValue {
+        case "adaptive": PrototypeAdaptive.slots.forEach(slot)
+        case "list": ["header", "footer"].forEach(slot)
+        default: break
+        }
+        slot("child")
+        for (index, value) in PrototypeStrictBindings.array(node["children"]).enumerated() {
+            if let child = value.objectFields { result.append(.init(value: child, path: "\(path).children[\(index)]")) }
+        }
+        if let screens = node["screens"]?.objectFields {
+            for key in PrototypeContractValidator.sorted(screens.keys) {
+                if let child = screens[key]?.objectFields {
+                    result.append(.init(value: child, path: PrototypeStacks.screenPath(path, name: key)))
+                }
+            }
+        }
+        return result
     }
 
     /// Convenience for an already validated saved library spec; malformed data is handled by the loader.

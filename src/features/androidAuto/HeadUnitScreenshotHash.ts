@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { AMBIENT_ENV, readEnvTrimmed } from "../../config/env";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { FileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import type { IdGenerator } from "../../utils/IdGenerator";
@@ -48,9 +49,10 @@ export interface DhuScreenshotHashDependencies {
  */
 export function headUnitScreenshotDirectories(
   tmpdir: string,
-  env: Readonly<Record<string, string | undefined>>,
+  env: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  return env.PUBLIC ? [tmpdir, env.PUBLIC] : [tmpdir];
+  const publicDirectory = readEnvTrimmed(AMBIENT_ENV.PUBLIC, env);
+  return publicDirectory ? [tmpdir, publicDirectory] : [tmpdir];
 }
 
 /**

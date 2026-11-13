@@ -1,6 +1,6 @@
 import {
-  SHARED_STORAGE_BACKUP_TIMEOUT_MS,
   SHARED_STORAGE_COMMIT_TIMEOUT_MS,
+  SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
 } from "../../src/features/storage/fileTransferTimeout";
 import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { logger } from "../../src/utils/logger";
@@ -428,23 +428,23 @@ describe("sharedStorageService rollback of overwritten files", () => {
         .filter((call) => call.command.includes(MARKER))
         .map((call) => call.timeoutMs);
 
-    test("caps a multi-file backup below the caller budget", async () => {
+    test("a small multi-file backup chunk gets the floor budget", async () => {
       const { executor, stage } = setup();
 
       await stage({ files: [fileAt("a.png"), fileAt("b.png")] });
 
-      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_BACKUP_TIMEOUT_MS]);
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS]);
     });
 
-    test("a single-file backup gets the explicit backup budget", async () => {
+    test("a small single-file backup gets the floor budget", async () => {
       const { executor, stage } = setup();
 
       await stage({ files: [fileAt("a.png")] });
 
-      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_BACKUP_TIMEOUT_MS]);
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS]);
     });
 
-    test("each chunk of 64 gets the bounded backup budget", async () => {
+    test("each chunk of 64 small files gets its own floor budget", async () => {
       const { executor, stage } = setup();
 
       await stage({
@@ -452,8 +452,8 @@ describe("sharedStorageService rollback of overwritten files", () => {
       });
 
       expect(probeTimeouts(executor)).toEqual([
-        SHARED_STORAGE_BACKUP_TIMEOUT_MS,
-        SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+        SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
+        SHARED_STORAGE_TRANSFER_TIMEOUT_FLOOR_MS,
       ]);
     });
   });

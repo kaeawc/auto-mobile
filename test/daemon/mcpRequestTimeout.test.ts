@@ -8,11 +8,10 @@ import { BARRIER_TIMEOUT_MS as coordinatorDefaultMs } from "../../src/server/Cri
 import { BARRIER_TIMEOUT_MS } from "../../src/features/action/coordinationTimeout";
 import { DEFAULT_EXPLORE_TIMEOUT_MS as explorationDefaultMs } from "../../src/features/navigation/Explore";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../../src/features/navigation/exploreTimeout";
-import { SHARED_STORAGE_PUSH_TIMEOUT_MS as storagePushMs } from "../../src/server/sharedStorageService";
 import { APP_FILE_PUSH_TIMEOUT_MS as appPushMs } from "../../src/server/appFileService";
 import {
-  SHARED_STORAGE_PUSH_TIMEOUT_MS,
   APP_FILE_PUSH_TIMEOUT_MS,
+  sharedStoragePushTimeoutMs,
 } from "../../src/features/storage/fileTransferTimeout";
 import {
   MCP_ARGUMENT_BUDGET_CASES,
@@ -1763,8 +1762,22 @@ test("request budget constants are the tool implementation constants", () => {
   expect(schemaSnapshotMaxMs).toBe(MAX_VM_SNAPSHOT_TIMEOUT_MS);
   expect(coordinatorDefaultMs).toBe(BARRIER_TIMEOUT_MS);
   expect(explorationDefaultMs).toBe(DEFAULT_EXPLORE_TIMEOUT_MS);
-  expect(storagePushMs).toBe(SHARED_STORAGE_PUSH_TIMEOUT_MS);
   expect(appPushMs).toBe(APP_FILE_PUSH_TIMEOUT_MS);
+});
+
+test("the largest size-scaled shared-storage push fits the putAppFile per-file deadline", () => {
+  const largestPushMs = sharedStoragePushTimeoutMs(Number.MAX_SAFE_INTEGER);
+  const files = (count: number) =>
+    Array.from({ length: count }, () => ({ destinationPath: "fixture", sourcePath: "/big.bin" }));
+  for (const count of [1, 3]) {
+    const deadlineMs = resolveMcpRequestTimeoutMs({
+      id: `large-shared-storage-${count}`,
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "putAppFile", arguments: { container: "downloads", files: files(count) } },
+    });
+    expect(count * largestPushMs).toBeLessThan(deadlineMs);
+  }
 });
 
 describe("client-supplied tool names that match inherited object members", () => {

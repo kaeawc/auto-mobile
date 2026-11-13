@@ -1,9 +1,9 @@
 import {
-  SHARED_STORAGE_PUSH_TIMEOUT_MS,
+  sharedStoragePushTimeoutMs,
+  sharedStorageBackupTimeoutMs,
   SHARED_STORAGE_MKDIR_TIMEOUT_MS,
   SHARED_STORAGE_COMMIT_TIMEOUT_MS,
   SHARED_STORAGE_RESET_TIMEOUT_MS,
-  SHARED_STORAGE_BACKUP_TIMEOUT_MS,
   SHARED_STORAGE_MEDIA_SCAN_TIMEOUT_MS,
   SHARED_STORAGE_MEDIA_QUERY_TIMEOUT_MS,
   SHARED_STORAGE_MEDIA_INDEX_TIMEOUT_MS,
@@ -53,7 +53,6 @@ import {
 } from "./sharedStorageContract";
 
 const DOWNLOADS_DIRECTORY = "Download";
-export { SHARED_STORAGE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 const SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS = 5000;
 const SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS = 15000;
 const SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND = 64;
@@ -293,6 +292,7 @@ class DefaultSharedStorageService implements SharedStorageService {
       adb,
       request,
       source: file.source.path,
+      byteCount: file.source.byteCount,
       destination,
       onBeforeCommit,
     });
@@ -323,10 +323,11 @@ class DefaultSharedStorageService implements SharedStorageService {
     adb: AdbExecutor;
     request: StageSharedStorageRequest;
     source: string;
+    byteCount: number;
     destination: string;
     onBeforeCommit?: () => void;
   }): Promise<void> {
-    const { adb, request, source, destination, onBeforeCommit } = context;
+    const { adb, request, source, byteCount, destination, onBeforeCommit } = context;
     // Dot-prefixed with a non-media extension so MediaStore never lists the in-flight copy.
     const temp = posix.join(
       posix.dirname(destination),
@@ -338,7 +339,7 @@ class DefaultSharedStorageService implements SharedStorageService {
         stage: "push",
         command: ["push", source, temp],
         signal: request.signal,
-        timeoutMs: SHARED_STORAGE_PUSH_TIMEOUT_MS,
+        timeoutMs: sharedStoragePushTimeoutMs(byteCount),
       });
       onBeforeCommit?.();
       await this.stages.run(adb, {
@@ -453,6 +454,7 @@ class DefaultSharedStorageService implements SharedStorageService {
       return {
         path: file.destinationPath,
         destination,
+        byteCount: file.source.byteCount,
         // Dot-prefixed with a non-media extension so MediaStore never lists the saved copy.
         backup: posix.join(
           posix.dirname(destination),
@@ -500,6 +502,8 @@ class DefaultSharedStorageService implements SharedStorageService {
 interface BackupPlan {
   path: string;
   destination: string;
+  /** Incoming size; the best available estimate of the content the backup copies. */
+  byteCount: number;
   backup: string;
 }
 
@@ -684,13 +688,13 @@ async function saveExistingFiles(
       ),
     );
     try {
-      // Cap even a large backup chunk below the caller budget so a wedged copy is diagnosable.
+      // Scale with the chunk's size, capped within the caller budget so a wedged copy is diagnosable.
       const result = await stages.run(adb, {
         destination: chunk.map((file) => file.destination).join(", "),
         stage: "backup",
         command: `shell sh -c ${shellQuote(script)}`,
         signal,
-        timeoutMs: SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+        timeoutMs: sharedStorageBackupTimeoutMs(chunk.map((file) => file.byteCount)),
       });
       for (const [path, backup] of copiedBackups(chunk, result.stdout)) {
         saved.set(path, backup);

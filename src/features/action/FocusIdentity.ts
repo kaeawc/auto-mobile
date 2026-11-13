@@ -148,6 +148,8 @@ export interface FocusIdentity {
  */
 interface ReadIdentity {
   position: string;
+  /** The focused control's `range-info` (a slider's current value), when it reports one. */
+  range: string;
   surroundings: Surroundings;
   label: string;
   /** The press that last changed the focused label, carried across refused presses. */
@@ -184,7 +186,11 @@ function changedInPlace(
  * multi-slot list stepped down and back up shifts its rows on each press, so it fails
  * {@link surroundingsStayed} and still reads as moving. A one-slot list leaves nothing outside
  * focus, and its items can repeat a label (A, B, A) while the same press keeps advancing, so the
- * label must come back on the press opposite to the one that changed it.
+ * label must come back on the press opposite to the one that changed it. A one-slot recycler
+ * scrolled to another item and back on opposite presses reads the same way, keeping resource id,
+ * bounds and an empty screen (#18255), so the label round trip is not enough: the control's own
+ * `range-info` must have changed with the label and come back with it, which a slider reports
+ * and a list row does not.
  */
 function toggledInPlace(
   older: ReadIdentity | undefined,
@@ -200,11 +206,35 @@ function toggledInPlace(
     previous.position === next.position &&
     older.label === next.label &&
     previous.label !== next.label &&
+    rangeRoundTripped(older, previous, next) &&
     previous.changedBy !== undefined &&
     next.changedBy === OPPOSITE[previous.changedBy] &&
     surroundingsStayed(older.surroundings, previous.surroundings) &&
     surroundingsStayed(previous.surroundings, next.surroundings)
   );
+}
+
+/**
+ * The focused control's `range-info`, on the control or a node inside it (a Compose slider's
+ * semantics can sit on a child), or empty when nothing there reports a range.
+ */
+function rangeOf(screen: Pick<FocusScreen, "focused" | "elements">): string {
+  const { focused } = screen;
+  if (!focused) {
+    return "";
+  }
+  const inside = screen.elements.filter((element) => boundsContain(focused.bounds, element.bounds));
+  const ranged = [focused, ...inside].find((element) => stringProp(element, "range-info") !== "");
+  return ranged ? stringProp(ranged, "range-info") : "";
+}
+
+/** Whether the control's `range-info` changed on the first press and came back on the second. */
+function rangeRoundTripped(
+  older: Pick<ReadIdentity, "range">,
+  previous: Pick<ReadIdentity, "range">,
+  next: Pick<ReadIdentity, "range">,
+): boolean {
+  return next.range !== "" && older.range === next.range && previous.range !== next.range;
 }
 
 export function createFocusIdentity() {
@@ -225,6 +255,7 @@ export function createFocusIdentity() {
     const label = focusKey(entry);
     const read = {
       position: positionKey(entry, screen.focused),
+      range: rangeOf(screen),
       surroundings: readSurroundings(screen),
       label,
       changedBy: label === before?.label ? before.changedBy : pressed,

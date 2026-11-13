@@ -634,3 +634,60 @@ test("two captured Switches sharing an id keep their sibling labels and indexes 
     { label: "XrPanel title", index: 1, bounds: [632, 65, 736, 161] },
   ]);
 });
+
+/** The skeleton row label and every searchable copy's label for the captured Switch. */
+async function switchLabels(mutate: (observation: ObserveResult) => void) {
+  const observation = spatialPanelObservation("switch-scroll");
+  mutate(observation);
+  await enrich(observation, true);
+  const output = sanitizeObserveResult(observation, {
+    dropElements: false,
+    compact: true,
+    project: "skeleton",
+  });
+  const switches = getSearchableEntries(observation.elements!)!.filter(
+    (entry) => entry.properties["view-id"] === SWITCH_ID,
+  );
+  expect(switches.length).toBeGreaterThan(0);
+  return {
+    skeleton: output.skeleton!.find((row) => row.elementId === SWITCH_ID)?.label,
+    searchable: switches.map((entry) => entry.displayedLabel),
+  };
+}
+
+/** Put each captured Switch inside a bounds-less copy of its captured parent container. */
+function wrapSwitchInBoundlessParent(observation: ObserveResult): void {
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const children = Array.isArray(record.node) ? (record.node as Record<string, unknown>[]) : [];
+    const at = children.findIndex((child) => child["view-id"] === SWITCH_ID);
+    if (at >= 0) {
+      const wrapper: Record<string, unknown> = { ...record };
+      delete wrapper.node;
+      delete wrapper.bounds;
+      delete wrapper["view-id"];
+      children[at] = { ...wrapper, node: [children[at]] };
+      return;
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(observation.viewHierarchy);
+}
+
+test("a Switch inside a bounds-less wrapper takes the same sibling label in both projections (#18253)", async () => {
+  const labels = await switchLabels(wrapSwitchInBoundlessParent);
+  expect(labels.skeleton).toBe("XrPanel title");
+  expect(labels.searchable).toEqual(labels.searchable.map(() => "XrPanel title"));
+});
+
+test("a windows-only capture keeps sibling labels within one window root in both projections (#18253)", async () => {
+  // The captured panel window lists the title and Switch as separate top-level roots.
+  const labels = await switchLabels((observation) => {
+    delete (observation.viewHierarchy as { hierarchy?: unknown }).hierarchy;
+  });
+  expect(labels.skeleton).toBeUndefined();
+  expect(labels.searchable).toEqual(labels.searchable.map(() => undefined));
+});

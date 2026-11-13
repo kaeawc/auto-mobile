@@ -525,33 +525,78 @@ function attributeSearchableLabels(entries: SearchableEntry[]): void {
 /**
  * The searchable twin of the skeleton's preceding-sibling toggle label (#17955), so the
  * resolver's `displayedLabel` matches the emitted row and duplicate indexes still apply.
- * A still-unlabelled toggle takes the outermost text node whose subtree ends right before
- * the toggle in the same window (a window's top-level children are separate roots, so
- * both serialized copies agree), unless a tappable ancestor already hoisted that text.
+ * It applies the skeleton's rule over the same nodes: only bounded nodes count (they are
+ * the ones the collector parses), and a still-unlabelled toggle takes the outermost text
+ * node whose bounded subtree ends right before the toggle in the same root group (each
+ * top-level child of a window is its own group), unless a tappable ancestor already
+ * hoisted that text. Like the skeleton, which merges a node's serialized copies (merged
+ * tree and window tree) into one row keeping the first copy's ancestry, a later copy of
+ * the same toggle takes the first copy's result (#18253).
  */
 function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): void {
   const hoisted = new Set(entries.flatMap((entry) => entry.hoistedSources ?? []));
   const isText = (entry: SearchableEntry) =>
     entry.affordances.length === 0 &&
-    entry.bounds !== undefined &&
+    entry.element !== undefined &&
     entry.label?.trim() &&
     !hoisted.has(entry);
+  const firstCopies = new Map<string, SearchableEntry | undefined>();
   for (const entry of entries) {
-    if (entry.label !== undefined || !entry.affordances.includes("toggle")) {
+    if (entry.label !== undefined || !entry.element || !entry.affordances.includes("toggle")) {
       continue;
     }
-    let preceding: SearchableEntry | undefined;
-    let cursor: SearchableEntry | undefined = entries[entry.index - 1];
-    while (cursor && cursor.index !== entry.parentIndex && cursor.windowRank === entry.windowRank) {
-      if (isText(cursor)) {
-        preceding = cursor;
-      }
-      cursor = cursor.parentIndex === undefined ? undefined : entries[cursor.parentIndex];
-    }
+    const copy = JSON.stringify([entry.elementId, entry.element.bounds]);
+    const preceding = firstCopies.has(copy)
+      ? firstCopies.get(copy)
+      : precedingSiblingText(entries, entry, isText);
+    firstCopies.set(copy, preceding);
     if (preceding) {
       entry.label = preceding.label;
       entry.displayedLabel = preceding.displayedLabel;
       entry.textFields = [...entry.textFields, preceding.displayedLabel!];
     }
   }
+}
+
+/** The outermost text whose bounded subtree ends right before `entry` in its root group. */
+function precedingSiblingText(
+  entries: readonly SearchableEntry[],
+  entry: SearchableEntry,
+  isText: (entry: SearchableEntry) => unknown,
+): SearchableEntry | undefined {
+  const ancestors = new Set(ancestorIndexes(entries, entry));
+  let preceding: SearchableEntry | undefined;
+  let cursor = previousBoundedEntry(entries, entry);
+  while (cursor && !ancestors.has(cursor.index)) {
+    if (isText(cursor)) {
+      preceding = cursor;
+    }
+    cursor = cursor.parentIndex === undefined ? undefined : entries[cursor.parentIndex];
+  }
+  return preceding;
+}
+
+function ancestorIndexes(entries: readonly SearchableEntry[], entry: SearchableEntry): number[] {
+  const indexes: number[] = [];
+  for (let parent = entry.parentIndex; parent !== undefined; parent = entries[parent].parentIndex) {
+    indexes.push(parent);
+  }
+  return indexes;
+}
+
+/** The bounded node right before `entry` in pre-order, skipping bounds-less wrappers. */
+function previousBoundedEntry(
+  entries: readonly SearchableEntry[],
+  entry: SearchableEntry,
+): SearchableEntry | undefined {
+  for (let index = entry.index - 1; index >= 0; index--) {
+    const candidate = entries[index];
+    if (candidate.rootGroup !== entry.rootGroup) {
+      return undefined;
+    }
+    if (candidate.element) {
+      return candidate;
+    }
+  }
+  return undefined;
 }

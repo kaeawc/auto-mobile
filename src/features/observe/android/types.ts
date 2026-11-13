@@ -214,6 +214,9 @@ export interface HierarchySyncDiagnostics {
   /** Per-call failure detail, including connection/send failures, interrupted waits and timeout.
    * A null sync result alone is not evidence that the hierarchy service is unreachable. */
   failureReason?: string;
+  /** Elapsed reply-wait time when the wait itself ran out its budget with no reply; excludes
+   * connection setup and is unset when the wait ended early or a reply arrived. */
+  replyWaitTimedOutMs?: number;
 }
 
 /** Trailing options for `getLatestHierarchy`. */

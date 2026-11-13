@@ -270,6 +270,30 @@ describe("findBannedPhrases source lines", () => {
     expect(linesOf("It's worth\n[noting](/u) that.\n")).toEqual([["worth-noting", 1]]);
   });
 
+  test("joins words across CRLF and CR soft breaks with a space", () => {
+    expect(linesOf("Intro.\r\n\r\nWe run it in order\r\nto test.\r\nrobust\r\n")).toEqual([
+      ["in-order-to", 3],
+      ["robust", 5],
+    ]);
+    expect(linesOf("Intro.\r\rWe run it in order\rto test.\rrobust\r")).toEqual([
+      ["in-order-to", 3],
+      ["robust", 5],
+    ]);
+  });
+
+  test("a decoded &#10; character reference does not advance the source line", () => {
+    expect(linesOf("a&#10;robust and &#xA;&NewLine;in order&#13;to\nseamless\n")).toEqual([
+      ["in-order-to", 1],
+      ["robust", 1],
+      ["seamless", 2],
+    ]);
+    expect(linesOf("![a&#10;robust\nseamless](/u)\n")).toEqual([
+      ["robust", 1],
+      ["seamless", 2],
+    ]);
+    expect(linesOf("Text \\&#10;\nrobust\n")).toEqual([["robust", 2]]);
+  });
+
   test("locates front matter prose and the body after it", () => {
     expect(linesOf("---\ntitle: robust\n---\n\nrobust\n")).toEqual([
       ["robust", 2],

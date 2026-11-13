@@ -1097,12 +1097,13 @@ MAVEN_CENTRAL_429_LOG=$'2026-11-04T08:25:42.8530004Z    > Could not resolve all 
 # Robolectric android-all download failure shape from #16802 (run 41789949312).
 ROBOLECTRIC_FETCH_LOG=$'2026-11-04T07:09:55.9539251Z AutoMobileSDKFirstActivityTapTrackingTest > classMethod FAILED\n2026-11-04T07:09:55.9669437Z     java.lang.AssertionError at MavenArtifactFetcher.java:130\n2026-11-04T07:09:55.9800000Z         Caused by: java.util.concurrent.ExecutionException at AbstractFuture.java:168\n2026-11-04T07:09:55.9962332Z             Caused by: java.io.IOException at HttpURLConnection.java:2034'
 
-@test "classifies a Robolectric MavenArtifactFetcher IOException as a rerun (#16802)" {
+@test "investigates a Robolectric MavenArtifactFetcher IOException instead of rerunning it (#16808)" {
   for job in "Kotlin Code Coverage" "Run CtrlProxy Unit Tests"; do
     runner_shutdown_fixture "$job"
     run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$ROBOLECTRIC_FETCH_LOG" bash "$SCRIPT" 123
     [ "$status" -eq 0 ]
-    [[ "$output" == *"RERUN-DONT-FIX — Robolectric's own android-all jar download from Maven Central failed"* ]]
+    [[ "$output" == *"INVESTIGATE — Robolectric tried to download its own android-all jar"* ]]
+    [[ "$output" != *"RERUN-DONT-FIX"* ]]
     [[ "$output" != *"UNKNOWN"* ]]
   done
 }
@@ -1112,7 +1113,7 @@ ROBOLECTRIC_FETCH_LOG=$'2026-11-04T07:09:55.9539251Z AutoMobileSDKFirstActivityT
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="${ROBOLECTRIC_FETCH_LOG//java.io.IOException/java.lang.SecurityException}" bash "$SCRIPT" 123
   [ "$status" -eq 0 ]
   [[ "$output" == *"UNKNOWN"* ]]
-  [[ "$output" != *"android-all jar download"* ]]
+  [[ "$output" != *"download its own android-all jar"* ]]
 }
 
 # Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.

@@ -6,6 +6,7 @@ import {
   sharedStorageAdbErrorMessage,
 } from "./sharedStorageDiagnostics";
 import { SHARED_STORAGE_DIAGNOSTICS_TOTAL_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
+import { ADB_ABORT_SETTLEMENT_MAX_MS } from "../utils/android-cmdline-tools/AdbSignalExecutor";
 import type {
   AdbExecutor,
   AdbExecuteOptions,
@@ -15,6 +16,12 @@ import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { shellQuote } from "../utils/shellQuote";
 import type { Timer } from "../utils/SystemTimer";
+
+/**
+ * Wait for a timed-out stage's aborted adb command to settle before cleanup or rollback; covers the
+ * executor's SIGTERM and SIGKILL grace with slack for the executor's own timers to fire first.
+ */
+export const SHARED_STORAGE_ABORT_SETTLEMENT_TIMEOUT_MS = ADB_ABORT_SETTLEMENT_MAX_MS + 500;
 
 export interface SharedStorageStageCommand {
   destination: string;
@@ -51,14 +58,17 @@ export class SharedStorageStages {
       noRetry: true,
       waitForProcessSettlementAfterAbort: true,
     };
+    let pending: Promise<T | ExecResult> | undefined;
     try {
       return await raceWithDeadline<T | ExecResult>(
-        () =>
-          operation
+        () => {
+          pending = operation
             ? operation(options)
             : typeof context.command === "string"
               ? adb.executeCommand(context.command, options)
-              : adb.execute(context.command, options),
+              : adb.execute(context.command, options);
+          return pending;
+        },
         {
           timer: this.timer,
           timeoutMs: context.timeoutMs,
@@ -68,7 +78,37 @@ export class SharedStorageStages {
         },
       );
     } catch (error) {
-      throw await this.failure(adb, context, started, error);
+      const failure = this.failure(adb, context, started, error);
+      if (controller.signal.aborted && pending) {
+        // The deadline lost the race while the aborted write may still be running; cleanup and
+        // rollback start once this throws, so wait for adb to stop writing (diagnostics overlap).
+        await this.awaitAbortSettlement(pending, context);
+      }
+      throw await failure;
+    }
+  }
+
+  private async awaitAbortSettlement(
+    pending: Promise<unknown>,
+    context: SharedStorageStageCommand,
+  ): Promise<void> {
+    try {
+      await raceWithDeadline(
+        pending.then(
+          () => undefined,
+          () => undefined,
+        ),
+        {
+          timer: this.timer,
+          timeoutMs: SHARED_STORAGE_ABORT_SETTLEMENT_TIMEOUT_MS,
+          label: `Shared-storage ${context.stage} abort settlement`,
+        },
+      );
+    } catch (settlementError) {
+      logger.warn(
+        `[SharedStorage] Aborted ${context.stage} for ${context.destination} did not settle; continuing with cleanup`,
+        settlementError,
+      );
     }
   }
 

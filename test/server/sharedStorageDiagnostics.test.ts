@@ -14,10 +14,11 @@ import {
 } from "../../src/utils/AbortContext";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
+import { SHARED_STORAGE_ABORT_SETTLEMENT_TIMEOUT_MS } from "../../src/server/sharedStorageStaging";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 const DESTINATION = "/storage/emulated/0/Download/fixtures/photo.png";
 const fileSystem: SharedStorageFileSystem = {
@@ -58,6 +59,15 @@ function setup() {
       ...options,
     });
   return { adb, timer, diagnostics, stage };
+}
+
+/** Like AdbSignalExecutor with waitForProcessSettlementAfterAbort: pending until aborted. */
+function settlesOnAbort(signal: AbortSignal | undefined): Promise<ExecResult> {
+  return new Promise<ExecResult>((_resolve, reject) => {
+    signal?.addEventListener("abort", () => reject(new Error("adb terminated after abort")), {
+      once: true,
+    });
+  });
 }
 
 function capturedError(operation: Promise<unknown>): Promise<ActionableError> {
@@ -115,7 +125,7 @@ describe("shared-storage stage failures", () => {
           commandSignal = options?.signal;
           expect(options?.timeoutMs).toBe(spec.timeout);
           expect(options?.noRetry).toBe(true);
-          return new Promise<ExecResult>(() => {});
+          return settlesOnAbort(options?.signal);
         }
         return execute(value, options);
       });
@@ -144,6 +154,76 @@ describe("shared-storage stage failures", () => {
       }
     });
   }
+
+  test("a timed-out push settles its aborted adb write before temp-file cleanup starts", async () => {
+    const { adb, timer, stage } = setup();
+    const execute = adb.executeCommand.bind(adb);
+    let pushSignal: AbortSignal | undefined;
+    let terminate: ((error: Error) => void) | undefined;
+    spyOn(adb, "executeCommand").mockImplementation((value, options) => {
+      if (value.includes("push ")) {
+        pushSignal = options?.signal;
+        // The executor keeps the write pending through its SIGTERM/SIGKILL grace after abort.
+        return new Promise<ExecResult>((_resolve, reject) => {
+          terminate = reject;
+        });
+      }
+      return execute(value, options);
+    });
+    const cleanupStarted = () =>
+      adb.getExecutedCommands().some((command) => command.includes("shell rm -f"));
+    let settled = false;
+    const failure = capturedError(stage()).finally(() => {
+      settled = true;
+    });
+    await drainUntil(() => terminate !== undefined, { description: "push command" });
+    timer.advanceTime(budgets.SHARED_STORAGE_PUSH_TIMEOUT_MS);
+    await drainMicrotasks(200);
+    expect(pushSignal?.aborted).toBe(true);
+    expect(cleanupStarted()).toBe(false);
+    expect(settled).toBe(false);
+    timer.advanceTime(1_000);
+    await drainMicrotasks(200);
+    expect(cleanupStarted()).toBe(false);
+    terminate?.(new Error("adb push killed"));
+    const error = await failure;
+    expect(error.message).toContain("stage=push");
+    expect(error.message).toContain(
+      `elapsed=${budgets.SHARED_STORAGE_PUSH_TIMEOUT_MS}ms: Shared-storage push timed out`,
+    );
+    expect(cleanupStarted()).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("an aborted push that never settles delays cleanup only by the bound, overlapping diagnostics", async () => {
+    const { adb, timer, diagnostics, stage } = setup();
+    const execute = adb.executeCommand.bind(adb);
+    spyOn(adb, "executeCommand").mockImplementation((value, options) =>
+      value.includes("push ") ? new Promise<ExecResult>(() => {}) : execute(value, options),
+    );
+    spyOn(diagnostics, "collect").mockImplementation(() => new Promise<string>(() => {}));
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const error = await settleByFakeEvents(timer, capturedError(stage()), {
+        description: "bounded abort settlement",
+      });
+      expect(error.message).toContain("stage=push");
+      expect(SHARED_STORAGE_ABORT_SETTLEMENT_TIMEOUT_MS).toBeLessThan(
+        budgets.SHARED_STORAGE_DIAGNOSTICS_TOTAL_TIMEOUT_MS,
+      );
+      expect(timer.now()).toBe(
+        budgets.SHARED_STORAGE_PUSH_TIMEOUT_MS +
+          budgets.SHARED_STORAGE_DIAGNOSTICS_TOTAL_TIMEOUT_MS,
+      );
+      expect(adb.getExecutedCommands().at(-1)).toContain("shell rm -f");
+      expect(warn.mock.calls.some(([message]) => String(message).includes("did not settle"))).toBe(
+        true,
+      );
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   test("empty adb errors retain a cause and explicit nonempty fallback", async () => {
     const { adb, timer, stage } = setup();
@@ -211,7 +291,7 @@ describe("shared-storage stage failures", () => {
         timer.advanceTime(2700);
         return Promise.resolve(result(""));
       }
-      return new Promise<ExecResult>(() => {});
+      return settlesOnAbort(options?.signal);
     });
     const failure = capturedError(stage());
     const error = await settleByFakeEvents(timer, failure, {

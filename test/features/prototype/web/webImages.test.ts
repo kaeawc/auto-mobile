@@ -501,3 +501,43 @@ describe("an image with an inlinable asset", () => {
     expect(rendered.imageDraws.map((draw) => draw.asset)).toEqual(["photo", "other"]);
   });
 });
+
+describe("nav item images", () => {
+  const nav = (type: "bottomNav" | "tabBar", items: Record<string, unknown>[]) =>
+    still({ type, items }, {});
+  const items = [
+    { label: "Home", image: "photo", icon: "home" },
+    { label: "Other", image: "missing" },
+    { label: "Plain", icon: "settings" },
+  ];
+
+  for (const type of ["bottomNav", "tabBar"] as const) {
+    test(`${type} draws a slotted item image at 24 dp and records the draw`, () => {
+      const rendered = nav(type, items);
+      const images = find(rendered.element, (e) => e.attrs["data-part"] === "image");
+      expect(images).toHaveLength(1);
+      expect(images[0]!.style.width).toBe("24px");
+      expect(images[0]!.style.height).toBe("24px");
+      const layer = find(images[0]!, (e) => "data-image" in e.attrs)[0]!;
+      expect(layer.style["background-image"]).toBe("var(--pa-3)");
+      expect(layer.style["background-size"]).toBe("contain");
+      expect(rendered.imageDraws).toEqual([
+        { asset: "photo", widthDp: 24, heightDp: 24, scale: "fit" },
+        { asset: "missing", widthDp: 24, heightDp: 24, scale: "fit" },
+      ]);
+    });
+
+    test(`${type} keeps the placeholder for an item whose asset has no slot`, () => {
+      const rendered = nav(type, [{ label: "Other", image: "missing" }]);
+      expect(find(rendered.element, (e) => e.attrs["data-part"] === "image")).toHaveLength(0);
+      expect(find(rendered.element, (e) => e.attrs["data-part"] === "placeholder")).toHaveLength(1);
+    });
+  }
+
+  test("a light/dark pair draws the mode's asset", () => {
+    const rendered = nav("bottomNav", [
+      { label: "Home", image: { light: "photo", dark: "other" } },
+    ]);
+    expect(rendered.imageDraws.map((draw) => draw.asset)).toEqual(["photo"]);
+  });
+});

@@ -60,6 +60,11 @@ export interface PrototypeToolDependencies {
   channelExecutor?: PrototypeChannelExecutor;
   /** Host feature gates; tests supply an isolated environment. */
   env?: NodeJS.ProcessEnv;
+  /** Caches iOS uploads per device so the web page can inline their images; none caches nothing. */
+  iosAssetCache?: Pick<
+    import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
+    "put" | "remove"
+  >;
   shaderAssetCache?: Pick<
     import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
     "get"

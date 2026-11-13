@@ -35,6 +35,7 @@ import type { DeviceSession } from "../../src/db/types";
 import type { ProxySetupResult } from "../../src/utils/interfaces/ProxyManager";
 import { logger } from "../../src/utils/logger";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
 /** Drain pending microtasks without yielding to timers or I/O. */
 const drainMicrotasks = async (): Promise<void> => {
@@ -644,6 +645,114 @@ describe("ToolExecutionContext", () => {
     expect((failure as Error).message).toContain("Failed to setup accessibility service");
     expect((failure as Error).cause).toBe(lost);
     expect(setupCalls).toBe(1);
+  });
+
+  // Issue #13392: drive the real AndroidCtrlProxyManager.setup() result (fake adb,
+  // fake timer) through the readiness retry decision, rather than a hand-built
+  // ProxySetupResult, so the classifier and the decision are tested together.
+  describe("real manager missing-device result through readiness (#13392)", () => {
+    const SERIAL_QUALIFIED = "adb: device 'device-1' not found";
+    type Compatibility = AndroidCtrlProxyManager["ensureCompatibleVersion"];
+
+    function realManager(ensureCompatibleVersion: Compatibility): AndroidCtrlProxyManager {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        createBootedDevice("device-1"),
+        new FakeAdbExecutor(),
+        { timer: new FakeTimer() },
+      );
+      manager.assertNotDrivenByOtherDaemon = async () => {};
+      manager.ensureCompatibleVersion = ensureCompatibleVersion;
+      return manager;
+    }
+
+    /** Publishes a driver whose setup() returns the real manager's result for the first `failures` calls. */
+    function driveRealManagerFailures(manager: AndroidCtrlProxyManager, failures: number) {
+      const results: ProxySetupResult[] = [];
+      stubManager({
+        resetSetupState: () => {},
+        setup: async () => {
+          if (results.length >= failures) {
+            return { success: true, message: "ok" };
+          }
+          const result = await manager.setup();
+          results.push(result);
+          return result;
+        },
+      });
+      return results;
+    }
+
+    arranged("retries a transient serial-qualified missing-device failure", async () => {
+      const manager = realManager(async () => ({ status: "failed", error: SERIAL_QUALIFIED }));
+      const results = driveRealManagerFailures(manager, 1);
+      await createToolExecutionContext("real-transient", sessionManager, devicePool, {
+        sessionOptions,
+      });
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({
+        success: false,
+        error: SERIAL_QUALIFIED,
+        category: "deviceConnection",
+      });
+      expect(sessionManager.getDeviceReadiness("real-transient")).toBe("automationReady");
+    });
+
+    arranged("keeps a confirmed DeviceLostError terminal after one setup() call", async () => {
+      const lost = new DeviceLostError("device-1", SERIAL_QUALIFIED);
+      const manager = realManager(async () => {
+        throw lost;
+      });
+      const results = driveRealManagerFailures(manager, Number.POSITIVE_INFINITY);
+      const failure = await createToolExecutionContext("real-lost", sessionManager, devicePool, {
+        sessionOptions,
+      }).catch((error: unknown) => error);
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({ category: "deviceConnection", cause: lost });
+      expect((failure as Error).message).toContain("Failed to setup accessibility service");
+      expect((failure as Error).cause).toBe(lost);
+    });
+
+    arranged("fails after the bounded attempts when the device never returns", async () => {
+      const manager = realManager(async () => ({ status: "failed", error: SERIAL_QUALIFIED }));
+      const results = driveRealManagerFailures(manager, Number.POSITIVE_INFINITY);
+      const failure = await createToolExecutionContext(
+        "real-exhausted",
+        sessionManager,
+        devicePool,
+        { sessionOptions },
+      ).catch((error: unknown) => error);
+      expect(results).toHaveLength(2);
+      expect(results.every((result) => result.category === "deviceConnection")).toBe(true);
+      expect((failure as Error).message).toContain("Failed to setup accessibility service");
+      expect((failure as Error).message).toContain(SERIAL_QUALIFIED);
+      expect(sessionManager.getDeviceReadiness("real-exhausted")).toBeUndefined();
+    });
+
+    arranged("stops at the retry sleep when the caller cancels", async () => {
+      let firstFailure!: () => void;
+      const failed = new Promise<void>((resolve) => {
+        firstFailure = resolve;
+      });
+      const manager = realManager(async () => {
+        queueMicrotask(() => firstFailure());
+        return { status: "failed", error: SERIAL_QUALIFIED };
+      });
+      const results = driveRealManagerFailures(manager, Number.POSITIVE_INFINITY);
+      await sessionManager.createSession("real-cancel", "device-1", "android");
+      sessionManager.stopCleanupTimer();
+      const controller = new AbortController();
+      const context = createToolExecutionContext("real-cancel", sessionManager, devicePool, {
+        sessionOptions,
+        requireIssuedSession: false,
+        signal: controller.signal,
+      });
+      await failed;
+      controller.abort(new Error("caller cancelled real-manager retry"));
+      await expect(context).rejects.toThrow("caller cancelled real-manager retry");
+      await drainTurns();
+      expect(results).toHaveLength(1);
+      expect(results[0]?.category).toBe("deviceConnection");
+    });
   });
 
   // Issue #7541: an abort during the retry delay must reject promptly with

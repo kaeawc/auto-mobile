@@ -212,7 +212,9 @@ release's `supportedDeviceTypeIds` (the runtime's `supportedDeviceTypes` from
 `simctl list runtimes -j`): a model missing from that list is incompatible with
 the runtime even inside its bounds. Non-exact OS selectors skip such a runtime
 when another satisfying one ships the model; the device-images
-`compatibleRuntimeIds` applies the same rule. The resolver
+`compatibleRuntimeIds`, the exact iOS pair check and its compatible
+alternatives, and the Apple TV and Apple Vision Pro spec checks apply the same
+rule. The resolver
 does not replace an exact model or exact/default-exact OS to repair the pair.
 Absent bounds and list produce `compatibility: "unknown"` so the native
 creation authority can attempt the preserved exact pair. Malformed bounds are

@@ -8,7 +8,7 @@ import type {
   AppleTvSimulatorCatalog,
   AppleTvSimulatorInventory,
 } from "./AppleTvSimulatorInventory";
-import { evaluateRuntimeCompatibility } from "./runtimeCompatibility";
+import { evaluateDeviceTypeOnRuntime } from "./runtimeCompatibility";
 import type { ListedAppleTv } from "./AppleTvSimulatorBoot";
 
 /** `simctl create` and `simctl delete`; `SimCtlClient` implements them. */
@@ -224,7 +224,7 @@ export function assertAppleTvSpecInCatalog(
     );
   }
   const deviceType = catalog.deviceTypes.find((type) => type.identifier === spec.deviceType)!;
-  if (evaluateRuntimeCompatibility(deviceType, runtime.version).status === "unsupported") {
+  if (evaluateDeviceTypeOnRuntime(deviceType, runtime).status === "unsupported") {
     throw new ActionableError(
       `Apple TV device type '${spec.deviceType}' is incompatible with tvOS runtime '${spec.runtime}' (${runtime.version}). Pick a compatible pair from automobile:devices/images/tvos.`,
     );

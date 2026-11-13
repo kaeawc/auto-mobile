@@ -121,12 +121,14 @@ hierarchies are structurally equal, bounded at 1000 ms and cancelled with the
 request. In-place and scroll actions are unchanged and keep their single
 capture.
 
-A node whose text or visibility alone changes in two consecutive comparisons (a
-running clock or stopwatch, a paused stopwatch blinking its time text, a typing
-indicator, a live counter) is treated as volatile for the rest of that settle:
-those changes in later comparisons are left out, so such a screen settles once
-everything else holds still. The two comparisons that mark the node still count,
-so a real transition that rewrites one node's text twice and then stops is not
+A node whose text or visibility alone changes in a comparison and in either of
+the two comparisons before it (a running clock or stopwatch, a paused stopwatch
+blinking its time text, a typing indicator, a live counter) is treated as
+volatile for the rest of that settle. Looking back two comparisons catches a
+blink whose polls land on the same phase twice in a row. The node's changes in
+later comparisons are left out, so such a screen settles once everything else
+holds still. The two comparisons that mark the node still count, so a real
+transition that rewrites one node's text twice and then stops is not
 mistaken for a ticking node. The first comparison may be the action's own
 capture against the first poll when both show the same screen; it feeds only
 volatile-node detection, never the stable pair. The node is identified by

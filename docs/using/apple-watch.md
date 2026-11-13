@@ -184,7 +184,7 @@ Every other tool refuses a watch before doing anything, with:
   It is not listed by default; enable it with `setToolEnabled` (see
   [Dynamic Tools](dynamic-tools.md)). The focused control is the innermost focused element with an
   accessible value (for example SwiftUI `.accessibilityValue`), or the one valued element inside a
-  focused view that does not scroll. When the same focused control has a readable accessible value
+  focused view that does not scroll. When the app reports no focused element, which is the case for SwiftUI `digitalCrownRotation`, it is the app's one valued control outside scrolling content. When the same focused control has a readable accessible value
   before and after a rotation, that value must change for success. Otherwise, any screen hierarchy
   change counts as success. When no focused value is readable, an unrelated update, such as a status
   label, can satisfy this condition; success does not confirm that the crown moved the control.

@@ -499,6 +499,13 @@ public final class NetworkRuleStore: ShapingRuleSource {
         return rules[target]?.condition == .watch
     }
 
+    public func isOffline(_ target: NetworkRuleTarget) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        sweep(now: clock.nowNanoseconds())
+        return rules[target]?.condition == .offline
+    }
+
     /// Only this installed revision's committed data drops count; new-flow drops do not.
     public func existingFlows(for command: NetworkRuleCommand) -> ExistingFlows {
         lock.lock()

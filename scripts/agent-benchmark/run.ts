@@ -19,7 +19,7 @@
  *   --output <dir>      artifact root (default: scratch/agent-benchmarks)
  *
  * Exit codes: 0 every run passed; 1 a run failed or was incomplete; 2 usage error.
- * See docs/using/agent-benchmarks.md.
+ * See docs/how-it-works/agent-benchmarks.md.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

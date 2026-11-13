@@ -531,7 +531,8 @@ function attributeSearchableLabels(entries: SearchableEntry[]): void {
  * top-level child of a window is its own group), unless a tappable ancestor already
  * hoisted that text. Like the skeleton, which merges a node's serialized copies (merged
  * tree and window tree) into one row keeping the first copy's ancestry, a later copy of
- * the same toggle takes the first copy's result (#18253).
+ * the same toggle takes the first copy's result (#18253). A copy shares the coordinate
+ * space too: window and ornament toggles with equal local bounds are distinct (#18273).
  */
 function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): void {
   const hoisted = new Set(entries.flatMap((entry) => entry.hoistedSources ?? []));
@@ -545,7 +546,7 @@ function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): 
     if (entry.label !== undefined || !entry.element || !entry.affordances.includes("toggle")) {
       continue;
     }
-    const copy = JSON.stringify([entry.elementId, entry.element.bounds]);
+    const copy = JSON.stringify([entry.element.space, entry.elementId, entry.element.bounds]);
     const preceding = firstCopies.has(copy)
       ? firstCopies.get(copy)
       : precedingSiblingText(entries, entry, isText);

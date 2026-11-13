@@ -319,3 +319,14 @@ export function findDocsRequiresDrift(
   }
   return problems;
 }
+
+/** Each of `tools` that no tool table row in `markdown` names: a tool page must carry its row. */
+export function findMissingToolRows(markdown: string, tools: readonly string[]): string[] {
+  const lines = markdown.split("\n");
+  const listed = new Set(
+    toolTables(lines).flatMap((table) => table.body.map((index) => rowTool(lines[index]))),
+  );
+  return tools
+    .filter((tool) => !listed.has(tool))
+    .map((tool) => `${tool}: page has no \`| Tool | What it does | Requires |\` row for it`);
+}

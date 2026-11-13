@@ -1,5 +1,9 @@
 # Seed Android system content
 
+| Tool                        | What it does                                                                                        | Requires |
+| --------------------------- | --------------------------------------------------------------------------------------------------- | -------- |
+| 🌱 <code>seedContent</code> | Seed Android contacts, calendar events, call history and SMS inbox, tagged `automobile.<namespace>` | —        |
+
 `seedContent` prepares contacts, calendar events, call history, and SMS inbox rows for app testing. Enable the tool before use. Select an Android device with the usual `deviceId`, `platform`, or `sessionUuid` parameters; iOS is unsupported.
 
 ```json

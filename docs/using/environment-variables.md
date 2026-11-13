@@ -355,7 +355,7 @@ budget-driven fallback reasons.
 | `AUTOMOBILE_HEADLESS`                                                                 | `1`/`true` runs the `prototype` tool on an in-memory virtual device with no real device, as `--headless` does. See [Headless prototypes](prototype-headless.md).                                                  | unset                                                                  |
 | `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS, exact `true`/`1` runs headless and any other set value shows a window. Non-macOS is always headless.                                                                                                    | detect a graphical login session                                       |
 | `AUTOMOBILE_BOOT_CAPACITY_GATE`                                                       | Boot limit check for emulator and simulator cold boots; exact `0` disables it on both platforms. See [Boot capacity](#boot-capacity).                                                                             | on                                                                     |
-| `AUTOMOBILE_IOS_TEMPLATE_CLONE`                                                       | Clone new iOS simulators from settled templates; off by default until clone isolation (#15327) is device-verified, `1`/`true` opts in. No template yet: normal create.                                            | `false`                                                                |
+| `AUTOMOBILE_IOS_TEMPLATE_CLONE`                                                       | Clone new iOS simulators from settled templates; off by default until clone isolation is device-verified, `1`/`true` opts in. No template yet: normal create.                                                     | `false`                                                                |
 | `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE`                                                 | New iOS simulators: `none`, `minimal`, or `catalog-cpu`; `none` opts out; unknown values use `minimal`. Explicit resources override the profile.                                                                  | `minimal`                                                              |
 | `AUTOMOBILE_IOS_SUPPRESS_APSD_LOG`                                                    | New iOS sims: turn off only the `com.apple.apsd` log subsystem before first boot; apsd's other logs remain. Exact `1`/`true` (trimmed, any case) opts in; persists. Hides push debug logs; push unaffected.       | `false`                                                                |
 | `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of the gate above: exact `0` disables, exact `1` enables.                                                                                                                                       | unset (follows the shared switch)                                      |
@@ -566,7 +566,7 @@ for up to 60 seconds from the moment its launch leaves the queue (waiting in the
 queue is bounded separately, at 5 minutes), and a retry joins that same start.
 The same typing applies to a `readiness: none` observe whose read lapses with a
 timeout, setup failure, or recovery reason while the device's launch is queued
-or holding a launch slot (#15291). Retry the observe shortly.
+or holding a launch slot. Retry the observe shortly.
 
 ## iOS builds and signing
 

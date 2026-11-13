@@ -1,30 +1,10 @@
 # iOS Simulator fleet cost and capacity
 
-AutoMobile measures what booted iOS Simulators cost the host and tells callers
-whether one more boot fits. Everything is read-only: it runs `ps`,
-`sysctl -n kern.memorystatus_vm_pressure_level`,
-`top -l 1 -stats pid,mem` and `xcrun simctl list devices -j`, and never boots, shuts down or
-reconfigures a simulator.
-
-## What is measured
-
-One host snapshot is taken per batch and shared by every simulator.
-
-| Measurement                  | Source                                                                            |
-| ---------------------------- | --------------------------------------------------------------------------------- |
-| Process memory footprint     | `top` `MEM` (`phys_footprint`) summed over the `ps` process tree of the simulator |
-| Process memory (RSS) and CPU | `ps` process tree rooted at the process whose command names the device data dir   |
-| Device data on disk          | `dataPathSize` from `simctl list devices -j` (no filesystem walk)                 |
-| Host memory, cores, load     | `os` totals, 1-minute load average, macOS memory pressure level                   |
-| Boot-to-ready duration       | Recorded boot durations, keyed by simulator and profile                           |
-
-RSS counts shared pages (the dyld cache and system frameworks) once per process, and a
-simulator tree has about 220 processes, so its summed RSS reads roughly ten times the real
-cost: 26.9 GiB for one idle simulator whose `phys_footprint` is 2.1–2.4 GiB (#15288). Memory
-cost is therefore the summed footprint, and RSS is only shown for reference. If the `top` read
-fails, footprint is reported as unmeasured (with a `memory footprint:` error), never replaced by
-RSS. `%CPU` is `ps`'s decayed ratio, not an instantaneous sample. A process claimed by two
-simulators is attributed to neither.
+AutoMobile measures what booted iOS Simulators cost the host (process-tree memory footprint,
+CPU, device data size, boot time) and tells callers whether one more boot fits. Measurement is
+read-only and never boots, shuts down or reconfigures a simulator. For how each value is
+measured and how the limits below are derived, see
+[fleet cost measurement](../how-it-works/ios-simulator-fleet-cost.md).
 
 Each simulator carries a `quality`: `measured`, `no-processes` (Booted but no
 process visible), `not-running`, or `unavailable` (host snapshot failed, with the
@@ -34,18 +14,12 @@ error). Missing data is never reported as zero.
 
 The count limit is the smaller of two budgets, at least 1:
 
-- Memory: 60% of host RAM divided by per-simulator settled process-tree footprint.
-  The tree includes the CtrlProxy runner app, so no extra runner overhead is added.
-  Measured footprints are averaged and clamped to 1.5–6 GiB (the upper bound is only a
-  sanity check); without measurements the default is 2.5 GiB. Boots in flight retain
-  conservative memory charges until ready. Round 6 ran 32 simulators healthy (normal memory
-  pressure, no swap) at 75.8 GiB, 59% of a 128 GB host, so a 128 GB / 16-core host derives 32
-  at the measured 2.4 GiB. Host memory pressure remains the backstop: it is reported as
-  `hostPressure` rather than silently raising the limit.
-- Settled CPU: half of host cores divided by 0.1 core per simulator (#15288 measured
-  0.07–0.115 at 5–20 minutes, drifting up with age; #15097 measured 0.055 in the first
-  minutes). The other half stays available for the app under test, IDE and runners. This
-  does not bind below about 80 simulators on 16 cores.
+- Memory: 60% of host RAM divided by the measured per-simulator footprint (1.5–6 GiB,
+  2.5 GiB before any measurement). Boots in flight keep conservative memory charges until
+  ready. Host memory pressure is reported as `hostPressure`; it never raises the limit.
+- Settled CPU: half of host cores divided by 0.1 core per simulator. The other half stays
+  available for the app under test, IDE and runners. This does not bind below about 80
+  simulators on 16 cores.
 
 Set `AUTOMOBILE_IOS_SIM_MAX_BOOTED` to override the count limit. Only count-limit
 overflow fails immediately with the retryable `capacity_exhausted` error.
@@ -56,11 +30,7 @@ that cold-boots a watch takes a slot and is refused with `capacity_exhausted`
 at the limit.
 
 First boot has a separate concurrency limit: `ceil(host cores / 13)`, at least 2
-(or 1 when host resources cannot be read). The floor of 2 matches the runner launch
-limit: boots share the host's CPU-seconds, so serializing them gains little, while
-a queue of one makes later callers wait out two full bursts. Measurements in #15097 show a burst
-of about 13 cores for 50–130 seconds: about 790 CPU-seconds, or 222 CPU-seconds
-with clone + lean preparation. Set `AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY` to
+(or 1 when host resources cannot be read). Set `AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY` to
 override this limit. Both overrides accept positive integers; invalid values
 warn and use their derived limits.
 
@@ -116,11 +86,9 @@ Set `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=none` to opt out of the profile, or
 `AUTOMOBILE_IOS_TEMPLATE_CLONE=1` (or `true`) to opt in to cloning. Explicit
 resource requests override the profile.
 
-### Known limitation: template clones shared Safari and system-app data
+### Known limitation: template clones
 
-Template cloning is off by default for this release because a clone used to share Safari and other
-system-app data with its template, so state (tabs, history, cookies, website data) written in one
-clone leaked to the template and to other clones (#15327, tracked under #15216). Clones are now
-rewritten after `simctl clone` so they own their system-app data; the default stays off until the next
-manual test confirms that on a release candidate. With `AUTOMOBILE_IOS_TEMPLATE_CLONE=1`, a clone whose
-rewrite fails is deleted and the simulator is created normally.
+Template cloning is off by default for this release: clones of a template could share Safari and
+other system-app data (tabs, history, cookies, website data). With
+`AUTOMOBILE_IOS_TEMPLATE_CLONE=1`, a clone whose isolation step fails is deleted and the
+simulator is created normally.

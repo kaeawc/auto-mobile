@@ -644,10 +644,21 @@ export class DefaultPlanStepExecutor<
   }
 
   private returnedFailureMessage(checkResult: object, context: StepExecutionContext): string {
-    const fallbackError = context.targetDevice
-      ? String(Reflect.get(checkResult, "message") ?? "returned failure status")
-      : "Tool execution failed";
-    return "error" in checkResult ? formatToolError(checkResult.error) : fallbackError;
+    if ("error" in checkResult) {
+      return formatToolError(checkResult.error);
+    }
+    // A tool's own message (or reason) explains the failure on every path, including a
+    // structured envelope whose top level carries only `success: false` (#18274).
+    const payload: object =
+      getStructuredPayload<Record<string, unknown>>(checkResult as Record<string, unknown>) ??
+      checkResult;
+    const reported = [Reflect.get(payload, "message"), Reflect.get(payload, "reason")].find(
+      (value) => typeof value === "string" && value.length > 0,
+    );
+    if (typeof reported === "string") {
+      return reported;
+    }
+    return context.targetDevice ? "returned failure status" : "Tool execution failed";
   }
 
   private async resultFromResponse(

@@ -318,7 +318,8 @@ routinely ships nothing.
   too. Stale claims in `docs/` were a recurring accepted finding. Edit the existing statement in
   place; flag docs added or grown with progress logs, status checklists, dated history, per-PR
   narration, or internals leaking into `docs/using/` (end users only; internals go in
-  `docs/how-it-works/`).
+  `docs/how-it-works/`, the why in a dated `docs/devlog/` entry). Flag a page that repeats
+  another section's content instead of linking to it.
 
 ## Step 6 — The generated lens
 

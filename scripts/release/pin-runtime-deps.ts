@@ -27,6 +27,7 @@ import {
   parseBunLock,
   repartitionDependencies,
 } from "./lib/runtime-pins";
+import { formatJsonWithOxfmt } from "./lib/oxfmt-json";
 import { deriveRootsFromDist } from "./lib/runtime-roots";
 
 const REPO_ROOT = path.resolve(import.meta.dir, "../..");
@@ -163,8 +164,12 @@ function readRootsForCheck(): string[] {
   );
 }
 
-function stableJson(value: unknown): string {
-  return `${JSON.stringify(value, null, 2)}\n`;
+/**
+ * Writes `value` as oxfmt-formatted JSON so a no-change `--write` leaves the
+ * tree clean and the Node lane's `oxfmt --check` passes (#18333).
+ */
+function writeFormattedJson(file: string, value: unknown): void {
+  writeFileSync(file, formatJsonWithOxfmt(value, path.relative(REPO_ROOT, file), REPO_ROOT));
 }
 
 function writeMode(): void {
@@ -182,7 +187,7 @@ function writeMode(): void {
   pkg.dependencies = intended.dependencies;
   pkg.devDependencies = intended.devDependencies;
   pkg.bundledDependencies = intended.bundledDependencies;
-  writeFileSync(PACKAGE_JSON, stableJson(pkg));
+  writeFormattedJson(PACKAGE_JSON, pkg);
 
   const manifest: Manifest = {
     description:
@@ -194,7 +199,7 @@ function writeMode(): void {
     bundledRuntimeDependencyOwners: intended.bundledRuntimeDependencyOwners,
     multiVersion: intended.multiVersion,
   };
-  writeFileSync(MANIFEST, stableJson(manifest));
+  writeFormattedJson(MANIFEST, manifest);
 
   console.log(
     `Pinned ${Object.keys(intended.dependencies).length} runtime dependencies; ` +

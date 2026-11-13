@@ -144,17 +144,17 @@ function volatileChanges(diff: ObserveDiff, untrackable: ReadonlySet<string>): S
 /**
  * Settle-scoped tracker for nodes whose text or visibility keeps changing
  * (#17670, #17749): a running clock or stopwatch, a paused stopwatch blinking,
- * a typing indicator, a live counter. Such a node changes on every poll, so a
- * comparator that counts every change never sees two equal reads and every
- * action pays the full settle budget.
+ * a typing indicator, a live counter. Counting every tick or blink can prevent
+ * the required run of equal reads and exhaust the settle budget.
  *
- * A node that changes, and only its text or visibility, in two consecutive
- * diffs is marked volatile for the rest of the settle, and those changes in
+ * A node that changes, and only its text or visibility, in two of the last
+ * three diffs is marked volatile for the rest of the settle. Those changes in
  * LATER diffs are dropped from the diff the comparator sees. The two diffs that
- * mark it still count, so a node must tick on at least three consecutive reads
- * before a tick is masked: a real transition that rewrites one node's text twice
- * and then stops still reads as unstable until a later read confirms it. The
- * first of those diffs may be the action's own capture against the first poll
+ * mark it still count, so at least three changes are needed before masking:
+ * a real transition that rewrites one node's text twice and then stops still
+ * reads as unstable until a later read confirms it. One intervening equal diff
+ * does not discard a sampled blink. The first diff may be the action's own
+ * capture against the first poll
  * (#17749); it only feeds this tracker, never the stable-read count.
  * Everything else still counts: a node added or removed without a counterpart,
  * a volatile node that changes anything else, any other node's change, and
@@ -162,7 +162,7 @@ function volatileChanges(diff: ObserveDiff, untrackable: ReadonlySet<string>): S
  */
 export class VolatileTextTracker {
   private readonly volatile = new Set<string>();
-  private previousChanges = new Set<string>();
+  private readonly recentChanges: Set<string>[] = [];
 
   /** Number of nodes currently treated as volatile. */
   get volatileCount(): number {
@@ -172,7 +172,7 @@ export class VolatileTextTracker {
   /** Forget everything; call when consecutive reads are not the same screen. */
   reset(): void {
     this.volatile.clear();
-    this.previousChanges = new Set();
+    this.recentChanges.length = 0;
   }
 
   /**
@@ -183,16 +183,24 @@ export class VolatileTextTracker {
    */
   mask(diff: ObserveDiff, untrackable: ReadonlySet<string> = new Set()): ObserveDiff {
     const changes = volatileChanges(diff, untrackable);
+    for (const previous of this.recentChanges) {
+      for (const identity of untrackable) {
+        previous.delete(identity);
+      }
+    }
     // Only a node already volatile before this diff is masked: the diff that
     // promotes a node still counts, so a screen transition made of two
     // text changes on one node is not mistaken for a ticking node (#17692).
     const maskable = new Set([...changes].filter((identity) => this.volatile.has(identity)));
     for (const identity of changes) {
-      if (this.previousChanges.has(identity)) {
+      if (this.recentChanges.some((previous) => previous.has(identity))) {
         this.volatile.add(identity);
       }
     }
-    this.previousChanges = changes;
+    this.recentChanges.push(changes);
+    if (this.recentChanges.length > 2) {
+      this.recentChanges.shift();
+    }
     return withoutChangesOf(diff, maskable);
   }
 }

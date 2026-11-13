@@ -64,8 +64,8 @@ function seedFromReference(
  * scroll as a small keyed delta, so a genuinely static screen settles even when
  * its raw JSON churns, while a spinner/animation correctly reads as not-settled
  * and the mandatory timeout governs. A node whose text alone changes in two
- * consecutive diffs (a running clock, a typing indicator) is masked for the rest
- * of the settle by {@link VolatileTextTracker}, so such a screen settles once
+ * of three recent diffs (a running clock, a typing indicator) is masked for the
+ * rest of the settle by {@link VolatileTextTracker}, so such a screen settles once
  * everything else holds still (#17670). A node that blinks (its visibility
  * flips) is treated the same way, and while ticks are the only change the loop
  * may spend `volatileExtensionMs` past its budget to confirm them (#17749).
@@ -93,7 +93,7 @@ export class RealSettleObserve implements SettleObserve {
     // The next poll must read the device, not serve the cached capture that reported motion: an
     // animation ending changes no node and fires no event, so a cache would stay "active" (#15114).
     let motionPending = false;
-    // Nodes whose text ticks every poll (clocks, typing indicators) are masked once seen (#17670).
+    // Repeated text ticks or visibility blinks are masked once confirmed (#17670, #17749).
     const volatileText = new VolatileTextTracker();
     // Whether only ticking or blinking nodes have changed since the last tick (#17749).
     let onlyTicking = false;

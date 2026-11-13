@@ -256,6 +256,25 @@ describe("settle on a paused, blinking stopwatch at device read cost (#17749)", 
     expect(result.waitMs).toBe(1350);
     expect(result.observation.viewHierarchy?.updatedAt).toBe(30);
   });
+
+  test("aliased blink reads settle with a three-read stability threshold", async () => {
+    const frames = [false, false, true, true, false, false, true].map((visible) => ({
+      ...PAUSED_ACTION_CAPTURE,
+      visible,
+    }));
+    const { settle, screen } = deviceSettle(PAUSED_ACTION_CAPTURE, frames, {
+      timeoutMs: 2500,
+      // One equal pair must not end the loop before the next sampled flip.
+      stableReads: 3,
+    });
+    const result = await settle;
+    expect(result.settled).toBe(true);
+    expect(result.terminalReason).toBe("settled");
+    expect(result.polls).toBe(5);
+    expect(result.waitMs).toBe(2250);
+    expect(result.observation.viewHierarchy?.updatedAt).toBe(50);
+    expect(screen.getCollectDeferredBackStackCallCount()).toBe(1);
+  });
 });
 
 describe("embedded settle gate on the stopwatch (#17749)", () => {
@@ -304,6 +323,42 @@ describe("VolatileTextTracker visibility blink (#17749)", () => {
       isStabilityDiffEmpty(tracker.mask(blink(TIME_ID, from))),
     );
     expect(stable).toEqual([false, false, true, true]);
+  });
+
+  test("an equal diff between flips still promotes the blink without masking its second flip", () => {
+    const tracker = new VolatileTextTracker();
+    const empty: ObserveDiff = { isDiff: true, skeleton: [], added: [], removed: [], changed: [] };
+    const stable = [
+      blink(TIME_ID, true),
+      empty,
+      blink(TIME_ID, false),
+      empty,
+      blink(TIME_ID, true),
+    ].map((step) => isStabilityDiffEmpty(tracker.mask(step)));
+    expect(stable).toEqual([false, true, false, true, true]);
+    expect(tracker.volatileCount).toBe(1);
+  });
+
+  test("a flip older than the two preceding diffs does not promote the blink", () => {
+    const tracker = new VolatileTextTracker();
+    const empty: ObserveDiff = { isDiff: true, skeleton: [], added: [], removed: [], changed: [] };
+    tracker.mask(blink(TIME_ID, true));
+    tracker.mask(empty);
+    tracker.mask(empty);
+    expect(isStabilityDiffEmpty(tracker.mask(blink(TIME_ID, false)))).toBe(false);
+    expect(tracker.volatileCount).toBe(0);
+  });
+
+  test("reset clears pending flips across equal diffs", () => {
+    const tracker = new VolatileTextTracker();
+    const empty: ObserveDiff = { isDiff: true, skeleton: [], added: [], removed: [], changed: [] };
+    tracker.mask(blink(TIME_ID, true));
+    tracker.mask(empty);
+    tracker.reset();
+    tracker.mask(blink(TIME_ID, false));
+    expect(tracker.volatileCount).toBe(0);
+    expect(isStabilityDiffEmpty(tracker.mask(blink(TIME_ID, true)))).toBe(false);
+    expect(tracker.volatileCount).toBe(1);
   });
 
   test("a node that only becomes visible once is never masked", () => {

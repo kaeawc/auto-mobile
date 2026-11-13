@@ -13,6 +13,7 @@ export function provisionDeviceDependencyOverrides(
   | "provisionAndroidIdentityBackoff"
   | "manufacturerProfileApplier"
   | "androidAutoProjection"
+  | "headUnitInventory"
   | "avdColdBootMarkers"
   | "holdAcquiringSession"
 > {
@@ -20,6 +21,7 @@ export function provisionDeviceDependencyOverrides(
     holdAcquiringSession: deps.holdAcquiringSession ?? currentDeps.holdAcquiringSession,
     avdColdBootMarkers: deps.avdColdBootMarkers ?? currentDeps.avdColdBootMarkers,
     androidAutoProjection: deps.androidAutoProjection ?? currentDeps.androidAutoProjection,
+    headUnitInventory: deps.headUnitInventory ?? currentDeps.headUnitInventory,
     manufacturerProfileApplier:
       deps.manufacturerProfileApplier ?? currentDeps.manufacturerProfileApplier,
     exactDeviceProvisionerFactory:

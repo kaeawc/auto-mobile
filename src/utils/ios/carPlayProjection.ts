@@ -88,7 +88,7 @@ export function assertCarPlayProjecting(state: CarPlayProjectionState): void {
       ? "Enable CarPlay and power the screen on first via ios/carplay-power. "
       : "";
   throw new ActionableError(
-    `${status} Capture was skipped because the frame would be black. ${power}Open the Simulator.app CarPlay window or wait for [#17561](https://github.com/kaeawc/auto-mobile/issues/17561).`,
+    `${status} Capture was skipped because the frame would be black. ${power}Open the CarPlay window in Simulator.app, then retry.`,
   );
 }
 

@@ -83,6 +83,7 @@ struct PrototypeBundleReferences {
     private mutating func collect(_ node: JSONValue, path: String, keys: [String: [String]]) {
         guard let fields = node.objectFields else { return }
         if fields["type"]?.stringValue == "image" { image(fields["asset"]) }
+        if let id = PrototypeMapMarkerAssets.asset(fields) { images.append(PrototypeBundleID(id)) }
         if case let .array(items) = fields["items"] { for item in items { image(item.objectFields?["image"]) } }
         font(fields["style"])
         if case let .array(entries) = fields["styleWhen"] { for entry in entries { font(entry.objectFields?["style"]) }

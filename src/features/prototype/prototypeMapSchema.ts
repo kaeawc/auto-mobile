@@ -23,6 +23,12 @@ const mapCameraSchema = z.union([
   z.object({ data: pointerSchema }).strict(),
 ]);
 
+/** A marker icon: a Material icon name, or `{asset}` naming an uploaded image asset, never a URL (#16491). */
+const mapMarkerIconSchema = z.union([
+  iconNameSchema,
+  z.object({ asset: mapTemplateSchema }).strict(),
+]);
+
 /** One marker per item of the `/data` array at `path`, bound under `as` (#14309). */
 const mapMarkersSchema = z
   .object({
@@ -32,7 +38,7 @@ const mapMarkersSchema = z
     lat: mapTemplateSchema,
     lng: mapTemplateSchema,
     title: mapTemplateSchema,
-    icon: iconNameSchema.optional(),
+    icon: mapMarkerIconSchema.optional(),
     // Degrees clockwise from north; `rotation` is a motion field elsewhere in the spec.
     heading: mapTemplateSchema.optional(),
     animateMs: z.number().int().min(0).max(2000).optional(),

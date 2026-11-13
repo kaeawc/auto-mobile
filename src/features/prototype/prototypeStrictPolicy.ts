@@ -1,4 +1,5 @@
 import { prototypeShareArgumentsError } from "./prototypeShare";
+import { prototypeMapMarkerAssetsError } from "./prototypeMap";
 import {
   prototypePlatformCall,
   prototypePlatformEvent,
@@ -890,7 +891,7 @@ function shareAssetsError(
       return error;
     }
   }
-  return undefined;
+  return prototypeMapMarkerAssetsError(spec, assets);
 }
 
 function shareLibraryFields(spec: unknown, fields: LibraryField[]): Set<string> {

@@ -157,6 +157,7 @@
     "loop-upper-bounds.json",
     "map-backend-channel-literal.json",
     "map-backends.json",
+    "map-marker-asset-icon.json",
     "map-marker-tap-emit-context.json",
     "map-node-limits.json",
     "map-node.json",
@@ -1090,9 +1091,11 @@
     "map-fit-unknown.json",
     "map-icon-url.json",
     "map-marker-animate-over.json",
+    "map-marker-asset-icon-url.json",
     "map-marker-missing-as.json",
     "map-marker-tap-context-marker-id.json",
     "map-marker-title-blank.json",
+    "map-marker-unknown-asset.json",
     "map-marker-unknown-field.json",
     "map-polyline-color-unknown.json",
     "map-polyline-width-over.json",
@@ -3438,6 +3441,11 @@
       "prototype_platform_v1"
     ],
     "map-node-limits.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
+    "map-marker-asset-icon.json": [
       "prototype_data_model_v1",
       "prototype_platform_map_v1",
       "prototype_platform_v1"

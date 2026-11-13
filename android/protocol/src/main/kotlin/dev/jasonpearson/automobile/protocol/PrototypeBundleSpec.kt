@@ -42,6 +42,7 @@ internal object PrototypeBundleSpec {
     val fonts = linkedSetOf<String>()
     for (node in nodes(spec)) {
       if (text(node["type"]) == "image") addImage(node["asset"], images)
+      PrototypeMapMarkerAssets.asset(node)?.let(images::add)
       for (item in (node["items"] as? JsonArray).orEmpty()) addImage(
         (item as? JsonObject)?.get("image"),
         images,

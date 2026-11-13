@@ -13,9 +13,22 @@ protocol CommandHandling: Sendable {
     func handle(
         _ request: WebSocketRequest, deadlineMs: Int64?, monotonicNowMs: @escaping @Sendable () -> Int64
     ) async -> any WebSocketResponsePayload
+    func handle(
+        _ request: WebSocketRequest, deadlineMs: Int64?, monotonicNowMs: @escaping @Sendable () -> Int64,
+        deliveryAbandoned: @escaping @Sendable () -> Bool
+    ) async -> any WebSocketResponsePayload
 }
 
 extension CommandHandling {
+    func handle(
+        _ request: WebSocketRequest, deadlineMs: Int64?, monotonicNowMs: @escaping @Sendable () -> Int64,
+        deliveryAbandoned _: @escaping @Sendable () -> Bool
+    )
+        async -> any WebSocketResponsePayload
+    {
+        await handle(request, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs)
+    }
+
     func handle(
         _ request: WebSocketRequest, deadlineMs _: Int64?, monotonicNowMs _: @escaping @Sendable () -> Int64
     )

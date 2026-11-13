@@ -131,6 +131,15 @@ final class CommandHandler: CommandHandling {
     )
         async -> any WebSocketResponsePayload
     {
+        await handle(request, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs, deliveryAbandoned: { false })
+    }
+
+    func handle(
+        _ request: WebSocketRequest, deadlineMs: Int64?, monotonicNowMs: @escaping @Sendable () -> Int64,
+        deliveryAbandoned: @escaping @Sendable () -> Bool
+    )
+        async -> any WebSocketResponsePayload
+    {
         let startTime = Date()
 
         if request.requestType != .requestPressKey {
@@ -139,7 +148,8 @@ final class CommandHandler: CommandHandling {
 
         do {
             return try await dispatch(
-                request, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs
+                request, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs,
+                deliveryAbandoned: deliveryAbandoned
             )
         } catch {
             // Frame-context rejection can precede pressKeyOutcome's consume step.
@@ -161,7 +171,8 @@ final class CommandHandler: CommandHandling {
 
     private func dispatch(
         _ request: WebSocketRequest, startTime: Date, deadlineMs: Int64?,
-        monotonicNowMs: @escaping @Sendable () -> Int64
+        monotonicNowMs: @escaping @Sendable () -> Int64,
+        deliveryAbandoned: @escaping @Sendable () -> Bool
     )
         async throws -> any WebSocketResponsePayload
     {
@@ -173,7 +184,8 @@ final class CommandHandler: CommandHandling {
                 request,
                 startTime: startTime,
                 deadlineMs: deadlineMs,
-                monotonicNowMs: monotonicNowMs
+                monotonicNowMs: monotonicNowMs,
+                deliveryAbandoned: deliveryAbandoned
             )
         case .setText, .appendText, .clearText, .imeAction, .selectAll, .pressKey, .keyboard:
             return try await dispatchTextInput(request, startTime: startTime)
@@ -221,18 +233,21 @@ final class CommandHandler: CommandHandling {
 
     private func dispatchGesture(
         _ request: WebSocketRequest, startTime: Date, deadlineMs: Int64?,
-        monotonicNowMs: @escaping @Sendable () -> Int64
+        monotonicNowMs: @escaping @Sendable () -> Int64,
+        deliveryAbandoned: @escaping @Sendable () -> Bool
     )
         async throws -> any WebSocketResponsePayload
     {
         switch request {
         case let .tapCoordinates(payload):
             return try await handleTapCoordinates(
-                payload, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs
+                payload, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs,
+                deliveryAbandoned: deliveryAbandoned
             )
         case let .swipe(payload):
             return try await handleSwipe(
-                payload, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs
+                payload, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs,
+                deliveryAbandoned: deliveryAbandoned
             )
         case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):
             return try await handleMultiFingerSwipe(payload, startTime: startTime)

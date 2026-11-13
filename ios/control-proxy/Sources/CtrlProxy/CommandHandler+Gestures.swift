@@ -96,12 +96,13 @@ extension CommandHandler {
     func handleTapCoordinates(
         _ request: RequestTapCoordinates,
         startTime: Date, deadlineMs: Int64?,
-        monotonicNowMs: @escaping @Sendable () -> Int64
+        monotonicNowMs: @escaping @Sendable () -> Int64,
+        deliveryAbandoned: @escaping @Sendable () -> Bool = { false }
     )
         async throws -> WebSocketResponse
     {
         let checkDeadline: @Sendable () throws -> Void = {
-            if let deadlineMs, monotonicNowMs() >= deadlineMs {
+            if let deadlineMs, monotonicNowMs() >= deadlineMs || deliveryAbandoned() {
                 throw CommandError.deadlineExceeded(
                     command: "request_tap_coordinates", deadlineMs: deadlineMs, gestureCompleted: false
                 )
@@ -115,19 +116,26 @@ extension CommandHandler {
             expected: request.frameContext, beforeOperation: checkDeadline
         ) {
             try checkDeadline()
+            let diagnostics: TapDiagnostics?
             if request.doubleTap == true {
                 try self.gesturePerformer.doubleTap(x: request.x, y: request.y)
-                return nil
-            }
-            if request.diagnostics == true {
-                return try self.gesturePerformer.tapWithDiagnostics(
+                diagnostics = nil
+            } else if request.diagnostics == true {
+                diagnostics = try self.gesturePerformer.tapWithDiagnostics(
                     x: request.x, y: request.y, durationMs: duration, strategy: request.tapStrategy
                 )
+            } else {
+                try self.gesturePerformer.tap(
+                    x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0, strategy: request.tapStrategy
+                )
+                diagnostics = nil
             }
-            try self.gesturePerformer.tap(
-                x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0, strategy: request.tapStrategy
-            )
-            return nil
+            if let deadlineMs, monotonicNowMs() >= deadlineMs || deliveryAbandoned() {
+                throw CommandError.deadlineExceeded(
+                    command: "request_tap_coordinates", deadlineMs: deadlineMs, gestureCompleted: true
+                )
+            }
+            return diagnostics
         }
         if let locator = elementLocator as? ElementLocator {
             await locator.clearAppSwitcherHint()
@@ -143,12 +151,13 @@ extension CommandHandler {
 
     func handleSwipe(
         _ request: RequestSwipe, startTime: Date, deadlineMs: Int64?,
-        monotonicNowMs: @escaping @Sendable () -> Int64
+        monotonicNowMs: @escaping @Sendable () -> Int64,
+        deliveryAbandoned: @escaping @Sendable () -> Bool = { false }
     )
         async throws -> WebSocketResponse
     {
         let checkDeadline: @Sendable () throws -> Void = {
-            if let deadlineMs, monotonicNowMs() >= deadlineMs {
+            if let deadlineMs, monotonicNowMs() >= deadlineMs || deliveryAbandoned() {
                 throw CommandError.deadlineExceeded(
                     command: "request_swipe", deadlineMs: deadlineMs, gestureCompleted: false
                 )
@@ -181,7 +190,7 @@ extension CommandHandler {
                     duration: TimeInterval(duration) / 1000.0
                 )
             }
-            if let deadlineMs, monotonicNowMs() >= deadlineMs {
+            if let deadlineMs, monotonicNowMs() >= deadlineMs || deliveryAbandoned() {
                 throw CommandError.deadlineExceeded(
                     command: "request_swipe", deadlineMs: deadlineMs, gestureCompleted: true
                 )

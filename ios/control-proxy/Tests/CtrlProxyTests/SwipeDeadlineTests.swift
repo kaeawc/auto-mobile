@@ -13,6 +13,7 @@ private struct DeadlineForwardingHandler: CommandHandling {
     let swipeHandler: CommandHandler
     let other: @Sendable (WebSocketRequest) -> any WebSocketResponsePayload
     var tapGate: FakeProxyTimer?
+    var swipeGate: FakeProxyTimer?
 
     func handle(_ request: WebSocketRequest) async -> any WebSocketResponsePayload {
         await handle(request, deadlineMs: nil, monotonicNowMs: { 0 })
@@ -23,12 +24,27 @@ private struct DeadlineForwardingHandler: CommandHandling {
     )
         async -> any WebSocketResponsePayload
     {
+        await handle(request, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs, deliveryAbandoned: { false })
+    }
+
+    func handle(
+        _ request: WebSocketRequest, deadlineMs: Int64?, monotonicNowMs: @escaping @Sendable () -> Int64,
+        deliveryAbandoned: @escaping @Sendable () -> Bool
+    )
+        async -> any WebSocketResponsePayload
+    {
         switch request {
         case .swipe, .tapCoordinates:
             if case .tapCoordinates = request, let tapGate {
                 await tapGate.wait(milliseconds: 1)
             }
-            return await swipeHandler.handle(request, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs)
+            if case .swipe = request, let swipeGate {
+                await swipeGate.wait(milliseconds: 1)
+            }
+            return await swipeHandler.handle(
+                request, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs,
+                deliveryAbandoned: deliveryAbandoned
+            )
         default:
             return other(request)
         }
@@ -117,6 +133,58 @@ final class SwipeDeadlineTests: XCTestCase {
         XCTAssertEqual(locator.filteringRequests.count, 1)
     }
 
+    func testTapReturningAfterDeadlineOrAbandonmentReportsCompletedGesture() async throws {
+        for fields in ["", ",\"doubleTap\":true", ",\"diagnostics\":true"] {
+            for abandoned in [false, true] {
+                let clock = FakeMonotonicClock()
+                let deliveryGate = GestureDeliveryGate()
+                let gestures = FakeGesturePerformer()
+                gestures.onTap = {
+                    if abandoned {
+                        deliveryGate.abandon()
+                    } else {
+                        clock.advance(by: 5000)
+                    }
+                }
+                let handler = CommandHandler(
+                    elementLocator: FakeElementLocator(), gesturePerformer: gestures,
+                    perf: FakePerfTracking(flushResult: nil)
+                )
+                let request = try JSONDecoder().decode(WebSocketRequest.self, from: tap("late", fields: fields))
+                let result = await handler.handle(
+                    request, deadlineMs: 5000, monotonicNowMs: { clock.now() },
+                    deliveryAbandoned: { deliveryGate.abandoned }
+                )
+                let response = try XCTUnwrap(result as? WebSocketResponse)
+                XCTAssertEqual(response.success, false)
+                XCTAssertEqual(response.errorCode, "deadline_completed_late")
+                XCTAssertEqual(gestures.tapCalls + gestures.diagnosticTapCalls + gestures.doubleTapPoints.count, 1)
+                if abandoned { XCTAssertLessThan(clock.now(), 5000) }
+            }
+        }
+    }
+
+    func testSwipeReturningAfterAbandonmentReportsCompletedGestureBeforeDeadline() async throws {
+        let clock = FakeMonotonicClock()
+        let deliveryGate = GestureDeliveryGate()
+        let gestures = FakeGesturePerformer()
+        gestures.onSwipe = { deliveryGate.abandon() }
+        let handler = CommandHandler(
+            elementLocator: FakeElementLocator(), gesturePerformer: gestures,
+            perf: FakePerfTracking(flushResult: nil)
+        )
+        let request = try JSONDecoder().decode(WebSocketRequest.self, from: swipe("late"))
+        let result = await handler.handle(
+            request, deadlineMs: 5000, monotonicNowMs: { clock.now() },
+            deliveryAbandoned: { deliveryGate.abandoned }
+        )
+        let response = try XCTUnwrap(result as? WebSocketResponse)
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(response.errorCode, "deadline_completed_late")
+        XCTAssertEqual(gestures.swipeCalls, 1)
+        XCTAssertLessThan(clock.now(), 5000)
+    }
+
     func testTapWireBudgetReachesHandlerAndLegacyTapStillSucceeds() async throws {
         for fields in ["", ",\"timeoutMs\":5000"] {
             let clock = FakeMonotonicClock()
@@ -173,6 +241,70 @@ final class SwipeDeadlineTests: XCTestCase {
         XCTAssertEqual(try response(next)["success"] as? Bool, true)
     }
 
+    func testTapWatchdogRejectsDeliveryBeforeDeadlineAndReleasesBusyGuard() async throws {
+        try await assertWatchdogRejectsDeliveryBeforeDeadline(isTap: true)
+    }
+
+    func testSwipeWatchdogRejectsDeliveryBeforeDeadlineAndReleasesBusyGuard() async throws {
+        try await assertWatchdogRejectsDeliveryBeforeDeadline(isTap: false)
+    }
+
+    private func assertWatchdogRejectsDeliveryBeforeDeadline(isTap: Bool) async throws {
+        let clock = FakeMonotonicClock()
+        let gestures = FakeGesturePerformer()
+        let timer = FakeProxyTimer(mode: .manual)
+        let gate = FakeProxyTimer(mode: .manual)
+        defer { gate.advance(by: 1) }
+        let server = server(
+            gestures: gestures, clock: clock, timer: timer,
+            tapGate: isTap ? gate : nil, swipeGate: isTap ? nil : gate
+        )
+        let bounded = expectation(description: "early bound response")
+        let responder = CapturingResponder(onEach: { bounded.fulfill() })
+        let request = isTap
+            ? tap("abandoned", fields: ",\"timeoutMs\":5000")
+            : swipe("abandoned", timeout: ",\"timeoutMs\":5000")
+        server.dispatchCommand(request, responder: responder)
+        var spins = 0
+        while timer.pendingWaiterCount == 0 || gate.pendingWaiterCount == 0, spins < 10000 {
+            await Task.yield()
+            spins += 1
+        }
+        XCTAssertEqual(timer.pendingWaiterCount, 1)
+        XCTAssertEqual(gate.pendingWaiterCount, 1)
+        let nextDone = expectation(description: "chain and busy guard released")
+        let next = CapturingResponder(onEach: { nextDone.fulfill() })
+        server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"next"}"#.utf8), responder: next)
+        XCTAssertTrue(next.captured.isEmpty)
+        clock.advance(by: 4500)
+        timer.advance(by: 4500)
+        await fulfillment(of: [bounded], timeout: 2)
+        XCTAssertEqual(try response(responder)["errorCode"] as? String, "gesture_bound_exceeded")
+        XCTAssertEqual(try response(responder)["success"] as? Bool, false)
+        XCTAssertEqual(gestures.tapCalls, 0)
+        XCTAssertEqual(gestures.swipeCalls, 0)
+
+        let busy = CapturingResponder()
+        server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"busy"}"#.utf8), responder: busy)
+        XCTAssertEqual(try response(busy)["error"] as? String, "runner_busy")
+        XCTAssertEqual(try response(busy)["blockingDeadlineRemainingMs"] as? Int, 500)
+        XCTAssertTrue(next.captured.isEmpty)
+
+        gate.advance(by: 1)
+        await fulfillment(of: [nextDone], timeout: 2)
+        XCTAssertLessThan(clock.now(), 5000)
+        XCTAssertEqual(gestures.tapCalls, 0)
+        XCTAssertEqual(gestures.swipeCalls, 0)
+        XCTAssertEqual(responder.captured.count, 1)
+        XCTAssertEqual(try response(next)["success"] as? Bool, true)
+
+        let freshDone = expectation(description: "fresh command admitted after release")
+        let fresh = CapturingResponder(onEach: { freshDone.fulfill() })
+        server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"fresh"}"#.utf8), responder: fresh)
+        await fulfillment(of: [freshDone], timeout: 2)
+        XCTAssertEqual(try response(fresh)["success"] as? Bool, true)
+    }
+
     private func swipe(_ id: String, timeout: String = "") -> Data {
         Data("""
         {"type":"request_swipe","requestId":"\(id)","x1":1,"y1":2,"x2":3,"y2":4\(timeout)}
@@ -191,6 +323,7 @@ final class SwipeDeadlineTests: XCTestCase {
         timings: [PerfTiming]? = nil,
         timer: any ProxyTimer = FakeProxyTimer(mode: .manual),
         tapGate: FakeProxyTimer? = nil,
+        swipeGate: FakeProxyTimer? = nil,
         other: @escaping @Sendable (WebSocketRequest) -> any WebSocketResponsePayload = { request in
             WebSocketResponse.success(type: "screenshot", requestId: request.requestId, totalTimeMs: 0)
         }
@@ -202,7 +335,7 @@ final class SwipeDeadlineTests: XCTestCase {
                 swipeHandler: CommandHandler(
                     elementLocator: elementLocator, gesturePerformer: gestures,
                     perf: FakePerfTracking(flushResult: nil)
-                ), other: other, tapGate: tapGate
+                ), other: other, tapGate: tapGate, swipeGate: swipeGate
             ),
             perf: FakePerfTracking(flushResult: timings),
             frameContext: FakeFrameContextRecording(token: nil),

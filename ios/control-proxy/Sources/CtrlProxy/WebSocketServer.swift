@@ -79,6 +79,16 @@ private enum GestureExecutionWinner: Sendable {
     case bound(phase: String, elapsedMs: Int64)
 }
 
+final class GestureDeliveryGate: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: false)
+
+    var abandoned: Bool { state.withLock { $0 } }
+
+    func abandon() {
+        state.withLock { $0 = true }
+    }
+}
+
 /// Exactly one racer resumes the continuation; losing tasks never send a response.
 private final class GestureExecutionResolution: Sendable {
     private struct State {
@@ -696,9 +706,11 @@ final class WebSocketServer: @unchecked Sendable {
         // Unstructured Tasks inherit gesture/perf TaskLocals without a task group's
         // mandatory child join preventing the early timeout response.
         let resolution = GestureExecutionResolution()
+        let deliveryGate = GestureDeliveryGate()
         let handler = Task {
             let response = await self.commandHandler.handle(
-                request, deadlineMs: deadlineMs, monotonicNowMs: self.monotonicNowMs
+                request, deadlineMs: deadlineMs, monotonicNowMs: self.monotonicNowMs,
+                deliveryAbandoned: { deliveryGate.abandoned }
             )
             resolution.resolve { .handler }
             return response
@@ -710,6 +722,7 @@ final class WebSocketServer: @unchecked Sendable {
             await self.timer.wait(milliseconds: remainingMs)
             guard !Task.isCancelled else { return }
             resolution.resolve {
+                deliveryGate.abandon()
                 let hit = diagnostics?.markBoundExceeded(boundMs: boundMs)
                 return .bound(phase: hit?.phase ?? "executionPreparation", elapsedMs: hit?.elapsedMs ?? boundMs)
             }

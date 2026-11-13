@@ -277,22 +277,18 @@ describe("an image with an inlinable asset", () => {
     expect(toHtml(rendered.element)).toContain("aspect-ratio:var(--pa-3-ar, auto)");
   });
 
-  test("saturates the image, then multiplies a tint masked by it", () => {
+  test("saturates the image, then multiplies it by the tint's colour matrix", () => {
     const rendered = still({
       type: "image",
       asset: "photo",
       filter: { saturation: 0.5, tint: "#ff0000" },
     });
     const layer = find(rendered.element, (e) => "data-image" in e.attrs)[0]!;
-    expect(layer.style.filter).toBe("saturate(0.5)");
-    const tint = find(rendered.element, (e) => "data-image-tint" in e.attrs)[0]!;
-    expect(tint.style).toMatchObject({
-      "background-color": "rgba(255,0,0,1)",
-      "mix-blend-mode": "multiply",
-      "mask-image": "var(--pa-3)",
-      "mask-size": "contain",
-      opacity: "var(--pa-3-on, 0)",
-    });
+    expect(layer.style.filter).toBe("saturate(0.5) url(#pa-tint-ff0000ff)");
+    const filter = find(rendered.element, (e) => e.tag === "filter")[0]!;
+    expect(filter.attrs).toEqual({ id: "pa-tint-ff0000ff", "color-interpolation-filters": "sRGB" });
+    const matrix = find(filter, (e) => e.tag === "fecolormatrix")[0]!;
+    expect(matrix.attrs.values).toBe("1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0");
   });
 
   test("a fixed dp axis keeps its size; only a wrapped axis gets the 48px minimum (#17241)", () => {
@@ -321,23 +317,22 @@ describe("an image with an inlinable asset", () => {
     }
   });
 
-  test("a translucent tint draws its opaque colour and scales the image's alpha", () => {
-    const rendered = still({
-      type: "image",
-      asset: "photo",
-      filter: { tint: "#80FF0000" },
-    });
-    const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
-    expect(group.style).toEqual({ position: "absolute", inset: "0", opacity: "0.502" });
-    expect(find(group, (e) => "data-image" in e.attrs)).toHaveLength(1);
-    const tint = find(group, (e) => "data-image-tint" in e.attrs)[0]!;
-    expect(tint.style["background-color"]).toBe("rgba(255,0,0,1)");
+  test("a translucent tint multiplies alpha once, as Modulate does (#17241)", () => {
+    // Android's Modulate gives a 0.5-alpha pixel under a 0.5-alpha tint alpha 0.25; the former
+    // masked multiply layer composited over the image gave 2a − a², 0.375 before the group alpha.
+    const rendered = still({ type: "image", asset: "photo", filter: { tint: "#80FF8000" } });
+    expect(find(rendered.element, (e) => "data-image-alpha" in e.attrs)).toEqual([]);
+    expect(find(rendered.element, (e) => "data-image-tint" in e.attrs)).toEqual([]);
+    const layer = find(rendered.element, (e) => "data-image" in e.attrs)[0]!;
+    expect(layer.style.filter).toBe("url(#pa-tint-ff800080)");
+    const matrix = find(rendered.element, (e) => e.tag === "fecolormatrix")[0]!;
+    expect(matrix.attrs.values).toBe("1 0 0 0 0 0 0.502 0 0 0 0 0 0 0 0 0 0 0 0.502 0");
   });
 
   test("a fully transparent tint hides the image, as Modulate does", () => {
     const rendered = still({ type: "image", asset: "photo", filter: { tint: "#00FFFFFF" } });
-    const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
-    expect(group.style.opacity).toBe("0");
+    const matrix = find(rendered.element, (e) => e.tag === "fecolormatrix")[0]!;
+    expect(matrix.attrs.values).toBe("1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 0 0");
   });
 
   test("a padded image's layers fill an in-flow content box inside the padding (#17202)", () => {
@@ -369,10 +364,9 @@ describe("an image with an inlinable asset", () => {
       // In flow, so it takes the node's content box rather than its padding box.
       expect(content.style.position).toBe("relative");
       expect(content.style.inset).toBeUndefined();
-      for (const attr of ["data-image", "data-image-tint"]) {
-        const layer = find(content, (e) => attr in e.attrs)[0]!;
-        expect([layer.style.position, layer.style.inset]).toEqual(["absolute", "0"]);
-      }
+      const layer = find(content, (e) => "data-image" in e.attrs)[0]!;
+      expect([layer.style.position, layer.style.inset]).toEqual(["absolute", "0"]);
+      expect(layer.style.filter).toBe("url(#pa-tint-ff0000ff)");
       expect(rendered.imageDraws).toEqual([
         { asset: "photo", widthDp: 140, heightDp: 160, scale: "fill" },
       ]);
@@ -531,6 +525,42 @@ describe("nav item images", () => {
       const rendered = nav(type, [{ label: "Other", image: "missing" }]);
       expect(find(rendered.element, (e) => e.attrs["data-part"] === "image")).toHaveLength(0);
       expect(find(rendered.element, (e) => e.attrs["data-part"] === "placeholder")).toHaveLength(1);
+    });
+  }
+
+  for (const type of ["bottomNav", "tabBar"] as const) {
+    test(`${type} keeps the icon or placeholder under a slotted image until its rule is inlined`, () => {
+      // A still carries no image rules, as a page whose budget dropped the slot's rule does.
+      const rendered = nav(type, [
+        { label: "Home", image: "photo", icon: "home" },
+        { label: "Bare", image: "photo" },
+      ]);
+      const images = find(rendered.element, (e) => e.attrs["data-part"] === "image");
+      expect(images).toHaveLength(2);
+      for (const image of images) {
+        const fallback = image.children[0] as WebElement;
+        expect(fallback.style.opacity).toBe("calc(1 - var(--pa-3-on, 0))");
+        expect(fallback.style.position).toBe("absolute");
+      }
+      const [withIcon, bare] = images.map((image) => image.children[0] as WebElement);
+      expect(find(withIcon!, (e) => e.attrs["data-part"] === "placeholder")).toHaveLength(0);
+      expect(toHtml(withIcon!)).not.toBe(toHtml(bare!));
+      expect(find(bare!, (e) => e.attrs["data-part"] === "placeholder")).toHaveLength(1);
+    });
+  }
+
+  for (const type of ["bottomNav", "tabBar"] as const) {
+    test(`${type} lists each item image as an image node is`, () => {
+      const rendered = nav(type, items);
+      expect(rendered.unsupportedNodes).toEqual([
+        { type: "image", path: "root.items[0].image", reason: "assetOverBudget", asset: "photo" },
+        {
+          type: "image",
+          path: "root.items[1].image",
+          reason: "assetNotInlined",
+          asset: "missing",
+        },
+      ]);
     });
   }
 

@@ -9,8 +9,11 @@ import {
   type HeadUnitIdleTiming,
 } from "../../../src/features/androidAuto/HeadUnitInteraction";
 import { HeadUnitFence } from "../../../src/features/androidAuto/HeadUnitFence";
+import { DhuScreenshotHashSource } from "../../../src/features/androidAuto/HeadUnitScreenshotHash";
 import type { CarAppProjectedTemplates } from "../../../src/models/CarAppTemplates";
 import { FakeSession } from "../../fakes/FakeAndroidAutoProjection";
+import { FakeFileSystem } from "../../fakes/FakeFileSystem";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   FIXTURE_CAR_APP_PACKAGE,
@@ -328,6 +331,27 @@ describe("HeadUnitInteraction screenshot fallback", () => {
     const result = await interaction.run(["tap 5 5"]);
     expect(result.effect).toEqual({ screenChanged: false, basis: "screenshot unchanged" });
     expect(result.idle.waitedMs).toBe(1_000);
+  });
+
+  test("a headless DHU without video focus returns at once, with no capture sent", async () => {
+    const session = new FakeSession();
+    session.hasVideoFocus = () => false;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screenshots = new DhuScreenshotHashSource(session, {
+      files: new FakeFileSystem(),
+      timer,
+      ids: new FakeIdGenerator(["capture-1", "capture-2"]),
+      directories: ["tmp"],
+    });
+    const interaction = new HeadUnitInteraction(session, { read: async () => undefined }, timer, {
+      timing: TIMING,
+      screenshots,
+    });
+    const result = await interaction.run(["tap 640 200"]);
+    expect(session.commands).toEqual(["tap 640 200"]);
+    expect(result.effect).toEqual({ basis: "no template data" });
+    expect(result.idle).toEqual({ basis: "none", stable: false, waitedMs: TIMING.pollMs });
   });
 
   test("no capture at all leaves the change unknown", async () => {

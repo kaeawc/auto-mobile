@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.PrototypePlatformModules.strings
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Located
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.fail
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -19,7 +20,55 @@ import kotlinx.serialization.json.contentOrNull
  * and navigation, title and back keys that name declared state of the right type. Contract only: no
  * runtime draws a web view.
  */
-internal object PrototypeWebView {
+object PrototypeWebView {
+  /** An imported page cannot load subresources while the library's network switch is off. */
+  data class ImportError(val path: String)
+
+  /**
+   * Checks authored node positions, including unexpanded repeat templates, depth first in a fixed
+   * order shared with Swift: adaptive slots (adaptive only), `header` then `footer` (list only),
+   * `child`, `children`, then `screens` by UTF-16 key order. JSON key order never matters.
+   */
+  fun importError(spec: JsonObject, networkAllowed: Boolean): ImportError? {
+    if (networkAllowed) return null
+    val root = spec["root"] as? JsonObject ?: return null
+    fun first(node: JsonObject, path: String): ImportError? =
+      if (node.text("type") == "webView") ImportError(path)
+      else importChildren(node, path).firstNotNullOfOrNull { (child, at) -> first(child, at) }
+    return first(root, "root")
+  }
+
+  /**
+   * Convenience for an already validated saved library spec. Malformed data returns null, as in
+   * Swift: the loader reports it, so this rule never throws.
+   */
+  fun importError(spec: String, networkAllowed: Boolean): ImportError? {
+    if (networkAllowed) return null
+    val parsed = runCatching { Json.parseToJsonElement(spec) }.getOrNull() as? JsonObject
+    return parsed?.let { importError(it, networkAllowed) }
+  }
+
+  private val adaptiveSlots = listOf("list", "detail", "content", "main", "supporting")
+
+  private fun importChildren(node: JsonObject, path: String): List<Pair<JsonObject, String>> =
+    buildList {
+      fun slot(key: String) {
+        (node[key] as? JsonObject)?.let { add(it to "$path.$key") }
+      }
+      when (node.text("type")) {
+        "adaptive" -> adaptiveSlots.forEach(::slot)
+        "list" -> listOf("header", "footer").forEach(::slot)
+      }
+      slot("child")
+      (node["children"] as? JsonArray).orEmpty().forEachIndexed { index, child ->
+        (child as? JsonObject)?.let { add(it to "$path.children[$index]") }
+      }
+      val screens = node["screens"] as? JsonObject
+      screens?.keys?.sorted()?.forEach { name ->
+        (screens[name] as? JsonObject)?.let { add(it to "$path.screens[${JsonPrimitive(name)}]") }
+      }
+    }
+
   private val webViewCalls = setOf("webview.back", "webview.reload")
 
   private val stateKeys =
@@ -31,11 +80,11 @@ internal object PrototypeWebView {
   private val literalAuthority = Regex("^https://([^/?#]*)")
 
   /** The ids of the spec's `webView` nodes, the values a `webview.*` `node` argument may name. */
-  fun ids(nodes: List<Located>): Set<String> =
+  internal fun ids(nodes: List<Located>): Set<String> =
     nodes.filter { it.value.text("type") == "webView" }.mapNotNull { it.value.text("id") }.toSet()
 
   /** The first `webView` node rule a spec breaks. */
-  fun error(root: JsonObject, nodes: List<Located>): PrototypeSpecError? {
+  internal fun error(root: JsonObject, nodes: List<Located>): PrototypeSpecError? {
     val webViews = nodes.filter { it.value.text("type") == "webView" }
     if (webViews.isEmpty()) return null
     val requires = root.member("requires") ?: JsonObject(emptyMap())
@@ -45,7 +94,7 @@ internal object PrototypeWebView {
   }
 
   /** `localhost`, a `.localhost` name, or a host a URL parser would read as an IP address. */
-  fun privateHost(host: String): Boolean =
+  internal fun privateHost(host: String): Boolean =
     host == "localhost" ||
       host.endsWith(".localhost") ||
       ipLikeLabel.matches(host.substringAfterLast('.'))
@@ -95,7 +144,11 @@ internal object PrototypeWebView {
     if (boolean) !value.isString && value.booleanOrNull != null else value.isString
 
   /** A `webview.*` call whose literal `node` argument names no `webView` node. */
-  fun callError(action: JsonObject, path: String, webViews: Set<String>): PrototypeSpecError? {
+  internal fun callError(
+    action: JsonObject,
+    path: String,
+    webViews: Set<String>,
+  ): PrototypeSpecError? {
     if (action.text("call") !in webViewCalls) return null
     val target = action.member("args")?.member("node")?.text("value") ?: return null
     return if (target in webViews) null else fail("$path.args.node.value", "Unknown webView")

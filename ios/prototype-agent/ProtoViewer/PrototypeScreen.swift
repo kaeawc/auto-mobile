@@ -7,7 +7,8 @@ struct PrototypeScreen: View {
     let store: PrototypeLibraryStore
     let entry: PrototypeLibraryEntry
     let networkSwitch: PrototypeLibraryNetworkSwitch
-    /// MCP `open` reports success on the first render and failure on any load error or watchdog expiry.
+    /// MCP `open` reports success on the first render and failure on any load error, refusal or
+    /// watchdog expiry, at most once per load (`PrototypeLoadReport`).
     let onLoaded: @MainActor () -> Void
     let onLoadFailed: @MainActor () -> Void
     /// Closes the prototype: pops the phone stack, or empties the detail pane at regular width.
@@ -16,6 +17,9 @@ struct PrototypeScreen: View {
     @State private var showsSettings = false
     @State private var revision = 0
     @State private var rendererActive = false
+    @State private var firstRender = false
+    @State private var waitingForStop = false
+    @State private var loadReport = PrototypeLoadReport()
     @State private var pending: Action?
     @State private var content: PrototypeLibraryContent?
     @State private var storage: URL?
@@ -109,40 +113,76 @@ struct PrototypeScreen: View {
         }
         .onAppear(perform: load)
         .onDisappear { watchdog.cancel() }
+        .onChange(of: importRefusal) { _, refusal in
+            if refusal != nil { watchdog.cancel() }
+        }
     }
 
     private var prototypeContent: some View {
         Group {
             if let error {
                 LibraryErrorView(error: error)
+            } else if let refusal = importRefusal {
+                importRefusalView(refusal)
+                    .onAppear {
+                        watchdog.cancel()
+                        waitingForStop = rendererActive
+                        reportLoad(.failed)
+                    }
+            } else if waitingForStop {
+                ProgressView()
             } else if let content, let storage {
                 AutoMobilePrototypeView(
                     spec: content.spec, assets: content.assets, storage: .directory(storage), network: network,
                     registry: registry,
                     onDismiss: { _ in onClose() },
                     onLoadError: {
+                        guard importRefusal == nil else { return }
                         watchdog.cancel()
                         diagnostics.record(ViewerFailure(rendererError: $0))
                         error = $0
                         self.content = nil
-                        onLoadFailed()
+                        reportLoad(.failed)
                     }
                 )
                 .onAppearanceChange { chromeAppearance = $0 }
                 .onFirstRender {
+                    guard importRefusal == nil else { return }
+                    firstRender = true
                     watchdog.cancel()
-                    onLoaded()
+                    reportLoad(.loaded)
                 }
                 .onStopped {
                     PrototypeAssetRegistrar.releaseProcessFonts()
                     rendererActive = false
+                    firstRender = false
+                    waitingForStop = false
                     finishRelaunch()
+                }
+                .onAppear {
+                    rendererActive = true
+                    if !firstRender, !watchdog.isArmed { startWatchdog() }
                 }
                 .id(revision)
             } else {
                 ProgressView()
             }
         }
+    }
+
+    private var importRefusal: PrototypeWebView.ImportError? {
+        content.flatMap { PrototypeWebView.importError($0.spec, networkAllowed: networkSwitch.enabled) }
+    }
+
+    private func importRefusalView(_: PrototypeWebView.ImportError) -> some View {
+        // Paths can contain authored stack screen names, so display only app-owned text.
+        Text(String(
+            localized: "This prototype contains a web page. Turn on Allow network for imported prototypes in Settings to open it.",
+            comment: "Refusal replacing the entire imported prototype while network is off. No placeholders; authored node paths are not displayed."
+        ))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .accessibilityIdentifier("viewer-import-refused")
     }
 
     private func relaunch(_ action: Action) {
@@ -155,6 +195,7 @@ struct PrototypeScreen: View {
     private func finishRelaunch() {
         guard let action = pending else { return }
         pending = nil
+        loadReport.begin()
         do {
             if action == .reset { try store.resetStorage(entry.libraryId) }
             revision += 1
@@ -163,11 +204,12 @@ struct PrototypeScreen: View {
         } catch {
             diagnostics.record(.libraryStorage)
             self.error = error
-            onLoadFailed()
+            reportLoad(.failed)
         }
     }
 
     private func load() {
+        loadReport.begin()
         var failure = ViewerFailure.libraryCorrupt
         do {
             let loaded = try store.load(entry.libraryId)
@@ -176,25 +218,38 @@ struct PrototypeScreen: View {
             failure = .libraryStorage
             try store.markOpened(entry.libraryId)
             storage = directory
-            rendererActive = true
             content = loaded
-            watchdog.start {
-                diagnostics.record(.watchdog)
-                // No first content within the budget: show the error state; Back and Close stay available.
-                error = PrototypeLibraryFailure(
-                    path: entry.label,
-                    message: String(
-                        localized: "Prototype did not render in time",
-                        comment: "Error when the prototype fails to produce its first render before the deadline."
-                    )
-                )
-                content = nil
-                onLoadFailed()
-            }
+            rendererActive = importRefusal == nil
+            if rendererActive { startWatchdog() }
         } catch {
             diagnostics.record(failure)
             self.error = error
-            onLoadFailed()
+            reportLoad(.failed)
+        }
+    }
+
+    private func reportLoad(_ outcome: PrototypeLoadReport.Outcome) {
+        guard loadReport.settle(outcome) else { return }
+        switch outcome {
+        case .loaded: onLoaded()
+        case .failed: onLoadFailed()
+        }
+    }
+
+    private func startWatchdog() {
+        watchdog.start {
+            guard importRefusal == nil else { return }
+            diagnostics.record(.watchdog)
+            // No first content within the budget: show the error state; Back and Close stay available.
+            error = PrototypeLibraryFailure(
+                path: entry.label,
+                message: String(
+                    localized: "Prototype did not render in time",
+                    comment: "Error when the prototype fails to produce its first render before the deadline."
+                )
+            )
+            content = nil
+            reportLoad(.failed)
         }
     }
 }

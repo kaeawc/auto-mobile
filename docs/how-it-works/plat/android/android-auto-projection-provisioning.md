@@ -163,7 +163,10 @@ this path never enters `BaseVisualChange` or `AwaitIdle`:
   observe's services snapshot alone). Each projected session contributes its top screen class,
   template type and title, and stack depth. When no projected app answers the template route before
   the input, the action compares SHA-256 hashes of DHU `screenshot <file>` captures instead
-  (`DhuScreenshotHashSource`, written to the host temp directory and removed after hashing). With
+  (`DhuScreenshotHashSource`, written to the host temp directory, or `%PUBLIC%` when the temp path
+  has whitespace the console may split on, and removed after hashing). Once the DHU prints
+  `Don't have video focus`, the session reports no video focus until `focus video` is sent again:
+  the source then sends no capture, and a wait in progress ends at its next poll. With
   no data on either side the effect is reported as unknown rather than unchanged.
 - **Idle** polls the same source until two consecutive reads agree with no template `loading`. A read
   that still matches the screen before the input is accepted only after the unchanged settle window,

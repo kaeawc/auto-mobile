@@ -12,6 +12,8 @@ import {
   ProtoViewerInboxUnsupportedError,
   ProtoViewerForegroundError,
   ProtoViewerStorageError,
+  type ProtoViewerCapabilityOptions,
+  type ProtoViewerCapabilityReport,
   type ProtoViewerDevice,
 } from "./protoViewerDevice";
 import {
@@ -20,6 +22,8 @@ import {
   PROTOVIEWER_RESULTS_FOLDER,
   PROTOVIEWER_REQUEST_ID,
   PROTOVIEWER_IOS_DELIVERY,
+  PROTOVIEWER_CAPABILITIES_FILE,
+  parseProtoViewerCapabilities,
   type ProtoViewerIosRequest,
   type ProtoViewerResult,
 } from "./protoViewerContract";
@@ -30,6 +34,8 @@ const PROTOVIEWER_MIN_RESULT_WAIT_MS = 1_000;
 export interface IosProtoViewerSimctl {
   installed(udid: string, signal?: AbortSignal): Promise<boolean>;
   dataContainer(udid: string, signal?: AbortSignal): Promise<string>;
+  /** The installed build's `CFBundleVersion` from simctl app info, when it reports one. */
+  installedVersionCode(udid: string, signal?: AbortSignal): Promise<number | undefined>;
   /**
    * Brings ProtoViewer to the foreground without custom-scheme delivery or system confirmation.
    */
@@ -41,6 +47,8 @@ export interface IosProtoViewerFiles {
   rename(from: string, to: string): Promise<void>;
   /** Missing is pending; other read errors must propagate. */
   read(path: string): Promise<string>;
+  /** Modification time in ms (sub-ms precision when the filesystem has it); undefined when missing. */
+  modifiedAt(path: string): Promise<number | undefined>;
   remove(path: string): Promise<void>;
 }
 interface Dependencies {
@@ -59,10 +67,84 @@ export class IosProtoViewer implements ProtoViewerDevice {
       (await this.deps.simctl.installed(this.deps.deviceId, signal))
     );
   }
-  /** The iOS app does not publish a capabilities report yet; its own import gate decides. */
-  async capabilities(): Promise<undefined> {
+  /**
+   * Reads the report the app publishes in `mcp/capabilities.json` (#16469). The app rewrites it
+   * whenever it creates its MCP folders, so a report for another `CFBundleVersion` (an update the
+   * app has not run since) or a refresh request foregrounds the app and waits for the rewrite. A
+   * missing report means a build from before the handshake: undefined, and the app's gate decides.
+   */
+  async capabilities({
+    timeoutMs,
+    refresh,
+    signal,
+  }: ProtoViewerCapabilityOptions): Promise<ProtoViewerCapabilityReport | undefined> {
+    const container = await this.deps.simctl.dataContainer(this.deps.deviceId, signal);
+    if (!container.trim()) {
+      throw new ProtoViewerStorageError("Could not resolve ProtoViewer's data container.");
+    }
+    const path = join(container, PROTOVIEWER_IOS_MCP_FOLDER, PROTOVIEWER_CAPABILITIES_FILE);
+    const installed = await this.deps.simctl.installedVersionCode(this.deps.deviceId, signal);
+    const isStale = (text: string): boolean => {
+      const published = text.trim() === "" ? undefined : parseProtoViewerCapabilities(text);
+      return (
+        published !== undefined && installed !== undefined && published.versionCode !== installed
+      );
+    };
+    const before = await this.snapshot(path);
+    let text = before.text;
+    if (refresh || isStale(text)) {
+      await this.foreground(timeoutMs, signal);
+      const rewritten = await this.awaitRewrite(path, before, isStale, { timeoutMs, signal });
+      if (rewritten === undefined && refresh) {
+        // The app publishes after foregrounding, so an unchanged report may predate a rebuild that
+        // kept CFBundleVersion (#18236): unknown, and the app's own gate decides.
+        return undefined;
+      }
+      text = rewritten ?? (await this.deps.files.read(path));
+    }
+    const published = text.trim() === "" ? undefined : parseProtoViewerCapabilities(text);
+    if (
+      published === undefined ||
+      (installed !== undefined && published.versionCode !== installed)
+    ) {
+      return undefined;
+    }
+    return {
+      ...(published.versionName ? { version: published.versionName } : {}),
+      capabilities: new Set(published.capabilities),
+    };
+  }
+
+  private async snapshot(path: string): Promise<{ text: string; modifiedAt?: number }> {
+    const modifiedAt = await this.deps.files.modifiedAt(path);
+    return { text: await this.deps.files.read(path), modifiedAt };
+  }
+
+  /**
+   * Waits until the app rewrites the report (its mtime or content differs from `before`) with one
+   * that is not stale; undefined when the deadline passes first.
+   */
+  private async awaitRewrite(
+    path: string,
+    before: { text: string; modifiedAt?: number },
+    isStale: (text: string) => boolean,
+    { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    const deadline = this.deps.timer.now() + timeoutMs;
+    do {
+      signal?.throwIfAborted();
+      const current = await this.snapshot(path);
+      const rewritten = current.modifiedAt !== before.modifiedAt || current.text !== before.text;
+      if (rewritten && current.text.trim() !== "" && !isStale(current.text)) {
+        return current.text;
+      }
+      await this.deps.timer.sleep(
+        Math.min(PROTOVIEWER_RESULT_POLL_MS, Math.max(0, deadline - this.deps.timer.now())),
+      );
+    } while (this.deps.timer.now() < deadline);
     return undefined;
   }
+
   importBundle(
     bytes: Uint8Array,
     label: string | undefined,

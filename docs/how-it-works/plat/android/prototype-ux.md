@@ -4120,8 +4120,10 @@ The `webView` node (contract only: no renderer draws it and no runtime advertise
 - A `webView` `id` uses the state-key pattern, the grammar of the `webview.*` `node` argument that names it.
 - `javaScript` defaults to `false`; `true` is accepted and never comes with a bridge. Page subresources cannot
   be checked at a resolved address the way `request` is, so an imported (ProtoViewer) prototype may show a
-  `webView` only while network for imported prototypes is on; ProtoViewer does not enforce that yet, which is
-  one reason no runtime advertises the capability.
+  `webView` only while network for imported prototypes is on. Turning it off replaces the entire imported
+  prototype with a refusal; turning it on restores rendering. The refusal names the first `webView` depth first
+  in a fixed order (adaptive slots, a list's `header` and `footer`, `child`, `children`, then `screens` by key),
+  pinned by `test/fixtures/prototype-spec/webview-import/cases.json`; an MCP `open` gets one outcome per load.
 - `onNavigate` and `onBlockedNavigation` are action lists. `{type: "platform", call: "webview.back"}` and
   `webview.reload` take `args: {node}`; a literal `node` must be the id of a `webView` node ("Unknown webView").
   The `webview` module has no state; its `webview.navigate` event exists so a simulation can deliver it.

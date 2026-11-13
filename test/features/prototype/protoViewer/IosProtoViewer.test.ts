@@ -38,7 +38,14 @@ class Files implements IosProtoViewerFiles {
   async rename(from: string, to: string) {
     this.events.push(`rename:${from}:${to}`);
   }
+  report = "";
+  /** What the app writes on its next start, applied when it is foregrounded. */
+  reportAfterLaunch: string | undefined;
   async read(path: string) {
+    if (path.endsWith("/capabilities.json")) {
+      this.events.push(`read:${path}`);
+      return this.report;
+    }
     if (path.endsWith("/delivery")) {
       this.capabilityReads++;
       return this.capabilityReads <= this.capabilityPending ? "" : this.capability;
@@ -47,6 +54,22 @@ class Files implements IosProtoViewerFiles {
     this.onResultRead();
     this.reads++;
     return this.reads <= this.pending ? "" : this.result;
+  }
+  reportModifiedAt: number | undefined;
+  /** Publishes `report` (a fresh mtime) once this many report reads have passed. */
+  publishAfterReads?: { reads: number; report: string };
+  reportReads = 0;
+  async modifiedAt(path: string) {
+    if (!path.endsWith("/capabilities.json")) {
+      return undefined;
+    }
+    this.reportReads++;
+    if (this.publishAfterReads && this.reportReads > this.publishAfterReads.reads) {
+      this.report = this.publishAfterReads.report;
+      this.reportModifiedAt = (this.reportModifiedAt ?? 0) + 1;
+      this.publishAfterReads = undefined;
+    }
+    return this.reportModifiedAt;
   }
   async remove(path: string) {
     this.events.push(`remove:${path}`);
@@ -70,6 +93,10 @@ class Simctl implements IosProtoViewerSimctl {
   }
   async installed(_udid: string) {
     return this.present;
+  }
+  versionCode: number | undefined = 2;
+  async installedVersionCode(_udid: string) {
+    return this.versionCode;
   }
   async dataContainer(_udid: string) {
     return this.container;
@@ -307,4 +334,96 @@ test("iOS cancellation while polling removes the published command before its bu
   const removals = files.events.filter((event) => event.startsWith("remove:"));
   expect(removals[0]).toBe(`remove:${ROOT}/inbox/${REQUEST}.request`);
   expect(removals).toContain(`remove:${ROOT}/inbox/${REQUEST}.automobile-proto`);
+});
+
+const REPORT_PATH = `${ROOT}/capabilities.json`;
+const report = (versionCode: number, capabilities: string[], versionName = "1.2") =>
+  JSON.stringify({ versionCode, versionName, capabilities });
+test("iOS capabilities: a current report is returned without launching the app", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(2, ["a", "b"]);
+  const result = await viewer.capabilities({ timeoutMs: 1000 });
+  expect(result?.version).toBe("1.2");
+  expect([...(result?.capabilities ?? [])]).toEqual(["a", "b"]);
+  expect(files.events).toContain(`read:${REPORT_PATH}`);
+  expect(simctl.calls).toEqual([]);
+});
+test("iOS capabilities: a missing report means a build from before the handshake", async () => {
+  const { viewer, simctl } = setup();
+  expect(await viewer.capabilities({ timeoutMs: 1000 })).toBeUndefined();
+  expect(simctl.calls).toEqual([]);
+});
+test("iOS capabilities: a stale report foregrounds the app and reads the rewrite", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(1, ["old"]);
+  simctl.onLaunch = () => {
+    files.report = report(2, ["old", "new"]);
+  };
+  const result = await viewer.capabilities({ timeoutMs: 1000 });
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+  expect(result?.capabilities.has("new")).toBe(true);
+});
+test("iOS capabilities: a report the app never refreshes is unknown, not trusted", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(1, ["old"]);
+  expect(await viewer.capabilities({ timeoutMs: 1000 })).toBeUndefined();
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+});
+test("iOS capabilities: a refresh request foregrounds even when the report matches", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(2, ["a"]);
+  await viewer.capabilities({ timeoutMs: 1000, refresh: true });
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+});
+test("iOS capabilities: a forced refresh waits for the delayed rewrite when CFBundleVersion is unchanged", async () => {
+  const { viewer, files, simctl, timer } = setup();
+  files.report = report(2, ["a"]);
+  files.reportModifiedAt = 100;
+  // A debug rebuild keeps versionCode 2; the app republishes a few polls after foregrounding.
+  simctl.onLaunch = () => {
+    files.publishAfterReads = { reads: 4, report: report(2, ["a", "b"]) };
+  };
+  const started = timer.now();
+  const result = await viewer.capabilities({ timeoutMs: 1000, refresh: true });
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+  expect([...(result?.capabilities ?? [])]).toEqual(["a", "b"]);
+  expect(timer.now() - started).toBeLessThan(1000);
+});
+test("iOS capabilities: a forced refresh accepts an identical rewrite by its new mtime", async () => {
+  const { viewer, files, simctl } = setup();
+  files.report = report(2, ["a"]);
+  files.reportModifiedAt = 100;
+  simctl.onLaunch = () => {
+    files.publishAfterReads = { reads: 2, report: report(2, ["a"]) };
+  };
+  expect(
+    (await viewer.capabilities({ timeoutMs: 1000, refresh: true }))?.capabilities.has("a"),
+  ).toBe(true);
+});
+test("iOS capabilities: a forced refresh the app never republishes is unknown after the timeout", async () => {
+  const { viewer, files, timer } = setup();
+  files.report = report(2, ["a"]);
+  files.reportModifiedAt = 100;
+  const started = timer.now();
+  expect(await viewer.capabilities({ timeoutMs: 1000, refresh: true })).toBeUndefined();
+  expect(timer.now() - started).toBeGreaterThanOrEqual(1000);
+});
+test("iOS capabilities: an unreadable report and an unknown installed version", async () => {
+  const bad = setup();
+  bad.files.report = "not json";
+  expect(await bad.viewer.capabilities({ timeoutMs: 1000 })).toBeUndefined();
+  const unknown = setup();
+  unknown.simctl.versionCode = undefined;
+  unknown.files.report = report(7, ["a"]);
+  expect((await unknown.viewer.capabilities({ timeoutMs: 1000 }))?.capabilities.has("a")).toBe(
+    true,
+  );
+  expect(unknown.simctl.calls).toEqual([]);
+});
+test("iOS capabilities: an unresolved container is a storage error", async () => {
+  const { viewer, simctl } = setup();
+  simctl.container = "";
+  await expect(viewer.capabilities({ timeoutMs: 1000 })).rejects.toBeInstanceOf(
+    ProtoViewerStorageError,
+  );
 });

@@ -456,7 +456,7 @@ the host, so the page's script only switches between views it was given and neve
   selected tab takes `primary` and a 3 px `primary` indicator, the rest `onSurfaceVariant`, and a
   `scrollable` one starts after 52 px with 90 px minimum tabs and clips the rest. Both bars select
   their linked `pager`'s initial page, else their numeric `stateKey`, else the first item. A nav item
-  draws its image in a 24 dp box when the page inlines it (recorded as a draw like an `image` node), else its named icon, else a 24 px `surfaceVariant` square. An
+  draws its image in a 24 dp box when the page inlines it (recorded as a draw and listed at `<path>.items[i].image` like an `image` node), else its named icon, else a 24 px `surfaceVariant` square. An
   icon button draws its icon in a 40 px circle inside a 48 px target: `standard` and
   `outlined` (an `outlineVariant` outline) tint it `onSurfaceVariant`, `filled` sits on `primary` and
   `tonal` on `secondaryContainer`; the icon name labels it when no label is authored. A chip with no
@@ -564,12 +564,12 @@ the host, so the page's script only switches between views it was given and neve
   `aspect-ratio` on an axis it leaves to wrap (so a weighted share carries it to the other axis,
   as before the content box existed); with padding (safe-area insets included) it is an in-flow
   child inside the padding that carries the ratio and the 48 px minimum. A zeroed row child's box
-  drops its inline padding, so its draw and minimums take none out either. The layers are an image layer (the slot's image as a centred background, `contain`, `cover` or
-  `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
-  `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
-  shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint
-  layer. `Modulate` multiplies alpha too, so a translucent tint wraps both layers in a group at the
-  tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Item images (nav items) are not inlined. Any other node draws a
+  drops its inline padding, so its draw and minimums take none out either. The layer is the slot's image as a centred background (`contain`, `cover` or
+  `100% 100%` for `fit`, `crop` and `fill`), filtered by `saturate()` for `filter.saturation` and
+  then, for `filter.tint`, an inline SVG `feColorMatrix` (`sRGB` interpolation, id
+  `pa-tint-<rrggbbaa>`) that multiplies every channel, alpha included, by the tint's, as Android's
+  saturation colour matrix then its `Modulate` tint layer (a fully transparent tint hides the
+  image, and a partly transparent pixel keeps alpha `a × tint.a`); a corner radius clips it. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Posture.** A foldable frame draws the panel its `posture` lights (default `opened`, else its
   first posture; a frame without postures takes none, and an unknown posture is an error listing

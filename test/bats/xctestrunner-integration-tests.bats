@@ -11,6 +11,8 @@ setup() {
   PROJECT="${WORKDIR}/project"
   INVOCATIONS="${WORKDIR}/invocations"
   ORIG_PATH="$PATH"
+  # Keep the device-id cases hermetic when the calling shell exports either variable.
+  unset AUTOMOBILE_DEVICE_ID AUTOMOBILE_DEVICE_UDID
 
   mkdir -p "${MOCK_BIN}" "${PROJECT}/scripts/ios" "${PROJECT}/scripts/ci" "${PROJECT}/ios/XCTestRunner"
   cp "$SCRIPT" "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh"
@@ -96,6 +98,19 @@ teardown() {
 
 @test "keeps a caller-provided AUTOMOBILE_DEVICE_ID" {
   run env AUTOMOBILE_DEVICE_ID=CALLER-ID "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh"
+  [ "$status" -eq 0 ]
+  grep -q '^device-id CALLER-ID$' "$INVOCATIONS"
+}
+
+@test "falls back to a caller-provided AUTOMOBILE_DEVICE_UDID" {
+  run env AUTOMOBILE_DEVICE_UDID=CALLER-UDID "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh"
+  [ "$status" -eq 0 ]
+  grep -q '^device-id CALLER-UDID$' "$INVOCATIONS"
+}
+
+@test "prefers AUTOMOBILE_DEVICE_ID over AUTOMOBILE_DEVICE_UDID" {
+  run env AUTOMOBILE_DEVICE_ID=CALLER-ID AUTOMOBILE_DEVICE_UDID=CALLER-UDID \
+    "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh"
   [ "$status" -eq 0 ]
   grep -q '^device-id CALLER-ID$' "$INVOCATIONS"
 }

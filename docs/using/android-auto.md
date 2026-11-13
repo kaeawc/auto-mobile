@@ -144,8 +144,8 @@ The result gains a `headUnit` block:
   list scroll counts only when the app's template reports different items. Without the AutoMobile template route in any projected app, the change is read from a DHU
   screenshot instead: `basis` is `screenshot changed` or `screenshot unchanged`, which tells changed
   pixels from unchanged ones but not which screen is shown. When no screenshot arrives either (a
-  `--headless` DHU without video focus), `basis` is `no template data` and `screenChanged` is
-  absent: the input was sent, but whether it changed the screen is unknown.
+  `--headless` DHU without video focus, which returns at once), `basis` is `no template data` and
+  `screenChanged` is absent: the input was sent, but whether it changed the screen is unknown.
 - `idle`: whether two reads in a row agreed (`stable`), what they were (`basis`: `carAppTemplates`,
   `screenshot` or `none`) and how long the wait took (`waitedMs`). A screen that still looks the same is waited on for about a second, so a slow screen
   push is not reported as no change. The wait ends after about three seconds either way.

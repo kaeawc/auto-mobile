@@ -66,7 +66,7 @@ export class VisionosRunnerArtifacts {
               await (this.dependencies.access ?? access)(projectPath);
             } catch (cause) {
               throw new ActionableError(
-                `Visionos runner project is unavailable; set ${ENV.VISIONOS_RUNNER_XCTESTRUN.name} to a prebuilt visionos runner xctestrun. This release has no published visionOS runner, and the published package does not include the visionos project.`,
+                `Visionos runner project is unavailable: ${projectPath} was not found. From an AutoMobile checkout, set ${ENV.PROJECT_ROOT.name} to the checkout root; otherwise set ${ENV.VISIONOS_RUNNER_XCTESTRUN.name} to a prebuilt visionos runner xctestrun. This release has no published visionOS runner, and the published package does not include the visionos project.`,
                 { cause },
               );
             }

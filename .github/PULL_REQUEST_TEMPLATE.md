@@ -31,7 +31,7 @@ Closes #
 - [ ] Android/iOS changes: ran the matching `scripts/` validation
 - [ ] New code uses interfaces + fakes + FakeTimer; unit tests run in <100ms
 - [ ] New generic code reuses the standard library or an existing project helper; any new direct dependency has a decision record under `docs/devlog/`
-- [ ] Docs describe current behavior only (no progress/status/history narration); `docs/using/` stays end-user, internals go in `docs/how-it-works/`
+- [ ] Docs describe current behavior only (no progress/status/history narration); `docs/using/` stays end-user, internals go in `docs/how-it-works/`, decisions and history in `docs/devlog/`
 - [ ] Rebased onto latest `main`, conflicts resolved
 
 ## Kotlin Reuse Check

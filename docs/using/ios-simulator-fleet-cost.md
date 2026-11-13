@@ -2,8 +2,8 @@
 
 AutoMobile measures what booted iOS Simulators cost the host (process-tree memory footprint,
 CPU, device data size, boot time) and tells callers whether one more boot fits. Measurement is
-read-only and never boots, shuts down or reconfigures a simulator. For how each value is
-measured and how the limits below are derived, see
+read-only and never boots, shuts down or reconfigures a simulator. For how AutoMobile measures
+each value and derives the limits below, see
 [fleet cost measurement](../how-it-works/ios-simulator-fleet-cost.md).
 
 Each simulator carries a `quality`: `measured`, `no-processes` (Booted but no
@@ -36,7 +36,7 @@ warn and use their derived limits.
 
 Boots beyond the concurrency limit queue in FIFO order while retaining their
 count slots, so queued boots count as in flight. Queue wait is outside the boot's
-own time budget, but the caller's AbortSignal and outer deadline still apply.
+own time budget, but the caller's cancellation and outer deadline still apply.
 Cancellation while queued releases the count slot. Because queued boots keep their
 count slots, a caller can see `capacity_exhausted` while fewer simulators are actually
 booted than the limit. The boot-concurrency limit applies only while the capacity gate
@@ -76,19 +76,17 @@ An admitted boot holds its slot until it finishes; a refused boot fails with `ca
   simulator's memory, CPU, data size and last boot time, and warns when a new boot would exceed capacity.
 
 Doctor also reports advisory Spotlight indexing warnings for existing developer directories on macOS.
-Generated scratch, build, and bootstrapped worktree roots receive `.metadata_never_index` markers.
-Set `AUTOMOBILE_SPOTLIGHT_EXCLUDE=0` to opt out of shell marker creation.
-For other developer directories, add a marker or use System Settings > Spotlight > Search Privacy.
-Doctor only reads indexing status and never changes system settings.
+To exclude a directory, add a `.metadata_never_index` marker file to it or use System Settings >
+Spotlight > Search Privacy. Doctor only reads indexing status and never changes system settings.
 
 New simulators use the `minimal` lean profile by default; settled template cloning is off by default.
 Set `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=none` to opt out of the profile, or
 `AUTOMOBILE_IOS_TEMPLATE_CLONE=1` (or `true`) to opt in to cloning. Explicit
 resource requests override the profile.
 
-### Known limitation: template clones
+### Template clones
 
-Template cloning is off by default for this release: clones of a template could share Safari and
-other system-app data (tabs, history, cookies, website data). With
+Template cloning is off by default because clones of a template can share Safari and other
+system-app data (tabs, history, cookies, website data). With
 `AUTOMOBILE_IOS_TEMPLATE_CLONE=1`, a clone whose isolation step fails is deleted and the
 simulator is created normally.

@@ -45,8 +45,8 @@ On failure `success` is `false` and `error` holds a human-readable message.
 
 Every command requires `platform`. Tap, swipe, `pressButton`, and typeText accept
 `"android"` or `"ios"`; gestures and `input/key` require `"android"`.
-`deviceId` is an optional string: when it
-is omitted, the daemon uses the socket session's autolocked device for that
+
+The optional `deviceId` string picks the device. When you omit it, the daemon uses the socket session's autolocked device for that
 platform, otherwise the single booted device of that platform. With multiple
 booted devices and no autolock, you must supply `deviceId`; with none, the
 request fails. All coordinates are finite numbers in **canonical device pixels**.

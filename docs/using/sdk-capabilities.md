@@ -52,11 +52,11 @@ The resource reports the app's current state; it does not change any capability 
 policy. The capability states for storage features are a separate resource, see
 [Storage capabilities](storage-capabilities.md).
 
-Database reads through the Android SDK's `DatabaseInspectorProvider`
+Database reads through the Android SDK's database provider
 (`automobile.database`) on a device held by another session require AutoMobile SDK
-**0.0.85 or newer** in the app. A non-owner read probes `getReadOnlyCapability` and
-proceeds only when the provider confirms `readOnlyEnforced: true`; otherwise it
-returns the non-retryable `sdk_too_old` refusal naming the minimum version. Upgrade
+**0.0.85 or newer** in the app. Such a read proceeds only when the app's SDK
+confirms it enforces read-only access. Otherwise it returns the non-retryable
+`sdk_too_old` refusal naming the minimum version. Upgrade
 the SDK in the app or ask the holder. Maven Central has the SDK only up to `0.0.67`; build a
 newer release from source as in
 [Adding the SDK template route](android-automotive.md#adding-the-sdk-template-route). The holder's own reads are unchanged.

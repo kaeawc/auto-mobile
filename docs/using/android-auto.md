@@ -1,10 +1,14 @@
 # Android Auto and the Desktop Head Unit
 
 Android Auto projects a phone app's car UI to a head unit. The Desktop Head Unit (DHU) is Google's
-desktop stand-in for that head unit. `provisionDevice` can set up projection on a phone emulator and
-start a headless DHU for you, and `startDevice` can start the DHU again for a phone that is already set
-up. `tapAt` and `pressButton` can then act on the head unit. This page covers the setup, the manual
-steps it automates, acting on the head unit, and what to expect.
+desktop stand-in for that head unit.
+
+- `provisionDevice` can set up projection on a phone emulator and start a headless DHU for you.
+- `startDevice` can start the DHU again for a phone that is already set up.
+- `tapAt` and `pressButton` can then act on the head unit.
+
+To do the setup yourself, or for the DHU console, capture and configs, see
+[Desktop Head Unit by hand](android-auto-dhu.md).
 
 For a full car Android build that AutoMobile drives directly, use an
 [Android Automotive OS emulator](android-automotive.md) instead.
@@ -74,12 +78,14 @@ phone, or provision again with `acceptAndroidAutoTerms: true`.
 | Host port 5277 is held by a redirect or process AutoMobile did not create                                            | Remove it (`adb -s <serial> emu redir del tcp:5277`) or stop the process, then retry.                                                                                                                                                |
 | The head unit server is not listening, or the DHU did not hold a connection                                          | Check developer mode in Android Auto and start the head unit server from its overflow menu, then retry.                                                                                                                              |
 
-A failure after boot fails the whole request: an emulator the request created is rolled back, and a DHU
-that request started is stopped. A DHU an earlier provision started keeps running. `killDevice` on an emulator also stops its DHU.
-When the session holding the phone ends (you release it, its heartbeat lapses, it idles out or is
-cancelled) or moves to another device, AutoMobile stops the DHU it started for that phone and removes
-its port 5277 redirect, so another emulator can project. A provision of that phone still running
-finishes first. The phone keeps running.
+A failure after boot fails the whole request. AutoMobile rolls back an emulator the request created
+and stops a DHU that request started. A DHU an earlier provision started keeps running. `killDevice`
+on an emulator also stops its DHU.
+
+The session holding the phone can end (you release it, its heartbeat lapses, it idles out or is
+cancelled) or move to another device. AutoMobile then stops the DHU it started for that phone and
+removes its port 5277 redirect, so another emulator can project. A provision of that phone still
+running finishes first. The phone keeps running.
 
 ## Starting the head unit with `startDevice`
 
@@ -138,24 +144,26 @@ or stops one.
 The result gains a `headUnit` block:
 
 - `commands`: the console commands sent.
-- `effect`: `screenChanged` and its `basis`. The change is read from the projected apps' template
-  stacks (`carAppTemplates.projected[]`): each app's top screen class and stack depth, and the top
-  template's content, so a tab switch or a changed item on the same screen counts as a change. A
-  list scroll counts only when the app's template reports different items. Without the AutoMobile template route in any projected app, the change is read from a DHU
-  screenshot instead: `basis` is `screenshot changed` or `screenshot unchanged`, which tells changed
-  pixels from unchanged ones but not which screen is shown. When no screenshot arrives either (a
-  `--headless` DHU without video focus, which returns at once), `basis` is `no template data` and
-  `screenChanged` is absent: the input was sent, but whether it changed the screen is unknown.
+- `effect`: `screenChanged` and its `basis` (see below).
 - `idle`: whether two reads in a row agreed (`stable`), what they were (`basis`: `carAppTemplates`,
-  `screenshot` or `none`) and how long the wait took (`waitedMs`). A screen that still looks the same is waited on for about a second, so a slow screen
-  push is not reported as no change. The wait ends after about three seconds either way.
+  `screenshot` or `none`) and how long the wait took (`waitedMs`). AutoMobile waits about a second on
+  a screen that still looks the same, so it does not report a slow screen push as no change. The wait
+  ends after about three seconds either way.
 - `before` and `after`: the top screen of each projected session, read before and after the input.
   Absent with the screenshot fallback.
 
+AutoMobile reads `effect` from the first source available:
+
+| Source                                                           | `basis`                                                  | What it tells                                                                                                                                                                                  |
+| ---------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Projected apps' template stacks (`carAppTemplates.projected[]`)  | `carAppTemplates changed` or `carAppTemplates unchanged` | Each app's top screen class, stack depth and top template content; a tab switch or changed item on the same screen counts. A list scroll counts only when the template reports different items |
+| DHU screenshot, when no projected app has the template route     | `screenshot changed` or `screenshot unchanged`           | Changed pixels from unchanged ones, but not which screen is shown                                                                                                                              |
+| Nothing (a `--headless` DHU without video focus returns at once) | `no template data`; `screenChanged` is absent            | The input went out, but whether it changed the screen is unknown                                                                                                                               |
+
 Before sending input, the action checks that the head unit is still the one the previous head-unit
-action left: the same DHU process, the same config, and the same projected apps and car sessions.
-If any of them changed, nothing is sent and the action fails. The check counts only apps with the
-template route, so a switch to an app without it is not caught.
+action left. That means the same DHU process, the same config, and the same projected apps and car
+sessions. If any of them changed, the action sends nothing and fails. The check counts only apps with
+the template route, so it misses a switch to an app without it.
 
 `dpad back` pops the current screen on the head unit, so `pressButton back` needs no fallback.
 
@@ -166,50 +174,6 @@ template route, so a switch to an app without it is not caught.
 | A button or field has no head unit equivalent  | Use one of the inputs in the table above.                                                                     |
 | Head unit input not sent                       | The DHU restarted, its config changed, or the projected apps changed. Observe again, then retry the input.    |
 
-## Setting up projection by hand
-
-1. Use a phone emulator with a Google Play system image, such as `google_apis_playstore`. No Google
-   account is needed: projection works on an emulator with no accounts, because Android Auto is
-   sideloaded (step 2) rather than updated from Play. AutoMobile takes no Google credentials and does
-   not sign in for you: Google does not allow scripted sign-in, and new emulators get "Verify it's you"
-   and CAPTCHA challenges that automation must not get past. For an app only available from Play, use
-   an AVD snapshot that you signed in to yourself.
-2. Replace the Android Auto stub. The image ships Android Auto as a stub
-   (`versionName=1.2.551000-stub`) with no head-unit server, and on the API 36 emulator image Google
-   Play reports Android Auto as not compatible, so it cannot be updated from Play. Install a current
-   Android Auto release yourself from a source you trust, for example a split-APK bundle with
-   `adb install-multiple base.apk split_config.arm64_v8a.apk split_config.en.apk split_config.xxhdpi.apk`.
-   Android rejects the update unless it is signed with the same Google key as the stub.
-3. Open Android Auto's settings
-   (`adb shell am start -a com.android.settings.action.IA_SETTINGS -p com.google.android.projection.gearhead`),
-   tap **Version** ten times and accept the prompt to turn on developer mode.
-4. In the overflow menu, open **Developer settings** and turn on **Unknown sources** so Android Auto
-   lists apps you installed yourself. Then choose **Start head unit server** from the overflow menu.
-5. Expose the server and start the DHU from `$ANDROID_HOME/extras/google/auto`:
-
-   ```bash
-   adb emu redir add tcp:5277:5277
-   ./desktop-head-unit --config config/default_720p.ini
-   ```
-
-   `adb forward tcp:5277 tcp:5277` also works, but the DHU's video stream then shares the adb
-   connection with AutoMobile, and when that connection drops the forward is removed and the DHU exits.
-   The emulator redirect keeps the DHU off adb.
-
-6. The first connection shows **Welcome to Android Auto** on the phone. Tap **Continue**, then give
-   Android Auto notification access when the head unit asks for it (or grant it with
-   `adb shell cmd notification allow_listener com.google.android.projection.gearhead/com.google.android.gearhead.notifications.SharedNotificationListenerManager\$ListenerService`).
-   The launcher then appears on the head unit.
-
-If the head-unit server is not running, the DHU still prints `connected.` and then exits with:
-
-```
-> [E]: Failed to read from transport - disconnect. Exiting...
-```
-
-Start the head-unit server (step 4), then start the DHU again. If the DHU connects but the TLS handshake
-never completes, stop and start the head-unit server.
-
 ## Making your app appear in Android Auto
 
 Android Auto on a phone lists a Car App Library app only when its manifest has
@@ -219,69 +183,59 @@ both. Apps installed with adb appear only while **Unknown sources** is on. Apps 
 higher to install on current emulator images, which excludes the Media Browser Simulator shipped in
 `extras/google/simulators`.
 
-## DHU console commands
-
-The DHU reads commands on its console (stdin). `help` in DHU 2.1 lists:
-
-| Group                | Commands                                                                                                                                           |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Controller           | `dpad up\|down\|left\|right\|ur\|dl\|ul\|dr\|click\|back\|soft left\|soft right\|0-9\|*\|#\|+\|rotate left\|rotate right\|flick left\|flick right` |
-| Touch                | `tap <x> <y>` in head-unit pixels                                                                                                                  |
-| Keycode              | `keycode home\|back\|call\|endcall\|search\|media_play_pause\|media_next\|media_previous\|media_play\|media_pause\|media\|navigation\|tel`         |
-| Day/Night Sensor     | `day`, `night`, `daynight`, `nightday`                                                                                                             |
-| Driving Restrictions | `restrict none`, `restrict all`                                                                                                                    |
-| Focus                | `focus audio`, `focus nav`, `focus video`, `focus video toggle`                                                                                    |
-| Microphone           | `mic begin`, `mic play`, `mic repeat`, `mic reject`                                                                                                |
-| Sensors              | `fuel`, `range`, `lowfuel`, `accel`, `compass`, `gyro`, `location`, `odometer`, `speed`, `tollcard insert`, `tollcard remove`                      |
-| System               | `help`, `quit`, `exit`, `licenses`, `sleep <seconds>`, `screenshot <file.png>`                                                                     |
-
-`tap` coordinates use the head unit's resolution (for example 1280x720 with `default_720p.ini`).
-`dpad back` pops the current screen; `dpad` input shows a focus highlight on the focused row.
-
-## Capturing the head unit
-
-`screenshot <file.png>` saves a PNG at the config's full resolution: 1280x720 with
-`default_720p.ini`, 1920x1080 with `default_1080p.ini`. It works with or without a window.
-
-`--headless` projects without a window. It starts without video focus, so `screenshot` fails with
-`Don't have video focus - nothing to screenshot.` until you send `focus video`; the first capture after
-that can be black until the next frame arrives.
-
-## Head unit configs
-
-Pass a config with `-c`/`--config`. The DHU ships these in `config/`: `all_720p`, `auxillary_nav`,
-`cluster`, `default`, `default_1080p`, `default_6in`, `default_720p`, `default_sensors`, `default_wide`,
-`hybrid`, `loaded_720p`, `rotary` and `touchpad` (each a `.ini` file). Without a config the DHU uses
-default values, the same as `default.ini`: 800x480 at 160 dpi and 30 fps.
-
 ## What to expect from AutoMobile
 
-- Android Auto renders the projected UI on virtual displays on the phone. `observe` lists them under
-  `otherDisplays` (for example `TemplateCarFragment`, `Dashboard` and `GhFacetBar`) and may report the
-  projection display as the active one, with a warning that it has no accessible content. The projected
-  UI is not in the accessibility tree; `observe`, `tapOn` and other tools act only on the phone screen.
-  To act on the head unit, use `tapAt` or `pressButton` with `display: "headUnit"` (see
-  [Acting on the head unit](#acting-on-the-head-unit)).
-- While projecting, the phone's foreground app is Android Auto, not your app. If your app enabled the
-  AutoMobile template route, `observe` reads it from every app Android Auto has bound and returns
-  `carAppTemplates.projected[]`, one entry per app (`packageName`, `sessions`, `error`), with
-  `error: "template_read_failed"` and no sessions when an app that answered before could not be
-  read this time, and
-  `projectedBy` naming Android Auto. Android Auto does not report which bound app the head unit shows,
-  so with several apps bound, check each entry's top screen rather than assuming the first is visible.
-  The entries are what the app built, not what the head unit rendered.
-- While the head unit hosts Car App Library templates, `observe` also returns an `androidAuto` block:
-  `projecting: true`, `projectedBy`, `templateHosts` (Android Auto's bound template host services)
-  and `apps[]`, each bound app whose template route answered, with its `userId` and bound `services`.
-  No app is marked visible: an app stays bound while another app is on the head unit, so check
-  `carAppTemplates.projected[]` and the head unit itself. Apps without the template route and a head
-  unit screenshot are not reported. Without a projection, `observe` has no `androidAuto` block.
-- `listDevices` reports the head unit on the phone's entry as `headUnit`, while AutoMobile runs a
-  healthy DHU for it: `display` (`"headUnit"`, the value `tapAt` and `pressButton` take), `role`
-  (`projected`), `projectedBy` (`androidAuto`), `console` (the DHU process; it changes when the DHU
-  restarts), `configPath` and `sizePx` (head-unit pixels from the config's `resolution`, 800x480 when
-  it sets none, absent when the config cannot be read). It is not one of the phone's
-  `displays.panels`.
-- The first `observe` on a fresh emulator installs AutoMobile's on-device service. If the DHU is
-  connected through `adb forward`, a dropped adb connection at that point ends the projection; use the
-  emulator redirect.
+Android Auto renders the projected UI on virtual displays on the phone. `observe` lists them under
+`otherDisplays` (for example `TemplateCarFragment`, `Dashboard` and `GhFacetBar`). It may report the
+projection display as the active one, with a warning that it has no accessible content.
+
+The projected UI is not in the accessibility tree; `observe`, `tapOn` and other tools act only on the
+phone screen. To act on the head unit, use `tapAt` or `pressButton` with `display: "headUnit"` (see
+[Acting on the head unit](#acting-on-the-head-unit)).
+
+The first `observe` on a fresh emulator installs AutoMobile's on-device service. If the DHU connects
+through `adb forward`, a dropped adb connection at that point ends the projection; use the emulator
+redirect.
+
+### Projected templates in `observe`
+
+While projecting, the phone's foreground app is Android Auto, not your app. If your app enabled the
+AutoMobile template route, `observe` reads it from every app Android Auto has bound. It returns
+`carAppTemplates.projected[]` and `projectedBy` naming Android Auto.
+
+| `projected[]` field | Content                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `packageName`       | The bound app                                                                               |
+| `sessions`          | What the app built, not what the head unit rendered                                         |
+| `error`             | `template_read_failed`, with no sessions, when an app that answered before failed this time |
+
+Android Auto does not report which bound app the head unit shows. With several apps bound, check each
+entry's top screen rather than assuming the first is visible.
+
+While the head unit hosts Car App Library templates, `observe` also returns an `androidAuto` block.
+Without a projection, `observe` has no `androidAuto` block.
+
+| `androidAuto` field | Content                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
+| `projecting`        | `true`                                                                     |
+| `projectedBy`       | Android Auto                                                               |
+| `templateHosts`     | Android Auto's bound template host services                                |
+| `apps[]`            | Each bound app whose template route answered, with `userId` and `services` |
+
+No app is marked visible, because an app stays bound while another app is on the head unit. Check
+`carAppTemplates.projected[]` and the head unit itself. The block leaves out apps without the
+template route, and has no head unit screenshot.
+
+### The head unit in `listDevices`
+
+While AutoMobile runs a healthy DHU for a phone, `listDevices` reports it on the phone's entry as
+`headUnit`. It is not one of the phone's `displays.panels`.
+
+| `headUnit` field | Content                                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------- |
+| `display`        | `"headUnit"`, the value `tapAt` and `pressButton` take                                                    |
+| `role`           | `projected`                                                                                               |
+| `projectedBy`    | `androidAuto`                                                                                             |
+| `console`        | The DHU process; it changes when the DHU restarts                                                         |
+| `configPath`     | The head unit config                                                                                      |
+| `sizePx`         | Head-unit pixels from the config's `resolution`; 800x480 when it sets none, absent when it cannot be read |

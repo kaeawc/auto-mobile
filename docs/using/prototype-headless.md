@@ -16,7 +16,8 @@ automatically.
   device.
 - Mock backends (`defineBackend`, `mock`, `mockPath`), `screenMap`, `share` and test sessions.
 - The accessibility findings a successful `show` or `patch` returns.
-- `automobile:prototype/<id>/web` returns the prototype as one HTML page in a device frame, and
+- `automobile:prototype/<id>/web` returns the prototype as one HTML page in a device frame (see
+  [Prototype web preview](prototype-web-preview.md)), and
   `automobile:prototype/native?id=<id>` returns the files that embed it in an app.
 
 Every result includes `virtualDevice`:
@@ -33,7 +34,7 @@ Every result includes `virtualDevice`:
   real device".
 - `display` fails: there is one display.
 - A spec that needs a capability in `unsupportedCapabilities` fails with the same error an older
-  device gives, for example `window.persistence: "device"` or `window.layer: "app"`
+  device gives. Examples: `window.persistence: "device"` or `window.layer: "app"`
   (`prototype_window_options_v1`), element anchors, `appearance: "light"`/`"dark"`, blur
   backdrops, custom shaders, dead taps, `via: "device"` requests, platform modules such as haptics
   and clipboard, storage and timers. Remove the feature, or run on a device.

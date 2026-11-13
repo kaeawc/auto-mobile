@@ -24,6 +24,7 @@ means Android returned the expected state after the command. A command accepted 
 an error can still fail read-back; inspect the observed value in `reason`. The overall
 status is `applied` when every step applies, `partial` when some apply and `unsupported`
 when none can apply. If no step applies and a step fails, the call returns an error.
+
 Later steps still run after a step reports failed or unsupported; cancellation stops the call.
 
 Reset restores the state captured before the first change, including after repeated applies.
@@ -31,6 +32,7 @@ It restores device-wide battery, Doze and screen state as well as the package's 
 A daemon session also restores recorded changes on release or rebind; check
 `restore.onSessionRelease`. Sessionless calls need an explicit reset. Records are in memory:
 a daemon restart loses them. Without records, reset changes nothing unless `baseline: true`.
+
 Baseline resets the supported battery, Doze, standby, appop and hibernation defaults; it cannot
 recover lost permission grants or the original screen state. Force-stop, killed processes
 and the previous foreground app cannot be restored. Open the app again to clear force-stop.
@@ -122,6 +124,7 @@ Apply and reset require Android and an installed package. Correct the device or 
 For unsupported steps, inspect the minimum API or device capability in the reason.
 For failed read-back, inspect the observed value: fixed permissions and preinstalled apps can
 resist restrictions. A failed boot dump is a failed check, not evidence of blocked delivery.
+
 Restore records survive uncertain writes and failed verification so reset can clean up partial changes.
 Retry reset after a restore error; failed facets remain recorded. Cancelling a screen-off wait
 stops subsequent steps; reset or session release can still wake an originally awake screen.

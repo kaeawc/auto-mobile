@@ -250,7 +250,9 @@ nav:
   - "Using AutoMobile":
       - "Agent Examples": using/agent-examples.md
       - "UI tests": using/ui-tests.md
+      - "Accessibility in UI tests": using/ui-tests-accessibility.md
       - "Test prep tools": using/test-prep-tools.md
+      - "Reaching a host server": using/port-reverse.md
       - "Manufacturer profiles": using/oem-personas.md
       - "Kill profiles": using/kill-profiles.md
       - "Session execution logs": using/session-logs.md
@@ -261,6 +263,7 @@ nav:
       - "SDK capabilities": using/sdk-capabilities.md
       - "Hackathon demo kit": using/hackathon.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
+      - "Prototype web preview": using/prototype-web-preview.md
       - "Prototype icons": using/prototype-icons.md
       - "Virtual BLE peripherals": using/ble-peripheral.md
       - "Headless prototypes": using/prototype-headless.md
@@ -272,13 +275,18 @@ nav:
       - "Navigation graph": using/navigation-graph.md
       - "Device condition fixtures": using/device-condition.md
       - "Android Automotive OS": using/android-automotive.md
+      - "Android Automotive secondary displays": using/android-automotive-displays.md
       - "Android Auto and the DHU": using/android-auto.md
+      - "Desktop Head Unit by hand": using/android-auto-dhu.md
       - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
+      - "Wear OS tiles and watch faces": using/wear-os-watch-faces.md
       - "Android XR": using/android-xr.md
       - "Android XR glasses": using/android-xr-glasses.md
       - "Apple TV": using/apple-tv.md
+      - "Apple TV app tools": using/apple-tv-app-tools.md
       - "Apple Watch": using/apple-watch.md
+      - "Apple Watch tool behavior": using/apple-watch-tools.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Apple Vision Pro simulator": using/visionos-simulator.md
@@ -289,6 +297,9 @@ nav:
       - "Emulator and simulator audio": using/emulator-audio.md
       - "Headless host audio setup": using/headless-audio.md
       - "Device ownership": using/device-ownership.md
+      - "Choosing a device for an ambiguous call": using/device-ownership-ambiguous-target.md
+      - "Device availability and capacity": using/device-ownership-availability.md
+      - "Apple simulator sessions": using/device-ownership-apple.md
       - "Listing device images": using/device-images.md
       - "Usage skill": using/usage-skill.md
       - "Python SDK": using/python-sdk.md

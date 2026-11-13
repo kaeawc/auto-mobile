@@ -185,8 +185,8 @@ describe("docs readability budgets", () => {
       "how-it-works",
       "devlog",
     ]);
-    // devlog is clean on main and gated; the others stay advisory until they are.
-    expect(config.sections.map((section) => section.enforced)).toEqual([false, false, true]);
+    // using and devlog are clean on main and gated; how-it-works stays advisory until it is.
+    expect(config.sections.map((section) => section.enforced)).toEqual([true, false, true]);
     expect(sectionFor(config, "docs/design-docs/x.md")?.name).toBe("how-it-works");
     expect(sectionFor(config, "docs/how-it-works/x.md")?.name).toBe("how-it-works");
   });

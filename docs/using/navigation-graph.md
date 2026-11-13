@@ -50,13 +50,15 @@ Launch the app first, then call `explore`:
 ```
 
 `explore` taps and swipes through the app until it reaches a limit or runs out
-of new things to try. On an Android TV it moves D-pad focus to an element and
-selects it instead, recorded as `focusNavigate` with `select: true`. It never
-explores the on-screen keyboard: when a field opens it over the app, `explore`
-presses back once to hide it, and it skips the keyboard's keys if it stays open.
-It also hides a keyboard its last interaction opened before it returns. An
-element whose tap or select left the screen unchanged is not tried again on that
-screen. It interacts with the device, so run it on a test device and test account.
+of new things to try. On an Android TV it instead moves D-pad focus to an
+element and selects it, and records that as `focusNavigate` with `select: true`.
+It interacts with the device, so run it on a test device and test account.
+
+It never explores the on-screen keyboard. When a field opens the keyboard over
+the app, `explore` presses back once to hide it, and it skips the keyboard's
+keys if it stays open. It also hides a keyboard its last interaction opened
+before it returns. It does not retry an element whose tap or select left the
+screen unchanged on that screen.
 
 | Parameter         | Default    | Meaning                                                                                                         |
 | ----------------- | ---------- | --------------------------------------------------------------------------------------------------------------- |
@@ -118,11 +120,11 @@ lacks.
 
 ## Labeling builds with their git revision
 
-The graph records which app build reached each screen. By default a build is
-shown as `v<versionCode> (<hash prefix>)`. To show `branch@shortsha` instead
+The graph records which app build reached each screen. By default it labels a
+build `v<versionCode> (<hash prefix>)`. To show `branch@shortsha` instead
 (for example `main@3f2a9c1`), declare the git branch and full commit sha the app
-was built from. Builds that declare nothing keep the default label, and the
-declaration never changes which builds are told apart.
+came from. Builds that declare nothing keep the default label, and the
+declaration never changes which builds AutoMobile tells apart.
 
 On Android, add both values as manifest meta-data, typically filled from your
 Gradle build:
@@ -156,15 +158,16 @@ from the CI environment instead (for example `GITHUB_HEAD_REF`, or
 is known.
 
 On iOS, add the same two keys as strings to the app's `Info.plist`, for example
-from a build phase that runs `git rev-parse`. iOS builds are labeled on
+from a build phase that runs `git rev-parse`. AutoMobile labels iOS builds on
 simulators only.
 
-Both values are required. The branch must be 1–255 characters; the sha must be
-7–64 hexadecimal characters, and a full 40-character sha is recommended (Android
-reads an all-digit short sha as a number and ignores it). An invalid pair is
-ignored. The label takes effect the next time AutoMobile observes the app after
-it is installed; rebuilding the same version and content from a later commit
-updates the label.
+Declare both values. The branch must be 1–255 characters and the sha 7–64
+hexadecimal characters. Use a full 40-character sha: Android reads an all-digit
+short sha as a number and ignores it. AutoMobile ignores an invalid pair.
+
+The label takes effect the next time AutoMobile observes the app after you
+install it. Rebuilding the same version and content from a later commit updates
+the label.
 
 ## Going to a screen
 

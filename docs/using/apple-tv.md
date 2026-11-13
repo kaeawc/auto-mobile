@@ -1,8 +1,7 @@
 # Apple TV simulators
 
-AutoMobile can list, create, boot and drive an Apple TV simulator. Apple TV apps are driven by
-focus and the Siri Remote, not touch. This guide covers the supported tools, focus navigation,
-installing a tvOS runtime, and what is out of scope.
+AutoMobile can list, create, boot and drive an Apple TV simulator. Apple TV apps respond to focus and
+the Siri Remote, not touch.
 
 > Name the platform on every call: `platform: "tvos"`, or the `sessionUuid` of an Apple TV
 > session. A call that names no platform never lands on an Apple TV.
@@ -17,9 +16,10 @@ xcodebuild -downloadPlatform tvOS
 
 tvOS 26.5 and tvOS 27.0 simulators are supported.
 
-The `automobile:devices/images/tvos` resource lists the installed tvOS runtimes, the Apple TV
-models and which runtimes each model supports, along with the configured Apple TV simulators. A `provisionDevice` request that names a missing or
-unavailable runtime fails, lists the available runtimes and repeats the install command.
+The `automobile:devices/images/tvos` resource lists the installed tvOS runtimes and the Apple TV
+models, with the runtimes each model supports. It also lists the configured Apple TV simulators. A
+`provisionDevice` request that names a missing or unavailable runtime fails. The error lists the
+available runtimes and repeats the install command.
 
 ## Supported tools
 
@@ -58,11 +58,13 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 
 <!-- apple-tv-supported-tools:end -->
 
-Every other device tool refuses an Apple TV with an error naming the tool. `tapAt`, `swipeOn`,
-`pinchOn`, `multiTouch`, `dragAndDrop` and `tapAny` refuse it as a touch gesture and point to
-focus navigation. `displayConfig`, `statusBar`, `clipboard` and `getAppPermissions` refuse it as
-not available on tvOS: the tvOS simulator has no appearance or content size setting, status bar
-override, pasteboard or permission read-back.
+Every other device tool refuses an Apple TV with an error naming the tool.
+
+- `tapAt`, `swipeOn`, `pinchOn`, `multiTouch`, `dragAndDrop` and `tapAny` refuse it as a touch
+  gesture and point to focus navigation.
+- `displayConfig`, `statusBar`, `clipboard` and `getAppPermissions` refuse it as not available on
+  tvOS. The tvOS simulator has no appearance or content size setting, status bar override,
+  pasteboard or permission read-back.
 
 ## Create and start an Apple TV simulator
 
@@ -82,37 +84,39 @@ runtime and device type identifiers from `automobile:devices/images/tvos`:
 }
 ```
 
-- An exact match is adopted; otherwise a simulator is created. Creation must be allowed; see
-  `AUTOMOBILE_ALLOW_DEVICE_CREATE` in [Environment variables](environment-variables.md).
-- A name clash, a `deviceId` that names no Apple TV, or an incompatible runtime and model is refused.
-  A missing `spec` or field, or an identifier the host does not list, is refused with an example
-  and the accepted identifiers; a short form such as `Apple-TV-4K-3rd-generation-4K` names the full one.
-- With `boot` (the default) the simulator boots and a session binds at readiness `booted`. A
-  simulator the call created is deleted again if booting or binding fails; if that deletion fails,
-  the error says so and tells you to delete it with `deleteDevice`.
-- `boot: false` creates or adopts the simulator without a session.
-- `enableTools` enables the named tools for the new session, as on iOS; it requires `boot`.
-- `readiness: "automation"` (with `boot`) also starts the automation runner, as `startDevice` does;
-  the result's `readiness` is `automation_ready`, or `runner_unavailable` with the reason in
-  `message`. The default, `none`, starts no runner.
-- `resources` are refused.
+| Input or case                                                                 | Behavior                                                                                                                                                      |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exact match exists                                                            | Adopts it; otherwise creates a simulator. Creation must be allowed; see `AUTOMOBILE_ALLOW_DEVICE_CREATE` in [Environment variables](environment-variables.md) |
+| Name clash, `deviceId` that names no Apple TV, incompatible runtime and model | Refused                                                                                                                                                       |
+| Missing `spec` or field, identifier the host does not list                    | Refused with an example and the accepted identifiers; a short form such as `Apple-TV-4K-3rd-generation-4K` names the full one                                 |
+| `boot` (default `true`)                                                       | Boots the simulator and binds a session at readiness `booted`                                                                                                 |
+| Boot or binding fails                                                         | Deletes a simulator the call created; if that deletion fails, the error says so and tells you to use `deleteDevice`                                           |
+| `boot: false`                                                                 | Creates or adopts the simulator without a session                                                                                                             |
+| `enableTools`                                                                 | Enables the named tools for the new session, as on iOS; requires `boot`                                                                                       |
+| `readiness: "automation"` (with `boot`)                                       | Also starts the automation runner; `readiness` is `automation_ready`, or `runner_unavailable` with the reason in `message`                                    |
+| `readiness: "none"` (default)                                                 | Starts no runner                                                                                                                                              |
+| `resources`                                                                   | Refused                                                                                                                                                       |
 
 `startDevice { platform: "tvos", name: "tv-4k" }` boots an existing simulator, starts its automation
-runner and binds a session. It accepts `enableTools` too. It never creates a simulator; a name or
-`deviceId` that matches none, or more than one, fails and asks for an exact `deviceId`. Starting the
-runner brings its own host app to the front, so an app you launched with `launchApp` before is
-brought back to the foreground once the runner is up, including after an automatic restart.
-`startDevice` returns once the runner sees that app in front, waiting up to 5 seconds. If the
-restore fails or does not finish in time, the runner still works, `message` says the app may not be
-in front, and the host app may stay in front. Call `observe` again, or `launchApp` to bring the app back.
+runner and binds a session. It accepts `enableTools` too. It never creates a simulator. A name or
+`deviceId` that matches none, or more than one, fails and asks for an exact `deviceId`.
 
-On first tvOS use, AutoMobile downloads and verifies the release’s prebuilt runner; no source
-checkout is needed. `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` selects an explicit `.xctestrun` instead.
-Existing local build products take precedence over the download. If the selected release has no
-runner checksum, use the override or a source checkout to build one. If the runner cannot start, the
-call still returns a booted session and `message` explains why. If a runner started for the session
-later disconnects, the next call restarts it automatically. Call `startDevice` again after fixing
-the cause if initial startup or automatic recovery fails.
+Starting the runner brings its own host app to the front. AutoMobile then brings an app you launched
+with `launchApp` back to the foreground, including after an automatic restart. The call returns
+once the runner sees that app in front, waiting up to 5 seconds. If the restore fails or times out,
+the runner still works and `message` says the app may not be in front. Call `observe` again, or
+`launchApp` to bring the app back.
+
+### The automation runner
+
+On first tvOS use, AutoMobile downloads and verifies the release’s prebuilt runner; you need no
+source checkout. `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` selects an explicit `.xctestrun` instead. Local
+build products take precedence over the download. If the selected release has no runner checksum,
+use the override or build one from a source checkout.
+
+- If the runner cannot start, the call still returns a booted session and `message` explains why.
+- If a runner started for the session later disconnects, the next call restarts it automatically.
+- If initial startup or automatic recovery fails, fix the cause and call `startDevice` again.
 
 ## Lifecycle
 
@@ -134,9 +138,15 @@ the cause if initial startup or automatic recovery fails.
 }
 ```
 
-It stops a running simulator and releases its session first. An absent UDID returns
-`already_absent`; a mismatched `target.stableName` fails with `identity_conflict`, and an
-unsuccessful deletion with `tv_delete_failed`. Releasing the session, killing or deleting the simulator stops its runner.
+It stops a running simulator and releases its session first.
+
+| Result              | Cause                              |
+| ------------------- | ---------------------------------- |
+| `already_absent`    | The UDID is absent                 |
+| `identity_conflict` | `target.stableName` does not match |
+| `tv_delete_failed`  | The deletion did not succeed       |
+
+Releasing the session, killing or deleting the simulator stops its runner.
 
 Check inventory completeness before treating an empty listing as no devices, and retry a failed
 listing.
@@ -144,31 +154,37 @@ listing.
 ## Observe
 
 With a connected runner, `observe` returns a screenshot, the hierarchy and `focusedElement`;
-`project: "full"` includes the full hierarchy. `focusedElement.checked` reports a toggle's on/off
-state when available, including when focus belongs to the row containing the toggle. An absent
-`checked` means its state is unknown. The hierarchy describes the app in front: the app
-you last started with `launchApp`, Settings or another Apple app, or the home screen.
+`project: "full"` includes the full hierarchy. The hierarchy describes the app in front: the app you
+last started with `launchApp`, Settings or another Apple app, or the home screen.
 
-Without a runner it returns a screenshot with `hierarchyUnavailable`; call `startDevice` (or
-`provisionDevice` with `readiness: "automation"`) to prepare automation. A runner that does not answer a command within 5 seconds is disconnected.
-An app crash is reported as an app exit. After a disconnect or crash, the next call automatically
-restarts a runner AutoMobile started for the session. If recovery fails, `observe` returns a
-screenshot with `hierarchyUnavailable` and the recovery error in its `message` (`project` and
-`waitFor` are refused); call `startDevice` to restart the runner. With a runner, `waitFor`
-waits for an element (`elementId`, `testTag`, `text`, `textAny`, `className`,
-`contentDescription`, `absent`) by re-reading the hierarchy until it matches or `timeout` elapses.
-`waitFor: {for: "focused"}` waits until an element holds focus, which lets a plan wait for focus to
-settle after a press or a screen change; add `elementId` or `text` to wait for that element to be
-focused. Other `for` kinds, `posture`, `activeDisplay` and `activeWindow` are refused, as are other
-advanced observe options.
+`focusedElement.checked` reports a toggle's on/off state when available, including when focus
+belongs to the row containing the toggle. An absent `checked` means its state is unknown.
+
+Without a runner, `observe` returns a screenshot with `hierarchyUnavailable`. Call `startDevice`, or
+`provisionDevice` with `readiness: "automation"`, to prepare automation.
+
+AutoMobile disconnects a runner that does not answer a command within 5 seconds, and reports an app
+crash as an app exit. After a disconnect or crash, the next call restarts a runner AutoMobile
+started for the session. If recovery fails, `observe` returns a screenshot with
+`hierarchyUnavailable` and the recovery error in its `message`, and refuses `project` and `waitFor`.
+Call `startDevice` to restart the runner.
+
+| `waitFor` (runner only)                                                                | Waits until                                                        |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `elementId`, `testTag`, `text`, `textAny`, `className`, `contentDescription`, `absent` | The hierarchy matches, re-read until `timeout` elapses             |
+| `{for: "focused"}`                                                                     | An element holds focus, for example after a press or screen change |
+| `{for: "focused"}` with `elementId` or `text`                                          | That element is focused                                            |
+
+Other `for` kinds, `posture`, `activeDisplay`, `activeWindow` and other advanced observe options
+are refused.
 
 ## Record and compare the screen
 
 `videoRecording` records an Apple TV simulator's screen like an iOS Simulator's, up to 3600
 seconds. Focus rings, parallax and focus scaling are visible in the recording.
 
-`compareScreenshot` records and compares named screenshot baselines. An Apple TV baseline is kept
-per screenshot size; density, font scale and theme are always `null` in its profile.
+`compareScreenshot` records and compares named screenshot baselines. AutoMobile keeps an Apple TV
+baseline per screenshot size; density, font scale and theme are always `null` in its profile.
 
 - Without a runner, only the full screen is compared. A `target` or `mask` is refused; call
   `startDevice` to prepare the runner.
@@ -193,103 +209,60 @@ focused one.
 remote button; omit it for a normal press. `steps` is unsupported. A tvOS runner built before
 long-press support refuses `durationMs` with `unsupported_on_tvos`; rebuild or update the runner.
 
-Touch-surface swipes are unavailable because XCUITest does not expose them on tvOS. Use
-directional presses and focus navigation instead.
+Touch-surface swipes are unavailable on tvOS. Use directional presses and focus navigation instead.
 
 `tapOn` replaces tapping: it moves focus to a matched element with directional presses and then
-presses `select`. A matched checkable control inside the focused row's bounds activates that row with one
-`select`; the result's `element` remains the matched child.
+presses `select`. A matched checkable control inside the focused row's bounds activates that row
+with one `select`; the result's `element` remains the matched child.
 
 - Match with an exact `text` or `elementId`, and an optional zero-based `index`. Only the `tap`
   action is supported; other options are refused.
 - If focus is missing during a screen transition, `tapOn` waits up to three seconds for it to
   return. If nothing gains focus, press a direction with `pressButton` and observe before retrying.
-- A match outside the visible area, such as an item further along a row, is still reached: focus
-  moves toward it and the row scrolls. On-screen matches count first for `index`.
-- When nothing on screen matches yet, focus sweeps each row right and left, moving down a row at a
+- Focus reaches a match outside the visible area, such as an item further along a row, and the row
+  scrolls. On-screen matches count first for `index`.
+- When nothing on screen matches yet, focus sweeps each row right and left. It moves down a row at a
   time and then up, until the match appears, for at most 60 moves.
-- No match after that search, a target that disappears, focus that stops moving, or more than 30
-  moves toward the target fails the call. Observe, move closer with `pressButton`, and retry.
+- The call fails when nothing matches after that search, the target disappears, focus stops moving,
+  or it takes more than 30 moves toward the target. Observe, move closer with `pressButton`, and retry.
 
-`focusNavigate` takes the same `until`, `direction`, `maxSteps`, `settleMs` and `select`
-parameters and returns the same `path`, `status` (`focused`, `max_steps` or `stuck`) and
-`selected` as on Android TV. Directions are Siri Remote presses, and `select: true` presses the
-remote's `select` once the target is focused; without it, activate the focused element with
-`pressButton` `select`. With nothing focused it presses down first. A `label` or `elementId`
-target is matched to the element `tapOn` would select.
+`focusNavigate` works as on [Android TV](android-tv.md#navigating-a-tv-app). It takes the same
+`until`, `direction`, `maxSteps`, `settleMs` and `select` parameters. It returns the same `path`,
+`status` (`focused`, `max_steps` or `stuck`) and `selected`.
 
-The tvOS focus engine remembers the last focused item in each row or column, so the element a
-direction reaches can depend on where focus was before. Observe again rather than predicting focus
+- Directions are Siri Remote presses.
+- `select: true` presses the remote's `select` once the target is focused. Without it, activate the
+  focused element with `pressButton` `select`.
+- With nothing focused, it presses down first.
+- A `label` or `elementId` target matches the element `tapOn` would select.
+
+The tvOS focus engine remembers the last focused item in each row or column. The element a direction
+reaches can then depend on where focus was before, so observe again rather than predicting focus
 from the layout.
 
 ## Enter text
 
 Select a text field with `pressButton select` to open the on-screen keyboard, then call `sendKeys`
-with `type` commands. Text is appended to the field. The hierarchy shows only each field's label,
-with no field values, while the keyboard is open and until about one second after AutoMobile
-last saw the keyboard or finished typing. Values may also be hidden briefly when first connecting. The placeholder
-appears only as the keyboard's prompt. Values stay hidden longer if an unnamed text input remains.
-Afterwards, a named plain field's typed value is readable with `observe`. Unnamed text inputs and
-secure fields never show their value. Whitespace-only values are empty.
+with `type` commands. `sendKeys` appends text to the field.
+
+The hierarchy shows only each field's label, with no field values, in these cases:
+
+- while the keyboard is open, and until about one second after AutoMobile last saw the keyboard or
+  finished typing;
+- briefly when first connecting;
+- for longer if an unnamed text input remains.
+
+The placeholder appears only as the keyboard's prompt. Afterwards, `observe` reads a named plain
+field's typed value. Unnamed text inputs and secure fields never show their value. Whitespace-only
+values are empty.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.
 
-## Explore an app
+## More Apple TV tools
 
-`explore` is available when the server runs with `--embedded-sdk`, like the other
-[navigation graph](navigation-graph.md) tools; the Apple TV app itself does not need the SDK.
-Without the flag, `explore` is missing from `tools/list` and a call fails with
-`Unknown tool: explore. embedded SDK mode is disabled; ...`, followed by these steps:
-
-1. Add `--embedded-sdk` to the AutoMobile MCP server command and reconnect. A running daemon
-   started without it is restarted with it.
-2. Enable `explore` for the session with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
-
-Launch the app with `launchApp`, then call `explore` with `platform: "tvos"`. Explore selects
-every item it can focus on a screen, observes after every remote press, records each screen a
-`select` opens in the navigation graph, and presses `menu` to go back.
-
-- It accepts `maxInteractions` (default 200), `timeoutMs` (default 300000) and `packageName`.
-  `strategy`, `mode`, `resetToHome`, `resetInterval` and `dryRun` are refused.
-- With `packageName`, that app must already be in the foreground.
-- It stops at either limit, when the first screen has nothing left to select, or when the app
-  cannot be brought back after leaving it (`stopReason`).
-- A recorded transition replays as `tapOn` with the item's identifier, or its text when it has
-  no identifier; going back replays as `pressButton menu`. A screen opened from an item with
-  neither is still recorded, but `navigateTo` cannot replay that transition and says so.
-
-## Run a plan
-
-`executePlan` with `platform: "tvos"` runs plan steps that use Apple TV tools: `pressButton`,
-`tapOn`, `sendKeys`, `observe` and the app tools. A step whose tool is not in the supported-tools
-table fails the plan with the same error the tool returns on its own. Step `expectations` are
-checked with the runner's hierarchy, as with `observe` `waitFor`. A plan may declare
-`platform: tvos`, and a device in its `devices` list may use `platform: tvos`. Apple TV plans are
-video-recorded like iOS plans; a recording that cannot start adds a `videoWarnings` entry and the
-plan still runs.
-
-## Open a deep link
-
-`openLink` opens a URL on the Apple TV, such as `myapp://episode/42`, and the app that declares the
-scheme shows that screen. Call `observe` afterwards to see where it landed.
-
-- `getDeepLinks` with the app's bundle ID lists the custom URL schemes the installed app declares.
-- The call fails when no installed app handles the URL. Apple TV has no web browser, so an
-  `http` or `https` URL opens only if an app claims it.
-- `waitFor`, `settled`, `acceptOpenAlert` and `chooserAppPackage` are refused.
-
-## Notifications and permissions
-
-`postNotification` sends a simulated remote push to the app named by `appId`, with the same
-payload options as on an iOS Simulator. A successful result means the simulator accepted the push;
-whether a banner is shown is up to the app and tvOS, so observe to check.
-
-`setAppPermissions` takes `action` (`grant`, `revoke` or `reset`) and `permissions`, such as
-`photos`, or `all` with `reset`. A permission the tvOS simulator does not have fails that entry with
-the simulator's error; the others still apply. The fields `notificationsEnabled`,
-`notificationPolicyAccess` and `scheduleExactAlarm` are refused. A change is reported as applied
-but is not read back, and `getAppPermissions` is not available.
+For exploring an app, running a plan, deep links, notifications and permissions, see
+[Apple TV app tools](apple-tv-app-tools.md).
 
 ## Out of scope
 

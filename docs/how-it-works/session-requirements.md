@@ -240,7 +240,17 @@ parseSessionDeviceRequirement(input);
 normalizeSessionDeviceRequirement(request, defaults, catalog, capabilities?);
 matchSessionDevice(normalized, candidate);
 resolveSessionDeviceProfile(normalized, defaults, catalog, capabilities?);
+querySessionRequirementCapability(input, defaults, catalog);
 ```
+
+`querySessionRequirementCapability` answers without acquiring anything. It
+normalizes and resolves the request, the same request with `os` omitted
+(`defaultOsSatisfiable`), and the same request with each installed release
+named exactly (`installedRuntimes`, `anyOsSatisfiable`). It reports the
+resolved OS's `source` (`request`, `device-type-default` for a
+`defaults.os.archetypes` entry, or `platform-default`). A malformed or watchOS
+request, invalid defaults, or a catalog that is not ready fail instead of
+answering.
 
 Parsing and resolution return `RequirementResult<T>`, with a typed error code
 instead of collapsing malformed input, disabled capability, unavailable

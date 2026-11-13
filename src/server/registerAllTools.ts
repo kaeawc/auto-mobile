@@ -28,6 +28,7 @@ import { registerMeasureStartupTools } from "./measureStartupTools";
 import { registerProfilingTools } from "./profilingTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
 import { registerAmbientTools } from "./ambientTool";
+import { registerSessionRequirementCapabilityTool } from "./sessionRequirementCapabilityTool";
 import { registerWearSurfaceTools } from "./wearSurfaceTool";
 import { registerGlassesInputTools } from "./glassesInputTool";
 import { registerRotaryScrollTools } from "./rotaryScrollTool";
@@ -120,6 +121,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   if (options.daemonMode) {
     registerCriticalSectionTools();
     registerBarrierTools();
+    registerSessionRequirementCapabilityTool();
   }
   registerVideoRecordingTools();
   registerSnapshotTools();

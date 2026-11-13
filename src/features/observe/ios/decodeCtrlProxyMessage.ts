@@ -293,7 +293,17 @@ function decodeHingeAngleResult(message: WebSocketMessage): unknown {
 }
 
 function decodeRefreshGeometryResult(message: WebSocketMessage): unknown {
-  const geometry = message as Record<string, unknown>;
+  const geometry = message as {
+    refreshed?: boolean;
+    rotation?: number | null;
+    appWidth?: number;
+    appHeight?: number;
+    screenWidth?: number;
+    screenHeight?: number;
+    observationWidth?: number;
+    observationHeight?: number;
+    foregroundBundleId?: string | null;
+  };
   return {
     success: message.success ?? false,
     refreshed: geometry.refreshed === true,

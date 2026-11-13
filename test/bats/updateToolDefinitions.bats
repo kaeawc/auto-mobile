@@ -51,3 +51,24 @@ teardown() {
   run cat "$STUB_LOG"
   [ "${lines[0]}" = "bun --no-install scripts/generate-tool-definitions.ts" ]
 }
+
+@test "formats and stages only the docs pages the generator lists" {
+  mkdir -p "$TMP_ROOT/node_modules/zod" && echo '{}' > "$TMP_ROOT/node_modules/zod/package.json"
+  cat > "$TMP_ROOT/stubs/bun" <<'STUB'
+#!/usr/bin/env bash
+echo "bun $*" >> "$STUB_LOG"
+if [[ " $* " == *" --list-docs "* ]]; then
+  printf 'docs/tools.md\ndocs/using/observe.md\n'
+fi
+STUB
+  printf '#!/usr/bin/env bash\necho "bunx $*" >> "$STUB_LOG"\n' > "$TMP_ROOT/stubs/bunx"
+  # git diff --quiet reports a change, so the script reaches git add.
+  printf '#!/usr/bin/env bash\necho "git $*" >> "$STUB_LOG"\n[[ " $* " == *" diff "* ]] && exit 1\nexit 0\n' > "$TMP_ROOT/stubs/git"
+  chmod +x "$TMP_ROOT/stubs/bun" "$TMP_ROOT/stubs/bunx" "$TMP_ROOT/stubs/git"
+  PATH="$TMP_ROOT/stubs:$PATH" run bash "$TMP_ROOT/scripts/update-tool-definitions.sh"
+  [ "$status" -eq 0 ]
+  run grep -E '^(bunx|git .* add)' "$STUB_LOG"
+  [[ "$output" == *"bunx oxfmt schemas/tool-definitions.json docs/tools.md docs/using/observe.md"* ]]
+  [[ "$output" == *"add -- schemas/tool-definitions.json docs/tools.md docs/using/observe.md"* ]]
+  [[ "$output" != *"docs/using "* && "$output" != *"docs/using"$'\n'* ]]
+}

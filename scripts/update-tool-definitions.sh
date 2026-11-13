@@ -33,7 +33,10 @@ echo "Generating tool definitions..."
 # Keep the pre-commit generated output aligned with the repository formatter.
 # Otherwise generation after `bun run format` immediately recreates formatting
 # drift that the CI formatter gate would reject.
-GENERATED=(schemas/tool-definitions.json docs/tools.md docs/using)
+# Only the pages the generator writes (docs/tools.md and each tool's own page), so
+# unrelated edits elsewhere in docs/ are never formatted or staged.
+mapfile -t TOOL_DOCS < <(cd "${PROJECT_ROOT}" && bun --no-install scripts/generate-tool-definitions.ts --list-docs)
+GENERATED=(schemas/tool-definitions.json "${TOOL_DOCS[@]}")
 (cd "${PROJECT_ROOT}" && bunx oxfmt "${GENERATED[@]}")
 
 if [[ "${1:-}" == "--no-stage" ]]; then

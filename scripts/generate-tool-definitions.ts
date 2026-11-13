@@ -8,6 +8,7 @@
  * Usage:
  *   bun scripts/generate-tool-definitions.ts
  *   bun scripts/generate-tool-definitions.ts --check
+ *   bun scripts/generate-tool-definitions.ts --list-docs   # the docs pages it writes, one per line
  */
 
 import fs from "node:fs";
@@ -179,9 +180,16 @@ function writeDocs(definitions: unknown[]): void {
 }
 
 const args = process.argv.slice(2);
-if (args.some((argument) => argument !== "--check") || args.length > 1) {
+if (
+  args.some((argument) => argument !== "--check" && argument !== "--list-docs") ||
+  args.length > 1
+) {
   console.error(`error: unknown arguments: ${args.join(" ")}`);
   process.exit(2);
+}
+if (args[0] === "--list-docs") {
+  console.log([DOCS_PATH, ...toolPages().keys()].join("\n"));
+  process.exit(0);
 }
 
 registerAllTools({ daemonMode: true });

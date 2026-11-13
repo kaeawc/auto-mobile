@@ -57,6 +57,14 @@ const consistent = innerObservation(1, 1, { width: 951, height: 669 });
 const lagging = innerObservation(1, 0, { width: 951, height: 669 });
 // The captured sample: rotation 0, 669x951, elements laid out landscape up to x=951.
 const staleTransposed = innerObservation(0, 0, { width: 669, height: 951 });
+// A fixed portrait display: the runner reads landscape, observe normalizes it to portrait.
+const fixedPortrait = {
+  ...innerObservation(0, 1, { width: 669, height: 951 }),
+  viewHierarchy: {
+    rotation: 1,
+    hierarchy: { node: { node: [{ bounds: { left: 0, top: 0, right: 669, bottom: 60 } }] } },
+  },
+} as ObserveResult;
 
 function harness(observeFor: (refreshes: number) => ObserveResult) {
   const client = new FakeIOSCtrlProxy();
@@ -94,6 +102,14 @@ describe("setPosture iOS geometry post-condition", () => {
     expect(result).not.toHaveProperty("warnings");
     expect(h.refresh).not.toHaveBeenCalled();
     expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a fixed portrait display with a landscape runner rotation is consistent", async () => {
+    const h = harness(() => fixedPortrait);
+    const result = await h.feature.execute("opened");
+    expect(result).toMatchObject({ posture: "opened" });
+    expect(result).not.toHaveProperty("warnings");
+    expect(h.refresh).not.toHaveBeenCalled();
   });
 
   test("a lagging runner that refreshes within the wait returns no warning", async () => {

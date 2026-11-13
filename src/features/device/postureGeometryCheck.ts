@@ -3,6 +3,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import { describeTransposedLayout } from "../observe/transposedLayoutGeometry";
 import type { PostureOperation } from "./postureCommands";
 
@@ -18,15 +19,23 @@ const isRotation = (value: unknown): value is number =>
 
 /**
  * Names a disagreement between the runner's own capture geometry and the observation built from
- * it: the runner's raw rotation is a different orientation from the observed one, or the
- * observation is portrait-reported with a landscape layout (#18245).
+ * it: the runner's rotation, normalized as observe normalizes it (a fixed portrait display
+ * reports 0), is a different orientation from the observed one, or the observation is
+ * portrait-reported with a landscape layout (#18245).
  */
 export function describePostureGeometryMismatch(
   observation: GeometryObservation,
 ): string | undefined {
   const runner = observation.viewHierarchy?.rotation;
+  const normalizedRunner = isRotation(runner)
+    ? resolveIosObserveRotation(runner, observation.screenSize)
+    : undefined;
   const observed = observation.rotation;
-  if (isRotation(runner) && isRotation(observed) && runner % 2 !== observed % 2) {
+  if (
+    isRotation(normalizedRunner) &&
+    isRotation(observed) &&
+    normalizedRunner % 2 !== observed % 2
+  ) {
     const { width, height } = observation.screenSize;
     return `the runner reports rotation ${runner} but observe reports rotation ${observed} at ${width}x${height}`;
   }

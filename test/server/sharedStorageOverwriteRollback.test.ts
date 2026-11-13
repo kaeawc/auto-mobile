@@ -1,4 +1,7 @@
-import { SHARED_STORAGE_BACKUP_TIMEOUT_MS } from "../../src/features/storage/fileTransferTimeout";
+import {
+  SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+  SHARED_STORAGE_COMMIT_TIMEOUT_MS,
+} from "../../src/features/storage/fileTransferTimeout";
 import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { logger } from "../../src/utils/logger";
 import { describe, expect, spyOn, test } from "bun:test";
@@ -9,9 +12,10 @@ import {
 } from "../../src/server/sharedStorageService";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { shellQuote } from "../../src/utils/shellQuote";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, ExecResult } from "../../src/models";
 
 // A failed batch must put back the files it overwrote instead of deleting them (#9965).
 
@@ -47,6 +51,7 @@ function fileAt(name: string) {
 
 function setup(existingIndexes: number[] = []) {
   const executor = new FakeAdbExecutor();
+  const timer = new FakeTimer();
   executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
   if (existingIndexes.length > 0) {
     executor.setCommandResponse(
@@ -58,14 +63,14 @@ function setup(existingIndexes: number[] = []) {
     diagnostics: new FakeSharedStorageDiagnostics(),
     adbFactory: { create: () => executor },
     fileSystem,
-    timer: new FakeTimer(),
+    timer,
     idGenerator: new CountingIdGenerator("t"),
   });
   const stage = (
     request: Partial<StageSharedStorageRequest> & Pick<StageSharedStorageRequest, "files">,
   ) =>
     service.stage({ device: androidDevice, namespace: "ns", rollbackOnFailure: true, ...request });
-  return { executor, stage };
+  return { executor, timer, stage };
 }
 
 function rollbackScript(created: string[], restores: string[]): string {
@@ -178,6 +183,50 @@ describe("sharedStorageService rollback of overwritten files", () => {
       ),
       rescanScript(["b.txt", "a.txt"]),
     ]);
+  });
+
+  test("removes a new destination and lists it in rollback when its commit times out", async () => {
+    const { executor, timer, stage } = setup();
+    const execute = executor.executeCommand.bind(executor);
+    let commitSignal: AbortSignal | undefined;
+    let commandSettled = false;
+    const commit = spyOn(executor, "executeCommand").mockImplementation((command, options) => {
+      if (command.startsWith("shell mv -f")) {
+        commitSignal = options?.signal;
+        expect(options?.timeoutMs).toBe(SHARED_STORAGE_COMMIT_TIMEOUT_MS);
+        return new Promise<ExecResult>((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              commandSettled = true;
+              reject(new Error("adb terminated after abort"));
+            },
+            { once: true },
+          );
+        });
+      }
+      return execute(command, options);
+    });
+    try {
+      const failure = stage({ files: [fileAt("new.txt")] }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await drainUntil(() => commitSignal !== undefined, { description: "commit command" });
+      timer.advanceTime(SHARED_STORAGE_COMMIT_TIMEOUT_MS);
+      const error = await failure;
+      expect(error).toBeInstanceOf(Error);
+      expect(error instanceof Error ? error.message : "").toMatch(
+        /stage=commit;[\s\S]*timed out[\s\S]*Rolled back: new\.txt\. Rollback failures: none\./,
+      );
+
+      expect(commitSignal?.aborted).toBe(true);
+      expect(commandSettled).toBe(true);
+      expect(executor.getExecutedCommands()).toContain(`shell rm -f ${q("new.txt")}`);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      commit.mockRestore();
+    }
   });
 
   test("discards the saved copy of a file the batch never reached instead of restoring it", async () => {

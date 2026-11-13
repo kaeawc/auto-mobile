@@ -231,13 +231,13 @@ describe("SharedStorageService", () => {
           ],
         }),
       ),
-    ).rejects.toThrow(/aborted[\s\S]*Rolled back: first.png.*Rollback failures: none/);
+    ).rejects.toThrow(/aborted[\s\S]*Rolled back: second.png, first.png.*Rollback failures: none/);
     expect(controller.signal.aborted).toBe(true);
-    // The cancelled second file never reached its destination: only its hidden temp copy is
-    // removed, then the committed first file, both detached from the cancelled request.
+    // Clean up the hidden temp and both attempted destinations, detached from cancellation.
+    // Removing the second destination is safe even when its rename never ran.
     expect(removed).toEqual([
       "shell rm -f '/storage/emulated/0/Download/cancelled-media/.automobile-t-4.part'",
-      "shell rm -f '/storage/emulated/0/Download/cancelled-media/first.png'",
+      "shell rm -f '/storage/emulated/0/Download/cancelled-media/second.png' '/storage/emulated/0/Download/cancelled-media/first.png'",
     ]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });

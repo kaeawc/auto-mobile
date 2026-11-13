@@ -386,11 +386,10 @@ class DefaultSharedStorageService implements SharedStorageService {
           userId,
           file,
           onBeforeCommit: () => {
-            // Tracked before the rename so a rename whose outcome is unknown still restores the
-            // original. The push itself never touches the destination, so it needs no tracking.
-            if (backups.has(file.destinationPath)) {
-              markWritten(file.destinationPath);
-            }
+            // Track before the rename so an unknown outcome is rolled back: restore an existing
+            // file from its backup or remove a new file (rm -f tolerates a missing file).
+            // The push itself never touches the destination.
+            markWritten(file.destinationPath);
           },
           onPushed: () => markWritten(file.destinationPath),
         });

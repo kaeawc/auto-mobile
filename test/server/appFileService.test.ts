@@ -1463,7 +1463,7 @@ describe("AppFileService", () => {
         })),
       }),
     ).rejects.toThrow(
-      /failed for third\.png:[\s\S]*stage=commit; command: adb shell mv[\s\S]*index query failed[\s\S]*Rolled back: second.png, first.png/,
+      /failed for third\.png:[\s\S]*stage=commit; command: adb shell mv[\s\S]*index query failed[\s\S]*Rolled back: third.png, second.png, first.png/,
     );
 
     expect(executor.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(3);
@@ -1472,7 +1472,7 @@ describe("AppFileService", () => {
         .getExecutedCommands()
         .filter((command) => command.includes("shell rm -f") && !command.includes(".part'")),
     ).toEqual([
-      "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png' '/storage/emulated/12/Download/automobile-media/first.png'",
+      "shell rm -f '/storage/emulated/12/Download/automobile-media/third.png' '/storage/emulated/12/Download/automobile-media/second.png' '/storage/emulated/12/Download/automobile-media/first.png'",
     ]);
     // The failed rename's hidden temp copy is removed too.
     expect(
@@ -1561,7 +1561,7 @@ describe("AppFileService", () => {
       new Error("index query failed"),
     );
     executor.setCommandError(
-      "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png'",
+      "shell rm -f '/storage/emulated/12/Download/automobile-media/third.png'",
       new Error("device unavailable"),
     );
     const sharedStorageService = createSharedStorageServiceForTesting({
@@ -1588,7 +1588,7 @@ describe("AppFileService", () => {
           })),
         }),
       ).rejects.toThrow(
-        "Rolled back: none. Rollback failures: second.png, first.png: Android shared-storage operation failed: device unavailable.",
+        "Rolled back: none. Rollback failures: third.png, second.png, first.png: Android shared-storage operation failed: device unavailable.",
       );
     } finally {
       warnSpy.mockRestore();

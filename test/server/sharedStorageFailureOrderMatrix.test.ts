@@ -209,10 +209,11 @@ describe("shared-storage failure-order matrix (existing a.txt and b.txt)", () =>
 
     const error = await stage(["a.txt", "b.txt"]);
 
-    expect((error as Error).message).toContain("Rolled back: a.txt.");
+    expect((error as Error).message).toContain("Rolled back: b.txt, a.txt.");
     const commands = executor.getExecutedCommands();
     expect(operationsOn(commands, path("a.txt")).other).toEqual([]);
     expect(operationsOn(commands, path("a.txt")).movedFrom).toEqual([path(TEMP_A), path(BACKUP_A)]);
+    expect(operationsOn(commands, path("b.txt")).other).toEqual([`rm ${path("b.txt")}`]);
     expectSeparateCleanups(commands);
   });
 

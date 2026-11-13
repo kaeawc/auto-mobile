@@ -1,4 +1,5 @@
 import type { ObserveResult } from "../../models";
+import type { CtrlProxyRefreshGeometryResult } from "../observe/ios/types";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
@@ -42,12 +43,41 @@ export function describePostureGeometryMismatch(
   return describeTransposedLayout(observation);
 }
 
+/** The part of a `refresh_geometry` reply the post-condition compares with observe. */
+export type RunnerGeometryReply = Pick<
+  CtrlProxyRefreshGeometryResult,
+  "success" | "refreshed" | "rotation" | "unsupported" | "error"
+>;
+
 export interface PostureGeometryCheck {
   timer: Timer;
   operation: PostureOperation;
-  /** Ask the runner for a fresh capture so its cached gesture geometry is rebuilt. */
+  /** Drop the runner's cached gesture geometry and read back the rotation its taps will use. */
+  refreshGeometry(): Promise<RunnerGeometryReply>;
+  /** Older runners without `refresh_geometry`: a hierarchy sync that rebuilds the cached geometry. */
   refreshRunner(): Promise<unknown>;
   observe(): Promise<GeometryObservation>;
+}
+
+/**
+ * Names a disagreement between the runner's refreshed rotation and observe, normalized as observe
+ * normalizes the runner's capture rotation.
+ */
+export function describeRunnerGeometryMismatch(
+  reply: RunnerGeometryReply,
+  observation: GeometryObservation,
+): string | undefined {
+  const runner = reply.rotation;
+  const observed = observation.rotation;
+  if (!isRotation(runner) || !isRotation(observed)) {
+    return undefined;
+  }
+  const normalizedRunner = resolveIosObserveRotation(runner, observation.screenSize);
+  if (!isRotation(normalizedRunner) || normalizedRunner % 2 === observed % 2) {
+    return undefined;
+  }
+  const { width, height } = observation.screenSize;
+  return `the runner's refreshed geometry reports rotation ${runner} but observe reports rotation ${observed} at ${width}x${height}`;
 }
 
 /**
@@ -65,9 +95,10 @@ export async function verifyPostureGeometry(
     return undefined;
   }
   const startedAt = timer.now();
+  const state: RecheckState = { refreshGeometrySupported: true };
   while (true) {
     try {
-      mismatch = await recheck(check);
+      mismatch = await recheck(check, state);
     } catch (error) {
       operation.assertCurrent();
       throwIfAborted(operation.signal);
@@ -89,7 +120,65 @@ export async function verifyPostureGeometry(
     : `Screen geometry is still inconsistent ${POSTURE_GEOMETRY_WAIT_MS} ms after the posture change: ${mismatch}. Taps may land in the wrong place; observe again before tapping.`;
 }
 
-async function recheck(check: PostureGeometryCheck): Promise<string | undefined> {
+interface RecheckState {
+  /** Cleared once the runner reports it has no `refresh_geometry` command. */
+  refreshGeometrySupported: boolean;
+}
+
+async function recheck(
+  check: PostureGeometryCheck,
+  state: RecheckState,
+): Promise<string | undefined> {
+  const { operation } = check;
+  operation.assertCurrent();
+  const reply = state.refreshGeometrySupported ? await refreshRunnerGeometry(check) : undefined;
+  if (reply?.unsupported === true) {
+    state.refreshGeometrySupported = false;
+  }
+  if (reply === undefined || reply.success !== true) {
+    await syncRunnerHierarchy(check);
+  }
+  operation.assertCurrent();
+  const observation = await awaitWhileRequestIsLive(check.observe(), operation.signal);
+  operation.assertCurrent();
+  const runnerMismatch =
+    reply?.success === true && reply.refreshed
+      ? describeRunnerGeometryMismatch(reply, observation)
+      : undefined;
+  return runnerMismatch ?? describePostureGeometryMismatch(observation);
+}
+
+/** Calls `refresh_geometry`, once more when a rotation landed mid-capture (`refreshed: false`). */
+async function refreshRunnerGeometry(
+  check: PostureGeometryCheck,
+): Promise<RunnerGeometryReply | undefined> {
+  let reply = await requestRunnerGeometry(check);
+  if (reply?.success === true && !reply.refreshed) {
+    reply = await requestRunnerGeometry(check);
+  }
+  if (reply !== undefined && reply.success !== true && reply.unsupported !== true) {
+    logger.warn(`[SetPosture] Runner refresh_geometry failed: ${reply.error ?? "unknown error"}`);
+  }
+  return reply;
+}
+
+async function requestRunnerGeometry(
+  check: PostureGeometryCheck,
+): Promise<RunnerGeometryReply | undefined> {
+  const { operation } = check;
+  operation.assertCurrent();
+  try {
+    return await awaitWhileRequestIsLive(check.refreshGeometry(), operation.signal);
+  } catch (error) {
+    operation.assertCurrent();
+    throwIfAborted(operation.signal);
+    // The hierarchy-sync fallback and fresh observe below still re-check.
+    logger.warn(`[SetPosture] Runner refresh_geometry failed: ${errorMessage(error)}`, error);
+    return undefined;
+  }
+}
+
+async function syncRunnerHierarchy(check: PostureGeometryCheck): Promise<void> {
   const { operation } = check;
   operation.assertCurrent();
   try {
@@ -100,8 +189,4 @@ async function recheck(check: PostureGeometryCheck): Promise<string | undefined>
     // The fresh observe below still re-checks; a missed refresh only delays agreement.
     logger.warn(`[SetPosture] Runner geometry refresh failed: ${errorMessage(error)}`, error);
   }
-  operation.assertCurrent();
-  const observation = await awaitWhileRequestIsLive(check.observe(), operation.signal);
-  operation.assertCurrent();
-  return describePostureGeometryMismatch(observation);
 }

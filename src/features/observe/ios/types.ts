@@ -408,6 +408,27 @@ export interface CtrlProxyHingeAngleResult {
   totalTimeMs: number;
 }
 
+/**
+ * `refresh_geometry` reply (#18295): the runner drops its cached gesture geometry and reports the
+ * rotation and sizes its next taps will use. `refreshed` is false when no geometry was captured
+ * (for example a rotation landed mid-capture). `unsupported` marks a runner without the command.
+ */
+export interface CtrlProxyRefreshGeometryResult {
+  success: boolean;
+  refreshed: boolean;
+  rotation: number | null;
+  appWidth: number | null;
+  appHeight: number | null;
+  screenWidth: number | null;
+  screenHeight: number | null;
+  observationWidth: number | null;
+  observationHeight: number | null;
+  foregroundBundleId: string | null;
+  unsupported?: boolean;
+  error?: string;
+  totalTimeMs: number;
+}
+
 /** A simulated fix for `request_location` (#14091), or `clear` to restore the real location. */
 export type CtrlProxyLocationRequest =
   | { latitude: number; longitude: number; altitude?: number; horizontalAccuracy?: number }

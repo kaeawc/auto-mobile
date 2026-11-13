@@ -950,6 +950,8 @@ export class SetPosture {
     const warning = await verifyPostureGeometry(observation, {
       timer: this.timer,
       operation,
+      refreshGeometry: () =>
+        this.iosClientProvider(this.device).requestRefreshGeometry(undefined, signal),
       refreshRunner: () =>
         this.iosClientProvider(this.device).requestHierarchySyncWithoutObservationStreamPush(
           undefined,

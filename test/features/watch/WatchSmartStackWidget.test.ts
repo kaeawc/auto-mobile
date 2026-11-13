@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   addWatchSmartStackWidget,
+  CLOCKFACE_RELAUNCH_SETTLE_MS,
+  hasGalleryAppRow,
   findUnnamedAddedWidget,
   hasNamelessSmartStackWidget,
   hasSmartStackWidget,
@@ -32,6 +34,14 @@ const noEdit = readFileSync(
 // #17793: both cells were added but their identifiers carry empty app and widget names.
 const emptyNames = readFileSync(
   new URL("../../fixtures/watch/fixture-face-smartstack-empty-names.txt", import.meta.url),
+  "utf8",
+);
+const galleryWithApp = readFileSync(
+  new URL("../../fixtures/watch/fixture-face-gallery-with-app-row.txt", import.meta.url),
+  "utf8",
+);
+const galleryMissingApp = readFileSync(
+  new URL("../../fixtures/watch/fixture-face-gallery-missing-app-row.txt", import.meta.url),
   "utf8",
 );
 const TOP_CELL = "6FFE7596-8496-4E83-91C4-563745BD75F9";
@@ -111,6 +121,7 @@ const galleryCommands: WatchCommand[] = [
   { type: "face", op: "tap", x: 0.5, y: (195.8 + 20.2 / 2) / 223 },
   { type: "face", op: "tap", x: 0.5, y: 0.44 },
   { type: "face", op: "swipe", direction: "up" },
+  { type: "face", op: "dump" },
   { type: "face", op: "drag", fromX: 0.5, fromY: 0.5, toX: 0.5, toY: 0.6 },
   { type: "face", op: "tap", x: 0.5, y: 0.65 },
   { type: "face", op: "tap", x: 0.5, y: 0.5 },
@@ -129,6 +140,244 @@ function widgetAttempt(verificationDumps: number): WatchCommand[] {
     })),
   ];
 }
+
+const missingRowAttempt = [...openingRound(1), ...galleryCommands.slice(0, 4)];
+const missingRowSleeps = [250, 250, 250, 250, 1500];
+
+describe("Smart Stack gallery rows", () => {
+  test("distinguishes present, missing and unknown gallery rows in real dumps", () => {
+    expect(hasGalleryAppRow(galleryWithApp, "ProbeApp")).toBe(true);
+    expect(hasGalleryAppRow(galleryMissingApp, "ProbeApp")).toBe(false);
+    expect(hasGalleryAppRow(galleryMissingApp, "Now Playing")).toBe(true);
+    for (const dump of ["", "container", withEdit]) {
+      expect(hasGalleryAppRow(dump, "ProbeApp")).toBeUndefined();
+    }
+  });
+  test("matches only the complete gallery cell identifier, not labels or substrings", () => {
+    expect(hasGalleryAppRow(galleryWithApp, "Probe")).toBe(false);
+    expect(hasGalleryAppRow(galleryWithApp, "ProbeApp2")).toBe(false);
+    expect(
+      hasGalleryAppRow(
+        galleryWithApp.replace("AppGroupCell -- ProbeApp'", "AppGroupCell -- ProbeApp2'"),
+        "ProbeApp",
+      ),
+    ).toBe(false);
+    expect(
+      hasGalleryAppRow(galleryWithApp.replaceAll("Cell,", "Other,"), "ProbeApp"),
+    ).toBeUndefined();
+    expect(
+      hasGalleryAppRow("Cell, identifier: 'AppGroupCell -- ProbeApp", "ProbeApp"),
+    ).toBeUndefined();
+    expect(hasGalleryAppRow("Cell, label: 'AppGroupCell -- ProbeApp'", "ProbeApp")).toBeUndefined();
+    expect(hasGalleryAppRow("Cell, identifier: 'AppGroupCell -- App.*'", "App.*")).toBe(true);
+    expect(hasGalleryAppRow("Cell, identifier: 'AppGroupCell -- AppXYZ'", "App.*")).toBe(false);
+  });
+  test.each(["", "container"])(
+    "preserves calibrated gestures for unknown dump %j",
+    async (dump) => {
+      const { client, timer } = arrange([withEdit, dump, captures[1]]);
+      const result = await addWatchSmartStackWidget(client, options, { timer });
+      expect(result).toMatchObject({ success: true, galleryRowMisses: 0, verificationAttempts: 1 });
+      expect(client.commands).toEqual(widgetAttempt(1));
+      expect(timer.getSleepHistory()).toEqual(widgetAttemptSleeps(1));
+    },
+  );
+  test("relaunches once after a miss and succeeds on the next attempt without retry delay", async () => {
+    const { client, timer } = arrange([
+      withEdit,
+      galleryMissingApp,
+      withEdit,
+      galleryWithApp,
+      captures[1],
+    ]);
+    const commandsAtRelaunch: number[] = [];
+    const result = await addWatchSmartStackWidget(client, options, {
+      timer,
+      relaunchClockface: async () => {
+        commandsAtRelaunch.push(client.commands.length);
+      },
+    });
+    expect(result).toMatchObject({
+      success: true,
+      attempts: 2,
+      galleryRowMisses: 1,
+      verificationAttempts: 1,
+    });
+    expect(commandsAtRelaunch).toEqual([missingRowAttempt.length]);
+    expect(client.commands).toEqual([...missingRowAttempt, ...widgetAttempt(1)]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...missingRowSleeps,
+      CLOCKFACE_RELAUNCH_SETTLE_MS,
+      ...widgetAttemptSleeps(1),
+    ]);
+  });
+  test("stops on a missing row without a relaunch dependency before any blind gestures", async () => {
+    const { client, timer } = arrange([withEdit, galleryMissingApp]);
+    const result = await addWatchSmartStackWidget(client, options, { timer });
+    expect(result).toMatchObject({
+      success: false,
+      attempts: 1,
+      galleryRowMisses: 1,
+      verificationAttempts: 0,
+    });
+    expect(result.reason).toBe(
+      "Smart Stack gallery has no row for ProbeApp. Relaunch com.apple.clockface (xcrun simctl terminate <udid> com.apple.clockface) and retry.",
+    );
+    expect(client.commands).toEqual(missingRowAttempt);
+    expect(timer.getSleepHistory()).toEqual(missingRowSleeps);
+  });
+  test("keeps a missed attempt's header for the next already-present check", async () => {
+    const { client, timer } = arrange([
+      withEditButton(noWidgetCells),
+      galleryMissingApp,
+      withEditButton(oneEmptyCell),
+    ]);
+    let relaunches = 0;
+    const result = await addWatchSmartStackWidget(client, options, {
+      timer,
+      relaunchClockface: async () => {
+        relaunches++;
+      },
+    });
+    expect(result).toMatchObject({
+      success: true,
+      alreadyPresent: true,
+      attempts: 2,
+      galleryRowMisses: 1,
+      verificationAttempts: 0,
+    });
+    expect(relaunches).toBe(1);
+    expect(client.commands).toEqual([...missingRowAttempt, ...openingRound(1)]);
+    expect(timer.getSleepHistory()).toEqual([
+      ...missingRowSleeps,
+      CLOCKFACE_RELAUNCH_SETTLE_MS,
+      250,
+      250,
+    ]);
+  });
+  test("surfaces relaunch rejection through the existing failure path", async () => {
+    const { client, timer } = arrange([withEdit, galleryMissingApp]);
+    const result = await addWatchSmartStackWidget(client, options, {
+      timer,
+      relaunchClockface: async () => {
+        throw new ActionableError("Clockface termination failed");
+      },
+    });
+    expect(result).toMatchObject({
+      success: false,
+      attempts: 1,
+      galleryRowMisses: 1,
+      verificationAttempts: 0,
+    });
+    expect(result.reason).toContain("Clockface termination failed");
+    expect(client.commands).toEqual(missingRowAttempt);
+    expect(timer.getSleepHistory()).toEqual(missingRowSleeps);
+  });
+  test.each([true, false])(
+    "requires widget readback after mixed gallery and verification failures (miss first: %s)",
+    async (missFirst) => {
+      const missing = [withEdit, galleryMissingApp];
+      const unverified = [withEdit, galleryWithApp, ...Array(10).fill("container")];
+      const { client, timer } = arrange(
+        missFirst ? [...missing, ...unverified] : [...unverified, ...missing],
+      );
+      const result = await addWatchSmartStackWidget(
+        client,
+        { ...options, maxAttempts: 2 },
+        {
+          timer,
+          relaunchClockface: async () => {},
+        },
+      );
+      expect(result).toMatchObject({
+        success: false,
+        attempts: 2,
+        galleryRowMisses: 1,
+        verificationAttempts: 10,
+      });
+      expect(result.reason).toContain(
+        "gallery row for ProbeApp never appeared during 1 of 2 attempts",
+      );
+      expect(timer.getSleepHistory().filter((ms) => ms === 20000)).toHaveLength(missFirst ? 0 : 1);
+    },
+  );
+  test.each(["dump", "relaunch", "settle"])(
+    "honors cancellation during gallery %s",
+    async (phase) => {
+      const { client, timer } = arrange([withEdit, galleryMissingApp]);
+      const controller = new AbortController();
+      let relaunches = 0;
+      const cancel = () => controller.abort(new ActionableError("Cancelled gallery recovery"));
+      client.onRequest = () => {
+        if (phase === "dump" && client.commands.length === missingRowAttempt.length) {
+          cancel();
+        }
+      };
+      const result = await addWatchSmartStackWidget(
+        client,
+        { ...options, signal: controller.signal },
+        {
+          timer,
+          relaunchClockface: async () => {
+            relaunches++;
+            if (phase === "relaunch") {
+              cancel();
+            }
+            if (phase === "settle") {
+              timer.setTimeout(cancel, 1000);
+            }
+          },
+        },
+      );
+      expect(result).toMatchObject({
+        success: false,
+        attempts: 1,
+        galleryRowMisses: 1,
+        verificationAttempts: 0,
+      });
+      expect(result.reason).toContain("Cancelled gallery recovery");
+      expect(relaunches).toBe(phase === "dump" ? 0 : 1);
+      expect(client.commands).toEqual(missingRowAttempt);
+      expect(timer.getSleepHistory()).toEqual([
+        ...missingRowSleeps,
+        ...(phase === "settle" ? [CLOCKFACE_RELAUNCH_SETTLE_MS] : []),
+      ]);
+    },
+  );
+  test.each([1, 3, 5])("bounds persistent gallery misses at %i attempts", async (maxAttempts) => {
+    const { client, timer } = arrange(
+      Array.from({ length: maxAttempts }, () => [withEdit, galleryMissingApp]).flat(),
+    );
+    let relaunches = 0;
+    const result = await addWatchSmartStackWidget(
+      client,
+      { ...options, maxAttempts },
+      {
+        timer,
+        relaunchClockface: async () => {
+          relaunches++;
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      success: false,
+      attempts: maxAttempts,
+      galleryRowMisses: maxAttempts,
+      verificationAttempts: 0,
+    });
+    expect(result.reason).toContain("gallery row for ProbeApp never appeared");
+    expect(relaunches).toBe(maxAttempts);
+    expect(client.commands).toEqual(
+      Array.from({ length: maxAttempts }, () => missingRowAttempt).flat(),
+    );
+    expect(timer.getSleepHistory()).toEqual(
+      Array.from({ length: maxAttempts }, () => [
+        ...missingRowSleeps,
+        CLOCKFACE_RELAUNCH_SETTLE_MS,
+      ]).flat(),
+    );
+  });
+});
 
 describe("Smart Stack widget", () => {
   test("reads Edit button tap coordinates from the parsed fixture", () => {
@@ -199,29 +448,31 @@ describe("Smart Stack widget", () => {
     expect(findUnnamedAddedWidget(duplicated, noWidgetCells, options.appName)).toBeUndefined();
   });
   test("succeeds on the first attempt with a captured widget readback", async () => {
-    const { client, timer } = arrange([withEdit, "container", captures[1]]);
+    const { client, timer } = arrange([withEdit, galleryWithApp, "container", captures[1]]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result).toMatchObject({
       success: true,
       attempts: 1,
       headerAttempts: 1,
       verificationAttempts: 2,
-      steps: 12,
+      steps: 13,
     });
     expect(client.commands).toEqual(widgetAttempt(2));
   });
   test("compares a retry against that attempt's own header dump", async () => {
     const { client, timer } = arrange([
       withEdit,
+      galleryWithApp,
       ...Array(10).fill("container"),
       withEdit,
+      galleryWithApp,
       captures[1],
     ]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result).toMatchObject({ success: true, attempts: 2, verificationAttempts: 11 });
   });
   test("fails when the empty-name cell was already on the stack before the edit", async () => {
-    const { client, timer } = arrange([withEdit, ...Array(10).fill(emptyNames)]);
+    const { client, timer } = arrange([withEdit, galleryWithApp, ...Array(10).fill(emptyNames)]);
     const result = await addWatchSmartStackWidget(
       client,
       { ...options, maxAttempts: 1 },
@@ -252,7 +503,7 @@ describe("Smart Stack widget", () => {
     expect(hasNamelessSmartStackWidget(header, identity)).toBe(true);
   });
   test("verifies a nameless readback by identity when the cell was already counted", async () => {
-    const { client, timer } = arrange([withEditButton(noWidgetCells), emptyNames]);
+    const { client, timer } = arrange([withEditButton(noWidgetCells), galleryWithApp, emptyNames]);
     const result = await addWatchSmartStackWidget(
       client,
       { ...options, ...identity, maxAttempts: 1 },
@@ -277,6 +528,7 @@ describe("Smart Stack widget", () => {
       attempts: 1,
       headerAttempts: 1,
       verificationAttempts: 0,
+      galleryRowMisses: 0,
     });
     expect(result.reason).toContain("no widget was added");
     expect(client.commands).toEqual(openingRound(1));
@@ -284,6 +536,7 @@ describe("Smart Stack widget", () => {
   test("a retry adds no duplicate when the first attempt's nameless cell landed late", async () => {
     const { client, timer } = arrange([
       withEditButton(noWidgetCells),
+      galleryWithApp,
       ...Array(10).fill(withEditButton(noWidgetCells)),
       withEditButton(oneEmptyCell),
     ]);
@@ -294,8 +547,10 @@ describe("Smart Stack widget", () => {
   test("a retry still edits when the nameless cell was already there before the first attempt", async () => {
     const { client, timer } = arrange([
       withEditButton(oneEmptyCell),
+      galleryWithApp,
       ...Array(10).fill(withEditButton(oneEmptyCell)),
       withEditButton(oneEmptyCell),
+      galleryWithApp,
       withEditButton(emptyNames),
     ]);
     const result = await addWatchSmartStackWidget(
@@ -318,12 +573,18 @@ describe("Smart Stack widget", () => {
     expect(client.commands).toEqual([]);
   });
   test("uses clockface commands in order and polls past container-only dumps", async () => {
-    const { client, timer } = arrange(["container", withEdit, "container", captures[1]]);
+    const { client, timer } = arrange([
+      "container",
+      withEdit,
+      galleryWithApp,
+      "container",
+      captures[1],
+    ]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result).toMatchObject({
       success: true,
       attempts: 1,
-      steps: 13,
+      steps: 14,
       headerAttempts: 2,
       verificationAttempts: 2,
     });
@@ -335,6 +596,7 @@ describe("Smart Stack widget", () => {
       { type: "face", op: "tap", x: 0.5, y: (195.8 + 20.2 / 2) / 223 },
       { type: "face", op: "tap", x: 0.5, y: 0.44 },
       { type: "face", op: "swipe", direction: "up" },
+      { type: "face", op: "dump" },
       { type: "face", op: "drag", fromX: 0.5, fromY: 0.5, toX: 0.5, toY: 0.6 },
       { type: "face", op: "tap", x: 0.5, y: 0.65 },
       { type: "face", op: "tap", x: 0.5, y: 0.5 },
@@ -345,14 +607,19 @@ describe("Smart Stack widget", () => {
     expect(timer.getSleepHistory()).toEqual([250, ...widgetAttemptSleeps(2)]);
   });
   test("recovers a swallowed first home on the second opening round", async () => {
-    const { client, timer } = arrange([...Array(8).fill("container"), withEdit, captures[1]]);
+    const { client, timer } = arrange([
+      ...Array(8).fill("container"),
+      withEdit,
+      galleryWithApp,
+      captures[1],
+    ]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result).toMatchObject({
       success: true,
       attempts: 1,
       headerAttempts: 9,
       verificationAttempts: 1,
-      steps: 24,
+      steps: 25,
     });
     expect(client.commands).toEqual([
       ...openingRound(2, 3),
@@ -370,8 +637,10 @@ describe("Smart Stack widget", () => {
     async (retryDelayMs) => {
       const { client, timer } = arrange([
         withEdit,
+        galleryWithApp,
         ...Array(10).fill("container"),
         withEdit,
+        galleryWithApp,
         captures[1],
       ]);
       const commandsAtRetryDelay: number[] = [];
@@ -392,7 +661,7 @@ describe("Smart Stack widget", () => {
         attempts: 2,
         headerAttempts: 2,
         verificationAttempts: 11,
-        steps: 31,
+        steps: 33,
       });
       expect(client.commands).toEqual([...widgetAttempt(10), ...widgetAttempt(1)]);
       const delay = retryDelayMs ?? 20000;
@@ -401,7 +670,7 @@ describe("Smart Stack widget", () => {
         ...(delay === 0 ? [] : [delay]),
         ...widgetAttemptSleeps(1),
       ]);
-      expect(commandsAtRetryDelay).toEqual(delay === 0 ? [] : [20]);
+      expect(commandsAtRetryDelay).toEqual(delay === 0 ? [] : [21]);
     },
   );
   test.each([undefined, 2, 5])("bounds whole-flow attempts at %s", async (maxAttempts) => {
@@ -409,6 +678,7 @@ describe("Smart Stack widget", () => {
     const { client, timer } = arrange(
       Array.from({ length: expectedAttempts }, () => [
         withEdit,
+        galleryWithApp,
         ...Array(10).fill("container"),
       ]).flat(),
     );
@@ -418,7 +688,7 @@ describe("Smart Stack widget", () => {
       attempts: expectedAttempts,
       headerAttempts: expectedAttempts,
       verificationAttempts: 10 * expectedAttempts,
-      steps: 20 * expectedAttempts,
+      steps: 21 * expectedAttempts,
     });
     expect(result.reason).toContain("Widget cell did not appear");
     expect(client.commands).toEqual(
@@ -443,13 +713,13 @@ describe("Smart Stack widget", () => {
       attempts: 1,
       verificationAttempts: 10,
       headerAttempts: 1,
-      steps: 20,
+      steps: 21,
     });
     expect(result.reason).toContain("Widget cell did not appear");
     expect(timer.getSleepHistory()).toEqual(widgetAttemptSleeps(10));
   });
   test("swipes again when Edit is below the fold, then taps Edit", async () => {
-    const { client, timer } = arrange([noEdit, "container", withEdit, captures[1]]);
+    const { client, timer } = arrange([noEdit, "container", withEdit, galleryWithApp, captures[1]]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result.success).toBe(true);
     expect(result.headerAttempts).toBe(3);
@@ -470,7 +740,12 @@ describe("Smart Stack widget", () => {
     });
   });
   test("starts the next home round after all extra swipes fail", async () => {
-    const { client, timer } = arrange([...Array(8).fill(noEdit), withEdit, captures[1]]);
+    const { client, timer } = arrange([
+      ...Array(8).fill(noEdit),
+      withEdit,
+      galleryWithApp,
+      captures[1],
+    ]);
     const result = await addWatchSmartStackWidget(client, options, { timer });
     expect(result.success).toBe(true);
     expect(result.headerAttempts).toBe(9);
@@ -502,7 +777,7 @@ describe("Smart Stack widget", () => {
     ).toBe(true);
   });
   test.each([0, 2])("supports %i gallery steps", async (galleryStepsFromBottom) => {
-    const { client, timer } = arrange([withEdit, captures[1]]);
+    const { client, timer } = arrange([withEdit, galleryWithApp, captures[1]]);
     expect(
       (await addWatchSmartStackWidget(client, { ...options, galleryStepsFromBottom }, { timer }))
         .success,
@@ -558,7 +833,7 @@ describe("Smart Stack widget", () => {
     expect(client.commands).toEqual([]);
     expect(timer.getSleepHistory()).toEqual([]);
   });
-  test.each([1, 20])("stops on cancellation after request %i without retrying", async (stopAt) => {
+  test.each([1, 21])("stops on cancellation after request %i without retrying", async (stopAt) => {
     const { client, timer } = arrange([withEdit]);
     const controller = new AbortController();
     client.onRequest = () => {
@@ -577,7 +852,7 @@ describe("Smart Stack widget", () => {
     expect(timer.getSleepHistory()).toHaveLength(stopAt === 1 ? 0 : 18);
   });
   test("passes the signal to every request", async () => {
-    const { client, timer } = arrange([withEdit, captures[1]]);
+    const { client, timer } = arrange([withEdit, galleryWithApp, captures[1]]);
     const signal = new AbortController().signal;
     await addWatchSmartStackWidget(client, { ...options, signal }, { timer });
     expect(client.signals).toHaveLength(client.commands.length);
@@ -587,7 +862,7 @@ describe("Smart Stack widget", () => {
     const { client, timer } = arrange([withEdit]);
     const controller = new AbortController();
     client.onRequest = () => {
-      if (client.commands.length === 20) {
+      if (client.commands.length === 21) {
         timer.setTimeout(() => controller.abort(new ActionableError("Cancelled")), 10000);
       }
     };
@@ -596,7 +871,7 @@ describe("Smart Stack widget", () => {
       { ...options, signal: controller.signal },
       { timer },
     );
-    expect(result).toMatchObject({ success: false, attempts: 1, steps: 20 });
+    expect(result).toMatchObject({ success: false, attempts: 1, steps: 21 });
     expect(result.reason).toContain("Cancelled");
     expect(client.commands).toEqual(widgetAttempt(10));
     expect(timer.getSleepHistory()).toEqual([...widgetAttemptSleeps(10), 20000]);

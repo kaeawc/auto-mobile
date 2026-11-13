@@ -64,7 +64,7 @@ export class TvosRunnerArtifacts {
               await (this.dependencies.access ?? access)(projectPath);
             } catch (cause) {
               throw new ActionableError(
-                `Tvos runner project is unavailable; set ${ENV.TVOS_RUNNER_XCTESTRUN.name} to a prebuilt tvos runner xctestrun. This release has no published tvOS runner, and the published package does not include the tvos project.`,
+                `Tvos runner project is unavailable: ${projectPath} was not found. From an AutoMobile checkout, set ${ENV.PROJECT_ROOT.name} to the checkout root; otherwise set ${ENV.TVOS_RUNNER_XCTESTRUN.name} to a prebuilt tvos runner xctestrun. This release has no published tvOS runner, and the published package does not include the tvos project.`,
                 { cause },
               );
             }

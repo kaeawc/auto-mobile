@@ -8,7 +8,7 @@ import {
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { SessionRequestForeignOwnerError } from "./SessionRequestForeignOwnerError";
 import { z } from "zod";
-import { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
+import { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS, type SessionBroker } from "./broker";
 import { brokerConnectionHostMutationRefusal } from "./connectionScope";
 import { RECEIPT_RETENTION_MS } from "./retention";
 import { SessionExportIdentityMismatchError } from "./store";
@@ -353,6 +353,35 @@ function unavailable(state: DaemonStateAccess): DaemonMethodResult {
   };
 }
 
+const capabilityParams = z.object({ device: z.unknown() }).strict();
+
+/**
+ * Read-only requirement capability (#18180): binds no connection and records nothing. A
+ * requirement the host cannot answer for (malformed, no defaults, no catalog) fails with the
+ * shared requirement error code, never an empty answer.
+ */
+export async function requirementCapabilityReply(
+  broker: Pick<SessionBroker, "requirementCapability">,
+  params: unknown,
+  signal?: AbortSignal,
+): Promise<DaemonMethodResult> {
+  const parsed = capabilityParams.safeParse(params ?? {});
+  if (!parsed.success || parsed.data.device === undefined) {
+    return { success: false, code: "invalid_request", error: "device is required" };
+  }
+  const answer = await broker.requirementCapability(parsed.data.device, signal);
+  if (!answer.ok) {
+    return {
+      success: false,
+      code: answer.error.code,
+      error: answer.error.message,
+      retryable: answer.error.transient,
+      ...(answer.error.field === undefined ? {} : { details: { field: answer.error.field } }),
+    };
+  }
+  return { success: true, result: { ...answer.value } };
+}
+
 /** Session-broker socket dispatch shares the initialized daemon context. */
 export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMethodHandler]> = [
   [
@@ -380,6 +409,15 @@ export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMeth
         success: true,
         result: { ...(await service.broker.stats(parsed.data.windowMs, parsed.data.limit)) },
       };
+    },
+  ],
+  [
+    "daemon/sessionRequirementCapability",
+    async (request, state, { signal }) => {
+      const service = state.getSessionBrokerService?.();
+      return service
+        ? requirementCapabilityReply(service.broker, request.params, signal)
+        : unavailable(state);
     },
   ],
   [

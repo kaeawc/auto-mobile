@@ -188,6 +188,18 @@ describe("VolatileTextTracker (#17670)", () => {
     expect(stable).toEqual([false, false, true]);
   });
 
+  test("two text rewrites separated by an equal diff still count (#17692)", () => {
+    const tracker = new VolatileTextTracker();
+    const title = (text: string) => capturedNode("com.example:id/title", TIME_BOUNDS, text, 0);
+    const stable = [
+      diff([title("Signing in")], [title("Loading")]),
+      diff([], []),
+      diff([title("Welcome")], [title("Signing in")]),
+      diff([], []),
+    ].map((step) => isStabilityDiffEmpty(tracker.mask(step)));
+    expect(stable).toEqual([false, true, false, true]);
+  });
+
   test("reset forgets volatile nodes", () => {
     const tracker = new VolatileTextTracker();
     tracker.mask(CAPTURED_STOPWATCH_DIFFS[1]);
@@ -195,6 +207,15 @@ describe("VolatileTextTracker (#17670)", () => {
     tracker.reset();
     expect(tracker.volatileCount).toBe(0);
     expect(isStabilityDiffEmpty(tracker.mask(CAPTURED_STOPWATCH_DIFFS[2]))).toBe(false);
+  });
+
+  test("an untrackable diff discards pending changes for that identity", () => {
+    const tracker = new VolatileTextTracker();
+    tracker.mask(CAPTURED_STOPWATCH_DIFFS[1]);
+    const identity = [HUNDREDTHS_ID, "588,1046,732,1219", 2].join("\0");
+    tracker.mask(diff([], []), new Set([identity]));
+    tracker.mask(CAPTURED_STOPWATCH_DIFFS[2]);
+    expect(tracker.volatileCount).toBe(0);
   });
 });
 

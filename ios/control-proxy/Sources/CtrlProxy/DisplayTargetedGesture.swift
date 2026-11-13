@@ -214,9 +214,16 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         if selection.strategy == .displayTargetedObserved { return observed }
         guard selection.strategy == .displayTargeted else { return nil }
         // Preserve exact point values instead of introducing normalize/denormalize rounding.
-        switch geometry.rotation {
+        // A portrait reading cannot describe a landscape observation: the rotation sample lags an
+        // unfold (#18245) and passing points through unrotated lands them in portrait space.
+        let corrected = geometry.rotation == 0 && geometry.observation.isValid &&
+            geometry.observation.width > geometry.observation.height
+        switch corrected ? 1 : geometry.rotation {
         case 0: return observed
-        case 1: return GesturePoint(x: observed.y, y: geometry.app.height - observed.x)
+        case 1:
+            return GesturePoint(
+                x: observed.y, y: (corrected ? geometry.observation.width : geometry.app.height) - observed.x
+            )
         case 3: return GesturePoint(x: geometry.app.width - observed.y, y: observed.x)
         default: return nil
         }

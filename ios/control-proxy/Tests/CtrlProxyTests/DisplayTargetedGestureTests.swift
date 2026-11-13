@@ -574,6 +574,24 @@ final class DisplayTargetedGestureTests: XCTestCase {
         XCTAssertEqual(diagnostics.deviceIdiom, "phone")
     }
 
+    /// #18245: a rotation sample that lags an unfold reads portrait for the landscape inner panel.
+    /// The delivered point must be the same one the observed rotation produces, not the unrotated point.
+    func testLaggingPortraitRotationReadingStillMapsLandscapePointToPortrait() throws {
+        let lagging = GestureCoordinateGeometry(
+            app: GestureSize(width: 951, height: 669), screen: unfolded.screen,
+            observation: unfolded.observation, rotation: 0
+        )
+        let expected = provider()
+        _ = try DisplayGestureFactory(provider: expected).deliver(start: point, press: 0.05)
+        let stale = provider(geometry: lagging)
+        _ = try DisplayGestureFactory(provider: stale).deliver(start: point, press: 0.05)
+        let touch = try XCTUnwrap(stale.touches.first)
+        XCTAssertEqual(touch.start, try XCTUnwrap(expected.touches.first).start)
+        XCTAssertEqual(touch.start.x, 202, accuracy: 1e-9)
+        XCTAssertEqual(touch.start.y, 508, accuracy: 1e-9)
+        XCTAssertEqual(touch.interfaceOrientation, 1)
+    }
+
     func testLongPressTargetsInnerDisplayAndAnnotatesDelivery() throws {
         for duration in [0.8, 2.5] {
             let provider = provider()

@@ -12,7 +12,7 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 
-async function createHarness(isolated: boolean) {
+async function createHarness(isolated: boolean, connectDelayMs = 0) {
   const timer = new FakeTimer();
   const socket = new FakeWebSocket("ws://fake", "none", 0, timer);
   await Promise.resolve();
@@ -25,7 +25,10 @@ async function createHarness(isolated: boolean) {
     getWebSocket: () => socket,
     requestManager: new RequestManager(timer),
     timer,
-    ensureConnected: async () => true,
+    ensureConnected: () =>
+      connectDelayMs === 0
+        ? Promise.resolve(true)
+        : new Promise<boolean>((resolve) => timer.setTimeout(() => resolve(true), connectDelayMs)),
     cancelScreenshotBackoff: () => {},
     device: { deviceId: "fake", platform: "android", name: "Fake" },
     adb: new FakeAdbExecutor(),
@@ -96,8 +99,8 @@ afterEach(() => {
   harnesses.length = 0;
 });
 const harnesses: Harness[] = [];
-async function harness(isolated: boolean): Promise<Harness> {
-  const h = await createHarness(isolated);
+async function harness(isolated: boolean, connectDelayMs = 0): Promise<Harness> {
+  const h = await createHarness(isolated, connectDelayMs);
   harnesses.push(h);
   return h;
 }
@@ -143,6 +146,42 @@ describe.each([false, true])("CtrlProxyHierarchy sync cooldown (isolated=%s)", (
     const h = await harness(isolated);
     await timeoutRead(h, 3000, 3000);
     await timeoutRead(h, 2000);
+  });
+
+  test("a slow reconnect before a short poll does not arm the cooldown", async () => {
+    const h = await harness(isolated, 3000);
+    const pending = h.read(500);
+    await drain();
+    h.timer.advanceTime(3000);
+    await drain();
+    expect(h.wait.mock.calls.at(-1)?.[0]).toBe(500);
+    h.timer.advanceTime(500);
+    expect(await pending).toBeNull();
+    const next = h.read();
+    await drain();
+    h.timer.advanceTime(3000);
+    await drain();
+    expect(h.wait.mock.calls.at(-1)?.[0]).toBe(10000);
+    h.timer.advanceTime(10000);
+    expect(await next).toBeNull();
+  });
+
+  test("a full reply-wait timeout after a slow reconnect arms the cooldown", async () => {
+    const h = await harness(isolated, 3000);
+    const pending = h.read(3000);
+    await drain();
+    h.timer.advanceTime(3000);
+    await drain();
+    expect(h.wait.mock.calls.at(-1)?.[0]).toBe(3000);
+    h.timer.advanceTime(3000);
+    expect(await pending).toBeNull();
+    const next = h.read();
+    await drain();
+    h.timer.advanceTime(3000);
+    await drain();
+    expect(h.wait.mock.calls.at(-1)?.[0]).toBe(2000);
+    h.timer.advanceTime(2000);
+    expect(await next).toBeNull();
   });
 
   test("a smaller caller budget is preserved during cooldown", async () => {

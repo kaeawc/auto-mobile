@@ -872,7 +872,7 @@ export class CtrlProxyHierarchy {
           ),
           signal,
         );
-        this.updateSyncCooldown(result, startTime, signal, syncDiagnostics);
+        this.updateSyncCooldown(result, signal, syncDiagnostics);
         return result;
       }
       // The wait accepts cache entries received at or after its dispatch floor. A flight with
@@ -920,7 +920,7 @@ export class CtrlProxyHierarchy {
       try {
         const result = await awaitWhileRequestIsLive(flight.promise, signal);
         this.copyFlightDiagnostics(flight.diagnostics, diagnostics);
-        this.updateSyncCooldown(result, startTime, signal, flight.diagnostics);
+        this.updateSyncCooldown(result, signal, flight.diagnostics);
         return result;
       } finally {
         flight.waiters -= 1;
@@ -943,7 +943,6 @@ export class CtrlProxyHierarchy {
 
   private updateSyncCooldown(
     result: HierarchySyncResult,
-    startTime: number,
     signal: AbortSignal | undefined,
     diagnostics: HierarchySyncDiagnostics,
   ): void {
@@ -953,7 +952,7 @@ export class CtrlProxyHierarchy {
     } else if (
       !signal?.aborted &&
       !diagnostics.runnerError &&
-      this.context.timer.now() - startTime >= HIERARCHY_SYNC_UNRESPONSIVE_MIN_WAIT_MS
+      (diagnostics.replyWaitTimedOutMs ?? 0) >= HIERARCHY_SYNC_UNRESPONSIVE_MIN_WAIT_MS
     ) {
       this.syncCooldown.recordFailure(deviceId);
     }

@@ -33460,7 +33460,7 @@
           "additionalProperties": false
         },
         "platformStatus": {
-          "description": "status and inspect: the last battery, power and audio values the device delivered through <module>.changed; a module is absent until its first change",
+          "description": "status and inspect: the last battery, power and audio values the device delivered through <module>.changed, and the accuracy of the last location.updated; a module is absent until its first event",
           "type": "object",
           "properties": {
             "battery": {
@@ -33470,6 +33470,10 @@
               "$ref": "#/$defs/__schema34"
             },
             "audio": {
+              "$ref": "#/$defs/__schema34"
+            },
+            "location": {
+              "description": "The last location.updated as {accuracyM, approximate} only: a fix is present and how accurate it is, never its coordinates",
               "$ref": "#/$defs/__schema34"
             }
           },

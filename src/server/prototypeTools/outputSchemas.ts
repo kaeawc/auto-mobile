@@ -477,10 +477,15 @@ export const prototypeOutputSchema = z.object({
       battery: prototypeDeviceStatusReadingSchema.optional(),
       power: prototypeDeviceStatusReadingSchema.optional(),
       audio: prototypeDeviceStatusReadingSchema.optional(),
+      location: prototypeDeviceStatusReadingSchema
+        .optional()
+        .describe(
+          "The last location.updated as {accuracyM, approximate} only: a fix is present and how accurate it is, never its coordinates",
+        ),
     })
     .optional()
     .describe(
-      "status and inspect: the last battery, power and audio values the device delivered through <module>.changed; a module is absent until its first change",
+      "status and inspect: the last battery, power and audio values the device delivered through <module>.changed, and the accuracy of the last location.updated; a module is absent until its first event",
     ),
   screenRound: z
     .boolean()

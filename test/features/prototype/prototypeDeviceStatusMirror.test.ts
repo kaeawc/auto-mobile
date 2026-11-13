@@ -65,7 +65,79 @@ describe("prototypeDeviceStatusOf", () => {
   });
 });
 
+describe("prototypeDeviceStatusOf location", () => {
+  test("a location.updated reading keeps only accuracy and approximate", () => {
+    const reading = prototypeDeviceStatusOf(
+      delivered(1, {
+        event: "location.updated",
+        data: {
+          accuracyM: 12.5,
+          approximate: false,
+          latitude: 37.4,
+          longitude: -122.1,
+          altitudeM: 30,
+          speedMps: 2,
+          bearingDeg: 90,
+          timestampMs: 5,
+        },
+        simulated: true,
+      }),
+    );
+    expect(reading).toEqual({
+      module: "location",
+      values: { accuracyM: 12.5, approximate: false },
+      simulated: true,
+    });
+    for (const key of ["latitude", "longitude", "altitudeM", "speedMps", "bearingDeg"]) {
+      expect(reading?.values).not.toHaveProperty(key);
+    }
+  });
+
+  test("ignores a location.updated without a valid summary", () => {
+    const ignored: PrototypeEvent[] = [
+      delivered(1, { event: "location.updated", data: { approximate: true } }),
+      delivered(2, { event: "location.updated", data: { accuracyM: 5 } }),
+      delivered(3, { event: "location.updated", data: { accuracyM: -1, approximate: true } }),
+      delivered(4, { event: "location.updated", data: { accuracyM: "5", approximate: true } }),
+      delivered(5, { event: "location.updated", data: [5, true] }),
+      delivered(6, {
+        event: "location.updated",
+        data: { accuracyM: 5, approximate: true },
+        truncated: true,
+      }),
+      delivered(
+        7,
+        { event: "location.updated", data: { accuracyM: 5, approximate: true } },
+        "save",
+      ),
+    ];
+    expect(ignored.map(prototypeDeviceStatusOf)).toEqual(ignored.map(() => undefined));
+  });
+});
+
 describe("prototype status device status mirror", () => {
+  test("mirrors the last location.updated as presence and accuracy only", () => {
+    const timer = new FakeTimer();
+    const store = new InMemoryPrototypeStatusStore(timer);
+    const scope = { deviceId: "device" };
+    timer.setCurrentTime(1000);
+    store.recordEvent(
+      scope,
+      delivered(1, {
+        event: "location.updated",
+        data: { accuracyM: 30, approximate: true, latitude: 1, longitude: 2 },
+      }),
+    );
+    store.recordEvent(
+      scope,
+      delivered(2, { event: "location.updated", data: { accuracyM: 4, approximate: false } }),
+    );
+    expect(store.status(scope).platformStatus).toEqual({
+      location: { values: { accuracyM: 4, approximate: false }, timestamp: 2, receivedAt: 1000 },
+    });
+    expect(JSON.stringify(store.status(scope))).not.toMatch(/latitude|longitude/);
+  });
+
   test("reports the last delivered values per module and copies them out", () => {
     const timer = new FakeTimer();
     const store = new InMemoryPrototypeStatusStore(timer);

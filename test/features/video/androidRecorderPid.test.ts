@@ -12,11 +12,23 @@ function streamOf(): { emit(chunk: string): void; stream: EventEmitter } {
 }
 
 describe("buildPidReportingScreenrecordArgs", () => {
-  test("prints the shell pid then execs the recorder in one shell argument", () => {
+  test("detaches the pid-reporting shell with setsid and falls back on older images", () => {
     expect(
       buildPidReportingScreenrecordArgs(["screenrecord", "--bit-rate", "1", "/sdcard/a.mp4"]),
-    ).toEqual(["shell", "echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4"]);
+    ).toEqual([
+      "shell",
+      "if command -v setsid >/dev/null 2>&1; then exec setsid sh -c 'echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4'; fi; echo $$; exec screenrecord --bit-rate 1 /sdcard/a.mp4",
+    ]);
   });
+
+  test.each(["screen'record", "/sdcard/it's.mp4"])(
+    "rejects single quotes in argv token %p",
+    (token) => {
+      expect(() => buildPidReportingScreenrecordArgs(["screenrecord", token])).toThrow(
+        "Android screenrecord argv must not contain single quotes.",
+      );
+    },
+  );
 });
 
 describe("trackDeviceRecorderPid", () => {

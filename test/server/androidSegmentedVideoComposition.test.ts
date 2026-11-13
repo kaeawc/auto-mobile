@@ -490,10 +490,9 @@ describe("each rotated Android segment is confirmed exited by its own pid (#1001
       const first = await startSegment(FIRST_ID);
       const client = factory.getFakeClient();
       client.setCommandResult(`shell stat -c %s ${deviceFile(FIRST_ID)}`, "0");
+      // One probe for the signal, then every finalize-time exit check while it still runs.
       client.setCommandResultSequence(probe(FIRST_PID), [
-        cmdline(FIRST_ID),
-        cmdline(FIRST_ID),
-        cmdline(FIRST_ID),
+        ...Array.from({ length: 6 }, () => cmdline(FIRST_ID)),
         "",
       ]);
       // First attempt: own recorder still running => retained, never released.

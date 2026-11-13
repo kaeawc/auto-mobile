@@ -15,6 +15,8 @@ import { useScratchRoot } from "../../helpers/scratchRoot";
 const LAUNCH = "exec screenrecord";
 const DEVICE_FILE = "/sdcard/auto-mobile-diagnostics.mp4";
 const RETRY_DEVICE_FILE = "/sdcard/auto-mobile-diagnostics-retry.mp4";
+const PROBE = "shell 'cat /proc/4321/cmdline 2>/dev/null; true'";
+const OUR_CMDLINE = `screenrecord\u0000${DEVICE_FILE}\u0000`;
 
 /** Schedules recorder failures on injected time; all other commands use the existing fake. */
 class StartupAdb extends FakeAdbClient {
@@ -107,6 +109,10 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
         const message = String(warn.mock.calls[0][0]);
         expect(message).toContain("code 255");
         expect(message).toContain("1600 ms");
+        expect(message).toContain(
+          "When launched with setsid, the device-side recorder keeps running",
+        );
+        expect(message).toContain("stop will signal it and collect the recording");
         expect(message).toContain(stderr || "stderr was empty");
         expect(message).not.toContain(DEVICE_FILE);
         if (stderr) {
@@ -236,16 +242,22 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
     }
   });
 
-  test.each([true, false])(
-    "stop retains the early-exit warning without logging the crash twice (wait for watcher: %p)",
-    async (waitForWatcher) => {
-      const { backend, client, config } = setup();
+  test.each([
+    [true, 3232, undefined, 255, null],
+    [false, 3232, undefined, 255, null],
+    [true, 20000, 1499, 255, null],
+    [true, 3232, undefined, null, "SIGKILL"],
+  ] as const)(
+    "stop retains the short-video early-exit warning without logging twice (watcher %p, bytes %p, duration %p, code %p, signal %p)",
+    async (waitForWatcher, bytes, duration, code, signal) => {
+      const { backend, client, timer, config } = setup(0, duration);
       const handle = await backend.start(config);
-      client.setCommandResult(`shell stat -c %s ${DEVICE_FILE}`, "3232");
-      await fs.writeFile(config.outputPath, Buffer.alloc(3232));
+      timer.advanceTime(3000 - timer.now());
+      client.setCommandResult(`shell stat -c %s ${DEVICE_FILE}`, String(bytes));
+      await fs.writeFile(config.outputPath, Buffer.alloc(bytes));
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        exit(client.getSpawnedProcesses()[0], 255, "encoder died");
+        exit(client.getSpawnedProcesses()[0], code, "encoder died", signal);
         if (waitForWatcher) {
           await drainMicrotasks(10);
           expect(warn).toHaveBeenCalledTimes(1);
@@ -254,11 +266,86 @@ describe("Android recorder diagnostics and recovery (#17951)", () => {
 
         expect(warn).toHaveBeenCalledTimes(1);
         expect(result.warnings).toHaveLength(2);
-        expect(result.warnings?.[0]).toContain("before the stop was requested");
+        expect(result.warnings?.[0]).toContain("host adb session to the Android recorder exited");
+        expect(result.warnings?.[0]).toContain(signal ? `signal ${signal}` : `code ${code}`);
+        expect(result.warnings?.[0]).toContain(
+          "before the stop was requested; the recording is shorter than requested.",
+        );
+        expect(result.warnings?.[0]).not.toContain("may end sooner");
         expect(result.warnings?.[1]).toContain("should not be used as evidence");
       } finally {
         warn.mockRestore();
       }
+    },
+  );
+
+  test.each([
+    [10000, undefined],
+    [20000, 1500],
+  ] as const)(
+    "host exit 255 still stops, finalizes and pulls a surviving recorder (%p bytes, %p ms) without a quality warning",
+    async (bytes, duration) => {
+      const { backend, client, timer, config } = setup(0, duration);
+      client.setSpawnStdout(LAUNCH, "4321\n");
+      const handle = await backend.start(config);
+      expect(handle.backendHandle).toMatchObject({ devicePid: { pid: 4321 } });
+      timer.advanceTime(3000 - timer.now());
+      exit(client.getSpawnedProcesses()[0], 255);
+      // Still alive for SIGINT and two exit polls, despite an unchanged file.
+      client.setCommandResultSequence(PROBE, [OUR_CMDLINE, OUR_CMDLINE, OUR_CMDLINE, ""]);
+      client.setCommandResult(`shell stat -c %s ${DEVICE_FILE}`, String(bytes));
+      await fs.writeFile(config.outputPath, Buffer.alloc(bytes));
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        const result = await backend.stop(handle);
+
+        expect(result.sizeBytes).toBe(bytes);
+        expect(result.warnings).toBeUndefined();
+        const interactions = client.getInteractionLog();
+        expect(interactions.slice(0, 2)).toEqual([
+          { kind: "spawn", text: client.getSpawnCalls()[0].join(" ") },
+          { kind: "command", text: PROBE },
+        ]);
+        expect(client.getAllCommands()[1]).toBe("shell kill -2 4321");
+        const pullIndex = interactions.findIndex(({ text }) => text.startsWith("pull "));
+        expect(pullIndex).toBeGreaterThan(0);
+        const beforePull = interactions.slice(0, pullIndex);
+        expect(beforePull.filter(({ text }) => text === PROBE)).toHaveLength(4);
+        expect(
+          beforePull.filter(({ text }) => text === `shell stat -c %s ${DEVICE_FILE}`),
+        ).toHaveLength(2);
+        expect(beforePull.slice(1, 6).map(({ text }) => text)).toEqual([
+          PROBE,
+          "shell kill -2 4321",
+          PROBE,
+          PROBE,
+          PROBE,
+        ]);
+        expect(info.mock.calls.map(([message]) => String(message))).toContainEqual(
+          expect.stringContaining("device recording was collected"),
+        );
+      } finally {
+        info.mockRestore();
+      }
+    },
+  );
+
+  test.each(["20000", ""])(
+    "host exit 255 retains a live device recorder's file without pulling (stat %p)",
+    async (stat) => {
+      const { backend, client, config } = setup();
+      client.setSpawnStdout(LAUNCH, "4321\n");
+      const handle = await backend.start(config);
+      exit(client.getSpawnedProcesses()[0], 255);
+      client.setCommandResult(PROBE, OUR_CMDLINE);
+      client.setCommandResult(`shell stat -c %s ${DEVICE_FILE}`, stat);
+
+      await expect(backend.stop(handle)).rejects.toMatchObject({ retainOwnership: true });
+
+      expect(client.getAllCommands()).toContain("shell kill -2 4321");
+      expect(client.getCommandCount(PROBE)).toBe(6);
+      expect(client.getSpawnCalls().some(([command]) => command === "pull")).toBe(false);
+      expect(client.wasSpawned(`rm ${DEVICE_FILE}`)).toBe(false);
     },
   );
 

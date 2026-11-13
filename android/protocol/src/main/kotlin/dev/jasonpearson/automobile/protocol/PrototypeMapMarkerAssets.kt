@@ -22,8 +22,8 @@ internal object PrototypeMapMarkerAssets {
   /** The first map whose marker asset is not in a complete uploaded asset inventory. */
   fun unknownError(nodes: List<Located>, assets: Set<String>): PrototypeSpecError? =
     nodes.firstNotNullOfOrNull { (node, path) ->
-      asset(node)
-        ?.takeUnless(assets::contains)
-        ?.let { PrototypeSpecError("$path.markers.icon.asset", "Unknown marker asset") }
+      asset(node)?.takeUnless(assets::contains)?.let {
+        PrototypeSpecError("$path.markers.icon.asset", "Unknown marker asset")
+      }
     }
 }

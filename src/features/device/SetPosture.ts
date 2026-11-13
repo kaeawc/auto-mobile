@@ -2,7 +2,7 @@ import { createProductionDevicectlPanelScreenshotSource } from "../../utils/ios-
 import type { DevicectlDisplayInfoSource } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, ObserveResult } from "../../models";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import {
@@ -83,6 +83,7 @@ import {
   type IosHingePanelRole,
   type IosRequestedHingeAngleStore,
 } from "./DuoHingeLayout";
+import { verifyPostureGeometry } from "./postureGeometryCheck";
 
 const IOS_INDETERMINATE_PANEL_REASON =
   "The runner accepted the hinge angle, but the active iPhone Duo panel could not be determined.";
@@ -480,10 +481,12 @@ export class SetPosture {
   ): Promise<SetPostureResult> {
     const { assertCurrent } = operation;
     let read: IosHingePanelRead = { role: undefined, fromDevicectl: false };
+    let lastObservation: ObserveResult | undefined;
     const deadline = this.timer.now() + IOS_POSTURE_TIMEOUT_MS;
     const observe = async () => {
       const polled = await this.observeIosHingePanel(angle, deadline, operation);
       read = polled.read;
+      lastObservation = polled.observation;
       return polled.observation;
     };
     const settled = await this.observeFinalPosture(
@@ -511,7 +514,11 @@ export class SetPosture {
             hingeAngle: angle,
           }
         : { ...settled, hingeAngle: angle };
-    return withEpilogueWarning(output, role ? iosHingeLayoutWarning(angle, role) : undefined);
+    const geometryWarning = await this.verifyIosGeometry(lastObservation, operation);
+    return withEpilogueWarning(
+      withWarnings(output, [geometryWarning]),
+      role ? iosHingeLayoutWarning(angle, role) : undefined,
+    );
   }
 
   /**
@@ -894,6 +901,7 @@ export class SetPosture {
     const expectedRole = requested === "closed" ? "cover" : "inner";
     const panels = this.device.displays?.panels;
     const expectedPanel = panels?.find((panel) => panel.role === expectedRole);
+    let lastObservation: ObserveResult | undefined;
     const observe = async () => {
       let confirmed = false;
       const observation = await observeIosPosture(
@@ -914,6 +922,7 @@ export class SetPosture {
           },
         },
       );
+      lastObservation = observation;
       // Only the posture result adopts this identity. The observe tool's runner data stays unchanged.
       return confirmed && expectedPanel
         ? {
@@ -929,6 +938,30 @@ export class SetPosture {
     };
     const settled = await this.observeFinalPosture(requested, observe, observe, operation);
     assertCurrent();
-    return settled;
+    return withWarnings(settled, [await this.verifyIosGeometry(lastObservation, operation)]);
+  }
+
+  /** Post-condition (#18245): the runner's geometry must agree with the final observation. */
+  private async verifyIosGeometry(
+    observation: ObserveResult | undefined,
+    operation: PostureOperation,
+  ): Promise<string | undefined> {
+    const { signal } = operation;
+    const warning = await verifyPostureGeometry(observation, {
+      timer: this.timer,
+      operation,
+      refreshRunner: () =>
+        this.iosClientProvider(this.device).requestHierarchySyncWithoutObservationStreamPush(
+          undefined,
+          false,
+          signal,
+        ),
+      observe: () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
+    });
+    operation.assertCurrent();
+    if (warning) {
+      logger.warn(`[SetPosture] ${warning}`);
+    }
+    return warning;
   }
 }

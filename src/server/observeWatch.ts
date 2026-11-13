@@ -534,43 +534,38 @@ async function observedHierarchy(
   return { ...lastRead, hierarchy, waitOutcome: outcome };
 }
 
+/** Why this read carries only a screenshot; `appNotRunning` is set only for watchOS (#18052). */
+function hierarchyUnavailableNote(
+  platform: AppleScreenshotOnlyPlatform,
+  { unavailableReason, appNotForeground, appNotRunning }: HierarchyOutcome,
+): WatchObservation["hierarchyUnavailable"] {
+  if (platform === "watchos" && appNotRunning) {
+    return {
+      platform,
+      message: watchAppNotRunningMessage(appNotRunning),
+      appNotRunning: { bundleId: appNotRunning },
+    };
+  }
+  const message =
+    platform === "watchos" && appNotForeground
+      ? WATCH_APP_NOT_FOREGROUND_MESSAGE
+      : platform === "tvos" && unavailableReason
+        ? TVOS_RUNNER_UNAVAILABLE_MESSAGE
+        : HIERARCHY_UNAVAILABLE_MESSAGES[platform];
+  return {
+    platform,
+    message: unavailableReason ? `${message} Runner unavailable: ${unavailableReason}` : message,
+  };
+}
+
 function watchObservationPayload(
   capture: Omit<WatchObservation, "hierarchyUnavailable">,
   platform: AppleScreenshotOnlyPlatform,
-  {
-    hierarchy: viewHierarchy,
-    unavailableReason,
-    appNotForeground,
-    appNotRunning,
-    hierarchyBundleId,
-  }: HierarchyOutcome,
+  outcome: HierarchyOutcome,
 ): WatchObservation | ObserveResult {
-  if (!viewHierarchy && platform === "watchos" && appNotRunning) {
-    return {
-      ...capture,
-      hierarchyUnavailable: {
-        platform,
-        message: watchAppNotRunningMessage(appNotRunning),
-        appNotRunning: { bundleId: appNotRunning },
-      },
-    };
-  }
+  const { hierarchy: viewHierarchy, hierarchyBundleId } = outcome;
   if (!viewHierarchy) {
-    const message =
-      platform === "watchos" && appNotForeground
-        ? WATCH_APP_NOT_FOREGROUND_MESSAGE
-        : platform === "tvos" && unavailableReason
-          ? TVOS_RUNNER_UNAVAILABLE_MESSAGE
-          : HIERARCHY_UNAVAILABLE_MESSAGES[platform];
-    return {
-      ...capture,
-      hierarchyUnavailable: {
-        platform,
-        message: unavailableReason
-          ? `${message} Runner unavailable: ${unavailableReason}`
-          : message,
-      },
-    };
+    return { ...capture, hierarchyUnavailable: hierarchyUnavailableNote(platform, outcome) };
   }
   return {
     ...capture,

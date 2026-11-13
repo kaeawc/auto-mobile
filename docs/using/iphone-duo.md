@@ -89,6 +89,30 @@ the panel to switch; if it still disagrees, the call succeeds and adds a `warnin
 target angle again, and `observe` before acting. Below 90 degrees the cover panel is a normal
 result; strictly between 0 and 90 degrees either panel is plausible.
 
+## Screen geometry after a posture change
+
+After a posture change, `setPosture` checks that the runner and `observe` agree on the screen's
+orientation and size, and waits up to 10 seconds for them to agree. If they still disagree, the
+posture change still succeeds, but the result's `warnings` list names the mismatch, for example:
+
+```text
+Screen geometry is still inconsistent 10000 ms after the posture change: observe reports rotation 0 and 669x951, but elements are laid out for 951x669. Taps may land in the wrong place; observe again before tapping.
+```
+
+When you see this warning, call `observe` again before you tap. If taps still miss, open a screen
+on the inner display first (for example switch tabs), then observe and tap.
+
+`tapAt` and `tapOn` refuse to tap when the latest observation contradicts itself: the reported
+screen is portrait, but the elements are laid out for the landscape size. Nothing is tapped, and
+the error reads:
+
+```text
+Screen geometry is stale after a posture change: observe reports rotation 0 and 669x951, but elements are laid out for 951x669. Nothing was tapped. Observe again, then retry.
+```
+
+Call `observe`, then retry the tap. Apps that are laid out for the reported size, in portrait or
+landscape, are tapped as usual.
+
 ## Home-screen icons after an unfold
 
 After an unfold, the home screen reports app icon positions that do not match what is drawn. As a

@@ -63,8 +63,8 @@ Linux configuration guidance until the cause is known:
 
 When an emulator exits unexpectedly, the loss incident keeps the process exit
 signal and a bounded, redacted `outputTail` of emulator output from launch
-onward. `outputUnavailable: "adopted"` marks an emulator AutoMobile did not
-launch, so no output was tracked. Slot recovery (`onLoss`) stays off by default
+onward. For an emulator AutoMobile did not launch, `outputUnavailable: "adopted"`
+records that no output was tracked. Slot recovery (`onLoss`) stays off by default
 and never substitutes a different device.
 
 The `swangle` cell matched the crashing hosts' flags, emulator build, image and

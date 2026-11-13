@@ -27,8 +27,8 @@ Two structural simplifications were also evaluated and rejected (do not re-litig
 ## Decision
 
 Parallel reimplementation, not in-place migration. The old `CtrlProxy` stayed as a behavioral oracle
-(Swift 5 mode) while `CtrlProxyRewrite` was built under strict Swift 6 concurrency and verified by
-differential parity against the frozen wire contract. Phases 0-7 (scaffold, pure core, networking,
+(Swift 5 mode) while the team built `CtrlProxyRewrite` under strict Swift 6 concurrency and verified it
+by differential parity against the frozen wire contract. Phases 0-7 (scaffold, pure core, networking,
 off-main SDK layer, `@MainActor` UI, PerfProvider, CommandHandler/coordinator, cutover) completed and
 the oracle was retired.
 
@@ -49,10 +49,10 @@ Other native-Swift components were ranked for their own Swift 6 pass, as separat
 
 - `ios/auto-mobile-sdk` (ctrl-proxy links it for wire models): largest need, architecturally the
   pre-rewrite ctrl-proxy. CI built it macOS-only, so its iOS UIKit `@MainActor` surface was
-  unchecked. #5839 moved the SDK and highlight-core targets to Swift 6 with zero concurrency
-  diagnostics on the macOS host build and a generic iOS Simulator `xcodebuild`, converting most types
-  to checked `Sendable`. The remaining `@unchecked Sendable` set for `UserDefaultsInspector`,
-  `SQLiteDatabaseDriver` and `AutoMobileWebViewBridge` is owner decision D52; the iOS 17 / macOS 15
+  unchecked. #5839 moved the SDK and highlight-core targets to Swift 6 and converted most types to
+  checked `Sendable`. It left zero concurrency diagnostics on the macOS host build and a generic iOS
+  Simulator `xcodebuild`. The remaining `@unchecked Sendable` set for `UserDefaultsInspector`,
+  `SQLiteDatabaseDriver` and `AutoMobileWebViewBridge` is owner decision D52. The iOS 17 / macOS 15
   floor is an owner decision of 2026-10-02. `SdkHighlightOverlayManager` is internal, so whole-type
   `@MainActor` is possible; its caller is `SdkHierarchyServer`'s off-main HTTP continuation.
 - `ios/XCTestRunner` (standalone MCP-client XCTest wrapper, no code coupling to ctrl-proxy): moderate,

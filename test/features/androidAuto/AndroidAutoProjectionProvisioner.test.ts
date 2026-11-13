@@ -788,4 +788,29 @@ describe("AndroidAutoProjectionProvisioner", () => {
     await provisioner.stopDesktopHeadUnit("emulator-5554");
     expect(provisioner.desktopHeadUnitConsole("emulator-5554")).toBeUndefined();
   });
+
+  test("names the DHU process and config behind a console, so a restart is visible", async () => {
+    const { provisioner } = setup();
+    await provisioner.provision(request());
+    const first = provisioner.desktopHeadUnitConsole("emulator-5554")?.panel;
+    expect(first).toEqual({ instance: expect.any(String), configPath: "config/default_720p.ini" });
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")?.panel).toEqual(first);
+
+    await provisioner.stopDesktopHeadUnit("emulator-5554");
+    await provisioner.provision(request());
+    const restarted = provisioner.desktopHeadUnitConsole("emulator-5554")?.panel;
+    expect(restarted?.instance).not.toBe(first?.instance);
+  });
+
+  test("a console reports the DHU's video focus, and focus when the session cannot tell", async () => {
+    const session = new FakeSession();
+    let videoFocus = false;
+    const { provisioner } = setup([{ status: "connected", session }]);
+    await provisioner.provision(request());
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")?.hasVideoFocus?.()).toBe(true);
+    session.hasVideoFocus = () => videoFocus;
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")?.hasVideoFocus?.()).toBe(false);
+    videoFocus = true;
+    expect(provisioner.desktopHeadUnitConsole("emulator-5554")?.hasVideoFocus?.()).toBe(true);
+  });
 });

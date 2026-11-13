@@ -21,8 +21,9 @@
       "paths": ["docs/devlog/"],
       "maxSentenceWords": 35,
       "maxParagraphWords": 150,
-      "maxPageWords": 1200,
-      "passive": { "minSentences": 3, "maxRatio": 0.5 }
+      "maxPageWords": 3000,
+      "passive": { "minSentences": 3, "maxRatio": 0.5 },
+      "enforced": true
     }
   ]
 }

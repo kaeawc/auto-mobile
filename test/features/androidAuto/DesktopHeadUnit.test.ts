@@ -114,6 +114,23 @@ describe("SpawningDesktopHeadUnitLauncher", () => {
     expect(() => result.session.sendCommand("day")).toThrow("not running");
   });
 
+  test("a no-video-focus line clears video focus until focus video is sent again", async () => {
+    const { timer, child, launch } = setup();
+    const outcome = launch();
+    child.print("connected.\n");
+    timer.advanceTime(TIMING.settleMs);
+    const result = await outcome;
+    if (result.status !== "connected") {
+      throw new Error(`expected connected, got ${result.status}`);
+    }
+    await flushStdin();
+    expect(result.session.hasVideoFocus?.()).toBe(true);
+    child.stderr.emit("data", "Don't have video focus - nothing to screenshot.\n");
+    expect(result.session.hasVideoFocus?.()).toBe(false);
+    result.session.sendCommand("focus video");
+    expect(result.session.hasVideoFocus?.()).toBe(true);
+  });
+
   test("interleaved stderr output never splices a stdout line", async () => {
     const { timer, child, launch } = setup();
     const outcome = launch();

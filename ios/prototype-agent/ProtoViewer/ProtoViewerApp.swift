@@ -27,7 +27,8 @@ struct ProtoViewerApp: App {
                 libraryLog.error("\($0, privacy: .public)")
             }
             let mcp = PrototypeMcpInbox(
-                root: support.appendingPathComponent("mcp", isDirectory: true), libraryRoot: root, storageRoot: storage
+                root: support.appendingPathComponent("mcp", isDirectory: true), libraryRoot: root, storageRoot: storage,
+                report: Bundle.main.infoDictionary.flatMap { PrototypeMcpCapabilitiesReport(info: $0) }
             ) {
                 libraryLog.warning("\($0, privacy: .private)")
             }

@@ -51,6 +51,37 @@ final class PrototypeMcpInboxTests: XCTestCase {
         )
     }
 
+    func testCapabilitiesReportIsWrittenWithTheDeliveryMarkerAndRewrittenOnEveryStart() async throws {
+        let files = McpFiles(); let entry = entry
+        let report = try XCTUnwrap(PrototypeMcpCapabilitiesReport(
+            info: ["CFBundleVersion": "7", "CFBundleShortVersionString": "1.4"], capabilities: ["b", "a"]
+        ))
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, _ in entry }, entries: { [] },
+            report: report, warning: { _ in }
+        )
+        try await inbox.ensureDirectories()
+        try await inbox.ensureDirectories()
+        let data = try files.read(root.appendingPathComponent("capabilities.json"), cap: 4096)
+        XCTAssertEqual(
+            String(decoding: data, as: UTF8.self),
+            #"{"capabilities":["b","a"],"versionCode":7,"versionName":"1.4"}"#
+        )
+        XCTAssertEqual(files.writes.withLock { $0 }, 4)
+    }
+
+    func testReportIsOmittedWithoutAnIntegerBundleVersionAndNothingIsWritten() async throws {
+        XCTAssertNil(PrototypeMcpCapabilitiesReport(info: ["CFBundleVersion": "1.2"]))
+        XCTAssertNil(PrototypeMcpCapabilitiesReport(info: [:]))
+        let files = McpFiles(); let entry = entry
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, _ in entry }, entries: { [] },
+            warning: { _ in }
+        )
+        try await inbox.ensureDirectories()
+        XCTAssertFalse(files.exists(root.appendingPathComponent("capabilities.json")))
+    }
+
     @MainActor
     func testRequestFilesDispatchImportAndOpenAndConsumeMalformedRequests() async throws {
         let files = McpFiles(); let entry = entry; let id = id

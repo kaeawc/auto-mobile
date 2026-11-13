@@ -1,4 +1,4 @@
-# Split the audit tool into accessibilityAudit and performanceAudit
+# Split the audit tool into `accessibilityAudit` and `performanceAudit`
 
 - Kind: decision
 - Date: 2026-11-13

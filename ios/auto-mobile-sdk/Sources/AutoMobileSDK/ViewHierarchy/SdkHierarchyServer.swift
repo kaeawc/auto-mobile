@@ -418,6 +418,31 @@
             return SdkRouteResponse(statusCode: 200, body: data)
         }
 
+        func handleCarPlayAction(_ connection: NWConnection, initialData: Data) {
+            withRequestBody(connection, initialData: initialData) { server, body in
+                guard let body,
+                      let request = try? JSONDecoder().decode(CarPlayActionRequest.self, from: body),
+                      request.isValid
+                else {
+                    server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                    return
+                }
+                DispatchQueue.main.async {
+                    CarPlayTemplateRegistry.shared.perform(request) { response in
+                        guard let data = try? JSONEncoder().encode(response) else {
+                            server.sendResponse(
+                                connection,
+                                statusCode: 500,
+                                body: Data("{\"error\":\"encode_failed\"}".utf8)
+                            )
+                            return
+                        }
+                        server.sendResponse(connection, statusCode: 200, body: data)
+                    }
+                }
+            }
+        }
+
         func handleCarPlayTemplates(_ connection: NWConnection) {
             DispatchQueue.main.async {
                 let document = CarPlayTemplateRegistry.shared.snapshot()

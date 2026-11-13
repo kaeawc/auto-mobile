@@ -412,6 +412,12 @@ Daemon protocol:
   drain and destruction as tracked release work (#12791).
 - Reconnect registration: `{sessionId, clientName, sessionBroker: {requestId,
   livenessOwnerToken}}`.
+- `daemon/sessionRequirementCapability`: `{device}`. Read-only: it reads the
+  broker's catalog and defaults and runs the same normalization and resolution
+  as admission; it binds no connection, takes no lock and writes no request row.
+  A request the host cannot answer fails with the requirement error code
+  (`invalid_request`, `invalid_config`, `catalog_unavailable`, …). The MCP tool
+  `getSessionRequirementCapability` returns the same answer.
 
 The token plus the complete request configuration define operation identity. After
 an ambiguous reply, query the same identity. Replay returns the durable receipt

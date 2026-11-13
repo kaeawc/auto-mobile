@@ -70,6 +70,16 @@ const PLAIN_TOOL_CALLS: Record<string, Args[]> = {
   exportPrototypeWeb: [{ id: "checkout" }],
   recordToolCalls: [{ action: "status" }, { action: "begin" }, { action: "end" }],
   getIosSimulatorCapabilities: [{ deviceType: "iPhone 16", runtime: "iOS 18.0" }],
+  getSessionRequirementCapability: [
+    {
+      device: {
+        schemaVersion: 1,
+        platform: "ios",
+        hardware: { kind: "omitted" },
+        os: { kind: "omitted" },
+      },
+    },
+  ],
   setToolEnabled: [{ toolName: "tapOn", enabled: false }],
 };
 const PLAIN_TOOL_CASES = Object.entries(PLAIN_TOOL_CALLS).flatMap(([name, calls]) =>

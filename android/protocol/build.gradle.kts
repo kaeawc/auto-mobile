@@ -63,4 +63,5 @@ sourceSets.main {
   resources.srcDir(layout.projectDirectory.dir("../../schemas"))
   resources.include("prototype-spec-contract.json")
   resources.include("prototype-asset-contract.json")
+  resources.include("prototype-platform-permissions.json")
 }

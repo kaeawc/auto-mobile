@@ -225,7 +225,13 @@ const CLASSIFICATION: Classification = {
  * for a mixed tool). Control is the default: acquisition, release, routing and configuration.
  */
 const PLAIN_CLASSIFICATION: Classification = {
-  read: ["doctor", "getIosSimulatorCapabilities", "listDeviceImages", "listDevices"],
+  read: [
+    "doctor",
+    "getIosSimulatorCapabilities",
+    "getSessionRequirementCapability",
+    "listDeviceImages",
+    "listDevices",
+  ],
   perArgs: {
     recordToolCalls: {
       reads: [{ action: "status" }],

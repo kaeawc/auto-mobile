@@ -47,6 +47,8 @@ export interface IosProtoViewerFiles {
   rename(from: string, to: string): Promise<void>;
   /** Missing is pending; other read errors must propagate. */
   read(path: string): Promise<string>;
+  /** Modification time in ms (sub-ms precision when the filesystem has it); undefined when missing. */
+  modifiedAt(path: string): Promise<number | undefined>;
   remove(path: string): Promise<void>;
 }
 interface Dependencies {
@@ -88,11 +90,17 @@ export class IosProtoViewer implements ProtoViewerDevice {
         published !== undefined && installed !== undefined && published.versionCode !== installed
       );
     };
-    let text = await this.deps.files.read(path);
+    const before = await this.snapshot(path);
+    let text = before.text;
     if (refresh || isStale(text)) {
-      const before = text;
       await this.foreground(timeoutMs, signal);
-      text = await this.awaitRewrite(path, before, isStale, { timeoutMs, signal });
+      const rewritten = await this.awaitRewrite(path, before, isStale, { timeoutMs, signal });
+      if (rewritten === undefined && refresh) {
+        // The app publishes after foregrounding, so an unchanged report may predate a rebuild that
+        // kept CFBundleVersion (#18236): unknown, and the app's own gate decides.
+        return undefined;
+      }
+      text = rewritten ?? (await this.deps.files.read(path));
     }
     const published = text.trim() === "" ? undefined : parseProtoViewerCapabilities(text);
     if (
@@ -107,26 +115,34 @@ export class IosProtoViewer implements ProtoViewerDevice {
     };
   }
 
-  /** Waits until the report differs from `before` and is not stale, or the deadline passes. */
+  private async snapshot(path: string): Promise<{ text: string; modifiedAt?: number }> {
+    const modifiedAt = await this.deps.files.modifiedAt(path);
+    return { text: await this.deps.files.read(path), modifiedAt };
+  }
+
+  /**
+   * Waits until the app rewrites the report (its mtime or content differs from `before`) with one
+   * that is not stale; undefined when the deadline passes first.
+   */
   private async awaitRewrite(
     path: string,
-    before: string,
+    before: { text: string; modifiedAt?: number },
     isStale: (text: string) => boolean,
     { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal },
-  ): Promise<string> {
+  ): Promise<string | undefined> {
     const deadline = this.deps.timer.now() + timeoutMs;
-    let text = before;
     do {
       signal?.throwIfAborted();
-      text = await this.deps.files.read(path);
-      if (text.trim() !== "" && !isStale(text)) {
-        return text;
+      const current = await this.snapshot(path);
+      const rewritten = current.modifiedAt !== before.modifiedAt || current.text !== before.text;
+      if (rewritten && current.text.trim() !== "" && !isStale(current.text)) {
+        return current.text;
       }
       await this.deps.timer.sleep(
         Math.min(PROTOVIEWER_RESULT_POLL_MS, Math.max(0, deadline - this.deps.timer.now())),
       );
     } while (this.deps.timer.now() < deadline);
-    return text;
+    return undefined;
   }
 
   importBundle(

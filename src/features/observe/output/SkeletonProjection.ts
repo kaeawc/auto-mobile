@@ -48,6 +48,7 @@ import {
   type ObserveElements,
   type SkeletonAccumulator,
 } from "./skeletonProjection/rowModel";
+import { attributePrecedingSiblingLabels } from "./skeletonProjection/precedingSiblingLabel";
 import {
   detectImeWindow,
   isImeKeycap,
@@ -917,6 +918,10 @@ export function projectSkeleton(
   // …then attribute an owning row's label to the state-carrying containers that
   // hoisting deliberately never folds into (issue #6871).
   attributeContainerLabels(accumulators);
+  // A toggle with no labelled owner row takes its preceding sibling text (#17955).
+  attributePrecedingSiblingLabels(accumulators, (acc) =>
+    clickable.some((container) => containerEnclosesText(container, acc)),
+  );
 
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
   const occluder = ime ? getImeOccluder(elements) : undefined;

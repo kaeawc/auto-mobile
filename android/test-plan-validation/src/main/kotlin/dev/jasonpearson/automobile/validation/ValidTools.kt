@@ -114,6 +114,7 @@ object ValidTools {
         "getApple",
         "getDataStore",
         "getIosSimulatorCapabilities",
+        "getSessionRequirementCapability",
         "getPreference",
         "hitTest",
         "listDataStores",

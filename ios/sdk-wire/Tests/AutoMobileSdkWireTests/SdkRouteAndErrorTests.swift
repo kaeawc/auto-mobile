@@ -4,7 +4,7 @@ import XCTest
 
 final class SdkRouteAndErrorTests: XCTestCase {
     func testRoutesAreUniqueAbsolutePathsWithAMethodEach() {
-        XCTAssertEqual(SdkRoute.allCases.count, 24)
+        XCTAssertEqual(SdkRoute.allCases.count, 25)
         XCTAssertEqual(Set(SdkRoute.allCases.map(\.path)).count, SdkRoute.allCases.count)
         for route in SdkRoute.allCases {
             XCTAssertTrue(route.path.hasPrefix("/"), route.path)
@@ -21,6 +21,8 @@ final class SdkRouteAndErrorTests: XCTestCase {
     }
 
     func testThePathsTheRunnerDialsAreTheOnesTheSdkServes() {
+        XCTAssertEqual(SdkRoute.carPlayAction.path, "/carplay/action")
+        XCTAssertEqual(SdkRoute.carPlayAction.method, "POST")
         XCTAssertEqual(SdkRoute.carPlayTemplates.path, "/carplay/templates")
         XCTAssertEqual(SdkRoute.carPlayTemplates.method, "GET")
         XCTAssertEqual(SdkRoute.freshHierarchy.path, "/hierarchy/fresh")

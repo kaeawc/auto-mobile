@@ -203,7 +203,10 @@
             case let contact as CPContactTemplate:
                 return (contact.leadingNavigationBarButtons, contact.trailingNavigationBarButtons, contact.backButton)
             case let voice as CPVoiceControlTemplate:
-                return (voice.leadingNavigationBarButtons, voice.trailingNavigationBarButtons, voice.backButton)
+                if #available(iOS 26.4, *) {
+                    return (voice.leadingNavigationBarButtons, voice.trailingNavigationBarButtons, voice.backButton)
+                }
+                return nil
             default:
                 return nil
             }

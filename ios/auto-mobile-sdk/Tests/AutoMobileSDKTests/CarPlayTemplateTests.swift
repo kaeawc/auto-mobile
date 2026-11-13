@@ -157,12 +157,9 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
             XCTAssertNil(empty.templates.first?.backButton)
         }
 
-        func testBarButtonsForMapContactAndVoiceControl() {
+        func testBarButtonsForMapAndContact() {
             let map = CPMapTemplate()
             let contact = CPContactTemplate(contact: CPContact(name: "Ada", image: UIImage()))
-            let voice = CPVoiceControlTemplate(voiceControlStates: [
-                CPVoiceControlState(identifier: "listening", titleVariants: ["Listening"], image: nil, repeats: false),
-            ])
             let leading = CPBarButton(title: "Leading", handler: nil)
             let trailing = CPBarButton(title: "Trailing", handler: nil)
             let back = CPBarButton(title: "Back", handler: nil)
@@ -172,12 +169,9 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
             contact.leadingNavigationBarButtons = [leading]
             contact.trailingNavigationBarButtons = [trailing]
             contact.backButton = back
-            voice.leadingNavigationBarButtons = [leading]
-            voice.trailingNavigationBarButtons = [trailing]
-            voice.backButton = back
             var mapper = CarPlayTemplateMapper()
-            let document = mapper.document(templates: [map, contact, voice])
-            XCTAssertEqual(document.templates.map(\.type), ["map", "contact", "voiceControl"])
+            let document = mapper.document(templates: [map, contact])
+            XCTAssertEqual(document.templates.map(\.type), ["map", "contact"])
             for (index, node) in document.templates.enumerated() {
                 XCTAssertEqual(node.leadingNavigationBarButtons?.first?.title, "Leading")
                 XCTAssertEqual(node.trailingNavigationBarButtons?.first?.title, "Trailing")
@@ -199,6 +193,28 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
             XCTAssertEqual(empty.templates.first?.leadingNavigationBarButtons?.count, 0)
             XCTAssertEqual(empty.templates.first?.trailingNavigationBarButtons?.count, 0)
             XCTAssertNil(empty.templates.first?.backButton)
+        }
+
+        func testBarButtonsForVoiceControl() throws {
+            guard #available(iOS 26.4, *) else {
+                throw XCTSkip("CPVoiceControlTemplate bar buttons require iOS 26.4")
+            }
+            let voice = CPVoiceControlTemplate(voiceControlStates: [
+                CPVoiceControlState(identifier: "listening", titleVariants: ["Listening"], image: nil, repeats: false),
+            ])
+            voice.leadingNavigationBarButtons = [CPBarButton(title: "Leading", handler: nil)]
+            voice.trailingNavigationBarButtons = [CPBarButton(title: "Trailing", handler: nil)]
+            voice.backButton = CPBarButton(title: "Back", handler: nil)
+            var mapper = CarPlayTemplateMapper()
+            let document = mapper.document(templates: [voice])
+            XCTAssertEqual(document.templates.map(\.type), ["voiceControl"])
+            let node = try XCTUnwrap(document.templates.first)
+            XCTAssertEqual(node.leadingNavigationBarButtons?.first?.title, "Leading")
+            XCTAssertEqual(node.trailingNavigationBarButtons?.first?.title, "Trailing")
+            XCTAssertEqual(node.backButton?.title, "Back")
+            XCTAssertEqual(node.leadingNavigationBarButtons?.first?.id, "stack/0/leadingNavigationBarButtons/0")
+            XCTAssertEqual(node.trailingNavigationBarButtons?.first?.id, "stack/0/trailingNavigationBarButtons/0")
+            XCTAssertEqual(node.backButton?.id, "stack/0/backButton/0")
         }
 
         func testInformationAndTemplatesWithoutBarButtons() {

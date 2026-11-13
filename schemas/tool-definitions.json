@@ -8694,6 +8694,10 @@
           "type": "boolean",
           "const": true
         },
+        "inputMode": {
+          "type": "string",
+          "enum": ["touch", "dpad"]
+        },
         "currentScreen": {
           "type": "object",
           "properties": {

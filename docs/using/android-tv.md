@@ -125,6 +125,13 @@ rail) until a new row scrolls into view, up to 12 presses, and stops when focus 
 leaves the list. The step to a card revealed this way in a rail is recorded as `focusNavigate`
 with `direction: "right"`, so `navigateTo` reaches it from the start of the rail. The replay presses
 right from wherever focus is, so it reaches the card only when focus starts in that rail.
+`explore { dryRun: true }` lists its planned steps as `tapOn` and `swipeOn` on a TV too, and returns
+`inputMode: "dpad"`: a run carries out each `tapOn` by moving focus to the target and selecting it,
+and each `swipeOn` by pressing along the list. On a touch device `inputMode` is `"touch"`.
+A `focusNavigate` call with `select: false` records a transition only when the screen changes within
+2 seconds of the call's start. A transition that a longer focus-only walk triggers, such as a
+category rail that switches content when focused, is not recorded, so `navigateTo` cannot replay
+it. With `select: true` the 2 seconds count from the select press.
 Both are available only when the server runs with `--embedded-sdk` and the app embeds the
 AutoMobile SDK; see [Navigation graph](navigation-graph.md#availability).
 

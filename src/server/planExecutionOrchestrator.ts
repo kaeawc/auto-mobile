@@ -71,6 +71,7 @@ import {
   rethrowDeviceLoss,
   sharedTestExecutionRepository,
   type VideoRecorder,
+  shortPlanVideoWarning,
   type VideoState,
 } from "./planExecutionRecords";
 import { executePlan, importPlanFromYaml } from "./planExecutorFactory";
@@ -696,6 +697,9 @@ export class PlanExecutionOrchestrator {
         state.androidTimerDriven = PlanPartitioner.isMultiDevicePlan(plan);
         await (state.androidTimerDriven ? session.start() : session.startFirstSegment());
         state.androidSession = session;
+        // Read the clock once startup resolves: capture begins here, so recorder setup time
+        // (device cleanup, config reads, display resolution) is not counted in the plan window.
+        state.androidStartedAtMs = this.timer.now();
         this.perfLog("Android segmented video recording started");
       } else {
         const recording = await this.videoRecorder.startVideoRecording({
@@ -764,7 +768,8 @@ export class PlanExecutionOrchestrator {
         "Finalizing segmented video recording",
         "Failed to finalize segmented video",
         async () => {
-          return this.packageAndroidVideo(await video.androidSession!.finalize());
+          const windowMs = this.timer.now() - (video.androidStartedAtMs ?? this.timer.now());
+          return this.packageAndroidVideo(await video.androidSession!.finalize(), windowMs);
         },
         video.warnings,
       );
@@ -804,11 +809,16 @@ export class PlanExecutionOrchestrator {
   }
 
   /** Packages a segmented session's result, with the best-effort on-disk manifest. */
-  private async packageAndroidVideo(finalized: SegmentedSessionResult): Promise<FinalizedVideo> {
+  private async packageAndroidVideo(
+    finalized: SegmentedSessionResult,
+    windowMs: number,
+  ): Promise<FinalizedVideo> {
+    const shortWarning = shortPlanVideoWarning(finalized.metadata, windowMs);
     const videoWarnings = [
       ...new Set([
         ...(finalized.warnings ?? []),
         ...finalized.metadata.flatMap((metadata) => metadata.warnings ?? []),
+        ...(shortWarning ? [shortWarning] : []),
       ]),
     ];
     this.perfLog(`Segmented video finalized (${finalized.filePaths.length} file(s))`);
@@ -897,7 +907,9 @@ export class PlanExecutionOrchestrator {
     const rollback = this.videoRecorder.rollbackVideoRecordingStart;
     const empty: FinalizedVideo = { videoFilePaths: [], videoRecordingIds: [] };
     const salvage = async (): Promise<FinalizedVideo> =>
-      androidSession ? this.packageAndroidVideo(androidSession.completedResult()) : empty;
+      // A cancelled plan's salvage and discard are partial by design and already say so;
+      // a zero window skips the coverage check.
+      androidSession ? this.packageAndroidVideo(androidSession.completedResult(), 0) : empty;
     if (owned || (!androidSession && !(iosRecordingId && rollback))) {
       return {
         label: "Cancelled plan video finalize",
@@ -912,7 +924,7 @@ export class PlanExecutionOrchestrator {
       capMs: CANCELLED_VIDEO_DISCARD_TIMEOUT_MS,
       run: async () => {
         if (androidSession) {
-          return this.packageAndroidVideo(await androidSession.finalizeWithoutDevice());
+          return this.packageAndroidVideo(await androidSession.finalizeWithoutDevice(), 0);
         }
         await rollback!(iosRecordingId!, { deviceWide: false });
         return empty;

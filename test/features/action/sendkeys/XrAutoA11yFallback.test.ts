@@ -15,7 +15,7 @@ import { FakeAndroidXrDetector } from "../../../fakes/FakeAndroidXrDetector";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
 import { setCapturedKeyboard } from "../../../../src/features/observe/output/elementProvenance";
-import { android, createSendKeysHarness, focused } from "../SendKeysTestHarness";
+import { android, createSendKeysHarness, focused, priorImeId } from "../SendKeysTestHarness";
 import { buildObserveResult } from "../../../helpers/observeFixture";
 
 interface CapturedSendKeys {
@@ -181,6 +181,70 @@ describe("Auto falls back to a11y when the AutoMobile IME cannot be used (#17801
     expect(result).toMatchObject({ success: true, resolvedMode: "ime", backend: "autoMobileIme" });
     expect(result.warning).toBeUndefined();
     expect(harness.committed).toEqual(["wifi"]);
+    expect(harness.inserted).toEqual([]);
+  });
+});
+
+describe("Auto falls back when the selected AutoMobile IME never binds (#17801)", () => {
+  /** The device report after #17804: Gboard shown, the search field focused and readable. */
+  const gboardFocused: ObserveResult = { ...focused, keyboard: { visible: true, package: GBOARD } };
+
+  function neverBinds(error: string) {
+    const harness = xrHarness(gboardFocused);
+    const attempts: string[] = [];
+    harness.client.commitViaIme = async (text) => {
+      attempts.push(text);
+      return { success: false, error };
+    };
+    return { harness, attempts };
+  }
+
+  test.each([
+    "IME service did not start within timeout",
+    "No active input connection within timeout",
+  ])("auto insert after %s types the text through the fallback", async (error) => {
+    const { harness, attempts } = neverBinds(error);
+    const result = await harness.executor.type({ action: "type", text: "wifi" });
+    expect(attempts).toEqual(["wifi"]);
+    expect(result).toMatchObject({
+      success: true,
+      requestedMode: "auto",
+      resolvedMode: "eventAll",
+    });
+    expect(result.error).toBeUndefined();
+    expect(harness.committed).toEqual([]);
+    // The prior keyboard is restored before the fallback types.
+    const imeSets = harness.adb.getExecutedCommands().filter((c) => c.includes("ime set"));
+    expect(imeSets.at(-1)).toBe(`shell ime set ${priorImeId}`);
+  });
+
+  test("auto replace after a binding failure sets the text through accessibility", async () => {
+    const { harness } = neverBinds("IME service did not start within timeout");
+    const result = await harness.executor.type({
+      action: "type",
+      text: "wifi",
+      operation: "replace",
+    });
+    expect(result).toMatchObject({ success: true, resolvedMode: "a11y" });
+    expect(harness.replaced).toEqual(["wifi"]);
+  });
+
+  test("an explicit ime mode still reports the binding failure", async () => {
+    const { harness } = neverBinds("IME service did not start within timeout");
+    const result = await harness.executor.type({ action: "type", text: "wifi", mode: "ime" });
+    expect(result).toMatchObject({
+      success: false,
+      resolvedMode: "ime",
+      error: "IME service did not start within timeout",
+      imeFailure: { stage: "activationBinding", textMayHaveBeenApplied: false },
+    });
+  });
+
+  test("a failure that may have typed text is never retried through the fallback", async () => {
+    const { harness, attempts } = neverBinds("Input connection lost during commit");
+    const result = await harness.executor.type({ action: "type", text: "wifi" });
+    expect(attempts).toEqual(["wifi"]);
+    expect(result).toMatchObject({ success: false, resolvedMode: "ime" });
     expect(harness.inserted).toEqual([]);
   });
 });

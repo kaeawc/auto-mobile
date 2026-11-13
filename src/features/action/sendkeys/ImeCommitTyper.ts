@@ -296,7 +296,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       });
     }
 
-    return withImeFailure(
+    const result = withImeFailure(
       await this.commitWithActiveIme({
         text,
         operation,
@@ -309,6 +309,10 @@ export class ImeCommitTyper implements AndroidModeTyper {
       "commit",
       { focusedFieldClass: routing.focusedFieldClass },
     );
+    // The IME was selected but never bound to the editor (on an Android XR headset with Gboard,
+    // "IME service did not start within timeout"), so nothing was typed: Auto may fall back
+    // exactly as when the switch itself failed (#17801).
+    return imeNeverBound(result) ? { ...result, imeActivationFailed: true } : result;
   }
 
   private async captureImeSpanSnapshot(
@@ -940,4 +944,16 @@ export function keyboardToRestore(
     `[SendKeys] The AutoMobile IME was left selected (likely by an earlier daemon); ${fallback} will be restored after the session`,
   );
   return fallback;
+}
+
+/** A commit that failed while binding the selected IME, with no text possibly applied. */
+function imeNeverBound(result: TextActionResult & { imeActivationFailed?: boolean }): boolean {
+  return (
+    !result.success &&
+    // Set only by the switch itself, which already decided whether a fallback is safe.
+    result.imeActivationFailed === undefined &&
+    result.sessionUnsafe !== true &&
+    result.imeFailure?.stage === "activationBinding" &&
+    !result.imeFailure.textMayHaveBeenApplied
+  );
 }

@@ -49,6 +49,9 @@ const UNMARKED_LINE = [
   /^\s*([-*+]|\d{1,9}[.)])\s*$/,
   /^\s{0,3}\[[^\]]+\]:/,
 ];
+// Blockquote markers before a line's content; the unmarked-line patterns test
+// what follows them, so `> ```` closes a fence inside a blockquote (#18193).
+const BLOCKQUOTE_PREFIX = /^(?:[ \t]*>)+/;
 // A trailing unescaped pipe closes a table row; a marker after it would be an
 // extra cell, which GFM drops, so the marker goes just before it.
 const TRAILING_PIPE = /(?<!\\)\|\s*$/;
@@ -84,7 +87,8 @@ export function annotateLines(markdown: string): string {
     .split(/\r?\n/)
     .map((line, index) => {
       const marker = `${MARK_OPEN}${index + 1}${MARK_CLOSE}`;
-      if (line.trim() === "" || UNMARKED_LINE.some((pattern) => pattern.test(line))) {
+      const content = line.replace(BLOCKQUOTE_PREFIX, "");
+      if (content.trim() === "" || UNMARKED_LINE.some((pattern) => pattern.test(content))) {
         return line;
       }
       const pipe = TRAILING_PIPE.exec(line);

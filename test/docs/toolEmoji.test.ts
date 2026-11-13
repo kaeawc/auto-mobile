@@ -132,6 +132,21 @@ describe("tool emoji docs check", () => {
     ]);
   });
 
+  test("checks references after a fenced block inside a blockquote", () => {
+    const markdown = [
+      "> Example:",
+      ">",
+      "> ```",
+      "> 👆 `tapOn`",
+      "> ```",
+      ">",
+      "> 🚀 `tapOn`",
+    ].join("\n");
+    expect(checkDoc("docs/tools.md", markdown, registry)).toEqual([
+      "docs/tools.md:7: 🚀 is launchApp's emoji but is used with tapOn (use 👆)",
+    ]);
+  });
+
   test("reports source lines across paragraphs, lists and table rows", () => {
     const markdown = [
       "# Tools",

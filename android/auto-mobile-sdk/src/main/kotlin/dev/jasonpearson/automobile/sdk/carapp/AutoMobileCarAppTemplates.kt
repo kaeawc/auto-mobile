@@ -66,23 +66,56 @@ internal interface MainThreadRunner {
   fun <T> run(block: () -> T): T
 }
 
-internal object LooperMainThreadRunner : MainThreadRunner {
-  private const val TIMEOUT_MS = 1_000L
+/** Posts to, and cancels on, the main thread. The seam [PostedMainThreadRunner] is tested over. */
+internal interface MainThreadPoster {
+  fun isCurrentThread(): Boolean
 
+  /** False when the main looper is gone and the task will never run. */
+  fun post(task: Runnable): Boolean
+
+  /** Drops [task] if it is still queued. A task already running is unaffected. */
+  fun cancel(task: Runnable)
+}
+
+internal class HandlerMainThreadPoster : MainThreadPoster {
+  private val handler by lazy { Handler(Looper.getMainLooper()) }
+
+  override fun isCurrentThread(): Boolean = Looper.myLooper() == Looper.getMainLooper()
+
+  override fun post(task: Runnable): Boolean = handler.post(task)
+
+  override fun cancel(task: Runnable) = handler.removeCallbacks(task)
+}
+
+internal class PostedMainThreadRunner(
+  private val poster: MainThreadPoster,
+  private val timeoutMs: Long = MAIN_THREAD_TIMEOUT_MS,
+) : MainThreadRunner {
   override fun <T> run(block: () -> T): T {
-    if (Looper.myLooper() == Looper.getMainLooper()) return block()
+    if (poster.isCurrentThread()) return block()
     val latch = CountDownLatch(1)
     var outcome: Result<T>? = null
-    Handler(Looper.getMainLooper()).post {
+    val task = Runnable {
       outcome = runCatching(block)
       latch.countDown()
     }
-    check(latch.await(TIMEOUT_MS, TimeUnit.MILLISECONDS)) { MAIN_THREAD_TIMEOUT }
+    check(poster.post(task)) { MAIN_THREAD_UNAVAILABLE }
+    if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+      // Nobody waits for this snapshot any more. Cancelling drops the task while it is still
+      // queued, which is the stalled-main-thread case; one already running finishes harmlessly.
+      poster.cancel(task)
+      throw IllegalStateException(MAIN_THREAD_TIMEOUT)
+    }
     return checkNotNull(outcome).getOrThrow()
   }
 }
 
+internal object LooperMainThreadRunner :
+  MainThreadRunner by PostedMainThreadRunner(HandlerMainThreadPoster())
+
 internal const val MAIN_THREAD_TIMEOUT = "main_thread_timeout"
+internal const val MAIN_THREAD_UNAVAILABLE = "main_thread_unavailable"
+internal const val MAIN_THREAD_TIMEOUT_MS = 1_000L
 
 private const val TEMPLATE_ID = "template"
 
@@ -105,6 +138,9 @@ internal class CarAppTemplateRecorder(private val mainThread: MainThreadRunner) 
     // Ids are relative here; the snapshot prefixes the screen's position in its stack.
     val node = CarAppTemplateMapper.map(template, TEMPLATE_ID)
     synchronized(lock) {
+      // disable() turns recording off and clears under this lock, so a write that raced it must
+      // not land afterwards.
+      if (!enabled) return
       templates[screen] = node
       sessionIds.getOrPut(manager) { nextSessionId++ }
     }
@@ -118,13 +154,19 @@ internal class CarAppTemplateRecorder(private val mainThread: MainThreadRunner) 
   }
 
   fun snapshot(): CarAppTemplateDocument {
-    val (recorded, sessions) =
-      synchronized(lock) { HashMap(templates) to sessionIds.entries.map { it.key to it.value } }
     return try {
       val walked = mainThread.run {
+        // Copy on the main thread, where records and stack pushes happen, so the walk cannot
+        // mix the templates of one state with the stacks of another.
+        val (recorded, sessions) =
+          synchronized(lock) {
+            HashMap(templates) to sessionIds.entries.map { it.key to it.value }
+          }
         sessions
           .sortedBy { it.second }
-          .mapNotNull { (manager, ordinal) -> walk(manager, "session$ordinal", recorded) }
+          .mapNotNull { (manager, ordinal) ->
+            walk(manager, "session$ordinal", recorded)
+          }
       }
       CarAppTemplateDocument(enabled = true, sessions = walked)
     } catch (error: IllegalStateException) {

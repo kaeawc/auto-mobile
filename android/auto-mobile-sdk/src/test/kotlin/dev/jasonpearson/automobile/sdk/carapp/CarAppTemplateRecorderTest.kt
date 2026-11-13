@@ -131,6 +131,45 @@ class CarAppTemplateRecorderTest {
   }
 
   @Test
+  fun `a push and record during the walk are reported together`() {
+    val root = FixedScreen(carContext, message("Root"))
+    push(root)
+    val pushed = FixedScreen(carContext, message("Pushed"))
+    lateinit var walking: CarAppTemplateRecorder
+    walking =
+      CarAppTemplateRecorder(
+        object : MainThreadRunner {
+          override fun <T> run(block: () -> T): T {
+            // Stands in for onGetTemplate() landing on the main thread just before the walk: the
+            // copy has to happen inside the walk, or this screen is reported without its template.
+            push(pushed)
+            walking.record(pushed, message("Pushed"))
+            return block()
+          }
+        },
+      )
+    walking.enabled = true
+    walking.record(root, root.onGetTemplate())
+
+    val screens = walking.snapshot().sessions.single().screens
+
+    assertEquals(listOf("Root", "Pushed"), screens.map { it.template?.message })
+  }
+
+  @Test
+  fun `record stores nothing once recording is turned off`() {
+    val screen = FixedScreen(carContext, message("Racing"))
+    push(screen)
+    recorder.enabled = false
+
+    recorder.record(screen, screen.onGetTemplate())
+
+    // Recording back on, so the empty snapshot is the dropped write and not a disabled recorder.
+    recorder.enabled = true
+    assertTrue(recorder.snapshot().sessions.isEmpty())
+  }
+
+  @Test
   fun `clear forgets every recorded screen`() {
     val screen = FixedScreen(carContext, message("Gone"))
     push(screen)

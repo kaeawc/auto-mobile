@@ -185,6 +185,12 @@ export const AMBIENT_ENV = {
     default: "unset",
     doc: "Windows local app data directory; ambient.",
   },
+  PUBLIC: {
+    name: "PUBLIC",
+    kind: "path",
+    default: "unset",
+    doc: "Windows public profile directory; ambient, fallback for head unit screenshots when the temp path has whitespace.",
+  },
   MCP_SERVER_VERSION: {
     name: "MCP_SERVER_VERSION",
     kind: "string",

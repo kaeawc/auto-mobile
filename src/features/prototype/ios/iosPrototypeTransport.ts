@@ -55,6 +55,7 @@ import {
   type PrototypeAssetUpload,
 } from "../prototypeAssets";
 import type { PrototypeAssetCache } from "../prototypeAssetCache";
+import { PrototypeAssetPutLedger } from "../prototypeAssetPutLedger";
 import type { PrototypeSpec } from "../prototypeSpec";
 import { prototypeClearStorageUnsupportedMessage } from "../prototypeStorage";
 import type {
@@ -176,21 +177,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class IosPrototypeTransport implements PrototypeTransport {
-  /** The latest cache put started per asset id, so a failed put only cleans up its own entry (#18256). */
-  private readonly cachePutGenerations = new Map<string, number>();
-  private nextCachePutGeneration = 0;
+  /** The latest cache put per device and asset id, so a failed put only cleans up its own entry. */
+  private readonly cachePuts: PrototypeAssetPutLedger;
 
   /**
    * `assetCache` records each confirmed upload under the device's id, so the web page can inline
-   * the image as it does for Android; without it uploads are not cached.
+   * the image as it does for Android; without it uploads are not cached. Every transport for one
+   * device must pass the same `puts` ledger, since they write the same cache keys (#18282).
    */
   constructor(
     private readonly agent: PrototypeAgentClient,
     private readonly assetCache?: {
       readonly serial: string;
       readonly cache: Pick<PrototypeAssetCache, "put" | "remove">;
+      readonly puts?: PrototypeAssetPutLedger;
     },
-  ) {}
+  ) {
+    this.cachePuts = assetCache?.puts ?? new PrototypeAssetPutLedger();
+  }
 
   /**
    * Whether the agent's handshake advertised `capability`: a request type, or a spec feature it
@@ -391,15 +395,11 @@ export class IosPrototypeTransport implements PrototypeTransport {
       options,
     );
     if (reply.success && !reply.error) {
-      const generation = ++this.nextCachePutGeneration;
-      this.cachePutGenerations.set(asset.id, generation);
+      const settle = this.cachePuts.begin(this.assetCache?.serial ?? "", asset.id);
       const cached = await this.cacheAsset(`cache prototype asset ${asset.id}`, (cache, serial) =>
         cache.put(serial, snapshot),
       );
-      const latest = this.cachePutGenerations.get(asset.id) === generation;
-      if (latest) {
-        this.cachePutGenerations.delete(asset.id);
-      }
+      const latest = settle();
       if (!cached && latest) {
         // An older entry under this id would otherwise let the web page inline the previous bytes.
         // A newer put started meanwhile owns the entry, so removing it would drop the newer bytes.

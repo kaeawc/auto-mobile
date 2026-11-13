@@ -7,6 +7,7 @@ import {
   PROTOTYPE_AGENT_PROTOCOL_VERSION,
 } from "../../../src/features/prototype/ios/prototypeAgentClient";
 import type { PrototypeAssetCache } from "../../../src/features/prototype/prototypeAssetCache";
+import { PrototypeAssetPutLedger } from "../../../src/features/prototype/prototypeAssetPutLedger";
 import type { PrototypeAssetUpload } from "../../../src/features/prototype/prototypeAssets";
 import type { PrototypeSpec } from "../../../src/features/prototype/prototypeSpec";
 import {
@@ -34,6 +35,62 @@ const spec: PrototypeSpec = {
 };
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const asset: PrototypeAssetUpload = { id: "shot", mimeType: "image/png", bytes: PNG };
+
+/**
+ * A cache that serializes like FilePrototypeAssetCache and holds its first put until the test
+ * fails it, so later puts queue behind it.
+ */
+function gatedFirstPutCache(): {
+  store: FakePrototypeAssetCache;
+  cache: Pick<PrototypeAssetCache, "put" | "remove">;
+  firstPutStarted(): Promise<void>;
+  failFirstPut(error: Error): void;
+  settled(): Promise<void>;
+} {
+  const store = new FakePrototypeAssetCache();
+  let failFirstPut: (error: Error) => void = () => undefined;
+  const firstPutGate = new Promise<void>((_resolve, reject) => {
+    failFirstPut = reject;
+  });
+  let pending: Promise<void> = Promise.resolve();
+  let puts = 0;
+  const serialize = (work: () => Promise<void>): Promise<void> => {
+    const next = pending.then(work);
+    pending = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+  return {
+    store,
+    cache: {
+      put: (serial, upload) =>
+        serialize(async () => {
+          puts += 1;
+          if (puts === 1) {
+            await firstPutGate;
+          }
+          await store.put(serial, upload);
+        }),
+      remove: (serial, id) => serialize(() => store.remove(serial, id)),
+    },
+    firstPutStarted: async () => {
+      while (puts === 0) {
+        await Promise.resolve();
+      }
+    },
+    failFirstPut: (error) => failFirstPut(error),
+    settled: async () => {
+      // A cleanup queued by a settling put joins the queue after the current tail.
+      let tail: Promise<void> | undefined;
+      while (tail !== pending) {
+        tail = pending;
+        await tail;
+      }
+    },
+  };
+}
 
 /** What each platform put on the wire, in one shared vocabulary. */
 interface Harness {
@@ -211,45 +268,62 @@ describe("IosPrototypeTransport", () => {
 
   test("a failed cache put keeps a newer queued put for the same id", async () => {
     const agent = new FakePrototypeAgentClient();
-    const store = new FakePrototypeAssetCache();
-    let failFirstPut: (error: Error) => void = () => undefined;
-    const firstPutGate = new Promise<void>((_resolve, reject) => {
-      failFirstPut = reject;
-    });
-    let pending: Promise<void> = Promise.resolve();
-    let puts = 0;
-    // Serializes like FilePrototypeAssetCache: each operation waits for the previous one.
-    const serialize = (work: () => Promise<void>): Promise<void> => {
-      const next = pending.then(work);
-      pending = next.then(
-        () => undefined,
-        () => undefined,
-      );
-      return next;
-    };
-    const cache: Pick<PrototypeAssetCache, "put" | "remove"> = {
-      put: (serial, upload) =>
-        serialize(async () => {
-          puts += 1;
-          if (puts === 1) {
-            await firstPutGate;
-          }
-          await store.put(serial, upload);
-        }),
-      remove: (serial, id) => serialize(() => store.remove(serial, id)),
-    };
-    const transport = new IosPrototypeTransport(agent, { serial: "sim-1", cache });
+    const gated = gatedFirstPutCache();
+    const transport = new IosPrototypeTransport(agent, { serial: "sim-1", cache: gated.cache });
     const newer = { ...asset, bytes: Uint8Array.from([9, 9]) };
     const first = transport.putAsset(asset);
     const second = transport.putAsset(newer);
-    while (puts === 0) {
-      await Promise.resolve();
-    }
-    failFirstPut(new Error("disk full"));
+    await gated.firstPutStarted();
+    gated.failFirstPut(new Error("disk full"));
     expect((await first).success).toBe(true);
     expect((await second).success).toBe(true);
-    await pending;
-    expect(await store.get("sim-1", "shot")).toEqual(newer);
+    await gated.settled();
+    expect(await gated.store.get("sim-1", "shot")).toEqual(newer);
+  });
+
+  test("a stale failed put from a replaced transport keeps the newer transport's bytes", async () => {
+    const gated = gatedFirstPutCache();
+    const puts = new PrototypeAssetPutLedger();
+    const replaced = new IosPrototypeTransport(new FakePrototypeAgentClient(), {
+      serial: "sim-1",
+      cache: gated.cache,
+      puts,
+    });
+    const replacement = new IosPrototypeTransport(new FakePrototypeAgentClient(), {
+      serial: "sim-1",
+      cache: gated.cache,
+      puts,
+    });
+    const newer = { ...asset, bytes: Uint8Array.from([9, 9]) };
+    const stale = replaced.putAsset(asset);
+    const fresh = replacement.putAsset(newer);
+    await gated.firstPutStarted();
+    gated.failFirstPut(new Error("disk full"));
+    expect((await stale).success).toBe(true);
+    expect((await fresh).success).toBe(true);
+    await gated.settled();
+    expect(await gated.store.get("sim-1", "shot")).toEqual(newer);
+  });
+
+  test("a failed put on one transport still drops the older bytes another transport cached", async () => {
+    const cache = new FakePrototypeAssetCache();
+    const puts = new PrototypeAssetPutLedger();
+    const replaced = new IosPrototypeTransport(new FakePrototypeAgentClient(), {
+      serial: "sim-1",
+      cache,
+      puts,
+    });
+    const replacement = new IosPrototypeTransport(new FakePrototypeAgentClient(), {
+      serial: "sim-1",
+      cache,
+      puts,
+    });
+    await replaced.putAsset(asset);
+    cache.putError = new Error("disk full");
+    expect((await replacement.putAsset({ ...asset, bytes: Uint8Array.from([9, 9]) })).success).toBe(
+      true,
+    );
+    expect(await cache.get("sim-1", "shot")).toBeUndefined();
   });
 
   test("an aborted upload sends nothing; an unanswered one is indeterminate", async () => {

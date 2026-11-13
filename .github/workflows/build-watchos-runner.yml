@@ -22,6 +22,13 @@ on:
       sha256:
         description: "SHA256 checksum of the watchOS runner archive"
         value: ${{ jobs.build.outputs.sha256 }}
+  # Trial the hosted build on PRs that touch it; no upload (inputs are empty outside workflow_call).
+  pull_request:
+    paths:
+      - ".github/workflows/build-watchos-runner.yml"
+      - "scripts/ios/build-simulator-runner-release.sh"
+      - "ios/control-proxy/project.yml"
+      - "ios/control-proxy/CtrlProxy.xcodeproj/xcshareddata/xcschemes/CtrlProxyWatch.xcscheme"
   # Manual build check outside a release; it uploads nothing.
   workflow_dispatch:
 

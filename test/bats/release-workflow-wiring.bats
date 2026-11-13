@@ -1224,10 +1224,14 @@ load yq-helpers
     grep -Fq "build-simulator-runner-release.sh --platform ${platform} --output /tmp/${platform}-runner-macos.zip" "$builder"
     grep -Fq "name: ${platform}-runner" "$builder"
     grep -Fq "path: /tmp/${platform}-runner-macos.zip" "$builder"
-    # Builders are reusable or dispatched by hand: they never run on pull requests or pushes.
+    # Builders are reusable, dispatched by hand, or trialled on pull requests that touch them: never push or schedule.
     grep -Fxq "  workflow_call:" "$builder"
     grep -Fxq "  workflow_dispatch:" "$builder"
-    run grep -Eq '^  (pull_request|pull_request_target|push|schedule):' "$builder"
+    grep -Fxq "  pull_request:" "$builder"
+    run grep -Eq '^  (pull_request_target|push|schedule):' "$builder"
     [ "$status" -ne 0 ]
+    # Pull-request runs never upload: the upload step is gated on the workflow_call input, empty here.
+    run yq -r '.jobs.build.steps[] | select(.uses == "actions/upload-artifact@v6") | .if' "$builder"
+    [ "$output" = '${{ inputs.upload-artifact }}' ]
   done
 }

@@ -26,6 +26,9 @@ export const carPlayTemplateSchema = (depth = 0) => {
       tabs: z.array(carPlayChildSchema(depth)).optional(),
       template: carPlayChildSchema(depth).optional(),
       actions: z.array(carPlayChildSchema(depth)).optional(),
+      leadingNavigationBarButtons: z.array(carPlayChildSchema(depth)).optional(),
+      trailingNavigationBarButtons: z.array(carPlayChildSchema(depth)).optional(),
+      backButton: carPlayChildSchema(depth).optional(),
     })
     .passthrough();
 };
@@ -54,6 +57,9 @@ export interface CarPlayTemplateNode {
   tabs?: CarPlayTemplateNode[];
   template?: CarPlayTemplateNode;
   actions?: CarPlayTemplateNode[];
+  leadingNavigationBarButtons?: CarPlayTemplateNode[];
+  trailingNavigationBarButtons?: CarPlayTemplateNode[];
+  backButton?: CarPlayTemplateNode;
   [key: string]: unknown;
 }
 
@@ -73,4 +79,37 @@ export type CarPlayTemplateDocument = z.infer<typeof carPlayTemplateDocumentSche
 
 export function parseCarPlayTemplateDocument(value: unknown): CarPlayTemplateDocument {
   return carPlayTemplateDocumentSchema.parse(value);
+}
+
+const carPlayActionSchema = z.enum(["select", "back", "popToRoot"]);
+
+export const carPlayActionRequestSchema = z
+  .object({
+    id: z.string().optional(),
+    action: carPlayActionSchema.default("select"),
+  })
+  .passthrough()
+  .refine((request) => request.action !== "select" || Boolean(request.id?.trim()), {
+    message: "select requires a nonempty id",
+    path: ["id"],
+  });
+
+export type CarPlayActionRequest = z.input<typeof carPlayActionRequestSchema>;
+
+export const carPlayActionResponseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.enum(["ok", "unsupported", "not_found", "failed"]),
+    simulated: z.literal("sdk"),
+    reason: z.string().optional(),
+    id: z.string().optional(),
+    action: carPlayActionSchema,
+    templates: carPlayTemplateDocumentSchema,
+  })
+  .passthrough();
+
+export type CarPlayActionResponse = z.infer<typeof carPlayActionResponseSchema>;
+
+export function parseCarPlayActionResponse(value: unknown): CarPlayActionResponse {
+  return carPlayActionResponseSchema.parse(value);
 }

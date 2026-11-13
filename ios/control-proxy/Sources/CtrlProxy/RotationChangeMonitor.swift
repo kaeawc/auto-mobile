@@ -11,6 +11,8 @@ final class RotationChangeMonitor: Sendable {
     private let changeGeneration = RotationChangeGeneration()
     private let signal: any RotationChangeSignaling
 
+    var generation: UInt64 { changeGeneration.current }
+
     init(signal: any RotationChangeSignaling) {
         self.signal = signal
         signal.startObserving { [weak self] in

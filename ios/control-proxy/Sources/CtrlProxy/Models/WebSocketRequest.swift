@@ -40,6 +40,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case rotate(RequestRotate)
     case location(RequestLocation)
     case setHingeAngle(RequestSetHingeAngle)
+    case refreshGeometry(RequestEnvelope)
     case appearance(RequestAppearance)
     case siri(RequestSiri)
     case clipboard(RequestClipboard)
@@ -98,7 +99,8 @@ public enum WebSocketRequest: Decodable, Sendable {
 
     private static func decode(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
         switch requestType {
-        case .requestHierarchy, .requestHierarchyIfStale, .setHierarchyPollInterval, .requestScreenshot:
+        case .requestHierarchy, .requestHierarchyIfStale, .setHierarchyPollInterval, .requestScreenshot,
+             .refreshGeometry:
             return try decodeHierarchy(requestType, from: decoder)
         case .requestTapCoordinates, .requestSwipe, .requestTwoFingerSwipe, .requestMultiFingerSwipe, .requestDrag,
              .requestPinch, .requestPathGesture:
@@ -137,6 +139,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try .setHierarchyPollInterval(RequestSetHierarchyPollInterval(from: decoder))
         case .requestScreenshot:
             return try .requestScreenshot(RequestEnvelope(from: decoder))
+        case .refreshGeometry:
+            return try .refreshGeometry(RequestEnvelope(from: decoder))
         default:
             throw CommandError.unknownCommand(requestType.rawValue)
         }
@@ -351,6 +355,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .rotate: return .requestRotate
         case .location: return .requestLocation
         case .setHingeAngle: return .setHingeAngle
+        case .refreshGeometry: return .refreshGeometry
         case .appearance: return .requestAppearance
         case .siri: return .requestSiri
         case .clipboard: return .requestClipboard
@@ -412,6 +417,7 @@ public enum WebSocketRequest: Decodable, Sendable {
              let .listPreferenceFiles(payload),
              let .getSdkCapabilities(payload):
             return payload
+        case let .refreshGeometry(payload): return payload
         case let .setVoiceOverState(payload): return payload
         case let .accessibilityAudit(payload): return payload
         case let .accessibilityFocus(payload): return payload

@@ -290,4 +290,31 @@ final class FailureResponseWireTests: XCTestCase {
             ]
         )
     }
+
+    func testRefreshGeometryCaptureFailureWire() async throws {
+        let locator = FakeElementLocator()
+        locator.onCapture = { throw VerbatimLocalizedError(message: "capture failed") }
+        let commandHandler = CommandHandler(
+            elementLocator: locator, gesturePerformer: FakeGesturePerformer(), perf: PerfProvider()
+        )
+        try await assertFailure(
+            "refresh_geometry",
+            using: commandHandler,
+            expected: [
+                "type": "refresh_geometry_result",
+                "requestId": requestId,
+                "success": false,
+                "error": "capture failed",
+                "refreshed": false,
+                "rotation": NSNull(),
+                "appWidth": NSNull(),
+                "appHeight": NSNull(),
+                "screenWidth": NSNull(),
+                "screenHeight": NSNull(),
+                "observationWidth": NSNull(),
+                "observationHeight": NSNull(),
+                "foregroundBundleId": NSNull(),
+            ]
+        )
+    }
 }

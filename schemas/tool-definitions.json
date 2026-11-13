@@ -20612,6 +20612,47 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "headUnit": {
+                "type": "object",
+                "properties": {
+                  "display": {
+                    "description": "The display value tapAt and pressButton take.",
+                    "type": "string",
+                    "const": "headUnit"
+                  },
+                  "role": {
+                    "type": "string",
+                    "const": "projected"
+                  },
+                  "projectedBy": {
+                    "type": "string",
+                    "const": "androidAuto"
+                  },
+                  "console": {
+                    "description": "The DHU process this daemon owns; changes when it restarts.",
+                    "type": "string"
+                  },
+                  "configPath": {
+                    "type": "string"
+                  },
+                  "sizePx": {
+                    "description": "Head-unit pixels from the config; absent when the config could not be read.",
+                    "type": "object",
+                    "properties": {
+                      "width": {
+                        "type": "number"
+                      },
+                      "height": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["width", "height"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["display", "role", "projectedBy", "console"],
+                "additionalProperties": false
               }
             },
             "required": [

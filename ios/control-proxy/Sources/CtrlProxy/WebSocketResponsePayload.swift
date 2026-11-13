@@ -17,6 +17,7 @@ extension ScreenshotResponse: WebSocketResponsePayload {}
 extension KeyboardResponse: WebSocketResponsePayload {}
 extension RotateResponse: WebSocketResponsePayload {}
 extension HingeAngleResponse: WebSocketResponsePayload {}
+extension RefreshGeometryResponse: WebSocketResponsePayload {}
 extension CurrentFocusResponse: WebSocketResponsePayload {}
 extension TraversalOrderResponse: WebSocketResponsePayload {}
 extension AccessibilityFocusResponse: WebSocketResponsePayload {}

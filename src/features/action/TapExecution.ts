@@ -1,6 +1,7 @@
 import { deadlineRequest, type TapOnCall } from "./ActionCall";
 import {
   deviceIosSdkBridgeTapper,
+  iosBackendFields,
   type IosSdkBridgeTapper,
   type IosSdkTapOutcome,
 } from "./IosSdkBridgeTapRouter";
@@ -20,6 +21,7 @@ import { freshTapHierarchy } from "./freshTapHierarchy";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
 import { StaleDisplayError, withStaleDisplay } from "../observe/StaleDisplayError";
+import { assertTapGeometryCurrent } from "../observe/transposedLayoutGeometry";
 import { isFocusEditableElement } from "../utility/ElementResolver";
 import { hasAccessibilityAction } from "../utility/elementProperties";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -843,6 +845,7 @@ export class TapExecution {
   ): Promise<void> {
     const { signal } = state;
     const { observeResult } = target;
+    assertTapGeometryCurrent(this.host.device().platform, observeResult);
 
     reportToolDispatched();
     await this.host.runPlatformTap({
@@ -1039,16 +1042,4 @@ export class TapExecution {
   ): LongPressMetadata {
     return this.host.longPressMetadataDetector().detect(previousObservation, currentObservation);
   }
-}
-
-/** `backend` and `fallbackReason` for a tap on an iOS SDK bridge node; nothing otherwise. */
-function iosBackendFields(
-  outcome: IosSdkTapOutcome | undefined,
-): Pick<TapOnElementResult, "backend" | "fallbackReason"> {
-  if (!outcome) {
-    return {};
-  }
-  return outcome.backend === "sdk"
-    ? { backend: "sdk" }
-    : { backend: "xctest", fallbackReason: outcome.fallbackReason };
 }

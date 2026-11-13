@@ -616,6 +616,25 @@
       }
     },
     {
+      "name" : "refresh_geometry_result",
+      "wire" : {
+        "appHeight" : 951,
+        "appWidth" : 669,
+        "foregroundBundleId" : "com.example.fixture",
+        "observationHeight" : 669,
+        "observationWidth" : 951,
+        "refreshed" : true,
+        "requestId" : "fixture-request-id",
+        "rotation" : 1,
+        "screenHeight" : 678,
+        "screenWidth" : 466,
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "refresh_geometry_result"
+      }
+    },
+    {
       "name" : "accessibility_audit_result",
       "wire" : {
         "engine" : "xcuitest",
@@ -1498,6 +1517,7 @@
     "press_home_result",
     "press_key_result",
     "recent_apps_result",
+    "refresh_geometry_result",
     "remove_preference_result",
     "reset_permissions_result",
     "rotate_result",

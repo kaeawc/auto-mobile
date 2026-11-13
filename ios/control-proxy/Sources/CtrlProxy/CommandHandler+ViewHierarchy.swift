@@ -5,6 +5,20 @@ import os
 extension CommandHandler {
     // MARK: - View Hierarchy
 
+    func handleRefreshGeometry(
+        _ request: RequestEnvelope, startTime: Date
+    )
+        async -> RefreshGeometryResponse
+    {
+        await respond(requestId: request.requestId, startTime: startTime) {
+            let geometry = try await elementLocator.refreshGeometry()
+            return RefreshGeometryResponse(
+                requestId: request.requestId, success: true,
+                geometry: geometry, totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
     func captureHierarchy(disableAllFiltering: Bool = false) async throws -> ViewHierarchy {
         try await captureAndRecordHierarchy(disableAllFiltering: disableAllFiltering)
     }

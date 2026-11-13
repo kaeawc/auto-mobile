@@ -44,6 +44,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case requestRotate = "request_rotate"
     case requestLocation = "request_location"
     case setHingeAngle = "set_hinge_angle"
+    case refreshGeometry = "refresh_geometry"
     case requestAppearance = "request_appearance"
     case requestSiri = "request_siri"
 
@@ -126,6 +127,7 @@ extension RequestType {
         case .requestRotate: return .rotateResult
         case .requestLocation: return .locationResult
         case .setHingeAngle: return .hingeAngleResult
+        case .refreshGeometry: return .refreshGeometryResult
         case .requestAppearance: return .appearanceResult
         case .requestSiri: return .siriResult
         case .requestClipboard: return .clipboardResult

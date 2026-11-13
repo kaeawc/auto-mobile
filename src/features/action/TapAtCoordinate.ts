@@ -40,6 +40,10 @@ import type {
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import { withVoiceOverTimeoutContextIfOn } from "./tapIosVoiceOver";
 import { withStaleDisplay } from "../observe/StaleDisplayError";
+import {
+  describeTransposedLayout,
+  staleGeometryTapError,
+} from "../observe/transposedLayoutGeometry";
 import { isAdoptableCapture } from "../observe/isAdoptableCapture";
 import {
   hasSameTapTargetingLayout,
@@ -302,15 +306,9 @@ export class TapAtCoordinate extends BaseVisualChange {
         signal,
         transitions: this.displayTransitionReader,
       });
-    const stale = this.staleSnapshotReason(options, observation);
-    if (stale) {
-      return {
-        success: false,
-        x: inputPoint(options).x,
-        y: inputPoint(options).y,
-        action,
-        error: stale,
-      };
+    const refusal = this.preDispatchRefusal(options, observation);
+    if (refusal) {
+      return refusal;
     }
     const resolved = await this.resolveWithXr(options, observation, signal);
     if ("error" in resolved) {
@@ -491,15 +489,9 @@ export class TapAtCoordinate extends BaseVisualChange {
               this.staleDisplay(transitionRevision.observedGeneration),
             );
           }
-          const stale = this.staleSnapshotReason(options, observeResult);
-          if (stale) {
-            return {
-              success: false,
-              x: inputPoint(options).x,
-              y: inputPoint(options).y,
-              action,
-              error: stale,
-            };
+          const refusal = this.preDispatchRefusal(options, observeResult);
+          if (refusal) {
+            return refusal;
           }
           const resolved = await this.resolveWithXr(options, observeResult, signal);
           if ("error" in resolved) {
@@ -600,6 +592,23 @@ export class TapAtCoordinate extends BaseVisualChange {
     if (this.device.platform === "ios" && result.success && result.observation) {
       result.effect = this.deriveInteractionEffect(previousObservation, result.observation);
     }
+  }
+
+  /** A stale snapshot, or an iOS observation laid out for the transposed screen (#18245). */
+  private preDispatchRefusal(
+    options: TapAtOptions,
+    observation: ObserveResult,
+  ): TapAtResult | undefined {
+    const mismatch =
+      this.device.platform === "ios" ? describeTransposedLayout(observation) : undefined;
+    const error =
+      this.staleSnapshotReason(options, observation) ??
+      (mismatch === undefined ? undefined : staleGeometryTapError(mismatch));
+    if (error === undefined) {
+      return undefined;
+    }
+    const { x, y } = inputPoint(options);
+    return { success: false, x, y, action: options.action ?? "tap", error };
   }
 
   private captureTransitionRevision(): { revision: number; observedGeneration: number } {

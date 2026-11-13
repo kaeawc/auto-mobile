@@ -186,6 +186,7 @@ extension CommandHandler {
                 throw VerbatimLocalizedError(message: "Hinge angle must be a finite number from 0 to 180 degrees.")
             }
             try await hingeAngleSetter.setHingeAngle(request.angle)
+            _ = try await elementLocator.refreshGeometry()
             return HingeAngleResponse(
                 requestId: request.requestId,
                 success: true,

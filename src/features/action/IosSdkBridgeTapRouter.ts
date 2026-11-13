@@ -1,5 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models";
+import type { TapOnElementResult } from "../../models/TapOnElementResult";
 import type { ObservationFallbackReason } from "../../models/ObserveResult";
 import { serverConfig } from "../../utils/ServerConfig";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
@@ -163,4 +164,16 @@ export function deviceIosSdkBridgeTapper(
     client: () => IOSCtrlProxyClient.getExistingInstance(device.deviceId),
     webClient: () => IOSCtrlProxyClient.getExistingInstance(device.deviceId),
   });
+}
+
+/** `backend` and `fallbackReason` for a tap on an iOS SDK bridge node; nothing otherwise. */
+export function iosBackendFields(
+  outcome: IosSdkTapOutcome | undefined,
+): Pick<TapOnElementResult, "backend" | "fallbackReason"> {
+  if (!outcome) {
+    return {};
+  }
+  return outcome.backend === "sdk"
+    ? { backend: "sdk" }
+    : { backend: "xctest", fallbackReason: outcome.fallbackReason };
 }

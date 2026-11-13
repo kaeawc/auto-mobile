@@ -103,6 +103,23 @@ final class ResponseContractFixtureTests: XCTestCase {
             HingeAngleResponse(requestId: requestId, success: false, error: "unsupported", angle: 90, totalTimeMs: 17)
         )
         try append(
+            "refresh_geometry_result",
+            RefreshGeometryResponse(
+                requestId: requestId, success: true,
+                geometry: RefreshGeometryResponse.Geometry(
+                    geometry: GestureCoordinateGeometry(
+                        app: GestureSize(width: 669, height: 951),
+                        screen: GestureSize(width: 466, height: 678),
+                        observation: GestureSize(width: 951, height: 669),
+                        rotation: 1,
+                        pinnedToObservation: true
+                    ),
+                    foregroundBundleId: "com.example.fixture"
+                ),
+                totalTimeMs: 17
+            )
+        )
+        try append(
             "accessibility_audit_result",
             AccessibilityAuditResponse(
                 requestId: requestId,

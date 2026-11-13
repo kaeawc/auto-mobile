@@ -317,6 +317,11 @@ private final class ScriptedRotateElementLocator: ElementLocating {
     }
 
     func findElement(byResourceId _: String) -> Any? { nil }
+    func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
+        _ = try getViewHierarchy(disableAllFiltering: false)
+        return nil
+    }
+
     func findElement(byText _: String) -> Any? { nil }
     func findElement(byText _: String, bounds _: ElementBounds) -> Any? { nil }
     func trackObservedBundleId(_: String) {}

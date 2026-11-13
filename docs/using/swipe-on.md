@@ -1,5 +1,9 @@
 # `swipeOn`
 
+| Tool                    | What it does                       | Requires              |
+| ----------------------- | ---------------------------------- | --------------------- |
+| 👉 <code>swipeOn</code> | Swipe/scroll on screen or elements | Android, iOS, watchOS |
+
 `swipeOn` swipes in a `direction` on the screen or a selected `container`.
 On iOS, a container thinner than 48 pt along the swipe axis (such as a sheet
 grabber) starts the drag at its centre and travels 240 pt in that direction,

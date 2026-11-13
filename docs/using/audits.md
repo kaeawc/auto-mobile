@@ -1,5 +1,10 @@
 # Accessibility and performance audits
 
+| Tool                               | What it does                                                                                    | Requires |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------- | -------- |
+| 🚦 <code>performanceAudit</code>   | Pass/fail performance checks of an app on the current screen, against the configured thresholds | —        |
+| ✅ <code>accessibilityAudit</code> | Audit the accessibility of the current screen                                                   | —        |
+
 Two tools check the current screen on demand and can fail a plan step: `accessibilityAudit` for
 accessibility and `performanceAudit` for UI performance and memory. Neither changes feature-flag
 state. Both are off by default; enable them with `setToolEnabled`.

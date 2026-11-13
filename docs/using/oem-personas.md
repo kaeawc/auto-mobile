@@ -1,5 +1,9 @@
 # Manufacturer profiles
 
+| Tool                                | What it does                                                                                                                                 | Requires |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 🏭 <code>manufacturerProfile</code> | Android: apply an OEM manufacturer profile on a stock device by composing the keyboard profile, `killProfile` and `displayProfile` executors | —        |
+
 The `manufacturerProfile` tool approximates an OEM device on a stock Android emulator
 or device. A manufacturer profile is a named, versioned bundle of facets. Each facet is applied by an existing tool:
 

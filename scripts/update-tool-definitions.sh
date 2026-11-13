@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Regenerate MCP tool definitions for IDE completion and each tool's Requires
-# cell in docs/tools.md.
+# cell in docs/tools.md and on each tool's own page under docs/using/.
 #
 # Usage:
 #   ./scripts/update-tool-definitions.sh
@@ -33,17 +33,18 @@ echo "Generating tool definitions..."
 # Keep the pre-commit generated output aligned with the repository formatter.
 # Otherwise generation after `bun run format` immediately recreates formatting
 # drift that the CI formatter gate would reject.
-(cd "${PROJECT_ROOT}" && bunx oxfmt schemas/tool-definitions.json docs/tools.md)
+GENERATED=(schemas/tool-definitions.json docs/tools.md docs/using)
+(cd "${PROJECT_ROOT}" && bunx oxfmt "${GENERATED[@]}")
 
 if [[ "${1:-}" == "--no-stage" ]]; then
-  echo "Generated schemas/tool-definitions.json and docs/tools.md without staging."
+  echo "Generated schemas/tool-definitions.json and tool docs without staging."
   exit 0
 fi
 
-if git -C "${PROJECT_ROOT}" diff --quiet -- schemas/tool-definitions.json docs/tools.md; then
-  echo "schemas/tool-definitions.json and docs/tools.md are up to date."
+if git -C "${PROJECT_ROOT}" diff --quiet -- "${GENERATED[@]}"; then
+  echo "schemas/tool-definitions.json and tool docs are up to date."
   exit 0
 fi
 
-git -C "${PROJECT_ROOT}" add schemas/tool-definitions.json docs/tools.md
-echo "Updated and staged schemas/tool-definitions.json and docs/tools.md."
+git -C "${PROJECT_ROOT}" add -- "${GENERATED[@]}"
+echo "Updated and staged schemas/tool-definitions.json and tool docs."

@@ -25,9 +25,11 @@ hooks:
 plugins:
   - search
   # Old paths keep working after docs/design-docs/ became docs/how-it-works/ and
-  # docs/decisions/ moved into docs/devlog/ (#18138, #18139).
+  # docs/decisions/ moved into docs/devlog/ (#18138, #18139), and contributor pages
+  # moved out of docs/using/ (#18140).
   - redirects:
       redirect_maps:
+        "using/agent-benchmarks.md": "how-it-works/agent-benchmarks.md"
         "decisions/androidx-baseline-profile-generator.md": "devlog/2026-11-08-androidx-baseline-profile-generator.md"
         "decisions/androidx-car-app-template-snapshots.md": "devlog/2026-11-04-androidx-car-app-template-snapshots.md"
         "decisions/androidx-tv-fixture-libraries.md": "devlog/2026-11-06-androidx-tv-fixture-libraries.md"
@@ -263,7 +265,6 @@ nav:
       - "Virtual BLE peripherals": using/ble-peripheral.md
       - "Headless prototypes": using/prototype-headless.md
       - "Installing ProtoViewer (Android)": using/protoviewer-install.md
-      - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "tapAt": using/tap-at.md
       - "swipeOn": using/swipe-on.md
@@ -297,6 +298,8 @@ nav:
       - "Device-description audit": how-it-works/device-description-audit.md
       - "Live device acceptance": how-it-works/live-device-acceptance.md
       - "Manual-test harness": how-it-works/manual-test-harness.md
+      - "Agent benchmarks": how-it-works/agent-benchmarks.md
+      - "iOS Simulator fleet cost measurement": how-it-works/ios-simulator-fleet-cost.md
       - "Device resources": how-it-works/device-resources.md
       - "Host toolchain resource": how-it-works/host-toolchain-resource.md
       - "Session broker experiment": how-it-works/session-broker-experiment.md

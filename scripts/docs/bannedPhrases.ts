@@ -1,17 +1,18 @@
 /**
  * Banned-phrase lint for docs/ prose (#18143).
  *
- * Markdown is parsed with the runtime's own parser (`Bun.markdown`, md4c), so
- * fenced and indented code blocks, inline code and raw HTML are excluded by
- * the parser rather than by line regexes. Each prose text leaf is mapped back
- * to its source line by scanning the source forward from the previous leaf,
- * which is exact because md4c emits leaves in document order. Link reference
- * definitions are not rendered, so they are blanked out of the searched copy
- * of the source first; otherwise a leaf could be located inside one. After a
- * link's or image's text, the search skips its inline `](destination "title")`
- * syntax for the same reason, and a newline inside that syntax is not a prose
- * line break.
+ * Markdown is parsed into an mdast tree (`mdast-util-from-markdown` with the
+ * GFM table and strikethrough extensions), so fenced and indented code blocks, inline code, raw
+ * HTML, link destinations and titles, and link reference definitions are
+ * excluded by the parser rather than by line regexes. Every prose text node
+ * carries its source position, and a soft line break inside it is a literal
+ * newline, so each character's source line is exact (#18196).
  */
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
+import { gfmTable } from "micromark-extension-gfm-table";
 
 export interface BannedPhraseRule {
   /** Stable id used by the allowlist. */
@@ -48,239 +49,110 @@ export interface PhraseHit {
   suggestion: string;
 }
 
-interface Leaf {
+/** The subset of an mdast node the prose walk reads. */
+interface MdastNode {
+  type: string;
+  value?: string;
+  alt?: string | null;
+  children?: MdastNode[];
+  position?: { start: { line: number } };
+}
+
+/** One block's prose, with the source line of every character. */
+interface ProseBlock {
   text: string;
-  excluded: boolean;
-  /** True when a block (paragraph, heading, cell, ...) ends after this leaf. */
-  blockEnd: boolean;
-  /** Number of links or images whose text ends with this leaf. */
-  linkCloses: number;
+  lines: number[];
 }
 
-interface ProseSegment {
-  text: string;
-  /** Source offset of the segment start, or -1 when it could not be located. */
-  offset: number;
-  /** Source line used when the exact offset is unknown. */
-  fallbackLine: number;
-  /** Source offset after the segment and any link syntax closing it, or -1. */
-  end: number;
-}
+/** Nodes whose content is prose that must not join with its neighbours. */
+const BLOCK_NODES = new Set(["paragraph", "heading", "tableCell"]);
+/** Nodes that are not prose and split the surrounding prose run. */
+const SPLIT_NODES = new Set(["code", "inlineCode", "html", "break"]);
+/** A soft line break and the whitespace around it. */
+const SOFT_BREAK = /[ \t]*\n[ \t]*/g;
 
-/** Renderer callbacks whose content is not prose and is never linted. */
-const EXCLUDED_NODES = new Set(["code", "codespan", "html"]);
-/** Inline callbacks that keep the surrounding block open. */
-const INLINE_NODES = new Set(["emphasis", "strong", "strikethrough", "link", "image", "text"]);
-/** Inline callbacks followed in the source by `](destination "title")` syntax. */
-const LINK_NODES = new Set(["link", "image"]);
+class ProseCollector {
+  readonly blocks: ProseBlock[] = [];
+  private current: ProseBlock = { text: "", lines: [] };
+  /** Source line after a soft break not yet written as a space, or 0. */
+  private pendingBreak = 0;
 
-function excludeTrailingLeaves(leaves: Leaf[], children: string): void {
-  let remaining = children.length;
-  for (let i = leaves.length - 1; i >= 0 && remaining > 0; i--) {
-    leaves[i].excluded = true;
-    remaining -= leaves[i].text.length;
-  }
-  if (leaves.length > 0) {
-    leaves[leaves.length - 1].blockEnd = true;
-  }
-}
-
-function collectLeaves(markdown: string): Leaf[] {
-  const leaves: Leaf[] = [];
-  const callbacks = new Proxy(
-    {},
-    {
-      get: (_target, key) => (children: unknown) => {
-        const name = String(key);
-        const content = typeof children === "string" ? children : "";
-        if (name === "text") {
-          leaves.push({ text: content, excluded: false, blockEnd: false, linkCloses: 0 });
-        } else if (LINK_NODES.has(name) && content.length > 0 && leaves.length > 0) {
-          leaves[leaves.length - 1].linkCloses++;
-        } else if (EXCLUDED_NODES.has(name)) {
-          excludeTrailingLeaves(leaves, content);
-        } else if (!INLINE_NODES.has(name) && leaves.length > 0) {
-          leaves[leaves.length - 1].blockEnd = true;
-        }
-        return content;
-      },
-    },
-  );
-  Bun.markdown.render(markdown, callbacks);
-  return leaves;
-}
-
-function lineAt(lineStarts: number[], offset: number): number {
-  let low = 0;
-  let high = lineStarts.length - 1;
-  while (low < high) {
-    const mid = (low + high + 1) >> 1;
-    if (lineStarts[mid] <= offset) {
-      low = mid;
-    } else {
-      high = mid - 1;
+  flush(): void {
+    if (this.current.text.length > 0) {
+      this.blocks.push(this.current);
     }
+    this.current = { text: "", lines: [] };
+    this.pendingBreak = 0;
   }
-  return low + 1;
-}
 
-function lineStartsOf(source: string): number[] {
-  const starts = [0];
-  for (let i = 0; i < source.length; i++) {
-    if (source[i] === "\n") {
-      starts.push(i + 1);
-    }
-  }
-  return starts;
-}
-
-/** Opening line of a possible link reference definition; md4c confirms it. */
-const REFERENCE_DEFINITION_START = /^ {0,3}\[[^\]\n]+\]:/;
-
-function sameLeaves(a: Leaf[], b: Leaf[]): boolean {
-  return (
-    a.length === b.length &&
-    a.every(
-      (leaf, i) =>
-        leaf.text === b[i].text &&
-        leaf.excluded === b[i].excluded &&
-        leaf.blockEnd === b[i].blockEnd &&
-        leaf.linkCloses === b[i].linkCloses,
-    )
-  );
-}
-
-/** Replaces every character of `source[start, end)` except newlines with a space. */
-function blank(source: string, start: number, end: number): string {
-  return (
-    source.slice(0, start) + source.slice(start, end).replace(/[^\n]/g, " ") + source.slice(end)
-  );
-}
-
-/**
- * Returns `source` with its top-level link reference definitions blanked, so
- * the forward leaf search cannot land on text md4c does not render. The
- * regex only proposes a span; md4c accepts it only if blanking the span in
- * place and re-appending it at the end of the document (definitions are
- * document-wide, so links that use it still resolve) renders the same leaves.
- * That rejects look-alikes inside code blocks or paragraph continuations. A
- * span must also render nothing on its own, so a paragraph that merely starts
- * like a definition is never blanked whole.
- */
-function blankReferenceDefinitions(source: string, leaves: Leaf[]): string {
-  const lineStarts = lineStartsOf(source);
-  const lineEnd = (line: number) =>
-    line + 1 < lineStarts.length ? lineStarts[line + 1] - 1 : source.length;
-  const lineText = (line: number) => source.slice(lineStarts[line], lineEnd(line));
-  let searchable = source;
-  let moved = "";
   /**
-   * Number of lines of the definition starting at `line` md4c accepts, or 0.
-   * A title may span any number of lines but not a blank one, so the span
-   * grows until md4c accepts it or the paragraph ends.
+   * Appends `text` that starts on source line `line`. A soft break becomes
+   * one space before the next prose, unless whitespace already separates the
+   * words; it may end this node and resolve in the next one (`a\n[b](/u)`).
    */
-  const acceptedSpan = (line: number): number => {
-    for (let last = line; last < lineStarts.length && lineText(last).trim() !== ""; last++) {
-      const span = last - line + 1;
-      const definition = source.slice(lineStarts[line], lineEnd(last));
-      // A paragraph that only starts like a definition renders prose of its
-      // own; relocating the whole paragraph would keep the leaves unchanged.
-      if (collectLeaves(definition).length > 0) {
-        continue;
-      }
-      const candidate = blank(searchable, lineStarts[line], lineEnd(last));
-      if (sameLeaves(collectLeaves(`${candidate}\n\n${moved}${definition}\n`), leaves)) {
-        searchable = candidate;
-        moved += `${definition}\n`;
-        return span;
+  append(text: string, line: number): void {
+    let lineNumber = line;
+    let last = 0;
+    for (const lineBreak of text.matchAll(SOFT_BREAK)) {
+      this.push(text.slice(last, lineBreak.index), lineNumber);
+      lineNumber++;
+      this.pendingBreak = lineNumber;
+      last = lineBreak.index + lineBreak[0].length;
+    }
+    this.push(text.slice(last), lineNumber);
+  }
+
+  private push(text: string, line: number): void {
+    if (text.length === 0) {
+      return;
+    }
+    const block = this.current;
+    if (this.pendingBreak > 0 && block.text.length > 0 && !/\s$/u.test(block.text)) {
+      if (!/^\s/u.test(text)) {
+        block.text += " ";
+        block.lines.push(this.pendingBreak);
       }
     }
-    return 0;
-  };
-  let line = 0;
-  while (line < lineStarts.length) {
-    const span = REFERENCE_DEFINITION_START.test(lineText(line)) ? acceptedSpan(line) : 0;
-    line += Math.max(span, 1);
+    this.pendingBreak = 0;
+    block.text += text;
+    for (let i = 0; i < text.length; i++) {
+      block.lines.push(line);
+    }
   }
-  return searchable;
 }
 
-/** Closing emphasis or code delimiters, then the `](` opening inline link syntax. */
-const INLINE_LINK_OPEN = /[*_~`]*\]\(/y;
-
-/**
- * Returns the offset after the inline `](destination "title")` syntax at
- * `start`, or `start` when there is none (a reference link or an autolink).
- * Parentheses nest, backslash escapes are skipped, and a `<...>` destination
- * or quoted title may contain parentheses. The syntax cannot cross a blank
- * line, so the scan gives up at one.
- */
-function skipInlineLinkSyntax(source: string, start: number): number {
-  INLINE_LINK_OPEN.lastIndex = start;
-  if (!INLINE_LINK_OPEN.test(source)) {
-    return start;
-  }
-  let depth = 1;
-  let quote = "";
-  let index = INLINE_LINK_OPEN.lastIndex;
-  const destinationStart = /^[ \t]*\n?[ \t]*/.exec(source.slice(index))?.[0].length ?? 0;
-  if (source[index + destinationStart] === "<") {
-    const close = source.indexOf(">", index + destinationStart);
-    index = close >= 0 ? close + 1 : index;
-  }
-  for (; index < source.length; index++) {
-    const char = source[index];
-    if (char === "\\") {
-      index++;
-    } else if (source.startsWith("\n\n", index)) {
-      return start;
-    } else if (quote) {
-      quote = char === quote ? "" : quote;
-    } else if (/["']/.test(char) && /\s/.test(source[index - 1] ?? "")) {
-      quote = char;
-    } else if (char === "(") {
-      depth++;
-    } else if (char === ")" && --depth === 0) {
-      return index + 1;
+function walk(node: MdastNode, collector: ProseCollector): void {
+  const line = node.position?.start.line ?? 1;
+  if (node.type === "text") {
+    collector.append(node.value ?? "", line);
+  } else if (node.type === "image" || node.type === "imageReference") {
+    collector.append(node.alt ?? "", line);
+  } else if (SPLIT_NODES.has(node.type)) {
+    collector.flush();
+  } else {
+    const block = BLOCK_NODES.has(node.type);
+    if (block) {
+      collector.flush();
+    }
+    for (const child of node.children ?? []) {
+      walk(child, collector);
+    }
+    if (block) {
+      collector.flush();
     }
   }
-  return start;
 }
 
-/** Splits the document's prose into blocks of located text segments. */
-function proseBlocks(source: string): ProseSegment[][] {
-  const lineStarts = lineStartsOf(source);
-  const blocks: ProseSegment[][] = [];
-  let current: ProseSegment[] = [];
-  let cursor = 0;
-  const leaves = collectLeaves(source);
-  const searchable = blankReferenceDefinitions(source, leaves);
-  for (const leaf of leaves) {
-    const found = leaf.text.length > 0 ? searchable.indexOf(leaf.text, cursor) : -1;
-    const fallbackLine = lineAt(lineStarts, cursor);
-    if (found >= 0) {
-      cursor = found + leaf.text.length;
-      for (let closes = 0; closes < leaf.linkCloses; closes++) {
-        cursor = skipInlineLinkSyntax(searchable, cursor);
-      }
-    }
-    if (leaf.excluded) {
-      if (current.length > 0) {
-        blocks.push(current);
-      }
-      current = [];
-    } else {
-      current.push({ text: leaf.text, offset: found, fallbackLine, end: found >= 0 ? cursor : -1 });
-    }
-    if (leaf.blockEnd && current.length > 0) {
-      blocks.push(current);
-      current = [];
-    }
-  }
-  if (current.length > 0) {
-    blocks.push(current);
-  }
-  return blocks;
+/** Splits the document's prose into blocks of text with per-character source lines. */
+function proseBlocks(source: string): ProseBlock[] {
+  const tree = fromMarkdown(source, {
+    extensions: [gfmTable(), gfmStrikethrough()],
+    mdastExtensions: [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown()],
+  });
+  const collector = new ProseCollector();
+  walk(tree, collector);
+  collector.flush();
+  return collector.blocks;
 }
 
 function compile(rules: BannedPhraseRule[]): Array<{ rule: BannedPhraseRule; regex: RegExp }> {
@@ -294,40 +166,11 @@ export function findBannedPhrases(
   rules: BannedPhraseRule[],
 ): PhraseHit[] {
   const compiled = compile(rules);
-  const lineStarts = lineStartsOf(source);
   const hits: PhraseHit[] = [];
   for (const block of proseBlocks(source)) {
-    const starts: number[] = [];
-    let joined = "";
-    let previousEnd = -1;
-    for (const segment of block) {
-      // md4c drops soft line breaks between leaves; restore one as a space so
-      // words on adjacent lines do not run together. A newline inside skipped
-      // syntax (such as a link destination) next to existing whitespace is not
-      // a break, so no second space is added there.
-      const brokenLine =
-        previousEnd >= 0 &&
-        segment.offset > previousEnd &&
-        source.slice(previousEnd, segment.offset).includes("\n");
-      if (brokenLine && !/\s$/u.test(joined) && !/^\s/u.test(segment.text)) {
-        joined += " ";
-      }
-      starts.push(joined.length);
-      joined += segment.text;
-      previousEnd = segment.end;
-    }
     for (const { rule, regex } of compiled) {
-      for (const match of joined.matchAll(regex)) {
-        const index = match.index ?? 0;
-        let segmentIndex = 0;
-        while (segmentIndex + 1 < starts.length && starts[segmentIndex + 1] <= index) {
-          segmentIndex++;
-        }
-        const segment = block[segmentIndex];
-        const line =
-          segment.offset >= 0
-            ? lineAt(lineStarts, segment.offset + index - starts[segmentIndex])
-            : segment.fallbackLine;
+      for (const match of block.text.matchAll(regex)) {
+        const line = block.lines[match.index] ?? 1;
         hits.push({ file, line, rule: rule.id, match: match[0], suggestion: rule.suggestion });
       }
     }

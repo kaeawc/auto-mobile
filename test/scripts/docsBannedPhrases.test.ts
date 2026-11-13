@@ -232,6 +232,44 @@ describe("findBannedPhrases source lines", () => {
     expect(linesOf("[ok][ref] robust\n\n[ref]: /url\n")).toEqual([["robust", 1]]);
   });
 
+  test("a quote inside a parenthesized link title does not open a quoted title", () => {
+    expect(linesOf("[ok](/url (a 'b))\nrobust\n")).toEqual([["robust", 2]]);
+    expect(linesOf("[ok](/url (robust 'b))\nrobust\n")).toEqual([["robust", 2]]);
+    expect(linesOf("It's [worth](/url (a 'b)) noting.\n")).toEqual([["worth-noting", 1]]);
+  });
+
+  test("skips every multi-line reference definition form", () => {
+    expect(linesOf('[ref]:\n  /robust\n  "robust\n  robust"\n\nrobust\n')).toEqual([["robust", 6]]);
+    expect(linesOf("[robust\nlabel]: /url\n\nrobust\n")).toEqual([["robust", 4]]);
+    expect(linesOf("[ref]: </a robust>\n  'robust'\nrobust\n")).toEqual([["robust", 3]]);
+  });
+
+  test("does not locate prose inside a full reference link label", () => {
+    expect(linesOf("[ok][robust]\nrobust\n\n[robust]: /url\n")).toEqual([["robust", 2]]);
+    expect(linesOf("[robust][robust]\n\n[robust]: /url\n")).toEqual([["robust", 1]]);
+  });
+
+  test("an escaped > inside an angle-bracket destination does not end it", () => {
+    expect(linesOf("[ok](<a\\>b(c>)\nrobust\n")).toEqual([["robust", 2]]);
+    expect(linesOf("[ok](<a\\>robust(c>)\nrobust\n")).toEqual([["robust", 2]]);
+  });
+
+  test("checks 600 definition-like lines in a code block in under 100 ms", () => {
+    const lines = Array.from({ length: 600 }, () => "[x]: /u").join("\n");
+    const started = performance.now();
+    expect(linesOf(`\`\`\`\n${lines}\n\`\`\`\n\nrobust\n`)).toEqual([["robust", 604]]);
+    expect(linesOf(`<div>\n${lines}\n</div>\n\nrobust\n`)).toEqual([["robust", 604]]);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  test("joins strikethrough text with the surrounding prose", () => {
+    expect(linesOf("It's worth ~~noting~~ that.\n")).toEqual([["worth-noting", 1]]);
+  });
+
+  test("keeps a soft break that ends a text node before a link", () => {
+    expect(linesOf("It's worth\n[noting](/u) that.\n")).toEqual([["worth-noting", 1]]);
+  });
+
   test("locates front matter prose and the body after it", () => {
     expect(linesOf("---\ntitle: robust\n---\n\nrobust\n")).toEqual([
       ["robust", 2],

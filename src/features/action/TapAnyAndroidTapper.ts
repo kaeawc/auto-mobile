@@ -67,7 +67,7 @@ export interface CapturedTapTarget {
   observationScreenSize?: ObserveResult["screenSize"];
   observationDisplay?: ScreenSizeForOffscreenCheckOptions["display"];
   scoped?: boolean;
-  /** The request's `container`; an XR node click never promotes past it. */
+  /** The effective selection container, including any XR text-match index. */
   container?: ElementContainerSelector;
   talkBackState?: boolean | null;
   /** The request's `layer`; with none, the tap point must avoid AutoMobile's prototype windows. */
@@ -94,7 +94,7 @@ export interface TapAnyAndroidTapperDependencies {
   talkBackDriverFactory: TalkBackNavigationDriverFactory;
   /** The shared XR predicate; XR panel bounds are not screen coordinates. */
   isAndroidXr(signal?: AbortSignal): Promise<boolean>;
-  /** Resolves the request's container in a hierarchy, as tapAny's selection does. */
+  /** Resolves the effective selection container in a hierarchy. */
   resolveContainer(
     hierarchy: ViewHierarchyResult,
     container: ElementContainerSelector,

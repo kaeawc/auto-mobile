@@ -6,6 +6,7 @@ import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
+import { executeXrNodeClick } from "../../../src/features/action/xrPanelNodeClick";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
@@ -52,6 +53,106 @@ const twoPaneHierarchy = identifyObservedHierarchy(
   "cached-ok",
   { timer: new FakeTimer() },
 ).hierarchy;
+const liveTwoPaneCapture: typeof capture = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-xr/observe-settings-subsettings-apps-two-pane-live-18147.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+
+test.each([
+  [{ text: "Apps" }, { left: 48, top: 548, right: 696, bottom: 724 }, "observed"],
+  [{ text: "Apps" }, { left: 48, top: 548, right: 696, bottom: 724 }, "refreshed"],
+  [{ text: "Apps" }, { left: 48, top: 548, right: 696, bottom: 724 }, "polled"],
+  [{ text: "Apps" }, { left: 48, top: 548, right: 696, bottom: 724 }, "refresh-miss"],
+  [
+    { elementId: "com.android.settings:id/homepage_container" },
+    { left: 48, top: 196, right: 696, bottom: 372 },
+    "observed",
+  ],
+] as const)(
+  "live two-pane XR click: container=%j bounds=%j capture=%s",
+  async (container, bounds, mode) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbClient();
+    const service = new FakeCtrlProxy(timer);
+    service.setSupportsNodeActionSelectors(true);
+    service.setActionResult({ success: true, action: "click", totalTimeMs: 1 });
+    const action = new TapAnyElement(
+      { name: "fake", platform: "android", deviceId: "fake-xr-live-two-pane" },
+      adb,
+      {
+        timer,
+        xrDetector: new FakeAndroidXrDetector(true),
+        elementSelector: selector,
+        accessibilityDetector: new FakeAccessibilityDetector(),
+        accessibilityService: service,
+      },
+    );
+    // Windows are authoritative; serialized merged roots duplicate those same nodes.
+    const tree = { ...structuredClone(liveTwoPaneCapture.viewHierarchy), hierarchy: {} };
+    const initiallyEmpty = mode === "polled";
+    action.observedInteraction = runBlockWith(() => {
+      const observation = buildObserveResult({
+        viewHierarchy: initiallyEmpty ? { hierarchy: {} } : tree,
+        screenSize: liveTwoPaneCapture.screenSize,
+        updatedAt: 0,
+        systemInsets: { top: 0, left: 0, right: 0, bottom: 0 },
+      });
+      return mode === "observed" || initiallyEmpty
+        ? recordObservationRead(observation)
+        : observation;
+    });
+    let refreshes = 0;
+    action.testHooks.setRefreshViewHierarchy(async () => {
+      refreshes++;
+      return mode === "refresh-miss" && refreshes === 1 ? { hierarchy: {} } : tree;
+    });
+    const result = await action.execute({ action: "tap", container });
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.element?.bounds).toEqual(bounds);
+    expect(service.getNodeActionHistory()).toMatchObject([
+      { action: "click", expectedBounds: bounds },
+    ]);
+    expect(service.getNodeActionHistory()).toHaveLength(1);
+    expect(service.getTapHistory()).toHaveLength(0);
+    expect(adb.getAllCommands()).toHaveLength(0);
+    const polls = initiallyEmpty || mode === "refresh-miss" ? 1 : 0;
+    expect(timer.getSleepHistory()).toEqual(polls ? [100] : []);
+    expect(refreshes).toBe(mode === "observed" ? 0 : mode === "refresh-miss" ? 2 : 1);
+  },
+);
+
+test("live two-pane XR click still refuses an Apps row outside the resolved toolbar container", async () => {
+  const timer = new FakeTimer();
+  const tree = identifyObservedHierarchy(
+    "android",
+    { ...structuredClone(liveTwoPaneCapture.viewHierarchy), hierarchy: {} },
+    "cached-ok",
+    { timer },
+  ).hierarchy;
+  const element = select(true, { text: "Apps" }, tree)!;
+  expect(element.bounds).toEqual({ left: 48, top: 548, right: 696, bottom: 724 });
+  const service = new FakeCtrlProxy(timer);
+  service.setSupportsNodeActionSelectors(true);
+  await expect(
+    executeXrNodeClick(() => service, {
+      action: "tap",
+      element,
+      options: { resolvedHierarchy: tree, container: { text: "Apps", index: 0 } },
+      resolveContainer: (hierarchy, options) =>
+        selector.resolveContainer(hierarchy, options.container),
+    }),
+  ).rejects.toThrow(/XR panel coordinate space/);
+  expect(service.getNodeActionHistory()).toHaveLength(0);
+  expect(service.getTapHistory()).toHaveLength(0);
+  expect(timer.getSleepHistory()).toEqual([]);
+});
 function select(
   xr: boolean,
   container?: TapAnyElementOptions["container"],

@@ -54,7 +54,11 @@ class EdgeNavigationUiTest {
   private class FakeDevice(private val reachable: Set<String>) : EdgeNavigator {
     val requests = mutableListOf<Pair<String, String>>()
 
-    override suspend fun navigateTo(deviceId: String, targetScreen: String): EdgeNavigationResult {
+    override suspend fun navigateTo(
+      deviceId: String,
+      transition: ScreenTransition,
+    ): EdgeNavigationResult {
+      val targetScreen = transition.toScreen
       requests += deviceId to targetScreen
       val reached = targetScreen in reachable
       return EdgeNavigationResult(reached, if (reached) targetScreen else "Home")
@@ -199,9 +203,9 @@ class EdgeNavigationUiTest {
   @Test
   fun `leaving transition detail mid-attempt still reports the outcome`() = runComposeUiTest {
     val gate = CompletableDeferred<Unit>()
-    val gated = EdgeNavigator { _, target ->
+    val gated = EdgeNavigator { _, transition ->
       gate.await()
-      EdgeNavigationResult(true, target)
+      EdgeNavigationResult(true, transition.toScreen)
     }
     setContent {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {

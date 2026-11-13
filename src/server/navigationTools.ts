@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { ActionableError, BootedDevice, requireAndroidOrIosPlatform } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
+import type { TransitionPin } from "../features/navigation/PinnedNavigation";
 import {
   NavigationGraphManager,
   type NavigationGraphService,
@@ -50,6 +51,26 @@ export const navigateToSchema = addDeviceTargetingToSchema(
       targetScreen: z
         .string()
         .describe("Screen name to reach; use a name from getNavigationGraph's screens"),
+      viaTransition: z
+        .object({
+          from: z.string().describe("Transition source screen"),
+          to: z.string().describe("Transition target screen; must equal targetScreen"),
+          edgeId: z
+            .number()
+            .int()
+            .optional()
+            .describe("getNavigationGraph edge id; selects its tool when toolName is omitted"),
+          toolName: z
+            .string()
+            .nullable()
+            .optional()
+            .describe("Transition tool; null selects a Back edge"),
+        })
+        .strict()
+        .optional()
+        .describe(
+          "Reach targetScreen by replaying exactly this recorded transition as the last step; no other edge is substituted",
+        ),
       platform: platformSchema.optional(),
     })
     .strict(),
@@ -107,6 +128,7 @@ export const exploreSchema = addDeviceTargetingToSchema(
 // Export interfaces for type safety
 export interface NavigateToArgs {
   targetScreen: string;
+  viaTransition?: TransitionPin;
   platform?: Platform;
   sessionUuid?: string;
 }
@@ -193,9 +215,15 @@ export function createNavigateToHandler({
   ) => {
     try {
       throwIfAborted(signal);
+      if (args.viaTransition && args.viaTransition.to !== args.targetScreen) {
+        throw new ActionableError(
+          `viaTransition.to ("${args.viaTransition.to}") must equal targetScreen ("${args.targetScreen}")`,
+        );
+      }
       const navigateTo = navigateToFactory(device, args);
       const options: NavigateToOptions = {
         ...replayRequestDeadline(),
+        ...(args.viaTransition ? { viaTransition: args.viaTransition } : {}),
         targetScreen: args.targetScreen,
         platform: requireAndroidOrIosPlatform(args.platform || device.platform, "navigateTo"),
         sessionUuid: args.sessionUuid,

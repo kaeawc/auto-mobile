@@ -401,6 +401,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-13: Pin a navigateTo attempt to one transition": devlog/2026-11-13-pinned-navigate-transition.md
       - "2026-11-13: iOS Simulator fleet capacity measurements": devlog/2026-11-13-ios-simulator-fleet-capacity-measurements.md
       - "2026-11-13: Split the audit tool into accessibilityAudit and performanceAudit": devlog/2026-11-13-split-audit-tool.md
       - "2026-11-13: Android TV explore: dry-run input mode and focus-only dispatch": devlog/2026-11-13-android-tv-explore-dry-run-and-focus-only-dispatch.md

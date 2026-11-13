@@ -22097,6 +22097,39 @@
           "description": "Screen name to reach; use a name from getNavigationGraph's screens",
           "type": "string"
         },
+        "viaTransition": {
+          "description": "Reach targetScreen by replaying exactly this recorded transition as the last step; no other edge is substituted",
+          "type": "object",
+          "properties": {
+            "from": {
+              "description": "Transition source screen",
+              "type": "string"
+            },
+            "to": {
+              "description": "Transition target screen; must equal targetScreen",
+              "type": "string"
+            },
+            "edgeId": {
+              "description": "getNavigationGraph edge id; selects its tool when toolName is omitted",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "toolName": {
+              "description": "Transition tool; null selects a Back edge",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["from", "to"],
+          "additionalProperties": false
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios", "tvos", "visionos"]

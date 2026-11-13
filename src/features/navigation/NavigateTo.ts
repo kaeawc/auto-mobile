@@ -49,6 +49,7 @@ import {
   type ForegroundObserver,
 } from "./foregroundOverlay";
 import { ReplayBlockedError } from "./ReplayBlockedError";
+import { navigateViaTransition, type TransitionPin } from "./PinnedNavigation";
 
 // Back presses need time to update the screen before the next press.
 const NAVIGATION_BACK_PRESS_SETTLE_MS = 300;
@@ -65,6 +66,8 @@ export interface NavigateToOptions {
   sessionUuid?: string;
   /** The navigateTo request's transport deadline, which each replayed tool call runs under. */
   requestDeadline?: Pick<RequestDeadline, "deadlineMs" | "timeoutMs">;
+  /** Reach `targetScreen` by replaying exactly this transition as the final hop (#16982). */
+  viaTransition?: TransitionPin;
 }
 
 interface PathRunContext {
@@ -77,6 +80,12 @@ interface PathRunContext {
    * failed search left the list, and the edges to settle when the call ends.
    */
   replayState: ReplayRunState;
+}
+
+interface PathRunControl {
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+  fallbacks?: boolean;
 }
 
 /** A path run's result; `retryFrom` is set when a step failed with the device still at its source. */
@@ -210,21 +219,15 @@ export class NavigateTo {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<NavigateToResult> {
+    if (options.viaTransition) {
+      return this.executeViaTransition(options, options.viaTransition, progress, signal);
+    }
     const perf = createGlobalPerformanceTracker();
     perf.serial("navigateTo");
 
     const startTime = this.timer.now();
     const { targetScreen } = options;
-    this.sessionUuid ??= options.sessionUuid;
-    const uiStateSetup =
-      this.uiStateSetup ??
-      this.uiStateSetupFactory({
-        device: this.device,
-        adb: this.adb,
-        timer: this.timer,
-        sessionUuid: this.sessionUuid,
-      });
-    this.uiStateSetup = uiStateSetup;
+    const uiStateSetup = this.resolveUIStateSetup(options);
 
     try {
       throwIfAborted(signal);
@@ -301,8 +304,7 @@ export class NavigateTo {
       const result = await this.followPath(
         pathResult,
         { targetScreen, startTime, options, uiStateSetup },
-        progress,
-        signal,
+        { progress, signal },
       );
       perf.end();
       return result;
@@ -314,27 +316,55 @@ export class NavigateTo {
     }
   }
 
+  private resolveUIStateSetup(options: NavigateToOptions): UIStateSetup {
+    this.sessionUuid ??= options.sessionUuid;
+    this.uiStateSetup ??= this.uiStateSetupFactory({
+      device: this.device,
+      adb: this.adb,
+      timer: this.timer,
+      sessionUuid: this.sessionUuid,
+    });
+    return this.uiStateSetup;
+  }
+
+  /** Navigate to the pinned transition's source, then replay only that transition (#16982). */
+  private executeViaTransition(
+    options: NavigateToOptions,
+    pin: TransitionPin,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<NavigateToResult> {
+    const unpinned = { ...options, viaTransition: undefined };
+    const uiStateSetup = this.resolveUIStateSetup(options);
+    const replayEdge = (edge: NavigationEdge) =>
+      this.followPath(
+        { found: true, path: [edge], startScreen: edge.from, targetScreen: edge.to },
+        { targetScreen: edge.to, startTime: this.timer.now(), options: unpinned, uiStateSetup },
+        { progress, signal, fallbacks: false },
+      );
+    const graph = this.navigationManager;
+    const now = () => this.timer.now();
+    const navigateTo = (screen: string) =>
+      this.execute({ ...unpinned, targetScreen: screen }, progress, signal);
+    return navigateViaTransition(pin, { graph, now, navigateTo, replayEdge }, signal);
+  }
+
   /**
    * Replay the found path. When a step does not reach its target while the device
    * is still on the step's source screen, remember the failure and re-plan from
    * there: findPath ranks the failed edge below the other edges for that screen pair,
    * so the next-best one (another tool edge, then a no-tool Back edge) is tried before
    * the navigation fails (#10031). Each edge action is tried at most once per call.
+   * `fallbacks: false` replays only the given path (a pinned transition, #16982).
    */
   private async followPath(
     initialPath: PathResult,
     context: Omit<PathRunContext, "replayState">,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
+    control: PathRunControl,
   ): Promise<NavigateToResult> {
     const replayState = new ReplayRunState();
     try {
-      return await this.followPathWithFallbacks(
-        initialPath,
-        { ...context, replayState },
-        progress,
-        signal,
-      );
+      return await this.followPathWithFallbacks(initialPath, { ...context, replayState }, control);
     } finally {
       // A target the bounded search could not find does not by itself show the edge is
       // broken: the failure only ranked it last for this call. Settling forgets what
@@ -349,15 +379,14 @@ export class NavigateTo {
   private async followPathWithFallbacks(
     initialPath: PathResult,
     context: PathRunContext,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
+    { progress, signal, fallbacks = true }: PathRunControl,
   ): Promise<NavigateToResult> {
     const executedPath: string[] = [];
     const attempted = new Set<string>();
     let path = initialPath.path;
     for (;;) {
       const outcome = await this.runPathSteps(path, context, executedPath, { progress, signal });
-      if (!outcome.retryFrom) {
+      if (!outcome.retryFrom || !fallbacks) {
         return outcome.result;
       }
       attempted.add(edgeReplayKey(outcome.retryFrom));

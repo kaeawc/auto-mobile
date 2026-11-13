@@ -270,15 +270,27 @@ function isIosRuntime(runtime: IosNativeRuntime): boolean {
   );
 }
 
+function runtimeSupportedDeviceTypeIds(runtime: IosNativeRuntime): string[] | undefined {
+  if (!Array.isArray(runtime.supportedDeviceTypes)) {
+    return undefined;
+  }
+  const ids = runtime.supportedDeviceTypes
+    .map((entry) => entry?.identifier)
+    .filter((identifier): identifier is string => typeof identifier === "string");
+  return [...new Set(ids)].sort();
+}
+
 function iosRelease(
   runtime: IosNativeRuntime,
   snapshotState: CatalogMetadataState,
   duplicate: boolean,
 ): IosCatalogRelease {
   const version = parseNumericVersion(runtime.version);
+  const supportedDeviceTypeIds = runtimeSupportedDeviceTypeIds(runtime);
   return {
     runtimeId: runtime.identifier,
     ...(version.ok ? { osVersion: version.value.value } : {}),
+    ...(supportedDeviceTypeIds === undefined ? {} : { supportedDeviceTypeIds }),
     installed: runtime.isAvailable === true,
     metadataState:
       snapshotState === "stale" ||

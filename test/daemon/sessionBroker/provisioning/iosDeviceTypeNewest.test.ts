@@ -27,6 +27,9 @@ const runtimes: AppleDeviceRuntime[] = JSON.parse(
     "utf8",
   ),
 ).runtimes;
+// Derived, not captured: synthetic device types appear in no real runtime's supportedDeviceTypes,
+// so their tie-break tests use the captured runtimes without that list (bounds-only output).
+const unlistedRuntimes = runtimes.map(({ supportedDeviceTypes: _omitted, ...rest }) => rest);
 const typeId = (suffix: string) => `com.apple.CoreSimulator.SimDeviceType.${suffix}`;
 const runtimeId = (suffix: string) => `com.apple.CoreSimulator.SimRuntime.iOS-${suffix}`;
 // A fixed permutation with no random or process seam: alternate the two halves.
@@ -46,7 +49,8 @@ const catalogs = [
 // Explicit expectations computed from hardware generation, variant, and runtime bounds.
 // iOS 16.4: iPhone 14 Pro / iPad mini (6th generation).
 // iOS 18.0: iPhone 16 Pro / iPad Pro 11-inch (M4).
-const expected = [
+// iOS 27.1 (24A94401) ships only the iPhone Duo, so no phone or tablet fits it (#18279).
+const expected: ReadonlyArray<readonly [string, string | undefined, string | undefined]> = [
   ["16-4", "iPhone-14-Pro", "iPad-mini-6th-generation"],
   ["17-5", "iPhone-15-Pro", "iPad-Pro-11-inch-M4-8GB"],
   ["18-0", "iPhone-16-Pro", "iPad-Pro-11-inch-M4-8GB"],
@@ -54,8 +58,8 @@ const expected = [
   ["26-2", "iPhone-17-Pro", "iPad-Pro-11-inch-M5-12GB"],
   ["26-5", "iPhone-17-Pro", "iPad-Pro-11-inch-M5-12GB"],
   ["27-0", "iPhone-18-Pro", "iPad-Pro-11-inch-M5-12GB"],
-  ["27-1", "iPhone-18-Pro", "iPad-Pro-11-inch-M5-12GB"],
-] as const;
+  ["27-1", undefined, undefined],
+];
 
 function synthetic(suffix: string, extra: Partial<AppleDeviceType> = {}): AppleDeviceType {
   return {
@@ -78,8 +82,9 @@ describe("chooseIosDeviceType newest hardware", () => {
       for (const family of ["phone", "tablet", undefined] as const) {
         test(`${order}: iOS ${version}, ${family ?? "default phone"}`, () => {
           const result = chooseIosDeviceType(runtimeId(version), runtimes, types, family);
-          expect(result).toBe(typeId(family === "tablet" ? tablet : phone));
-          expect(result).not.toContain("iPod");
+          const suffix = family === "tablet" ? tablet : phone;
+          expect(result).toBe(suffix === undefined ? undefined : typeId(suffix));
+          expect(result ?? "").not.toContain("iPod");
         });
       }
     }
@@ -99,8 +104,10 @@ describe("chooseIosDeviceType newest hardware", () => {
       synthetic("iPhone-first"),
       synthetic("iPhone-last", { modelIdentifier: "invalid" }),
     ];
-    expect(chooseIosDeviceType(ios, runtimes, types)).toBe(types[1].identifier);
-    expect(chooseIosDeviceType(ios, runtimes, types.toReversed())).toBe(types[0].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, types)).toBe(types[1].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, types.toReversed())).toBe(
+      types[0].identifier,
+    );
   });
 
   test("parseable hardware outranks unparseable hardware within either tier", () => {
@@ -112,7 +119,7 @@ describe("chooseIosDeviceType newest hardware", () => {
         synthetic("iPhone-parsed", { modelIdentifier: "iPhone18,1", ...bounds }),
         synthetic("iPhone-unparsed", bounds),
       ];
-      expect(chooseIosDeviceType(ios, runtimes, types)).toBe(types[0].identifier);
+      expect(chooseIosDeviceType(ios, unlistedRuntimes, types)).toBe(types[0].identifier);
     }
   });
 
@@ -121,10 +128,10 @@ describe("chooseIosDeviceType newest hardware", () => {
       synthetic("iPhone-18-Pro", { modelIdentifier: "iPhone18,1" }),
       synthetic("iPhone-Duo", { name: "iPhone Duo", modelIdentifier: "iPhone19,1" }),
     ];
-    expect(chooseIosDeviceType(ios, runtimes, types)).toBe(types[0].identifier);
-    expect(chooseIosDeviceType(ios, runtimes, types, "phone")).toBe(types[0].identifier);
-    expect(chooseIosDeviceType(ios, runtimes, types, "foldable")).toBe(types[1].identifier);
-    expect(chooseIosDeviceType(ios, runtimes, [types[1]])).toBeUndefined();
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, types)).toBe(types[0].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, types, "phone")).toBe(types[0].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, types, "foldable")).toBe(types[1].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, [types[1]])).toBeUndefined();
   });
 
   test("supported tier beats newer hardware with unknown compatibility", () => {
@@ -136,8 +143,8 @@ describe("chooseIosDeviceType newest hardware", () => {
         maxRuntimeVersionString: undefined,
       }),
     ];
-    expect(chooseIosDeviceType(ios, runtimes, types)).toBe(types[0].identifier);
-    expect(chooseIosDeviceType(ios, runtimes, [types[1]])).toBe(types[1].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, types)).toBe(types[0].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, [types[1]])).toBe(types[1].identifier);
   });
 
   test("equal hardware chooses shorter name, then ascending identifier", () => {
@@ -146,13 +153,17 @@ describe("chooseIosDeviceType newest hardware", () => {
       synthetic("iPhone-A", { modelIdentifier: "iPhone18,1", name: "Pro" }),
       synthetic("iPhone-C", { modelIdentifier: "iPhone18,1", name: "Pro (16GB)" }),
     ];
-    expect(chooseIosDeviceType(ios, runtimes, types)).toBe(types[1].identifier);
-    expect(chooseIosDeviceType(ios, runtimes, types.toReversed())).toBe(types[1].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, types)).toBe(types[1].identifier);
+    expect(chooseIosDeviceType(ios, unlistedRuntimes, types.toReversed())).toBe(
+      types[1].identifier,
+    );
   });
 
   test("default family excludes iPod even when it is the only candidate", () => {
     expect(
-      chooseIosDeviceType(ios, runtimes, [synthetic("iPod-touch", { modelIdentifier: "iPod9,1" })]),
+      chooseIosDeviceType(ios, unlistedRuntimes, [
+        synthetic("iPod-touch", { modelIdentifier: "iPod9,1" }),
+      ]),
     ).toBeUndefined();
   });
 

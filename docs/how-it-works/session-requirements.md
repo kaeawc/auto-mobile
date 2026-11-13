@@ -207,9 +207,14 @@ it chooses the highest satisfying installed release. Stable runtime/package
 identity breaks equal-version ties, so catalog order never changes the result.
 Exact predicates consider only numerically equal releases.
 
-Known iOS model/runtime bounds can prove `runtime_incompatible`. The resolver
+Known iOS model/runtime bounds can prove `runtime_incompatible`, and so can a
+release's `supportedDeviceTypeIds` (the runtime's `supportedDeviceTypes` from
+`simctl list runtimes -j`): a model missing from that list is incompatible with
+the runtime even inside its bounds. Non-exact OS selectors skip such a runtime
+when another satisfying one ships the model; the device-images
+`compatibleRuntimeIds` applies the same rule. The resolver
 does not replace an exact model or exact/default-exact OS to repair the pair.
-Absent compatibility bounds produce `compatibility: "unknown"` so the native
+Absent bounds and list produce `compatibility: "unknown"` so the native
 creation authority can attempt the preserved exact pair. Malformed bounds are
 invalid catalog metadata.
 

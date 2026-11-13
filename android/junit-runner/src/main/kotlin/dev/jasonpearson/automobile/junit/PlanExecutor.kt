@@ -219,7 +219,7 @@ internal class PlanExecutor(
    * is skipped rather than run on a device another session may already own.
    */
   private fun sessionNotHeldFailure(
-    sessionUuid: String,
+    sessionUuid: String?,
     output: String,
     errorOutput: String,
     toolResults: List<ToolResultEntry>,

@@ -10,12 +10,18 @@ hierarchy, tap and screenshot operations; these are its capabilities and limits.
 - The Smart Stack widget driver (`scripts/watch/addSmartStackWidget.ts`) uses a calibrated gallery
   position (steps from the bottom, default one) and the first widget preview. After the gallery
   swipe settles, a dump checks for the exact `AppGroupCell -- <appName>` identifier. When gallery
-  rows are readable but the app row is missing, the driver skips the calibrated gestures. With
-  `--udid <simulator UDID>`, the host relaunches clockface using
-  `xcrun simctl terminate <udid> com.apple.clockface`, waits 3000 ms for respawn, and retries
-  within `maxAttempts` without the retry delay. Without a relaunch dependency it stops with
-  that command as recovery guidance. Dumps with no gallery row identifiers preserve the
-  calibrated flow. The result's `galleryRowMisses` counts missing-row attempts. App and widget
+  rows are readable but the app row is missing, the driver searches by scrolling later, then
+  earlier, settling 1500 ms before each dump. Each direction stops at an unchanged row set,
+  no rows, or eight steps. A row found by scrolling is tapped at its visible centre normalized
+  by the window size, followed by the first widget preview and add taps; rows with less than
+  24 pt visible need another scroll within the cap, and rows covered by the picker's navigation
+  bar are nudged earlier before tapping. A row in the initial dump preserves the calibrated flow.
+  If the search misses and another attempt remains, with `--udid <simulator UDID>` the host
+  relaunches clockface using `xcrun simctl terminate <udid> com.apple.clockface`, waits 3000 ms
+  for respawn, and retries within `maxAttempts` without the retry delay. The final attempt
+  skips relaunch and its wait. Without a relaunch dependency it stops with that command as
+  recovery guidance. An initial dump with no gallery row identifiers preserves the calibrated
+  flow. The result's `galleryRowMisses` counts missing-row attempts. App and widget
   display names verify the resulting cell identifier. When the face leaves both name fields
   empty, a cell verifies when its host bundle id and widget kind equal `hostBundleId` and
   `widgetKind` (`--host-bundle-id`, `--widget-kind`, given together), or otherwise only as the

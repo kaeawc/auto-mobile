@@ -112,7 +112,8 @@ public final class FlowShaper {
         lock.lock()
         defer { lock.unlock() }
         let now = monotonicNow()
-        if flows[flow] == nil, flows.count >= Self.maximumFlows { reclaimEndedWatches() }
+        // Ended-watch flows lose eviction protection only once this admission proceeds.
+        let endedWatches = flows[flow] == nil && flows.count >= Self.maximumFlows ? reclaimEndedWatches() : []
         if ruleSource.watches(target) {
             // Fail open at capacity without evicting an actively watched connection.
             guard flows[flow] != nil || flows.count < Self.maximumFlows else { return .allow }
@@ -120,6 +121,7 @@ public final class FlowShaper {
             var tracked = flows[flow] ?? Flow(target: target, transport: transport, lastActive: now)
             tracked.watched = true
             flows[flow] = tracked
+            clearWatched(endedWatches)
             return .filter(inbound: true, outbound: true, peekBytes: 65536)
         }
         guard let rule = ruleSource.shapingRule(for: target) else {
@@ -138,9 +140,9 @@ public final class FlowShaper {
             return .drop
         }
         if flows.count >= Self.maximumFlows {
-            let candidate = flows.filter { _, value in
-                !value.watched && value.pending == nil && now - value.lastActive >= Self.idleEvictionNanoseconds &&
-                    !ruleSource.watches(value.target)
+            let candidate = flows.filter { key, value in
+                (!value.watched || endedWatches.contains(key)) && value.pending == nil &&
+                    now - value.lastActive >= Self.idleEvictionNanoseconds && !ruleSource.watches(value.target)
             }.min { lhs, rhs in
                 (lhs.value.lastActive, lhs.key.uuidString) < (rhs.value.lastActive, rhs.key.uuidString)
             }
@@ -162,9 +164,11 @@ public final class FlowShaper {
             }
             tracked.pending = Pending(pause: token, ticket: rule.ticket, bytes: 0)
             flows[flow] = tracked
+            clearWatched(endedWatches)
             return .pause(token)
         }
         flows[flow] = tracked
+        clearWatched(endedWatches)
         return newFilter(rule.profile)
     }
 
@@ -401,12 +405,20 @@ public final class FlowShaper {
     /// active. Once it ends, an offline replacement keeps them so it can cut
     /// them; a shaping replacement makes them ordinary evictable flows; with
     /// no rule they are forgotten, as their next data callback would do.
-    private func reclaimEndedWatches() {
+    /// Returns the shaped ones; the caller clears their watched flag only once
+    /// its admission proceeds, so a refused admission keeps their protection.
+    private func reclaimEndedWatches() -> Set<UUID> {
+        var shaped = Set<UUID>()
         for (id, flow) in flows where flow.watched && flow.pending == nil && !ruleSource.watches(flow.target) {
             if ruleSource.isOffline(flow.target) { continue }
-            if ruleSource.shapingRule(for: flow.target) != nil { flows[id]?.watched = false }
+            if ruleSource.shapingRule(for: flow.target) != nil { shaped.insert(id) }
             else { flows.removeValue(forKey: id) }
         }
+        return shaped
+    }
+
+    private func clearWatched(_ ids: Set<UUID>) {
+        for id in ids { flows[id]?.watched = false }
     }
 
     private func monotonicNow() -> UInt64 {

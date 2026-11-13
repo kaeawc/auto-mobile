@@ -256,6 +256,33 @@ final class WatchFlowTests: XCTestCase {
         XCTAssertEqual(drops.count, FlowShaper.maximumFlows)
     }
 
+    func testRefusedShapingAdmissionKeepsOfflineProtectionForEndedWatchFlows() throws {
+        let clock = FakeMonotonicClock()
+        let store = NetworkRuleStore(clock: clock, supportsShaping: true)
+        let shaper = FlowShaper(clock: clock, ruleSource: store)
+        let other = try XCTUnwrap(NetworkRuleTarget(simulator: RuleFixtures.simulator, bundleId: "other.app"))
+        watch(store, RuleFixtures.target)
+        let flows = fillWatchedSlots(shaper)
+        let shaping = ShapingRequest(downloadKilobitsPerSecond: 8)
+        _ = store.execute(NetworkRuleCommand(
+            kind: .apply, target: RuleFixtures.target, ownership: RuleFixtures.ownership(revision: 2),
+            condition: .shaped(shaping), leaseMilliseconds: 60000
+        ))
+        XCTAssertEqual(shaper.newFlow(UUID(), target: RuleFixtures.target, transport: .stream), .drop)
+        let offline = RuleFixtures.ownership(revision: 3)
+        _ = store.execute(RuleFixtures.apply(offline, leaseMilliseconds: 60000))
+        clock.advance(milliseconds: 59000)
+        XCTAssertEqual(store.execute(RuleFixtures.renew(offline, leaseMilliseconds: 60000)).outcome, .renewed)
+        _ = store.execute(NetworkRuleCommand(
+            kind: .apply, target: other, ownership: RuleFixtures.ownership("session-b", revision: 1),
+            condition: .shaped(shaping), leaseMilliseconds: 60000
+        ))
+        clock.advance(milliseconds: 1000)
+        XCTAssertEqual(shaper.newFlow(UUID(), target: other, transport: .stream), .drop)
+        let drops = flows.filter { shaper.data($0, direction: .inbound, availableBytes: 1) == .drop }
+        XCTAssertEqual(drops.count, FlowShaper.maximumFlows)
+    }
+
     func testPausedDataCommitsOneDropButPausedNewFlowDoesNotClaimAnExistingConnection() throws {
         for transport in [FlowTransport.stream, .datagram] {
             let clock = FakeMonotonicClock()

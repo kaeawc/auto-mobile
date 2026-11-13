@@ -161,7 +161,7 @@ final class SwipeDeadlineTests: XCTestCase {
         timer.advance(by: 1)
         await fulfillment(of: [bounded], timeout: 2)
         XCTAssertEqual(try response(responder)["errorCode"] as? String, "gesture_bound_exceeded")
-        XCTAssertTrue((try response(responder)["error"] as? String)?.contains("4500ms") == true)
+        try XCTAssertTrue((response(responder)["error"] as? String)?.contains("4500ms") == true)
         XCTAssertEqual(gestures.tapCalls, 0)
 
         XCTAssertTrue(next.captured.isEmpty)

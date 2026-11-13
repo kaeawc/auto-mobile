@@ -13,7 +13,7 @@ Dependency: `androidx.tv:tv-material`, `implementation` in `android/tv-fixture` 
 
 The fixtures exist to exercise the two focus models real TV apps ship: Compose for TV components
 (`Card`, `Button`, `Surface` with TV focus indication) and View-based Leanback
-(`BrowseSupportFragment`, `ListRowPresenter`, `ImageCardView`). Each is defined by its AndroidX library,
+(`BrowseSupportFragment`, `ListRowPresenter`, `ImageCardView`). Its AndroidX library defines each model,
 so each fixture uses its library directly. No other module depends on them, and none is published.
 
 The player needs no library: a framework `MediaSession` in front of a simulated, non-ticking player

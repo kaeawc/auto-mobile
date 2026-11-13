@@ -17,8 +17,8 @@ Not recorded.
 
 ## Decision
 
-**GO** for the runner-dependent implementation: hierarchy, focus observation, remote input, text,
-sockets and screenshots were demonstrated. No simulator device-side questions remained. Physical
+**GO** for the runner-dependent implementation: the spike demonstrated hierarchy, focus observation,
+remote input, text, sockets and screenshots. No simulator device-side questions remained. Physical
 Apple TV was out of scope; tvOS 27 and Duo-style runtimes were untried.
 
 ## Consequences

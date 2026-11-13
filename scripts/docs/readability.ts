@@ -24,6 +24,8 @@ export interface SectionBudget {
   maxParagraphWords: number;
   maxPageWords: number;
   passive: { minSentences: number; maxRatio: number };
+  /** When true, any finding in this section fails the check (the section is clean on main). */
+  enforced: boolean;
 }
 
 export interface ReadabilityConfig {
@@ -307,6 +309,19 @@ export function checkPage(file: string, source: string, budget: SectionBudget): 
     .sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
 }
 
+/** Findings that fail the check: those in an enforced section, or all of them under `strict`. */
+export function failingFindings(
+  config: ReadabilityConfig,
+  findings: Finding[],
+  strict: boolean,
+): Finding[] {
+  if (strict) {
+    return findings;
+  }
+  const enforced = new Set(config.sections.filter((s) => s.enforced).map((s) => s.name));
+  return findings.filter((finding) => enforced.has(finding.section));
+}
+
 export function formatFinding(finding: Finding): string {
   return `${finding.file}:${finding.line}: ${finding.rule}: ${finding.message} [${finding.section}]`;
 }
@@ -324,7 +339,7 @@ function parseSection(raw: unknown, index: number): SectionBudget {
     throw new Error(`${where} must be an object`);
   }
   const section = raw as Record<string, unknown>;
-  const { name, paths, passive } = section;
+  const { name, paths, passive, enforced } = section;
   if (typeof name !== "string" || name === "") {
     throw new Error(`${where}.name must be a string`);
   }
@@ -337,6 +352,9 @@ function parseSection(raw: unknown, index: number): SectionBudget {
   }
   if (typeof passive !== "object" || passive === null) {
     throw new Error(`${where}.passive must be an object`);
+  }
+  if (enforced !== undefined && typeof enforced !== "boolean") {
+    throw new Error(`${where}.enforced must be a boolean`);
   }
   const passiveRecord = passive as Record<string, unknown>;
   const maxRatio = positiveNumber(passiveRecord.maxRatio, `${where}.passive.maxRatio`);
@@ -353,6 +371,7 @@ function parseSection(raw: unknown, index: number): SectionBudget {
       minSentences: positiveNumber(passiveRecord.minSentences, `${where}.passive.minSentences`),
       maxRatio,
     },
+    enforced: enforced ?? false,
   };
 }
 

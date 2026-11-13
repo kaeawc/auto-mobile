@@ -44,10 +44,10 @@ smaller contract points. Each is recorded here; the current contract is the shap
   assets.
 
 Earlier decisions that still apply: the renderer is Compose; sizes and positions use dp; prototype
-opacity is a percentage; app-element anchoring is supported; observe includes prototype nodes by
-default; existing tap/text tools target prototype nodes; screenshots come from observe, with no
-separate screenshot tool. Focus management belongs to the window host: accessibility set-text does
-not require focus, human keyboard input does (the device findings in #9300 superseded the blanket
+opacity is a percentage; app-element anchoring is supported. Observe includes prototype nodes by
+default, and existing tap/text tools target prototype nodes. Screenshots come from observe, with no
+separate screenshot tool. Focus management belongs to the window host. Accessibility set-text does
+not require focus; human keyboard input does (the device findings in #9300 superseded the blanket
 focusability proposal).
 
 Later decisions:

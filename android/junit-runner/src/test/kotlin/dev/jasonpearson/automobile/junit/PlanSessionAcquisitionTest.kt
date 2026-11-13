@@ -148,12 +148,53 @@ internal class DaemonPlanSessionAcquirerTest {
   }
 
   @Test
-  fun `without a device it lets the daemon choose`() {
-    val daemon = AcquisitionDaemon(textResult("""{"runtime":{"session":{"sessionUuid":"s-1"}}}"""))
+  fun `without a device it acquires the first free booted device the daemon lists`() {
+    val daemon =
+      AcquisitionDaemon(
+        textResult("""{"runtime":{"session":{"sessionUuid":"s-1"}}}"""),
+        booted =
+          bootedDevices(
+            """{"deviceId":"emulator-5554","session":{"sessionUuid":"other","ownership":"owned"}}""",
+            """{"deviceId":"emulator-5556","connection":{"state":"offline","adbState":"offline"}}""",
+            """{"deviceId":"emulator-5558","heldBy":"other_daemon"}""",
+            """{"deviceId":"emulator-5562","session":null,"poolStatus":"idle"}""",
+          ),
+      )
 
-    DaemonPlanSessionAcquirer(daemon).acquire(null, 1_000L)
+    val acquisition = DaemonPlanSessionAcquirer(daemon).acquire(null, 1_000L)
 
-    assertFalse(daemon.arguments!!.containsKey("deviceId"))
+    assertEquals(PlanSessionAcquisition.Acquired("s-1"), acquisition)
+    assertEquals(listOf(DaemonPlanSessionAcquirer.BOOTED_ANDROID_URI), daemon.reads)
+    assertEquals(JsonPrimitive("emulator-5562"), daemon.arguments?.get("deviceId"))
+  }
+
+  @Test
+  fun `when every online device is held it asks for the first so the daemon refusal waits`() {
+    val choice =
+      DaemonPlanSessionAcquirer.chooseBootedDevice(
+        json
+          .parseToJsonElement(
+            bootedDevices(
+              """{"deviceId":"emulator-5554","session":{"sessionUuid":"other","ownership":"owned"}}""",
+              """{"deviceId":"emulator-5556","poolStatus":"assigned"}""",
+            ),
+          )
+          .let { (it as JsonObject)["devices"] as JsonArray },
+      )
+
+    assertEquals(DaemonPlanSessionAcquirer.BootedDeviceChoice.Chosen("emulator-5554"), choice)
+  }
+
+  @Test
+  fun `with no booted device it fails without calling getAndroid`() {
+    val daemon = AcquisitionDaemon(textResult("{}"), booted = bootedDevices())
+
+    val acquisition = DaemonPlanSessionAcquirer(daemon).acquire(null, 1_000L)
+
+    val parsed = (acquisition as PlanSessionAcquisition.Failed).parsed
+    assertTrue(parsed.errorMessage, parsed.errorMessage.contains("no online booted Android device"))
+    assertTrue(parsed.errorMessage, parsed.errorMessage.contains("ANDROID_SERIAL"))
+    assertEquals(null, daemon.toolName)
   }
 
   @Test
@@ -167,7 +208,7 @@ internal class DaemonPlanSessionAcquirerTest {
 
     val parsed = (acquisition as PlanSessionAcquisition.Failed).parsed
     assertFalse(parsed.success)
-    assertTrue(parsed.errorMessage, parsed.errorMessage.contains("a free Android device"))
+    assertTrue(parsed.errorMessage, parsed.errorMessage.contains("an Android device"))
     assertTrue(parsed.errorMessage, parsed.errorMessage.contains("runtime.session.sessionUuid"))
   }
 
@@ -224,7 +265,15 @@ internal class DaemonPlanSessionAcquirerTest {
         ),
     )
 
-  private class AcquisitionDaemon(private val answer: DaemonResponse) : DaemonToolClient {
+  /** A `automobile:devices/booted/android` read whose devices carry these `runtime` objects. */
+  private fun bootedDevices(vararg runtimes: String): String =
+    """{"devices":[${runtimes.joinToString(",") { """{"runtime":$it}""" }}]}"""
+
+  private class AcquisitionDaemon(
+    private val answer: DaemonResponse,
+    private val booted: String? = null,
+  ) : DaemonToolClient {
+    val reads = mutableListOf<String>()
     var toolName: String? = null
     var arguments: JsonObject? = null
     val methods = mutableListOf<Pair<String, JsonObject>>()
@@ -240,8 +289,17 @@ internal class DaemonPlanSessionAcquirerTest {
       return answer
     }
 
-    override fun readResource(uri: String, timeoutMs: Long): DaemonResponse =
-      throw IllegalStateException("unexpected read of $uri")
+    override fun readResource(uri: String, timeoutMs: Long): DaemonResponse {
+      reads.add(uri)
+      val text = booted ?: throw IllegalStateException("unexpected read of $uri")
+      val content = JsonObject(mapOf("uri" to JsonPrimitive(uri), "text" to JsonPrimitive(text)))
+      return DaemonResponse(
+        id = "r",
+        type = "resource_response",
+        success = true,
+        result = JsonObject(mapOf("contents" to JsonArray(listOf(content)))),
+      )
+    }
 
     override fun callDaemonMethod(
       method: String,

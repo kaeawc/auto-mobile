@@ -173,8 +173,10 @@ internal class PlanAttemptLoop(
       parsed = parseDaemonToolResult(response, json)
       toolResults = parseToolResults(response, json, options.debugMode)
       // The daemon keeps a session its caller held before the plan, so the runner releases it,
-      // except a failed attempt held for AI recovery, whose release the recovery flow owns.
-      if (response.success && parsed.success || !holdForRecovery) {
+      // except a failed attempt held for AI recovery, whose release the recovery flow owns. A
+      // failure the daemon reports as not held (`sessionHeld: false`) skips recovery, so its
+      // caller-held base is released here too.
+      if (response.success && parsed.success || !holdForRecovery || parsed.sessionHeld == false) {
         collaborators.sessionAcquirer.release(sessionUuid)
       }
     }

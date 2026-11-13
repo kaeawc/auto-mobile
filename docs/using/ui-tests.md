@@ -161,7 +161,8 @@ Run it with:
 **Device.** Pass `AutoMobilePlanExecutionOptions(device = "<serial>")` to
 `execute()` to pick the device. With the default `device = "auto"`, a set
 `ANDROID_SERIAL` pins every single-device plan to that serial and runs the
-class's tests one at a time; without either, the daemon picks a free device.
+class's tests one at a time; without either, the test uses the first booted
+device no other session holds.
 Multi-device plans (section 4) choose their own devices and ignore
 `ANDROID_SERIAL`. The test acquires that device with `getAndroid` before the
 plan runs and releases it afterwards; if the device cannot be acquired (for

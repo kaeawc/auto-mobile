@@ -31,9 +31,10 @@ sequenceDiagram
 
 Each attempt runs under a session the daemon issued: the daemon refuses a
 `sessionUuid` it never issued, so the runner acquires one with `getAndroid`
-(on the configured device or `ANDROID_SERIAL`, otherwise one the daemon picks)
-and releases it when the attempt ends. A failed attempt held for AI recovery is
-released by the recovery flow instead.
+(on the configured device or `ANDROID_SERIAL`, otherwise the first booted
+device `automobile:devices/booted/android` lists as free) and releases it when
+the attempt ends. A failed attempt held for AI recovery is released by the
+recovery flow instead, unless the daemon reports it as not held.
 
 ## iOS
 

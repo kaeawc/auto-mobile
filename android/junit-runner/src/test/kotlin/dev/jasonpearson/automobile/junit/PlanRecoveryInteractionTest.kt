@@ -42,15 +42,17 @@ class PlanRecoveryInteractionTest {
   private lateinit var daemon: PlanInteractionDaemon
   private lateinit var recordingAgent: PlanInteractionRecordingAgent
   private lateinit var heartbeat: PlanInteractionHeartbeat
+  private lateinit var acquirer: FakePlanSessionAcquirer
 
   @Before
   fun setup() {
     daemon = PlanInteractionDaemon()
     recordingAgent = PlanInteractionRecordingAgent()
     heartbeat = PlanInteractionHeartbeat()
+    acquirer = FakePlanSessionAcquirer()
     collaborators =
       PlanExecutorCollaborators(
-        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
+        sessionAcquirerFactory = { acquirer },
         agent = { recordingAgent },
         deviceChecker = PlanInteractionDeviceChecker(),
         daemon = daemon,
@@ -260,6 +262,11 @@ class PlanRecoveryInteractionTest {
       "the daemon already released it; nothing to release",
       emptyList<Pair<String, String?>>(),
       daemon.daemonMethodCalls,
+    )
+    assertEquals(
+      "the caller-held base the daemon kept is released by its acquirer",
+      listOf(daemon.sessionUuidArgs.single()),
+      acquirer.released,
     )
   }
 

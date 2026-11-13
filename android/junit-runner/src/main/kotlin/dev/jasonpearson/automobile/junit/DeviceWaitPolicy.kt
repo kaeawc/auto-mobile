@@ -160,9 +160,11 @@ internal object DeviceWaitPolicy {
       "\nThe runner waited ${waitedMs}ms for it to be released. Another test attempt or tool " +
       "session is using this device; give each concurrent test its own device, or run them " +
       "serially." +
-      (if (parsed.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) "\n$OWN_SESSION_RELEASE_REMEDY"
-      else "")
+      ownSessionReleaseRemedy(parsed.code)
   }
+
+  private fun ownSessionReleaseRemedy(code: String?): String =
+    if (code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) "\n$OWN_SESSION_RELEASE_REMEDY" else ""
 
   /**
    * The remedy for a device the caller's own MCP connection holds (#18275): that connection's

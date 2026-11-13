@@ -578,3 +578,47 @@ test("a windows-only capture keeps sibling labels within one window root in both
   expect(labels.skeleton).toBeUndefined();
   expect(labels.searchable).toEqual(labels.searchable.map(() => undefined));
 });
+
+/**
+ * Drop the captured Switch's element id and repeat the title + Switch pair at the same
+ * local bounds as an ornament-space copy with its own title, in both serialized trees.
+ */
+function repeatTitledSwitchAsOrnament(observation: ObserveResult): void {
+  const markOrnament = (node: Record<string, unknown>): void => {
+    node.space = "ornament";
+    [node.node ?? []].flat().forEach((child) => markOrnament(child as Record<string, unknown>));
+  };
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const children = Array.isArray(record.node) ? (record.node as Record<string, unknown>[]) : [];
+    const at = children.findIndex((child) => child.text === "XrPanel title");
+    if (at >= 0) {
+      delete children[at + 1]["view-id"];
+      const pair = structuredClone(children.slice(at, at + 2));
+      pair[0].text = "Ornament title";
+      pair.forEach(markOrnament);
+      children.splice(at + 2, 0, ...pair);
+      return;
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(observation.viewHierarchy);
+}
+
+test("window and ornament Switches with matching bounds and no id keep their own sibling labels (#18273)", async () => {
+  const observation = spatialPanelObservation("switch-scroll");
+  repeatTitledSwitchAsOrnament(observation);
+  await enrich(observation, true);
+  const switches = getSearchableEntries(observation.elements!)!.filter(
+    (entry) => entry.affordances.includes("toggle") && entry.elementId === undefined,
+  );
+  const labels = (space: "ornament" | undefined) =>
+    switches.filter((entry) => entry.element?.space === space).map((entry) => entry.displayedLabel);
+  expect(labels(undefined).length).toBeGreaterThan(0);
+  expect(labels("ornament").length).toBe(labels(undefined).length);
+  expect(labels(undefined)).toEqual(labels(undefined).map(() => "XrPanel title"));
+  expect(labels("ornament")).toEqual(labels("ornament").map(() => "Ornament title"));
+});

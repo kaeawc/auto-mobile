@@ -11,7 +11,15 @@ internal data class PlanExecutorCollaborators(
   val environment: (String) -> String? = System::getenv,
   /** The daemon control socket this runner talks to, named in a failed plan's output (#17953). */
   val daemonEndpoint: () -> String = { DefaultDaemonEndpoint.socketPath },
-)
+  /**
+   * Builds the acquirer of the issued device session each executePlan attempt runs under (#17953).
+   * A factory over [daemon], so a copy with another daemon acquires through that daemon.
+   */
+  val sessionAcquirerFactory: (DaemonToolClient) -> PlanSessionAcquirer =
+    ::DaemonPlanSessionAcquirer,
+) {
+  val sessionAcquirer: PlanSessionAcquirer by lazy { sessionAcquirerFactory(daemon) }
+}
 
 /** Resolved once: it may shell out to `id -u`, and only failure output reads it. */
 private object DefaultDaemonEndpoint {

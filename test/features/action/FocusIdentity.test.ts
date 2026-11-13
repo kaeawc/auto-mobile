@@ -6,14 +6,18 @@ import type { Element } from "../../../src/models/Element";
 
 const BOUNDS = { left: 0, top: 400, right: 1920, bottom: 520 };
 
-/** One read of a one-slot control: nothing sits outside it, so only its label can change. */
-function read(label: string): { entry: FocusPathEntry; screen: FocusScreen } {
+/**
+ * One read of a one-slot control: nothing sits outside it, so only its label and, for a slider,
+ * its `range-info` can change.
+ */
+function read(label: string, range?: string): { entry: FocusPathEntry; screen: FocusScreen } {
   const focused: Element = {
     bounds: BOUNDS,
     "resource-id": "slot",
     text: label,
     focusable: true,
     class: "android.widget.TextView",
+    ...(range === undefined ? {} : { "range-info": range }),
   };
   return {
     entry: { bounds: BOUNDS, resourceId: "slot", text: label },
@@ -21,32 +25,30 @@ function read(label: string): { entry: FocusPathEntry; screen: FocusScreen } {
   };
 }
 
-function keys(steps: ReadonlyArray<[string, FocusNavigateDirection | undefined]>) {
+type Step = [label: string, pressed: FocusNavigateDirection | undefined, range?: string];
+
+function keys(steps: readonly Step[]) {
   const identify = createFocusIdentity();
-  return steps.map(([label, pressed]) => {
-    const { entry, screen } = read(label);
+  return steps.map(([label, pressed, range]) => {
+    const { entry, screen } = read(label, range);
     return identify(entry, screen, pressed);
   });
 }
 
+/** A slider step: the label and the extractor's `range-info` both carry the value. */
+function slider(value: number, pressed?: FocusNavigateDirection): Step {
+  return [`${value}%`, pressed, `current:${value}.0,min:0.0,max:100.0`];
+}
+
 describe("createFocusIdentity toggle detection (#17209)", () => {
   test("a label changed by right and changed back by left is an in-place toggle", () => {
-    const ids = keys([
-      ["50%", undefined],
-      ["51%", "right"],
-      ["50%", "left"],
-    ]);
+    const ids = keys([slider(50), slider(51, "right"), slider(50, "left")]);
     expect(ids[2]).toMatchObject({ changedInPlace: true });
     expect(ids[2]?.key).toStartWith("adjustable|");
   });
 
   test("a toggle still counts when a refused press sits between the two changes", () => {
-    const ids = keys([
-      ["50%", undefined],
-      ["51%", "right"],
-      ["51%", "down"],
-      ["50%", "left"],
-    ]);
+    const ids = keys([slider(50), slider(51, "right"), slider(51, "down"), slider(50, "left")]);
     expect(ids[3]).toMatchObject({ changedInPlace: true });
   });
 
@@ -64,5 +66,50 @@ describe("createFocusIdentity toggle detection (#17209)", () => {
       undefined,
     ]);
     expect(new Set(ids.map((id) => id.key)).size).toBe(3);
+  });
+
+  test("a one-slot list scrolled down and back up is focus moving, not a toggle (#18255)", () => {
+    const ids = keys([
+      ["A", undefined],
+      ["B", "down"],
+      ["A", "up"],
+      ["B", "down"],
+      ["C", "down"],
+    ]);
+    expect(ids.map((id) => id.changedInPlace)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(ids.map((id) => id.key.startsWith("adjustable|"))).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(new Set(ids.map((id) => id.key)).size).toBe(3);
+  });
+
+  test("a label round trip whose range-info stays put is not a toggle (#18255)", () => {
+    const range = "current:0.0,min:0.0,max:100.0";
+    const ids = keys([
+      ["A", undefined, range],
+      ["B", "down", range],
+      ["A", "up", range],
+    ]);
+    expect(ids[2]?.changedInPlace).toBeUndefined();
+    expect(ids[2]?.key).not.toStartWith("adjustable|");
+  });
+
+  test("a label round trip whose range-info does not come back is not a toggle (#18255)", () => {
+    const ids = keys([
+      slider(50),
+      slider(51, "right"),
+      ["50%", "left", "current:52.0,min:0.0,max:100.0"],
+    ]);
+    expect(ids[2]?.changedInPlace).toBeUndefined();
   });
 });

@@ -24,10 +24,11 @@ const MAX_PID_LINE_LENGTH = 32;
 
 /**
  * Builds one `adb shell` command that detaches with `setsid` so a dropped host adb
- * session does not kill the recorder (#17951). Older images without `setsid` use the
- * attached launch. In either case the innermost shell prints `$$` before `exec` keeps
- * that pid for `screenrecord`. Tokens must not contain single quotes because the
- * detached shell command is single-quoted; argv otherwise stays space-joined.
+ * session does not kill the recorder (#17951). Older images without `setsid`, and images
+ * whose `setsid` cannot exec (exit 126/127, before the detached shell printed anything),
+ * use the attached launch (#18243). In either case the innermost shell prints `$$` before
+ * `exec` keeps that pid for `screenrecord`. Tokens must not contain single quotes because
+ * the detached shell command is single-quoted; argv otherwise stays space-joined.
  */
 export function buildPidReportingScreenrecordArgs(screenrecordArgv: readonly string[]): string[] {
   if (screenrecordArgv.some((arg) => arg.includes("'"))) {
@@ -36,7 +37,7 @@ export function buildPidReportingScreenrecordArgs(screenrecordArgv: readonly str
   const command = `echo $$; exec ${screenrecordArgv.join(" ")}`;
   return [
     "shell",
-    `if command -v setsid >/dev/null 2>&1; then exec setsid sh -c '${command}'; fi; ${command}`,
+    `if command -v setsid >/dev/null 2>&1; then setsid sh -c '${command}'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; ${command}`,
   ];
 }
 
@@ -86,4 +87,44 @@ export function isOwnRecorderCmdline(cmdline: string, deviceTempPath: string): b
     (argv[0] === "screenrecord" || argv[0].endsWith("/screenrecord")) &&
     argv.includes(deviceTempPath)
   );
+}
+
+/**
+ * One device command that lists every running `screenrecord` with its cmdline, so a
+ * recorder whose launch pid was never learned can still be found by its unique output
+ * file (#18243). `pidof`'s own status is printed last: 1 means no recorder runs at all,
+ * and a missing or other status means the answer is unknown.
+ */
+export const RECORDER_LOOKUP_COMMAND =
+  'shell \'pids=$(pidof screenrecord); s=$?; for p in $pids; do printf "pid:%s:" "$p"; cat /proc/$p/cmdline 2>/dev/null; echo; done; printf "pidof-status:%s\\n" "$s"\'';
+
+/** What {@link RECORDER_LOOKUP_COMMAND} says about the recorder writing one output file. */
+export type RecorderLookup =
+  | { kind: "found"; pid: number }
+  | { kind: "none" }
+  | { kind: "unknown" };
+
+/**
+ * Parses {@link RECORDER_LOOKUP_COMMAND} output for the recorder writing `deviceTempPath`.
+ * "none" is returned only when `pidof` answered and no listed recorder writes that file.
+ */
+export function parseRecorderLookup(stdout: string, deviceTempPath: string): RecorderLookup {
+  const lines = stdout.split(/\r?\n/);
+  const status = lines
+    .map((line) => /^pidof-status:(\d+)$/.exec(line.trim())?.[1])
+    .find((value) => value !== undefined);
+  if (status === "1") {
+    return { kind: "none" };
+  }
+  if (status !== "0") {
+    return { kind: "unknown" };
+  }
+  for (const line of lines) {
+    const match = /^pid:(\d+):(.*)$/s.exec(line);
+    const pid = match ? parsePidLine(match[1]) : undefined;
+    if (pid !== undefined && isOwnRecorderCmdline(match?.[2] ?? "", deviceTempPath)) {
+      return { kind: "found", pid };
+    }
+  }
+  return { kind: "none" };
 }

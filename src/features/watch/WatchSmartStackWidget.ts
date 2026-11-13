@@ -31,6 +31,7 @@ export interface WatchSmartStackWidgetResult {
   attempts: number;
   headerAttempts: number;
   verificationAttempts: number;
+  galleryRowMisses: number;
   /** True when a matching cell was on the stack before an edit, so no widget was added. */
   alreadyPresent: boolean;
   reason: string;
@@ -45,6 +46,25 @@ export interface SmartStackWidgetTarget {
 }
 
 export const GALLERY_SCROLL_SETTLE_MS = 1500;
+export const CLOCKFACE_RELAUNCH_SETTLE_MS = 3000;
+
+/** Exact gallery cell identifier match; undefined means no readable gallery rows. */
+export function hasGalleryAppRow(dump: string, appName: string): boolean | undefined {
+  let hasRows = false;
+  for (const line of dump.split("\n")) {
+    if (!line.trimStart().startsWith("Cell,")) {
+      continue;
+    }
+    const identifier = /, identifier: 'AppGroupCell -- ([^']*)'/.exec(line)?.[1];
+    if (identifier !== undefined) {
+      hasRows = true;
+      if (identifier === appName) {
+        return true;
+      }
+    }
+  }
+  return hasRows ? false : undefined;
+}
 
 function hasEditableSmartStack(dump: string): boolean {
   try {
@@ -243,6 +263,15 @@ function createWidgetActions(
     await request(command);
     await settle(delayMs);
   };
+  const readDump = async () => {
+    const dump = await request({ type: "face", op: "dump" });
+    if (typeof dump !== "string") {
+      throw new ActionableError(
+        "Clockface dump was not text; update or reconnect the watch runner.",
+      );
+    }
+    return dump;
+  };
   const poll = async (
     phase: "headerAttempts" | "verificationAttempts",
     matches: (dump: string) => boolean,
@@ -250,12 +279,7 @@ function createWidgetActions(
   ) => {
     for (let attempt = 0; attempt < limit; attempt++) {
       result[phase]++;
-      const dump = await request({ type: "face", op: "dump" });
-      if (typeof dump !== "string") {
-        throw new ActionableError(
-          "Clockface dump was not text; update or reconnect the watch runner.",
-        );
-      }
+      const dump = await readDump();
       if (matches(dump)) {
         return dump;
       }
@@ -265,7 +289,7 @@ function createWidgetActions(
     }
     return undefined;
   };
-  return { gesture, poll, settle };
+  return { gesture, poll, settle, readDump };
 }
 
 type WidgetActions = ReturnType<typeof createWidgetActions>;
@@ -314,13 +338,17 @@ async function openSmartStack(actions: WidgetActions): Promise<EditableStack | u
 }
 
 async function selectGalleryWidget(
-  { gesture }: WidgetActions,
+  { gesture, readDump }: WidgetActions,
   galleryStepsFromBottom: number,
   editTap: { x: number; y: number },
+  appName: string,
 ) {
   await gesture({ type: "face", op: "tap", ...editTap });
   await gesture({ type: "face", op: "tap", x: 0.5, y: 0.44 });
   await gesture({ type: "face", op: "swipe", direction: "up" }, GALLERY_SCROLL_SETTLE_MS);
+  if (hasGalleryAppRow(await readDump(), appName) === false) {
+    return "gallery-row-missing";
+  }
   for (let step = 0; step < galleryStepsFromBottom; step++) {
     await gesture(
       { type: "face", op: "drag", fromX: 0.5, fromY: 0.5, toX: 0.5, toY: 0.6 },
@@ -330,12 +358,14 @@ async function selectGalleryWidget(
   await gesture({ type: "face", op: "tap", x: 0.5, y: 0.65 });
   await gesture({ type: "face", op: "tap", x: 0.5, y: 0.5 });
   await gesture({ type: "face", op: "tap", x: 0.16, y: 0.14 });
+  return "selected";
 }
 
 interface WidgetAttempt {
   /** Set when the flow ends with this attempt. */
   final?: WatchSmartStackWidgetResult;
   headerDump?: string;
+  galleryRowMissing?: boolean;
 }
 
 /** One open, check and add round; `firstHeaderDump` is the first attempt's header dump. */
@@ -368,7 +398,15 @@ async function runWidgetAttempt(
       },
     };
   }
-  await selectGalleryWidget(actions, target.galleryStepsFromBottom, editableStack.editTap);
+  const selection = await selectGalleryWidget(
+    actions,
+    target.galleryStepsFromBottom,
+    editableStack.editTap,
+    target.appName,
+  );
+  if (selection === "gallery-row-missing") {
+    return { headerDump, galleryRowMissing: true };
+  }
   const readback = await actions.poll(
     "verificationAttempts",
     (dump) => verifySmartStackWidget(dump, headerDump, target),
@@ -387,22 +425,62 @@ async function runWidgetAttempt(
   };
 }
 
+async function recoverMissingGalleryRow(
+  actions: WidgetActions,
+  result: WatchSmartStackWidgetResult,
+  { appName, signal }: WatchSmartStackWidgetOptions,
+  relaunchClockface?: () => Promise<void>,
+): Promise<WatchSmartStackWidgetResult | undefined> {
+  result.galleryRowMisses++;
+  signal?.throwIfAborted();
+  if (!relaunchClockface) {
+    return {
+      ...result,
+      reason: `Smart Stack gallery has no row for ${appName}. Relaunch com.apple.clockface (xcrun simctl terminate <udid> com.apple.clockface) and retry.`,
+    };
+  }
+  await relaunchClockface();
+  await actions.settle(CLOCKFACE_RELAUNCH_SETTLE_MS);
+  return undefined;
+}
+
+function withDefaultFlowLimits({
+  galleryStepsFromBottom = 1,
+  maxAttempts = 3,
+  retryDelayMs = 20000,
+}: WatchSmartStackWidgetOptions) {
+  return { galleryStepsFromBottom, maxAttempts, retryDelayMs };
+}
+
+interface RecoveryContext {
+  options: WatchSmartStackWidgetOptions;
+  firstHeaderDump: string | undefined;
+  relaunchClockface?: () => Promise<void>;
+}
+
+/** One attempt; a gallery without the app row relaunches clockface instead of tapping blindly. */
+async function runAttemptWithRecovery(
+  actions: WidgetActions,
+  result: WatchSmartStackWidgetResult,
+  target: SmartStackWidgetTarget & { galleryStepsFromBottom: number },
+  { options, firstHeaderDump, relaunchClockface }: RecoveryContext,
+): Promise<WidgetAttempt & { missed: boolean }> {
+  const attempt = await runWidgetAttempt(actions, result, target, firstHeaderDump);
+  if (attempt.final !== undefined || !attempt.galleryRowMissing) {
+    return { ...attempt, missed: false };
+  }
+  const failure = await recoverMissingGalleryRow(actions, result, options, relaunchClockface);
+  return { headerDump: attempt.headerDump, final: failure, missed: true };
+}
+
 /** Drives the calibrated first-widget gallery path; success requires a clockface cell readback. */
 export async function addWatchSmartStackWidget(
   client: Pick<WatchRunnerClient, "request">,
   options: WatchSmartStackWidgetOptions,
-  deps: { timer?: Timer } = {},
+  deps: { timer?: Timer; relaunchClockface?: () => Promise<void> } = {},
 ): Promise<WatchSmartStackWidgetResult> {
-  const {
-    appName,
-    widgetName,
-    hostBundleId,
-    widgetKind,
-    signal,
-    galleryStepsFromBottom = 1,
-    maxAttempts = 3,
-    retryDelayMs = 20000,
-  } = options;
+  const { appName, widgetName, hostBundleId, widgetKind, signal } = options;
+  const { galleryStepsFromBottom, maxAttempts, retryDelayMs } = withDefaultFlowLimits(options);
   validateWidgetOptions(options);
   const result: WatchSmartStackWidgetResult = {
     success: false,
@@ -410,6 +488,7 @@ export async function addWatchSmartStackWidget(
     attempts: 0,
     headerAttempts: 0,
     verificationAttempts: 0,
+    galleryRowMisses: 0,
     alreadyPresent: false,
     reason: "",
   };
@@ -420,22 +499,25 @@ export async function addWatchSmartStackWidget(
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       signal?.throwIfAborted();
       result.attempts++;
-      const { final, headerDump } = await runWidgetAttempt(
+      const { final, headerDump, missed } = await runAttemptWithRecovery(
         actions,
         result,
         { ...target, galleryStepsFromBottom },
-        firstHeaderDump,
+        { options, firstHeaderDump, relaunchClockface: deps.relaunchClockface },
       );
       if (final !== undefined) {
         return final;
       }
       firstHeaderDump ??= headerDump;
-      if (attempt < maxAttempts - 1) {
+      // A relaunch already waited for clockface to respawn; only gallery indexing needs the delay.
+      if (!missed && attempt < maxAttempts - 1) {
         await actions.settle(retryDelayMs);
       }
     }
     result.reason =
-      "Widget cell did not appear; check the display names and galleryStepsFromBottom before retrying.";
+      result.galleryRowMisses > 0
+        ? `Smart Stack gallery row for ${appName} never appeared during ${result.galleryRowMisses} of ${result.attempts} attempts; widget cell was not verified. Check widget availability and retry.`
+        : "Widget cell did not appear; check the display names and galleryStepsFromBottom before retrying.";
     return result;
   } catch (error) {
     const failure = toActionableError(error, "Failed to add watch Smart Stack widget");

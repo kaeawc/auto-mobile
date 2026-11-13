@@ -390,7 +390,7 @@ export function webImageRule(slot: number, image: PrototypeWebImage): string {
     image.bytes.byteOffset,
     image.bytes.byteLength,
   ).toString("base64");
-  return `:root{${webImageVar(slot)}:url(data:image/webp;base64,${base64});${webImageVar(slot, "-bg")}:transparent;${webImageVar(slot, "-ar")}:${image.width}/${image.height}}`;
+  return `:root{${webImageVar(slot)}:url(data:image/webp;base64,${base64});${webImageVar(slot, "-bg")}:transparent;${webImageVar(slot, "-ar")}:${image.width}/${image.height};${webImageVar(slot, "-on")}:1}`;
 }
 
 /**

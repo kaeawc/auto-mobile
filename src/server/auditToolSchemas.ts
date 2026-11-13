@@ -2,8 +2,8 @@ import { z } from "zod/v4";
 import { AUDIT_FAIL_ON } from "../features/audit/OnDemandAudit";
 
 /**
- * Input and output pieces shared by `accessibilityAudit` (wcag engine), `performanceAudit` and
- * the deprecated `audit` tool, so the three describe the same arguments the same way (#17279).
+ * Input and output pieces shared by `accessibilityAudit` (wcag engine) and `performanceAudit`, so
+ * both describe the same arguments the same way (#17279).
  */
 
 export const auditAppIdInput = z

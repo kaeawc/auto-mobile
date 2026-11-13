@@ -2,7 +2,10 @@ package dev.jasonpearson.automobile.protocol
 
 import java.io.File
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
@@ -32,5 +35,27 @@ class PrototypeWebViewImportTest {
     val spec =
       """{"root":{"type":"column","repeat":{"items":[],"as":"item"},"children":[{"type":"box","child":{"type":"webView"}},{"type":"webView"}]}}"""
     assertEquals("root.children[0].child", PrototypeWebView.importError(spec, false)?.path)
+  }
+
+  @Test
+  fun `malformed saved data returns null instead of throwing, as in Swift`() {
+    assertNull(PrototypeWebView.importError("{not json", false))
+    assertNull(PrototypeWebView.importError("[]", false))
+  }
+
+  @Test
+  fun `shared cases pin the first reported path independent of key order`() {
+    val cases =
+      Json.parseToJsonElement(File(fixtureDirectory(), "webview-import/cases.json").readText())
+        .jsonArray
+    assertTrue(cases.isNotEmpty())
+    cases.forEach {
+      val case = it.jsonObject
+      val expected = case["path"]?.takeUnless { path -> path is JsonNull }?.jsonPrimitive?.content
+      val name = case["name"]?.jsonPrimitive?.content
+      val spec = case.getValue("spec").jsonObject
+      assertEquals(expected, PrototypeWebView.importError(spec, false)?.path, name)
+      assertEquals(expected, PrototypeWebView.importError(spec.toString(), false)?.path, name)
+    }
   }
 }

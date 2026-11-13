@@ -27,7 +27,7 @@ import { defaultFillAxes, filling, linkedPagerPage } from "./webCollections";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
 import { cssColor, textCss } from "./webStyle";
-import { webImageAsset, webImageLayers } from "./webImages";
+import { webImageAsset, webImageLayers, webImageVar } from "./webImages";
 
 type Css = Record<string, string>;
 
@@ -272,6 +272,8 @@ export interface NavItem {
   readonly image: boolean;
   /** The bound asset id of the item's image in the current mode, when it authors one. */
   readonly asset?: string;
+  /** Where the item's image sits in the spec (`<nav path>.items[i].image`), when it authors one. */
+  readonly imagePath?: string;
 }
 
 /** Nav item images draw in a 24 dp square, as Android's navigation icons do. */
@@ -281,14 +283,21 @@ function optionalAsset(asset: string | undefined): { asset?: string } {
   return asset === undefined ? {} : { asset };
 }
 
-export function navItems(node: Raw, scope: WebRenderScope, kit: WebRenderKit): NavItem[] {
+export function navItems(
+  node: Raw,
+  scope: WebRenderScope,
+  kit: WebRenderKit,
+  path: string,
+): NavItem[] {
   const items = Array.isArray(node.items) ? node.items : [];
-  return items.map((entry) => {
+  return items.map((entry, index) => {
     const item = record(entry) ?? {};
+    const image = item.image !== undefined;
     return {
       label: kit.bound(item.label, scope),
       ...(typeof item.icon === "string" ? { icon: item.icon } : {}),
-      image: item.image !== undefined,
+      image,
+      ...(image ? { imagePath: `${path}.items[${index}].image` } : {}),
       ...optionalAsset(
         webImageAsset(item.image, scope.style.mode, (text) => kit.bound(text, scope)),
       ),
@@ -315,11 +324,22 @@ export function navSelection(
 }
 
 /**
- * An item's visual: its image when the page inlines one (the image takes precedence over the icon,
- * and the draw is recorded so the page encodes it at 24 dp), else its named icon, else Android's
- * 24 px surfaceVariant placeholder square.
+ * An item's visual: its image when the asset has a slot (the image takes precedence over the icon,
+ * and the draw is recorded so the page encodes it at 24 dp) over its fallback, which shows until
+ * the page inlines the image's rule; else the fallback alone: its named icon, else Android's 24 px
+ * surfaceVariant placeholder square.
  */
 export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebElement {
+  const slot = item.asset === undefined ? undefined : scope.imageSlots?.get(item.asset);
+  if (item.imagePath !== undefined) {
+    // Listed as an `image` node is: over budget until the page inlines it and drops the entry.
+    scope.unsupported.push({
+      type: "image",
+      path: item.imagePath,
+      reason: slot === undefined ? "assetNotInlined" : "assetOverBudget",
+      ...optionalAsset(item.asset),
+    });
+  }
   if (item.asset !== undefined) {
     scope.imageDraws?.push({
       asset: item.asset,
@@ -327,8 +347,22 @@ export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit)
       heightDp: NAV_IMAGE_DP,
       scale: "fit",
     });
-    const slot = scope.imageSlots?.get(item.asset);
     if (slot !== undefined) {
+      // The page may drop the image's rule over budget while keeping this view, so the icon or
+      // placeholder stays underneath until the rule sets the slot's `-on` flag, as an image node
+      // keeps its placeholder background.
+      const fallback = el(
+        "span",
+        {
+          style: {
+            display: "block",
+            position: "absolute",
+            inset: "0",
+            opacity: `calc(1 - var(${webImageVar(slot, "-on")}, 0))`,
+          },
+        },
+        [navFallback(item, scope, kit)],
+      );
       return el(
         "span",
         {
@@ -341,10 +375,15 @@ export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit)
             [FLEX_SHRINK]: "0",
           },
         },
-        webImageLayers(slot, {}, scope.style),
+        [fallback, ...webImageLayers(slot, {}, scope.style)],
       );
     }
   }
+  return navFallback(item, scope, kit);
+}
+
+/** The item's named icon, else Android's 24 px surfaceVariant placeholder square. */
+function navFallback(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebElement {
   if (item.icon !== undefined) {
     return kit.icon({ type: "icon", name: item.icon }, scope, "");
   }
@@ -440,8 +479,8 @@ export function withBottomInset(
 /** A Material 3 navigation bar: 80 px on surfaceContainer, each item an icon in a pill over a label. */
 const bottomNavRenderer =
   (kit: WebRenderKit): NodeRenderer =>
-  (node, scope) => {
-    const items = navItems(node, scope, kit);
+  (node, scope, path) => {
+    const items = navItems(node, scope, kit, path);
     const selected = navSelection(node, items.length, scope, kit);
     const { attrs, style: barStyle } = barBase(node, scope, kit, {
       [MIN_HEIGHT]: "80px",
@@ -500,8 +539,8 @@ function tab(item: NavItem, selected: boolean, layout: TabLayout) {
  */
 const tabBarRenderer =
   (kit: WebRenderKit): NodeRenderer =>
-  (node, scope) => {
-    const items = navItems(node, scope, kit);
+  (node, scope, path) => {
+    const items = navItems(node, scope, kit, path);
     const selected = navSelection(node, items.length, scope, kit);
     const layout: TabLayout = {
       scrollable: node.scrollable === true,

@@ -16,6 +16,7 @@ import {
   parseVideoRecordingConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import { type BootedDevice } from "../../../src/models";
+import { RECORDER_LOOKUP_COMMAND } from "../../../src/features/video/androidRecorderPid";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -248,7 +249,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     expect(calls[1]?.join(" ")).not.toContain("--display-id");
     // The retry keeps the pid-reporting wrapper.
     expect(calls[1]?.[1]).toStartWith(
-      "if command -v setsid >/dev/null 2>&1; then exec setsid sh -c 'echo $$; exec screenrecord ",
+      "if command -v setsid >/dev/null 2>&1; then setsid sh -c 'echo $$; exec screenrecord ",
     );
     expect(handle.warning).toContain("rejected --display-id");
     expect(handle.physicalDisplayId).toBeUndefined();
@@ -312,8 +313,11 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         );
 
         expect(result.codec).toBe("h264");
+        // An unanswered output-file lookup (#18243) keeps the name-based stop.
         expect(adb.getAllCommands()).toEqual([
+          RECORDER_LOOKUP_COMMAND,
           "shell pkill -2 screenrecord",
+          RECORDER_LOOKUP_COMMAND,
           "shell stat -c %s /sdcard/auto-mobile-test.mp4",
           "shell stat -c %s /sdcard/auto-mobile-test.mp4",
           "shell stat -c %s /sdcard/auto-mobile-test.mp4",
@@ -538,7 +542,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(signals).toContain("SIGKILL");
     });
 
-    test("sends device-side `pkill -2 screenrecord` as the first ADB command on stop", async () => {
+    test("sends device-side `pkill -2 screenrecord` first on stop when the output-file lookup is unanswered", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       const fakeClient = fakeFactory.getFakeClient();
       const fakeTimer = new FakeTimer();
@@ -553,7 +557,10 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       await backend.stop(handle);
 
       const commands = fakeClient.getAllCommands();
-      expect(commands[0]).toBe("shell pkill -2 screenrecord");
+      expect(commands.slice(0, 2)).toEqual([
+        RECORDER_LOOKUP_COMMAND,
+        "shell pkill -2 screenrecord",
+      ]);
     });
 
     test("does NOT signal host adb when the device-side pkill caused it to exit on its own", async () => {
@@ -1064,7 +1071,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         });
         expect(factory.getFakeClient().getSpawnCalls()).toContainEqual([
           "shell",
-          "if command -v setsid >/dev/null 2>&1; then exec setsid sh -c 'echo $$; exec screenrecord --bit-rate 1000 --time-limit 180 /sdcard/auto-mobile-clamp.mp4'; fi; echo $$; exec screenrecord --bit-rate 1000 --time-limit 180 /sdcard/auto-mobile-clamp.mp4",
+          "if command -v setsid >/dev/null 2>&1; then setsid sh -c 'echo $$; exec screenrecord --bit-rate 1000 --time-limit 180 /sdcard/auto-mobile-clamp.mp4'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; echo $$; exec screenrecord --bit-rate 1000 --time-limit 180 /sdcard/auto-mobile-clamp.mp4",
         ]);
       },
     );

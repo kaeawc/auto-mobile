@@ -280,6 +280,7 @@ export const exploreResultSchema = z
       .optional(),
     // Dry run.
     dryRun: z.literal(true).optional(),
+    inputMode: z.enum(["touch", "dpad"]).optional(),
     currentScreen: z
       .object({ name: z.string(), interactableElements: z.number().int().nonnegative() })
       .passthrough()

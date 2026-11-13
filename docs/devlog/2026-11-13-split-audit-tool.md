@@ -7,9 +7,9 @@
 
 ## Context
 
-Two tools audited accessibility, each on one platform: `audit` ran the host-side WCAG checks with
-scope, baseline and `failOn` on Android, and `accessibilityAudit` ran XCUITest
-`performAccessibilityAudit` on iOS. `audit` also carried the only pass/fail performance and memory
+Two tools audited accessibility, each on one platform. On Android, `audit` ran the host-side WCAG
+checks with scope, baseline and `failOn`. On iOS, `accessibilityAudit` ran XCUITest
+`performAccessibilityAudit`. The `audit` tool also carried the only pass/fail performance and memory
 checks, which an agent looking for a performance check had no reason to find in a tool whose
 default kind was accessibility.
 

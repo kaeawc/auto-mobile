@@ -13,6 +13,11 @@ import {
 import { iosWindowLayer, rankWithIosWindowLayer } from "../observe/ios/iosWindowLayer";
 import type { AccessibilityNodeSelector } from "../observe/android/types";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
+import {
+  boundedEntryPositions,
+  followsToggleInPlainWrapper,
+  precedingSiblingLabelSources,
+} from "./SiblingToggleLabels";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "./ElementParser";
 import type { Element } from "../../models/Element";
@@ -525,31 +530,45 @@ function attributeSearchableLabels(entries: SearchableEntry[]): void {
 /**
  * The searchable twin of the skeleton's preceding-sibling toggle label (#17955), so the
  * resolver's `displayedLabel` matches the emitted row and duplicate indexes still apply.
- * It applies the skeleton's rule over the same nodes: only bounded nodes count (they are
- * the ones the collector parses), and a still-unlabelled toggle takes the outermost text
- * node whose bounded subtree ends right before the toggle in the same root group (each
- * top-level child of a window is its own group), unless a tappable ancestor already
- * hoisted that text. Like the skeleton, which merges a node's serialized copies (merged
- * tree and window tree) into one row keeping the first copy's ancestry, a later copy of
- * the same toggle takes the first copy's result (#18253). A copy shares the coordinate
- * space too: window and ornament toggles with equal local bounds are distinct (#18273).
+ * Both projections run the one rule in `precedingSiblingLabelSources` (#18286), including
+ * trailing-text reservation and coordinate space, over the same nodes: only bounded nodes
+ * count (they are the ones the collector parses), numbered as collector provenance, and a
+ * text a tappable ancestor already hoisted never qualifies. Like the skeleton, which merges
+ * a node's serialized copies (merged tree and window tree) into one row keeping the first
+ * copy's ancestry, a later copy of the same toggle takes the first copy's result (#18253).
+ * A copy shares the coordinate space too: window and ornament toggles with equal local
+ * bounds are distinct (#18273).
  */
 function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): void {
   const hoisted = new Set(entries.flatMap((entry) => entry.hoistedSources ?? []));
-  const isText = (entry: SearchableEntry) =>
-    entry.affordances.length === 0 &&
-    entry.element !== undefined &&
-    entry.label?.trim() &&
-    !hoisted.has(entry);
+  const positions = boundedEntryPositions(entries);
+  const toggles = entries.filter(
+    (entry) => entry.element !== undefined && entry.affordances.includes("toggle"),
+  );
+  const texts = entries.filter(
+    (entry) =>
+      entry.affordances.length === 0 &&
+      entry.element !== undefined &&
+      entry.label?.trim() &&
+      !hoisted.has(entry),
+  );
+  const labels = precedingSiblingLabelSources(
+    toggles,
+    texts,
+    (entry) => ({
+      position: positions.get(entry)!,
+      space: entry.element!.space,
+      labelled: entry.label !== undefined,
+    }),
+    (toggle, text) => followsToggleInPlainWrapper(entries, toggle, text),
+  );
   const firstCopies = new Map<string, SearchableEntry | undefined>();
-  for (const entry of entries) {
-    if (entry.label !== undefined || !entry.element || !entry.affordances.includes("toggle")) {
+  for (const entry of toggles) {
+    if (entry.label !== undefined) {
       continue;
     }
-    const copy = JSON.stringify([entry.element.space, entry.elementId, entry.element.bounds]);
-    const preceding = firstCopies.has(copy)
-      ? firstCopies.get(copy)
-      : precedingSiblingText(entries, entry, isText);
+    const copy = JSON.stringify([entry.element!.space, entry.elementId, entry.element!.bounds]);
+    const preceding = firstCopies.has(copy) ? firstCopies.get(copy) : labels.get(entry);
     firstCopies.set(copy, preceding);
     if (preceding) {
       entry.label = preceding.label;
@@ -557,47 +576,4 @@ function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): 
       entry.textFields = [...entry.textFields, preceding.displayedLabel!];
     }
   }
-}
-
-/** The outermost text whose bounded subtree ends right before `entry` in its root group. */
-function precedingSiblingText(
-  entries: readonly SearchableEntry[],
-  entry: SearchableEntry,
-  isText: (entry: SearchableEntry) => unknown,
-): SearchableEntry | undefined {
-  const ancestors = new Set(ancestorIndexes(entries, entry));
-  let preceding: SearchableEntry | undefined;
-  let cursor = previousBoundedEntry(entries, entry);
-  while (cursor && !ancestors.has(cursor.index)) {
-    if (isText(cursor)) {
-      preceding = cursor;
-    }
-    cursor = cursor.parentIndex === undefined ? undefined : entries[cursor.parentIndex];
-  }
-  return preceding;
-}
-
-function ancestorIndexes(entries: readonly SearchableEntry[], entry: SearchableEntry): number[] {
-  const indexes: number[] = [];
-  for (let parent = entry.parentIndex; parent !== undefined; parent = entries[parent].parentIndex) {
-    indexes.push(parent);
-  }
-  return indexes;
-}
-
-/** The bounded node right before `entry` in pre-order, skipping bounds-less wrappers. */
-function previousBoundedEntry(
-  entries: readonly SearchableEntry[],
-  entry: SearchableEntry,
-): SearchableEntry | undefined {
-  for (let index = entry.index - 1; index >= 0; index--) {
-    const candidate = entries[index];
-    if (candidate.rootGroup !== entry.rootGroup) {
-      return undefined;
-    }
-    if (candidate.element) {
-      return candidate;
-    }
-  }
-  return undefined;
 }

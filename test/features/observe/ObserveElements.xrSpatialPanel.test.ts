@@ -755,3 +755,89 @@ test("window and ornament Switches with matching bounds and no id keep their own
   expect(labels(undefined)).toEqual(labels(undefined).map(() => "XrPanel title"));
   expect(labels("ornament")).toEqual(labels("ornament").map(() => "Ornament title"));
 });
+
+/** Skeleton row labels and every searchable copy's label, per captured Switch view id. */
+async function bothProjectionLabels(
+  rows: Parameters<typeof restructureSwitchRows>[1],
+  ids: readonly string[] = [SWITCH_ID, SECOND_SWITCH_ID],
+) {
+  const observation = spatialPanelObservation("switch-scroll");
+  restructureSwitchRows(observation, rows);
+  await enrich(observation, true);
+  const output = sanitizeObserveResult(observation, {
+    dropElements: false,
+    compact: true,
+    project: "skeleton",
+  });
+  const entries = getSearchableEntries(observation.elements!)!;
+  return ids.map((id) => {
+    const copies = entries.filter((entry) => entry.properties["view-id"] === id);
+    expect(copies.length).toBeGreaterThan(0);
+    const bounds = copies[0].element!.bounds;
+    const row = output.skeleton!.find(
+      (entry) =>
+        entry.bounds.join() === [bounds.left, bounds.top, bounds.right, bounds.bottom].join() &&
+        entry.affordances.includes("toggle") &&
+        (entry.space ?? "window") === (copies[0].element!.space ?? "window"),
+    );
+    expect(row).toBeDefined();
+    return {
+      skeleton: row!.label,
+      index: row!.index,
+      searchable: [...new Set(copies.map((entry) => entry.displayedLabel))],
+    };
+  });
+}
+
+/** Shift a captured node subtree right so a repeated pair cannot merge with the original. */
+function shifted(node: CapturedNode): CapturedNode {
+  const copy = structuredClone(node);
+  const shift = (value: unknown): void => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    const bounds = (value as { bounds?: { left: number; right: number } }).bounds;
+    if (bounds) {
+      bounds.left += 600;
+      bounds.right += 600;
+    }
+    Object.values(value).forEach(shift);
+  };
+  shift(copy);
+  return copy;
+}
+
+function asOrnament(node: CapturedNode): CapturedNode {
+  const copy = structuredClone(node);
+  const mark = (value: CapturedNode): void => {
+    value.space = "ornament";
+    [value.node ?? []].flat().forEach(mark);
+  };
+  mark(copy);
+  return copy;
+}
+
+test("flat `Switch, Text, Switch, Text` with a shared id agree in both projections (#18286)", async () => {
+  const labels = await bothProjectionLabels((t1, s1, t2, s2) => [
+    { ...s1, "resource-id": SHARED_SWITCH_ID },
+    t1,
+    shifted({ ...s2, "resource-id": SHARED_SWITCH_ID }),
+    shifted(t2),
+  ]);
+  expect(labels).toEqual([
+    { skeleton: undefined, index: 0, searchable: [undefined] },
+    { skeleton: undefined, index: 1, searchable: [undefined] },
+  ]);
+});
+
+test("a window Switch never reserves the ornament text before an ornament Switch (#18286)", async () => {
+  const labels = await bothProjectionLabels((_t1, s1, t2, s2) => [
+    s1,
+    asOrnament({ ...t2, text: "Ornament title" }),
+    asOrnament(s2),
+  ]);
+  expect(labels).toEqual([
+    { skeleton: undefined, index: undefined, searchable: [undefined] },
+    { skeleton: "Ornament title", index: undefined, searchable: ["Ornament title"] },
+  ]);
+});

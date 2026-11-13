@@ -113,6 +113,7 @@ final class FakeGesturePerformer: GesturePerforming {
     var tapDurations: [TimeInterval] = []
     var lastTap: (x: Double, y: Double)?
     var diagnosticTapCalls = 0
+    var onTap: (() -> Void)?
     var tapStrategies: [String?] = []
     var tapDiagnosticsResult: TapDiagnostics?
     var lockScreenSwipeCalls = 0
@@ -158,12 +159,14 @@ final class FakeGesturePerformer: GesturePerforming {
 
     func doubleTap(x: Double, y: Double) throws {
         doubleTapPoints.append(.init(x: x, y: y))
+        onTap?()
     }
 
     func tap(x: Double, y: Double, duration: TimeInterval) throws {
         tapDurations.append(duration)
         tapCalls += 1
         lastTap = (x, y)
+        onTap?()
     }
 
     func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws {
@@ -178,6 +181,7 @@ final class FakeGesturePerformer: GesturePerforming {
 
     func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics {
         diagnosticTapCalls += 1
+        onTap?()
         return tapDiagnosticsResult ?? TapDiagnostics(requested: .init(x: x, y: y, durationMs: durationMs))
     }
 

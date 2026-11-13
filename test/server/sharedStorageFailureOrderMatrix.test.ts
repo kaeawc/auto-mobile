@@ -1,3 +1,4 @@
+import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test } from "bun:test";
 import {
@@ -63,6 +64,7 @@ function setup(existingIndexes: number[]) {
     );
   }
   const service = createSharedStorageServiceForTesting({
+    diagnostics: new FakeSharedStorageDiagnostics(),
     adbFactory: { create: () => executor },
     fileSystem,
     timer: new FakeTimer(),

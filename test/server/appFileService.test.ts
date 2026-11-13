@@ -1,3 +1,4 @@
+import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { SimulatorContainerOwnershipError } from "../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
 import { cloneContainerFixture } from "../helpers/simulatorContainerFixture";
 import { simulatorOwnership } from "../helpers/simulatorContainerFixture";
@@ -102,6 +103,7 @@ describe("AppFileService", () => {
         // reaches the images collection, so the batch fails on it.
         adb.setCommandResponse("content://media/external_primary/file", execResult("Row: 0 _id=1"));
         const sharedStorageService = createSharedStorageServiceForTesting({
+          diagnostics: new FakeSharedStorageDiagnostics(),
           adbFactory: adbFactoryFor(adb),
           timer,
           fileSystem: {
@@ -132,11 +134,15 @@ describe("AppFileService", () => {
               (error: unknown) => error,
             );
           expect(error).toBeInstanceOf(ActionableError);
-          expect((error as Error).message).toBe(
-            "Android shared-storage batch staging failed for b.png: Android media indexing did not complete for /storage/emulated/0/Download/fixtures/b.png within 5 seconds. " +
-              (cleanupFails
-                ? "Rolled back: none. Rollback failures: b.png, a.txt: Android shared-storage operation failed: cleanup denied."
-                : "Rolled back: b.png, a.txt. Rollback failures: none."),
+          const message = (error as Error).message;
+          expect(message).toContain("Android shared-storage batch staging failed for b.png:");
+          expect(message).toContain("stage=media-query; command: adb shell content query");
+          expect(message).toContain("timeout=5000ms; elapsed=5000ms");
+          expect(message).toContain("Device state:");
+          expect(message).toContain(
+            cleanupFails
+              ? "Rolled back: none. Rollback failures: b.png, a.txt: Android shared-storage operation failed: cleanup denied."
+              : "Rolled back: b.png, a.txt. Rollback failures: none.",
           );
           expect(
             adb
@@ -1220,6 +1226,7 @@ describe("AppFileService", () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=7"));
     const sharedStorageService = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer: new FakeTimer(),
       createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "primary" }) }),
@@ -1259,6 +1266,7 @@ describe("AppFileService", () => {
     const executor = new FakeAdbExecutor();
     let resolveCalls = 0;
     const sharedStorageService = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
         resolve: async (request) => {
@@ -1364,6 +1372,7 @@ describe("AppFileService", () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
     const sharedStorageService = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer: new FakeTimer(),
       fileSystem: {
@@ -1434,6 +1443,7 @@ describe("AppFileService", () => {
       new Error("index query failed"),
     );
     const sharedStorageService = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
         resolve: async () => ({ userId: 12, source: "managedProfile" }),
@@ -1453,7 +1463,7 @@ describe("AppFileService", () => {
         })),
       }),
     ).rejects.toThrow(
-      "failed for third.png: Android shared-storage operation failed: index query failed Rolled back: second.png, first.png",
+      /failed for third\.png:[\s\S]*stage=commit; command: adb shell mv[\s\S]*index query failed[\s\S]*Rolled back: second.png, first.png/,
     );
 
     expect(executor.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(3);
@@ -1482,6 +1492,7 @@ describe("AppFileService", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const sharedStorageService = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       timer,
       createUserResolver: () => ({
@@ -1502,7 +1513,7 @@ describe("AppFileService", () => {
         })),
       }),
     ).rejects.toThrow(
-      "failed for third.png: Android media indexing did not complete for /storage/emulated/12/Download/automobile-media/third.png within 5 seconds. Rolled back: third.png, second.png, first.png",
+      /failed for third\.png:[\s\S]*stage=media-query; command: adb shell content query[\s\S]*Android media indexing did not complete for \/storage\/emulated\/12\/Download\/automobile-media\/third.png within 5 seconds.[\s\S]*Rolled back: third.png, second.png, first.png/,
     );
 
     expect(executor.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(3);
@@ -1516,6 +1527,7 @@ describe("AppFileService", () => {
   test("validates the entire media batch before writing any file", async () => {
     const executor = new FakeAdbExecutor();
     const sharedStorageService = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
         resolve: async () => ({ userId: 12, source: "managedProfile" }),
@@ -1553,6 +1565,7 @@ describe("AppFileService", () => {
       new Error("device unavailable"),
     );
     const sharedStorageService = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
         resolve: async () => ({ userId: 12, source: "managedProfile" }),

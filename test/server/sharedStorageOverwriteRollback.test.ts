@@ -1,8 +1,9 @@
+import { SHARED_STORAGE_BACKUP_TIMEOUT_MS } from "../../src/features/storage/fileTransferTimeout";
+import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { logger } from "../../src/utils/logger";
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   createSharedStorageServiceForTesting,
-  SHARED_STORAGE_PUSH_TIMEOUT_MS,
   type SharedStorageFileSystem,
   type StageSharedStorageRequest,
 } from "../../src/server/sharedStorageService";
@@ -54,6 +55,7 @@ function setup(existingIndexes: number[] = []) {
     );
   }
   const service = createSharedStorageServiceForTesting({
+    diagnostics: new FakeSharedStorageDiagnostics(),
     adbFactory: { create: () => executor },
     fileSystem,
     timer: new FakeTimer(),
@@ -92,8 +94,7 @@ describe("sharedStorageService rollback of overwritten files", () => {
     await expect(
       stage({ files: [fileAt("first.png"), fileAt("second.png"), fileAt("third.png")] }),
     ).rejects.toThrow(
-      "failed for third.png: Android shared-storage operation failed: push failed " +
-        "Rolled back: second.png, first.png. Rollback failures: none.",
+      /failed for third\.png:[\s\S]*stage=push; command: adb 'push'[\s\S]*push failed[\s\S]*Rolled back: second.png, first.png. Rollback failures: none./,
     );
 
     const backup = `${DIR}/.automobile-t-1.bak`;
@@ -260,7 +261,7 @@ describe("sharedStorageService rollback of overwritten files", () => {
     executor.setCommandError(MARKER, new Error("cp failed"));
 
     await expect(stage({ files: [fileAt("a.txt"), fileAt("b.txt")] })).rejects.toThrow(
-      "failed for previous-content backup: Android shared-storage operation failed: cp failed",
+      /failed for previous-content backup:[\s\S]*stage=backup; command: adb shell sh -c[\s\S]*cp failed/,
     );
 
     const commands = executor.getExecutedCommands();
@@ -378,23 +379,23 @@ describe("sharedStorageService rollback of overwritten files", () => {
         .filter((call) => call.command.includes(MARKER))
         .map((call) => call.timeoutMs);
 
-    test("scales with the number of files copied, one push budget per file", async () => {
+    test("caps a multi-file backup below the caller budget", async () => {
       const { executor, stage } = setup();
 
       await stage({ files: [fileAt("a.png"), fileAt("b.png")] });
 
-      expect(probeTimeouts(executor)).toEqual([2 * SHARED_STORAGE_PUSH_TIMEOUT_MS]);
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_BACKUP_TIMEOUT_MS]);
     });
 
-    test("a single-file backup gets one push budget, not the 15 s default", async () => {
+    test("a single-file backup gets the explicit backup budget", async () => {
       const { executor, stage } = setup();
 
       await stage({ files: [fileAt("a.png")] });
 
-      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_PUSH_TIMEOUT_MS]);
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_BACKUP_TIMEOUT_MS]);
     });
 
-    test("each chunk of 64 is budgeted for its own size", async () => {
+    test("each chunk of 64 gets the bounded backup budget", async () => {
       const { executor, stage } = setup();
 
       await stage({
@@ -402,8 +403,8 @@ describe("sharedStorageService rollback of overwritten files", () => {
       });
 
       expect(probeTimeouts(executor)).toEqual([
-        64 * SHARED_STORAGE_PUSH_TIMEOUT_MS,
-        SHARED_STORAGE_PUSH_TIMEOUT_MS,
+        SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+        SHARED_STORAGE_BACKUP_TIMEOUT_MS,
       ]);
     });
   });

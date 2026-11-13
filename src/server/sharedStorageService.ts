@@ -1,4 +1,16 @@
-import { SHARED_STORAGE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
+import {
+  SHARED_STORAGE_PUSH_TIMEOUT_MS,
+  SHARED_STORAGE_MKDIR_TIMEOUT_MS,
+  SHARED_STORAGE_COMMIT_TIMEOUT_MS,
+  SHARED_STORAGE_RESET_TIMEOUT_MS,
+  SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+  SHARED_STORAGE_MEDIA_SCAN_TIMEOUT_MS,
+  SHARED_STORAGE_MEDIA_QUERY_TIMEOUT_MS,
+  SHARED_STORAGE_MEDIA_INDEX_TIMEOUT_MS,
+  SHARED_STORAGE_MEDIA_POLL_INTERVAL_MS,
+} from "../features/storage/fileTransferTimeout";
+import { SharedStorageStages } from "./sharedStorageStaging";
+import type { SharedStorageDiagnostics } from "./sharedStorageDiagnostics";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { promises as nodeFs } from "node:fs";
@@ -80,6 +92,7 @@ export interface SharedStorageServiceDependencies {
   timer?: Timer;
   idGenerator?: IdGenerator;
   createUserResolver?: (adb: AdbExecutor) => SharedStorageUserResolver;
+  diagnostics?: SharedStorageDiagnostics;
 }
 
 export interface SharedStorageUserResolver {
@@ -120,6 +133,7 @@ export function createSharedStorageServiceForTesting(
       createUserResolver:
         dependencies.createUserResolver ?? ((adb) => new AndroidUserTargetResolver(adb)),
       idGenerator: dependencies.idGenerator ?? defaultIdGenerator,
+      stages: new SharedStorageStages(dependencies.timer ?? defaultTimer, dependencies.diagnostics),
     },
   );
 }
@@ -127,6 +141,7 @@ export function createSharedStorageServiceForTesting(
 class DefaultSharedStorageService implements SharedStorageService {
   private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver;
   private readonly idGenerator: IdGenerator;
+  private readonly stages: SharedStorageStages;
 
   constructor(
     private readonly adbFactory: AdbClientFactory,
@@ -135,13 +150,16 @@ class DefaultSharedStorageService implements SharedStorageService {
     {
       createUserResolver,
       idGenerator,
+      stages,
     }: {
       createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver;
       idGenerator: IdGenerator;
+      stages: SharedStorageStages;
     },
   ) {
     this.createUserResolver = createUserResolver;
     this.idGenerator = idGenerator;
+    this.stages = stages;
   }
 
   async stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
@@ -167,16 +185,26 @@ class DefaultSharedStorageService implements SharedStorageService {
         );
       }
       const destinationDirectory = downloadsDirectory(user.userId, namespace);
+      const destinations = preparedFiles
+        .map((file) => posix.join(destinationDirectory, file.destinationPath))
+        .join(", ");
       if (request.reset) {
         // namespace has exactly one safe segment, so this can only remove Downloads/<namespace>.
-        await execute(
-          adb,
-          `shell rm -rf ${shellQuote(destinationDirectory)}`,
-          request.signal,
-          SHARED_STORAGE_PUSH_TIMEOUT_MS,
-        );
+        await this.stages.run(adb, {
+          destination: destinations,
+          stage: "reset",
+          command: `shell rm -rf ${shellQuote(destinationDirectory)}`,
+          signal: request.signal,
+          timeoutMs: SHARED_STORAGE_RESET_TIMEOUT_MS,
+        });
       }
-      await execute(adb, `shell mkdir -p ${shellQuote(destinationDirectory)}`, request.signal);
+      await this.stages.run(adb, {
+        destination: destinations,
+        stage: "mkdir",
+        command: `shell mkdir -p ${shellQuote(destinationDirectory)}`,
+        signal: request.signal,
+        timeoutMs: SHARED_STORAGE_MKDIR_TIMEOUT_MS,
+      });
 
       const files = await this.stagePreparedFiles({
         adb,
@@ -254,7 +282,13 @@ class DefaultSharedStorageService implements SharedStorageService {
     if (!destination.startsWith(`${destinationDirectory}/`)) {
       throw new ActionableError(`destinationPath escapes shared-storage namespace ${namespace}`);
     }
-    await execute(adb, `shell mkdir -p ${shellQuote(posix.dirname(destination))}`, request.signal);
+    await this.stages.run(adb, {
+      destination,
+      stage: "mkdir",
+      command: `shell mkdir -p ${shellQuote(posix.dirname(destination))}`,
+      signal: request.signal,
+      timeoutMs: SHARED_STORAGE_MKDIR_TIMEOUT_MS,
+    });
     await this.pushThroughTemp({
       adb,
       request,
@@ -270,6 +304,7 @@ class DefaultSharedStorageService implements SharedStorageService {
         ? await indexMediaFile(adb, destination, destinationPath, {
             userId,
             timer: this.timer,
+            stages: this.stages,
             signal: request.signal,
           })
         : {
@@ -298,18 +333,21 @@ class DefaultSharedStorageService implements SharedStorageService {
       `.automobile-${this.idGenerator.next()}.part`,
     );
     try {
-      await executeArgs(
-        adb,
-        ["push", source, temp],
-        request.signal,
-        SHARED_STORAGE_PUSH_TIMEOUT_MS,
-      );
+      await this.stages.run(adb, {
+        destination,
+        stage: "push",
+        command: ["push", source, temp],
+        signal: request.signal,
+        timeoutMs: SHARED_STORAGE_PUSH_TIMEOUT_MS,
+      });
       onBeforeCommit?.();
-      await execute(
-        adb,
-        `shell mv -f ${shellQuote(temp)} ${shellQuote(destination)}`,
-        request.signal,
-      );
+      await this.stages.run(adb, {
+        destination,
+        stage: "commit",
+        command: `shell mv -f ${shellQuote(temp)} ${shellQuote(destination)}`,
+        signal: request.signal,
+        timeoutMs: SHARED_STORAGE_COMMIT_TIMEOUT_MS,
+      });
     } catch (error) {
       await discardHiddenFiles(adb, [temp], "unfinished pushes");
       throw error;
@@ -400,7 +438,10 @@ class DefaultSharedStorageService implements SharedStorageService {
     if (!shouldKeepPrevious(request)) {
       return new Map();
     }
-    return saveExistingFiles(adb, this.planBackups(destinationDirectory, files), request.signal);
+    return saveExistingFiles(adb, this.planBackups(destinationDirectory, files), {
+      signal: request.signal,
+      stages: this.stages,
+    });
   }
 
   /** One hidden saved-copy path per destination, beside the destination it protects. */
@@ -625,7 +666,7 @@ async function rescanRestoredFiles(
 async function saveExistingFiles(
   adb: AdbExecutor,
   files: BackupPlan[],
-  signal?: AbortSignal,
+  { signal, stages }: { signal?: AbortSignal; stages: SharedStorageStages },
 ): Promise<Map<string, string>> {
   const saved = new Map<string, string>();
   for (
@@ -644,15 +685,14 @@ async function saveExistingFiles(
       ),
     );
     try {
-      // The copies are device-local but as large as the files the push will replace, so the
-      // budget scales with the file count the same way the push budget does (one push budget per
-      // file) instead of the 15 s default, which would fail a batch that used to succeed.
-      const result = await executeResult(
-        adb,
-        `shell sh -c ${shellQuote(script)}`,
+      // Cap even a large backup chunk below the caller budget so a wedged copy is diagnosable.
+      const result = await stages.run(adb, {
+        destination: chunk.map((file) => file.destination).join(", "),
+        stage: "backup",
+        command: `shell sh -c ${shellQuote(script)}`,
         signal,
-        chunk.length * SHARED_STORAGE_PUSH_TIMEOUT_MS,
-      );
+        timeoutMs: SHARED_STORAGE_BACKUP_TIMEOUT_MS,
+      });
       for (const [path, backup] of copiedBackups(chunk, result.stdout)) {
         saved.set(path, backup);
       }
@@ -785,25 +825,9 @@ async function execute(
       waitForProcessSettlementAfterAbort: true,
     });
   } catch (error) {
-    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
-  }
-}
-
-async function executeArgs(
-  adb: AdbExecutor,
-  args: string[],
-  signal?: AbortSignal,
-  timeoutMs?: number,
-): Promise<void> {
-  try {
-    await adb.execute(args, {
-      noRetry: true,
-      signal,
-      waitForProcessSettlementAfterAbort: true,
-      timeoutMs,
+    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`, {
+      cause: error,
     });
-  } catch (error) {
-    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }
 }
 
@@ -811,11 +835,39 @@ async function indexMediaFile(
   adb: AdbExecutor,
   destination: string,
   destinationPath: string,
-  { userId, timer, signal }: { userId: number; timer: Timer; signal?: AbortSignal },
+  {
+    userId,
+    timer,
+    stages,
+    signal,
+  }: {
+    userId: number;
+    timer: Timer;
+    stages: SharedStorageStages;
+    signal?: AbortSignal;
+  },
 ): Promise<{ status: "completed" }> {
-  await execute(adb, `shell ${mediaScanCommand(userId, destination)}`, signal);
+  await stages.run(adb, {
+    destination,
+    stage: "media-scan",
+    command: `shell ${mediaScanCommand(userId, destination)}`,
+    signal,
+    timeoutMs: SHARED_STORAGE_MEDIA_SCAN_TIMEOUT_MS,
+  });
+  const started = timer.now();
+  const deadline = started + SHARED_STORAGE_MEDIA_INDEX_TIMEOUT_MS;
   const collection = mediaStoreCollectionFor(destinationPath);
-  const apiLevel = await readAndroidDeviceApiLevel(adb);
+  const apiLevel = await stages.run(
+    adb,
+    {
+      destination,
+      stage: "media-query",
+      command: "shell getprop ro.build.version.sdk",
+      signal,
+      timeoutMs: SHARED_STORAGE_MEDIA_QUERY_TIMEOUT_MS,
+    },
+    (options) => readAndroidDeviceApiLevel(adb, options.timeoutMs, timer, options.signal),
+  );
   const modernQuery = apiLevel === null || apiLevel >= 29;
   const downloadsPrefix = `/${DOWNLOADS_DIRECTORY}/`;
   const downloadsIndex = destination.indexOf(downloadsPrefix);
@@ -832,19 +884,36 @@ async function indexMediaFile(
     ? `relative_path=${sqlString(relativePath)} AND _display_name=${sqlString(posix.basename(destination))}`
     : `_data=${sqlString(destination.replace("/sdcard/", "/storage/emulated/0/"))}`;
   const volume = modernQuery ? "external_primary" : "external";
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const result = await executeResult(
-      adb,
-      `shell content query --user ${userId} --uri ${mediaStoreUri(volume, collection)} --projection _id --where ${shellQuote(selection)}`,
+  const command = `shell content query --user ${userId} --uri ${mediaStoreUri(volume, collection)} --projection _id --where ${shellQuote(selection)}`;
+  while (timer.now() < deadline) {
+    const result = await stages.run(adb, {
+      destination,
+      stage: "media-query",
+      command,
       signal,
-    );
+      timeoutMs: Math.min(SHARED_STORAGE_MEDIA_QUERY_TIMEOUT_MS, deadline - timer.now()),
+    });
     if (/^Row:/m.test(result.stdout)) {
       return { status: "completed" };
     }
-    await timer.sleep(250);
+    const remaining = deadline - timer.now();
+    if (remaining > 0) {
+      await timer.sleep(Math.min(SHARED_STORAGE_MEDIA_POLL_INTERVAL_MS, remaining));
+    }
   }
-  throw new ActionableError(
-    `Android media indexing did not complete for ${destination} within 5 seconds.`,
+  throw await stages.failure(
+    adb,
+    {
+      destination,
+      stage: "media-query",
+      command,
+      signal,
+      timeoutMs: SHARED_STORAGE_MEDIA_INDEX_TIMEOUT_MS,
+    },
+    started,
+    new Error(
+      `Android media indexing did not complete for ${destination} within 5 seconds. Total media-index budget exhausted.`,
+    ),
   );
 }
 
@@ -860,24 +929,6 @@ function fileUriFor(absolutePath: string): string {
 
 function mediaScanCommand(userId: number, destination: string): string {
   return `am broadcast --user ${userId} -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(fileUriFor(destination))}`;
-}
-
-async function executeResult(
-  adb: AdbExecutor,
-  command: string,
-  signal?: AbortSignal,
-  timeoutMs?: number,
-) {
-  try {
-    return await adb.executeCommand(command, {
-      timeoutMs,
-      noRetry: true,
-      signal,
-      waitForProcessSettlementAfterAbort: true,
-    });
-  } catch (error) {
-    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
-  }
 }
 
 type MediaStoreCollection = "images" | "video" | "audio" | "file";

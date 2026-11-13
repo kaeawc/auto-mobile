@@ -1,3 +1,4 @@
+import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { logger } from "../../src/utils/logger";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, spyOn, test } from "bun:test";
@@ -45,6 +46,7 @@ function setup() {
   const executor = new FakeAdbExecutor();
   executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
   const service = createSharedStorageServiceForTesting({
+    diagnostics: new FakeSharedStorageDiagnostics(),
     adbFactory: { create: () => executor },
     fileSystem,
     timer: new FakeTimer(),
@@ -180,6 +182,7 @@ describe("sharedStorageService with rollback", () => {
     executor.setCommandResponse(MARKER, execResult(`${MARKER}:0\n${MARKER}:1\n`));
     executor.setCommandError("push /fixtures/b.txt", new Error("push cut off"));
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: { create: () => executor },
       fileSystem,
       timer: new FakeTimer(),
@@ -241,6 +244,7 @@ describe("media-scan file URI", () => {
     executor.setCommandResponse(MARKER, execResult(`${MARKER}:0\n`));
     executor.setCommandError("push /fixtures/b.txt", new Error("push failed"));
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: { create: () => executor },
       fileSystem,
       timer: new FakeTimer(),

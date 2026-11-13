@@ -1,3 +1,4 @@
+import { FakeSharedStorageDiagnostics } from "../fakes/FakeSharedStorageDiagnostics";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerAppFileTools } from "../../src/server/appFileTools";
@@ -32,6 +33,7 @@ describe("putAppFile shared-storage rollback", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const service = createSharedStorageServiceForTesting({
+      diagnostics: new FakeSharedStorageDiagnostics(),
       adbFactory: { create: () => adb },
       timer,
       fileSystem: {
@@ -75,9 +77,12 @@ describe("putAppFile shared-storage rollback", () => {
       (error: unknown) => error,
     );
     expect(error).toBeInstanceOf(ActionableError);
-    expect((error as Error).message).toBe(
-      "Android shared-storage batch staging failed for b.png: Android media indexing did not complete for /storage/emulated/0/Download/fixtures/b.png within 5 seconds. Rolled back: b.png, a.txt. Rollback failures: none.",
-    );
+    const message = (error as Error).message;
+    expect(message).toContain("Android shared-storage batch staging failed for b.png:");
+    expect(message).toContain("stage=media-query; command: adb shell content query");
+    expect(message).toContain("timeout=5000ms; elapsed=5000ms");
+    expect(message).toContain("Device state:");
+    expect(message).toContain("Rolled back: b.png, a.txt. Rollback failures: none.");
     expect(adb.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(2);
     expect(adb.getExecutedCommands()).toContain(
       "shell rm -f '/storage/emulated/0/Download/fixtures/b.png' '/storage/emulated/0/Download/fixtures/a.txt'",

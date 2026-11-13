@@ -42,6 +42,7 @@ SCRIPT
   cat > "${MOCK_BIN}/swift" <<SCRIPT
 #!/usr/bin/env bash
 printf '%s\n' "swift \$*" >> "${INVOCATIONS}"
+printf '%s\n' "device-id \${AUTOMOBILE_DEVICE_ID-unset}" >> "${INVOCATIONS}"
 SCRIPT
 
   chmod +x \
@@ -85,4 +86,16 @@ teardown() {
   [ "$status" -eq 0 ]
   ! grep -q '^warm-reminders-target-app$' "$INVOCATIONS"
   grep -q '^swift test --filter RemindersLaunchPlanTests$' "$INVOCATIONS"
+}
+
+@test "exports the booted simulator id for AutoMobileTestCase" {
+  run "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh"
+  [ "$status" -eq 0 ]
+  grep -q '^device-id BOOTED-UDID$' "$INVOCATIONS"
+}
+
+@test "keeps a caller-provided AUTOMOBILE_DEVICE_ID" {
+  run env AUTOMOBILE_DEVICE_ID=CALLER-ID "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh"
+  [ "$status" -eq 0 ]
+  grep -q '^device-id CALLER-ID$' "$INVOCATIONS"
 }

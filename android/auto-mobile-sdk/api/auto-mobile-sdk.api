@@ -623,6 +623,8 @@ public final class dev.jasonpearson.automobile.sdk.carapp.AutoMobileCarAppTempla
 Compiled from "AutoMobileCarAppTemplates.kt"
 public final class dev.jasonpearson.automobile.sdk.carapp.AutoMobileCarAppTemplatesKt {
   public static final java.lang.String MAIN_THREAD_TIMEOUT = "main_thread_timeout";
+  public static final java.lang.String MAIN_THREAD_UNAVAILABLE = "main_thread_unavailable";
+  public static final long MAIN_THREAD_TIMEOUT_MS = 1000l;
 }
 Compiled from "CarAppTemplateDocument.kt"
 public final class dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode$Companion {
@@ -919,14 +921,35 @@ public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateRoute {
   public final java.lang.String snapshotJson();
 }
 Compiled from "AutoMobileCarAppTemplates.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.HandlerMainThreadPoster implements dev.jasonpearson.automobile.sdk.carapp.MainThreadPoster {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.HandlerMainThreadPoster();
+  public boolean isCurrentThread();
+  public boolean post(java.lang.Runnable);
+  public void cancel(java.lang.Runnable);
+}
+Compiled from "AutoMobileCarAppTemplates.kt"
 public final class dev.jasonpearson.automobile.sdk.carapp.LooperMainThreadRunner implements dev.jasonpearson.automobile.sdk.carapp.MainThreadRunner {
   public static final dev.jasonpearson.automobile.sdk.carapp.LooperMainThreadRunner INSTANCE;
   public static final int $stable;
   public <T> T run(kotlin.jvm.functions.Function0<? extends T>);
 }
 Compiled from "AutoMobileCarAppTemplates.kt"
+public interface dev.jasonpearson.automobile.sdk.carapp.MainThreadPoster {
+  public abstract boolean isCurrentThread();
+  public abstract boolean post(java.lang.Runnable);
+  public abstract void cancel(java.lang.Runnable);
+}
+Compiled from "AutoMobileCarAppTemplates.kt"
 public interface dev.jasonpearson.automobile.sdk.carapp.MainThreadRunner {
   public abstract <T> T run(kotlin.jvm.functions.Function0<? extends T>);
+}
+Compiled from "AutoMobileCarAppTemplates.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.PostedMainThreadRunner implements dev.jasonpearson.automobile.sdk.carapp.MainThreadRunner {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.PostedMainThreadRunner(dev.jasonpearson.automobile.sdk.carapp.MainThreadPoster, long);
+  public dev.jasonpearson.automobile.sdk.carapp.PostedMainThreadRunner(dev.jasonpearson.automobile.sdk.carapp.MainThreadPoster, long, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public <T> T run(kotlin.jvm.functions.Function0<? extends T>);
 }
 Compiled from "SdkContext.kt"
 public final class dev.jasonpearson.automobile.sdk.context.SdkContext {

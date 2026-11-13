@@ -541,7 +541,7 @@ function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): 
       continue;
     }
     let preceding: SearchableEntry | undefined;
-    let cursor = entries[entry.index - 1];
+    let cursor: SearchableEntry | undefined = entries[entry.index - 1];
     while (cursor && cursor.index !== entry.parentIndex && cursor.windowRank === entry.windowRank) {
       if (isText(cursor)) {
         preceding = cursor;

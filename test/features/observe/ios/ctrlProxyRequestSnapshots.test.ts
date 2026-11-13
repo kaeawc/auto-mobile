@@ -70,7 +70,6 @@ import { buildNetworkMockRules } from "../../../../src/utils/networkMockRules";
 import { NetworkState } from "../../../../src/utils/NetworkState";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { serializeIosRequest } from "../../../../src/features/observe/ios/serializeIosRequest";
-import { sendCommand } from "../../../../src/features/observe/DeviceServiceUtils";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const FIXTURE_PATH = resolve(
@@ -261,18 +260,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     fireAndForget: true,
   },
   {
-    // No TS delegate method yet (#18245): the host sends `refresh_geometry` after
-    // setPosture through the shared `sendCommand` envelope, which this captures live.
-    // Point `builder`/`invoke` at the dedicated delegate method when it lands.
     name: "refresh_geometry",
-    builder: "sendCommand (shared delegate envelope; no dedicated builder yet)",
-    invoke: (h) =>
-      sendCommand(h.context, {
-        idPrefix: "refreshGeometry",
-        responseType: "refresh_geometry_result",
-        messageType: "refresh_geometry",
-        timeoutMs: 5000,
-      }),
+    builder: "CtrlProxyNavigation.requestRefreshGeometry",
+    invoke: (h) => new CtrlProxyNavigation(h.context).requestRefreshGeometry(),
   },
   {
     name: "set_network_error_simulation",

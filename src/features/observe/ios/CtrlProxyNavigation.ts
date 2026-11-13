@@ -22,6 +22,7 @@ import type {
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
   CtrlProxyHingeAngleResult,
+  CtrlProxyRefreshGeometryResult,
   CtrlProxyLocationRequest,
   CtrlProxyLocationResult,
   CtrlProxyAppearanceResult,
@@ -211,6 +212,34 @@ export class CtrlProxyNavigation {
   }
 
   /**
+   * Drop the runner's cached gesture geometry and read back what its next taps will use (#18295).
+   * A runner without `refresh_geometry` answers `unsupported: true` without a round trip.
+   */
+  async requestRefreshGeometry(
+    timeoutMs: number = 5000,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyRefreshGeometryResult> {
+    const failed = (error: string, totalTimeMs: number, unsupported = false) => ({
+      ...emptyRefreshGeometryResult(),
+      ...(unsupported ? { unsupported } : {}),
+      error,
+      totalTimeMs,
+    });
+    return sendCommand<CtrlProxyRefreshGeometryResult>(this.context, {
+      idPrefix: "refreshGeometry",
+      responseType: "refresh_geometry_result",
+      messageType: "refresh_geometry",
+      timeoutMs,
+      abortSignal: signal,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => failed("Not connected", 0),
+      unsupportedCommandError: (_messageType, error) => failed(error, 0, true),
+      timeoutError: (timeout) => failed(`Refresh geometry timed out after ${timeout}ms`, timeout),
+      responseError: (error, totalTimeMs) => failed(error, totalTimeMs),
+    });
+  }
+
+  /**
    * Set or clear the device's simulated location through `XCUIDevice.location` (#14091).
    * Works on physical devices, where simctl has no location verb.
    */
@@ -348,4 +377,19 @@ export class CtrlProxyNavigation {
       errorLabel: "Recent apps",
     });
   }
+}
+
+function emptyRefreshGeometryResult(): Omit<CtrlProxyRefreshGeometryResult, "totalTimeMs"> {
+  return {
+    success: false,
+    refreshed: false,
+    rotation: null,
+    appWidth: null,
+    appHeight: null,
+    screenWidth: null,
+    screenHeight: null,
+    observationWidth: null,
+    observationHeight: null,
+    foregroundBundleId: null,
+  };
 }

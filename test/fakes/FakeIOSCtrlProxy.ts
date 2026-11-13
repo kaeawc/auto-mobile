@@ -44,6 +44,7 @@ import type {
   CtrlProxySdkTriggerResult,
   CtrlProxyVoiceOverResult,
   CtrlProxyHingeAngleResult,
+  CtrlProxyRefreshGeometryResult,
   CtrlProxyLocationRequest,
   CtrlProxyLocationResult,
   CtrlProxyAppearance,
@@ -1203,6 +1204,37 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     await this.applyDelay("setHingeAngle");
     this.checkFailure("setHingeAngle");
     return this.hingeAngleResult ?? { success: true, angle, totalTimeMs: 0 };
+  }
+
+  /** Scripted `refresh_geometry` replies, consumed in order; the last one repeats (#18302). */
+  refreshGeometryReplies: CtrlProxyRefreshGeometryResult[] = [];
+  refreshGeometryCalls = 0;
+
+  async requestRefreshGeometry(
+    _timeoutMs: number = 5000,
+    _signal?: AbortSignal,
+  ): Promise<CtrlProxyRefreshGeometryResult> {
+    const index = Math.min(this.refreshGeometryCalls, this.refreshGeometryReplies.length - 1);
+    this.refreshGeometryCalls += 1;
+    await this.applyDelay("refreshGeometry");
+    this.checkFailure("refreshGeometry");
+    return (
+      this.refreshGeometryReplies[index] ?? {
+        success: false,
+        refreshed: false,
+        rotation: null,
+        appWidth: null,
+        appHeight: null,
+        screenWidth: null,
+        screenHeight: null,
+        observationWidth: null,
+        observationHeight: null,
+        foregroundBundleId: null,
+        unsupported: true,
+        error: "refresh_geometry is not supported by the connected device service",
+        totalTimeMs: 0,
+      }
+    );
   }
 
   /** Location requests seen, and an optional scripted result (#14091). */

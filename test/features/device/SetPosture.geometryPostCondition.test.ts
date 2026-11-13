@@ -10,6 +10,7 @@ import {
   observedIosDisplay,
 } from "../../../src/features/observe/ObservationDisplay";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
+import type { CtrlProxyRefreshGeometryResult } from "../../../src/features/observe/ios/types";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
   parseSimulatorDisplays,
@@ -165,5 +166,116 @@ describe("setPosture iOS geometry post-condition", () => {
       "[SetPosture] Geometry re-check failed: runner disconnected",
       expect.any(Error),
     );
+  });
+});
+
+function runnerReply(rotation: number, refreshed = true): CtrlProxyRefreshGeometryResult {
+  return {
+    success: true,
+    refreshed,
+    rotation: refreshed ? rotation : null,
+    appWidth: null,
+    appHeight: null,
+    screenWidth: null,
+    screenHeight: null,
+    observationWidth: null,
+    observationHeight: null,
+    foregroundBundleId: null,
+    totalTimeMs: 0,
+  };
+}
+
+/** Observations keyed by refresh_geometry calls; the runner replies come from `replies` (#18302). */
+function refreshGeometryHarness(
+  replies: CtrlProxyRefreshGeometryResult[],
+  observeFor: (calls: { geometry: number; syncs: number }) => ObserveResult,
+) {
+  const client = new FakeIOSCtrlProxy();
+  client.refreshGeometryReplies = replies;
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const tracker = new DisplayTransitionTracker(() => {});
+  const sync = spyOn(client, "requestHierarchySyncWithoutObservationStreamPush");
+  const feature = new SetPosture(duo, {
+    iosClientProvider: () => client,
+    iosDisplayInfoSource: new FakeDevicectlDisplayInfoSource(),
+    timer,
+    transitionSink: tracker,
+    observeFactory: () =>
+      ({
+        execute: async () => ({
+          ...observeFor({ geometry: client.refreshGeometryCalls, syncs: sync.mock.calls.length }),
+          displayRevision: tracker.revision(duo.deviceId),
+        }),
+      }) as ObserveScreen,
+  });
+  return { client, feature, sync, timer };
+}
+
+describe("setPosture iOS geometry post-condition through refresh_geometry", () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  afterEach(() => {
+    warn.mockClear();
+    ObservedAndroidDisplayCache.release(duo.deviceId);
+  });
+
+  const laggingUntilRefreshed = ({ geometry }: { geometry: number }) =>
+    geometry > 0 ? consistent : lagging;
+
+  test("a refreshed reply that agrees with observe returns no warning", async () => {
+    const h = refreshGeometryHarness([runnerReply(1)], laggingUntilRefreshed);
+    const result = await h.feature.execute("opened");
+    expect(result).toMatchObject({ posture: "opened" });
+    expect(result).not.toHaveProperty("warnings");
+    expect(h.client.refreshGeometryCalls).toBe(1);
+    expect(h.sync).not.toHaveBeenCalled();
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a reply that disagrees and then agrees after a poll returns no warning", async () => {
+    const h = refreshGeometryHarness([runnerReply(0), runnerReply(1)], laggingUntilRefreshed);
+    const result = await h.feature.execute("opened");
+    expect(result).not.toHaveProperty("warnings");
+    expect(h.client.refreshGeometryCalls).toBe(2);
+    expect(h.sync).not.toHaveBeenCalled();
+    expect(h.timer.getSleepHistory()).toEqual([POSTURE_GEOMETRY_POLL_MS]);
+  });
+
+  test("refreshed: false is retried once before comparing", async () => {
+    const h = refreshGeometryHarness(
+      [runnerReply(0, false), runnerReply(1)],
+      laggingUntilRefreshed,
+    );
+    const result = await h.feature.execute("opened");
+    expect(result).not.toHaveProperty("warnings");
+    expect(h.client.refreshGeometryCalls).toBe(2);
+    expect(h.sync).not.toHaveBeenCalled();
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a runner without refresh_geometry falls back to the hierarchy sync", async () => {
+    const h = refreshGeometryHarness([], ({ syncs }) => (syncs >= 2 ? consistent : lagging));
+    const result = await h.feature.execute("opened");
+    expect(result).not.toHaveProperty("warnings");
+    // Unsupported is remembered: later polls go straight to the hierarchy sync.
+    expect(h.client.refreshGeometryCalls).toBe(1);
+    expect(h.sync).toHaveBeenCalledTimes(2);
+    expect(h.timer.getSleepHistory()).toEqual([POSTURE_GEOMETRY_POLL_MS]);
+  });
+
+  test("a persistent runner mismatch returns success with a warning", async () => {
+    const h = refreshGeometryHarness([runnerReply(0)], laggingUntilRefreshed);
+    const result = await h.feature.execute("opened");
+    expect(result).toMatchObject({ posture: "opened" });
+    const warnings = "warnings" in result ? (result.warnings ?? []) : [];
+    expect(warnings).toEqual([
+      `Screen geometry is still inconsistent ${POSTURE_GEOMETRY_WAIT_MS} ms after the posture change: the runner's refreshed geometry reports rotation 0 but observe reports rotation 1 at 951x669. Taps may land in the wrong place; observe again before tapping.`,
+    ]);
+    const slept = h.timer.getSleepHistory().reduce((sum, ms) => sum + ms, 0);
+    expect(slept).toBe(POSTURE_GEOMETRY_WAIT_MS);
+    expect(h.client.refreshGeometryCalls).toBe(
+      POSTURE_GEOMETRY_WAIT_MS / POSTURE_GEOMETRY_POLL_MS + 1,
+    );
+    expect(h.sync).not.toHaveBeenCalled();
   });
 });

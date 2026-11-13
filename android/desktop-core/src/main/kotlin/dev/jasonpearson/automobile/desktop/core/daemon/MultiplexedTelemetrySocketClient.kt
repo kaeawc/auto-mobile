@@ -39,6 +39,8 @@ internal class TelemetryTransport(
   val socketAvailable: (String) -> Boolean = { Files.exists(Path.of(it)) },
   val retryDelay: TelemetryRetryDelay = TelemetryRetryDelay { delay(it) },
   val socketPath: () -> String = { AutoMobileSocketPaths.socketPath("telemetry-push.sock") },
+  /** Runs after a socket opens and before the connection publishes it to the table. */
+  val beforePublish: () -> Unit = {},
 )
 
 /**
@@ -209,10 +211,14 @@ internal class MultiplexedTelemetrySocketClient(
       if (!transport.socketAvailable(path)) throw java.io.IOException("Socket not found at $path")
       current = transport.openSocket(path)
       currentCoroutineContext().ensureActive()
+      transport.beforePublish()
       val open = current
+      val self = currentCoroutineContext()[Job]
       val subscribes =
         synchronized(table.lock) {
-          if (table.idle) return
+          // A connection released after ensureActive() no longer owns the table: publishing its
+          // socket would let its cleanup reset a replacement's subscriptions (#17014).
+          if (table.idle || table.connection !== self) return
           table.socket = open
           table.snapshot().mapNotNull(::prepare)
         }

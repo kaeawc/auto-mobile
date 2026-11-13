@@ -157,6 +157,50 @@ final class CarPlayTemplateDocumentTests: XCTestCase {
             XCTAssertNil(empty.templates.first?.backButton)
         }
 
+        func testBarButtonsForMapContactAndVoiceControl() {
+            let map = CPMapTemplate()
+            let contact = CPContactTemplate(contact: CPContact(name: "Ada", image: UIImage()))
+            let voice = CPVoiceControlTemplate(voiceControlStates: [
+                CPVoiceControlState(identifier: "listening", titleVariants: ["Listening"], image: nil, repeats: false),
+            ])
+            let leading = CPBarButton(title: "Leading", handler: nil)
+            let trailing = CPBarButton(title: "Trailing", handler: nil)
+            let back = CPBarButton(title: "Back", handler: nil)
+            map.leadingNavigationBarButtons = [leading]
+            map.trailingNavigationBarButtons = [trailing]
+            map.backButton = back
+            contact.leadingNavigationBarButtons = [leading]
+            contact.trailingNavigationBarButtons = [trailing]
+            contact.backButton = back
+            voice.leadingNavigationBarButtons = [leading]
+            voice.trailingNavigationBarButtons = [trailing]
+            voice.backButton = back
+            var mapper = CarPlayTemplateMapper()
+            let document = mapper.document(templates: [map, contact, voice])
+            XCTAssertEqual(document.templates.map(\.type), ["map", "contact", "voiceControl"])
+            for (index, node) in document.templates.enumerated() {
+                XCTAssertEqual(node.leadingNavigationBarButtons?.first?.title, "Leading")
+                XCTAssertEqual(node.trailingNavigationBarButtons?.first?.title, "Trailing")
+                XCTAssertEqual(node.backButton?.title, "Back")
+                XCTAssertEqual(
+                    node.leadingNavigationBarButtons?.first?.id,
+                    "stack/\(index)/leadingNavigationBarButtons/0"
+                )
+                XCTAssertEqual(
+                    node.trailingNavigationBarButtons?.first?.id,
+                    "stack/\(index)/trailingNavigationBarButtons/0"
+                )
+                XCTAssertEqual(node.backButton?.id, "stack/\(index)/backButton/0")
+            }
+            map.leadingNavigationBarButtons = []
+            map.trailingNavigationBarButtons = []
+            map.backButton = nil
+            let empty = mapper.document(templates: [map])
+            XCTAssertEqual(empty.templates.first?.leadingNavigationBarButtons?.count, 0)
+            XCTAssertEqual(empty.templates.first?.trailingNavigationBarButtons?.count, 0)
+            XCTAssertNil(empty.templates.first?.backButton)
+        }
+
         func testInformationAndTemplatesWithoutBarButtons() {
             let info = CPInformationTemplate(
                 title: "Info",

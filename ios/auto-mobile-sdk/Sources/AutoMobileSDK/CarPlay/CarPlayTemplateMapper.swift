@@ -198,6 +198,12 @@
                 return (info.leadingNavigationBarButtons, info.trailingNavigationBarButtons, info.backButton)
             case let poi as CPPointOfInterestTemplate:
                 return (poi.leadingNavigationBarButtons, poi.trailingNavigationBarButtons, poi.backButton)
+            case let map as CPMapTemplate:
+                return (map.leadingNavigationBarButtons, map.trailingNavigationBarButtons, map.backButton)
+            case let contact as CPContactTemplate:
+                return (contact.leadingNavigationBarButtons, contact.trailingNavigationBarButtons, contact.backButton)
+            case let voice as CPVoiceControlTemplate:
+                return (voice.leadingNavigationBarButtons, voice.trailingNavigationBarButtons, voice.backButton)
             default:
                 return nil
             }

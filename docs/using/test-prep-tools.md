@@ -27,13 +27,7 @@ Use `putAppFile` to write text, base64, or a host file into an app container:
 }
 ```
 
-Give each file `contentText`, `contentBase64`, or `sourcePath` (a file path on the
-host running AutoMobile). Base64 travels inside the MCP message and is about 4/3 of
-the file size. One MCP message can be up to 256 MiB over streamable HTTP and
-256 MiB less 64 KiB over stdio. Over stdio, a larger request fails with JSON-RPC
-error `-32600` naming the limit (`error.data.limitBytes`), and the session stays
-open. For large files on a local host, prefer `sourcePath`, which skips base64 and
-the message size limit.
+For large files, see [MCP message size](mcp-message-size.md).
 
 `putAppFile` never terminates the app. After an `app_containers` write,
 `result.warning` says the app may not see the change until it re-reads the file

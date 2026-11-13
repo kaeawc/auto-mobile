@@ -252,6 +252,7 @@ nav:
       - "UI tests": using/ui-tests.md
       - "Accessibility in UI tests": using/ui-tests-accessibility.md
       - "Test prep tools": using/test-prep-tools.md
+      - "MCP message size": using/mcp-message-size.md
       - "Reaching a host server": using/port-reverse.md
       - "Manufacturer profiles": using/oem-personas.md
       - "Kill profiles": using/kill-profiles.md

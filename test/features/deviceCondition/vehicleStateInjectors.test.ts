@@ -366,7 +366,7 @@ describe("vehicle state injectors (#14919)", () => {
     const car = vehicleAdb({ ...PARKED });
     await expect(
       injectorFor(automotive, "vehicle.motion", car.adb, traitsOf(null)).apply("driving"),
-    ).rejects.toThrow(/unsupported.*not one/);
+    ).rejects.toThrow(/unsupported.*neither/);
     expect(car.log).toEqual([]);
   });
 

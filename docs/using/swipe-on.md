@@ -5,6 +5,9 @@
 | 👉 <code>swipeOn</code> | Swipe/scroll on screen or elements | Android, iOS, watchOS |
 
 `swipeOn` swipes in a `direction` on the screen or a selected `container`.
+When the selected range control changes its numeric state, `effect.value`
+reports `before` and `after`, each with `current`, `min`, and `max`. The field
+is omitted when the value is unchanged or comparable range state is unavailable.
 
 On iOS, a container thinner than 48 pt along the swipe axis (such as a sheet
 grabber) starts the drag at its centre and travels 240 pt in that direction.

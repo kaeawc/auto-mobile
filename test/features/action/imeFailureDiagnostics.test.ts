@@ -255,8 +255,6 @@ describe("IME failure diagnostics", () => {
   });
 
   test.each([
-    ["IME service did not start within timeout", "activationBinding", false],
-    ["No active input connection within timeout", "activationBinding", false],
     ["Input connection lost during commit", "commit", true],
     ["Input connection lost while finishing composition", "commit", true],
     ["unknown old APK error", "commit", true],
@@ -274,6 +272,29 @@ describe("IME failure diagnostics", () => {
         expectedText: "@everyone",
         focusedFieldClass: "android.widget.MultiAutoCompleteTextView",
         textMayHaveBeenApplied: applied,
+      },
+    });
+    expect(h.deliveries).toEqual([]);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  // Auto falls back after a binding failure (#17801), so the diagnostic is read in explicit IME mode.
+  test.each([
+    "IME service did not start within timeout",
+    "No active input connection within timeout",
+  ])("preserves backend cause %s and distinguishes stage activationBinding", async (cause) => {
+    const h = harness("");
+    h.client.commitViaIme = async () => ({ success: false, error: cause });
+    const result = await h.executor.type({ action: "type", text: "@everyone", mode: "ime" });
+    expect(result.error).toBe(cause);
+    expect(result).toMatchObject({
+      success: false,
+      resolvedMode: "ime",
+      imeFailure: {
+        cause,
+        stage: "activationBinding",
+        expectedText: "@everyone",
+        textMayHaveBeenApplied: false,
       },
     });
     expect(h.deliveries).toEqual([]);

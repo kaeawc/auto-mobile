@@ -1,3 +1,4 @@
+import type { RangeValue } from "./RangeValue";
 import type { DeviceLockUnknown } from "./DeviceLockState";
 import { Element } from "./Element";
 import type { ElementBounds } from "./ElementBounds";
@@ -77,9 +78,9 @@ export interface Predictions {
  * A single actionable affordance a skeleton entry exposes (issue #4388).
  * Derived from view-hierarchy attributes: `clickable` → `tap`,
  * `long-clickable` → `long-press`, `scrollable` → `scroll`, `checkable` →
- * `toggle` (carries `checked`), and a focusable editable field → `input`.
+ * `toggle` (carries `checked`), a focusable editable field → `input`, and a range widget → `adjust`.
  */
-export type Affordance = "tap" | "long-press" | "input" | "scroll" | "toggle";
+export type Affordance = "tap" | "long-press" | "input" | "scroll" | "toggle" | "adjust";
 
 /**
  * One row of the Interactable Skeleton Projection (issue #4388): a flat,
@@ -122,12 +123,14 @@ export interface SkeletonElement {
   boundsSpace?: "panel" | "window";
   /** visionOS ornament-local bounds: tap by label/identifier, never coordinates. */
   space?: "ornament";
-  /** Actionable affordances, in canonical order tap, long-press, input, scroll, toggle. */
+  /** Actionable affordances, in canonical order tap, long-press, input, scroll, toggle, adjust. */
   affordances: Affordance[];
   /** Fully covered by the Android IME window or the visible iOS keyboard, or an iOS row with no visible tap area: off screen, under a navigation/status/tab bar, scrolled out of its scroll container, or covered by another control; this row has no actionable affordance. */
   occluded?: true;
   /** Present only for a `toggle` affordance: the current checked state. */
   checked?: boolean;
+  /** Numeric accessibility state for a range widget, when available. */
+  range?: RangeValue;
   /**
    * AutoMobile prototype rows only (rows from CtrlProxy's own prototype windows): the selected tab or
    * option (#10446). App rows never carry it, as observe output for apps is unchanged.

@@ -1,3 +1,4 @@
+import type { RangeValue } from "./RangeValue";
 import type { ContainerFailure } from "./ActionableError";
 import { Element } from "./Element";
 import { ElementBounds } from "./ElementBounds";
@@ -18,6 +19,8 @@ export type TapEffectBasis =
 export interface TapEffect {
   screenChanged: boolean;
   basis: TapEffectBasis;
+  /** Changed numeric state of the swiped range widget; omitted without comparable state. */
+  value?: { before: RangeValue; after: RangeValue };
 }
 
 export interface TapOnSelectedElementBounds extends ElementBounds {

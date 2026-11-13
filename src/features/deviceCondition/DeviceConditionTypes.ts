@@ -486,13 +486,13 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .enum(["parked", "driving", DEVICE_CONDITION_UNSET])
           .optional()
           .describe(
-            "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset.",
+            "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset. On a phone projecting to a Desktop Head Unit: 'driving' sends restrict all, 'parked' and reset restrict none.",
           ),
         nightMode: z
           .enum(["on", "off", DEVICE_CONDITION_UNSET])
           .optional()
           .describe(
-            "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override.",
+            "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override. On a phone projecting to a Desktop Head Unit: 'on' sends night, 'off' and reset send day.",
           ),
       })
       .strict()

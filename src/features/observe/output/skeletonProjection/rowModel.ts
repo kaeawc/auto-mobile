@@ -57,6 +57,7 @@ export interface SkeletonAccumulator {
   boundsSpace?: "panel" | "window";
   affordances: Set<Affordance>;
   checked?: boolean;
+  range?: SkeletonElement["range"];
   /** AutoMobile prototype rows only: the selected tab or option, and the node's state description. */
   selected?: true;
   stateDescription?: string;

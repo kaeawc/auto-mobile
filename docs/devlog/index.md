@@ -12,6 +12,7 @@ To add one, copy the [template](template.md).
 
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-13 | decision | [Pin a `navigateTo` attempt to one transition](2026-11-13-pinned-navigate-transition.md)                                           |
 | 2026-11-13 | concept  | [iOS Simulator fleet capacity measurements](2026-11-13-ios-simulator-fleet-capacity-measurements.md)                               |
 | 2026-11-13 | decision | [Split the audit tool into `accessibilityAudit` and `performanceAudit`](2026-11-13-split-audit-tool.md)                            |
 | 2026-11-13 | decision | [Android TV explore: dry-run input mode and focus-only dispatch](2026-11-13-android-tv-explore-dry-run-and-focus-only-dispatch.md) |

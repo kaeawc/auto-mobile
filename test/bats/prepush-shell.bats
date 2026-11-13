@@ -861,3 +861,45 @@ FIXTURE
   [ "${status}" -eq 0 ]
   grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,manual-test-python' "${FAST_LOG}"
 }
+
+@test "--list-checks prints the selected checks and runs none of them (#17010)" {
+  commit_change ".claude-plugin/plugin.json" '{}'
+  commit_change ".githooks/pre-push" "#!/usr/bin/env bash"
+  commit_change "test/bats/only-this.bats" '@test "fails" { false; }'
+
+  run bash scripts/prepush-shell.sh --base base --list-checks
+
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "$(printf '%s\n' codex-skills claude-plugin shellcheck shell-portability shell-sete pipefail-grep-q)" ]
+  [ ! -e "${FAST_LOG}" ]
+  [ ! -e "${BATS_LOG}" ]
+  [ ! -e "${SHELLCHECK_LOG}" ]
+}
+
+@test "--list-checks selects claude-plugin through a registered check implementation (#17010)" {
+  install_registry_stub
+  commit_change "scripts/claude/validate_plugin.sh" "#!/usr/bin/env bash"
+
+  run bash scripts/prepush-shell.sh --base base --list-checks
+
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "$(printf '%s\n' shellcheck shell-portability shell-sete pipefail-grep-q stdlib-first claude-plugin)" ]
+  [ ! -e "${FAST_LOG}" ]
+}
+
+@test "--list-checks prints nothing when no check is selected (#17010)" {
+  commit_change "test/bats/only-this.bats" '@test "fails" { false; }'
+
+  run bash scripts/prepush-shell.sh --base base --list-checks
+
+  [ "${status}" -eq 0 ]
+  [ -z "${output}" ]
+  [ ! -e "${BATS_LOG}" ]
+}
+
+@test "--list-checks prints nothing when nothing changed (#17010)" {
+  run bash scripts/prepush-shell.sh --base HEAD --list-checks
+
+  [ "${status}" -eq 0 ]
+  [ -z "${output}" ]
+}

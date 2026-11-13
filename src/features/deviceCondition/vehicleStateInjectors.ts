@@ -14,6 +14,12 @@ import type { DeviceConditionInjector } from "./DeviceConditionController";
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
 import { createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
+import { existingDesktopHeadUnitConsole } from "../androidAuto/AndroidAutoProjectionService";
+import {
+  createHeadUnitVehicleInjector,
+  runningHeadUnit,
+  type HeadUnitConsoleLookup,
+} from "./headUnitVehicleInjector";
 import {
   defaultDeviceTraits,
   type DeviceTraits,
@@ -82,7 +88,7 @@ async function unsupportedReason(
 ): Promise<string | undefined> {
   const read = await traits.read(adb, device.deviceId);
   if (read.formFactor !== "automotive") {
-    return "vehicle state needs an Android Automotive emulator, and this device is not one";
+    return "vehicle state needs an Android Automotive emulator or a phone projecting to a Desktop Head Unit this daemon started, and this device is neither";
   }
   if (read.isEmulator !== true) {
     return "vehicle state is injected on emulators only; a physical head unit has no VHAL injection";
@@ -481,7 +487,13 @@ function createMotionInjector(adb: AdbExecutor, timer: Timer): DeviceConditionIn
   };
 }
 
-/** One vehicle key, serialised across applies and resets, with injected device I/O and time. */
+/** No head unit lookup: vehicle state goes to the automotive emulator only. */
+const NO_HEAD_UNIT: HeadUnitConsoleLookup = () => undefined;
+
+/**
+ * One vehicle key, serialised across applies and resets, with injected device I/O and time. A
+ * phone with a running Desktop Head Unit (#17842) takes the key through the DHU console instead.
+ */
 export function createVehicleStateInjector(
   key: VehicleStateKey,
   adb: AdbExecutor,
@@ -489,16 +501,24 @@ export function createVehicleStateInjector(
   {
     traits = defaultDeviceTraits,
     timer = defaultTimer,
-  }: { traits?: DeviceTraits; timer?: Timer } = {},
+    headUnit = NO_HEAD_UNIT,
+  }: { traits?: DeviceTraits; timer?: Timer; headUnit?: HeadUnitConsoleLookup } = {},
 ): DeviceConditionInjector {
   const injector =
     key === "vehicle.motion" ? createMotionInjector(adb, timer) : createNightModeInjector(adb);
+  const headUnitInjector = createHeadUnitVehicleInjector(key, device.deviceId, headUnit);
   const allowed = key === "vehicle.motion" ? Object.keys(MOTION_TARGETS) : ["on", "off"];
   return {
     ...injector,
+    async isClean(signal) {
+      return (await headUnitInjector.isClean(signal)) && injector.isClean(signal);
+    },
     async apply(value, signal) {
       if (!allowed.includes(value)) {
         rejectValue(key, value, allowed);
+      }
+      if (runningHeadUnit(headUnit, device.deviceId)) {
+        return headUnitInjector.apply(value, signal);
       }
       const reason = await unsupportedReason(adb, device, traits);
       if (reason !== undefined) {
@@ -515,6 +535,8 @@ export interface VehicleStateInjectorDeps {
   cache?: Map<string, DeviceConditionInjector>;
   traits?: DeviceTraits;
   timer?: Timer;
+  /** The daemon's running DHU per phone; defaults to the projection service's. */
+  headUnit?: HeadUnitConsoleLookup;
 }
 
 /** One injector per device and key, so every apply shares its baseline and registers a single reset. */
@@ -537,7 +559,11 @@ export function resolveVehicleStateInjector(
       key as VehicleStateKey,
       (deps.adbFactory ?? defaultAdbClientFactory).create(device),
       device,
-      { traits: deps.traits, timer: deps.timer },
+      {
+        traits: deps.traits,
+        timer: deps.timer,
+        headUnit: deps.headUnit ?? existingDesktopHeadUnitConsole,
+      },
     );
     cache.set(cacheKey, injector);
   }

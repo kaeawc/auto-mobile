@@ -3,7 +3,7 @@
 This page describes how each tool that accepts an [Apple Watch simulator](apple-watch.md) behaves
 on a watch. Every call names the watch with `platform: "watchos"`.
 
-## observe
+## `observe`
 
 `observe` returns a screenshot. With the automation runner connected, it also returns the target
 app's view hierarchy and on-screen system alerts, even when the app is not in the foreground. Those
@@ -26,7 +26,7 @@ The watch refuses these options: `waitFor` with `for`, `posture`, `activeDisplay
 `activeWindow`; `waitFor` without a runner; `settled`, `raw`, `includeExtras`, `scope`, `layer`,
 `skipBackStack`, `crop`, `screenshotOptions` and `screenshot: "none"`.
 
-## tapOn and tapAt
+## `tapOn` and `tapAt`
 
 `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. It supports
 only `action: "tap"`. Only elements wholly on screen match, including notification action buttons.
@@ -54,7 +54,7 @@ Tapping a widget opens its host app, so the normal tools work afterwards. A widg
 shows its text about 2 seconds after the final Done tap. Wait about 2 seconds once before you match
 it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md) for how this works.
 
-## swipeOn and pressButton
+## `swipeOn` and `pressButton`
 
 `swipeOn` swipes in a direction, including on the watch face after `pressButton` with `home`. With
 `lookFor`, it swipes until an exact `text` or `elementId` is on screen, up to `maxSwipes` (default
@@ -63,7 +63,7 @@ overlap and do not skip nearby targets. You cannot set coordinates or duration.
 
 `pressButton` supports `home` only.
 
-## rotateCrown
+## `rotateCrown`
 
 `rotateCrown` turns the Digital Crown. Enable it with `setToolEnabled` (see
 [Dynamic Tools](dynamic-tools.md)).
@@ -115,7 +115,7 @@ Use `observe` after rotating to confirm the app responded. Retry only if `observ
 turn had no effect, because a retry after a working turn can overshoot. Tap the control that should
 respond before retrying.
 
-## sendKeys
+## `sendKeys`
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with `tapOn`
 first, or pass a selector with an exact `elementId` or `text`. Selector `text` matches a field's
@@ -123,7 +123,7 @@ label, value or placeholder, and prefers text fields over static text. A focused
 watch keyboard, and AutoMobile types through it. Input fails when no text field or keyboard is up.
 The watch refuses commands that clear, replace or press keys.
 
-## postNotification
+## `postNotification`
 
 `postNotification` sends a simulated push to the watch app named by `appId`. The simulator cannot
 pre-grant notification authorization, so the app must request permission. Answer Allow with
@@ -157,7 +157,7 @@ argument you choose. Then call `terminateApp` and `launchApp` with that argument
 `launchArguments: ["-reload"]`. The widget shows the new content within about 2 seconds, with no
 tap in the host app.
 
-## getLogs
+## `getLogs`
 
 `getLogs` reads the watch simulator's unified log as on an iOS simulator. Enable it with
 `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
@@ -168,7 +168,7 @@ tap in the host app.
 | `minPriority`                      | `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, `F` fault only |
 | `tags`, `buffers`, `includeSystem` | Android-only; ignored with a warning                                                                                                  |
 
-## executePlan
+## `executePlan`
 
 `executePlan` replays a plan on a watch with `platform: "watchos"`, including a plan that
 `recordToolCalls` recorded on a watch. Each step runs as the same tool called directly. A step whose

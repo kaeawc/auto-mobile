@@ -25,6 +25,7 @@ import type { InteractionToolDependencies } from "./interactionTools/dependencie
 import {
   headUnitPressButtonHandler,
   headUnitTapAtHandler,
+  headUnitTapOnHandler,
 } from "./interactionTools/headUnitHandlers";
 import { HEAD_UNIT_DISPLAY } from "../features/androidAuto/HeadUnitInteraction";
 import { withTvosHomeScreen } from "./tvosHomeScreen";
@@ -387,7 +388,9 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     tapOnSchema,
     {
       handler: (device, args, progress, signal) =>
-        tapOnHandler(device, args, { progress, signal, deps }),
+        args.display === HEAD_UNIT_DISPLAY
+          ? headUnitTapOnHandler(device, args, deps.headUnitTemplateSourceFactory)
+          : tapOnHandler(device, args, { progress, signal, deps }),
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: tapOnResultSchema,

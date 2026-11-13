@@ -147,7 +147,9 @@ This handling uses the AVD's form factor, so it does not cover a physical head u
 
 Call `setDeviceState` with a `deviceCondition` object as its only field; do not combine it with
 other `setDeviceState` fields. It sits behind the `device-condition` feature flag, which is off by
-default; see [Device condition fixtures](device-condition.md). The `vehicle` family supports emulators:
+default; see [Device condition fixtures](device-condition.md). The `vehicle` family supports
+emulators and a phone projecting to a Desktop Head Unit (see
+[Head unit day, night and driving restrictions](android-auto.md#head-unit-day-night-and-driving-restrictions)):
 
 ```json
 { "deviceCondition": { "vehicle": { "motion": "driving", "nightMode": "on" } } }

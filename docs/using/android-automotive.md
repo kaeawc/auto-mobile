@@ -136,7 +136,7 @@ The gate uses the AVD's form factor, so a physical head unit is not covered.
 
 Call `setDeviceState` with a `deviceCondition` object as its only field; do not combine it with
 other `setDeviceState` fields. It is behind the `device-condition` feature flag, which is disabled
-by default; see [Device condition fixtures](device-condition.md). The `vehicle` family supports emulators:
+by default; see [Device condition fixtures](device-condition.md). The `vehicle` family supports emulators, and a phone projecting to a Desktop Head Unit ([Head unit day, night and driving restrictions](android-auto.md#head-unit-day-night-and-driving-restrictions)):
 
 ```json
 { "deviceCondition": { "vehicle": { "motion": "driving", "nightMode": "on" } } }

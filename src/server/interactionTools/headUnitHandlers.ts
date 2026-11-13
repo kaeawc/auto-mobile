@@ -6,8 +6,10 @@ import {
   headUnitButtonCommands,
   headUnitTapCommand,
   type HeadUnitInteractionResult,
+  type HeadUnitTemplateSource,
 } from "../../features/androidAuto/HeadUnitInteraction";
 import { defaultHeadUnitFence } from "../../features/androidAuto/HeadUnitFence";
+import { refuseHeadUnitTapOn } from "../../features/androidAuto/HeadUnitTemplateItems";
 import {
   DhuScreenshotHashSource,
   headUnitScreenshotDirectories,
@@ -17,7 +19,7 @@ import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { createStructuredToolResponse } from "../../utils/toolUtils";
-import type { PressButtonArgs, TapAtArgs } from "../interactionToolTypes";
+import type { PressButtonArgs, TapAtArgs, TapOnArgs } from "../interactionToolTypes";
 import { carAppTemplateReader } from "../observeResponse";
 
 /** What a head-unit action needs: send console commands and read the projected templates. */
@@ -154,4 +156,38 @@ export async function headUnitPressButtonHandler(
     button: args.button,
     headUnit: result,
   });
+}
+
+export type HeadUnitTemplateSourceFactory = (device: BootedDevice) => HeadUnitTemplateSource;
+
+export const defaultHeadUnitTemplateSourceFactory: HeadUnitTemplateSourceFactory = (device) => ({
+  read: () => carAppTemplateReader().readProjected(device),
+});
+
+/** The texts a head-unit tapOn selector names; only text selectors resolve against templates. */
+function tapOnTexts(args: TapOnArgs): string[] {
+  const { text, textAny } = args.selector;
+  if (text !== undefined) {
+    return [text];
+  }
+  if (textAny !== undefined) {
+    return textAny;
+  }
+  throw new ActionableError(
+    `tapOn display "${HEAD_UNIT_DISPLAY}" takes selector.text or selector.textAny: the projected templates have no resource ids, test tags or accessibility links.`,
+  );
+}
+
+/**
+ * tapOn by text on the head unit: finds the row, tab or action in the projected templates and
+ * reports it, because item bounds are not known; it never sends input.
+ */
+export async function headUnitTapOnHandler(
+  device: BootedDevice,
+  args: TapOnArgs,
+  factory: HeadUnitTemplateSourceFactory = defaultHeadUnitTemplateSourceFactory,
+): Promise<never> {
+  assertAndroid(device, "tapOn");
+  const texts = tapOnTexts(args);
+  refuseHeadUnitTapOn(await factory(device).read(), texts, args.exactText === true);
 }

@@ -195,14 +195,28 @@ describe("criticalSection shares plan step execution (#6535)", () => {
   );
 
   test.each([
-    { payload: { success: false, message: "missing element" }, sectionError: "missing element" },
-    { payload: { success: false }, sectionError: "returned failure status" },
-  ])("failure without error keeps caller-specific text: %j", async ({ payload, sectionError }) => {
+    {
+      payload: { success: false, message: "missing element" },
+      planError: "missing element",
+      sectionError: "missing element",
+    },
+    {
+      payload: { success: false, reason: "no candidate" },
+      planError: "no candidate",
+      sectionError: "no candidate",
+    },
+    {
+      payload: { success: false },
+      planError: "Tool execution failed",
+      sectionError: "returned failure status",
+    },
+  ])("failure without error reports the tool's message: %j", async (row) => {
+    const { payload, planError, sectionError } = row;
     ToolRegistry.register("sharedFailure", "Failure", schema, async () => payload);
     const steps: PlanStep[] = [{ tool: "sharedFailure", params: { device: "A" } }];
     const result = await runPlan(steps);
     expect(result.success).toBe(false);
-    expect(result.failedStep?.error).toBe("Tool execution failed");
+    expect(result.failedStep?.error).toBe(planError);
     await expect(runSection(steps)).rejects.toMatchObject({
       message: expect.stringContaining(sectionError),
       failedStep: { error: sectionError },

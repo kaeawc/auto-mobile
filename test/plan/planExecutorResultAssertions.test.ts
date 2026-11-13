@@ -225,4 +225,23 @@ steps:
     await first;
     expect(calls.map((call) => call.start)).toEqual([1000, 0]);
   });
+  test("a returned failure without an error field carries the tool's message (#18274)", async () => {
+    const message = "No rotary candidate changed the screen on read-back.";
+    const { executor } = harness({ success: false, message, delta: 3, reason: message });
+    const result = await executor.executePlan(
+      { name: "rotary", steps: [{ tool: "rotaryScroll", params: {} }] },
+      0,
+    );
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.error).toBe(message);
+  });
+
+  test("a returned failure with only a reason carries the reason", async () => {
+    const { executor } = harness({ success: false, reason: "nothing changed" });
+    const result = await executor.executePlan(
+      { name: "reason", steps: [{ tool: "rotaryScroll", params: {} }] },
+      0,
+    );
+    expect(result.failedStep?.error).toBe("nothing changed");
+  });
 });

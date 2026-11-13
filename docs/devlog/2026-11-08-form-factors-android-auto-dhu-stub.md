@@ -40,4 +40,4 @@ Measured on a Mac arm64 host with DHU 2.1 (`Build: 2022-12-15-495527557`) agains
 
 - **Shipped configs.** `extras/google/auto/config` ships `all_720p auxillary_nav cluster default default_1080p default_6in default_720p default_sensors default_wide hybrid loaded_720p rotary touchpad` (`.ini`), selected with `-c`/`--config`. `default.ini` is `resolution = 800x480`, `dpi = 160`, `framerate = 30`.
 
-- **Unverified.** A live `help`, `screenshot` and phone-side `observe` during projection need a real projection session and are unverified until a person completes the Play sign-in step. Projected UI is expected to be absent from the phone-side `observe`, because the host renders it into the head unit.
+- **Unverified.** A live `help`, `screenshot` and phone-side `observe` during projection need a real projection session and are unverified until a person completes the Play sign-in step. The phone-side `observe` should not show projected UI, because the host renders it into the head unit.

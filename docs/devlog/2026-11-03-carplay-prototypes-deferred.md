@@ -35,5 +35,5 @@ Defer (option 3).
 ## Consequences
 
 A spec cannot target CarPlay. Revisit when #14924's CarPlay observation tools are shipped and used
-and #14925 has answered the open-window, entitlement and XCUITest questions; then choose between
+and #14925 has answered the open-window, entitlement and XCUITest questions. Then choose between
 options 1 and 2 and file implementation issues under a prototype milestone, not under #14924.

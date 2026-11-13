@@ -129,6 +129,8 @@ waits for receipts and verifies native absence (240 s budget). `report` writes
 daemon. `--daemon-arg TOKEN` records each daemon argv token (`N:TOKEN` selects a
 daemon; `--daemon-arg=--debug` also works). Restarts reuse recorded env and argv;
 `start -- …` adds one-off argv. The harness owns `--port` and `--strict-port`.
+`init` records `AUTOMOBILE_PROJECT_ROOT` as the harness checkout, so local runner
+source builds find `ios/control-proxy`; `--env`/`--daemon-env` override it.
 
 `start` refuses a recorded live PID, then mirrors the daemon's JSON PID to
 `daemonN/pid.txt`. `stop` confirms identity through `ide/status` on the private

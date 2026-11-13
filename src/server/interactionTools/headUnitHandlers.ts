@@ -1,3 +1,4 @@
+import os from "node:os";
 import { existingDesktopHeadUnitConsole } from "../../features/androidAuto/AndroidAutoProjectionService";
 import {
   HEAD_UNIT_DISPLAY,
@@ -6,7 +7,11 @@ import {
   headUnitTapCommand,
   type HeadUnitInteractionResult,
 } from "../../features/androidAuto/HeadUnitInteraction";
+import { defaultHeadUnitFence } from "../../features/androidAuto/HeadUnitFence";
+import { DhuScreenshotHashSource } from "../../features/androidAuto/HeadUnitScreenshotHash";
 import { ActionableError, type BootedDevice } from "../../models";
+import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
+import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { createStructuredToolResponse } from "../../utils/toolUtils";
 import type { PressButtonArgs, TapAtArgs } from "../interactionToolTypes";
@@ -34,6 +39,15 @@ export const defaultHeadUnitInteractionFactory: HeadUnitInteractionFactory = (de
     dhuConsole,
     { read: () => carAppTemplateReader().readProjected(device) },
     defaultTimer,
+    {
+      fence: { deviceId: device.deviceId, state: defaultHeadUnitFence },
+      screenshots: new DhuScreenshotHashSource(dhuConsole, {
+        files: new DefaultFileSystem(),
+        timer: defaultTimer,
+        ids: defaultIdGenerator,
+        directory: os.tmpdir(),
+      }),
+    },
   );
 };
 

@@ -177,6 +177,11 @@ export class WatchRunnerLifecycle {
     return undefined;
   }
 
+  /** The app a lifecycle-owned runner was last launched or retargeted for. */
+  targetBundleId(deviceId: string): string | undefined {
+    return this.runners.get(deviceId)?.bundleId;
+  }
+
   stop(deviceId: string): void {
     const entry = this.runners.get(deviceId);
     if (!entry) {

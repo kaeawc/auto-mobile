@@ -14,8 +14,8 @@ Dependency: `androidx.wear.compose:compose-foundation` and `compose-material3`,
 ## Decision
 
 The fixture exists to exercise the surfaces a Wear app really ships: a `ScalingLazyColumn`, a
-swipe-to-dismiss box, a tile, a complication data source and an ongoing activity. Each surface is
-defined by its AndroidX library, so the fixture uses those libraries directly. `concurrent-futures`
+swipe-to-dismiss box, a tile, a complication data source and an ongoing activity. Its AndroidX library
+defines each surface, so the fixture uses those libraries directly. `concurrent-futures`
 supplies the immediate `ListenableFuture` the tile service returns. No other module depends on them,
 and none is published.
 

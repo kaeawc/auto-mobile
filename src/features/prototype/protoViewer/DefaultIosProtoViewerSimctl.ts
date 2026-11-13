@@ -3,6 +3,7 @@ import {
   resolveOwnAppDataContainer,
   SimulatorContainerUnresolvedError,
 } from "../../../utils/ios-cmdline-tools/simulatorOwnContainer";
+import { getIosInstalledAppBundleId } from "../../../utils/ios-cmdline-tools/iosInstalledApp";
 import { logger } from "../../../utils/logger";
 import {
   PROTOVIEWER_PACKAGE,
@@ -31,6 +32,15 @@ export class DefaultIosProtoViewerSimctl implements IosProtoViewerSimctl {
     }
     this.bundleIds.set(udid, bundleId);
     return true;
+  }
+  async installedVersionCode(udid: string, signal?: AbortSignal): Promise<number | undefined> {
+    const bundleId = this.bundleId(udid);
+    const apps = await this.client.listAppsOrThrow(udid, { signal });
+    const version = apps.find(
+      (app) => getIosInstalledAppBundleId(app) === bundleId,
+    )?.CFBundleVersion;
+    const code = typeof version === "string" ? Number(version) : Number.NaN;
+    return Number.isSafeInteger(code) ? code : undefined;
   }
   async dataContainer(udid: string, signal?: AbortSignal): Promise<string> {
     try {

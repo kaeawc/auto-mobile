@@ -107,7 +107,10 @@ class ViewerActivity : ComponentActivity() {
         clock = services.clock::nowMillis
         flushScope = services.flushScope
         isCurrent = {
-          content?.host === this && !isFinishing && !restarting && !renderFailed &&
+          content?.host === this &&
+            !isFinishing &&
+            !restarting &&
+            !renderFailed &&
             (content?.importError == null || services.settings.allowNetwork.value)
         }
         onRuntime = { opened -> if (isCurrent()) runtime = opened else opened.close() }
@@ -139,14 +142,16 @@ class ViewerActivity : ComponentActivity() {
       // layers. Clip that whole surface, including its scrims, below the app-owned provenance.
       Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("viewer-content")) {
         val current = content
-        val refusal = remember(current, allowNetwork) {
-          current?.importError?.takeUnless { allowNetwork }
-        }
+        val refusal =
+          remember(current, allowNetwork) {
+            current?.importError?.takeUnless { allowNetwork }
+          }
         if (current != null)
           DisposableEffect(current, refusal) {
             if (refusal != null) {
               stopWatchdog()
-              // Unmount closes the runtime. Serialize its final flush before any restored renderer opens.
+              // Unmount closes the runtime. Serialize its final flush before any restored renderer
+              // opens.
               val target = runtime
               runtime = null
               services.flushScope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
@@ -386,8 +391,10 @@ internal fun ViewerChrome(
 }
 
 /** Pure library-render decision; only validated saved specs reach this boundary. */
-internal fun viewerImportError(specJson: String, networkAllowed: Boolean): PrototypeWebView.ImportError? =
-  PrototypeWebView.importError(specJson, networkAllowed)
+internal fun viewerImportError(
+  specJson: String,
+  networkAllowed: Boolean,
+): PrototypeWebView.ImportError? = PrototypeWebView.importError(specJson, networkAllowed)
 
 @Composable
 @Suppress("UNUSED_PARAMETER")

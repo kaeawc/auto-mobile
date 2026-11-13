@@ -30,7 +30,8 @@ object PrototypeWebView {
     val root = spec["root"] as? JsonObject ?: return null
     fun first(node: JsonObject, path: String): ImportError? =
       if (node.text("type") == "webView") ImportError(path)
-      else PrototypeRepeatTree.childrenOf(node, path).firstNotNullOfOrNull { first(it.node, it.path) }
+      else
+        PrototypeRepeatTree.childrenOf(node, path).firstNotNullOfOrNull { first(it.node, it.path) }
     return first(root, "root")
   }
 
@@ -114,7 +115,11 @@ object PrototypeWebView {
     if (boolean) !value.isString && value.booleanOrNull != null else value.isString
 
   /** A `webview.*` call whose literal `node` argument names no `webView` node. */
-  internal fun callError(action: JsonObject, path: String, webViews: Set<String>): PrototypeSpecError? {
+  internal fun callError(
+    action: JsonObject,
+    path: String,
+    webViews: Set<String>,
+  ): PrototypeSpecError? {
     if (action.text("call") !in webViewCalls) return null
     val target = action.member("args")?.member("node")?.text("value") ?: return null
     return if (target in webViews) null else fail("$path.args.node.value", "Unknown webView")

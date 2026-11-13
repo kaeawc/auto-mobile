@@ -67,11 +67,17 @@ export interface ImeWindow {
   spanExit: number;
 }
 
+const IOS_DOCKED_KEYS_WIDTH_RATIO = 0.9;
+const IOS_DOCKED_INSET_KEYS_WIDTH_RATIO = 0.8;
+const IOS_DOCKED_BOTTOM_GAP = 2;
+
 /** A detected keyboard's measured rectangle and its window position. */
 export interface ImeOccluder {
   bounds: Bounds;
   /** Docked iOS container chrome starts above the measured key union. */
   chromeTop?: number;
+  /** Bottom of the docked iOS keyboard container; flush with the display when docked. */
+  chromeBottom?: number;
   /** Valid adjacent assistant subtree; its members keep the key-union cover. */
   assistantBar?: { bounds: Bounds; group: number; spanEnter: number; spanExit: number };
   group?: number;
@@ -150,6 +156,7 @@ function iosKeyboardChrome(elements: ObserveElements, ime: ImeWindow): Partial<I
   const provenance = assistant && getElementProvenance(assistant);
   return {
     chromeTop: container.bounds.top,
+    chromeBottom: container.bounds.bottom,
     ...(assistant && provenance
       ? {
           assistantBar: {
@@ -194,6 +201,33 @@ function measuredImeOcclusionBounds(
   return boxes.length > 0 ? unionBounds(boxes) : fallback;
 }
 
+/**
+ * Docked keyboards span the display, but their keys can be inset on a wide display: 83-874 of
+ * the Duo inner screen's 951 pt (#18248). A keyboard container resting on the bottom edge
+ * with keys over 80 percent of the width is docked; floating and one-handed ones are not.
+ */
+function isDockedIosKeyboard(
+  occluder: ImeOccluder,
+  screenSize: NonNullable<ObserveResult["screenSize"]>,
+): boolean {
+  return isDockedWidth(occluder.bounds[2] - occluder.bounds[0], occluder, screenSize);
+}
+
+function isDockedWidth(
+  width: number,
+  occluder: ImeOccluder,
+  screenSize: NonNullable<ObserveResult["screenSize"]>,
+): boolean {
+  if (width >= screenSize.width * IOS_DOCKED_KEYS_WIDTH_RATIO) {
+    return true;
+  }
+  return (
+    width >= screenSize.width * IOS_DOCKED_INSET_KEYS_WIDTH_RATIO &&
+    occluder.chromeBottom !== undefined &&
+    screenSize.height - occluder.chromeBottom <= IOS_DOCKED_BOTTOM_GAP
+  );
+}
+
 /** Action-only iOS geometry; skeleton projection retains measured keyboard bounds. */
 export function getIosImeOccluder(
   occluder: ImeOccluder,
@@ -202,14 +236,14 @@ export function getIosImeOccluder(
   if (
     !screenSize ||
     !clipImeBounds(occluder.bounds, screenSize) ||
-    occluder.bounds[2] - occluder.bounds[0] < screenSize.width * 0.9
+    !isDockedIosKeyboard(occluder, screenSize)
   ) {
     return occluder;
   }
   // Docked keys omit container chrome, assistant bar, side margins and the bottom strip.
   const bar = occluder.assistantBar;
   const top =
-    bar && bar.bounds[2] - bar.bounds[0] >= screenSize.width * 0.9
+    bar && isDockedWidth(bar.bounds[2] - bar.bounds[0], occluder, screenSize)
       ? Math.min(occluder.chromeTop ?? occluder.bounds[1], bar.bounds[1])
       : (occluder.chromeTop ?? occluder.bounds[1]);
   return { ...occluder, bounds: [0, top, screenSize.width, screenSize.height] };

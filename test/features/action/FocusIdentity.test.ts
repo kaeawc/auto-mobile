@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { createFocusIdentity } from "../../../src/features/action/FocusIdentity";
 import type { FocusPathEntry, FocusScreen } from "../../../src/features/action/FocusNavigate";
 import type { FocusNavigateDirection } from "../../../src/features/action/FocusNavigateDirections";
+import { findFocusedElement } from "../../../src/features/observe/HierarchyFocus";
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { Element } from "../../../src/models/Element";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 
 const BOUNDS = { left: 0, top: 400, right: 1920, bottom: 520 };
 
@@ -111,5 +115,40 @@ describe("createFocusIdentity toggle detection (#17209)", () => {
       ["50%", "left", "current:52.0,min:0.0,max:100.0"],
     ]);
     expect(ids[2]?.changedInPlace).toBeUndefined();
+  });
+
+  describe("a captured Playground slider (#17209)", () => {
+    const parser = new DefaultElementParser();
+
+    function capture(name: string): { entry: FocusPathEntry; screen: FocusScreen } {
+      const hierarchy = JSON.parse(
+        readFileSync(`test/fixtures/android-focus/${name}.json`, "utf8"),
+      ) as ViewHierarchyResult;
+      const focused = findFocusedElement(hierarchy, parser);
+      const elements = parser.flattenViewHierarchy(hierarchy).map(({ element }) => element);
+      const label = elements
+        .map((element) => element["content-desc"])
+        .find((desc) => typeof desc === "string" && desc.startsWith("Slider with value"));
+      if (!focused || typeof label !== "string") {
+        throw new Error(`${name} has no focused slider`);
+      }
+      return {
+        entry: { bounds: focused.bounds, resourceId: "slider_control", descendantLabel: label },
+        screen: { focused, elements },
+      };
+    }
+
+    test("the value readout growing a pixel wider with its digits does not move the screen", () => {
+      // The readout's bounds are [64,381][357,429] at 50% and [64,381][358,429] at 49%: the node is
+      // as wide as its text, so a layout compared by full bounds read every press as a scroll and
+      // focusNavigate walked the slider to max_steps.
+      const identify = createFocusIdentity();
+      const first = capture("playground-slider-value-50");
+      const second = capture("playground-slider-value-49");
+      identify(first.entry, first.screen);
+      const after = identify(second.entry, second.screen, "down");
+      expect(after.changedInPlace).toBe(true);
+      expect(after.key).toStartWith("adjustable|");
+    });
   });
 });

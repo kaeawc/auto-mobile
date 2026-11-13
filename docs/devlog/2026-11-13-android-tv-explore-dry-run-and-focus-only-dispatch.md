@@ -38,7 +38,7 @@ uses, so a caller knows a TV run moves focus and selects instead of tapping. The
 is unchanged.
 
 Focus-only dispatch: option 1. `explore` itself always records `focusNavigate` with
-`select: true`, so its edges are timed from the select press; only caller-issued focus-only walks
+`select: true`, so it times its edges from the select press. Only caller-issued focus-only walks
 are affected, and no device run so far has shown a TV app whose navigation needs a long one.
 The #10196 ordering stays untouched.
 

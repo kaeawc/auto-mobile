@@ -6,7 +6,8 @@
       "maxSentenceWords": 30,
       "maxParagraphWords": 100,
       "maxPageWords": 1500,
-      "passive": { "minSentences": 3, "maxRatio": 0.5 }
+      "passive": { "minSentences": 3, "maxRatio": 0.5 },
+      "enforced": true
     },
     {
       "name": "how-it-works",

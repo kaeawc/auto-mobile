@@ -76,18 +76,24 @@ is omitted.
 
 ## Setting a hinge angle
 
-`setPosture` with `hingeAngle` (0 to 180 degrees) returns `hingeAngle` as requested and no
-`observedHingeAngle`: the runner cannot read the angle apps see. `posture` follows the same rules as
-`getDeviceState` above (cover `closed`, inner `half_opened` or `opened`), or `unknown` with
-`postureReason` when the active panel cannot be determined.
+Call `setPosture` with `hingeAngle` (0 to 180 degrees). The result returns `hingeAngle` as requested
+and no `observedHingeAngle`, because the runner cannot read the angle apps see.
+
+The result's `posture` follows the same rules as `getDeviceState` above: cover `closed`, inner
+`half_opened` or `opened`. When AutoMobile cannot determine the active panel, `posture` is `unknown`
+with a `postureReason`.
 
 The simulator's panel switch depends on the angles it passed through, not only on the final angle.
-For example, `0 -> 80 -> 120` leaves the cover panel active and apps on the closed layout, while
-`0 -> 120` switches to the inner panel. When the active panel contradicts the requested angle
-(cover panel at 90 degrees or above, or inner panel at 0 degrees), the call waits up to 3 seconds for
-the panel to switch; if it still disagrees, the call succeeds and adds a `warnings` entry. To recover a cover panel that should be open, set `hingeAngle` 180, then the
-target angle again, and `observe` before acting. Below 90 degrees the cover panel is a normal
-result; strictly between 0 and 90 degrees either panel is plausible.
+For example, `0 -> 80 -> 120` leaves the cover panel active and apps on the closed layout. A direct
+`0 -> 120` switches to the inner panel.
+
+The active panel can contradict the requested angle: cover panel at 90 degrees or above, or inner
+panel at 0 degrees. The call then waits up to 3 seconds for the panel to switch. If it still
+disagrees, the call succeeds and adds a `warnings` entry.
+
+To recover a cover panel that should be open, set `hingeAngle` 180, then the target angle again,
+and `observe` before acting. Below 90 degrees the cover panel is a normal result. Strictly between
+0 and 90 degrees, either panel is plausible.
 
 ## Screen geometry after a posture change
 
@@ -115,11 +121,11 @@ landscape, are tapped as usual.
 
 ## Home-screen icons after an unfold
 
-After an unfold, the home screen reports app icon positions that do not match what is drawn. As a
-result, `observe` on the home screen can omit icons that are visible (for example Settings) or
-report an icon at the wrong position, and `tapOn` by an icon's label can fail with "Element not
-found" or tap the wrong place. This affects app icons only; the dock, status bar and other
-home-screen controls are reported correctly.
+After an unfold, the home screen reports app icon positions that do not match what it draws. As a
+result, `observe` on the home screen can omit visible icons (for example Settings) or report an
+icon at the wrong position. A `tapOn` by an icon's label can fail with "Element not found" or tap
+the wrong place. Only app icons suffer this; AutoMobile reports the dock, status bar and other
+home-screen controls correctly.
 
 To open an app on the iPhone Duo, call `launchApp` with its bundle ID instead of tapping its
 home-screen icon:
@@ -130,7 +136,7 @@ home-screen icon:
 
 ## Screenshots that cannot be verified
 
-When AutoMobile cannot tell which panel is active, or cannot read the size of the fallback
-screenshot to check it against the active panel, it does not return a screenshot that may be of
-the dark panel. The screenshot fails with `Runner screenshot could not be verified`. Call `observe`
+AutoMobile does not return a screenshot that may show the dark panel. That applies when it cannot
+tell which panel is active, or cannot read the fallback screenshot's size to check it against the
+active panel. The screenshot fails with `Runner screenshot could not be verified`. Call `observe`
 again so the active panel is known, or check the posture with `setPosture`.

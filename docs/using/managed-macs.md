@@ -3,15 +3,15 @@
 On iOS simulators, `networkCondition` relies on a macOS network-filter system extension.
 Out of the box, macOS asks a person to approve it twice: once for the system extension
 and once for the content filter. On Macs that nobody watches, such as CI runners, EC2 Mac
-hosts, or a team's managed machines, you can remove both prompts with one MDM
-configuration profile that works for every AutoMobile release.
+hosts, or a team's managed machines, one MDM configuration profile removes both prompts.
+It works for every AutoMobile release.
 
 **Download:** [automobile-network-filter.mobileconfig](../assets/mdm/automobile-network-filter.mobileconfig)
 
 > [!IMPORTANT]
-> Deliver this profile through MDM. If someone opens the file or installs it with
-> System Settings, it does not pre-approve system extensions. macOS accepts the
-> system extension policy only from an MDM, so the approval prompts still appear.
+> Deliver this profile through MDM. Opened as a file or installed with System
+> Settings, it does not pre-approve system extensions. Only an MDM can deliver the
+> system extension policy to macOS, so the approval prompts still appear.
 
 ## What the profile contains
 

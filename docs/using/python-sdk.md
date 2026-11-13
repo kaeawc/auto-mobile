@@ -44,10 +44,10 @@ asyncio.run(main())
 
 ## Daemon lifecycle
 
-- `await client.status()` returns a `DaemonStatus`: `running`, `pid`, `port`,
-  `socket_path`, `version`, `started_at`, `recovery`, and the full object as `raw`.
-  `healthy` is false when the daemon is down because its identity could not be
-  recovered.
+- `await client.status()` returns a `DaemonStatus`. Its fields are `running`, `pid`,
+  `port`, `socket_path`, `version`, `started_at` and `recovery`, with the full object as `raw`.
+  Its `healthy` field is false when the daemon is down and AutoMobile cannot
+  recover its identity.
 - `await client.ensure_running(timeout=90)` returns the status of a running daemon,
   starting one first when none is running. The whole call, including start-up, is
   bounded by `timeout` seconds.
@@ -94,11 +94,15 @@ token.
 | `SessionBindingError`       | The session is closed, or a call named a device other than the bound one.                                                                                                                                                        | Open a new session.                                                                                                                                                                  |
 | `ToolCallError`             | Raised by `ToolResult.raise_for_error()` for a tool that ran and failed.                                                                                                                                                         | Read `text` for the tool's message.                                                                                                                                                  |
 
-The SDK retries only requests that the daemon never ran: a refused access token
-(after re-reading it once), a daemon that is still starting, and a refused connection
-to a daemon that moved to another port. A connection that is reset or broken after it
-was opened raises `DaemonUnavailableError` without a retry, because the request may
-already have run; the next request looks up the daemon's port again.
+The SDK retries only requests that the daemon never ran:
+
+- a refused access token (after re-reading it once)
+- a daemon that is still starting
+- a refused connection to a daemon that moved to another port
+
+A connection that is reset or broken after it opened raises `DaemonUnavailableError`
+without a retry, because the request may already have run. The next request looks up
+the daemon's port again.
 
 ## Testing your code
 

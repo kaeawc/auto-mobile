@@ -530,7 +530,9 @@ test("documented unheld registry readiness matches literal classifications", () 
     join(import.meta.dir, "../../docs/using/device-ownership.md"),
     "utf8",
   ).split(/\r?\n/);
-  const start = lines.indexOf("### Which read tools ready an unheld device");
+  const start = lines.findIndex((line) =>
+    /^#{2,3} Which read tools ready an unheld device$/.test(line),
+  );
   expect(start).toBeGreaterThanOrEqual(0);
   const section = lines.slice(start + 1);
   const end = section.findIndex((line) => /^#{1,3} /.test(line));

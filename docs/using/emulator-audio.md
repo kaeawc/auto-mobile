@@ -18,6 +18,10 @@ Microphone permission to the host app that runs the emulator or restart the emul
 Keep audio enabled on the emulator: do not set `AUTOMOBILE_EMULATOR_AUDIO=false`.
 The result's `route` is `emulator-grpc`.
 
+AutoMobile starts each emulator it boots with a gRPC port (`-grpc`) on a free host port from 8554
+to 8653. It holds that port while the emulator runs, so you need no extra launch flags. AutoMobile uses a
+`-grpc` flag you pass in `AUTOMOBILE_EMULATOR_ARGS` or in the launch's extra arguments as given.
+
 ## iOS Simulators
 
 A simulator records from the Mac's default input device and plays to its default output device,
@@ -39,10 +43,6 @@ Every simulator on the Mac shares these devices:
 - A capture hears every simulator on the Mac. Run audio tests on one simulator at a time.
 - With one loopback device as both default input and output, a simulator's own playback also
   reaches its microphone.
-
-AutoMobile starts each emulator it boots with a gRPC port (`-grpc`) on a free host port from 8554
-to 8653, held while that emulator runs, so no extra launch flags are needed. A `-grpc` flag you
-pass in `AUTOMOBILE_EMULATOR_ARGS` or in the launch's extra arguments is used as given.
 
 ## `injectAudioInput`
 

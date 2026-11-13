@@ -3,12 +3,15 @@
 Most users can use the defaults. Set these variables when you need a different
 state directory, logs, tool set, or device behavior.
 
-Each name below with an `AUTO_MOBILE_` spelling is a legacy alias; when a cell
+Each name below with an `AUTO_MOBILE_` spelling is a legacy alias. When a cell
 lists two names, the first takes precedence when set. Defaults are the behavior
-with the variable unset. A flag whose row says `1`/`true` accepts `1`, `true`,
-`yes` or `on`, trimmed and case-insensitive; any other value is off. A row that
-says _exact_ accepts only the values it shows. Unknown numeric values usually
-fall back to the default unless the row says otherwise.
+with the variable unset. Accepted values:
+
+- A flag whose row says `1`/`true` accepts `1`, `true`, `yes` or `on`, trimmed
+  and case-insensitive; any other value is off.
+- A row that says _exact_ accepts only the values it shows.
+- Unknown numeric values usually fall back to the default unless the row says
+  otherwise.
 
 ## State and logs
 
@@ -82,11 +85,11 @@ instance. Relative paths resolve from the daemon launch directory.
 ### Shared-namespace guard
 
 `AUTOMOBILE_DATA_DIR`, `AUTOMOBILE_DB_DIR` and `AUTOMOBILE_DB_PATH` relocate a
-daemon's state, but not its socket. With any of them set and neither
-`AUTOMOBILE_AUX_SOCKET_DIR` nor a non-default `AUTOMOBILE_DAEMON_SOCKET_PATH`,
-`--daemon start`, `stop`, `restart`, `release-session` and `set-feature-flag` refuse with
-`[shared_daemon_namespace]`, because they would act on the default daemon, which
-runs on different state. MCP and `--cli` clients likewise refuse an automatic
+daemon's state, but not its socket. Suppose any of them is set, and neither
+`AUTOMOBILE_AUX_SOCKET_DIR` nor a non-default `AUTOMOBILE_DAEMON_SOCKET_PATH` is.
+Then `--daemon start`, `stop`, `restart`, `release-session` and `set-feature-flag`
+refuse with `[shared_daemon_namespace]`: they would act on the default daemon,
+which runs on different state. MCP and `--cli` clients likewise refuse an automatic
 restart, though they still start a daemon when none is running.
 `AUTOMOBILE_LOG_DIR` and the coordination directories do not count.
 
@@ -181,17 +184,14 @@ for the file formats.
 export AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS=20000
 ```
 
-A device session is released about 10 s after its owner's last heartbeat at the
-default settings. The MCP proxy heartbeats automatically, so a late or lost beat
-does not lapse the session.
+At the default settings, AutoMobile releases a device session about 10 s after
+its owner's last heartbeat. The MCP proxy heartbeats automatically, so a late or
+lost beat does not lapse the session.
 
-A session also has an idle window (2 minutes by default). Only control calls
-(taps, swipes, typing and similar) extend it; heartbeats and read-only calls such
-as `observe` do not. An agent that acquires a device and then makes no control
-calls for the whole window loses the session and its device, even while its proxy
-stays connected. Raise `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` if your workflow only
-observes for long stretches. See [device ownership](device-ownership.md) for which
-tools count as reads.
+Only control calls extend a session's idle window (2 minutes by default), even
+while its proxy stays connected. Raise `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` if
+your workflow only observes for long stretches; see
+[device ownership](device-ownership.md#when-a-session-is-released).
 
 Idle time includes host sleep, so a laptop that sleeps longer than the window may
 lose its session. The next call then fails with `bound_session_lost`; acquire a
@@ -206,29 +206,46 @@ returns a structured error on the next call that uses the session:
   Reacquire the device with `getAndroid` or `getApple`.
 
 To restart a proxy and keep its sessions, start it with `--initial-session-uuid`
-and a stable `--liveness-owner-token <token>`; use a distinct token per harness.
+and a stable `--liveness-owner-token <token>`. Use a distinct token per harness.
 A one-shot `--cli` call needs no keeper, and `--daemon heartbeat` on a CLI session
 is a no-op.
 
-`--daemon session-info <session-id>` prints a session's device, platform,
-`lastToolActivityAt`, `idleReleaseAt` and lease `liveness`, plus `stableDeviceId`
-(when known), `deviceGeneration` (zero initially), and `previousDeviceId` (after a
-serial change). `--daemon active-sessions` includes these binding fields for every
-held session.
+`--daemon session-info <session-id>` prints a session's binding.
+`--daemon active-sessions` includes the same fields for every held session.
 
-When a retained session is recovered onto a new serial (not when you move it yourself with
-`setActiveDevice` or an explicit bind), its proxy sends an MCP logging
-notification at level `info`, logger `auto-mobile.liveness`, with data
-`{ code: "session_device_rebound", sessionUuid, previousDeviceId, deviceId,
-stableDeviceId?, avdName?, generation }`. `avdName` is the Android AVD name when
-known. A client logging threshold above `info` suppresses this notification.
-Subsequent admitted daemon tool results also carry
-`_meta["automobile/sessionDevice"] = { sessionUuid, deviceId, stableDeviceId?,
-generation, previousDeviceId }`; this field is absent before the first serial
-change. Compare `sessionUuid` and `stableDeviceId` across results to verify the
-same session and device image, with the new `deviceId` and an incremented
-`generation`. Generations count serial changes within one daemon lifetime and
-restart at zero after a daemon restart. See [device-loss retry guidance](device-ownership.md#when-a-session-is-released).
+| Field                | Meaning                                      |
+| -------------------- | -------------------------------------------- |
+| device, platform     | The bound device and its platform            |
+| `lastToolActivityAt` | The session's last tool call                 |
+| `idleReleaseAt`      | When the idle window releases the session    |
+| `liveness`           | The lease's liveness                         |
+| `stableDeviceId`     | The device's stable identity, when known     |
+| `deviceGeneration`   | Serial changes so far; zero initially        |
+| `previousDeviceId`   | The serial before the last change, after one |
+
+AutoMobile can recover a retained session onto a new serial. Its proxy then sends
+an MCP logging notification at level `info`, logger `auto-mobile.liveness`, with
+this data:
+
+```
+{ code: "session_device_rebound", sessionUuid, previousDeviceId, deviceId,
+  stableDeviceId?, avdName?, generation }
+```
+
+`avdName` is the Android AVD name when known. Moving the session yourself with
+`setActiveDevice` or an explicit bind sends no notification. A client logging
+threshold above `info` suppresses it.
+
+After the first serial change, admitted daemon tool results also carry:
+
+```
+_meta["automobile/sessionDevice"] = { sessionUuid, deviceId, stableDeviceId?,
+  generation, previousDeviceId }
+```
+
+Compare `sessionUuid` and `stableDeviceId` across results to verify the same
+session and device image, with the new `deviceId` and an incremented `generation`.
+See [device-loss retry guidance](device-ownership.md#when-a-session-is-released).
 
 ## CLI session lifetime
 
@@ -240,15 +257,14 @@ restart at zero after a daemon restart. See [device-loss retry guidance](device-
 
 </div>
 
-Each `--cli` call is its own process and cannot send heartbeats, so a session
-used from `--cli` is released after this much time since its last `--cli` tool
-call:
+Each `--cli` call is its own process and cannot send heartbeats. AutoMobile
+releases a session used from `--cli` this long after its last `--cli` tool call:
 
 ```bash
 export AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS=600000
 ```
 
-The value is read per invocation, so a change applies on the next call with no
+Each invocation reads the value, so a change applies on the next call with no
 daemon restart.
 
 ## Automatic observation screenshots
@@ -276,18 +292,21 @@ export AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT=false
 An action observation with a screenshot reports `screenshotHierarchyLagMs`, the
 milliseconds between its hierarchy and its screenshot. If the screenshot is more
 than 500 ms later, the observation also has `screenshotHierarchyMismatch: true`
-and a `freshness.warning`: the image may show a later screen than the hierarchy,
-so trust the hierarchy and call `observe` for a matching screenshot. Android captures
-that try CtrlProxy before ADB wait at most three seconds for CtrlProxy; a recent
-failure sends subsequent captures straight to ADB for 60 seconds before retrying.
-When capture diagnostics are available, `screenshotFallback` indicates ADB capture,
-`screenshotFallbackReason` explains the switch (`ctrlproxy_timeout` for a timeout,
-`ctrlproxy_recent_failure` for the cooldown), and `screenshotStageDurationsMs`
-contains `totalMs` plus `ctrlProxyMs` and/or `adbMs` for the stages attempted,
-including encoding and saving the image. `screenshotCaptureSource` on observe
-continues to distinguish `device` from `observation-cache`; on screenshot stream
-frames it identifies the capture backend. Prototype-hidden captures fail if
-CtrlProxy cannot capture them; they never switch to ADB.
+and a `freshness.warning`. The image may then show a later screen than the
+hierarchy: trust the hierarchy, and call `observe` for a matching screenshot.
+
+Android captures try CtrlProxy before ADB and wait at most three seconds for
+CtrlProxy. After a recent failure, captures go straight to ADB for 60 seconds
+before trying CtrlProxy again. Prototype-hidden captures fail if CtrlProxy cannot
+capture them; they never switch to ADB. When capture diagnostics are available,
+the observation reports:
+
+| Field                        | Meaning                                                                                                        |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `screenshotFallback`         | ADB captured the image.                                                                                        |
+| `screenshotFallbackReason`   | Why: `ctrlproxy_timeout` for a timeout, `ctrlproxy_recent_failure` for the cooldown.                           |
+| `screenshotStageDurationsMs` | `totalMs` plus `ctrlProxyMs` and/or `adbMs` for the stages attempted, including encoding and saving the image. |
+| `screenshotCaptureSource`    | On `observe`, `device` or `observation-cache`; on screenshot stream frames, the capture backend.               |
 
 Settled mode costs roughly 170 ms per Android observation and 20-70 ms per iOS
 observation over async. When only one call needs a matching screenshot, pass
@@ -306,23 +325,27 @@ observation over async. When only one call needs a matching screenshot, pass
 
 </div>
 
-Capacity is the larger of the base and active devices × per-device capacity,
-limited by the ceiling (or the base if larger). A device is active while any of
-its screenshots has an unexpired retention guarantee; an incoming capture also
-counts. Files without a device identity do not increase capacity. Under pressure,
-the byte capacity stays fixed for the eviction pass and is recalculated on the
-next admission. Each device's newest screenshots are evicted last, with the incoming
-capture counting toward its device's allowance and files already being removed
-excluded from that allowance. Capture is still admitted if nothing fits.
+How the cache sizes and evicts:
+
+- Capacity is the larger of the base and active devices × per-device capacity,
+  limited by the ceiling (or the base if larger).
+- A device is active while any of its screenshots has an unexpired retention
+  guarantee; an incoming capture also counts.
+- Files without a device identity do not increase capacity.
+- Eviction removes each device's newest screenshots last.
+- AutoMobile still admits a capture when nothing fits.
 
 ## Device behavior
 
-Android rebind command and iOS keep-booted reset budgets scale by the one-minute host
-load per CPU core when it exceeds 1, up to the configured maximum. Unknown load uses
-the base budget. Setting MAX equal to the base disables scaling. A budget timeout
-allows one retry with up to twice the first budget, bounded by MAX. iOS waits for
-the abandoned step to settle before retrying; exhausted budgets are reported as
-budget-driven fallback reasons.
+Android rebind commands and iOS keep-booted reset steps have budgets that scale
+with host load:
+
+- When the one-minute host load per CPU core exceeds 1, the budget scales by it,
+  up to the configured maximum. Unknown load uses the base budget.
+- Setting MAX equal to the base disables scaling.
+- A budget timeout allows one retry with up to twice the first budget, bounded by
+  MAX. iOS waits for the abandoned step to settle before retrying.
+- AutoMobile reports exhausted budgets as budget-driven fallback reasons.
 
 <div class="environment-variable-table" markdown>
 
@@ -367,10 +390,8 @@ budget-driven fallback reasons.
 
 </div>
 
-By default the daemon only does background work (iOS warm-up, Android appearance
-sync, observation streams) for devices that have a session. List devices in
-`AUTOMOBILE_IOS_WARMUP_DEVICES`, `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES` or
-`AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES` to include session-less devices,
+The daemon does background work only for devices that have a session. List
+session-less devices in the three `*_DEVICES` variables above to include them,
 for example when only an IDE is attached:
 
 ```bash
@@ -386,8 +407,7 @@ export AUTOMOBILE_ALLOW_DEVICE_CREATE=1
 auto-mobile --cli startDevice --platform ios --create-if-missing
 ```
 
-An explicit `--create-if-missing false` disables creation even when the variable
-is set. Remove created devices with `xcrun simctl delete <udid>` or
+Remove created devices with `xcrun simctl delete <udid>` or
 `avdmanager delete avd -n <name>`.
 
 Invalid `AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS` entries fail at launch.
@@ -401,11 +421,10 @@ export AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=0
 ```
 
 `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1` additionally restarts an Android emulator
-that AutoMobile started with `startDevice` or `getAndroid`. Physical devices,
-emulators started outside AutoMobile, and iOS simulators are never restarted;
-they are only waited for. Restarts are limited by
-`AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` within
-`AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`.
+that AutoMobile started with `startDevice` or `getAndroid`. AutoMobile never
+restarts physical devices, emulators started outside AutoMobile, or iOS
+simulators; it only waits for them. `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`
+within `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS` limits restarts.
 
 ### Ambient Android and OS variables
 
@@ -442,20 +461,12 @@ Not AutoMobile-specific; these configure platform toolchains and the host.
 
 ### Boot capacity
 
-Emulator and simulator cold boots are checked against host capacity by default.
-Android and iOS each have a limit: the smaller of the host RAM budget divided by the
-per-device memory, and the CPU budget, at least 1. Android budgets half the RAM and
-one emulator per 2 cores; iOS budgets 60% of RAM divided by the measured
-per-simulator memory footprint (not summed RSS) and half the cores at 0.1 core per
-simulator, see [iOS Simulator fleet cost](ios-simulator-fleet-cost.md). Every booted device of
-that platform counts, including ones started outside AutoMobile. A simulator
-inventory that cannot be read refuses the boot with the retryable
-`discovery_incomplete`.
-
-A boot over the limit is refused at once with a retryable error whose
-`retryAfterMs` (5 seconds) says when to try again. When emulators AutoMobile did
-not start occupy capacity, the message lists them and `externalDevices` carries
-their serials:
+AutoMobile checks emulator and simulator cold boots against host capacity by
+default. [Boot capacity](device-ownership-availability.md#boot-capacity) explains
+each platform's limit and the fields a refusal carries; see also
+[iOS Simulator fleet cost](ios-simulator-fleet-cost.md). Adopting an emulator or
+simulator that is already running is never refused. A refused Android boot looks
+like this:
 
 ```json
 {
@@ -471,16 +482,9 @@ their serials:
 }
 ```
 
-For iOS refusals, `heldDevices` lists simulators owned by an AutoMobile session or
-broker binding. They count toward the limit, but are not strays: release their
-session or binding first. See [device ownership](device-ownership.md).
-
-Adopting an emulator or simulator that is already running is never refused.
-`listDevices` reports `capacity` per platform as `{ limit, booted, inFlight }`.
-
 The Android limit is shared by every daemon using the same ADB server on one
 host. Daemons given different `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` values do
-not see each other's boots, so they can exceed the limit; give each its own ADB
+not see each other's boots, so they can exceed the limit. Give each its own ADB
 server as well to isolate their limits.
 
 ```bash
@@ -557,16 +561,11 @@ To keep an installed CtrlProxy APK through device readiness, set
 ### Queued iOS runner launches
 
 When simultaneous cold iOS `observe` calls exceed
-`AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY`, a read can reach its bounded budget
-while its runner launch is queued or already running. It returns `ok: true`, no hierarchy, and
-`freshness` with `isFresh: false` and `unavailableReason: "runner_launch_queued"`.
-The detail names its queue position when queued, or says the runner is still
-starting in the background. Any captured screenshot is kept. The start continues
-for up to 60 seconds from the moment its launch leaves the queue (waiting in the
-queue is bounded separately, at 5 minutes), and a retry joins that same start.
-The same typing applies to a `readiness: none` observe whose read lapses with a
-timeout, setup failure, or recovery reason while the device's launch is queued
-or holding a launch slot. Retry the observe shortly.
+`AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY`, a read can return before its runner
+starts. See [Cold iOS observe freshness](device-ownership-availability.md#cold-ios-observe-freshness)
+for the result. A `readiness: none` observe reports the same way when its read
+lapses with a timeout, setup failure, or recovery reason while the device's launch
+is queued or holds a launch slot. Retry the observe shortly.
 
 ## iOS builds and signing
 
@@ -682,8 +681,7 @@ or holding a launch slot. Retry the observe shortly.
 
 ## Testing and internal
 
-These are read by AutoMobile but are meant for testing and diagnostics, not
-normal use.
+AutoMobile reads these for testing and diagnostics; they are not for normal use.
 
 <div class="environment-variable-table" markdown>
 
@@ -704,13 +702,21 @@ normal use.
 Do not use `AUTOMOBILE_DB_PATH=:memory:` in production. Tests may allow it by also setting
 `AUTOMOBILE_ALLOW_IN_MEMORY_DB` to `1`, `true` or `yes`.
 
-When template cloning is enabled (opt in with `AUTOMOBILE_IOS_TEMPLATE_CLONE=1`; it is off by default), the first request uses normal creation and starts a background
-template build. Later requests can clone a settled, shut-down template for the same runtime,
-device type and preboot profile. Template builds consume a boot capacity slot and may take several minutes.
+Template cloning is off by default; opt in with `AUTOMOBILE_IOS_TEMPLATE_CLONE=1`.
+The first request then uses normal creation and starts a background template build.
+Later requests can clone a settled, shut-down template for the same runtime, device
+type and preboot profile. Template builds take a boot capacity slot and may take
+several minutes.
 
-Use `auto-mobile --ios-templates build --runtime <identifier> --device-type <identifier>` to build
-one explicitly. Use `auto-mobile --ios-templates clean --all` to remove templates, or replace
-`--all` with `--runtime <identifier> --device-type <identifier>` to select one. The selected preboot
-profile comes from `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE`. Cleanup refuses active builds unless
-`--force` is supplied. These commands require macOS; explicit maintenance works independently of
-the cloning flag. A failed or deferred build exits with status 1; successful build and cleanup exit 0.
+Template commands require macOS and work whether or not cloning is on:
+
+| Command                                                                               | Effect                 |
+| ------------------------------------------------------------------------------------- | ---------------------- |
+| `auto-mobile --ios-templates build --runtime <identifier> --device-type <identifier>` | Build one template.    |
+| `auto-mobile --ios-templates clean --all`                                             | Remove every template. |
+| `auto-mobile --ios-templates clean --runtime <identifier> --device-type <identifier>` | Remove one template.   |
+
+The selected template uses the preboot profile from
+`AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE`. Cleanup refuses active builds unless you pass
+`--force`. A failed or deferred build exits with status 1; successful build and
+cleanup exit 0.

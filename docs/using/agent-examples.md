@@ -42,9 +42,9 @@
 
 <div class="copyable-prompt" markdown>
 
-> In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, use search to find
-> <code class="prompt-var--edit" contenteditable="true">what to search for</code> and
-> open the first result. Tell me how many taps it took, and whether anything
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app. Use search to find
+> <code class="prompt-var--edit" contenteditable="true">what to search for</code>.
+> Open the first result. Tell me how many taps it took, and whether anything
 > about the search or results was confusing.
 
 </div>
@@ -59,9 +59,9 @@
 
 <div class="copyable-prompt" markdown>
 
-> In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, use search to find
-> <code class="prompt-var--edit" contenteditable="true">what to search for</code> and
-> open the first result. Tell me how many taps it took, and whether anything
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app. Use search to find
+> <code class="prompt-var--edit" contenteditable="true">what to search for</code>.
+> Open the first result. Tell me how many taps it took, and whether anything
 > about the search or results was confusing.
 
 </div>
@@ -76,9 +76,9 @@
 
 <div class="copyable-prompt" markdown>
 
-> Go through my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app's onboarding as
-> a brand-new user, from first launch to the main screen. Report each step,
-> any dead ends or confusing copy, and controls that were hard to tap.
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app as a brand-new user.
+> Go through its onboarding, from first launch to the main screen. Report each
+> step, any dead ends or confusing copy, and controls that were hard to tap.
 
 </div>
 
@@ -86,9 +86,9 @@
 
 <div class="copyable-prompt" markdown>
 
-> Go through my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app's onboarding as a
-> brand-new user, from first launch to the main screen. Report each step,
-> any dead ends or confusing copy, and controls that were hard to tap.
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app as a brand-new user.
+> Go through its onboarding, from first launch to the main screen. Report each
+> step, any dead ends or confusing copy, and controls that were hard to tap.
 
 </div>
 
@@ -102,9 +102,9 @@
 
 <div class="copyable-prompt" markdown>
 
-> In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, open
-> <code class="prompt-var--edit" contenteditable="true">a screen or feature</code> and
-> fill in the form — enter realistic text, pick a date one week from today,
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app. Go to
+> <code class="prompt-var--edit" contenteditable="true">a screen or feature</code>.
+> Fill in the form — enter realistic text, pick a date one week from today,
 > and set any toggles or options. Submit it and confirm the result, flagging
 > fields that were awkward to use.
 
@@ -120,9 +120,9 @@
 
 <div class="copyable-prompt" markdown>
 
-> In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, open
-> <code class="prompt-var--edit" contenteditable="true">a screen or feature</code> and
-> fill in the form — enter realistic text, pick a date one week from today,
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app. Go to
+> <code class="prompt-var--edit" contenteditable="true">a screen or feature</code>.
+> Fill in the form — enter realistic text, pick a date one week from today,
 > and set any toggles or options. Submit it and confirm the result, flagging
 > fields that were awkward to use.
 
@@ -138,9 +138,9 @@
 
 <div class="copyable-prompt" markdown>
 
-> Open <code class="prompt-var--edit" contenteditable="true">a list or feed</code> in my
-> <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, scroll until you find
-> <code class="prompt-var--edit" contenteditable="true">an item</code>, then open its
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app. Go to
+> <code class="prompt-var--edit" contenteditable="true">a list or feed</code>.
+> Scroll until you find <code class="prompt-var--edit" contenteditable="true">an item</code>, then open its
 > detail screen. Report whether the list scrolled smoothly and if anything
 > was hard to reach.
 
@@ -156,9 +156,9 @@
 
 <div class="copyable-prompt" markdown>
 
-> Open <code class="prompt-var--edit" contenteditable="true">a list or feed</code> in my
-> <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, scroll until you find
-> <code class="prompt-var--edit" contenteditable="true">an item</code>, then open its
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app. Go to
+> <code class="prompt-var--edit" contenteditable="true">a list or feed</code>.
+> Scroll until you find <code class="prompt-var--edit" contenteditable="true">an item</code>, then open its
 > detail screen. Report whether the list scrolled smoothly and if anything
 > was hard to reach.
 
@@ -174,13 +174,13 @@
 
 <div class="copyable-prompt" markdown>
 
-> Reproduce this bug in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app:
+> Reproduce the bug below in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app.
 >
-> <code class="prompt-var--edit" contenteditable="true">paste the bug report here</code>
+> Bug report: <code class="prompt-var--edit" contenteditable="true">paste the bug report here</code>.
 >
-> Report the exact steps, expected and actual results, device and OS version,
-> app version, and whether it reproduced consistently. Highlight the defect,
-> then take a device snapshot so someone else can inspect the state.
+> Report the exact steps and the expected and actual results. Include the device,
+> OS version, app version, and whether it reproduced consistently. Highlight the
+> defect, then take a device snapshot so someone else can inspect the state.
 
 </div>
 
@@ -194,13 +194,13 @@
 
 <div class="copyable-prompt" markdown>
 
-> Reproduce this bug in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app:
+> Reproduce the bug below in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app.
 >
-> <code class="prompt-var--edit" contenteditable="true">paste the bug report here</code>
+> Bug report: <code class="prompt-var--edit" contenteditable="true">paste the bug report here</code>.
 >
-> Report the exact steps, expected and actual results, device and OS version,
-> app version, and whether it reproduced consistently. Highlight the defect,
-> then take a device snapshot so someone else can inspect the state.
+> Report the exact steps and the expected and actual results. Include the device,
+> OS version, app version, and whether it reproduced consistently. Highlight the
+> defect, then take a device snapshot so someone else can inspect the state.
 
 </div>
 
@@ -220,8 +220,8 @@ auditing is enabled.
 
 <div class="copyable-prompt" markdown>
 
-> Launch my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app five times, measure
-> cold and warm startup, and report time to first frame, time to
+> Launch my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app five times.
+> Measure cold and warm startup, and report time to first frame, time to
 > interactive, and any outliers. Then open a long list, scroll it a few
 > times, and report FPS, dropped frames, and visible jank.
 
@@ -237,10 +237,10 @@ auditing is enabled.
 
 <div class="copyable-prompt" markdown>
 
-> Launch my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app five times, measure cold
-> and warm startup, and report time to first frame, time to interactive,
-> and any outliers. Then open a long list, scroll it a few times, and report
-> FPS, dropped frames, and visible jank.
+> Launch my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app five times.
+> Measure cold and warm startup, and report time to first frame, time to
+> interactive, and any outliers. Then open a long list, scroll it a few
+> times, and report FPS, dropped frames, and visible jank.
 
 </div>
 
@@ -254,8 +254,8 @@ auditing is enabled.
 
 <div class="copyable-prompt" markdown>
 
-> Explore the current screen in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app
-> and point out interactive elements that are difficult to use — small tap
+> Explore the current screen in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app.
+> Point out interactive elements that are difficult to use — small tap
 > targets, low contrast, missing labels, or unclear controls. Suggest what
 > to fix first.
 
@@ -265,8 +265,8 @@ auditing is enabled.
 
 <div class="copyable-prompt" markdown>
 
-> Explore the current screen in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app and
-> point out interactive elements that are difficult to use — small tap
+> Explore the current screen in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app.
+> Point out interactive elements that are difficult to use — small tap
 > targets, low contrast, missing labels, or unclear controls. Suggest what
 > to fix first.
 

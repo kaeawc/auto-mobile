@@ -8,11 +8,15 @@ Use `blePeripheral` to prototype a wearable or smart lock against an Android emu
 
 Start with `{"action":"start","sessionUuid":"<session>","name":"Prototype","presets":["battery","heartRate"]}`. The result includes a session-owned `handle`, name, address, presets, transport, `transportShared`, `running`, `advertising`, `connected`, `subscribed`, `pythonReady` and `bumbleReady`. Initial battery level is 87 and heart rate is 72 bpm.
 
-`name` is the advertised local name, limited to 20 UTF-8 bytes. `address` defaults to `F0:F1:F2:F3:F4:F5`; choose distinct addresses for simultaneous peripherals. `deviceId` defaults to the calling session's emulator and must match that session. A private netsim instance is selected automatically when discoverable. Without a known private instance, the default is `android-netsim`, the host-wide netsim that every emulator shares. `transport` is optional and only accepts `android-netsim` or `android-netsim:localhost:<port>`; it must match the transport discovered for the session's emulator, otherwise start fails and the error names the expected value.
+- `name` is the advertised local name, limited to 20 UTF-8 bytes.
+- `address` defaults to `F0:F1:F2:F3:F4:F5`. Choose distinct addresses for simultaneous peripherals.
+- `deviceId` defaults to the calling session's emulator and must match that session.
+
+AutoMobile selects a private netsim instance automatically when it can discover one. Without a known private instance, the default is `android-netsim`, the host-wide netsim that every emulator shares. The optional `transport` only accepts `android-netsim` or `android-netsim:localhost:<port>`. It must match the transport discovered for the session's emulator. Otherwise start fails, and the error names the expected value.
 
 ## Shared and private netsim
 
-By default emulators share one netsim, so every emulator on the host can see the peripheral. When the transport is the shared `android-netsim`, `start`, `status`, `notify` and `stop` results carry `transportShared: true` and a `warning`. To keep a peripheral visible only to its own emulator, set `AUTOMOBILE_EMULATOR_NETSIM_ISOLATION=true` for the daemon and launch the emulator through AutoMobile: each newly launched emulator then gets a private netsim, the transport becomes `android-netsim:localhost:<port>`, and `transportShared` is `false`. Emulators that were already running keep the shared netsim until relaunched.
+By default emulators share one netsim, so every emulator on the host can see the peripheral. When the transport is the shared `android-netsim`, `start`, `status`, `notify` and `stop` results carry `transportShared: true` and a `warning`. To keep a peripheral visible only to its own emulator, set `AUTOMOBILE_EMULATOR_NETSIM_ISOLATION=true` for the daemon and launch the emulator through AutoMobile. Each newly launched emulator then gets a private netsim. The transport becomes `android-netsim:localhost:<port>`, and `transportShared` is `false`. Emulators that were already running keep the shared netsim until relaunched.
 
 AutoMobile stops a private netsim when the emulator it launched exits. If the daemon is stopped first and the emulator is then killed outside AutoMobile, nothing is left to stop that netsim; it normally exits once its emulator disconnects. If a `netsimd -i <N>` process is still running after its emulator is gone, kill it.
 
@@ -49,7 +53,13 @@ Use the same session and returned handle for subsequent calls:
 
 ## Keeping the session alive
 
-A peripheral lives only as long as its session. Releasing, unbinding or idling out the session, or shutting down the daemon, kills it. A session whose owner never sends a heartbeat is released through the lost-heartbeat path: about 20 seconds after it was created when it set its own heartbeat timeout (about 5 seconds on the default timeout), and after that once no control call has arrived within its heartbeat timeout. A session whose owner heartbeats is released after the idle window (2 minutes by default) with no control call. Every `blePeripheral` action, `status` included, is a control call, so it counts as use; `setToolEnabled` counts only when it passes the session's `sessionUuid`. Heartbeats are not use. While a central connects or a test runs, call `blePeripheral` `status` more often than the idle window (2 minutes by default) to keep the session and its peripheral alive. An owner that heartbeats must keep heartbeating too, since `status` does not replace a lost heartbeat; an owner that never heartbeats must call `status` more often than the session's heartbeat timeout. See [Device ownership](device-ownership.md#when-a-session-is-released) for the release rules.
+A peripheral lives only as long as its session. Releasing, unbinding or idling out the session, or shutting down the daemon, kills it. See [Device ownership](device-ownership.md#when-a-session-is-released) for the release rules.
+
+- **Owner never heartbeats:** the daemon releases the session through the lost-heartbeat path. That happens about 20 seconds after creation when the session set its own heartbeat timeout (about 5 seconds on the default timeout). After that, it happens once no control call arrives within the heartbeat timeout.
+- **Owner heartbeats:** the daemon releases the session after the idle window (2 minutes by default) passes with no control call.
+- **What counts as use:** every `blePeripheral` action, `status` included, is a control call. `setToolEnabled` counts only when it passes the session's `sessionUuid`. Heartbeats do not count.
+
+While a central connects or a test runs, call `blePeripheral` `status` more often than the idle window to keep the session and its peripheral alive. An owner that heartbeats must keep heartbeating too, since `status` does not replace a lost heartbeat. An owner that never heartbeats must call `status` more often than the session's heartbeat timeout.
 
 A connected peripheral stops advertising until disconnect. Advertising restarts automatically after disconnection; notifications continue while connected.
 

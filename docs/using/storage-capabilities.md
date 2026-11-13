@@ -65,8 +65,8 @@ not infer it. Treat an `uncoordinated` shared store as one that can change betwe
 
 For example: `sqlQuery({appId: "com.example.app", store: "Main", entity: "Item", limit: 10})`.
 Core Data reads return `type: "query"`, `columns`, `rows` (strings or nulls),
-`truncated`, and a message. `truncated: true` means additional rows exist or the
-response was shortened to meet the app's row or byte limit. Sensitive attributes
+`truncated`, and a message. A `truncated: true` value means more rows exist or the
+app shortened the response to meet its row or byte limit. Sensitive attributes
 are redacted. These reads never require storage mutation authorization.
 
 Core Data queries require iOS and the app's Debug storage inspection support.
@@ -74,6 +74,7 @@ For `unknown_core_data_store`, use a store identifier listed in `databases.store
 the storage capabilities resource. For `unknown_core_data_entity`, use one of that
 store's registered entity names. For `core_data_query_unavailable`, the app registered
 only metadata for that store; ask the app developer to enable read access.
-`db_inspection_disabled` requires enabling inspection in the app.
-`core_data_fetch_failed` means the fetch threw inside the app; check the app logs.
-`response_too_large` means even the column metadata exceeds the app's response limit. Invalid or mixed parameter pairs are rejected before execution.
+For `db_inspection_disabled`, enable inspection in the app.
+For `core_data_fetch_failed`, the fetch threw inside the app; check the app logs.
+For `response_too_large`, even the column metadata exceeds the app's response limit.
+AutoMobile rejects invalid or mixed parameter pairs before execution.

@@ -1,7 +1,7 @@
 # Test prep tools
 
-Prepare a repeatable device and app state before running a flow. These tools
-are useful for fixtures, localization, permissions, and system state.
+Prepare a repeatable device and app state, such as fixtures, locale,
+permissions, and system state, before running a flow.
 
 ## App files
 
@@ -27,11 +27,10 @@ Use `putAppFile` to write text, base64, or a host file into an app container:
 }
 ```
 
-`putAppFile` never terminates the app. After a successful `app_containers` write,
-`result.warning` appears when the target app is known to be running (on Android,
-in the written user profile): it may not see the change until it re-reads the file
-or is relaunched. The warning is omitted when running state is unknown or the
-app is not running, and for `user_files` and `media_library` writes.
+`putAppFile` never terminates the app. After an `app_containers` write,
+`result.warning` says the app may not see the change until it re-reads the file
+or relaunches. It appears only when AutoMobile knows the app is running (on
+Android, in the written user profile), and never for other domains.
 
 `user_files` on an iOS Simulator stages files through the managed Files fixture
 app `dev.jasonpearson.automobile.FilesFixture`. Writes go only to
@@ -44,15 +43,16 @@ On Android, `putAppFile` accepts an optional `userId` (a non-negative integer) t
 target a work or secondary profile. When you omit it, AutoMobile uses the only user
 the app is installed for. With several candidates it prefers the foreground app's
 user, then the current user. If it is still ambiguous, the error lists the candidate
-IDs and asks you to pass `userId`. Private `documents`/`cache`/`tmp` containers
-require a debuggable app. `externalFiles` writes to the app's external files
-directory for the chosen user. On API 30+, writing to other apps' `Android/data`
-directories may be denied by the platform. See [File containers](../tools.md) for
-semantics.
+IDs and asks you to pass `userId`.
 
-To list or read files, use the resource
-`automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}{?userId}`,
-appending `/{path}` before the query to read a file. For example:
+Private `documents`/`cache`/`tmp` containers require a debuggable app.
+`externalFiles` writes to the app's external files directory for the chosen user.
+On API 30+, the platform may deny writes to other apps' `Android/data`
+directories. See [File containers](../tools.md) for semantics.
+
+To list files, read the resource
+`automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}{?userId}`.
+To read a file, append `/{path}` before the query, for example:
 `automobile:devices/emulator-5554/storage-domains/app_containers/com.example.app/documents/settings.json?userId=10`.
 Returned file URIs include the resolved user (`?userId=N`) where it matters.
 iOS URIs have no user query.
@@ -61,18 +61,13 @@ iOS URIs have no user query.
 
 - `changeLocalization` sets language, region, time zone, and formatting for a
   device. Set the locale before launching the app.
-- `setDeviceState` configures supported system state such as biometric
-  enrollment, an Android lock-screen PIN, password, or pattern (`screenLock`)
-  that the session clears on release, or Android power constraints (`power`:
-  battery, battery saver, Doze, standby buckets, Data Saver, thermal status)
-  that the session restores on release. `cameraPoster` accepts `mode: "image"` with a host
-  PNG/JPG/JPEG `path`, `mode: "qr"` with `text`, or `mode: "clear"`. Android emulators
-  update the virtual-scene poster live (`surface: "wall"` or `"table"`). On iOS Simulator,
-  it records the poster for each app's next `launchApp` and returns
-  `method: "ios_simulator_dyld_injection"`, `path` when set, and `relaunchRequired: true`.
-  Running apps must be relaunched; `surface` is accepted and ignored. After clearing,
-  use `launchApp` with `coldBoot: true` to remove injection from an already-running app.
-  Physical iOS and Android devices are unsupported.
+- `setDeviceState` configures supported system state:
+  - biometric enrollment;
+  - an Android lock-screen PIN, password, or pattern (`screenLock`), which the
+    session clears on release;
+  - Android power constraints (`power`: battery, battery saver, Doze, standby
+    buckets, Data Saver, thermal status), which the session restores on release;
+  - a camera poster (`cameraPoster`); see [Camera posters](#camera-posters).
 - `biometricAuth` simulates a match or failure on supported emulators and iOS
   simulators, and every result in apps that embed the AutoMobile SDK.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.
@@ -97,9 +92,9 @@ On iOS the app under test must embed the AutoMobile iOS SDK; without it `sendSms
 and `phoneCall` `call`, `cancel` and `busy` fail with an error asking for the SDK.
 
 The iOS Simulator cannot answer or hold a CallKit call: its call service ends the
-call instead. `phoneCall` with `accept` or `hold` on a simulator therefore sends
-nothing to the app and returns, without an error and whether or not the app embeds
-the SDK or a `phoneNumber` is given:
+call instead. On a simulator, `phoneCall` with `accept` or `hold` sends nothing to
+the app. It returns this result without an error, with or without the SDK or a
+`phoneNumber`:
 
 ```json
 {
@@ -113,102 +108,57 @@ the SDK or a `phoneNumber` is given:
 
 Check `supported` and `reason` rather than treating this as a failure, and drive
 the in-call state with `call`, `cancel` and `busy` instead. Every other failure
-(missing `phoneNumber`, no SDK, an SDK rejection, an unsupported device) is
-returned as a tool error.
+(missing `phoneNumber`, no SDK, an SDK rejection, an unsupported device) returns a
+tool error.
 
 ## Reaching a host server from the device
 
-When an app or browser on an Android device must reach a server on your
-machine at exactly `http://localhost:<port>` (an OAuth redirect URI, a local
-mock backend), use `portReverse` instead of running `adb reverse` yourself:
+Use `portReverse` when an app on an Android device must reach a server on your
+machine at `http://localhost:<port>`. See
+[Reaching a host server from the device](port-reverse.md) for its actions,
+probes, and error codes.
 
-- `ensure` with `ports: [{ devicePort, hostPort? }]` adds each mapping
-  (`hostPort` defaults to `devicePort`). Calling it again is a no-op.
-  With `reclaimStale: true`, a mapping left behind by a crashed session, a
-  daemon restart or another tool is replaced instead of reported as a conflict,
-  but only when your session holds the device, no running session owns the
-  mapping, its host side is `tcp:<H>`, and nothing on your machine accepts a
-  connection on port `H`. That mapping's result carries
-  `reclaimed: { host, reason: "host_refused" }`. When adb talks to a server on
-  another machine (`ANDROID_ADB_SERVER_ADDRESS` or `ADB_SERVER_SOCKET`), host
-  ports cannot be checked, so nothing is reclaimed.
-- `list` returns every reverse on the device; `owned: true` marks the ones
-  your session created, `owner: "prototype"` marks one a shown or saved
-  prototype's `via: "device"` request uses, and `hostListening` says whether a server on your
-  machine accepts connections on each mapping's `tcp:` host port (absent when
-  it could not be checked).
-- `list` and `verify` give each port a `deviceListener`: `{ kind: "none" }`
-  (nothing listens on the device port), `{ kind: "reverse" }` (the reverse
-  itself), `{ kind: "process", uid, package? }` (an app or other process on the
-  device holds the port; `package` is set when exactly one package has that
-  uid) or `{ kind: "unsupported", detail }` (the device would not show its
-  listening sockets).
-- `verify` reports whether ports (default: all of yours) are mapped now. With
-  `probe: true` it also connects to each mapped port from the device (about a
-  second, all ports at once) and reports `reachable` (your host server accepted
-  and kept the connection open), `unreachable` or `probe_unsupported`. Ports
-  that are not mapped stay `missing` and are not probed. `unreachable` carries a
-  `probeReason`: `closed` (the mapping exists but nothing is listening on the
-  host port), `refused` (nothing is listening on the device port) or `timeout`
-  (the device did not answer). `probe_unsupported` means the device shell has no
-  usable connect command; `probeDetail` holds what it printed. A host server
-  that closes idle connections within a second reads as `closed`.
-  A TCP connect succeeds for any server, including the wrong one on a reused
-  host port. To check the right service answers, pass
-  `probe: { http: { path, expectStatus, hostHeader?, expectBodyContains?, timeoutMs? } }`:
-  the device sends `GET <path>` through each mapping and reports `httpStatus`.
-  A port is `reachable` when the status is in `expectStatus` (and the body
-  contains `expectBodyContains`, when given); otherwise `unreachable` with
-  `probeReason` `http_status` (another status), `http_body` (the text is
-  missing), `no_http_response` (the connection ended, or something answered,
-  without an HTTP response; `probeDetail` shows what came back), `refused` or
-  `timeout`. `path` must start with `/` and contain no spaces; `hostHeader`
-  defaults to `localhost:<devicePort>`; `timeoutMs` (1000-10000, default 2000)
-  is rounded up to whole seconds. Responses over 256 KB are not read and report
-  `timeout`.
-- `remove` deletes mappings your session created. A port a prototype also uses
-  is reported `released`: your session no longer owns it, and it stays on the
-  device until the prototype is dismissed. Likewise `ensure` on a prototype's
-  port to the same host port shares it (`present`) instead of conflicting.
+## Camera posters
 
-AutoMobile owns the mappings it creates for your session. If one disappears
-(an adb server restart, `adb reconnect`, `adb root`/`unroot`, an emulator
-restart, or `adb reverse --remove` run outside AutoMobile), AutoMobile re-adds
-it on its own once it sees the device's adb connection recover or on its
-periodic check (every 30 s by default), and otherwise the next `ensure`, `list`
-or `verify` call re-adds it. Either way, that next call lists it in `restored`; a mapping it
-could not re-add is listed in `restoreFailures` and retried on the next call. Your mappings are removed when your session is
-released or leaves the device. Mappings made without a session stay until the
-device disconnects; AutoMobile stops tracking them then, and a device that stays
-connected keeps them until you run `adb reverse --remove`.
+A camera poster puts an image or QR code in front of the camera. Physical iOS and
+Android devices, and Apple platforms other than iOS, do not support camera posters.
 
-Errors come back with `errorCode`:
+`setDeviceState` `cameraPoster` accepts `mode: "image"` with a host PNG/JPG/JPEG
+`path`, `mode: "qr"` with `text`, or `mode: "clear"`.
 
-| `errorCode`                       | Meaning and what to do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port_reverse_conflict`           | The device port is already mapped by someone else or to another host port. Nothing changed; pick another port or remove the existing mapping. `conflicts` lists each port's `conflictKind` (also given at the top level when every port has the same one): `other_session` (another running session owns it), `prototype` (a prototype's request uses it, mapped to another host port), `external_live` (made outside AutoMobile and its host port accepts connections) or `external_unknown` (made outside AutoMobile and its host port was not shown to be live; retry with `reclaimStale: true` to replace it if it is stale). |
-| `port_reverse_device_port_in_use` | A process on the device already listens on the device port, so the reverse cannot be added. The message names its uid and package; stop it or pick another device port.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `port_reverse_reclaim_failed`     | `reclaimStale` found a stale mapping but could not remove it, or it changed just before removal. That mapping was left as it was and this call\'s new mappings were rolled back; a stale mapping the same call already reclaimed stays removed. Call `list` to see the current mappings.                                                                                                                                                                                                                                                                                                                                          |
-| `port_reverse_not_owned`          | `remove` named a port your session did not create. Nothing was removed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `port_reverse_port_refused`       | A port is below 1024 or outside `AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS`, or `ports` was missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+- Android emulators update the virtual-scene poster live (`surface: "wall"` or
+  `"table"`).
+- On iOS Simulator, the call records the poster for each app's next `launchApp`.
+  It returns `method: "ios_simulator_dyld_injection"`, `path` when set, and
+  `relaunchRequired: true`. Relaunch running apps; iOS ignores `surface`. After
+  clearing, use `launchApp` with `coldBoot: true` to remove the poster from a
+  running app.
 
-On iOS the tool returns `status: "not_applicable"`: a simulator shares the
-host's network, so `localhost:<port>` already reaches your machine.
+`startDevice` accepts mutually exclusive `cameraPosterPath` or
+`cameraPosterQr: { text }`. Android requires a stopped emulator; iOS Simulator also
+accepts posters when already running.
 
-`startDevice` accepts mutually exclusive `cameraPosterPath` or `cameraPosterQr: { text }`.
-Android requires a stopped emulator; iOS Simulator also accepts posters when already running.
 On iOS, `launchApp` applies a registered poster with a cold launch and reports
-`cameraPosterApplied: true`. Apple system apps (`com.apple.*`) cannot be injected: they launch
-normally and the result reports `cameraPosterApplied: false` with a note in `message`.
-A poster lasts until it is cleared, the simulator is killed with `killDevice`, the session that
-holds the simulator is released or switches to another device, or the daemon restarts; a later session on the same simulator
-starts without one. Use a PNG/JPG/JPEG file that exists on the host.
-Setting a poster prepares the injection library, so a missing Xcode or library fails
-`startDevice` or `setDeviceState` (nothing is recorded) instead of the later `launchApp`.
-The library is built on first use from the source shipped in the package (Intel and Apple
-silicon simulators); this needs Xcode. To skip the build, set
-`AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB` to a prebuilt library. Other Apple platforms do not support
-camera posters.
+`cameraPosterApplied: true`. Apple system apps (`com.apple.*`) launch normally
+without the poster; the result reports `cameraPosterApplied: false` with a note in
+`message`.
+
+An iOS poster lasts until one of these happens:
+
+- you clear it;
+- `killDevice` kills the simulator;
+- the session that holds the simulator is released or switches device;
+- the daemon restarts.
+
+A later session on the same simulator starts without a poster.
+
+Setting an iOS poster needs Xcode. AutoMobile builds the injection library from the
+packaged source on first use, for Intel and Apple silicon simulators. A missing
+Xcode or library fails `startDevice` or `setDeviceState` and records nothing,
+rather than failing the later `launchApp`. To skip the build, set
+`AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB` to a prebuilt library.
+
+## Clean start
 
 For a clean app start, use `launchApp` with `clearAppData: true` where the
 platform supports it. Use `observe` after preparation to confirm the expected
@@ -277,15 +227,15 @@ be an emulator VM snapshot: on a physical device, an iOS simulator, or with
 `useVmSnapshot: false`, the capture is refused with
 `fixture_requires_vm_snapshot` and nothing is saved.
 
-The identity is read again once the snapshot is saved. If it changed while the
-capture ran, the capture is refused with `fixture_invalidated` and nothing is
-recorded. When `AUTOMOBILE_EMULATOR_ARGS` redirects the userdata image with
+AutoMobile reads the identity again once the snapshot is saved. If it changed
+while the capture ran, AutoMobile refuses the capture with `fixture_invalidated`
+and records nothing. When `AUTOMOBILE_EMULATOR_ARGS` redirects the userdata image with
 `-data`, the fixture tracks that image.
 
 Every restore of a fixture checks those inputs first, settings-only restores
-included. If any changed, the restore is refused, the device is left as it
-was, and the fixture is removed. Its in-AVD snapshot is deleted then, or, if
-that fails, the next time a snapshot is captured on that emulator:
+included. If any changed, AutoMobile refuses the restore, leaves the device as it
+was, and removes the fixture. It deletes the in-AVD snapshot then, or, if that
+fails, at the next capture on that emulator:
 
 ```json
 {
@@ -306,14 +256,16 @@ that fails, the next time a snapshot is captured on that emulator:
 | `avd-changed`              | The AVD itself                                                 |
 
 Capture the fixture again with `fixture: true` to replace it. Pass
-`fixture: true` on restore to require a fixture: a snapshot captured without it
-is refused with `snapshot_not_a_fixture`, and `useVmSnapshot: false` with
-`fixture_requires_vm_snapshot`.
+`fixture: true` on restore to require a fixture:
+
+| Restore of                     | Refused with                   |
+| ------------------------------ | ------------------------------ |
+| A snapshot captured without it | `snapshot_not_a_fixture`       |
+| `useVmSnapshot: false`         | `fixture_requires_vm_snapshot` |
 
 A fixture persists across sessions. VM retention (`maxVmSnapshotsPerAvd`,
-`maxVmArchiveSizeMb`) neither evicts it nor counts it. It is removed only when
-it is invalidated, when you delete it, or when `deleteDevice` (or the session
-broker) destroys its AVD.
+`maxVmArchiveSizeMb`) neither evicts it nor counts it. It goes away only when it
+is invalidated, when you delete it, or when `deleteDevice` destroys its AVD.
 
 ### Deleting a snapshot
 
@@ -326,8 +278,8 @@ Delete any snapshot, fixture or not, by name:
 }
 ```
 
-Run it on the snapshot's own device, as for a restore: a snapshot of another
-device or AVD is refused. The result has `deleted: true` once the snapshot and
+Run it on the snapshot's own device, as for a restore; AutoMobile refuses a
+snapshot of another device or AVD. The result has `deleted: true` once the snapshot and
 its data are gone. A VM snapshot whose in-AVD payload cannot be deleted now
 returns `deleted: false` with `pendingReclaim: true`. Delete it again, or
 capture any snapshot on that emulator, to finish it.
@@ -347,40 +299,30 @@ snapshot archive costs and what still needs cleaning up:
 | `maxVmArchiveSizeMb`   | Optional additional per-AVD byte ceiling for VM snapshots; `null` means unlimited.                                                                      |
 | `maxArchiveSizeMb`     | The byte budget for non-`vm` (`app_data`, `adb`, `simctl`) archive records (default 100 MB).                                                            |
 
-An Android emulator VM snapshot does not live in the archive store — the
-emulator writes it inside the AVD, at
-`~/.android/avd/<avd>.avd/snapshots/<name>/` (`ram.bin`, `textures.bin`,
-`snapshot.pb`, ...), which is routinely a couple of gigabytes. That directory is
-what a `vm` record's size measures. VM snapshots are retained per AVD by
-`maxVmSnapshotsPerAvd` (default 3), evicting least-recently-accessed records
-first. `maxVmArchiveSizeMb` is a per-AVD byte ceiling and is unlimited by default because a
-single VM snapshot is routinely gigabytes. `maxArchiveSizeMb` does not apply to `vm`
-records; it continues to govern only archive-store `app_data`, `adb`, and
-`simctl` records.
+An Android emulator VM snapshot lives inside the AVD at
+`~/.android/avd/<avd>.avd/snapshots/<name>/`, not in the archive store. A `vm`
+record's size measures that directory, often a couple of gigabytes.
 
-`maxVmSnapshotsPerAvd`, `maxVmArchiveSizeMb`, and `maxArchiveSizeMb` cannot be set
+AutoMobile keeps up to `maxVmSnapshotsPerAvd` VM snapshots per AVD and evicts the
+least recently accessed first. `maxArchiveSizeMb` does not apply to `vm` records.
+You cannot set `maxVmSnapshotsPerAvd`, `maxVmArchiveSizeMb`, or `maxArchiveSizeMb`
 through a CLI flag, environment variable, or MCP tool; the defaults apply.
 
 Evicting a `vm` record deletes the in-AVD snapshot through the emulator console
-(`adb -s <serial> emu avd snapshot del <name>`). When that emulator is not
-running there is nothing to issue the delete to, so the record is **kept** and
-flagged `pendingReclaim` rather than dropped — dropping it would lose the only
-reference to gigabytes still on disk. The next capture on that AVD sweeps the
-flagged records and finishes the job.
+(`adb -s <serial> emu avd snapshot del <name>`). When that emulator is not running,
+AutoMobile **keeps** the record and flags it `pendingReclaim`. The next capture on
+that AVD deletes the flagged snapshots.
 
 #### Cleaning up orphaned in-AVD snapshots
 
-`orphanedAvdSnapshots` lists in-AVD snapshot directories no record accounts for.
-AutoMobile never deletes them automatically: an orphan may predate AutoMobile or
-be a snapshot someone made by hand. The emulator's own `default_boot` quick-boot
-state is excluded from the report entirely.
+`orphanedAvdSnapshots` skips the emulator's `default_boot` quick-boot state.
+AutoMobile never deletes orphans automatically, since one may be a snapshot
+someone made by hand.
 
 Each entry reports `avdName`, `snapshotName`, `sizeBytes` and `directoryPath`.
 **Use `directoryPath`** for anything that touches the filesystem: it is the
-directory the scan actually measured. `ANDROID_AVD_HOME` (and an `<avd>.ini`
-registry file redirecting to a relocated AVD) move an AVD off the conventional
-`~/.android/avd/<avd>.avd` path, so that path is not reliably where the bytes
-are.
+directory the scan measured. Setting `ANDROID_AVD_HOME`, or an `<avd>.ini` file
+pointing elsewhere, moves an AVD off the usual `~/.android/avd/<avd>.avd` path.
 
 To remove one yourself, with the AVD's emulator running:
 

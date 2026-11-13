@@ -20,9 +20,9 @@ across restarts.
 
 Pass `toolNames` instead of `toolName` to declare a whole task's toolset in one
 round-trip. The batch is all-or-nothing: an unknown name rejects the
-request before anything is written. Always-on names such as `setToolEnabled`,
-`getAndroid`, and `getApple` are accepted as no-ops and listed in the response's
-`skipped` field.
+request before AutoMobile writes anything. AutoMobile accepts always-on names
+such as `setToolEnabled`, `getAndroid`, and `getApple` as no-ops and lists them
+in the response's `skipped` field.
 
 ```json
 {
@@ -56,29 +56,31 @@ call:
 ```
 
 An unknown name rejects the call before any device work starts. Always-on names
-such as `setToolEnabled`, `getAndroid`, and `getApple` are accepted as no-ops
-and reported in `skipped`. `getAndroid` and `getApple` report both `gatedTools`
-(omitted from discovery) and `enabledTools`
-(the complement) in their response; `provisionDevice` reports `enabledTools`
-and requires `boot: true`, since a no-boot provision mints no session to
+such as `setToolEnabled`, `getAndroid`, and `getApple` are no-ops reported in
+`skipped`.
+
+`getAndroid` and `getApple` report both `gatedTools` (omitted from discovery)
+and `enabledTools` (the complement). The `provisionDevice` tool reports
+`enabledTools` and requires `boot: true`, since a no-boot provision mints no session to
 declare capabilities against.
+
 Every tool they list is one the next `tools/list` will advertise. On an Apple
 Watch, Apple TV or Apple Vision Pro, both lists leave out tools that refuse that
 platform, so every listed tool can run on the acquired device. A direct
 `tools/call` can still invoke an omitted tool.
 
 On a TV (an Android TV device or an Apple TV), acquiring the device also enables
-`focusNavigate`, since D-pad focus is how a TV is navigated; it then appears in
-`enabledTools` and `tools/list`. A startup `--disable-tool focusNavigate` (or the
-environment equivalent) or an earlier `setToolEnabled` choice for the session
+`focusNavigate`, since a TV navigates by D-pad focus. It then appears in
+`enabledTools` and `tools/list`. A startup `--disable-tool focusNavigate`, its
+environment equivalent, or an earlier `setToolEnabled` choice for the session
 wins over this. Other tools that are off by default stay off on a TV, as on any
 device, to keep `tools/list` short: `executePlan`, `recordToolCalls`, `getLogs`
 and `provisionDevice` among them. They appear in `gatedTools`; list them with
 `enableTools` at acquisition or with `setToolEnabled`, or call them by name.
 
-If the device is acquired but the capability declaration itself cannot be
-persisted, the response keeps its session handle and adds an `enableToolsError`
-describing what did not land; re-declare those tools with `setToolEnabled`.
+If AutoMobile acquires the device but cannot save the capability declaration,
+the response keeps its session handle and adds an `enableToolsError` describing
+what did not land. Re-declare those tools with `setToolEnabled`.
 
 ## Startup defaults
 

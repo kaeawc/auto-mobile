@@ -1,6 +1,6 @@
 # Apple Vision Pro simulator (visionOS)
 
-A visionOS simulator runs the same visionOS app builds as Apple Vision Pro hardware. Use it to check a visionOS app before you have a headset, and as a stand-in for Apple glasses testing. It is not glasses hardware: it does not reproduce their sensors, cameras or display.
+A visionOS simulator runs the same visionOS app builds as Apple Vision Pro hardware. Use it to check a visionOS app before you have a headset, and as a stand-in for Apple glasses testing. It is not glasses hardware, and it does not reproduce their sensors, cameras or display.
 
 ## Requirements
 
@@ -60,7 +60,15 @@ auto-mobile --cli getLogs --platform visionos --sessionUuid "$SESSION_ID" \
   --appId com.example.yourapp --grep "detail opened"
 ```
 
-`getLogs` reads the simulator's unified log for the app: lines from its `os.Logger` subsystem (`com.example.yourapp` or `com.example.yourapp.*`) or from its process. `appId` is required. `since` takes `"lastAction"`, `"sessionStart"`, `"run-start"` (during plan execution only) or `{"seconds": N}` (default the last 300 seconds). `minPriority` ranks unified-log levels as `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, and `F` fault only. `tags`, `buffers` and `includeSystem` are Android-only and are ignored with a warning. `getLogs` is not listed by default; enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
+`getLogs` reads the simulator's unified log for the app: lines from its `os.Logger` subsystem (`com.example.yourapp` or `com.example.yourapp.*`) or from its process.
+
+| Parameter                                                                                                    | visionOS behavior                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `appId`                                                                                                      | Required.                                                                                                                              |
+| `since`                                                                                                      | `"lastAction"`, `"sessionStart"`, `"run-start"` (during plan execution only) or `{"seconds": N}`. Default: the last 300 seconds.       |
+| `minPriority`                                                                                                | `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, `F` fault only. |
+| `tags`, `buffers`, `includeSystem`                                                                           | Android-only; ignored with a warning.                                                                                                  |
+| `getLogs` is not listed by default; enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)). |
 
 ## List, stop and uninstall apps
 
@@ -88,5 +96,7 @@ A successful delete reports `state: destroyed` and `inventory: complete_absence_
 
 - No scripted gaze or hand input, and no coordinate gestures such as tapping or swiping at a point. Gaze and pinch can only be driven interactively in the Simulator window.
 - `observe` returns a screenshot only unless the window-app runner is available. On first use AutoMobile downloads and verifies the release's prebuilt runner; no source checkout is needed. Existing local build products take precedence over the download. If the selected release has no visionOS runner checksum, set `AUTOMOBILE_VISIONOS_RUNNER_XCTESTRUN` to a prebuilt runner (see [environment variables](environment-variables.md)) or use a source checkout. `tapOn` and `sendKeys` also need the runner.
-- With the runner active, `observe` reports the accessibility hierarchy of the app you last launched with `launchApp`, including built-in visionOS apps such as Safari, Settings, Files, Maps and Photos. A hierarchy can take a few seconds to return. `hierarchyBundleId` is the bundle ID of the app the runner that returned the hierarchy was started for, and is present with the default projection too. It is omitted when that runner has no target app or the hierarchy is unavailable. A `deviceId` read of a device another session holds reuses its running runner, so it can report an earlier app than that session's last `launchApp`. The app can also differ from the screenshot when another app was brought forward outside `launchApp`. Compare `hierarchyBundleId` with the app in the screenshot, and relaunch with `launchApp` to switch the hierarchy to the app you want.
+- With the runner active, `observe` reports the accessibility hierarchy of the app you last launched with `launchApp`. That includes built-in visionOS apps such as Safari, Settings, Files, Maps and Photos. A hierarchy can take a few seconds to return.
+- `hierarchyBundleId` names the app that the runner returning the hierarchy targets. It appears with the default projection too. It is absent when that runner has no target app or the hierarchy is unavailable.
+- A `deviceId` read of a device another session holds reuses its running runner, so it can report an earlier app than that session's last `launchApp`. The app can also differ from the screenshot when another app was brought forward outside `launchApp`. Compare `hierarchyBundleId` with the app in the screenshot, and relaunch with `launchApp` to switch the hierarchy to the app you want.
 - Provisioning accepts only `readiness: "none"` for visionOS.

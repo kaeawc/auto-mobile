@@ -17,10 +17,10 @@ or device. A manufacturer profile is a named, versioned bundle of facets. Each f
 
 A manufacturer profile reproduces what an app **observes** on an OEM's devices: its process killed in the
 background, a punch-hole cutout, three-button navigation, a different typing behaviour. It does
-not install or imitate the OEM's firmware. One UI, HyperOS, OxygenOS and ColorOS SystemUI,
-vendor services and the triggers that decide when an OEM restricts an app are not present, so a
-passing test under a manufacturer profile is evidence about the app's handling of those effects, not about
-behaviour on the real device.
+not install or imitate the OEM's firmware. The profile lacks One UI, HyperOS, OxygenOS and ColorOS SystemUI,
+vendor services, and the triggers that decide when an OEM restricts an app. A passing test under a
+manufacturer profile is evidence about the app's handling of those effects, not about behaviour on
+the real device.
 
 Every facet carries its evidence:
 
@@ -103,8 +103,8 @@ provisionDevice({
 
 ## What cannot be emulated
 
-Each manufacturer profile lists the OEM capabilities no stock device provides, for example Samsung DeX, Knox,
-the Galaxy Z Flip cover screen, S Pen Air actions, the OEM's own SystemUI and Xiaomi's
-proprietary AppOps. Pass the capabilities a task needs as `requires`; when the manufacturer
-profile cannot emulate one, `apply` returns `status: "route_to_real_device"` and changes nothing, so the task
-can be routed to real hardware instead of passing silently.
+Each manufacturer profile lists the OEM capabilities no stock device provides. Examples are
+Samsung DeX, Knox, the Galaxy Z Flip cover screen, S Pen Air actions, the OEM's own SystemUI and
+Xiaomi's proprietary AppOps. Pass the capabilities a task needs as `requires`. When the manufacturer
+profile cannot emulate one, `apply` returns `status: "route_to_real_device"` and changes nothing.
+You can then route the task to real hardware instead of letting it pass silently.

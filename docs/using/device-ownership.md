@@ -1,59 +1,51 @@
 # Device ownership
 
 A device that a session holds takes control calls only from that session.
-Acquiring a device with `getAndroid`, `getApple` or `startDevice` creates the
-session and returns its `sessionUuid`; the session holds the device until it is
-released (idle timeout, lost heartbeat, or an explicit release).
+`getAndroid`, `getApple` and `startDevice` acquire a device and return the new
+session's `sessionUuid`. The session holds the device until it is released.
 
-`daemon/releaseSession` returns `alreadyReleased:true` and `known:true` when
-this daemon remembers an earlier release. An unrecognized session returns
-`alreadyReleased:false` and `known:false`; it still succeeds so releases remain
-idempotent after a daemon restart. Set `requireKnown:true` to refuse unrecognized
-sessions with `daemon_session_not_found`. When restoration is incomplete,
-`cleanup` is `pending` or `failed` (failure takes precedence); inspect the restore
-reports before relying on the device being fully restored. Completed restoration
-omits `cleanup`.
+For refusals, capacity and dropped devices, see
+[Device availability and capacity](device-ownership-availability.md).
+
+## Releasing a session explicitly
+
+`daemon/releaseSession` always succeeds, so releases stay idempotent after a
+daemon restart:
+
+| Case                                     | Result                                                                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| This daemon remembers an earlier release | `alreadyReleased:true`, `known:true`                                                                                    |
+| Unrecognized session                     | `alreadyReleased:false`, `known:false`; with `requireKnown:true`, refused with `daemon_session_not_found`               |
+| Restoration incomplete                   | `cleanup` is `pending` or `failed` (failure takes precedence); inspect the restore reports before relying on the device |
+| Restoration complete                     | No `cleanup` field                                                                                                      |
 
 ## Passing the session
 
-- **MCP:** a connection that acquired a device is bound to it, so its calls route
-  to the session without repeating it. A different connection passes
-  `sessionUuid` in the call arguments; while the acquiring connection is still
-  connected, that works for reads only.
-- **CLI:** each `--cli` call is its own connection. Use the `sessionUuid` from the
-  acquisition result on every later call:
-  `auto-mobile --cli --session-uuid <uuid> tapOn --selector '{"text":"Submit"}'`.
-  A second `--cli getAndroid` for the same device reuses the anonymous session.
-  Free the device with `--daemon release-session`. `--daemon heartbeat` on a
-  one-shot CLI session is a successful no-op, so keeper processes are
-  unnecessary.
-- **Default session:** only `setActiveDevice` or an acquisition changes the
-  session that untargeted calls run on. An explicit `sessionUuid` targets that
-  one call only. A call passing only `platform` runs on the default session when
-  the platform matches.
-- **Device id:** `observe` and the app-management tools (`installApp`,
-  `launchApp`, `terminateApp`, `crashApp`, `appLifecycle`, `uninstallApp`,
-  `listApps`, `setAppPermissions`, `getAppPermissions`, `inspectPackageSigning`,
-  `resetKeychain`) take `deviceId` (an Android serial such as `emulator-5554`, or
-  an iOS UDID) to pick one of several booted devices. `device` is not a device
-  id: it is an `executePlan` device label, and passing a serial there is refused
-  with a message that names `deviceId`.
+| Caller          | How the session is passed                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MCP             | A connection that acquired a device is bound to it, so its calls route to the session without repeating it. A different connection passes `sessionUuid` in the call arguments; while the acquiring connection is still connected, that works for reads only.                                                                                                                                                                       |
+| CLI             | Each `--cli` call is its own connection: pass the acquisition's `sessionUuid` on every later call, as in `auto-mobile --cli --session-uuid <uuid> tapOn --selector '{"text":"Submit"}'`. A second `--cli getAndroid` for the same device reuses the anonymous session. Free the device with `--daemon release-session`. `--daemon heartbeat` on a one-shot CLI session is a successful no-op, so keeper processes are unnecessary. |
+| Default session | Only `setActiveDevice` or an acquisition changes the session that untargeted calls run on. An explicit `sessionUuid` targets that one call only. A call passing only `platform` runs on the default session when the platform matches.                                                                                                                                                                                             |
+| `deviceId`      | `observe` and the app-management tools (`installApp`, `launchApp`, `terminateApp`, `crashApp`, `appLifecycle`, `uninstallApp`, `listApps`, `setAppPermissions`, `getAppPermissions`, `inspectPackageSigning`, `resetKeychain`) take `deviceId` to pick one of several booted devices: an Android serial such as `emulator-5554`, or an iOS UDID.                                                                                   |
+| `device`        | Not a device id: it is an `executePlan` device label. A serial passed there is refused with a message that names `deviceId`.                                                                                                                                                                                                                                                                                                       |
 
 If you hold two sessions and the default one ends, a control call that passes the
 surviving session's `sessionUuid` or `deviceId` runs on that session. A control
-call with only `platform`, an unmatched `deviceId`, or no selector is refused
-with `no_active_device_session`. Call `setActiveDevice` or acquire a new
-session.
+call with only `platform`, an unmatched `deviceId`, or no selector gets
+`no_active_device_session`. Call `setActiveDevice` or acquire a new session.
 
 ## What is refused
 
-A control call on a held device is refused with `device_owned_by_other_session`
-when it carries no `sessionUuid` (a plain `--cli tapOn`, for example), names a
-different session than the holder, or names the holder's session from another
-connection while the owner is still connected. Naming a session's UUID never
-takes it over. Once the owner has disconnected (a finished `--cli` call, for
-example) another connection may name the session. A device that no session holds
-takes calls from anyone.
+A control call on a held device gets `device_owned_by_other_session` when it:
+
+- carries no `sessionUuid` (a plain `--cli tapOn`, for example);
+- names a different session than the holder;
+- names the holder's session from another connection while the owner is still
+  connected.
+
+Naming a session's UUID never takes it over. Once the owner has disconnected (a
+finished `--cli` call, for example), another connection may name the session. A
+device that no session holds takes calls from anyone.
 
 Other refusals you may meet, and what to do:
 
@@ -73,111 +65,9 @@ Other refusals you may meet, and what to do:
 | `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                                                                                      |
 | `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                                                                          |
 
-Every daemon that shares an adb server must run the same release or later: a daemon
-from before the shared claims table cannot see a device a newer daemon claimed there.
-A daemon warning about unknown registry migrations means a newer release has updated
-shared ownership data. Allocation claim files alone decide ownership, and this daemon
-skips the shared claims table until restart. This `files_only` mode does not enforce
-managed bindings: this daemon can allocate a device held only by a managed binding.
-The warning names writer versions when recorded. Upgrade the daemons sharing managed
-devices to a release that includes these migrations, then restart older daemons.
-
-To check versions, run `auto-mobile --daemon capabilities --json`. In session-broker
-mode, an already-open registry adds `bindingRegistry`: `schemaVersion` is the latest
-recorded migration, `knownSchemaVersion` is the latest migration this daemon knows,
-`supported` says whether all recorded migrations are known, and `writerVersion`
-identifies the build that recorded the latest migration. A null version means it is
-unknown; the block is omitted when no registry is open or a read fails unexpectedly.
-The refusal's `writerVersions` maps migration names to the builds that applied them;
-older migrations without a recorded writer are left out. Use these versions to
-choose an upgrade that understands every recorded migration.
-
-### Choosing a device when a call is ambiguous
-
-If your MCP client declares the elicitation capability (form mode) and connects
-over stdio, an `ambiguous_device_target` refusal first becomes a question: the
-client shows the candidate devices and the call continues on the one you pick.
-If you decline or cancel, do not answer within about 20 seconds, or your client
-does not declare elicitation, you get the `ambiguous_device_target` refusal
-above, unchanged. Unattended agents are never held open. Pass `deviceId` on the
-call to skip the question.
-
-If you decline or cancel, the same connection is not asked again for the same set
-of devices, so you are not prompted on every call; a different set of devices, a
-new connection, or an accepted answer asks again. Set `AUTOMOBILE_ELICITATION=off`
-to never ask (CI, benchmarks): the call returns the refusal immediately.
-
-#### Answering the question from code or a headless run
-
-What happens to the question depends on how you run your client:
-
-| Client setup                                       | What the question does                                                                                          |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Claude Code, interactive                           | Shows a dialog listing the devices; your pick continues the call.                                               |
-| Claude Code `-p` (headless) with no hook           | Answered with `cancel` within milliseconds, so you get the `ambiguous_device_target` refusal. Nothing waits.    |
-| Claude Agent SDK (TypeScript) with `onElicitation` | Your callback decides.                                                                                          |
-| Claude Agent SDK (TypeScript) without a handler    | Declined automatically, so you get the refusal.                                                                 |
-| Claude Agent SDK (Python) or the CLI               | There is no callback; only an `Elicitation` hook can answer. Without one the question is declined or cancelled. |
-
-The Agent SDK runs Claude Code underneath, so an external AutoMobile server always sees Claude
-Code's behavior, not a separate client.
-
-**TypeScript `onElicitation`.** The callback receives the request and returns an elicitation result:
-
-```json
-{
-  "serverName": "automobile",
-  "message": "tapOn matched 2 devices. Which device should it use?",
-  "mode": "form",
-  "requestedSchema": {
-    "type": "object",
-    "properties": {
-      "deviceId": {
-        "type": "string",
-        "title": "Device",
-        "description": "The device this call should run on.",
-        "oneOf": [
-          { "const": "emulator-5554", "title": "emulator-5554 (android)" },
-          { "const": "emulator-5556", "title": "emulator-5556 (android)" }
-        ]
-      }
-    },
-    "required": ["deviceId"]
-  }
-}
-```
-
-Answer with `{ "action": "accept", "content": { "deviceId": "emulator-5554" } }`, or
-`{ "action": "decline" }` to get the refusal back. A `deviceId` that was not offered is treated as
-invalid and also returns the refusal.
-
-**`Elicitation` hook (CLI and both SDKs).** A command hook in your settings receives:
-
-```json
-{
-  "hook_event_name": "Elicitation",
-  "mcp_server_name": "automobile",
-  "message": "tapOn matched 2 devices. Which device should it use?",
-  "mode": "form",
-  "requested_schema": { "type": "object", "properties": { "deviceId": { "type": "string" } } }
-}
-```
-
-and answers on stdout:
-
-```json
-{
-  "hookSpecificOutput": {
-    "hookEventName": "Elicitation",
-    "action": "accept",
-    "content": { "deviceId": "emulator-5554" }
-  }
-}
-```
-
-A hook that always accepts picks a device for you without anyone looking, which can run a control
-call on the wrong device. Have the hook choose by a rule you trust (for example the one device that
-is booted), or decline; and pass `deviceId` on the call whenever you know it.
+Your MCP client may first ask you to resolve `ambiguous_device_target`; see
+[Choosing a device](device-ownership-ambiguous-target.md). For other daemons, see
+[Several daemons on one host](device-ownership-availability.md#several-daemons-on-one-host).
 
 When a refusal carries `retryAfterMs`, wait that long before retrying.
 Refusals do not count as session use and do not extend the session's idle window.
@@ -185,123 +75,118 @@ Refusals do not count as session use and do not extend the session's idle window
 ### Reads and control
 
 Read-only calls never need a session and never count as activity, even for the
-holder. A read that names another connected client's session is refused (below). Anything that changes visible UI or starts a device-side process is
+holder. Anything that changes visible UI or starts a device-side process is
 control.
 
-- Reads include `observe`, `snapshotOf`, `hitTest`, `identifyInteractions`,
-  `listApps`, `getDeviceState`, `getNetworkGraph`, `getPreference`,
-  `listDataStores`, `getDataStore`, `getAppPermissions`,
-  `getNotificationPolicy`, `getDeepLinks` and `getNavigationGraph`.
-- Mixed tools are classified per call: `keyboard` detect/list calls, `clipboard`
-  get, `mediaSession` get, `displayConfig` with no set field, `accessibility`
-  with no toggle, `prototype` status/inspect and a single read-only `sqlQuery`
-  statement are reads. Their other forms, `systemTray`, `videoRecording` and
-  `deviceSnapshot` are control.
+| Kind                        | Calls                                                                                                                                                                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Read                        | `observe`, `snapshotOf`, `hitTest`, `identifyInteractions`, `listApps`, `getDeviceState`, `getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`, `getAppPermissions`, `getNotificationPolicy`, `getDeepLinks`, `getNavigationGraph` |
+| Read (mixed tool, per call) | `keyboard` detect/list, `clipboard` get, `mediaSession` get, `displayConfig` with no set field, `accessibility` with no toggle, `prototype` status/inspect, a single read-only `sqlQuery` statement                                                |
+| Control                     | The other forms of those mixed tools, plus `systemTray`, `videoRecording` and `deviceSnapshot`                                                                                                                                                     |
+
 - A sessionless read without `deviceId` uses an already-running device and never
-  boots one. If none is running it answers that there is nothing to read: start
+  boots one. If none is running it answers that there is nothing to read. Start
   one with `startDevice` or `provisionDevice`, or pass a `deviceId`.
 - A sessionless read that passes `deviceId` may boot that stopped device (an
-  Android AVD name or an available iOS simulator UDID) and never creates one.
-  Boot capacity limits still apply.
-- A read that passes the `sessionUuid` of a session another connected client
-  owns is refused like a control call: knowing the UUID is not enough. It gets
-  the non-retryable `read_session_not_bound`, which names the session, unless
-  it comes from a broker connection granted that session or presents the
-  session's owner token. Read on the owning connection, or leave `sessionUuid`
-  out and pass `deviceId` for a sessionless read. Once the owner has
-  disconnected (a finished `--cli` call, for example) another connection may
-  read under the session. A `sessionUuid` that names no device session (such as
-  an IDE observer session) still reads sessionlessly.
+  Android AVD name or an available iOS simulator UDID). It never creates one, and
+  boot capacity limits still apply.
 - Ownership is a guard between cooperating clients, not a security boundary
   against other local processes.
 
-### Cold iOS observe freshness
+A read that passes the `sessionUuid` of a session another connected client owns
+gets the non-retryable `read_session_not_bound`, which names the session.
+Knowing the UUID is not enough. The exceptions are a broker connection granted
+that session and a call that presents the session's owner token.
 
-With more simultaneous cold iOS observes than the configured launch concurrency,
-a queued launch or one already running can outlast the read budget. `observe`
-keeps that budget and reports the pending state with `ok: true`, `freshness.isFresh: false`, and
-`freshness.unavailableReason: "runner_launch_queued"`, without a hierarchy.
-The detail includes the queue position when queued, or says the runner is still
-starting in the background. Any captured screenshot is kept. The start continues
-for up to 60 seconds from the moment its launch leaves the queue (waiting in the
-queue is bounded separately, at 5 minutes), and a retry joins that same start. While it runs it holds the
-device's readiness lock, so a concurrent `startDevice` or session upgrade for that
-simulator waits within its own deadline. Retry the observe shortly.
-A warm retry can complete in about 1.4 seconds; timing depends on the device and host.
-
-A rollback of an Android AVD that `provisionDevice` created and never attempted to boot
-is not blocked by an unrelated unnamed sibling emulator while the request holds the
-lifecycle reservation. If rollback is refused before changing the device, the response
-keeps the original failure's retryability and reports the retained device in `lifecycle`;
-follow `recovery.nextAction`, which permits reacquiring an intact retained device when
-the original failure is retryable.
+- Read on the owning connection, or leave `sessionUuid` out and pass `deviceId`
+  for a sessionless read.
+- Once the owner has disconnected (a finished `--cli` call, for example),
+  another connection may read under the session.
+- A `sessionUuid` that names no device session (such as an IDE observer session)
+  still reads sessionlessly.
 
 ## When a session is released
 
-A session is released by an explicit release, a lost owner heartbeat, the idle
-window, the owning connection closing, or the device being killed or lost. Tune
-the windows with the variables in
+A session ends on an explicit release, a lost owner heartbeat, the idle window,
+the owning connection closing, or a killed or lost device. Tune the
+windows with the variables in
 [Environment variables](environment-variables.md#session-heartbeat-timeout).
 
-- **Lost heartbeat.** A session whose owner stops heartbeating is released after
-  roughly ten seconds. Calls from other callers do not keep a dead owner alive.
-  A session whose owner has never heartbeated is released about 20 seconds after
-  it was created if it set its own heartbeat timeout (about 5 seconds on the
-  default timeout), and after that once no control call has arrived within its
-  heartbeat timeout.
-- **Idle.** A session is released after 2 minutes (default) with no control call.
-  Heartbeats and reads do not extend the window, nor does a `setToolEnabled`
-  call that does not pass the session's `sessionUuid`; a control call still
+- **Lost heartbeat.** A session whose owner stops heartbeating ends after roughly
+  ten seconds. Calls from other callers do not keep a dead owner alive.
+- **No first heartbeat.** If the owner has never heartbeated, the session ends
+  about 20 seconds after creation when it set its own heartbeat timeout (about 5
+  seconds on the default timeout). After that it ends once no control call
+  arrives within its heartbeat timeout.
+- **Idle.** A session ends after 2 minutes (default) with no control call.
+  Heartbeats and reads do not extend the window. Neither does a `setToolEnabled`
+  call that does not pass the session's `sessionUuid`. A control call still
   running holds the release until it finishes. Every `blePeripheral` action,
   `status` included, is a control call and extends it.
-- **Terminal releases.** A released session UUID is never revived. A later call
-  naming it is refused with `session_ownership_lost`, `retryable: false` and
-  `nextAction: "acquire_new_session"`. After an idle release the refusal also
-  carries `idle: true`. After a `cli-idle-timeout` release it also carries
-  `idleTimeoutMs`, the idle window the session had: the
-  `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` of the last `--cli` call that used it,
-  capped at 1 hour. A plan's derived label session that ends with its base's
-  `cli-idle-timeout` carries the base's `idleTimeoutMs`, the window that
-  expired. A call still running when its session is released is cut with the same
-  refusal.
-- **Daemon restart.** A daemon restart is not terminal: the owner reclaims the
-  session under the same UUID. While the daemon reclaims the binding, calls may
-  receive the retryable `binding_ownership_unconfirmed`; wait `retryAfterMs`.
-  If ownership cannot be confirmed in about a minute the session is released and
-  calls get `session_ownership_lost`.
-  If the previous daemon exited without shutting down (it crashed or was killed),
-  its sessions wait at most about 8 seconds for their owner to reconnect, whatever
-  their own heartbeat or CLI idle window; a client that is still running and
-  heartbeating keeps its session, and otherwise the device is free for another
-  session within seconds. A CLI session (which does not heartbeat) does not
-  survive such a restart: its next call gets `session_ownership_lost`, and a new
-  session is acquired.
-- **Device restart.** When a device restarts, its session can resume under the
-  same UUID for 180 seconds; other sessions cannot take that device meanwhile
-  (a start naming it is refused with a retry hint). If the window passes without
-  a resume the session ends with `session_ownership_lost`.
-- **Device killed or lost.** An explicit kill ends the session with
-  `session_ownership_lost`; while it runs, calls get
-  `session_terminal_release_in_progress` (`retryable: false`). Acquire again
-  under a new session. With session continuity enabled, a connection loss can
-  instead return `device_lost` while the session is retained. Its `deviceId`
-  names the lost serial; `replacementDeviceId`, when present, names the live
-  replacement. `retry.sameSession: true` and `requiresNewSession: false` mean
-  retry using the same `sessionUuid`. `recovery.status: "pending"` means recovery
-  is still settling, even if a replacement serial is already known; wait and
-  retry. `"recovered"` means recovery completed, and `recovery.attempts` counts
-  recorded attempts (zero when only live-session evidence is available). An
-  exhausted or unattempted recovery retains its reported status; follow
-  `sessionState` and `retry` to decide whether to reacquire. Without a retained
-  session or incident, no retry guidance is inferred. Verify continuity using
-  the [binding metadata and liveness notification](environment-variables.md#session-heartbeat-timeout). The generation counter is valid only within one daemon
-  lifetime and restarts at zero after a daemon restart. `session_device_rebound`
-  is sent at `info` level, so a client that raised its log level above `info`
-  will not see it; read `session-info` instead.
 - **Plan labels.** A multi-device plan runs its extra labels on derived
-  `<base>:<label>` sessions that live only as long as the plan run and end with
+  `<base>:<label>` sessions. They live only as long as the plan run and end with
   the base session. The next plan run mints them again; do not create
   `<base>:<name>` sessions yourself.
+
+### Terminal releases
+
+AutoMobile never revives a released session UUID. A later call naming it gets
+`session_ownership_lost`, `retryable: false` and
+`nextAction: "acquire_new_session"`. A call still running when its session ends
+is cut with the same refusal. Extra fields depend on the release:
+
+| Release                                                              | Extra field                                                                                                                    |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Idle                                                                 | `idle: true`                                                                                                                   |
+| `cli-idle-timeout`                                                   | `idleTimeoutMs`: the `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` of the last `--cli` call that used the session, capped at 1 hour |
+| Derived plan label session ending with its base's `cli-idle-timeout` | The base's `idleTimeoutMs`, the window that expired                                                                            |
+
+### Daemon and device restarts
+
+A daemon restart is not terminal: the owner reclaims the session under the same
+UUID. While the daemon reclaims the binding, calls may get the retryable
+`binding_ownership_unconfirmed`; wait `retryAfterMs`. If ownership cannot be
+confirmed in about a minute, the session ends and calls get
+`session_ownership_lost`.
+
+If the previous daemon crashed or was killed, its sessions wait at most about 8
+seconds for their owner to reconnect, whatever their own heartbeat or CLI idle
+window. A client that is still running and heartbeating keeps its session;
+otherwise the device frees within seconds. A CLI session does not heartbeat, so
+its next call gets `session_ownership_lost`; acquire a new session.
+
+When a device restarts, its session can resume under the same UUID for 180
+seconds. Meanwhile other sessions cannot take that device: a start naming it gets
+a retry hint. If the window passes without a resume, the session ends with
+`session_ownership_lost`.
+
+### Device killed or lost
+
+An explicit kill ends the session with `session_ownership_lost`. While the kill
+runs, calls get `session_terminal_release_in_progress` (`retryable: false`).
+Acquire again under a new session.
+
+With session continuity enabled, a connection loss can instead return
+`device_lost` while AutoMobile keeps the session:
+
+| Field                                                  | Meaning                                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `deviceId`                                             | The lost serial                                                                   |
+| `replacementDeviceId`                                  | When present, the live replacement                                                |
+| `retry.sameSession: true`, `requiresNewSession: false` | Retry using the same `sessionUuid`                                                |
+| `recovery.status: "pending"`                           | Recovery is still settling, even if a replacement serial is known; wait and retry |
+| `recovery.status: "recovered"`                         | Recovery completed                                                                |
+| `recovery.attempts`                                    | Recorded attempts; zero when only live-session evidence is available              |
+
+An exhausted or unattempted recovery keeps its reported status. Follow
+`sessionState` and `retry` to decide whether to reacquire. Without a retained
+session or incident, the response carries no retry guidance.
+
+Verify continuity with the
+[binding metadata and liveness notification](environment-variables.md#session-heartbeat-timeout).
+The generation counter restarts at zero after a daemon restart. AutoMobile sends `session_device_rebound` at `info`
+level, so a client that raised its log level above `info` will not see it; read
+`session-info` instead.
 
 ### Release reasons
 
@@ -329,9 +214,9 @@ the windows with the variables in
 
 ## Stopping a held device: `killDevice` and `deleteDevice`
 
-Only the holder may stop a device it holds. A booted device another session
-holds is refused with `device_owned_by_other_session` unless the call passes
-`force: true`, which stops the device and releases the holder. From the CLI:
+Only the holder may stop a device it holds. Stopping a booted device another
+session holds gets `device_owned_by_other_session`, unless the call passes
+`force: true`. Force stops the device and releases the holder. From the CLI:
 `auto-mobile --cli killDevice --device '{...}' --force true`. Use it only when
 the device really should be stopped out from under its holder.
 
@@ -340,190 +225,85 @@ the device really should be stopped out from under its holder.
   `sessionUuid` out.
 - `force` never overrides another session's device-restart reservation (the
   refusal is retryable with `retryAfterMs`) or a broker binding's device.
-- A device another live AutoMobile daemon holds is refused with
-  `device_owned_by_other_daemon`: stop it through that daemon, wait for it to
+- A device another live AutoMobile daemon holds gets
+  `device_owned_by_other_daemon`. Stop it through that daemon, wait for it to
   release the device, or pass `force: true`.
 - For a wedged Android emulator, `force` also skips the AVD-name comparison.
-- `killDevice` stops an Apple Watch simulator too (see
-  [Apple Watch simulators](apple-watch.md)): pass `platform: "watchos"`
-  and its UDID. A UDID that is not a watch simulator is refused.
-- `deleteDevice` deletes an Apple Watch simulator with
-  `target.platform: "watchos"` and the watch's UDID as `target.stableId`. A
-  running watch is stopped first, which also releases any session on it. The
-  call succeeds only once a fresh watch listing no longer shows the watch. A
-  UDID that no watch simulator has reports `already_absent` and deletes
-  nothing, even when it names another simulator. A `target.stableName` that
-  differs from the watch's name fails with `identity_conflict`, a failed
-  `simctl delete` with `watch_delete_failed`, and running out of `timeoutMs`
-  with `teardown_deadline_exceeded`.
+- `killDevice` stops an Apple Watch simulator too: pass `platform: "watchos"`
+  and its UDID. It refuses a UDID that is not a watch simulator, and releases the
+  watch's runner.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
 
-## Apple TV simulators
+`deleteDevice` deletes an Apple Watch simulator with `target.platform: "watchos"`
+and the watch's UDID as `target.stableId`. It stops a running watch first,
+releasing any session on it. It succeeds once a fresh watch listing no longer
+shows the watch.
 
-Listing, provisioning, starting, deleting and driving Apple TV simulators are covered in
-[Apple TV simulators](apple-tv.md).
+| Result                       | When                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------- |
+| `already_absent`             | No watch simulator has that UDID; deletes nothing, even if it names another simulator |
+| `identity_conflict`          | `target.stableName` differs from the watch's name                                     |
+| `watch_delete_failed`        | `simctl delete` failed                                                                |
+| `teardown_deadline_exceeded` | The call ran out of `timeoutMs`                                                       |
 
-## Apple Vision Pro simulators
+## Apple simulators
 
-Name `platform: "visionos"` or a Vision Pro session to use `installApp`,
-`uninstallApp`, `launchApp`, `terminateApp` and `listApps` on an Apple Vision Pro
-simulator. Install a `.app` bundle built for the visionOS simulator;
-`launchApp` refuses `prototype: true`. With the visionOS runner active,
-`observe` returns the window app's accessibility hierarchy, including
-ornaments, `tapOn` taps an element by a unique accessibility identifier, and
-`sendKeys` types into the focused text field. These act on the app you last
-started with `launchApp`; launch a different app and the next call follows it. If the runner is unavailable, `observe` returns a
-screenshot-only observation with `hierarchyUnavailable`; read the screenshot.
-Coordinate gestures and other input tools are not supported.
+How sessions select, start and release Apple TV, Vision Pro and Apple Watch
+simulators is in [Apple simulator sessions](device-ownership-apple.md).
 
-## Apple Watch simulators
+## Streams need an observer registration, not a session
 
-A watch is reached only by naming it: `platform: "watchos"`, or the
-`sessionUuid` of a watch session. A call without a platform never lands on a
-watch, even after one was selected.
+`subscribe`, `request_observation`, video and WebRTC viewing need a lightweight
+observer registration, not a session. Tools need nothing, and streams need only
+that registration. A viewer keeps streaming when ownership changes.
 
-- `setActiveDevice` selects a watch only with `platform: "watchos"`; a bare
-  watch `deviceId` is not found. With a `sessionUuid` it binds the watch to that
-  session, otherwise it makes the watch the connection's active watch, which
-  only calls naming `platform: "watchos"` use.
-- `installApp`, `uninstallApp`, `listApps`, `launchApp` and `terminateApp`
-  work on a watch. `installApp` takes a `.app` bundle built for the watchOS
-  simulator; `.ipa`, `.apk` and the Android-only options are refused by name.
-  `uninstallApp` refuses `keepData: true`, because uninstalling always removes
-  the app's data.
-- `launchApp` on a watch accepts `coldBoot`, `clearAppData` (wipes the app's
-  Documents, Library and tmp before launching) and `launchArguments`, and
-  returns the app's `pid`. `intent`, `activityName`, `userId` and
-  `prototype: true` are refused. An app that is not installed fails with
-  `App is not installed`.
-- `provisionDevice` with `device.platform: "watchos"` takes the watch's exact
-  `name`, optional `deviceId`, and `spec.runtime` and `spec.deviceType`
-  identifiers from the host's watchOS runtimes and Apple Watch device types. It
-  adopts a watch that matches all of them, or creates one; a near match, an
-  unknown identifier or a `deviceId` that names no watch is refused. With
-  `boot` (the default) it boots the watch and returns a `sessionId`; a watch it
-  created is deleted again if that fails. `resources`, `enableTools` and
-  `readiness: "automation"` are refused; `readiness` is always `"none"`.
-- `startDevice` with `platform: "watchos"` boots the watch, starts its automation
-  runner, then binds a session. If the session ends before runner startup completes,
-  the call fails; retry `startDevice`. A second start reuses a connected runner. If the
-  runner cannot start, the call still returns a booted session and explains why
-  in `message`. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt watch runner
-  artifact if automatic discovery, download or building is unavailable, then retry.
-- With its runner connected, `observe` returns the watch hierarchy and screenshot;
-  `tapOn`, `tapAt`, directional `swipeOn` and `pressButton` with home are available.
-  Without a runner, observation returns a fresh screenshot (`screenshotPath`,
-  `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note.
-  Hierarchy fields are absent, not empty; use the screenshot and retry `startDevice`
-  before acting.
-- A session request (`--session-config` / `AUTOMOBILE_SESSION_CONFIG`) asks for
-  a watch with `device: { "schemaVersion": 1, "platform": "watchos", "spec": {
-  "runtime": "...", "deviceType": "..." } }`: the exact watchOS runtime and Apple
-  Watch device type identifiers, as for `provisionDevice`. An unknown device type
-  fails with `unsupported_hardware` and an unknown or unavailable runtime with
-  `missing_installed_runtime`, both naming the available ones; a host that is not
-  a Mac fails with `unsupported_hardware`, and an unreadable simulator catalog with
-  retryable `catalog_unavailable`. A ready result carries the watch's `profile`
-  and `readiness: { "mode": "none", "status": "device_ready" }`: the watch is
-  booted, with no automation runner. A watch counts against the same device limit
-  as every other device. On release the host's iOS reuse mode decides what
-  happens to the watch: `erase` erases and reboots it for the next request with
-  the same runtime and device type, `keep-booted` erases it (or destroys it when
-  its fallback is `destroy`), and `minimal` or no reuse deletes it.
-- Unsupported device tools refuse a watch with `<tool> does not support watchOS
-  yet`. `killDevice` stops a watch named with `platform: "watchos"` and releases
-  its runner. Ending the owning session or stopping the daemon also stops the runner.
+## Recordings
 
-## A device that drops off
+- A recording stops and finalizes within about 120 seconds of its session's
+  release, idle releases included.
+- Recording artifacts stay fetchable by id.
+- Hiding a desktop or IDE window during a recording does not release the device.
+- A video start from the connection holding a device belongs to that session,
+  even when the call omits `sessionUuid`.
+- Starting a device gesture recording on an unheld device gets
+  `no_active_device_session`; acquire a session on that device first.
+- An ownerless active recording keeps running when a session acquires its
+  device, and that holder adopts it. Before then anyone can stop it; afterwards
+  only the holder.
 
-An Android device that `adb` still lists as `offline` stays held for up to 60
-seconds before it counts as lost, and still appears in `listDevices` with its
-session and connection state. A physical USB device that vanishes from
-`adb devices` entirely is released at once.
+## Display and system settings between owners
 
-A phone reachable over both USB and Wi-Fi is one device: a call may name it by
-either endpoint, or an emulator by its `localhost:<port>` address, and is judged
-exactly as if it named the canonical id. If a transport cannot be identified and
-a held device could be its alias, a control call is refused with
-`device_owned_by_other_session`; address the device by its USB serial or
-`emulator-NNNN` id. If the `adb devices` listing itself fails, a control call
-naming a wireless address AutoMobile has not seen is refused with the retryable
-`discovery_incomplete`.
+AutoMobile does not restore display and system settings when a session releases
+the device. It resets them when a different session next acquires the device:
 
-### Transient Android transport failures
+- Before a session first changes a setting, AutoMobile records its current value
+  as the device default. It does not record changes made while no session holds
+  the device.
+- A different session acquiring the device resets each recorded setting whose
+  value differs from its default. The same session acquiring it again resets
+  nothing. AutoMobile logs a failed reset and retries it at the next acquisition
+  by another session.
 
-An `adb` transport failure on a session-owned device returns
-`device_transport_unavailable` with `retryable: true`, `retryAfterMs`, `deviceId`
-and `dispatched`.
+| Tool                 | Covered settings                                                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `displayConfig`      | Font scale (content size category on the iOS Simulator), display density, night mode, increase contrast, reduce motion, bold text and Android display accessibility preferences |
+| `changeLocalization` | 24-hour format and calendar system                                                                                                                                              |
+| iOS Simulator        | Device-wide locale (Android locale changes are not covered)                                                                                                                     |
 
-- `dispatched: false`: `adb` refused the command before dispatch. AutoMobile
-  already retried briefly; retrying is safe.
-- `dispatched: "unknown"`: the transport dropped after dispatch, so the command
-  may have run. Observe before reissuing a non-idempotent action, especially an
-  `openLink` with a single-use sign-in link.
+On Android, `displayConfig` also sets the runtime screen size, navigation mode
+and display-cutout emulation. AutoMobile restores those when the session that
+changed them releases the device or rebinds to another one. `displayConfig`
+`reset` clears a leftover size override even after a daemon restart.
 
-## Retryable acquisition refusals
+Appearance configuration is per session.
 
-An acquisition AutoMobile cannot grant yet is refused with a typed, retryable
-code; wait and retry:
-
-- `device_cleanup_in_progress`: the device is still being released. `retryAfterMs`
-  says how long cleanup can take. The CLI and MCP proxy poll this for you.
-- `device_owned_by_other_daemon`: another daemon holds the device.
-- `device_shutting_down`: the device is stopping.
-- `device_offline`: an exact Android device stayed `offline` or `unauthorized`
-  after a short wait.
-- `session_rebinding`: a kill raced the session's own rebind.
-- `device_unhealthy`: a health marker refuses the device. `devices` lists each
-  unhealthy candidate with its `deviceId`, `reason` and `recovering` state. While
-  `retryable` and `recovering` are true, wait (honouring `retryAfterMs` when
-  present). When recovery ends with the marker kept, the refusal is
-  non-retryable: replace the device with `killDevice` then `startDevice`.
-  Reads stay allowed on marked devices.
-- `orphan_recorder_active`: a leftover screen recorder could not be confirmed
-  stopped. Retry, or stop it by recording id.
-- `setActiveDevice` on a device another request is still preparing is refused
-  with a retryable `device_owned_by_other_session` and `retryAfterMs: 2000`.
-
-A kill naming a device the session has already left is refused with
-`session_no_longer_owns_device` (`retryable: false`); check who holds the device
-before killing it.
-
-## Device status in listings
-
-`listDevices` and the device resources report one status per device. A device
-that cannot be lent out is `assigned`, not `idle`: that covers a device with a
-session, one that is shutting down or still becoming ready, one held by a broker
-binding or another daemon, and an idle device with an unhealthy marker. A device
-in error stays `error`. `idle + assigned + error` equals the total.
-
-## Boot capacity
-
-Cold boots are admitted against host capacity. Each platform has its own limit on
-booted devices: for Android, the smaller of half the host RAM divided by the
-measured per-device memory and half the CPU cores; for iOS, the smaller of
-60% of host RAM divided by the measured per-simulator memory footprint (about 2.4 GiB;
-2.5 GiB when unmeasured) and a settled-CPU budget (about 0.1 core per simulator, half the
-cores), at least 1. Every booted emulator or
-simulator counts, including ones started outside AutoMobile. A boot over the
-count limit is not queued: it fails at once with the retryable `capacity_exhausted`,
-which carries `retryAfterMs`, `limit`, `booted`, `platform` and, when relevant,
-`externalDevices` (running devices AutoMobile did not start) and `heldDevices`
-(iOS simulators held by AutoMobile sessions or bindings; release the session
-first rather than shutting them down). Adopting an already-running device never
-fails this way. `listDevices` reports `capacity` per platform as
-`{ limit, booted, inFlight }`. If the booted count cannot be read, the boot is
-refused with `discovery_incomplete`. See
-[environment variables](environment-variables.md#boot-capacity) for the opt-out
-and per-platform overrides.
-
-### Which read tools ready an unheld device
+## Which read tools ready an unheld device
 
 A sessionless read that names a running device nobody holds can set up CtrlProxy
 (Android) or the runner (iOS simulator) so the read can answer. **Yes** means the
-read does that setup. A device held or reserved by another session or daemon is
-never readied: reads use what is already installed, and control is refused.
+read does that setup. AutoMobile never readies a device another session or daemon
+holds or reserves: reads use what is already installed, and control is refused.
 
 | Tool                    | Android                                     | iOS simulator                               |
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |
@@ -553,51 +333,6 @@ never readied: reads use what is already installed, and control is refused.
 | `snapshotOf`            | Yes                                         | Yes                                         |
 | `sqlQuery`              | Yes                                         | Yes                                         |
 | `statusBar`             | Yes                                         | Yes                                         |
-
-## Streams need an observer registration, not a session
-
-`subscribe`, `request_observation`, video and WebRTC viewing need a lightweight
-observer registration, not a session. Tools need nothing, and streams need only
-that registration. A viewer keeps streaming when ownership changes.
-
-## Recordings
-
-- A recording stops and finalizes when its session is released, including an idle
-  release, within about 120 seconds.
-- Recording artifacts stay fetchable by id.
-- Hiding a desktop or IDE window during a recording does not release the device.
-- A video start from the connection holding a device belongs to that session,
-  even when the call omits `sessionUuid`.
-- Starting a device gesture recording on an unheld device is refused with
-  `no_active_device_session`; acquire a session on that device first.
-- An active recording with no owner keeps running when a session acquires its
-  device: the acquiring holder adopts it. Until then it can be stopped
-  sessionless; afterwards only the holder can stop it.
-
-## Display and system settings between owners
-
-Display and system settings a session changes are not restored when it releases
-the device. They are reset when a different session next acquires the device:
-
-- Before a session first changes a setting, AutoMobile records its current value
-  as the device default. Changes made with no session holding the device are not
-  recorded.
-- Covered settings: font scale (content size category on the iOS Simulator),
-  display density, night mode, the increase contrast, reduce motion, bold text
-  and Android display accessibility preferences (`displayConfig`), the 24-hour
-  format and calendar system (`changeLocalization`), and the iOS Simulator
-  device-wide locale. Android locale changes are not covered.
-- A different session acquiring the device resets each recorded setting whose
-  value differs from its default. The same session acquiring it again resets
-  nothing. A failed reset is logged and retried at the next acquisition by
-  another session.
-
-The runtime screen size, navigation mode and display-cutout emulation that
-`displayConfig` sets on Android are restored when the session that changed them
-releases the device or rebinds to another one. `displayConfig` `reset` clears a
-leftover size override even after a daemon restart.
-
-Appearance configuration is per session.
 
 ## Related
 

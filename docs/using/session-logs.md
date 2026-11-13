@@ -3,7 +3,7 @@
 Collect the diagnostic sources a test would otherwise reach with raw platform
 commands (`adb shell run-as`, `xcrun simctl get_app_container`, `log show`)
 through one session-scoped resource and one reset tool. Everything is bound to
-the caller's device session: the URI names the session, the read must come from
+the caller's device session. The URI names the session, the read must come from
 the connection that owns that session, and the device is the one the session
 holds. A read never resolves a caller-supplied serial and never constructs a
 device client for a session it cannot serve.
@@ -15,9 +15,9 @@ automobile:device-session/{sessionUuid}/apps/{appId}/logs
   {?container,paths,pathsJson,groupId,groupPaths,groupPathsJson,lastSeconds,level,maxBytes}
 ```
 
-Each source is optional and selected by its query parameters. At least one
-source is required. Unknown parameters, path traversal, and out-of-range bounds
-are rejected before any device is touched.
+Each source is optional; its query parameters select it. Request at least one
+source. AutoMobile rejects unknown parameters, path traversal, and out-of-range
+bounds before it touches any device.
 
 | Source             | Parameters                     | Android                                                    | iOS Simulator                                                 | Physical iOS                                      |
 | ------------------ | ------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- |
@@ -47,9 +47,9 @@ are rejected before any device is touched.
 
 ### Physical iOS devices
 
-On a physical device the unified-log window runs on the macOS host:
+On a physical device the unified-log window runs on the macOS host.
 `log collect --device-udid <udid> --last N --output <tmp>.logarchive` copies
-the device's recent log store, then `log show` filters that archive with the
+the device's recent log store. Then `log show` filters that archive with the
 same predicate, `level` flags, and `maxBytes` bound as the Simulator path. The
 archive is deleted after every read. Collection copies data from the device, so
 it is slower than a Simulator read; the timeout for `log collect` plus

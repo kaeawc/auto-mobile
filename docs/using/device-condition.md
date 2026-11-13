@@ -30,7 +30,7 @@ or in the AutoMobile IDE plugin under **Settings > AutoMobile > Feature Flags**.
 
 On Android, call `setDeviceState` with `{ "deviceCondition": { "exportAttestation": true } }` to export a temporary key's public certificate chain for a test backend. Send this alone, without conditions, reset or a lease; no session is required. The temporary key is deleted before the response is sent. If the image cannot generate attestation, the call fails; use an image supporting key attestation. If the installed automation service predates this action (it requires CtrlProxy 0.0.90 or newer), the call fails with an error naming that version; install CtrlProxy 0.0.90 or newer.
 
-The `attestation` result contains `certificateChainBase64` (base64 DER, leaf first and root last), `rootCertificateBase64`, and `fields`: numeric `attestationSecurityLevel` and `keymasterSecurityLevel`, `deviceLocked`, `verifiedBootState`, and `attestationApplicationId` (raw base64, package names, decimal version strings and base64 signing-certificate digests). Missing optional fields are `null`. These are the certificate's reported fields, not a passing-integrity verdict or signature validation. The application ID describes the automation service that generated the key, not your app. Use the exported root only in your test backend's trust configuration; your backend still validates the app's own attestation chain and policy.
+The `attestation` result contains `certificateChainBase64` (base64 DER, leaf first and root last) and `rootCertificateBase64`. Its `fields` hold numeric `attestationSecurityLevel` and `keymasterSecurityLevel`, `deviceLocked`, `verifiedBootState`, and `attestationApplicationId` (raw base64, package names, decimal version strings and base64 signing-certificate digests). Missing optional fields are `null`. These are the certificate's reported fields, not a passing-integrity verdict or signature validation. The application ID describes the automation service that generated the key, not your app. Use the exported root only in your test backend's trust configuration; your backend still validates the app's own attestation chain and policy.
 
 ## Conditions
 
@@ -63,7 +63,9 @@ Set a condition by passing its value. Pass `"unset"` to clear it, or `{ "reset":
 
 `rootState` needs a non-Play image booted with `-writable-system`, which keeps `/system` writable. Without it, apply returns `unsupported` with guidance to boot with `-writable-system`. After the daemon stops with the fixture applied, the next `unset` or `reset` on the device removes the planted files and restores SELinux.
 
-`faults.biometricEnrollment` drives the emulator's Settings enrollment screens and touches its virtual sensor with `adb emu finger touch`, so it needs an emulator whose console accepts `finger` commands and whose system language is English. It is refused on a physical device. Settings only enrolls a fingerprint behind a lock screen, so the first `add` needs a device with no lock screen and sets the AutoMobile test PIN (`1234`); each later `add` enrolls another fingerprint, up to five. Android deletes fingerprints with the lock-screen credential, so `none`, `unset` and reset all clear the test PIN, which leaves no lock screen and no fingerprints. Lock-screen-bound keys are deleted with it. Do not combine it with `faults.lockScreen`.
+`faults.biometricEnrollment` drives the emulator's Settings enrollment screens and touches its virtual sensor with `adb emu finger touch`. It needs an emulator whose console accepts `finger` commands and whose system language is English, and AutoMobile refuses it on a physical device.
+
+Settings only enrolls a fingerprint behind a lock screen. The first `add` needs a device with no lock screen and sets the AutoMobile test PIN (`1234`); each later `add` enrolls another fingerprint, up to five. Android deletes fingerprints with the lock-screen credential, so `none`, `unset` and reset all clear the test PIN. That leaves no lock screen and no fingerprints, and Android deletes lock-screen-bound keys too. Do not combine it with `faults.lockScreen`.
 
 To invalidate an enrollment-bound key: `add` once, have the app create its key, then `add` again.
 
@@ -73,11 +75,11 @@ A condition the device cannot apply comes back `unsupported` with a `detail` rea
 
 ## iOS Simulator
 
-On an iOS Simulator, `statusBar`, `privacy` and `location` apply and restore like the Android conditions. They are not available on Android or a physical iOS device yet, and return `unsupported` there.
+On an iOS Simulator, `statusBar`, `privacy` and `location` apply and restore like the Android conditions. On Android or a physical iOS device they return `unsupported`.
 
-`privacy.service` is one of `calendar`, `contacts-limited`, `contacts`, `location`, `location-always`, `photos-add`, `photos`, `media-library`, `microphone`, `motion`, `reminders` or `siri`. Reset puts back the app's earlier decision for that service: granted, denied, or not yet asked. `photos` and `photos-add`, `location` and `location-always`, and `contacts` and `contacts-limited` change together, so reset restores both services in the pair. If the app already has the requested decision, the change is `unchanged`. If its earlier decision cannot be restored, such as limited Photos access, the request is refused and nothing changes; reset the app's privacy settings first.
+`privacy.service` is one of `calendar`, `contacts-limited`, `contacts`, `location`, `location-always`, `photos-add`, `photos`, `media-library`, `microphone`, `motion`, `reminders` or `siri`. Reset puts back the app's earlier decision for that service: granted, denied, or not yet asked. These pairs change together, and reset restores both services in a pair: `photos` and `photos-add`, `location` and `location-always`, `contacts` and `contacts-limited`. If the app already has the requested decision, the change is `unchanged`. If its earlier decision cannot be restored, such as limited Photos access, the request is refused and nothing changes; reset the app's privacy settings first.
 
-Every other condition returns `unsupported` on an iOS Simulator, with the reason. `rootState` and `integrityState` need a bootloader, verified boot or a jailbroken device, and the Simulator has none of them. The `faults` and `vehicle` conditions need Android system services. For `faults.battery`, use `statusBar` to change the displayed battery; for `faults.revokePermission`, use `privacy` with `action: "revoke"`.
+Every other condition returns `unsupported` on an iOS Simulator, with the reason. `rootState` and `integrityState` need a bootloader, verified boot or a jailbroken device; the Simulator has none. The `faults` and `vehicle` conditions need Android system services. For `faults.battery`, use `statusBar` to change the displayed battery; for `faults.revokePermission`, use `privacy` with `action: "revoke"`.
 
 ## Compound faults
 
@@ -96,7 +98,7 @@ Every restorable condition is undone, newest first, when any of these happens:
 - its lease expires: `expiresInSeconds` (1 to 86,400) restores everything after that many seconds unless a later `deviceCondition` call renews it. Leases need a session;
 - you call `{ "deviceCondition": { "reset": true } }`.
 
-Conditions belong to the device, not to the caller that set them. When two sessions, or a session and a call without one, set the same condition on one device, they act on one shared device state. Only the caller that applied it first can undo it: its release or reset clears the condition for both, while the second caller's request reports `unchanged` and its release or reset leaves the condition in place. Give each condition-setting run its own device.
+Conditions belong to the device, not to the caller that set them. When two sessions, or a session and a call without one, set the same condition on one device, they act on one shared device state. Only the caller that applied it first can undo it: its release or reset clears the condition for both. The second caller's request reports `unchanged`, and its release or reset leaves the condition in place. Give each condition-setting run its own device.
 
 After each reset, AutoMobile reads the device back to check the condition is gone. One-shot faults (`killApp`, `trimMemory`, `clearPackageData`) have nothing to restore, and `"unset"` on them does nothing.
 

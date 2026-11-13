@@ -30,38 +30,41 @@ Branch on `reason`, not on error text: `BRIDGE_NOT_INSTALLED`, `DISABLED`,
 reads. Deletion can report per-alias `locked` and `authentication_required` outcomes.
 
 A metadata read checks that each present key created with
-`setUserAuthenticationRequired(true)` can still be used. If that key has been
-permanently invalidated (for example by a new fingerprint enrollment) or needs
-authentication first, the whole read returns `authentication_required` /
-`AUTHENTICATION_REQUIRED` with no `entries`, even when other aliases in the scope
-are healthy; query one `alias` to find the affected key. Authenticate through the
-app's normal flow, or delete and re-create an invalidated key. Other keys, and keys
-whose usability cannot be checked, report presence and category as before, so `ok`
-does not prove that a key is usable.
+`setUserAuthenticationRequired(true)` can still be used. A new fingerprint
+enrollment, for example, can permanently invalidate such a key. If a key is
+invalidated or needs authentication first, the whole read returns
+`authentication_required` / `AUTHENTICATION_REQUIRED` with no `entries`. This holds
+even when other aliases in the scope are healthy.
+
+Query one `alias` to find the affected key. Authenticate through the app's normal
+flow, or delete and re-create an invalidated key. Other keys, and keys whose
+usability AutoMobile cannot check, report presence and category only, so `ok` does
+not prove that a key is usable.
 
 ## Android scoped deletion
 
 Call `resetKeychain` with `appId`, an explicit device target (`deviceId`, `device`,
 or `sessionUuid`), and `scope` and/or `alias`. A scope deletes every exact alias
-registered in that scope. An alias alone is allowed when declared in any scope;
-with a scope it must belong to that scope. An empty selector is rejected.
+registered in that scope. An alias alone works when any scope declares it; with
+a scope it must belong to that scope. AutoMobile rejects an empty selector.
 
 The app must enable Keystore test state, declare the selected aliases, and enable
-both its storage mutation capability and mutation policy. Android does not need
-`confirm` and requires no session, but `confirm: false` refuses the reset. A recorded
-plan writes `confirm: false`, so its replay stops at this step until you set
-`confirm: true`. No keys are created or re-provisioned.
+both its storage mutation capability and mutation policy. Android needs neither
+`confirm` nor a session, but `confirm: false` refuses the reset. A recorded plan
+writes `confirm: false`, so its replay stops at this step until you set
+`confirm: true`. The reset does not create or re-provision keys.
 
-The result reports `scope: "app"`, `requestedScope`/`requestedAlias`, `deletedCount`
-and one outcome per attempted alias: `deleted`, `not_found`, `locked`,
-`authentication_required`, or `failed`. Every selected alias is attempted. Overall
-`status` is `deleted` when all are deleted, `partial` when some are deleted, and
-`failed` when none are deleted (including when all are absent). `success` is true
-only for `deleted`; partial and failed results are tool errors. Only identifiers
-and counts are returned, never key material.
+The result reports `scope: "app"`, `requestedScope`/`requestedAlias`, and
+`deletedCount`. It also holds one outcome per attempted alias: `deleted`,
+`not_found`, `locked`, `authentication_required`, or `failed`. The reset attempts
+every selected alias. Overall `status` is `deleted` when all are deleted, `partial`
+when some are deleted, and `failed` when none are deleted, including when all are
+absent. The `success` field is true only for `deleted`; partial and failed results
+are tool errors. The result holds
+only identifiers and counts, never key material.
 
-Request-level refusals have an `outcome` and `reason`, zero deleted count and no
-per-alias results: `disabled` / `DISABLED`, `scope_not_declared` /
+Request-level refusals have an `outcome` and `reason`, a zero deleted count, and
+no per-alias results. They are `disabled` / `DISABLED`, `scope_not_declared` /
 `SCOPE_NOT_DECLARED`, `authorization_denied` / `MUTATION_NOT_ALLOWED`,
 `invalid_selector` / `EMPTY_SELECTOR`, `unsupported` / `DECLARED_UNSUPPORTED`, or
 `unavailable` / `BRIDGE_NOT_INSTALLED` or `BRIDGE_UNAVAILABLE`. Enable the app's
@@ -81,15 +84,18 @@ Package-data reset remains a separate operation. On iOS Simulator,
 Call `resetKeychain` with `action: "injectFault"`, `appId`, an explicit device
 target, `scope` and/or `alias`, and `kind`: `KEY_STORE_EXCEPTION`,
 `PROVIDER_EXCEPTION`, `USER_NOT_AUTHENTICATED`, `DELAY`, or
-`STRONGBOX_UNAVAILABLE`. Nothing is deleted. Use exact declared aliases; a scope
-selects all its aliases. For `DELAY`, supply an integer `delayMs` from 1 through
-10000; `kind` and `delayMs` are accepted only with `injectFault`. The delay runs
-before each selected alias's metadata lookup or deletion operation, and the delays
-in one provider call add up to at most 10000 ms in total: once that is spent, the
-call's remaining operations run without delay. A `resetKeychain` reset waits up to
-20 s for the bridge, so injected delay alone does not make it report
-`BRIDGE_UNAVAILABLE`. `KEY_STORE_EXCEPTION`, `PROVIDER_EXCEPTION`, and
-`USER_NOT_AUTHENTICATED` simulate the named failure on those same operations.
+`STRONGBOX_UNAVAILABLE`. Injection deletes nothing. Use exact declared aliases; a
+scope selects all its aliases.
+
+For `DELAY`, supply an integer `delayMs` from 1 through 10000. Only `injectFault`
+accepts `kind` and `delayMs`. The delay runs before each selected alias's metadata
+lookup or deletion operation. The delays in one provider call add up to at most
+10000 ms; after that, the call's remaining operations run without delay. A
+`resetKeychain` reset waits up to 20 s for the bridge, so injected delay alone does
+not make it report `BRIDGE_UNAVAILABLE`.
+
+`KEY_STORE_EXCEPTION`, `PROVIDER_EXCEPTION`, and `USER_NOT_AUTHENTICATED` simulate
+the named failure on those same operations.
 
 `STRONGBOX_UNAVAILABLE` affects key generation only, and only in an app that runs
 the debug SDK's key-generation check with its key spec immediately before
@@ -116,9 +122,10 @@ The result has `action`, `success` (true only for outcome `ok`), `scope: "app"`,
 and any supplied `requestedScope`, `requestedAlias`, and `requestedKind`.
 Refusals add `reason`: `disabled` / `DISABLED`, `authorization_denied` /
 `MUTATION_NOT_ALLOWED`, `scope_not_declared` / `SCOPE_NOT_DECLARED`,
-`invalid_selector` / `EMPTY_SELECTOR` or `INVALID_FAULT`, `unsupported` /
-`DECLARED_UNSUPPORTED` (an app SDK without fault injection), or `unavailable` /
-`BRIDGE_NOT_INSTALLED` (no debug SDK provider in the app) or `BRIDGE_UNAVAILABLE`.
+`invalid_selector` / `EMPTY_SELECTOR` or `INVALID_FAULT`, or `unsupported` /
+`DECLARED_UNSUPPORTED` (an app SDK without fault injection). They can also add
+`unavailable` / `BRIDGE_NOT_INSTALLED` (no debug SDK provider in the app) or
+`BRIDGE_UNAVAILABLE`.
 Correct the selector, kind, delay, or app authorization, or install a debug build
 with a current SDK, before retrying. Faulted metadata can report
 `authentication_required` or `unavailable`; deletion retains its per-alias

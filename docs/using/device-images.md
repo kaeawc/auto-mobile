@@ -44,8 +44,8 @@ you need that per-image shape; it is several times larger.
 
 ## Large results
 
-A result over 64 KiB is written to a tool-output file. The inline result then
-has `artifact` (with `resourceUri`) and a `resource_link` content block, and
+AutoMobile writes a result over 64 KiB to a tool-output file. The inline result
+then has `artifact` (with `resourceUri`) and a `resource_link` content block. It
 keeps `count`, `platform`, `configuredInventory` and `host`. `capabilityProfiles`
 holds the profiles that the inline images name, so every inline
 `capabilityProfile` resolves. It adds:

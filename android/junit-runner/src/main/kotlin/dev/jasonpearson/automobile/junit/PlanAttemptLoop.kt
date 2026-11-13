@@ -97,92 +97,128 @@ internal class PlanAttemptLoop(
     reuseSession: String?,
     attempt: Int,
   ): PlanAttemptOutcome {
-    val options = request.options
-    val startStep = request.startStep
-    val json = Json { ignoreUnknownKeys = true }
     val deviceId = effectiveDeviceId(request)
     val sessionUuid =
       reuseSession
-        ?: when (
-          val acquisition =
-            collaborators.sessionAcquirer.acquire(deviceId, options.effectiveExecutePlanTimeoutMs())
-        ) {
+        ?: when (val acquisition = acquireSession(deviceId, request.options)) {
           is PlanSessionAcquisition.Acquired -> acquisition.sessionUuid
-          is PlanSessionAcquisition.Failed ->
-            return PlanAttemptOutcome(
-              acquisition.response,
-              acquisition.outputPayload,
-              acquisition.parsed,
-              emptyList(),
-              null,
-            )
+          is PlanSessionAcquisition.Failed -> return acquisitionFailedOutcome(acquisition)
         }
     val acquired = reuseSession == null
     val args = buildArguments(request, holdForRecovery, sessionUuid, deviceId)
     // Opt this device session into executePlan before invoking it.
-    val selectionResponse =
-      callDaemonToolForAttempt(
-        "setToolEnabled",
-        JsonObject(
-          mapOf(
-            "toolName" to JsonPrimitive("executePlan"),
-            "sessionUuid" to JsonPrimitive(sessionUuid),
-          ),
-        ),
-        options.effectiveExecutePlanTimeoutMs(),
-      )
-    var response = selectionResponse
-    val outputPayload: String
-    val parsed: ParsedToolResult
-    val toolResults: List<ToolResultEntry>
-    if (!response.success) {
-      // Treat the prerequisite like executePlan itself: the retry classifier
-      // below handles transient daemon responses rather than throwing before
-      // it has a chance to retry the attempt.
-      outputPayload =
-        response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
-      parsed =
-        parseDaemonToolResult(response, json).let {
-          if (response.error.isNullOrBlank()) it.copy(errorMessage = "Unable to enable executePlan")
-          else it
-        }
-      toolResults = emptyList()
-      // executePlan never ran, so nothing holds this attempt's own acquisition for recovery.
-      if (acquired) collaborators.sessionAcquirer.release(sessionUuid)
-    } else {
-      if (options.debugMode) {
-        println(
-          "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)",
-        )
-      }
+    val selectionResponse = enableExecutePlan(sessionUuid, request.options)
+    if (!selectionResponse.success) {
+      return toolEnableFailedOutcome(selectionResponse, sessionUuid, acquired)
+    }
+    return runExecutePlan(request, holdForRecovery, sessionUuid, args, attempt)
+  }
 
-      takenOverSession = null
-      collaborators.heartbeat.registerSession(sessionUuid)
-      response =
-        try {
-          callDaemonToolForAttempt(
-            "executePlan",
-            JsonObject(args),
-            options.effectiveExecutePlanTimeoutMs(),
-          )
-        } finally {
-          collaborators.heartbeat.unregisterSession(sessionUuid)
-        }
-      outputPayload =
-        response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
-      parsed = parseDaemonToolResult(response, json)
-      toolResults = parseToolResults(response, json, options.debugMode)
-      // The daemon keeps a session its caller held before the plan, so the runner releases it,
-      // except a failed attempt held for AI recovery, whose release the recovery flow owns. A
-      // failure the daemon reports as not held (`sessionHeld: false`) skips recovery, so its
-      // caller-held base is released here too.
-      if (response.success && parsed.success || !holdForRecovery || parsed.sessionHeld == false) {
-        collaborators.sessionAcquirer.release(sessionUuid)
+  private fun acquireSession(
+    deviceId: String?,
+    options: AutoMobilePlanExecutionOptions,
+  ): PlanSessionAcquisition =
+    collaborators.sessionAcquirer.acquire(deviceId, options.effectiveExecutePlanTimeoutMs())
+
+  private fun acquisitionFailedOutcome(
+    acquisition: PlanSessionAcquisition.Failed,
+  ): PlanAttemptOutcome =
+    PlanAttemptOutcome(
+      acquisition.response,
+      acquisition.outputPayload,
+      acquisition.parsed,
+      emptyList(),
+      null,
+    )
+
+  private fun enableExecutePlan(
+    sessionUuid: String,
+    options: AutoMobilePlanExecutionOptions,
+  ): DaemonResponse =
+    callDaemonToolForAttempt(
+      "setToolEnabled",
+      JsonObject(
+        mapOf(
+          "toolName" to JsonPrimitive("executePlan"),
+          "sessionUuid" to JsonPrimitive(sessionUuid),
+        ),
+      ),
+      options.effectiveExecutePlanTimeoutMs(),
+    )
+
+  private fun toolEnableFailedOutcome(
+    response: DaemonResponse,
+    sessionUuid: String,
+    acquired: Boolean,
+  ): PlanAttemptOutcome {
+    // Treat the prerequisite like executePlan itself: the retry classifier
+    // below handles transient daemon responses rather than throwing before
+    // it has a chance to retry the attempt.
+    val outputPayload = encodeOutputPayload(response)
+    val parsed =
+      parseDaemonToolResult(response, json).let {
+        if (response.error.isNullOrBlank()) it.copy(errorMessage = "Unable to enable executePlan")
+        else it
       }
+    // executePlan never ran, so nothing holds this attempt's own acquisition for recovery.
+    if (acquired) collaborators.sessionAcquirer.release(sessionUuid)
+    return PlanAttemptOutcome(response, outputPayload, parsed, emptyList(), sessionUuid)
+  }
+
+  private fun runExecutePlan(
+    request: PlanExecutionRequest,
+    holdForRecovery: Boolean,
+    sessionUuid: String,
+    args: Map<String, JsonElement>,
+    attempt: Int,
+  ): PlanAttemptOutcome {
+    val options = request.options
+    val startStep = request.startStep
+    if (options.debugMode) {
+      println(
+        "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)",
+      )
     }
 
+    takenOverSession = null
+    collaborators.heartbeat.registerSession(sessionUuid)
+    val response =
+      try {
+        callDaemonToolForAttempt(
+          "executePlan",
+          JsonObject(args),
+          options.effectiveExecutePlanTimeoutMs(),
+        )
+      } finally {
+        collaborators.heartbeat.unregisterSession(sessionUuid)
+      }
+    val outputPayload = encodeOutputPayload(response)
+    val parsed = parseDaemonToolResult(response, json)
+    val toolResults = parseToolResults(response, json, options.debugMode)
+    if (shouldReleaseAfterPlan(response, parsed, holdForRecovery)) {
+      collaborators.sessionAcquirer.release(sessionUuid)
+    }
     return PlanAttemptOutcome(response, outputPayload, parsed, toolResults, sessionUuid)
   }
+
+  /**
+   * The daemon keeps a session its caller held before the plan, so the runner releases it, except
+   * a failed attempt held for AI recovery, whose release the recovery flow owns. A failure the
+   * daemon reports as not held (`sessionHeld: false`) skips recovery, so its caller-held base is
+   * released here too.
+   */
+  private fun shouldReleaseAfterPlan(
+    response: DaemonResponse,
+    parsed: ParsedToolResult,
+    holdForRecovery: Boolean,
+  ): Boolean {
+    val succeeded = response.success && parsed.success
+    val heldForRecovery = holdForRecovery && parsed.sessionHeld != false
+    return succeeded || !heldForRecovery
+  }
+
+  private fun encodeOutputPayload(response: DaemonResponse): String =
+    response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
 
   /**
    * The configured device, `ANDROID_SERIAL`, or the device recovery just drove; null lets the
@@ -305,5 +341,9 @@ internal class PlanAttemptLoop(
   private fun releaseForRetry(holdForRecovery: Boolean, sessionUuid: String?) {
     if (holdForRecovery && sessionUuid != null) releaseHeldSession(sessionUuid)
     releaseTakenOverSession()
+  }
+
+  private companion object {
+    private val json = Json { ignoreUnknownKeys = true }
   }
 }

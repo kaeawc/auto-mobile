@@ -1,5 +1,9 @@
 # `tapAt`
 
+| Tool                  | What it does                                                                                 | Requires              |
+| --------------------- | -------------------------------------------------------------------------------------------- | --------------------- |
+| 📍 <code>tapAt</code> | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units | Android, iOS, watchOS |
+
 `tapAt` taps, long presses, or double taps at `x`, `y`. Absolute coordinates use
 platform-native units; `coordinateSpace: "normalized"` uses 0–1 and `"percent"`
 uses 0–100. Alternatively, pass `image` with a screenshot-relative point and its

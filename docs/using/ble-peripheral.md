@@ -1,5 +1,9 @@
 # Virtual BLE peripherals
 
+| Tool                          | What it does                                                    | Requires |
+| ----------------------------- | --------------------------------------------------------------- | -------- |
+| 📡 <code>blePeripheral</code> | Manage a session-owned virtual BLE peripheral on Android netsim | —        |
+
 Use `blePeripheral` to prototype a wearable or smart lock against an Android emulator's Bluetooth stack. Acquire a daemon device session first and enable the tool with `setToolEnabled` if it is not listed. The host needs `python3` (Python 3.11 with venv support). The first start downloads the managed Bluetooth dependencies from PyPI; later starts reuse them.
 
 Start with `{"action":"start","sessionUuid":"<session>","name":"Prototype","presets":["battery","heartRate"]}`. The result includes a session-owned `handle`, name, address, presets, transport, `transportShared`, `running`, `advertising`, `connected`, `subscribed`, `pythonReady` and `bumbleReady`. Initial battery level is 87 and heart rate is 72 bpm.

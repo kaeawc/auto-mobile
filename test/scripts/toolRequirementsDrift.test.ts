@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   applyRequiresColumn,
   findDocsRequiresDrift,
+  findMissingToolRows,
   findToolRequirementsDrift,
   renderRequiresCell,
   scanFeatureFlagRefusals,
@@ -157,6 +158,22 @@ describe("docs/tools.md Requires column (#18141)", () => {
     ].join("\n");
     expect(findDocsRequiresDrift(markdown, requires)).toEqual([
       'sqlQuery: docs say "—", definitions say "<code>sdkEmbed</code>"',
+    ]);
+  });
+});
+
+describe("findMissingToolRows (#18140)", () => {
+  test("reports each page tool without a tool table row", () => {
+    const markdown = [
+      "# Audits",
+      "| Tool | What it does | Requires |",
+      "| --- | --- | --- |",
+      "| ✅ <code>accessibilityAudit</code> | Audit | — |",
+      "",
+      "Prose naming <code>performanceAudit</code> is not a row.",
+    ].join("\n");
+    expect(findMissingToolRows(markdown, ["accessibilityAudit", "performanceAudit"])).toEqual([
+      "performanceAudit: page has no `| Tool | What it does | Requires |` row for it",
     ]);
   });
 });

@@ -38,6 +38,7 @@ import {
 } from "../../features/prototype/prototypeShaders";
 import { prototypeEventSource } from "../../features/prototype/PrototypeTransport";
 import { AndroidPrototypeTransport } from "../../features/prototype/androidPrototypeTransport";
+import { PrototypeAssetPutLedger } from "../../features/prototype/prototypeAssetPutLedger";
 import {
   IosPrototypeTransport,
   noPrototypeAgentConnections,
@@ -301,6 +302,8 @@ function defaultPrototypeLifecycle(): PrototypeEventLifecycle {
 interface PrototypeTransportCache {
   android: WeakMap<PrototypeClient, AndroidPrototypeTransport>;
   ios: WeakMap<PrototypeAgentClient, IosPrototypeTransport>;
+  /** Shared by every iOS transport, since cache keys are per device, not per agent client. */
+  iosAssetPuts: PrototypeAssetPutLedger;
   requests?: requestWiring.PrototypeRequestCoordinator;
   channels?: channelWiring.PrototypeChannelCoordinator;
 }
@@ -338,7 +341,9 @@ function prototypeTargets(
     if (transport === undefined) {
       transport = new IosPrototypeTransport(
         agent,
-        iosAssetCache === undefined ? undefined : { serial: device.deviceId, cache: iosAssetCache },
+        iosAssetCache === undefined
+          ? undefined
+          : { serial: device.deviceId, cache: iosAssetCache, puts: transports.iosAssetPuts },
       );
       transports.ios.set(agent, transport);
       requestWiring.attachIosPrototypeRequests(agent, device.deviceId, transports.requests);
@@ -408,7 +413,13 @@ function createPrototypeHost(
     recorder,
     commits: new PrototypeCommitGenerations(),
     patchQueue: createPrototypePatchQueue(),
-    transports: { android: new WeakMap(), ios: new WeakMap(), requests, channels },
+    transports: {
+      android: new WeakMap(),
+      ios: new WeakMap(),
+      iosAssetPuts: new PrototypeAssetPutLedger(),
+      requests,
+      channels,
+    },
     mocks,
     virtualDevice:
       dependencies.virtualDevice ?? new VirtualPrototypeDevice(prototypeClock(dependencies)),

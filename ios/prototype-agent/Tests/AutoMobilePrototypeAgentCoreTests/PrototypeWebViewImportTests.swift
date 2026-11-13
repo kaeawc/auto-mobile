@@ -33,12 +33,20 @@ final class PrototypeWebViewImportTests: XCTestCase {
     }
 
     func testOpaqueDataAndActionPayloadsAreNotNodes() throws {
-        let data = Data(#"{"data":{"type":"webView"},"root":{"type":"button","onTap":[{"type":"emit","payload":{"type":"webView"}}]}}"#.utf8)
+        let data =
+            Data(
+                #"{"data":{"type":"webView"},"root":{"type":"button","onTap":[{"type":"emit","payload":{"type":"webView"}}]}}"#
+                    .utf8
+            )
         XCTAssertNil(PrototypeWebView.importError(data, networkAllowed: false))
     }
 
     func testNestedRepeatTemplateIsCheckedEvenWithNoItemsAndFirstPageWins() {
-        let data = Data(#"{"root":{"type":"column","repeat":{"items":[],"as":"item"},"children":[{"type":"box","child":{"type":"webView"}},{"type":"webView"}]}}"#.utf8)
+        let data =
+            Data(
+                #"{"root":{"type":"column","repeat":{"items":[],"as":"item"},"children":[{"type":"box","child":{"type":"webView"}},{"type":"webView"}]}}"#
+                    .utf8
+            )
         XCTAssertEqual(PrototypeWebView.importError(data, networkAllowed: false)?.path, "root.children[0].child")
     }
 }

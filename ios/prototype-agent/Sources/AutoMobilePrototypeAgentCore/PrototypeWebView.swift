@@ -72,7 +72,9 @@ public enum PrototypeWebView {
 
     private static func validateNode(
         _ node: [String: JSONValue], path: String, declared: Bool, state: [String: JSONValue]
-    ) throws {
+    )
+        throws
+    {
         guard declared else {
             throw PrototypeLimits.violation(path, "webView requires webview in requires.platform")
         }

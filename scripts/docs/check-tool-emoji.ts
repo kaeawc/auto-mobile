@@ -7,15 +7,51 @@ import { TOOL_EMOJI, TOOLS_PAGE, toolPage } from "../../src/server/toolEmoji";
 /**
  * Docs gate for the canonical tool emoji registry (#18142). A tool emoji
  * reference is an emoji directly followed by a tool name in code, optionally
- * as a Markdown link: `👁️ `observe``, `📍 [<code>tapAt</code>](using/tap-at.md)`.
- * Each reference must use that tool's emoji and link to the tool's page (a
+ * as a Markdown link: `👁️ `observe``, `📍 [<code>tapAt</code>](using/tap-at.md)`,
+ * or with the emoji inside the link text: `[👁️ `observe`](observe.md)`. Each
+ * reference must use that tool's emoji and link to the tool's page (a
  * reference on the tool's own page needs no link). Other emoji use is free.
+ *
+ * Markdown structure comes from Bun's built-in CommonMark/GFM parser
+ * (`Bun.markdown.render`), as in check-docs-tool-names.ts: code blocks and
+ * HTML blocks are dropped, and links arrive with their parsed destination
+ * (titles excluded). The callbacks flatten each block into a token string
+ * (code spans and links wrapped in private-use delimiters) that one pattern
+ * matches. The parser reports no source positions, so `annotateLines` adds an
+ * invisible line marker to each source line first; a reference takes the line
+ * of the next marker after it (#18190).
  */
 
 const EMOJI = String.raw`\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic}|\p{Emoji_Modifier})*`;
-const NAME = String.raw`(?:\x60(\w+)\x60|<code>(\w+)</code>)`;
-const LINKED_NAME = String.raw`\[(?:\x60(\w+)\x60|<code>(\w+)</code>)\]\(([^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)`;
-const REFERENCE = new RegExp(String.raw`(${EMOJI})[ \t]*(?:${LINKED_NAME}|${NAME})`, "gu");
+const MARK_OPEN = "\uE000";
+const MARK_CLOSE = "\uE001";
+const CODE_OPEN = "\uE010";
+const CODE_CLOSE = "\uE011";
+const LINK_OPEN = "\uE012";
+const LINK_TEXT = "\uE013";
+const LINK_CLOSE = "\uE014";
+const MARKER = new RegExp(`${MARK_OPEN}(\\d+)${MARK_CLOSE}`, "g");
+const NAME = String.raw`(?:${CODE_OPEN}(\w+)${CODE_CLOSE}|<code>(\w+)</code>)`;
+const LINKED = String.raw`${LINK_OPEN}(\d+)${LINK_TEXT}`;
+// Emoji before the name or its link, or the emoji inside the link text.
+const REFERENCE = new RegExp(
+  String.raw`(?:(${EMOJI})[ \t]*(?:${LINKED}${NAME}${LINK_CLOSE}|${NAME})|${LINKED}(${EMOJI})[ \t]*${NAME}${LINK_CLOSE})`,
+  "gu",
+);
+
+// Lines where trailing text would change how the parser reads the block:
+// fence delimiters, setext underlines and breaks, table delimiter rows, empty
+// list markers and link reference definitions.
+const UNMARKED_LINE = [
+  /^\s*(`{3,}|~{3,})/,
+  /^\s*([-=*_]\s*)+$/,
+  /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/,
+  /^\s*([-*+]|\d{1,9}[.)])\s*$/,
+  /^\s{0,3}\[[^\]]+\]:/,
+];
+// A trailing unescaped pipe closes a table row; a marker after it would be an
+// extra cell, which GFM drops, so the marker goes just before it.
+const TRAILING_PIPE = /(?<!\\)\|\s*$/;
 
 export interface ToolEmojiReference {
   readonly line: number;
@@ -42,39 +78,101 @@ export function emojiOwners(
   return owners;
 }
 
-/** Blank fenced code blocks so their contents never count, keeping line numbers. */
-function withoutFences(markdown: string): string[] {
-  let fence: string | undefined;
-  return markdown.split("\n").map((line) => {
-    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
-    if (fence === undefined && marker !== undefined) {
-      fence = marker[0];
-      return "";
-    }
-    if (fence !== undefined) {
-      if (marker?.[0] === fence) {
-        fence = undefined;
+/** Add a 1-based line marker to every source line whose block structure it cannot change. */
+export function annotateLines(markdown: string): string {
+  return markdown
+    .split(/\r?\n/)
+    .map((line, index) => {
+      const marker = `${MARK_OPEN}${index + 1}${MARK_CLOSE}`;
+      if (line.trim() === "" || UNMARKED_LINE.some((pattern) => pattern.test(line))) {
+        return line;
       }
-      return "";
-    }
-    return line;
-  });
+      const pipe = TRAILING_PIPE.exec(line);
+      return pipe
+        ? `${line.slice(0, pipe.index)}${marker}${line.slice(pipe.index)}`
+        : `${line}${marker}`;
+    })
+    .join("\n");
+}
+
+function markersOnly(text: string): string {
+  return text.match(MARKER)?.join("") ?? "";
+}
+
+const BLOCKS = [
+  "heading",
+  "paragraph",
+  "blockquote",
+  "list",
+  "listItem",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+] as const;
+
+/** Flatten `markdown` into a token string plus the destination of each link. */
+function tokenize(markdown: string): { tokens: string; links: string[] } {
+  const links: string[] = [];
+  const block = (children: string): string => `${children}\n`;
+  const callbacks: Record<string, (children: string, meta?: { href?: string }) => string> = {
+    // Fenced and indented code and HTML blocks are never references.
+    code: (children) => markersOnly(children),
+    html: (children) => markersOnly(children),
+    codespan: (children) =>
+      `${CODE_OPEN}${children.replace(MARKER, "")}${CODE_CLOSE}${markersOnly(children)}`,
+    link: (children, meta) =>
+      `${LINK_OPEN}${links.push((meta?.href ?? "").replace(MARKER, "")) - 1}${LINK_TEXT}${children}${LINK_CLOSE}`,
+  };
+  for (const type of BLOCKS) {
+    callbacks[type] = block;
+  }
+  return { tokens: Bun.markdown.render(annotateLines(markdown), callbacks), links };
 }
 
 export function findToolEmojiReferences(
   markdown: string,
   toolNames: ReadonlySet<string>,
 ): ToolEmojiReference[] {
-  return withoutFences(markdown).flatMap((text, index) =>
-    [...text.matchAll(REFERENCE)].flatMap((match) => {
-      const tool = match[2] ?? match[3] ?? match[5] ?? match[6];
-      if (tool === undefined || !toolNames.has(tool)) {
-        return [];
-      }
-      const link = match[4];
-      return [{ line: index + 1, emoji: match[1], tool, ...(link ? { link } : {}) }];
-    }),
-  );
+  const { tokens, links } = tokenize(markdown);
+  const markers = [...tokens.matchAll(MARKER)].map((match) => ({
+    at: match.index,
+    line: Number(match[1]),
+  }));
+  const lineAfter = (offset: number): number =>
+    markers.find((marker) => marker.at >= offset)?.line ?? markers.at(-1)?.line ?? 1;
+  return [...tokens.matchAll(REFERENCE)].flatMap((match) => {
+    const [
+      ,
+      before,
+      beforeLink,
+      linkedCode,
+      linkedHtml,
+      code,
+      html,
+      inLink,
+      inside,
+      insideCode,
+      insideHtml,
+    ] = match;
+    const emoji = before ?? inside;
+    const tool = linkedCode ?? linkedHtml ?? code ?? html ?? insideCode ?? insideHtml;
+    if (emoji === undefined || tool === undefined || !toolNames.has(tool)) {
+      return [];
+    }
+    const linkIndex = beforeLink ?? inLink;
+    const link = linkIndex === undefined ? undefined : links[Number(linkIndex)];
+    return [
+      {
+        line: lineAfter(match.index + match[0].length),
+        emoji,
+        tool,
+        ...(link ? { link } : {}),
+      },
+    ];
+  });
 }
 
 function resolvesTo(docPath: string, link: string, page: string): boolean {

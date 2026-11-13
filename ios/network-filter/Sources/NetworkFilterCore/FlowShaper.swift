@@ -21,8 +21,9 @@ import Foundation
 /// pass whole. Directional peek windows use that quantum (65536 if unlimited).
 ///
 /// State holds no payloads: at most 256 flows, one reservation/token per flow,
-/// 64 timelines and 64 refused-only diagnostic entries. Admission evicts only
-/// unpaused flows idle 60 seconds, oldest activity then UUID; otherwise refuses.
+/// 64 timelines and 64 refused-only diagnostic entries. At capacity, admission
+/// first reclaims flows whose watch ended, then evicts only unwatched unpaused
+/// flows idle 60 seconds, oldest activity then UUID; otherwise refuses.
 /// Pauses over 30 seconds for streams or 8 seconds for UDP drop without charge,
 /// keeping UDP below Apple's ten-second limit. Caller-owned timers recheck the
 /// rule ticket on resume; reset/end/stop settle with allow exactly once.
@@ -111,8 +112,9 @@ public final class FlowShaper {
         lock.lock()
         defer { lock.unlock() }
         let now = monotonicNow()
+        if flows[flow] == nil, flows.count >= Self.maximumFlows { reclaimEndedWatches() }
         if ruleSource.watches(target) {
-            // Fail open at capacity without evicting another watched connection.
+            // Fail open at capacity without evicting an actively watched connection.
             guard flows[flow] != nil || flows.count < Self.maximumFlows else { return .allow }
             if let pending = flows[flow]?.pending { return .pause(pending.pause) }
             var tracked = flows[flow] ?? Flow(target: target, transport: transport, lastActive: now)
@@ -391,6 +393,18 @@ public final class FlowShaper {
         countRelease(bytes, tracked.target, direction)
         flows[flow] = tracked
         return .pass(bytes: bytes, peekBytes: peek)
+    }
+
+    /// Watched flows are exempt from idle eviction only while their watch is
+    /// active. Once it ends, an offline replacement keeps them so it can cut
+    /// them; a shaping replacement makes them ordinary evictable flows; with
+    /// no rule they are forgotten, as their next data callback would do.
+    private func reclaimEndedWatches() {
+        for (id, flow) in flows where flow.watched && flow.pending == nil && !ruleSource.watches(flow.target) {
+            if ruleSource.isOffline(flow.target) { continue }
+            if ruleSource.shapingRule(for: flow.target) != nil { flows[id]?.watched = false }
+            else { flows.removeValue(forKey: id) }
+        }
     }
 
     private func monotonicNow() -> UInt64 {

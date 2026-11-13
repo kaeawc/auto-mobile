@@ -56,9 +56,12 @@ export function attributePrecedingSiblingLabels(
       )
       .sort((a, b) => a.provenance!.enter - b.provenance!.enter)[0];
     if (acc.label === undefined && !preceding) {
-      texts
-        .filter((text) => followsToggle(acc, text) || graph?.followsInWrapper(acc, text))
-        .forEach((text) => trailing.add(text));
+      const claimed = texts.filter(
+        (text) => followsToggle(acc, text) || graph?.followsInWrapper(acc, text),
+      );
+      for (const text of claimed) {
+        trailing.add(text);
+      }
     }
     if (acc.label === undefined) {
       acc.label = preceding?.label;

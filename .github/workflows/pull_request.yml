@@ -1230,8 +1230,21 @@ jobs:
         run: scripts/ci/install-bun-deps.sh
 
       # The selector adds `claude-plugin` for plugin changes, and that check fails
-      # in CI without the Claude CLI (#16963). Foreground: it appends to $GITHUB_PATH.
+      # in CI without the Claude CLI (#16963). Ask the selector first and install
+      # the CLI only when it picks that check (#17010). After the Bun install: the
+      # selector resolves TypeScript check dependencies with bun.
+      - name: "Select changed-file shell checks"
+        id: select-shell-checks
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"
+          scripts/ci/shell-changed-needs-claude.sh "${base}"
+
+      # Foreground: it appends to $GITHUB_PATH.
       - name: "Install pinned Claude Code"
+        if: steps.select-shell-checks.outputs.claude_plugin == 'true'
         timeout-minutes: 10
         uses: ./.github/actions/install-claude-code
 

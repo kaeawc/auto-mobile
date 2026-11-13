@@ -9,14 +9,19 @@ source "${SCRIPT_DIR}/lib/vcs-diff.sh"
 DEFAULT_BASE="origin/main"
 BASE="${DEFAULT_BASE}"
 base_was_explicit=0
+list_only=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/prepush-shell.sh [--base <ref>] [--help]
+Usage: scripts/prepush-shell.sh [--base <ref>] [--list-checks] [--help]
 
 Runs the shell/BATS-relevant fast validation checks for files changed since the
 merge-base with origin/main. If origin/main is unavailable, it falls back to
 main. An explicitly supplied --base must resolve.
+
+--list-checks prints the selected fast validation check names, one per line,
+and exits without running any check, shellcheck or BATS. CI uses it to install
+a check's tools only when the check is selected.
 EOF
 }
 
@@ -353,6 +358,10 @@ while [[ $# -gt 0 ]]; do
       base_was_explicit=1
       shift
       ;;
+    --list-checks)
+      list_only=1
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -399,6 +408,10 @@ while IFS= read -r path; do
     changed_files+=("${path}")
   fi
 done <<< "${changed_files_output}"
+
+if [[ "${#changed_files[@]}" -eq 0 && "${list_only}" -eq 1 ]]; then
+  exit 0
+fi
 
 if [[ "${#changed_files[@]}" -eq 0 ]]; then
   echo "No changed files since merge-base with ${BASE}; nothing to validate."
@@ -600,6 +613,13 @@ for path in "${changed_files[@]}"; do
     add_check "lfs-pointers"
   fi
 done
+
+if [[ "${list_only}" -eq 1 ]]; then
+  for selected in ${selected_checks[@]+"${selected_checks[@]}"}; do
+    printf '%s\n' "${selected}"
+  done
+  exit 0
+fi
 
 if [[ "${#selected_checks[@]}" -eq 0 && "${#bats_files[@]}" -eq 0 ]]; then
   echo "No shell/BATS-relevant fast validation checks match changed files; nothing to validate."

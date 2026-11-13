@@ -1,0 +1,34 @@
+{
+  "entries": [
+    {
+      "file": "docs/how-it-works/plat/android/persona-robustness-harness.md",
+      "rule": "robust",
+      "count": 2,
+      "reason": "Proper name of the persona robustness harness, not a filler adjective."
+    },
+    {
+      "file": "docs/how-it-works/prototype-web-renderer.md",
+      "rule": "seamless",
+      "count": 1,
+      "reason": "A seamless fold is a foldable display with no hinge gap, a device posture term."
+    },
+    {
+      "file": "docs/how-it-works/prototype-web-frames-v2.md",
+      "rule": "seamless",
+      "count": 2,
+      "reason": "A seamless fold is a foldable display with no hinge gap, a device posture term."
+    },
+    {
+      "file": "docs/devlog/2026-10-28-persona-robustness-harness-survival-measurements.md",
+      "rule": "robust",
+      "count": 2,
+      "reason": "Proper name of the persona robustness harness, not a filler adjective."
+    },
+    {
+      "file": "docs/devlog/index.md",
+      "rule": "robust",
+      "count": 1,
+      "reason": "Proper name of the persona robustness harness, not a filler adjective."
+    }
+  ]
+}

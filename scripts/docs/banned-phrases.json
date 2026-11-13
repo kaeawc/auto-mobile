@@ -1,0 +1,71 @@
+{
+  "rules": [
+    {
+      "id": "delve",
+      "pattern": "\\bdelv(?:e|es|ed|ing)\\b",
+      "suggestion": "use \"look at\", \"explain\" or \"cover\""
+    },
+    {
+      "id": "seamless",
+      "pattern": "\\bseamless(?:ly)?\\b",
+      "suggestion": "drop it, or say which step is no longer needed"
+    },
+    {
+      "id": "robust",
+      "pattern": "\\brobust(?:ly|ness)?\\b",
+      "suggestion": "say what it withstands, for example \"retries on timeout\""
+    },
+    { "id": "leverage", "pattern": "\\bleverag(?:e|es|ed|ing)\\b", "suggestion": "use \"use\"" },
+    {
+      "id": "utilize",
+      "pattern": "\\butili[sz](?:e|es|ed|ing|ation)\\b",
+      "suggestion": "use \"use\""
+    },
+    {
+      "id": "worth-noting",
+      "pattern": "\\b(?:it(?:'|\u2019)s|it is) (?:worth (?:noting|mentioning|pointing out)|important to note)(?: that)?",
+      "suggestion": "drop it and state the fact"
+    },
+    {
+      "id": "honest-hedge",
+      "pattern": "\\b(?:to be (?:honest|frank)|honestly|frankly|truth be told)\\b",
+      "suggestion": "drop the hedge"
+    },
+    {
+      "id": "genuine-hedge",
+      "pattern": "\\bgenuine(?:ly)?\\b",
+      "suggestion": "drop it, or say what makes it real (for example \"a reproducible failure\")"
+    },
+    {
+      "id": "not-only-but-also",
+      "pattern": "\\bnot only\\b[^.!?]*?\\bbut (?:also\\b)?",
+      "suggestion": "use \"X and Y\""
+    },
+    {
+      "id": "stacked-em-dash",
+      "pattern": "\u2014[^.!?\u2014]*\u2014[^.!?\u2014]*\u2014",
+      "suggestion": "keep at most one em-dash aside per sentence; use commas, parentheses or a new sentence"
+    },
+    { "id": "in-order-to", "pattern": "\\bin order to\\b", "suggestion": "use \"to\"" },
+    {
+      "id": "deep-dive",
+      "pattern": "\\b(?:deep[- ]dive|dive (?:deep )?into)\\b",
+      "suggestion": "use \"look at\" or \"details of\""
+    },
+    {
+      "id": "hype",
+      "pattern": "\\b(?:cutting[- ]edge|game[- ]chang(?:er|ing)|state[- ]of[- ]the[- ]art|supercharg(?:e|es|ed|ing)|empower(?:s|ed|ing)?|unlock(?:s|ed|ing)? the (?:power|full potential)|harness(?:es|ed|ing)? the power)\\b",
+      "suggestion": "say what it does instead"
+    },
+    {
+      "id": "plethora",
+      "pattern": "\\b(?:plethora|myriad|a wide (?:range|array|variety) of)\\b",
+      "suggestion": "use \"many\" or name them"
+    },
+    {
+      "id": "furthermore",
+      "pattern": "\\b(?:furthermore|moreover)\\b",
+      "suggestion": "use \"also\", or start a new sentence"
+    }
+  ]
+}

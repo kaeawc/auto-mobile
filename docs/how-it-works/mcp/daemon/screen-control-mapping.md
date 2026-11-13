@@ -261,7 +261,7 @@ must make the same platform-aware decision rather than infer from `alt && printa
 
 **Known limitation (Windows).** `ctrl && alt` is a heuristic: requiring the
 `ALT_GRAPH` mask would regress AltGr typing (`@`, `€`, `{`) on JDKs that leave it
-unset. A genuine Ctrl+Alt host shortcut producing a printable character may
+unset. A real Ctrl+Alt host shortcut producing a printable character may
 therefore be forwarded to the device on Windows.
 
 A client may opt a chord in with `forwardedChords` (default **empty**). Entries

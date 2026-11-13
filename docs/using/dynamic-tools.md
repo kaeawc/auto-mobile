@@ -19,7 +19,7 @@ across restarts.
 ## Enabling several tools at once
 
 Pass `toolNames` instead of `toolName` to declare a whole task's toolset in one
-round-trip. The batch is all-or-nothing: a genuinely unknown name rejects the
+round-trip. The batch is all-or-nothing: an unknown name rejects the
 request before anything is written. Always-on names such as `setToolEnabled`,
 `getAndroid`, and `getApple` are accepted as no-ops and listed in the response's
 `skipped` field.
@@ -92,7 +92,7 @@ export AUTOMOBILE_ENABLED_TOOLS=clipboard,sqlQuery
 export AUTOMOBILE_DISABLED_TOOLS=observe
 ```
 
-Names and casing must match the registered tool exactly. Genuinely unknown
+Names and casing must match the registered tool exactly. Unknown
 names and conflicts between configurable tools in the same layer fail startup.
 Always-on names such as `setToolEnabled`, `getAndroid`, and `getApple` are
 ignored with a startup log message because they have no configurable

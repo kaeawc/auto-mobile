@@ -10,7 +10,7 @@ const textMatcher = new DefaultTextMatcher();
 
 export function stringProp(
   element: Element,
-  key: "text" | "content-desc" | "resource-id" | "view-id",
+  key: "text" | "content-desc" | "resource-id" | "view-id" | "range-info",
 ): string {
   const value = element[key];
   return typeof value === "string" ? value : "";

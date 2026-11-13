@@ -18,7 +18,6 @@ object ValidTools {
         "accessibilityAudit",
         "accessibilityAction",
         "accessibilityFocus",
-        "audit",
         "barrier",
         "biometricAuth",
         "changeLocalization",

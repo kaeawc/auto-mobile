@@ -77,6 +77,7 @@ class AgentDaemonInjectionTest {
     var resolutions = 0
     val collaborators =
       PlanExecutorCollaborators(
+        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
         daemon = daemon,
         agent = {
           resolutions++
@@ -124,6 +125,7 @@ class AgentDaemonInjectionTest {
     val executor =
       PlanExecutor(
         PlanExecutorCollaborators(
+          sessionAcquirerFactory = { FakePlanSessionAcquirer() },
           daemon = daemon,
           deviceChecker = FakeDevices,
           heartbeat = FakeHeartbeat,

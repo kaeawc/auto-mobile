@@ -9,6 +9,7 @@ import { ActionableError, type Point } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import type { IosFrameDispatchOptions } from "../observe/ios/CtrlProxyDispatch";
+import type { CtrlProxyTapDiagnostics } from "../observe/ios/types";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -47,6 +48,7 @@ export interface IosCoordinateTapClient {
     errorCode?: string;
     dispatched?: boolean;
     acknowledged?: boolean;
+    tapDiagnostics?: Pick<CtrlProxyTapDiagnostics, "route">;
   }>;
 }
 
@@ -167,7 +169,7 @@ export async function dispatchIosCoordinateTap(
     frameContext,
     options = {},
   }: { durationMs: number; frameContext?: string; options?: IosCoordinateTapOptions },
-): Promise<void> {
+): Promise<{ route?: string }> {
   return dispatchIosTap(client, point, { durationMs, frameContext, options });
 }
 
@@ -180,7 +182,7 @@ export async function dispatchIosDoubleTap(
     frameContext,
     options = {},
   }: { durationMs?: number; frameContext?: string; options?: IosCoordinateTapOptions } = {},
-): Promise<void> {
+): Promise<{ route?: string }> {
   return dispatchIosTap(client, point, {
     durationMs,
     frameContext,
@@ -200,7 +202,7 @@ async function dispatchIosTap(
     frameContext,
     options,
   }: { durationMs: number; frameContext?: string; options: InternalIosCoordinateTapOptions },
-): Promise<void> {
+): Promise<{ route?: string }> {
   const { x, y } = point;
   const { failureLabel = "tap", signal, doubleTap = false } = options;
   if (doubleTap) {
@@ -236,7 +238,7 @@ async function dispatchIosTap(
     throw error;
   }
   if (result.success) {
-    return;
+    return iosTapDispatchMetadata(result);
   }
   if (isUnconfirmedIosTapReply(result, dispatched)) {
     // The runner's press is a blocking XCUITest call: the timeout here does not cancel it, so
@@ -252,6 +254,11 @@ async function dispatchIosTap(
 }
 
 type IosTapReply = Awaited<ReturnType<IosCoordinateTapClient["requestTapCoordinates"]>>;
+
+function iosTapDispatchMetadata(result: IosTapReply): { route?: string } {
+  const route = result.tapDiagnostics?.route;
+  return typeof route === "string" ? { route } : {};
+}
 
 /** A runner refusal (an ActionableError) and the caller's own abort keep their original throw. */
 function isUnconfirmedIosTapThrow(

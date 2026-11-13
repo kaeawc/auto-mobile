@@ -5,6 +5,9 @@ platform-native units; `coordinateSpace: "normalized"` uses 0–1 and `"percent"
 uses 0–100. Alternatively, pass `image` with a screenshot-relative point and its
 image metadata.
 
+On iOS, a successful tap with a post-tap observation includes `effect: { screenChanged, basis }`, comparing observations for evidence of a screen change.
+On iOS, `dispatchRoute` is the runner-reported route (for example, `xcuiCoordinate` or `displayTargetedRecord`), omitted when unreported.
+
 On an Android XR headset in home space, coordinates are screenshot pixels.
 For a standard (task-aligned) app panel, choose a point inside the topmost app
 panel in the screenshot. Normalized, percent, and image inputs resolve to the same screenshot space. The result's

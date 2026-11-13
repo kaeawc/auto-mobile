@@ -141,7 +141,7 @@ describe("iOS opt-in tap diagnostics", () => {
           { x: 443, y: 202 },
           { durationMs: 50, frameContext: "frame" },
         ),
-      ).toBeUndefined();
+      ).toEqual({});
       expect(JSON.parse(sent[0])).toEqual({
         type: "request_tap_coordinates",
         requestId: expect.any(String),

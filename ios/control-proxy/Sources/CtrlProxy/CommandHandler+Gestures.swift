@@ -95,14 +95,26 @@ extension CommandHandler {
 
     func handleTapCoordinates(
         _ request: RequestTapCoordinates,
-        startTime: Date
+        startTime: Date, deadlineMs: Int64?,
+        monotonicNowMs: @escaping @Sendable () -> Int64
     )
         async throws -> WebSocketResponse
     {
+        let checkDeadline: @Sendable () throws -> Void = {
+            if let deadlineMs, monotonicNowMs() >= deadlineMs {
+                throw CommandError.deadlineExceeded(
+                    command: "request_tap_coordinates", deadlineMs: deadlineMs, gestureCompleted: false
+                )
+            }
+        }
+        try checkDeadline()
         try requireFinite(request.x, field: "x")
         try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
-        let diagnostics: TapDiagnostics? = try await performContextCheckedGesture(expected: request.frameContext) {
+        let diagnostics: TapDiagnostics? = try await performContextCheckedGesture(
+            expected: request.frameContext, beforeOperation: checkDeadline
+        ) {
+            try checkDeadline()
             if request.doubleTap == true {
                 try self.gesturePerformer.doubleTap(x: request.x, y: request.y)
                 return nil

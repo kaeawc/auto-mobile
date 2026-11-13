@@ -1,3 +1,4 @@
+test/fixtures/observe-output/ios-keyboard-duo-inner/*.json text eol=lf
 test/fixtures/visionos-settings/*.json text eol=lf
 test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/xr-headset/*.json text eol=lf

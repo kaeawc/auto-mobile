@@ -32,6 +32,7 @@ class TestTimingKeyingTest {
       AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = false))
     collaborators =
       PlanExecutorCollaborators(
+        sessionAcquirerFactory = { FakePlanSessionAcquirer() },
         agent = { agent },
         deviceChecker = TimingFakeDeviceChecker(),
         daemon = daemon,

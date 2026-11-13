@@ -52,6 +52,32 @@ final class GestureCoordinateStrategyTests: XCTestCase {
         observation: GestureSize(width: 466, height: 678), rotation: 0
     )
 
+    func testTapApplicationFrameRequiresFiniteOriginAndPositiveFiniteSize() throws {
+        try GesturePerformer.requireTapApplicationFrame(
+            origin: GesturePoint(x: -10, y: 20), size: GestureSize(width: 466, height: 678)
+        )
+        for size in [
+            GestureSize(width: 0, height: 0), GestureSize(width: 0, height: 678),
+            GestureSize(width: 466, height: 0), GestureSize(width: -1, height: 678),
+            GestureSize(width: 466, height: -1), GestureSize(width: .nan, height: 678),
+            GestureSize(width: 466, height: .nan), GestureSize(width: .infinity, height: 678),
+            GestureSize(width: 466, height: -.infinity),
+        ] {
+            XCTAssertThrowsError(try GesturePerformer.requireTapApplicationFrame(origin: .zero, size: size)) { error in
+                XCTAssertTrue(error.localizedDescription.contains("no accessibility snapshot / empty frame"))
+                XCTAssertTrue(error.localizedDescription.contains("observe again then retry"))
+            }
+        }
+        for origin in [
+            GesturePoint(x: .nan, y: 0), GesturePoint(x: 0, y: .nan),
+            GesturePoint(x: .infinity, y: 0), GesturePoint(x: 0, y: -.infinity),
+        ] {
+            XCTAssertThrowsError(try GesturePerformer.requireTapApplicationFrame(
+                origin: origin, size: GestureSize(width: 466, height: 678)
+            ))
+        }
+    }
+
     func testMismatchExcludesFoldedTransposeAndDegenerateSizes() {
         XCTAssertFalse(hasMultiPanelMismatch(app: folded.app, screen: folded.screen))
         XCTAssertTrue(hasMultiPanelMismatch(app: unfolded.app, screen: unfolded.screen))

@@ -227,7 +227,9 @@ final class CommandHandler: CommandHandling {
     {
         switch request {
         case let .tapCoordinates(payload):
-            return try await handleTapCoordinates(payload, startTime: startTime)
+            return try await handleTapCoordinates(
+                payload, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs
+            )
         case let .swipe(payload):
             return try await handleSwipe(
                 payload, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs

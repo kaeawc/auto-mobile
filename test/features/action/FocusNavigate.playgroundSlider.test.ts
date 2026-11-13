@@ -79,6 +79,8 @@ class FakePlaygroundHome implements FocusObserver, FocusKeyPresser {
           "resource-id": "slider_control",
           class: "android.view.View",
           focusable: true,
+          // The CtrlProxy extractor's RangeInfo format; a slider reports its value here (#18255).
+          "range-info": `current:${this.value}.0,min:0.0,max:100.0`,
           bounds: SLIDER_BOUNDS,
         };
       case "demos":

@@ -82,7 +82,10 @@ class ViewerWatchdogTest {
   @Test
   fun webViewRefusalTracksLiveConsentWithoutRenderingOrWatchdogFailure() {
     // JavaScript does not bypass consent; the app-owned provenance remains visible when enabled.
-    val spec = webViewFixture().replace("\"javaScript\": false", "\"javaScript\": true")
+    val fixture = webViewFixture()
+    val spec = fixture.replace("\"javaScript\": false", "\"javaScript\": true")
+    // A reformatted fixture would make the replace a silent no-op and test the default instead.
+    assertNotEquals("webview-node.json no longer contains \"javaScript\": false", fixture, spec)
     val decoded = (PrototypeSpecValidator.validate(spec) as PrototypeSpecValidation.Success).spec
     repository.prototypes[FIRST] =
       LibraryPrototype(

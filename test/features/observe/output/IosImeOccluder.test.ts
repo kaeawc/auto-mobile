@@ -3,6 +3,7 @@ import {
   getImeOccluder,
   getIosImeOccluder,
   getVisibleIosImeBounds,
+  tapPointOutsideIme,
   type ImeOccluder,
 } from "../../../../src/features/observe/output/SkeletonProjection";
 import { iosKeyboardCapture } from "../../../fixtures/observe/iosKeyboardTabbar";
@@ -11,6 +12,7 @@ import {
   iosKeyboardVisibleHierarchy,
   iosKeyboardMinimizedHierarchy,
 } from "../../../fixtures/observe/iosKeyboardStates";
+import { duoInnerKeyboardCapture } from "../../../fixtures/observe/iosKeyboardDuoInner";
 
 const measured: ImeOccluder = {
   bounds: iosKeyboardCapture.ime.bounds,
@@ -131,5 +133,28 @@ describe("synthetic visible iOS keyboard intersection", () => {
     { width: 402, height: -1 },
   ])("synthetic unknown or invalid screen has no visible rectangle: %j", (size) => {
     expect(getVisibleIosImeBounds(measured, size ?? { width: 0, height: 0 })).toBeUndefined();
+  });
+});
+
+describe("iPhone Duo inner display keyboard (#18248)", () => {
+  const capture = duoInnerKeyboardCapture;
+  const screen = { width: 951, height: 669, units: "points" as const };
+
+  test("keycaps and UIKeyboard are inset, the host view spans the display", () => {
+    const elements = new DefaultObserveElementCollector().collect(capture.viewHierarchy, "ios");
+    const ime = getImeOccluder(elements!);
+    // Keycaps 83-874: 83 percent of the display, below the 90 percent docked threshold.
+    expect<unknown>(ime!.bounds).toEqual([83, 454, 874, 661]);
+    expect(ime!.chromeBottom).toBe(668);
+    expect<unknown>(getIosImeOccluder(ime!, screen).bounds).toEqual([0, 405, 951, 669]);
+    expect<unknown>(getVisibleIosImeBounds(ime!, screen)).toEqual([0, 405, 951, 669]);
+  });
+
+  test("a control under the keyboard's side margins has no visible tap point", () => {
+    const elements = new DefaultObserveElementCollector().collect(capture.viewHierarchy, "ios");
+    const cover = getIosImeOccluder(getImeOccluder(elements!)!, screen).bounds;
+    // The captured Emoji key (clipped to the display) sits left of the keycaps, under the keyboard.
+    expect(tapPointOutsideIme([8, 604, 76, 669], cover)).toBeNull();
+    expect(tapPointOutsideIme([8, 200, 76, 260], cover)).not.toBeNull();
   });
 });

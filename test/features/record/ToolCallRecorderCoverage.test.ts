@@ -119,8 +119,6 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "accessibilityAudit",
   // Added after the list was frozen: a semantic accessibility action replays as a plan step (#14077).
   "accessibilityAction",
-  // Added after the list was frozen: an audit runs as a plan assertion step (#14075).
-  "audit",
   "appLifecycle",
   // Added after the list was frozen: a triggered job replays as a plan step (#14090).
   "backgroundWork",

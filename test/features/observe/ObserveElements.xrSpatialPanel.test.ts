@@ -494,6 +494,7 @@ function restructureSwitchRows(
     title2: CapturedNode,
     toggle2: CapturedNode,
   ) => CapturedNode[],
+  root: unknown = observation.viewHierarchy,
 ): void {
   const visit = (node: unknown): void => {
     if (!node || typeof node !== "object") {
@@ -514,7 +515,7 @@ function restructureSwitchRows(
     }
     Object.values(record).forEach(visit);
   };
-  visit(observation.viewHierarchy);
+  visit(root);
 }
 
 const SECOND_SWITCH_ID = "s2-switch-2";
@@ -760,9 +761,16 @@ test("window and ornament Switches with matching bounds and no id keep their own
 async function bothProjectionLabels(
   rows: Parameters<typeof restructureSwitchRows>[1],
   ids: readonly string[] = [SWITCH_ID, SECOND_SWITCH_ID],
+  mergedRows?: Parameters<typeof restructureSwitchRows>[1],
 ) {
   const observation = spatialPanelObservation("switch-scroll");
-  restructureSwitchRows(observation, rows);
+  if (mergedRows) {
+    const hierarchy = observation.viewHierarchy!;
+    restructureSwitchRows(observation, mergedRows, hierarchy.hierarchy);
+    restructureSwitchRows(observation, rows, hierarchy.windows);
+  } else {
+    restructureSwitchRows(observation, rows);
+  }
   await enrich(observation, true);
   const output = sanitizeObserveResult(observation, {
     dropElements: false,
@@ -839,5 +847,24 @@ test("a window Switch never reserves the ornament text before an ornament Switch
   expect(labels).toEqual([
     { skeleton: undefined, index: undefined, searchable: [undefined] },
     { skeleton: "Ornament title", index: undefined, searchable: ["Ornament title"] },
+  ]);
+});
+
+test("a later raw copy of a Switch never reserves trailing text before first-copy labels apply (#18293)", async () => {
+  // Merged tree `[Text("Wi-Fi"), Switch A]`; window tree `[Switch A, Text("Bluetooth"), Switch B]`
+  // under one bounds-less row, since the captured window lists its children as separate roots.
+  const labels = await bothProjectionLabels(
+    (_t1, s1, t2, s2) => [
+      {
+        "view-id": "s2-window-row",
+        node: [s1, shifted({ ...t2, text: "Bluetooth" }), shifted(s2)],
+      },
+    ],
+    [SWITCH_ID, SECOND_SWITCH_ID],
+    (t1, s1) => [{ ...t1, text: "Wi-Fi" }, s1],
+  );
+  expect(labels.map(({ skeleton, searchable }) => ({ skeleton, searchable }))).toEqual([
+    { skeleton: "Wi-Fi", searchable: ["Wi-Fi"] },
+    { skeleton: "Bluetooth", searchable: ["Bluetooth"] },
   ]);
 });

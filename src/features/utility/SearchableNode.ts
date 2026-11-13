@@ -537,7 +537,9 @@ function attributeSearchableLabels(entries: SearchableEntry[]): void {
  * a node's serialized copies (merged tree and window tree) into one row keeping the first
  * copy's ancestry, a later copy of the same toggle takes the first copy's result (#18253).
  * A copy shares the coordinate space too: window and ornament toggles with equal local
- * bounds are distinct (#18273).
+ * bounds are distinct (#18273). Later copies are left out of the shared rule, as the
+ * skeleton merges them away, so a raw duplicate never reserves trailing text another
+ * toggle needs (#18293).
  */
 function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): void {
   const hoisted = new Set(entries.flatMap((entry) => entry.hoistedSources ?? []));
@@ -545,6 +547,15 @@ function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): 
   const toggles = entries.filter(
     (entry) => entry.element !== undefined && entry.affordances.includes("toggle"),
   );
+  const byCopy = new Map<string, SearchableEntry>();
+  const firstCopy = new Map<SearchableEntry, SearchableEntry>();
+  for (const entry of toggles.filter((toggle) => toggle.label === undefined)) {
+    const copy = JSON.stringify([entry.element!.space, entry.elementId, entry.element!.bounds]);
+    if (!byCopy.has(copy)) {
+      byCopy.set(copy, entry);
+    }
+    firstCopy.set(entry, byCopy.get(copy)!);
+  }
   const texts = entries.filter(
     (entry) =>
       entry.affordances.length === 0 &&
@@ -553,7 +564,7 @@ function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): 
       !hoisted.has(entry),
   );
   const labels = precedingSiblingLabelSources(
-    toggles,
+    toggles.filter((entry) => (firstCopy.get(entry) ?? entry) === entry),
     texts,
     (entry) => ({
       position: positions.get(entry)!,
@@ -562,14 +573,9 @@ function attributeSearchablePrecedingSiblingLabels(entries: SearchableEntry[]): 
     }),
     (toggle, text) => followsToggleInPlainWrapper(entries, toggle, text),
   );
-  const firstCopies = new Map<string, SearchableEntry | undefined>();
   for (const entry of toggles) {
-    if (entry.label !== undefined) {
-      continue;
-    }
-    const copy = JSON.stringify([entry.element!.space, entry.elementId, entry.element!.bounds]);
-    const preceding = firstCopies.has(copy) ? firstCopies.get(copy) : labels.get(entry);
-    firstCopies.set(copy, preceding);
+    const first = firstCopy.get(entry);
+    const preceding = first && labels.get(first);
     if (preceding) {
       entry.label = preceding.label;
       entry.displayedLabel = preceding.displayedLabel;

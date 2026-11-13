@@ -26,7 +26,9 @@ const MAX_PID_LINE_LENGTH = 32;
  * Builds one `adb shell` command that detaches with `setsid` so a dropped host adb
  * session does not kill the recorder (#17951). Older images without `setsid`, and images
  * whose `setsid` cannot exec (exit 126/127, before the detached shell printed anything),
- * use the attached launch (#18243). In either case the innermost shell prints `$$` before
+ * use the attached launch (#18243). The launch shell first ignores SIGHUP: when the host adb
+ * client dies while the server stays up, adbd sends the shell SIGHUP, and mksh forwards it
+ * to its jobs even across the `setsid` boundary, which stopped the recorder (#18292). In either case the innermost shell prints `$$` before
  * `exec` keeps that pid for `screenrecord`. Tokens must not contain single quotes because
  * the detached shell command is single-quoted; argv otherwise stays space-joined.
  */
@@ -37,7 +39,7 @@ export function buildPidReportingScreenrecordArgs(screenrecordArgv: readonly str
   const command = `echo $$; exec ${screenrecordArgv.join(" ")}`;
   return [
     "shell",
-    `if command -v setsid >/dev/null 2>&1; then setsid sh -c '${command}'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; ${command}`,
+    `trap '' HUP; if command -v setsid >/dev/null 2>&1; then setsid sh -c '${command}'; s=$?; case $s in 126|127) ;; *) exit $s;; esac; fi; ${command}`,
   ];
 }
 

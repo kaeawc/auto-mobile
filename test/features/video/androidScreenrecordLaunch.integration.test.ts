@@ -36,6 +36,28 @@ describe.skipIf(process.platform === "win32")(
       expect(status).toBe(3);
     });
 
+    test("the launch shell survives SIGHUP while the recorder runs (#18292)", () => {
+      const bin = scratch.next();
+      for (const [name, body] of [
+        ["setsid", "sleep 1; exit 7"],
+        ["screenrecord", "exit 3"],
+      ]) {
+        writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`);
+        chmodSync(path.join(bin, name), 0o755);
+      }
+      const [, command] = buildPidReportingScreenrecordArgs(["screenrecord", "/sdcard/a.mp4"]);
+      const run = spawnSync(
+        "/bin/sh",
+        ["-c", `/bin/sh -c "$LAUNCH" >/dev/null & p=$!; sleep 0.3; kill -HUP $p; wait $p; echo $?`],
+        {
+          encoding: "utf8",
+          env: { LAUNCH: command, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` },
+        },
+      );
+      // 129 would mean the launch shell died of SIGHUP; 7 is the stub recorder's own status.
+      expect(run.stdout.trim()).toBe("7");
+    });
+
     test.each([126, 127])("setsid exec failure %p falls back to the plain launch", (code) => {
       const { lines, status } = runLaunch(`echo "setsid: exec failed" >&2; exit ${code}`);
       expect(lines).toHaveLength(2);

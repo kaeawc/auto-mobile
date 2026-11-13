@@ -109,7 +109,7 @@
         "reflect-metadata": "^0.2.2",
         "turbo": "^2.8.10",
         "typescript": "6.0.3",
-        "werift": "^0.26.0",
+        "werift": "^0.27.0",
         "ws": "^8.19.0",
         "xml2js": "^0.6.2",
         "zod-to-json-schema": "^3.25.1",
@@ -785,7 +785,7 @@
 
     "walk-up-path": ["walk-up-path@4.0.0", "", {}, "sha512-3hu+tD8YzSLGuFYtPRb48vdhKMi0KQV5sn+uWr8+7dMEq/2G/dtLrdDinkLjqq5TIbIBjYJ4Ax/n3YiaW7QM8A=="],
 
-    "werift": ["werift@0.26.0", "", { "dependencies": { "buffer": "^6.0.3", "mediabunny": "^1.62.1", "multicast-dns": "^7.2.5" } }, "sha512-pH8l4jmp+oNnyGG9FrqkBf8r+Tz+1oDE6rshqtMlpfUzf90rJCn/XS81yalXl58T3tnsXnNQnhwkW/nE0wbFRA=="],
+    "werift": ["werift@0.27.0", "", { "dependencies": { "buffer": "^6.0.3", "mediabunny": "^1.62.1", "multicast-dns": "^7.2.5" } }, "sha512-JgFfqVXZ4s3A+VE2DxMo5QympNAnravCuQdNqQeBiKIrojtpjghYahgnl5Vc+sh0Porsx/LHODNMdZKM/JbksA=="],
 
     "which": ["which@2.0.2", "", { "dependencies": { "isexe": "^2.0.0" }, "bin": { "node-which": "bin/node-which" } }, "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA=="],
 

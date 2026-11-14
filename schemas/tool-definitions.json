@@ -32761,7 +32761,7 @@
                 "minLength": 1
               },
               "observation": {
-                "description": "Instead of path: an observation screenshot URI, automobile:observation/{deviceId}/{observationId}/screenshot (the observationScreenshotResourceUri that observe returns); it must still be that device's current observation",
+                "description": "Instead of path: an observation screenshot URI, automobile:observation/{deviceId}/{observationId}/screenshot (the observationScreenshotResourceUri that observe returns); it must still be retained (one of that device's last 10 observations, under 5 minutes old)",
                 "type": "string",
                 "minLength": 1
               }

@@ -798,7 +798,8 @@ describe("unscoped latest observation resources", () => {
         deps,
       );
       expect(result).toMatchObject({
-        error: expect.stringContaining("unknown or has been superseded"),
+        code: "OBSERVATION_NOT_RETAINED",
+        error: expect.stringContaining("is unknown or is no longer retained"),
       });
     });
 
@@ -856,7 +857,7 @@ describe("unscoped latest observation resources", () => {
     const screenshot = await readObservationScreenshot(deviceA.deviceId, "evicted-observation");
 
     expect(screenshot.mimeType).toBe("application/json");
-    expect(screenshot.text).toContain("unknown or has been superseded");
+    expect(screenshot.text).toContain("is unknown or is no longer retained");
   });
 
   test("waits for a pending capture for the requested observation", async () => {
@@ -1026,18 +1027,23 @@ describe("unscoped latest observation resources", () => {
     await job.promise;
   });
 
-  test("does not serve a newer screenshot when the requested observation is replaced while waiting", async () => {
+  test("serves the requested observation's own capture when a newer observation lands while waiting", async () => {
     const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
     getScreenshotStateStore().beginObservation(deviceA.deviceId, observationId);
     const gate = createGate();
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
       getScreenshotStateStore().updateForObservation(deviceA.deviceId, observationId, {
-        path: "/tmp/device-a-newer.png",
+        path: "/tmp/device-a-own.png",
       });
-      return { success: true, path: "/tmp/device-a-newer.png" };
+      return { success: true, path: "/tmp/device-a-own.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
+    const ownImage = Buffer.from("own-capture");
+    useScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => ownImage,
+    });
 
     const screenshotPromise = readObservationScreenshot(deviceA.deviceId, observationId);
     expect(await Promise.race([screenshotPromise, settleSentinel()])).toBe("still-pending");
@@ -1047,8 +1053,7 @@ describe("unscoped latest observation resources", () => {
     gate.open();
 
     const screenshot = await screenshotPromise;
-    expect(screenshot.mimeType).toBe("application/json");
-    expect(screenshot.text).toContain("unknown or has been superseded");
+    expect(screenshot.blob).toBe(ownImage.toString("base64"));
     await job.promise;
   });
 

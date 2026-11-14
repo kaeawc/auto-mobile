@@ -6,6 +6,7 @@ import {
   MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES,
 } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
+import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
@@ -900,7 +901,13 @@ describe("IOSCtrlProxyManager simulator start", function () {
           expect(events).toEqual(["xctestrun:device", "verify:device"]);
         } else {
           await steps.startOnDevice();
-          expect(events).toEqual(["xctestrun:device", "verify:device", "spawn"]);
+          // The launch re-resolves the xctestrun after the verify, which can re-extract (#18339).
+          expect(events).toEqual([
+            "xctestrun:device",
+            "verify:device",
+            "xctestrun:device",
+            "spawn",
+          ]);
         }
       },
     );
@@ -1947,6 +1954,84 @@ describe("IOSCtrlProxyManager simulator start", function () {
       await expect(manager.start()).rejects.toThrow(
         /port 8765 still held by PID 5555 .*xcodebuild test-without-building/,
       );
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+  });
+
+  describe("xctestrun selection across a pre-launch re-extraction (#18339)", function () {
+    const PRODUCTS = "/derived-data/Build/Products";
+    const STALE_LOCAL = `${PRODUCTS}/AutoMobileTest_iphonesimulator26.5-arm64.xctestrun`;
+    const RELEASE = `${PRODUCTS}/AutoMobileTest_iphonesimulator26.5-arm64-x86_64.xctestrun`;
+
+    /**
+     * Fake Products directory: file path -> mtime. The lookup picks the newest
+     * xctestrun by mtime (as the real builder does), the pre-launch check models a
+     * release extraction that replaces the whole directory, and the env write
+     * fails with ENOENT for a path that is no longer present.
+     */
+    function createProductsFilesystemBuilder(options: { extractionLeaves: string[] }): {
+      builder: ReturnType<typeof fakeIosCtrlProxyBuilder>;
+      writes: string[];
+    } {
+      // A stale local build left a NEWER -arm64 xctestrun beside the release one.
+      let files = new Map<string, number>([
+        [RELEASE, 1_000],
+        [STALE_LOCAL, 2_000],
+      ]);
+      const writes: string[] = [];
+      const builder = fakeIosCtrlProxyBuilder({
+        getXctestrunPath: async () => {
+          const newest = [...files.entries()].sort((a, b) => b[1] - a[1])[0];
+          return newest?.[0] ?? null;
+        },
+        verifyRunnerBinaryBeforeLaunch: async () => {
+          files = new Map(options.extractionLeaves.map((file) => [file, 3_000]));
+        },
+        writeRunnerEnvironment: async (xctestrunPath, env, deviceId) => {
+          if (!files.has(xctestrunPath)) {
+            throw new Error(`ENOENT: no such file or directory, open '${xctestrunPath}'`);
+          }
+          writes.push(xctestrunPath);
+          return fakeWriteRunnerEnvironment(xctestrunPath, env, deviceId);
+        },
+      });
+      return { builder, writes };
+    }
+
+    test("injects the env into the xctestrun the extraction published, not the stale local build", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      const { builder, writes } = createProductsFilesystemBuilder({ extractionLeaves: [RELEASE] });
+      const { steps } = createManagerWithOwnSteps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder,
+        processExecutor: fakeExecutor,
+      });
+
+      await steps.startOnSimulator();
+
+      expect(writes).toEqual([RELEASE]);
+      const spawn = fakeExecutor.getSpawnedProcesses()[0];
+      expect(spawn.args).toContain(
+        `${PRODUCTS}/automobile-runner-${testDevice.deviceId}.xctestrun`,
+      );
+    });
+
+    test("fails with an actionable error naming the vanished xctestrun when none remains", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      const { builder, writes } = createProductsFilesystemBuilder({ extractionLeaves: [] });
+      const { steps } = createManagerWithOwnSteps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder,
+        processExecutor: fakeExecutor,
+      });
+
+      const failure = steps.startOnSimulator();
+
+      await expect(failure).rejects.toBeInstanceOf(ActionableError);
+      await expect(failure).rejects.toThrow(STALE_LOCAL);
+      expect(writes).toEqual([]);
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
     });
   });

@@ -1046,6 +1046,31 @@ describe("IosCtrlProxyBuilder", function () {
       expect(env.get("TERM")).toBe("dumb");
     });
 
+    test("a vanished source xctestrun names it and the xctestrun the extraction left (#18339)", async function () {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const staleLocal = path.join(
+        productsDir,
+        "AutoMobileTest_iphonesimulator26.5-arm64.xctestrun",
+      );
+      const release = path.join(
+        productsDir,
+        "AutoMobileTest_iphonesimulator26.5-arm64-x86_64.xctestrun",
+      );
+      await fs.writeFile(release, SAMPLE_XCTESTRUN);
+
+      const builder = IosCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+      const failure = builder.writeRunnerEnvironment(
+        staleLocal,
+        { CTRL_PROXY_IOS_PORT: "8767" },
+        "SIM-UUID",
+      );
+
+      await expect(failure).rejects.toBeInstanceOf(ActionableError);
+      await expect(failure).rejects.toThrow(staleLocal);
+      await expect(failure).rejects.toThrow(`present now: ${release}`);
+    });
+
     test("per-launch copy is excluded from getXctestrunPath candidate globs", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });

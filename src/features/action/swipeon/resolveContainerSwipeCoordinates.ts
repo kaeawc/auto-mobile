@@ -104,6 +104,7 @@ export function resolveContainerSwipeCoordinates({
   const overlayCandidates = overlayDetector.collectOverlayCandidates(
     viewHierarchy,
     containerElement,
+    platform ?? getHierarchySnapshot(observeResult.viewHierarchy)?.platform,
   );
   if (overlayCandidates.length === 0) {
     return withChromeWarning(defaultSwipe);

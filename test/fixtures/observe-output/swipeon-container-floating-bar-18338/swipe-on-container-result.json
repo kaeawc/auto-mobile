@@ -1,0 +1,37 @@
+{
+  "message": "Swiped up",
+  "success": true,
+  "x1": 540,
+  "y1": 1921,
+  "x2": 540,
+  "y2": 778,
+  "duration": 300,
+  "targetType": "element",
+  "element": {
+    "actions": [
+      "accessibility_focus",
+      "scroll_backward"
+    ],
+    "visible-to-user": true,
+    "collection-info": "rows:1,cols:6",
+    "view-id": "s2-ece1d20da9fba3c3",
+    "scrollable": "true",
+    "bounds": {
+      "left": 0,
+      "top": 636,
+      "right": 1080,
+      "bottom": 2064
+    }
+  },
+  "warning": "Swipe did not change the screen; the start point was inside the scrollable, which may already be at the end of the scrollable content.",
+  "effect": {
+    "screenChanged": false,
+    "basis": "screenIdentity unchanged"
+  },
+  "velocityPxPerSecond": 3810,
+  "observationDiff": {
+    "mode": "full",
+    "reason": "disabled",
+    "hint": "Set --actions-diff-observe to receive diffs."
+  }
+}

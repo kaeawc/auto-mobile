@@ -4,7 +4,7 @@ import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { SwipeInterval, OverlayCandidate, OverlayAnalyzer } from "./types";
 import { toSearchable } from "../../utility/SearchableNode";
 import { boundsArea, boundsEqual, clamp } from "../../../utils/bounds";
-import { nodeBounds } from "../../../models/ViewHierarchyResult";
+import { childrenOf, nodeBounds } from "../../../models/ViewHierarchyResult";
 import { isTruthyFlag } from "../../utility/elementProperties";
 
 export class OverlayDetector implements OverlayAnalyzer {
@@ -19,6 +19,7 @@ export class OverlayDetector implements OverlayAnalyzer {
   collectOverlayCandidates(
     viewHierarchy: ViewHierarchyResult,
     containerElement: Element,
+    platform?: "android" | "ios",
   ): OverlayCandidate[] {
     const parser = this.elementParser;
 
@@ -64,7 +65,7 @@ export class OverlayDetector implements OverlayAnalyzer {
     // clickable/focusable parent (card, Compose root) used to be recorded as an
     // overlay covering the whole container, which left no safe swipe area and
     // forced the "No unobstructed swipe area" fallback (#6128). Ancestors are
-    // never overlays — only siblings and other windows are.
+    // never overlays; descendants need separate evidence of a floating control.
     const containerAncestors = this.collectContainerAncestors(
       selectedContainer?.roots ?? null,
       parser,
@@ -91,6 +92,7 @@ export class OverlayDetector implements OverlayAnalyzer {
       for (const rootNode of rootNodes) {
         let insideContainer = false;
         let containerDepth = -1;
+        let childOverlays = new Set<ViewHierarchyNode>();
 
         parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
           if (seenNodes.has(node)) {
@@ -111,6 +113,9 @@ export class OverlayDetector implements OverlayAnalyzer {
             if (!insideContainer) {
               insideContainer = true;
               containerDepth = depth;
+              if (platform === "android") {
+                childOverlays = this.collectContainerChildOverlays(node, containerBounds);
+              }
             }
             return;
           }
@@ -120,7 +125,7 @@ export class OverlayDetector implements OverlayAnalyzer {
             containerDepth = -1;
           }
 
-          if (insideContainer || containerAncestors.has(node)) {
+          if ((insideContainer && !childOverlays.has(node)) || containerAncestors.has(node)) {
             return;
           }
 
@@ -128,32 +133,92 @@ export class OverlayDetector implements OverlayAnalyzer {
             return;
           }
 
-          const parsedNode = parser.parseNodeBounds(node);
-          if (!parsedNode) {
-            return;
-          }
-
-          const overlapBounds = this.intersectBounds(containerBounds, parsedNode.bounds);
-          if (!overlapBounds) {
-            return;
-          }
-
-          const coverage = boundsArea(overlapBounds);
-          if (coverage <= 0) {
-            return;
-          }
-
-          overlays.push({
-            bounds: parsedNode.bounds,
-            overlapBounds,
-            coverage,
-            zOrder: { windowRank, nodeOrder: currentOrder },
+          const overlay = this.parseOverlayCandidate(node, containerBounds, {
+            windowRank,
+            nodeOrder: currentOrder,
           });
+          if (overlay) {
+            overlays.push(overlay);
+          }
         });
       }
     });
 
     return overlays;
+  }
+
+  private parseOverlayCandidate(
+    node: ViewHierarchyNode,
+    containerBounds: Element["bounds"],
+    zOrder: OverlayCandidate["zOrder"],
+  ): OverlayCandidate | null {
+    const parsedNode = this.elementParser.parseNodeBounds(node);
+    if (!parsedNode) {
+      return null;
+    }
+    const overlapBounds = this.intersectBounds(containerBounds, parsedNode.bounds);
+    if (!overlapBounds) {
+      return null;
+    }
+    const coverage = boundsArea(overlapBounds);
+    if (coverage <= 0) {
+      return null;
+    }
+    return { bounds: parsedNode.bounds, overlapBounds, coverage, zOrder };
+  }
+
+  private collectContainerChildOverlays(
+    container: ViewHierarchyNode,
+    bounds: Element["bounds"],
+  ): Set<ViewHierarchyNode> {
+    const overlays = new Set<ViewHierarchyNode>();
+    let followsScrollable = false;
+    for (const child of childrenOf(container)) {
+      const properties = this.elementParser.extractNodeProperties(child);
+      if (isTruthyFlag(properties.scrollable)) {
+        followsScrollable = true;
+        continue;
+      }
+      if (!followsScrollable || !this.isClickableNode(properties)) {
+        continue;
+      }
+      const parsed = this.elementParser.parseNodeBounds(child);
+      if (!parsed) {
+        continue;
+      }
+      if (!this.isInContainerEdgeBand(parsed.bounds, bounds)) {
+        continue;
+      }
+
+      // A direct, later sibling of scrolling content wholly in an outer 20% band
+      // is a floating-control candidate, not a row. Allow decorative labels but
+      // reject composite/scrolling controls; never inspect nested-list children.
+      let hasInteractiveDescendant = false;
+      this.elementParser.traverseNode(child, (descendant: ViewHierarchyNode, depth: number) => {
+        if (depth === 0) {
+          return;
+        }
+        const attributes = this.elementParser.extractNodeProperties(descendant);
+        if (isTruthyFlag(attributes.scrollable) || this.isClickableNode(attributes)) {
+          hasInteractiveDescendant = true;
+        }
+      });
+      if (!hasInteractiveDescendant) {
+        overlays.add(child);
+      }
+    }
+    return overlays;
+  }
+
+  private isInContainerEdgeBand(child: Element["bounds"], container: Element["bounds"]): boolean {
+    const width = container.right - container.left;
+    const height = container.bottom - container.top;
+    return (
+      child.right <= container.left + width * 0.2 ||
+      child.left >= container.right - width * 0.2 ||
+      child.bottom <= container.top + height * 0.2 ||
+      child.top >= container.bottom - height * 0.2
+    );
   }
 
   computeSafeSwipeCoordinates(

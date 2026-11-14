@@ -210,9 +210,28 @@ summary() {
     i=$((i + 1))
   done
 }
+# Checksums of the files pin-runtime-deps.ts --write may rewrite, so the lane can
+# tell a no-change run (tree left as it was, #18333) from one that moved pins.
+pin_outputs_snapshot() {
+  local file
+  for file in package.json bun.lock scripts/release/runtime-graph.json; do
+    if [[ -f "$file" ]]; then cksum "$file"; else echo "missing $file"; fi
+  done
+}
+runtime_pins_lane() {
+  local before after
+  before="$(pin_outputs_snapshot)"
+  bun scripts/release/pin-runtime-deps.ts --write || return 1
+  after="$(pin_outputs_snapshot)"
+  if [[ "$before" == "$after" ]]; then
+    echo 'Runtime pins already current; package.json, bun.lock, and scripts/release/runtime-graph.json unchanged.'
+  else
+    echo 'Runtime pins changed: commit package.json, bun.lock, and scripts/release/runtime-graph.json.'
+  fi
+}
 for lane in ${selected_lanes[@]+"${selected_lanes[@]}"}; do
   case "$lane" in
-    runtime-pins) run_lane "$lane" bun scripts/release/pin-runtime-deps.ts --write; abort_if_failed; echo 'Reminder: commit package.json, bun.lock, and scripts/release/runtime-graph.json if changed.' ;;
+    runtime-pins) run_lane "$lane" runtime_pins_lane; abort_if_failed ;;
     node) args=(); if [[ "$changed_mode" -eq 1 ]]; then args+=(--changed); fi; if [[ "$profile" == cloud || "$timing_mode" -eq 1 ]]; then args+=(--timing); fi; run_lane "$lane" bash "$SCRIPT_DIR/prepush-node.sh" ${args[@]+"${args[@]}"}; abort_if_failed ;;
     shell) run_lane "$lane" bash "$SCRIPT_DIR/prepush-shell.sh" --base "$BASE"; abort_if_failed; case "$selected" in *" node "*) ;; *) run_lane 'shell format' bun run format; abort_if_failed ;; esac ;;
     android) run_lane "$lane" bash "$SCRIPT_DIR/prepush-android.sh" --base-ref "$BASE"; abort_if_failed ;;

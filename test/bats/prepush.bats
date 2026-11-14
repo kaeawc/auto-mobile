@@ -263,3 +263,55 @@ STUB
   run bash scripts/prepush.sh --base main --list
   [ "$status" -eq 0 ]; [ "$output" = android ]
 }
+
+# Stubs the pin script through the bun shim: "unchanged" rewrites the manifest
+# with identical bytes (an already-pinned tree), "changed" moves a pin (#18333).
+stub_pin_script() {
+  cat > "$TEST_ROOT/bin/bun" <<'STUB'
+#!/usr/bin/env bash
+echo "bun $*" >> "$LOG"
+if [[ "$1" == scripts/release/pin-runtime-deps.ts && "$2" == --write ]]; then
+  case "${PIN_STUB_MODE:-unchanged}" in
+    unchanged) content="$(cat scripts/release/runtime-graph.json)"; printf '%s\n' "$content" > scripts/release/runtime-graph.json ;;
+    changed) printf '{ "roots": ["a", "b"] }\n' > scripts/release/runtime-graph.json ;;
+    fail) exit 1 ;;
+  esac
+fi
+STUB
+  chmod +x "$TEST_ROOT/bin/bun"
+  mkdir -p "$TEST_ROOT/scripts/release"
+  printf '{ "roots": ["a"] }\n' > "$TEST_ROOT/scripts/release/runtime-graph.json"
+  printf '{}\n' > "$TEST_ROOT/package.json"
+  printf 'lock\n' > "$TEST_ROOT/bun.lock"
+  git -C "$TEST_ROOT" init -q
+  git -C "$TEST_ROOT" add package.json bun.lock scripts/release/runtime-graph.json
+  git -C "$TEST_ROOT" -c user.email=t@example.com -c user.name=t commit -q -m init
+}
+
+@test "runtime-pins lane leaves no working-tree diff when pins are current" {
+  stub_pin_script
+  set_paths bun.lock
+  PIN_STUB_MODE=unchanged run bash scripts/prepush.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Runtime pins already current"* ]]
+  [[ "$output" != *"Runtime pins changed"* ]]
+  [ -z "$(git -C "$TEST_ROOT" status --porcelain -- package.json bun.lock scripts/release/runtime-graph.json)" ]
+}
+
+@test "runtime-pins lane reports changed pin outputs" {
+  stub_pin_script
+  set_paths bun.lock
+  PIN_STUB_MODE=changed run bash scripts/prepush.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Runtime pins changed: commit"* ]]
+  [ -n "$(git -C "$TEST_ROOT" status --porcelain -- scripts/release/runtime-graph.json)" ]
+}
+
+@test "runtime-pins lane failure stops before later lanes" {
+  stub_pin_script
+  set_paths bun.lock
+  PIN_STUB_MODE=fail run bash scripts/prepush.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"runtime-pins       FAIL"* ]]
+  ! grep -q '^node ' "$LOG"
+}

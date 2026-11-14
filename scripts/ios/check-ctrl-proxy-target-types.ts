@@ -21,7 +21,7 @@
  *   bun scripts/ios/check-ctrl-proxy-target-types.ts [project-dir]
  */
 import { readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
 import { sortedReaddirEntriesSync } from "../../src/utils/io";
@@ -140,8 +140,9 @@ function swiftFilesUnder(root: string, path: string, excludes: readonly string[]
   const files: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of sortedReaddirEntriesSync(join(root, dir))) {
-      const child = join(dir, entry.name);
-      const fromSource = relative(path, child);
+      // Keys are project-relative POSIX paths on every host, matching project.yml.
+      const child = posix.join(dir, entry.name);
+      const fromSource = posix.relative(path, child);
       const excluded = excludes.some(
         (pattern) =>
           new Bun.Glob(pattern).match(fromSource) || new Bun.Glob(pattern).match(entry.name),
@@ -186,7 +187,7 @@ export function loadProject(projectDir: string): {
   const packageFiles = new Map<string, string[]>();
   for (const [name, config] of Object.entries(project.packages ?? {})) {
     if (typeof config?.path === "string") {
-      packageFiles.set(name, swiftFilesUnder(projectDir, join(config.path, "Sources"), []));
+      packageFiles.set(name, swiftFilesUnder(projectDir, posix.join(config.path, "Sources"), []));
     }
   }
   const targets = Object.entries(project.targets).map(([name, config]) => ({

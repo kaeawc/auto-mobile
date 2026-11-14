@@ -3,15 +3,53 @@
 Run from scripts/github: uv run --locked python -m unittest discover -s tests
 """
 
+import tempfile
 import unittest
 from pathlib import Path
 
 import markdown
 
-from auto_mobile_docs.check_github_markdown import check_text, load_markdown_settings
+from auto_mobile_docs.check_github_markdown import check_text, load_markdown_settings, pages_to_check
 from auto_mobile_docs.github_alerts import GithubAlertsExtension
 
 MKDOCS_YML = Path(__file__).resolve().parents[3] / "mkdocs.yml"
+
+
+class PagesToCheckTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.docs = self.root / "docs"
+        (self.docs / "guide").mkdir(parents=True)
+        (self.root / ".github").mkdir()
+        for path in ("docs/index.md", "docs/guide/page.md", "docs/contributing.md",
+                     "docs/changelog.md", "CHANGELOG.md", ".github/CONTRIBUTING.md"):
+            (self.root / path).write_text("# Page\n", encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_default_docs_dir_skips_transient_deploy_copies(self):
+        # The lychee check writes and deletes these copies while this check runs (#18336).
+        self.assertEqual(pages_to_check(self.root, self.docs, include_deploy_copied=True), [
+            self.docs / "guide" / "page.md",
+            self.docs / "index.md",
+            self.root / "CHANGELOG.md",
+            self.root / ".github" / "CONTRIBUTING.md",
+        ])
+
+    def test_nested_pages_with_copied_names_are_still_checked(self):
+        (self.docs / "guide" / "changelog.md").write_text("# Nested\n", encoding="utf-8")
+        self.assertIn(self.docs / "guide" / "changelog.md",
+                      pages_to_check(self.root, self.docs, include_deploy_copied=True))
+
+    def test_explicit_docs_dir_checks_every_page(self):
+        self.assertEqual(pages_to_check(self.root, self.docs, include_deploy_copied=False), [
+            self.docs / "changelog.md",
+            self.docs / "contributing.md",
+            self.docs / "guide" / "page.md",
+            self.docs / "index.md",
+        ])
 
 
 class CheckGithubMarkdownTest(unittest.TestCase):

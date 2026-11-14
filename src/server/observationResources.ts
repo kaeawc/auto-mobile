@@ -24,6 +24,9 @@ import {
 } from "./retainedScreenshot";
 import {
   getScreenshotStateStore,
+  MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE,
+  OBSERVE_RESULT_CACHE_TTL_MS,
+  type ObservationEviction,
   SCREENSHOT_CAPTURE_CANCELLED_REASON,
   SCREENSHOT_CAPTURE_SUPERSEDED_REASON,
 } from "../features/observe/screenshot/ScreenshotStateRegistry";
@@ -74,8 +77,9 @@ export const RESOURCE_URIS = {
 // the two reads. Callers that need a guaranteed hierarchy/screenshot match from
 // exactly one device can use the observation-id-scoped screenshot resource.
 // It is keyed by immutable device and capture identities, is readable by any
-// client (unlike session-scoped resources), and errors when that observation
-// has been superseded or evicted from the device cache.
+// client (unlike session-scoped resources), and stays readable while that
+// observation is one of the device's last MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE
+// captures within the cache TTL (#18337); afterwards it errors with the reason.
 
 function resolveLatestScreenshotDeviceId(): string | undefined {
   return RealObserveScreen.getRecentCachedObservation()?.deviceId;
@@ -111,6 +115,7 @@ interface ObservationResourceIdentity {
   deviceId?: string;
   observationId?: string;
   sessionUuid?: string;
+  eviction?: ObservationEviction;
 }
 
 function observationResourceError(
@@ -128,6 +133,8 @@ function observationResourceError(
     ...(identity.deviceId ? { deviceId: identity.deviceId } : {}),
     ...(identity.observationId ? { observationId: identity.observationId } : {}),
     ...(identity.sessionUuid ? { sessionUuid: identity.sessionUuid } : {}),
+    ...(identity.eviction ? { evictedBecause: identity.eviction.reason } : {}),
+    ...(identity.eviction?.supersededBy ? { supersededBy: identity.eviction.supersededBy } : {}),
   };
   return { uri, mimeType: "application/json", text: JSON.stringify(body, null, 2) };
 }
@@ -314,11 +321,15 @@ function observationScreenshotUnknownError(
   deviceId: string,
   observationId: string,
 ): ResourceContent {
+  const eviction = getScreenshotStateStore().getObservationEviction(deviceId, observationId);
+  const why = eviction
+    ? observationEvictionDescription(eviction)
+    : "is unknown or is no longer retained";
   return observationResourceError(
     uri,
     "OBSERVATION_NOT_RETAINED",
-    `Observation id ${observationId} is unknown or has been superseded or evicted by a newer observation for device ${deviceId}. Call the 'observe' tool again.`,
-    { deviceId, observationId },
+    `Observation id ${observationId} for device ${deviceId} ${why}. Call the 'observe' tool again.`,
+    { deviceId, observationId, ...(eviction ? { eviction } : {}) },
   );
 }
 
@@ -343,9 +354,27 @@ function observationScreenshotMalformedUriError(uri: string): ResourceContent {
   );
 }
 
+function observationEvictionDescription(eviction: ObservationEviction): string {
+  switch (eviction.reason) {
+    case "newer-observation":
+      return `was evicted after ${MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE} newer observations${
+        eviction.supersededBy ? ` (latest ${eviction.supersededBy})` : ""
+      }`;
+    case "ttl":
+      return `expired after ${Math.round(OBSERVE_RESULT_CACHE_TTL_MS / 1000)} seconds`;
+    case "cache-cleared":
+      return "was cleared with the device's observation cache";
+  }
+}
+
+// An observation stays readable while it is the device's current cached one or the screenshot
+// store still retains it (one of the last few captures for that device, within the TTL).
 function matchesObservationId(deviceId: string, observationId: string): boolean {
   const cachedResult = RealObserveScreen.getRecentCachedResultForDevice(deviceId);
-  return cachedResult?.observationId === observationId;
+  return (
+    cachedResult?.observationId === observationId ||
+    getScreenshotStateStore().isObservationRetained(deviceId, observationId)
+  );
 }
 
 async function waitForObservationScreenshot(
@@ -516,7 +545,7 @@ function resourceErrorText(content: ResourceContent): {
 /**
  * Reads the bytes behind `automobile:observation/{deviceId}/{observationId}/screenshot` for host
  * consumers such as the prototype tool. It runs the same handler as the resource read, so the
- * observation must still be the device's current one, a pending capture is awaited, and the file
+ * observation must still be retained for its device, a pending capture is awaited, and the file
  * is read through the same retention lease. That resource is readable by any client without
  * session ownership, so this exposes nothing a client could not already read.
  */
@@ -925,13 +954,12 @@ export function registerObservationResources(deps: ObservationResourceDependenci
   });
 
   // This template has no read context: a known observation identity is readable
-  // by any client, but becomes unavailable after a newer device observation evicts it.
+  // by any client while the device's bounded observation window still retains it.
   ResourceRegistry.registerTemplate(
     RESOURCE_URIS.OBSERVATION_SCREENSHOT,
     "Observation Screenshot",
     {
-      description:
-        "Screen capture paired with one immutable device observation identity. Readable by any client and unavailable after that observation is superseded or evicted. Failures are application/json with code, retryable, error. SCREENSHOT_NOT_READY: read the same URI again; OBSERVATION_NOT_RETAINED: observe again.",
+      description: `Screen capture paired with one immutable device observation identity. Readable by any client while that observation is one of the device's last ${MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE} observations and under ${OBSERVE_RESULT_CACHE_TTL_MS / 60_000} minutes old, even after newer observations or app changes. Failures are application/json with code, retryable, error. SCREENSHOT_NOT_READY: read the same URI again; OBSERVATION_NOT_RETAINED (with evictedBecause newer-observation, ttl or cache-cleared, and supersededBy when known): observe again.`,
       mimeType: "image/png",
       handler: (params: Record<string, string>) => getObservationScreenshot(params, deps),
     },

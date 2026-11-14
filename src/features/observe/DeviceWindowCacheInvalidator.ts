@@ -18,7 +18,8 @@ export interface DeviceWindowCacheInvalidator {
 /**
  * Default invalidator: drops the existing platform CtrlProxy hierarchy cache
  * (never bootstraps a connection just to clear it) and the observe-result cache
- * for the device, so the next observe re-syncs fresh.
+ * for the device, so the next observe re-syncs fresh. Completed per-observation screenshots stay
+ * readable by id until the per-device window or TTL evicts them.
  */
 export class DefaultDeviceWindowCacheInvalidator implements DeviceWindowCacheInvalidator {
   invalidate(device: BootedDevice, preserveAppIdentity?: boolean): void {
@@ -32,7 +33,8 @@ export class DefaultDeviceWindowCacheInvalidator implements DeviceWindowCacheInv
         client?.clearCache();
       }
     }
-    RealObserveScreen.clearCache(device.deviceId);
+    // Completed captures are immutable evidence a caller may still read by observation id.
+    RealObserveScreen.clearCache(device.deviceId, { retainCompletedObservations: true });
     if (device.platform === "android") {
       markWindowResolutionRequired(device.deviceId);
     }

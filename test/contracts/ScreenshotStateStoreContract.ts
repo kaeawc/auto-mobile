@@ -172,6 +172,54 @@ export function runScreenshotStateStoreContract(
         expect(store.getReferencedScreenshotPaths()).toEqual([]);
       }));
 
+    test("an observation pushed out of the window reports newer-observation and its successor", () =>
+      withStore((store) => {
+        const total = MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE + 1;
+        for (let i = 0; i < total; i++) {
+          store.updateForObservation("d1", `o${i}`, { path: `/${i}.png` });
+        }
+        expect(store.isObservationRetained("d1", "o0")).toBe(false);
+        expect(store.getObservationEviction("d1", "o0")).toEqual({
+          reason: "newer-observation",
+          supersededBy: `o${total - 1}`,
+        });
+        expect(store.isObservationRetained("d1", "o1")).toBe(true);
+        expect(store.getObservationEviction("d1", "o1")).toBeUndefined();
+        expect(store.getObservationEviction("d1", "never-seen")).toBeUndefined();
+      }));
+
+    test("an expired observation reports ttl, and the eviction is forgotten after another TTL", () =>
+      withStore((store, timer) => {
+        store.updateForObservation("d1", "o1", { path: "/a.png" });
+        store.beginObservation("d1", "pending");
+        expect(store.isObservationRetained("d1", "pending")).toBe(true);
+        timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
+        expect(store.isObservationRetained("d1", "o1")).toBe(false);
+        expect(store.getObservationEviction("d1", "o1")).toEqual({ reason: "ttl" });
+        timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
+        expect(store.getObservationEviction("d1", "o1")).toBeUndefined();
+      }));
+
+    test("clear(device) reports cache-cleared unless completed observations are retained", () =>
+      withStore((store) => {
+        store.updateForObservation("d1", "kept", { path: "/kept.png" });
+        store.update("d1", "/latest.png");
+        store.beginObservation("d1", "pending");
+        store.clear("d1", { retainCompletedObservations: true });
+        expect(store.getPath("d1")).toBeUndefined();
+        expect(store.isObservationRetained("d1", "kept")).toBe(true);
+        expect(store.getPathForObservation("d1", "kept")).toBe("/kept.png");
+        // A capture still in flight at clear time stays fenced.
+        store.updateForObservation("d1", "pending", { path: "/late.png" });
+        expect(store.isObservationRetained("d1", "pending")).toBe(false);
+
+        store.clear("d1");
+        expect(store.isObservationRetained("d1", "kept")).toBe(false);
+        expect(store.getObservationEviction("d1", "kept")).toEqual({ reason: "cache-cleared" });
+        store.updateForObservation("d1", "kept", { path: "/again.png" });
+        expect(store.getObservationEviction("d1", "kept")).toBeUndefined();
+      }));
+
     test("referenced paths cover unexpired latest and observation state", () =>
       withStore((store, timer) => {
         store.update("d1", "/old.png");

@@ -413,6 +413,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-14: Observation screenshots stay readable for a bounded window": devlog/2026-11-14-observation-screenshot-retention-window.md
       - "2026-11-13: Pin a navigateTo attempt to one transition": devlog/2026-11-13-pinned-navigate-transition.md
       - "2026-11-13: iOS Simulator fleet capacity measurements": devlog/2026-11-13-ios-simulator-fleet-capacity-measurements.md
       - "2026-11-13: Split the audit tool into accessibilityAudit and performanceAudit": devlog/2026-11-13-split-audit-tool.md

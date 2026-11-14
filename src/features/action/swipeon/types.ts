@@ -99,6 +99,7 @@ export interface OverlayAnalyzer {
   collectOverlayCandidates(
     viewHierarchy: ViewHierarchyResult,
     containerElement: Element,
+    platform?: "android" | "ios",
   ): OverlayCandidate[];
 
   computeSafeSwipeCoordinates(

@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
+    "test/fixtures/observe-output/swipeon-container-floating-bar-18338/*.json",
     "test/fixtures/observe-output/compose-control-shapes-17955/*.json",
     "test/fixtures/wear/systemtray/ctrlproxy-card-expanded-reply-input.json",
     "test/fixtures/wear/systemtray/ctrlproxy-round384-stream-reply-card.json",

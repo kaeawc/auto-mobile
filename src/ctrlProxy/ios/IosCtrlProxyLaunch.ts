@@ -157,6 +157,43 @@ export class IosCtrlProxyLaunch {
     throw startupAbort.reason ?? new Error("iOS CtrlProxy startup was cancelled by stop()");
   }
 
+  /**
+   * Resolve the xctestrun to launch, AFTER the pre-launch runner verify. The verify
+   * re-checks the runner binary hash (and refuses a foreign-owned derived-data tree)
+   * immediately before launch, closing the verify→execute TOCTOU window left by
+   * post-extract verification alone (issue #4759). It can also repair the cache by
+   * re-extracting the release bundle, which replaces the Products directory: a path
+   * looked up before it (e.g. a stale local build's newer xctestrun) may no longer
+   * exist (#18339), so the launch uses the lookup made once the tree is final.
+   */
+  private async resolveVerifiedXctestrun(platform: "simulator" | "device"): Promise<string> {
+    const initial = await this.state.builder.getXctestrunPath(platform);
+    if (!initial) {
+      throw new Error(
+        `CtrlProxy xctestrun not found for ${platform}. Download the CtrlProxy bundle before starting.`,
+      );
+    }
+
+    await this.state.builder.verifyRunnerBinaryBeforeLaunch(platform);
+
+    const verified = await this.state.builder.getXctestrunPath(platform);
+    if (!verified) {
+      throw new ActionableError(
+        `CtrlProxy xctestrun for ${platform} vanished during the pre-launch runner check: ` +
+          `${initial} was selected before the check and no xctestrun remains after it. ` +
+          `Retry provisioning; if it persists, delete the CtrlProxy derived-data directory ` +
+          `so the bundle is extracted again.`,
+      );
+    }
+    if (verified !== initial) {
+      logger.info(
+        `[IOSCtrlProxy] Pre-launch runner check replaced the ${platform} xctestrun: ` +
+          `${initial} -> ${verified}`,
+      );
+    }
+    return verified;
+  }
+
   async startOnSimulator(): Promise<RunnerLaunchProvenance> {
     await this.host.assertSimulatorNotShutDown();
     logger.info("[IOSCtrlProxy] Starting CtrlProxy on simulator");
@@ -207,17 +244,7 @@ export class IosCtrlProxyLaunch {
 
     // Use xcodebuild test-without-building (same approach as physical devices).
     // simctl spawn is unreliable on Xcode 26.3+ (NSPOSIXErrorDomain code=2).
-    const xctestrunPath = await this.state.builder.getXctestrunPath("simulator");
-    if (!xctestrunPath) {
-      throw new Error(
-        "CtrlProxy xctestrun not found for simulator. Download the CtrlProxy bundle before starting.",
-      );
-    }
-
-    // Re-verify the runner binary hash (and refuse a foreign-owned derived-data
-    // tree) IMMEDIATELY before launch, closing the verify→execute TOCTOU window
-    // left by post-extract verification alone (issue #4759).
-    await this.state.builder.verifyRunnerBinaryBeforeLaunch("simulator");
+    const xctestrunPath = await this.resolveVerifiedXctestrun("simulator");
 
     const timeout = readEnvRaw(AMBIENT_ENV.CTRL_PROXY_IOS_TIMEOUT) || "86400";
     const bundleId = this.host.resolveTargetBundleId();
@@ -373,17 +400,7 @@ export class IosCtrlProxyLaunch {
 
     // For physical devices, we need to use iproxy for port forwarding
     // and run the XCUITest via xcodebuild with device destination
-    const xctestrunPath = await this.state.builder.getXctestrunPath("device");
-    if (!xctestrunPath) {
-      throw new Error(
-        "CtrlProxy xctestrun not found for device. Download the CtrlProxy bundle before starting.",
-      );
-    }
-
-    // Re-verify the runner binary hash (and refuse a foreign-owned derived-data
-    // tree) IMMEDIATELY before launch, closing the verify→execute TOCTOU window
-    // left by post-extract verification alone (issue #4759).
-    await this.state.builder.verifyRunnerBinaryBeforeLaunch("device");
+    const xctestrunPath = await this.resolveVerifiedXctestrun("device");
 
     await this.host.ensureLocalServicePortAllocatedAndAvailable();
     await this.host.startIproxyTunnel();

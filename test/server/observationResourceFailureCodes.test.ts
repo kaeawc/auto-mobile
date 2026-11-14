@@ -6,8 +6,11 @@ import {
   resetObserveCacheStore,
   setObserveCacheStore,
 } from "../../src/features/observe/cache/ObserveCacheRegistry";
+import { DefaultDeviceWindowCacheInvalidator } from "../../src/features/observe/DeviceWindowCacheInvalidator";
 import {
   InMemoryScreenshotStateStore,
+  MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE,
+  OBSERVE_RESULT_CACHE_TTL_MS,
   SCREENSHOT_CAPTURE_CANCELLED_REASON,
   SCREENSHOT_CAPTURE_SUPERSEDED_REASON,
   resetScreenshotStateStore,
@@ -77,6 +80,8 @@ interface FailureBody {
   deviceId?: string;
   observationId?: string;
   sessionUuid?: string;
+  evictedBecause?: string;
+  supersededBy?: string;
 }
 
 async function read(uri: string, context: ResourceReadContext = {}): Promise<ResourceContent> {
@@ -97,7 +102,10 @@ async function read(uri: string, context: ResourceReadContext = {}): Promise<Res
 function failure(
   content: ResourceContent,
   code: string,
-  ids: Pick<FailureBody, "deviceId" | "observationId" | "sessionUuid"> = {},
+  ids: Pick<
+    FailureBody,
+    "deviceId" | "observationId" | "sessionUuid" | "evictedBecause" | "supersededBy"
+  > = {},
 ): FailureBody {
   expect(content.mimeType).toBe("application/json");
   expect(content.blob).toBeUndefined();
@@ -109,6 +117,8 @@ function failure(
   expect(body.deviceId).toBe(ids.deviceId);
   expect(body.observationId).toBe(ids.observationId);
   expect(body.sessionUuid).toBe(ids.sessionUuid);
+  expect(body.evictedBecause).toBe(ids.evictedBecause);
+  expect(body.supersededBy).toBe(ids.supersededBy);
   const keys = ["code", "retryable"];
   if (body.retryable) {
     expect(body.retryAfterMs).toBe(OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS);
@@ -227,14 +237,74 @@ describe("observation resource failure envelopes", () => {
     const { observationId } = await observe();
     store.updateForObservation(deviceA.deviceId, observationId, { path: "/fake/evicted.png" });
     cache.clear(deviceA.deviceId);
+    store.clear(deviceA.deviceId);
     failure(
       await read(buildObservationScreenshotUri(deviceA.deviceId, observationId)),
       "OBSERVATION_NOT_RETAINED",
       {
         deviceId: deviceA.deviceId,
         observationId,
+        evictedBecause: "cache-cleared",
       },
     );
+  });
+
+  // #18337: evidence capture reads an observation's screenshot after the agent's next step.
+  describe("bounded retention window after newer observations", () => {
+    async function observeWithScreenshot(): Promise<string> {
+      const { observationId } = await observe();
+      store.updateForObservation(deviceA.deviceId, observationId, {
+        path: `/fake/${observationId}.png`,
+      });
+      return observationId;
+    }
+
+    test("an older observation stays readable after a newer one lands", async () => {
+      const first = await observeWithScreenshot();
+      const second = await observeWithScreenshot();
+      expect(cache.getRecentInMemoryForDevice(deviceA.deviceId)?.observationId).toBe(second);
+      image(await read(buildObservationScreenshotUri(deviceA.deviceId, first)));
+    });
+
+    test("it is evicted with newer-observation once the per-device window is full", async () => {
+      const first = await observeWithScreenshot();
+      let latest = first;
+      for (let i = 0; i < MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE - 1; i++) {
+        latest = await observeWithScreenshot();
+      }
+      image(await read(buildObservationScreenshotUri(deviceA.deviceId, first)));
+      latest = await observeWithScreenshot();
+      failure(
+        await read(buildObservationScreenshotUri(deviceA.deviceId, first)),
+        "OBSERVATION_NOT_RETAINED",
+        {
+          deviceId: deviceA.deviceId,
+          observationId: first,
+          evictedBecause: "newer-observation",
+          supersededBy: latest,
+        },
+      );
+    });
+
+    test("it is evicted with ttl after the cache TTL", async () => {
+      const first = await observeWithScreenshot();
+      await observeWithScreenshot();
+      timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
+      failure(
+        await read(buildObservationScreenshotUri(deviceA.deviceId, first)),
+        "OBSERVATION_NOT_RETAINED",
+        { deviceId: deviceA.deviceId, observationId: first, evictedBecause: "ttl" },
+      );
+    });
+
+    test("a foreground-changing action's cache invalidation keeps the window", async () => {
+      const first = await observeWithScreenshot();
+      const second = await observeWithScreenshot();
+      new DefaultDeviceWindowCacheInvalidator().invalidate(deviceA, true);
+      expect(cache.getRecentInMemoryForDevice(deviceA.deviceId)).toBeUndefined();
+      image(await read(buildObservationScreenshotUri(deviceA.deviceId, first)));
+      image(await read(buildObservationScreenshotUri(deviceA.deviceId, second)));
+    });
   });
 
   test("superseded URI never serves the newer observation image", async () => {
@@ -720,7 +790,7 @@ describe("observation resource failure envelopes", () => {
     });
   });
 
-  test("observation replaced while waiting returns not retained", async () => {
+  test("observation replaced while waiting reports its own superseded capture", async () => {
     const { observationId } = await observe();
     store.beginObservation(deviceA.deviceId, observationId);
     const pending = read(buildObservationScreenshotUri(deviceA.deviceId, observationId));
@@ -728,13 +798,13 @@ describe("observation resource failure envelopes", () => {
     const newer = await observe();
     store.updateForObservation(deviceA.deviceId, newer.observationId, { path: "/fake/newer.png" });
     store.endObservation(deviceA.deviceId, observationId, SCREENSHOT_CAPTURE_SUPERSEDED_REASON);
-    failure(await pending, "OBSERVATION_NOT_RETAINED", {
+    failure(await pending, "SCREENSHOT_CAPTURE_SUPERSEDED", {
       deviceId: deviceA.deviceId,
       observationId,
     });
   });
 
-  test("observation replaced during file read never returns either image", async () => {
+  test("observation replaced during file read returns its own image", async () => {
     const { observationId } = await observe();
     store.updateForObservation(deviceA.deviceId, observationId, { path: "/fake/old.png" });
     useScreenshotFileSystem({
@@ -747,11 +817,8 @@ describe("observation resource failure envelopes", () => {
         return images[0].bytes;
       },
     });
-    failure(
-      await read(buildObservationScreenshotUri(deviceA.deviceId, observationId)),
-      "OBSERVATION_NOT_RETAINED",
-      { deviceId: deviceA.deviceId, observationId },
-    );
+    const content = await read(buildObservationScreenshotUri(deviceA.deviceId, observationId));
+    expect(content.blob).toBe(images[0].bytes.toString("base64"));
   });
 
   test("host byte reader forwards pending retryability", async () => {

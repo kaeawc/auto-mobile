@@ -68,7 +68,10 @@ import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfac
 
 import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
 import type { RecentObserveCacheEntry } from "./cache/ObserveResultCacheStore";
-import { getScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
+import {
+  getScreenshotStateStore,
+  type ScreenshotStateClearOptions,
+} from "./screenshot/ScreenshotStateRegistry";
 import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRecorder";
 import { createObserveScreenWiring } from "./ObserveScreenWiring";
 import {
@@ -238,10 +241,12 @@ export class RealObserveScreen implements ObserveScreen {
   /**
    * Clear the in-memory cache (and disk cache).
    * @param deviceId - If provided, only clears cache for that device. Otherwise clears all.
+   * @param options - `retainCompletedObservations` keeps completed per-observation screenshots
+   *   readable by id (an action that may change the foreground app does not erase evidence).
    */
-  static clearCache(deviceId?: string): void {
+  static clearCache(deviceId?: string, options?: ScreenshotStateClearOptions): void {
     getObserveCacheStore().clear(deviceId);
-    getScreenshotStateStore().clear(deviceId);
+    getScreenshotStateStore().clear(deviceId, options);
     if (deviceId) {
       ScreenshotJobTracker.cancelJob(deviceId);
     } else {

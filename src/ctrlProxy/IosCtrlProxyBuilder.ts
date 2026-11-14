@@ -46,6 +46,7 @@ import {
 } from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 import { sortedReaddir } from "../utils/io";
 import { matchesXctestrunSelection } from "./IosXctestrunPlatform";
+import { isSourceXctestrunFile, readSourceXctestrun } from "./IosSourceXctestrun";
 import { ENV, readEnvBool, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 export {
@@ -367,10 +368,8 @@ export class IosCtrlProxyBuilder {
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
     try {
       const files = await sortedReaddir(productsDir);
-      const xctestrunFiles = files.filter(
-        (file) =>
-          file.endsWith(".xctestrun") &&
-          !file.startsWith(IosCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
+      const xctestrunFiles = files.filter((file) =>
+        isSourceXctestrunFile(file, IosCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
       );
       if (xctestrunFiles.length === 0) {
         return null;
@@ -440,7 +439,10 @@ export class IosCtrlProxyBuilder {
     deviceId: string,
   ): Promise<string> {
     try {
-      const xml = await fs.readFile(xctestrunPath, "utf-8");
+      const xml = await readSourceXctestrun(
+        xctestrunPath,
+        IosCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX,
+      );
       const root = await parsePlist(xml);
       if (!(root instanceof Map)) {
         throw new Error("xctestrun root is not a plist dictionary");
@@ -482,10 +484,8 @@ export class IosCtrlProxyBuilder {
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
     try {
       const files = await sortedReaddir(productsDir);
-      const xctestrunFiles = files.filter(
-        (file) =>
-          file.endsWith(".xctestrun") &&
-          !file.startsWith(IosCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
+      const xctestrunFiles = files.filter((file) =>
+        isSourceXctestrunFile(file, IosCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
       );
       if (xctestrunFiles.length <= 1) {
         return;

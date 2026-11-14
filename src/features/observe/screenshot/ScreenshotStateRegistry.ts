@@ -15,6 +15,28 @@ export const MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE = 10;
  * clear storms; insertion-order eviction keeps the newest fences.
  */
 export const MAX_CLEARED_OBSERVATION_TOMBSTONES_PER_DEVICE = 64;
+/** Backstop on remembered observation evictions per device; each retires after the TTL. */
+export const MAX_OBSERVATION_EVICTIONS_PER_DEVICE = 64;
+
+/** Why an observation's screenshot state is no longer retained. */
+export type ObservationEvictionReason = "newer-observation" | "ttl" | "cache-cleared";
+
+/** What the store remembers about an observation it no longer retains. */
+export interface ObservationEviction {
+  reason: ObservationEvictionReason;
+  /** The observation whose arrival pushed this one out of the per-device window. */
+  supersededBy?: string;
+}
+
+/** Options for `ScreenshotStateStore.clear`. */
+export interface ScreenshotStateClearOptions {
+  /**
+   * Keep completed observation captures, which are immutable evidence, while still dropping
+   * the latest state and fencing pending captures. Used when an action may change the
+   * foreground app, so a caller can still read a screenshot it already holds an id for.
+   */
+  retainCompletedObservations?: boolean;
+}
 
 interface ScreenshotState {
   imageSize?: { width: number; height: number };
@@ -73,9 +95,13 @@ export interface ScreenshotStateStore {
     path: string,
   ): ScreenshotMetadata | undefined;
   getErrorForObservation(deviceId: string, observationId: string): string | undefined;
+  /** Whether this observation has unexpired retained state or a capture still in flight. */
+  isObservationRetained(deviceId: string, observationId: string): boolean;
+  /** Why a recently known observation is no longer retained, while that is still remembered. */
+  getObservationEviction(deviceId: string, observationId: string): ObservationEviction | undefined;
   /** Screenshot paths retained by unexpired latest and observation state. */
   getReferencedScreenshotPaths(): readonly string[];
-  clear(deviceId?: string): void;
+  clear(deviceId?: string, options?: ScreenshotStateClearOptions): void;
 }
 
 /**
@@ -98,6 +124,9 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
    * `beginObservation` that reuses the id, and are capped per device.
    */
   private clearedObservationIds: Map<string, Map<string, number>> = new Map();
+  /** Recently evicted observation ids per device, in eviction order, retired after the TTL. */
+  private evictedObservations: Map<string, Map<string, ObservationEviction & { at: number }>> =
+    new Map();
   private timer: Timer;
 
   constructor(timer: Timer = defaultTimer) {
@@ -125,6 +154,7 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     }
     const states = this.observationStates.get(deviceId) ?? new Map<string, ScreenshotState>();
     states.delete(observationId);
+    this.forgetEviction(deviceId, observationId);
     states.set(observationId, {
       path: path ?? null,
       error: error ?? null,
@@ -138,6 +168,10 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
         break;
       }
       states.delete(oldestObservationId);
+      this.recordEviction(deviceId, oldestObservationId, {
+        reason: "newer-observation",
+        supersededBy: observationId,
+      });
     }
     this.observationStates.set(deviceId, states);
     this.completeObservation(deviceId, observationId);
@@ -231,6 +265,31 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     return this.findObservation(deviceId, observationId)?.error ?? undefined;
   }
 
+  isObservationRetained(deviceId: string, observationId: string): boolean {
+    return (
+      this.isObservationPending(deviceId, observationId) ||
+      this.findObservation(deviceId, observationId) !== undefined
+    );
+  }
+
+  getObservationEviction(deviceId: string, observationId: string): ObservationEviction | undefined {
+    // Reading the state first records a TTL expiry that no other read has noticed yet.
+    this.findObservation(deviceId, observationId);
+    const evictions = this.evictedObservations.get(deviceId);
+    const eviction = evictions?.get(observationId);
+    if (!evictions || !eviction) {
+      return undefined;
+    }
+    if (this.timer.now() - eviction.at > OBSERVE_RESULT_CACHE_TTL_MS) {
+      this.forgetEviction(deviceId, observationId);
+      return undefined;
+    }
+    return {
+      reason: eviction.reason,
+      ...(eviction.supersededBy ? { supersededBy: eviction.supersededBy } : {}),
+    };
+  }
+
   getReferencedScreenshotPaths(): readonly string[] {
     const now = this.timer.now();
     const paths = new Set<string>();
@@ -245,6 +304,7 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
       for (const [observationId, state] of states.entries()) {
         if (now - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
           states.delete(observationId);
+          this.recordEviction(deviceId, observationId, { reason: "ttl" });
         } else if (state.path) {
           paths.add(state.path);
         }
@@ -256,15 +316,20 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     return [...paths];
   }
 
-  clear(deviceId?: string): void {
+  clear(deviceId?: string, options: ScreenshotStateClearOptions = {}): void {
     if (deviceId) {
       this.markPendingObservationsCleared(deviceId);
       this.states.delete(deviceId);
-      this.observationStates.delete(deviceId);
+      if (!options.retainCompletedObservations) {
+        this.evictAllObservationsForDevice(deviceId);
+      }
       this.completeAllObservationsForDevice(deviceId);
     } else {
       this.states.clear();
-      this.observationStates.clear();
+      if (!options.retainCompletedObservations) {
+        this.observationStates.clear();
+        this.evictedObservations.clear();
+      }
       for (const pendingDeviceId of [...this.pendingObservationWaiters.keys()]) {
         this.markPendingObservationsCleared(pendingDeviceId);
         this.completeAllObservationsForDevice(pendingDeviceId);
@@ -326,9 +391,44 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
       if (states?.size === 0) {
         this.observationStates.delete(deviceId);
       }
+      this.recordEviction(deviceId, observationId, { reason: "ttl" });
       return undefined;
     }
     return state;
+  }
+
+  private evictAllObservationsForDevice(deviceId: string): void {
+    const states = this.observationStates.get(deviceId);
+    this.observationStates.delete(deviceId);
+    for (const observationId of states?.keys() ?? []) {
+      this.recordEviction(deviceId, observationId, { reason: "cache-cleared" });
+    }
+  }
+
+  private recordEviction(
+    deviceId: string,
+    observationId: string,
+    eviction: ObservationEviction,
+  ): void {
+    const evictions = this.evictedObservations.get(deviceId) ?? new Map();
+    evictions.delete(observationId);
+    evictions.set(observationId, { ...eviction, at: this.timer.now() });
+    while (evictions.size > MAX_OBSERVATION_EVICTIONS_PER_DEVICE) {
+      const oldest = evictions.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      evictions.delete(oldest);
+    }
+    this.evictedObservations.set(deviceId, evictions);
+  }
+
+  private forgetEviction(deviceId: string, observationId: string): void {
+    const evictions = this.evictedObservations.get(deviceId);
+    evictions?.delete(observationId);
+    if (evictions?.size === 0) {
+      this.evictedObservations.delete(deviceId);
+    }
   }
 
   private completeObservation(deviceId: string, observationId: string): void {

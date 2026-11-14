@@ -21,9 +21,9 @@ local Maven repository (`~/.m2`). This needs JDK 21 and an Android SDK
 (`ANDROID_HOME` set, or `sdk.dir` in `android/local.properties`):
 
 ```bash
-git clone --depth 1 --branch 0.0.94 https://github.com/kaeawc/auto-mobile.git
+git clone --depth 1 --branch 0.0.95 https://github.com/kaeawc/auto-mobile.git
 cd auto-mobile/android
-./gradlew :test-plan-validation:publishToMavenLocal :junit-runner:publishToMavenLocal -PVERSION_NAME=0.0.94
+./gradlew :test-plan-validation:publishToMavenLocal :junit-runner:publishToMavenLocal -PVERSION_NAME=0.0.95
 ```
 
 Then add `mavenLocal()` to the consuming project's repositories and the JUnit runner
@@ -41,7 +41,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.94")
+    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.95")
 }
 ```
 
@@ -62,7 +62,7 @@ Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), 
 For a Swift package manifest, use the released package:
 
 ```swift
-.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.94")
+.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.95")
 ```
 
 `from:` resolves the newest compatible AutoMobile release, not an exact pin. The package requires Swift 6 and supports macOS 15 or iOS 17 test bundles. AI-assisted recovery runs only in a macOS test bundle, not in an iOS Simulator test bundle.
@@ -421,12 +421,12 @@ Use one release version for the test runner and the AutoMobile CLI. Restart a
 shared daemon so it receives the pin, then check the environment before tests:
 
 ```bash
-export AUTOMOBILE_VERSION=0.0.94
-bunx @kaeawc/auto-mobile@0.0.94 --daemon restart
-bunx @kaeawc/auto-mobile@0.0.94 --cli doctor
+export AUTOMOBILE_VERSION=0.0.95
+bunx @kaeawc/auto-mobile@0.0.95 --daemon restart
+bunx @kaeawc/auto-mobile@0.0.95 --cli doctor
 ```
 
-Replace `0.0.94` with the version used by your test runner dependency.
+Replace `0.0.95` with the version used by your test runner dependency.
 
 `--cli doctor` reports the status of AutoMobile on each booted Android device,
 including whether the accessibility service is installed and up to date. It never

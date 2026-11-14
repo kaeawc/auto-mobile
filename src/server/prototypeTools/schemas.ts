@@ -149,7 +149,7 @@ const assetsInput = z
           .min(1)
           .optional()
           .describe(
-            "Instead of path: an observation screenshot URI, automobile:observation/{deviceId}/{observationId}/screenshot (the observationScreenshotResourceUri that observe returns); it must still be that device's current observation",
+            "Instead of path: an observation screenshot URI, automobile:observation/{deviceId}/{observationId}/screenshot (the observationScreenshotResourceUri that observe returns); it must still be retained (one of that device's last 10 observations, under 5 minutes old)",
           ),
       })
       .strict()

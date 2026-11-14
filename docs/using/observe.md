@@ -12,6 +12,24 @@ Adjustable range controls, including sliders, carry the `adjust` affordance. Any
 state, including a read-only progress indicator, carries `range: {current, min, max}`. To adjust
 one, use `swipeOn` with an `adjust` row's `elementId` as the `container`.
 
+## Reading an observation's screenshot later
+
+Each observation returns an `observationScreenshotResourceUri`. Read that URI to get the
+screenshot of exactly that observation. It stays readable while it is one of the device's last
+10 observations and is under 5 minutes old, even after later actions or app switches. Read it
+before then if you record evidence after the agent's next step.
+
+When the screenshot is gone, the read returns JSON with code `OBSERVATION_NOT_RETAINED`.
+`evictedBecause` says why:
+
+| `evictedBecause`    | Meaning                                                               |
+| ------------------- | --------------------------------------------------------------------- |
+| `newer-observation` | 10 newer observations pushed it out; `supersededBy` names the newest. |
+| `ttl`               | It is older than 5 minutes.                                           |
+| `cache-cleared`     | The device's cache was cleared, for example when its session ended.   |
+
+With no `evictedBecause`, the id is unknown. In every case, call `observe` again.
+
 ## Toggle labels
 
 A toggle or range row may have no label of its own or from its enclosing row. It then

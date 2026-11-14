@@ -1,7 +1,10 @@
 import type { ScreenshotMetadata } from "../../src/features/observe/ScreenshotMetadata";
 import {
+  MAX_OBSERVATION_EVICTIONS_PER_DEVICE,
   MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE,
   OBSERVE_RESULT_CACHE_TTL_MS,
+  type ObservationEviction,
+  type ScreenshotStateClearOptions,
   type ScreenshotStateStore,
   type ScreenshotStateUpdate,
 } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
@@ -28,6 +31,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
   private pendingObservations: Set<string> = new Set();
   private pendingObservationWaiters: Map<string, Set<() => void>> = new Map();
   private clearedObservations: Map<string, number> = new Map();
+  private evictions: Map<string, ObservationEviction & { at: number }> = new Map();
   private nowOverride: number | undefined;
 
   constructor(private readonly timer: Timer) {}
@@ -58,6 +62,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     }
     const states = this.observationStates.get(deviceId) ?? new Map<string, FakeScreenshotState>();
     states.delete(observationId);
+    this.evictions.delete(this.observationKey(deviceId, observationId));
     states.set(observationId, {
       path: path ?? null,
       error: error ?? null,
@@ -71,6 +76,10 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
         break;
       }
       states.delete(oldest);
+      this.recordEviction(deviceId, oldest, {
+        reason: "newer-observation",
+        supersededBy: observationId,
+      });
     }
     this.observationStates.set(deviceId, states);
     this.completeObservation(deviceId, observationId);
@@ -156,6 +165,30 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     return this.findObservation(deviceId, observationId)?.error ?? undefined;
   }
 
+  isObservationRetained(deviceId: string, observationId: string): boolean {
+    return (
+      this.isObservationPending(deviceId, observationId) ||
+      this.findObservation(deviceId, observationId) !== undefined
+    );
+  }
+
+  getObservationEviction(deviceId: string, observationId: string): ObservationEviction | undefined {
+    this.findObservation(deviceId, observationId);
+    const key = this.observationKey(deviceId, observationId);
+    const eviction = this.evictions.get(key);
+    if (!eviction) {
+      return undefined;
+    }
+    if (this.now() - eviction.at > OBSERVE_RESULT_CACHE_TTL_MS) {
+      this.evictions.delete(key);
+      return undefined;
+    }
+    return {
+      reason: eviction.reason,
+      ...(eviction.supersededBy ? { supersededBy: eviction.supersededBy } : {}),
+    };
+  }
+
   getReferencedScreenshotPaths(): readonly string[] {
     const paths = new Set<string>();
     for (const [deviceId, state] of this.states.entries()) {
@@ -169,6 +202,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
       for (const [observationId, state] of states.entries()) {
         if (this.now() - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
           states.delete(observationId);
+          this.recordEviction(deviceId, observationId, { reason: "ttl" });
         } else if (state.path) {
           paths.add(state.path);
         }
@@ -180,7 +214,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     return [...paths];
   }
 
-  clear(deviceId?: string): void {
+  clear(deviceId?: string, options: ScreenshotStateClearOptions = {}): void {
     for (const key of this.pendingObservations) {
       if (!deviceId || key.startsWith(`${deviceId}\u0000`)) {
         this.clearedObservations.set(key, this.now());
@@ -188,7 +222,12 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     }
     if (deviceId) {
       this.states.delete(deviceId);
-      this.observationStates.delete(deviceId);
+      if (!options.retainCompletedObservations) {
+        for (const observationId of this.observationStates.get(deviceId)?.keys() ?? []) {
+          this.recordEviction(deviceId, observationId, { reason: "cache-cleared" });
+        }
+        this.observationStates.delete(deviceId);
+      }
       for (const key of [...this.pendingObservations]) {
         if (key.startsWith(`${deviceId}\u0000`)) {
           const [, observationId] = key.split("\u0000");
@@ -197,7 +236,10 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
       }
     } else {
       this.states.clear();
-      this.observationStates.clear();
+      if (!options.retainCompletedObservations) {
+        this.observationStates.clear();
+        this.evictions.clear();
+      }
       for (const key of [...this.pendingObservations]) {
         const [pendingDeviceId, observationId] = key.split("\u0000");
         this.completeObservation(pendingDeviceId, observationId);
@@ -236,6 +278,21 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     waiters?.forEach((resolve) => resolve());
   }
 
+  private recordEviction(
+    deviceId: string,
+    observationId: string,
+    eviction: ObservationEviction,
+  ): void {
+    const prefix = `${deviceId}\u0000`;
+    const key = this.observationKey(deviceId, observationId);
+    this.evictions.delete(key);
+    this.evictions.set(key, { ...eviction, at: this.now() });
+    const forDevice = [...this.evictions.keys()].filter((k) => k.startsWith(prefix));
+    forDevice
+      .slice(0, Math.max(0, forDevice.length - MAX_OBSERVATION_EVICTIONS_PER_DEVICE))
+      .forEach((k) => this.evictions.delete(k));
+  }
+
   private isExpired(state: FakeScreenshotState): boolean {
     return this.now() - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS;
   }
@@ -267,6 +324,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
       if (states?.size === 0) {
         this.observationStates.delete(deviceId);
       }
+      this.recordEviction(deviceId, observationId, { reason: "ttl" });
       return undefined;
     }
     return state;

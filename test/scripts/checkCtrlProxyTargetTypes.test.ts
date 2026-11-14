@@ -76,6 +76,18 @@ describe("findMissingTypes", () => {
     expect(findMissingTypes([TV], sources, PACKAGES)).toEqual([]);
   });
 
+  test("does not let another file's nested type hide a missing top-level type", () => {
+    const sources = new Map([
+      ["Own.swift", "struct Own {\n  struct Geometry {}\n}\n"],
+      ["Use.swift", "struct Use {\n  let geometry: Geometry\n  let n: Own.Geometry\n}\n"],
+      ["Geometry.swift", "struct Geometry {}\n"],
+    ]);
+    const target = { name: "T", files: ["Own.swift", "Use.swift"], packages: [] };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      { target: "T", file: "Use.swift", line: 2, type: "Geometry", definedIn: ["Geometry.swift"] },
+    ]);
+  });
+
   test("reports a package type when the target does not depend on the package", () => {
     const sources = withResponse("struct R { let e: WireEnvelope }\n");
     const missing = findMissingTypes([{ ...TV, packages: [] }], sources, PACKAGES);

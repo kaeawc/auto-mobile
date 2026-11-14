@@ -8,8 +8,8 @@
  *
  *   - every Swift file under the project directory and its local packages defines top-level
  *     types (`struct`, `class`, `enum`, `protocol`, `actor`, `typealias` outside any braces);
- *   - a target can use the types (nested ones included) declared by its own sources and by the
- *     local packages it depends on;
+ *   - a target can use the top-level types declared by its own sources and by the local
+ *     packages it depends on, and each file can also use the nested types it declares;
  *   - a capitalized identifier in a target's code (comments and string text removed) that names
  *     a type defined elsewhere in the project, but not one the target can use, is a missing
  *     source.
@@ -46,7 +46,8 @@ export interface MissingType {
 
 const DECLARATION_OR_BRACE =
   /[{}]|(?<![A-Za-z0-9_$])(?:struct|class|enum|protocol|actor|typealias)\s+([A-Z][A-Za-z0-9_]*)/g;
-const CAPITALIZED = /(?<![A-Za-z0-9_$`])[A-Z][A-Za-z0-9_]*/g;
+// A `.`-qualified name (`Parent.Child`) resolves through its qualifier, which is scanned itself.
+const CAPITALIZED = /(?<![A-Za-z0-9_$`.])[A-Z][A-Za-z0-9_]*/g;
 const IMPORT = /^[ \t]*(?:@[A-Za-z_]+(?:\([^)\n]*\))?[ \t]+)*import[ \t][^\n]*/gm;
 
 export interface DeclaredTypes {
@@ -104,14 +105,15 @@ export function findMissingTypes(
       ...target.files,
       ...target.packages.flatMap((name) => packageFiles.get(name) ?? []),
     ];
-    const available = new Set(visible.flatMap((file) => [...(declared.get(file)?.all ?? [])]));
+    const available = new Set(visible.flatMap((file) => [...(declared.get(file)?.topLevel ?? [])]));
     for (const file of target.files) {
       const code = referencingCode(sources.get(file) ?? "");
+      const nested = declared.get(file)?.all ?? new Set<string>();
       const reported = new Set<string>();
       for (const match of code.matchAll(CAPITALIZED)) {
         const type = match[0];
         const definedIn = definers.get(type);
-        if (!definedIn || available.has(type) || reported.has(type)) {
+        if (!definedIn || available.has(type) || nested.has(type) || reported.has(type)) {
           continue;
         }
         reported.add(type);

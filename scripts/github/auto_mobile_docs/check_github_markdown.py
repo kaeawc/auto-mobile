@@ -131,17 +131,32 @@ def check_text(text, names, configs):
     return reasons
 
 
-# Copied into docs/ by deploy_pages.py right before the deployed build.
-DEPLOY_COPIED = ("CHANGELOG.md", ".github/CONTRIBUTING.md")
+# Source -> docs/ name. deploy_pages.py copies each source into docs/ right
+# before the deployed build, and the lychee check writes the same copies while
+# other Fast Validation checks run in parallel.
+DEPLOY_COPIED = {"CHANGELOG.md": "changelog.md", ".github/CONTRIBUTING.md": "contributing.md"}
+
+
+def pages_to_check(root, docs_dir, include_deploy_copied):
+    """Pages under docs_dir, plus the deploy-copied sources when requested.
+
+    When the deploy-copied sources are checked directly, their transient copies
+    at the top of docs_dir are skipped: they duplicate the source and another
+    process may delete them between listing and reading (#18336).
+    """
+    docs_dir = Path(docs_dir)
+    if not include_deploy_copied:
+        return sorted(docs_dir.rglob("*.md"))
+    copies = {docs_dir / name for name in DEPLOY_COPIED.values()}
+    pages = sorted(page for page in docs_dir.rglob("*.md") if page not in copies)
+    return pages + [root / source for source in DEPLOY_COPIED if (root / source).exists()]
 
 
 def main(argv):
     root = Path(__file__).resolve().parents[3]
     config_file = Path(argv[1]) if len(argv) > 1 else root / "mkdocs.yml"
     docs_dir = Path(argv[2]) if len(argv) > 2 else root / "docs"
-    pages = sorted(docs_dir.rglob("*.md"))
-    if len(argv) <= 2:
-        pages += [root / name for name in DEPLOY_COPIED if (root / name).exists()]
+    pages = pages_to_check(root, docs_dir, include_deploy_copied=len(argv) <= 2)
     names, configs = load_markdown_settings(config_file)
     failures = [
         f"{page}: {reason}"

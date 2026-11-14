@@ -94,6 +94,68 @@ describe("findMissingTypes", () => {
     expect(missing.map((m) => m.type)).toEqual(["WireEnvelope"]);
   });
 
+  test("treats generic parameters as bound inside their declaration only", () => {
+    const sources = new Map([
+      ["CommandError.swift", "enum CommandError: Error { case failed }\n"],
+      [
+        "Use.swift",
+        [
+          "struct Use<CommandError> { let e: CommandError }",
+          "func echo<CommandError>(_ value: CommandError) -> CommandError { value }",
+          "protocol P { func f<CommandError>(_ e: CommandError) -> CommandError }",
+          "struct Other { let e: CommandError }",
+          "",
+        ].join("\n"),
+      ],
+    ]);
+    const target = { name: "T", files: ["Use.swift"], packages: [] };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      {
+        target: "T",
+        file: "Use.swift",
+        line: 4,
+        type: "CommandError",
+        definedIn: ["CommandError.swift"],
+      },
+    ]);
+  });
+
+  test("binds a nested type inside its declaring type and its extensions only", () => {
+    const sources = new Map([
+      ["Geometry.swift", "struct Geometry {}\n"],
+      [
+        "Use.swift",
+        [
+          "struct Own {",
+          "  let first: Geometry",
+          "  struct Geometry {}",
+          "}",
+          "extension Own { var g: Geometry { Geometry() } }",
+          "struct Use { let geometry: Geometry }",
+          "",
+        ].join("\n"),
+      ],
+    ]);
+    const target = { name: "T", files: ["Use.swift"], packages: [] };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      { target: "T", file: "Use.swift", line: 6, type: "Geometry", definedIn: ["Geometry.swift"] },
+    ]);
+  });
+
+  test("resolves a module-qualified type against the package the target depends on", () => {
+    const sources = withResponse("struct R { let e: Wire.WireEnvelope }\n");
+    expect(findMissingTypes([TV], sources, PACKAGES)).toEqual([]);
+    expect(findMissingTypes([{ ...TV, packages: [] }], sources, PACKAGES)).toEqual([
+      {
+        target: "CtrlProxyTVUITests",
+        file: "Sources/CtrlProxy/Models/HierarchyUpdateResponse.swift",
+        line: 2,
+        type: "Wire.WireEnvelope",
+        definedIn: ["Wire/Sources/Wire/Envelope.swift"],
+      },
+    ]);
+  });
+
   test("ignores references in comments, strings and import lines", () => {
     const sources = withResponse(
       '@testable import GestureCoordinateGeometry\n// GestureCoordinateGeometry\nlet s = "GestureCoordinateGeometry"\n',
@@ -148,5 +210,22 @@ describe("loadProject", () => {
     expect(packageFiles.get("Wire")).toEqual(["../wire/Sources/Wire/Envelope.swift"]);
     expect(sources.has("Tests/TV/SkipMe.swift")).toBe(true);
     expect(findMissingTypes(targets, sources, packageFiles).map((m) => m.type)).toEqual(["Helper"]);
+  });
+
+  test("normalizes ./-prefixed file entries to the keys of the project traversal", () => {
+    const dir = join(root, "dotted");
+    write(
+      "dotted/project.yml",
+      "targets:\n  TV:\n    sources:\n      - ./Sources//Shared.swift\n      - path: ./Tests\n",
+    );
+    write("dotted/Sources/Shared.swift", "struct Shared { let h: Helper }\n");
+    write("dotted/Sources/Helper.swift", "struct Helper {}\n");
+    write("dotted/Tests/Case.swift", "struct Case { let s: Shared }\n");
+
+    const { targets, sources, packageFiles } = loadProject(dir);
+    expect(targets[0]?.files).toEqual(["Sources/Shared.swift", "Tests/Case.swift"]);
+    expect(findMissingTypes(targets, sources, packageFiles).map((m) => m.file)).toEqual([
+      "Sources/Shared.swift",
+    ]);
   });
 });

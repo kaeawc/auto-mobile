@@ -541,6 +541,17 @@
         }
       }
     },
+    "Uses %@": {
+      "comment": "PrototypeScreen chrome: viewer band naming the sensitive platform modules an imported prototype uses; placeholder is a comma-separated list of module identifiers.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uses %@"
+          }
+        }
+      }
+    },
     "Hide %@?": {
       "comment": "LibraryView Hide confirmation title; placeholder is the prototype name.",
       "localizations": {

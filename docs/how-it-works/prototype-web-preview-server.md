@@ -31,13 +31,14 @@ accepts both forms for any id.
 The web page's CSP allows only its own runtime script and no network, so the page is never
 modified. The reload script lives in the shell, whose CSP pins that script's hash and allows
 `connect-src 'self'` and `frame-src 'self'`. The shell renders the iframe without `src` and loads
-it on the first `ready` (or on a stream error before one), so the page is requested only after the
-stream is subscribed and a change between the two cannot go unseen. On `reload` the shell reads the variant picked in the
-same-origin iframe and reloads the iframe with it. `generation` counts changes: a later `ready` with a
+it on the first `ready` (or on a stream error before one). The shell therefore requests the page
+only after it subscribes to the stream, and a change between the two cannot go unseen. On `reload`
+the shell reads the variant picked in the same-origin iframe and reloads the iframe with it. The
+`generation` field counts changes: a later `ready` with a
 different generation means a change was missed, and the shell reloads.
 
 A page for `P` gets `reload` when the changed id is `P`, is in `P`'s variant group now, or was at
-the previous change, so a variant that leaves the group still reloads its pages once.
+the previous change. A variant that leaves the group therefore still reloads its pages once.
 
 ## Invariants
 
@@ -55,12 +56,13 @@ the previous change, so a variant that leaves the group still reloads its pages 
 ## Headless mode
 
 Headless mode (#17974) needs no source of its own. A show or patch on the virtual device runs the
-same Android path as a device, so the status store records it into the daemon's spec revisions and
-the default `PrototypePreviewPageSource` serves it and signals the reload. `serve` and `stop` are
-host-only: in every mode the registration's `shouldEnsureDevice` skips device resolution for them
-(and for `screenMap`, `share` and the mock-backend actions), and `nonDeviceHandler` runs them on
-the virtual device, so a disconnected device cannot block the preview. Outside headless mode their
-results carry no `virtualDevice` report. `status` still resolves a device, because its entries are
+same Android path as a device. The status store records it into the daemon's spec revisions, and
+the default `PrototypePreviewPageSource` serves it and signals the reload. The `serve` and `stop`
+actions are host-only. In every mode the registration's `shouldEnsureDevice` skips device
+resolution for them (and for `screenMap`, `share` and the mock-backend actions). The
+`nonDeviceHandler` runs them on the virtual device, so a disconnected device cannot block the
+preview. Outside headless mode their results carry no `virtualDevice` report. The `status` action
+still resolves a device, because its entries are
 scoped to the device that showed them.
 
 ## Background

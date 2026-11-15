@@ -1,10 +1,10 @@
 # Accessibility-data-sensitive windows (Android 14+)
 
 Android 14 added `View#setAccessibilityDataSensitive` / `android:accessibilityDataSensitive`.
-Views marked sensitive, and windows built from them, are delivered only to accessibility services
+Android delivers views marked sensitive, and windows built from them, only to accessibility services
 whose config declares `android:isAccessibilityTool="true"`. Any other service gets a `null` root for
-that window: `AccessibilityWindowInfo.getRoot()` and `rootInActiveWindow` both return `null`, even
-though the window is listed with correct `focused=true` / `active=true` flags. `uiautomator` is exempt
+that window. Both `AccessibilityWindowInfo.getRoot()` and `rootInActiveWindow` return `null`, even
+though the window list shows it with correct `focused=true` / `active=true` flags. `uiautomator` is exempt
 because `UiAutomation` is registered as an accessibility tool.
 
 On the API 34 GA image, the permission controller's `GrantPermissionsActivity` and the Settings

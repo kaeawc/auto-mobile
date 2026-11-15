@@ -25,6 +25,6 @@ disabled or hidden element is rejected before any script runs.
 ## Page-controlled ids
 
 Element ids live in the page's `data-automobile-id` attributes, so a page can choose them. An id
-never becomes script source: each action script binds it as a JSON string literal and selects the
-element with `CSS.escape`, so an id containing quotes, brackets or script text matches nothing
-instead of executing. A script whose element is gone does nothing.
+never becomes script source. Each action script binds it as a JSON string literal and selects the
+element with `CSS.escape`. An id containing quotes, brackets or script text therefore matches
+nothing instead of executing. A script whose element is gone does nothing.

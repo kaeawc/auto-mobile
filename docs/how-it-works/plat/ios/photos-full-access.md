@@ -2,10 +2,10 @@
 
 `setAppPermissions` with `photos` on a simulator runs `simctl privacy <udid> grant photos <bundle>`
 (`src/utils/ios-cmdline-tools/IosPermissionsBackend.ts`), which stores a `kTCCServicePhotos` row.
-That grant is not known to give the app effective full access: on iOS 26.5 / Xcode 26.6 the app's own
+Nothing shows that this grant gives the app effective full access: on iOS 26.5 / Xcode 26.6 the app's own
 `PHPhotoLibrary.authorizationStatus(for: .readWrite)` stays `notDetermined`, and `.addOnly` becomes
-`authorized` only after `photos-add` (#12317). No simulator/runtime combination is verified, and
-nothing here is device-verified. Physical-device limits are unchanged.
+`authorized` only after `photos-add` (#12317). No one has verified any simulator/runtime combination, and
+nothing here has device verification. Physical-device limits stay the same.
 
 ## Grant outcomes
 

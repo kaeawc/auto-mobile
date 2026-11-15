@@ -20,9 +20,9 @@ One host snapshot is taken per batch and shared by every simulator.
 | Boot-to-ready duration       | Recorded boot durations, keyed by simulator and profile                           |
 
 Memory cost is the summed footprint; RSS over-counts shared pages and is shown for reference
-only. If the `top` read fails, footprint is reported as unmeasured (with a `memory footprint:`
-error), never replaced by RSS. `%CPU` is `ps`'s decayed ratio, not an instantaneous sample. A
-process claimed by two simulators is attributed to neither.
+only. If the `top` read fails, the report shows footprint as unmeasured (with a `memory footprint:`
+error) and never substitutes RSS. The `%CPU` value is `ps`'s decayed ratio, not an instantaneous
+sample. The report attributes a process claimed by two simulators to neither.
 
 Each simulator carries a `quality`: `measured`, `no-processes` (Booted but no process visible),
 `not-running`, or `unavailable` (host snapshot failed, with the error). Missing data is never

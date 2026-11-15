@@ -16,8 +16,8 @@ neither touch nor, in general, the SDK.
   the observed result of each direction from each position. A focus position is the focused
   element's identifier, text, class and bounds.
 - **Re-read after every press.** The focus engine remembers the last item per row or column, so
-  the result of a move cannot be predicted from geometry (`xcuitest-spike.md`). Every press is
-  followed by a hierarchy read, and the observed move overwrites any earlier one.
+  geometry cannot predict the result of a move (`xcuitest-spike.md`). The crawl follows every
+  press with a hierarchy read, and the observed move overwrites any earlier one.
 - **Next step.** Select the focused item if it is unselected. Otherwise breadth-first search the
   known moves for the nearest position that is unselected or has an untried direction and take
   the first move toward it. With nothing left, press `menu` back to the parent; on the first
@@ -29,8 +29,8 @@ neither touch nor, in general, the SDK.
   destinations. Its edge is still written, and `navigateTo` refuses an edge with no recorded
   action instead of opening the wrong screen. The screen the press reaches is written with
   `recordNavigationEvent`; a press that reaches no new screen withdraws its call.
-- **Termination.** Moves need no budget of their own: every move either tries an untried
-  direction or follows a known move toward one, and a landing that contradicts a known move
+- **Termination.** Moves need no budget of their own. Every move either tries an untried
+  direction or follows a known move toward one. A landing that contradicts a known move
   overwrites it, so known moves cannot cycle without new information. A new focus position is
   selected at once, so new positions are bounded by `maxInteractions` (`select` and `menu`
   presses); `timeoutMs` bounds wall time. A select that leaves the app is answered with one
@@ -40,7 +40,7 @@ neither touch nor, in general, the SDK.
 
 `PlanExecutionOrchestrator` admits `tvos`, and the plan schema and `PlanValidator` accept `tvos`
 as the plan's platform hint and as a plan device's platform. Steps run through the same tool registry as on other
-platforms, so each step passes the per-platform tool gate (`applePlatformToolSupport.ts`): a
+platforms, so each step passes the per-platform tool gate (`applePlatformToolSupport.ts`). A
 step whose tool is not on the tvOS allowlist fails with that tool's refusal. Automatic plan video
 takes the iOS single-file path, which records an Apple TV through `simctl io recordVideo`.
 

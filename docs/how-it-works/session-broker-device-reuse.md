@@ -99,7 +99,6 @@ The only tunable is `maxUses`; `fallback` is rejected for this mode.
 - app-group and shared-container contents of apps the session did not install;
 - anything the journal did not record.
 
-
 Choose `keep-booted` when those matter; choose `minimal` when sessions only install
 and use their own apps and the cheaper release is worth the weaker isolation.
 It is not device-verified (#14786 and #14787 cover the same simctl behaviours in

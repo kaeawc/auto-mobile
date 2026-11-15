@@ -2,7 +2,6 @@
 
 Part of [the agent-authored prototype specification](prototype-ux.md).
 
-
 Optional top-level `theme` selects the design and sets the scheme components draw
 from. At least one of its fields is required:
 

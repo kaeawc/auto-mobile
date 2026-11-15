@@ -2,7 +2,6 @@
 
 Part of [the agent-authored prototype specification](prototype-ux.md).
 
-
 Chromeless fullscreen is the default on a device advertising `prototype_window_chrome_v1` (#12064),
 and the bar is opt-in. The host escape is a stationary two-finger long press (1 s) anywhere on the window.
 It cancels authored touch handling for that gesture and reveals a small dismiss pill for 5 s. A second

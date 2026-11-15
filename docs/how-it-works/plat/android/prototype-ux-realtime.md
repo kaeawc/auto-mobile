@@ -2,7 +2,6 @@
 
 Part of [the agent-authored prototype specification](prototype-ux.md).
 
-
 The strict root `channels` map declares up to four channel IDs (state-key grammar) and requires
 `realtime` in `requires.platform`. Channel declarations, realtime calls and realtime state reads
 require `prototype_platform_realtime_v1`. `via: "device"` additionally requires

@@ -50,7 +50,7 @@ is recorded in the matrix and never stops the script.
 
 ## Injectors with device-capability contracts
 
-`faults.readOnlyFilesystem` requires rootable Android images and remounts the `/storage/emulated` FUSE superblock read-only device-wide, causing app writes to `/sdcard` to fail with EROFS; apply and reset verify mount options, and only mounts changed by the injector are restored to read-write on release or session close, without creating files.
+`faults.readOnlyFilesystem` requires rootable Android images and remounts the `/storage/emulated` FUSE superblock read-only device-wide, causing app writes to `/sdcard` to fail with EROFS. Apply and reset verify mount options. On release or session close the injector restores to read-write only the mounts it changed, without creating files.
 
 `faults.memoryPressure`:
 
@@ -72,20 +72,20 @@ is recorded in the matrix and never stops the script.
 - Binaries are built from source per ABI by `scripts/android/build-lmk-pressure.sh` and are not
   checked in. `AUTOMOBILE_LMK_PRESSURE_DIR` overrides the package-root `build/lmk-pressure`
   directory.
-- Prepare Release builds both ABIs once with the runner's NDK (`build-lmk-pressure.yml`), requires
+- Prepare Release builds both ABIs once with the runner's NDK (`build-lmk-pressure.yml`). It requires
   each to be a 64-bit ELF for its own ABI and a second build to match byte for byte, and pins them as
   `lmkPressureArm64Sha256` and `lmkPressureX8664Sha256`. Release attaches those same bytes as
   `automobile-lmk-pressure-arm64-v8a` and `automobile-lmk-pressure-x86_64`: release assets, not npm
   package contents.
-- The injector uses a local build first, then `LmkPressureBinaryProvider`, which downloads the device
-  ABI's asset once, checks it against the pinned SHA-256 and caches it under the data directory in
-  one directory per ABI and pinned SHA-256, so daemons on different releases never replace each
-  other's binary (re-downloading when the recorded size or pinned SHA-256 changes). A release without
-  a pinned checksum is unsupported without touching the network, a checksum mismatch is an error, and
-  a set `AUTOMOBILE_LMK_PRESSURE_DIR` that lacks the binary is unsupported rather than downloaded
+- The injector uses a local build first, then `LmkPressureBinaryProvider`. The provider downloads the
+  device ABI's asset once, checks it against the pinned SHA-256 and caches it under the data
+  directory in one directory per ABI and pinned SHA-256. Daemons on different releases therefore
+  never replace each other's binary. The provider re-downloads when the recorded size or pinned
+  SHA-256 changes. A release without a pinned checksum is unsupported without touching the network.
+  A checksum mismatch is an error, and a set `AUTOMOBILE_LMK_PRESSURE_DIR` that lacks the binary is unsupported rather than downloaded
   around.
 - Pull requests that change the payload, its build or its injector run the x86_64 binary on an
-  x86_64 CI emulator (`lmk-pressure-emulator-smoke.sh`): it must report READY, run as the shell user
+  x86_64 CI emulator (`lmk-pressure-emulator-smoke.sh`). It must report READY, run as the shell user
   and stop; lmkd kills are not part of that smoke.
 
 ## Background

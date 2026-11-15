@@ -73,7 +73,7 @@ first; see `docs/using/environment-variables.md`.
 
 ## Committed corpus
 
-- `test/fixtures/ios/ctrlproxy-golden/settings-tap-general/` holds 14 exchanges:
+- `test/fixtures/ios/ctrlproxy-golden/settings-tap-general/` holds 14 exchanges. They are
   `request_launch_app`, two `get_sdk_capabilities`, `request_hierarchy_if_stale`
   on the Settings root, `request_tap_coordinates` at the General row's centre
   (201, 406), `request_hierarchy_if_stale` on the General screen, and the pushes in
@@ -120,9 +120,9 @@ diff cannot pass vacuously. Making the legacy matcher always miss turns
   substituted. Coordinates, timeouts and frame contexts are not compared; tests
   assert on `sentRequests` when they matter. A request with no recorded response
   left goes into `unmatchedRequests` and gets no reply.
-- **Pushes are not replayed, except `connected`.** The handshake is replayed when
-  the socket opens. Recorded `hierarchy_update` and `performance_update` pushes are
-  kept in the fixture but never emitted on their own.
+- **Pushes are not replayed, except `connected`.** The replay socket replays the handshake when
+  the socket opens. The fixture keeps recorded `hierarchy_update` and `performance_update` pushes,
+  but the replay socket never emits them on its own.
 - **Recorded timing.** `perfTiming`, `timestamp` and `updatedAt` are capture-time
   values, and replies arrive on the next microtask with no latency.
 - **Redaction.** Replayed text-input requests carry `<redacted:password-field>`
@@ -130,7 +130,7 @@ diff cannot pass vacuously. Making the legacy matcher always miss turns
 - **The runner's SDK cache.** On `request_hierarchy`, the runner probes the SDK only
   while it has no cached tree for the foreground app. After that it reuses the
   cache until the app posts `/sdk-events`, so a pair recorded right after an
-  in-app tap can pair the new XCUITest screen with the previous screen's SDK tree. `--fresh` clears the cache: it
+  in-app tap can pair the new XCUITest screen with the previous screen's SDK tree. The `--fresh` flag clears the cache. It
   requests a SpringBoard hierarchy before each capture, after terminating the app
   or (after a tap) going Home, then relaunches. Every committed pair has an SDK
   timestamp later than the screen change.

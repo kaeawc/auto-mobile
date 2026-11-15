@@ -19,9 +19,9 @@ runner capabilities and limits it builds on.
 ## Focus and runner constraints
 
 - Reaching an element takes a path of directional remote moves, with a fresh focus read after
-  every move. The focus engine remembers the last item per column (moving up from the text field
-  after leaving `B22` returns to `B22`, not the geometric `B21`), so focus cannot be inferred from
-  grid geometry or a previously planned path.
+  every move. The focus engine remembers the last item per column: moving up from the text field
+  after leaving `B22` returns to `B22`, not the geometric `B21`. So neither grid geometry nor a
+  previously planned path predicts focus.
 - Settings (`com.apple.TVSettings`) supports system-app hierarchy capture. Activating
   `com.apple.TVWatchList` and `com.apple.TVHomeScreen` fails; they are not usable capture targets.
 - Under load a test invocation can keep running after the test passes: use a hard timeout and

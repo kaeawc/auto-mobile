@@ -16,8 +16,8 @@ exercise a matching pair; they are fixtures, not measurements from either keyboa
 
 1. Install and enable Gboard and Samsung Keyboard on the same Android device. Record the Android
    build, keyboard package/version, and whether either keyboard has custom settings enabled.
-2. Select the first keyboard in Android input settings, open Discover's IC Trace screen, enter a
-   precise scenario name, and leave **Include text** off unless the scenario requires content-level
+2. Select the first keyboard in Android input settings, open Discover's IC Trace screen, and enter a
+   precise scenario name. Leave **Include text** off unless the scenario requires content-level
    comparison and the entered text is safe to export. The default capture records lengths rather
    than typed or read text.
 3. Start from the same editor contents and selection for every capture. Perform the scenario once,

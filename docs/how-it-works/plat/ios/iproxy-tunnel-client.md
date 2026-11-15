@@ -19,9 +19,9 @@ the runner restart. A local tunnel's recorded port keeps runner launch and owner
 
 ## Binary and prerequisites
 
-`iproxy` is launched by name through the executor and resolved from the host's `PATH` (the remote
-host's for remote execution). The binary's path, signature, version and provenance are not checked
-or pinned, and logs make no claim about them. The `iproxy` installation and the connected USB device
+The executor launches `iproxy` by name and resolves it from the host's `PATH` (the remote
+host's for remote execution). Nothing checks or pins the binary's path, signature, version and
+provenance, and logs make no claim about them. The `iproxy` installation and the connected USB device
 are trusted host prerequisites; existing physical CtrlProxy prerequisites apply. No specific
 Xcode/iOS/libusbmuxd combination is validated by the unit tests.
 

@@ -59,17 +59,19 @@ Local clients read the UTF-8 token file and trim whitespace. On POSIX, the file
 must be a regular file owned by the current uid with mode `0600`; symlinks are
 refused. Writes use an exclusive `0600` temporary file in the same directory and
 rename it into place. The parent directory is created with mode `0700` where
-supported. Windows uses the same publication rules without POSIX uid/mode checks,
-and retries a rename that fails with a transient sharing violation (`EPERM`, `EBUSY`,
-`EACCES`) only while the public token file is unchanged since publication began; if
-another daemon publishes during the backoff, publication fails without overwriting it
+supported. Windows uses the same publication rules without POSIX uid/mode checks.
+It retries a rename that fails with a transient sharing violation (`EPERM`, `EBUSY`,
+`EACCES`) only while the public token file is unchanged since publication began. If
+another daemon publishes during the backoff, publication fails without overwriting it,
 and the aborted store never claims ownership (`remove()` leaves that token alone).
+
 External clients must discover the file using the daemon's
 launch environment and read it again after a daemon restart. TypeScript clients
-can use `readDaemonHttpToken(env)` or `daemonHttpAuthHeaders(endpoint, env)`, which
-returns the Authorization header only for a daemon endpoint (and `{}` for any
-other URL): an exact loopback host (`localhost`, `127.0.0.1`, `[::1]`), an explicit
-port in the original URL spelling, and path `/auto-mobile/streamable` or `/heartbeat`.
+can use `readDaemonHttpToken(env)` or `daemonHttpAuthHeaders(endpoint, env)`. The
+latter returns the Authorization header only for a daemon endpoint, and `{}` for any
+other URL. A daemon endpoint has an exact loopback host (`localhost`, `127.0.0.1`,
+`[::1]`), an explicit port in the original URL spelling, and path
+`/auto-mobile/streamable` or `/heartbeat`.
 When the daemon PID file (same isolation-aware path as the token) records an HTTP
 port, the URL port must equal it; with no discoverable port any explicit port passes.
 The PID file is re-read per request. The client-only
@@ -82,9 +84,9 @@ the in-process transport rather than an HTTP request.
 
 ## MCP transport and sessions
 
-The daemon's internal MCP endpoint (`/auto-mobile/streamable`) is stateless: each
-request gets its own server and transport, responses carry no `mcp-session-id`, and
-there is no transport session to expire, so a daemon restart needs no replay on the
+The daemon's internal MCP endpoint (`/auto-mobile/streamable`) is stateless. Each
+request gets its own server and transport, and responses carry no `mcp-session-id`.
+There is no transport session to expire, so a daemon restart needs no replay on the
 client side. The one session key is the `x-auto-mobile-mcp-session-id` header (or the
 in-band `__mcpSessionId` argument). The socket server forwards its socket session id
 in that header, and the desktop app sends one id per app session. Tool-to-session
@@ -92,12 +94,14 @@ bindings live in a daemon-scoped store rather than on any one server (#4678, #11
 [SDK v2 and stateless daemon layer](sdk-v2-stateless-migration.md).
 
 A `sessionUuid` on a read is not a bearer capability (#13540).
-Reads follow the ownership rule control calls follow (#11344): a `deviceReadOnly` call that
-names a session another connected client owns (a derived `base:label` session counts as its
-base) is refused before admission with the non-retryable `read_session_not_bound`
-(`ReadSessionNotBoundError`, carrying the session and `missingBinding: "session"`), unless
-the calling connection was granted that session by a broker binding or declared the
-session's owner token. The owning connection reads as before, and a session no connected
+Reads follow the ownership rule control calls follow (#11344). A `deviceReadOnly` call can
+name a session another connected client owns (a derived `base:label` session counts as its
+base). The daemon then refuses it before admission with the non-retryable `read_session_not_bound`
+(`ReadSessionNotBoundError`, carrying the session and `missingBinding: "session"`). The exception
+is a calling connection that a broker binding granted that session, or that declared the
+session's owner token.
+
+The owning connection reads as before, and a session no connected
 client owns (its owner disconnected, such as a finished one-shot `--cli` call) stays
 readable by any connection, as it stays controllable. The check
 (`readSessionBindingRefusal`) runs in read-target resolution, so a refused read runs no

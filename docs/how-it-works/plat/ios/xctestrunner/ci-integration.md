@@ -15,6 +15,7 @@ After initialization, `AutoMobilePlanExecutor` acquires an issued session with `
 (`udid`) for iOS or `getAndroid` (`deviceId`) for Android. Missing or empty identifiers fail
 before either acquisition tool is called.
 It then enables and executes `executePlan` with `runtime.session.sessionUuid` from that response.
+
 An explicit caller-supplied
 session skips acquisition on the initial attempt. Retries and device waits acquire new sessions;
 AI recovery resumes reuse the held session, and the daemon releases it when the plan completes.
@@ -164,10 +165,10 @@ The `simulator-tests` job runs the complement of `automobile-tests` with
 
 ## Caching strategy
 
-The `ios-xctest-runner-simulator-tests` job (`.github/workflows/xctestrunner-simulator-tests.yml`,
-run on PRs labelled `run-ios-sim` and on PRs that touch an iOS SDK contract input; its nightly run is the CircleCI `xctestrunner-simulator-tests`
-job in `.circleci/continue_config.yml`, #11010) restores two cache layers before its
-`build-for-testing` invocation. It resolves the CtrlProxy package after restore, so a manifest
+The `ios-xctest-runner-simulator-tests` job (`.github/workflows/xctestrunner-simulator-tests.yml`)
+runs on PRs labelled `run-ios-sim` and on PRs that touch an iOS SDK contract input. Its nightly run
+is the CircleCI `xctestrunner-simulator-tests` job in `.circleci/continue_config.yml` (#11010). The
+job restores two cache layers before its `build-for-testing` invocation. It resolves the CtrlProxy package after restore, so a manifest
 change still fetches any newly introduced dependency before the cached DerivedData is reused:
 
 | Cache                     | Key                                                              | What it stores                                                                                                                                                                                                                                                                                              |
@@ -184,11 +185,13 @@ every DerivedData `hashFiles(...)` call (here and in the analogous Xcode-build a
 must cover every compiled, configuration and resource input of the scoped project directory.
 Otherwise a changed Objective-C shim, `.xcconfig`, `Info.plist`, asset catalog, font or
 storyboard/xib still hits the key exactly, the rebuilt DerivedData is never saved, and every later run
-restores the stale build. Each key hashes, scoped to the job's project directory and any local Swift
-package directories it depends on: `*.swift`, `*.m`, `*.mm`, `*.h`, `*.c`, `*.cpp`, `*.xcconfig`,
+restores the stale build. Each key hashes these files, scoped to the job's project directory and any
+local Swift package directories it depends on:
+
+`*.swift`, `*.m`, `*.mm`, `*.h`, `*.c`, `*.cpp`, `*.xcconfig`,
 `*.plist`, `*.entitlements`, `*.storyboard`, `*.xib`, `*.xcassets/**`, `*.strings`, `*.ttf`, `*.otf`,
 `*.xcprivacy`, `*.pbxproj`, `*.xcscheme`, `project.yml`, `Package.swift` and `Package.resolved`.
-`.build/`, `DerivedData/` and `SourcePackages/` are excluded by that scoping.
+That scoping excludes `.build/`, `DerivedData/` and `SourcePackages/`.
 
 ## Required secrets
 

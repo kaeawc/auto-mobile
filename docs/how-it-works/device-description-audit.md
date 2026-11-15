@@ -19,11 +19,15 @@ Canonical fields:
   (`deviceId`, `connectionId`, and `deviceSessionUuid`) live under `runtime`.
 - `osVersion`, `apiLevel`, `runtimeId`, `deviceType`, `model`, `architecture`,
   and `formFactor` are top-level static facts.
-- `runtime.lifecycle`, `runtime.readiness`, `runtime.poolStatus` (`assigned` also covers a device held by the session broker or another daemon, with `runtime.heldBy` of `session_broker`/`other_daemon`; a broker-bound device the pool dropped, such as a simulator an erase reset shut down or an emulator an ADB server reset detached, reports `poolStatus: null` with `heldBy: "session_broker"` until the next pool refresh re-pools it as `assigned`), and
-  `runtime.session` describe observed state and ownership.
-- A held device its platform still lists in a transitional state is published, never dropped, and
-  counted `assigned`: an Android device adb lists outside `device` carries
-  `runtime.connection.adbState`; an iOS simulator `simctl` lists `Booting` or `Shutting Down`
+- `runtime.lifecycle`, `runtime.readiness`, `runtime.poolStatus` and `runtime.session` describe
+  observed state and ownership. A pool status of `assigned` also covers a device held by the
+  session broker or another daemon, with `runtime.heldBy` of `session_broker`/`other_daemon`. A
+  broker-bound device the pool dropped reports `poolStatus: null` with `heldBy: "session_broker"`
+  until the next pool refresh re-pools it as `assigned`. Such a device is, for example, a simulator
+  an erase reset shut down, or an emulator an ADB server reset detached.
+- The description publishes a held device its platform still lists in a transitional state, never
+  drops it, and counts it `assigned`. An Android device adb lists outside `device` carries
+  `runtime.connection.adbState`. An iOS simulator `simctl` lists as `Booting` or `Shutting Down`
   carries the additive `runtime.simulatorState` (`"Booting"`/`"Shutting Down"`) with
   `runtime.lifecycle.state` `booting`/`shutting-down` and `readiness` `not_ready`. An unheld
   simulator in those states stays unlisted. When the held-Android state probe cannot answer, the

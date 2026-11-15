@@ -18,9 +18,9 @@ From `EmulatorLauncher.startClaimedEmulatorProcess` and the AVD hardware fields 
 | Cameras        | AVD value (back `emulated`, front `none` on every sampled AVD)                                                | `config.ini`                            |
 | CPU, RAM       | AVD value; `provisionDevice` accepts `cpuCores` (1-16) and `memoryMb` (at least 2048)                         | `provisionDeviceSpecSchemas.ts`         |
 
-With `AUTOMOBILE_EMULATOR_NETSIM_ISOLATION=true`, each newly spawned emulator owns a private netsimd started after boot admission and connected through `-packet-streamer-endpoint`, isolating BLE peripherals across sessions; explicit endpoints take precedence, and emulator exit or launch failure stops only its owned daemon. An `O_EXCL` claim lock beside `netsim_N.ini` (in netsimd's discovery directory: `TMPDIR`, then `XDG_RUNTIME_DIR` on Linux) reserves instance N across daemons until that netsimd's exit is observed, and `--no-shutdown` is stripped from `NETSIM_ARGS` so a daemon orphaned by an AutoMobile restart still exits once its emulator disconnects.
+With `AUTOMOBILE_EMULATOR_NETSIM_ISOLATION=true`, each newly spawned emulator owns a private netsimd started after boot admission and connected through `-packet-streamer-endpoint`. This isolates BLE peripherals across sessions. Explicit endpoints take precedence, and emulator exit or launch failure stops only its owned daemon. An `O_EXCL` claim lock beside `netsim_N.ini` reserves instance N across daemons until that netsimd's exit is observed. The lock lives in netsimd's discovery directory: `TMPDIR`, then `XDG_RUNTIME_DIR` on Linux. AutoMobile strips `--no-shutdown` from `NETSIM_ARGS`, so a daemon orphaned by an AutoMobile restart still exits once its emulator disconnects.
 
-Headless launches do not imply audio off ([Android provisioning hardware](device-resources.md#android-provisioning-hardware)).
+Headless launches do not imply audio off ([Android provisioning hardware](device-resources-android.md#android-provisioning-hardware)).
 The CI action passes the opposite set: `-no-window -gpu swiftshader
 -noaudio -no-boot-anim -camera-back none` and `-no-snapshot-save`
 (`.github/actions/android-emulator/action.yml`).
@@ -39,17 +39,18 @@ The CPU side budgets two cores per emulator, while product AVDs are created with
 
 ## Configuration that differs from the AVD
 
-1. **Effective RAM differs from the configured RAM** (#15475). `config.ini` says 2G, but the emulator
-   resolves more on newer images. `AvdConfig.effectiveRamMb` and `effectiveCpuCores` carry the
+1. **Effective RAM differs from the configured RAM** (#15475). The `config.ini` file says 2G, but the
+   emulator resolves more on newer images. The `AvdConfig.effectiveRamMb` and `effectiveCpuCores` fields carry the
    launch-time values from `hardware-qemu.ini`, and the boot gate raises its per-emulator estimate to
    the AVD's effective RAM (never lowering it).
 2. **CPU budget vs AVD vCPUs** (#15476). The gate budgets the AVD's own vCPUs under
    `AUTOMOBILE_ANDROID_BOOT_BUDGET_VCPUS=configured`; the default stays two cores. Labelled
    `needs-device-verify`.
 3. **Quick-boot snapshot writes at exit** (#15477). Broker-provisioned emulators launch with
-   `-no-snapshot-save` when no snapshot reset can use the exit state: no `androidResetMode` (released
-   emulators are destroyed), or `keep-booted` without `androidKeepBootedFallback: "snapshot"` (a
-   non-clean release deletes the AVD; a clean one stays booted). `snapshot` hosts, `keep-booted` with
+   `-no-snapshot-save` when no snapshot reset can use the exit state. That is the case with no `androidResetMode`
+   (released emulators are destroyed). It is also the case for `keep-booted` without
+   `androidKeepBootedFallback: "snapshot"` (a non-clean release deletes the AVD; a clean one stays
+   booted). Hosts using `snapshot` reset, `keep-booted` with
    the snapshot fallback, user AVDs and `startDevice` keep the default. The broker baseline is saved
    and loaded explicitly with `avd snapshot save|load`, which the flag does not disable. Labelled
    `needs-device-verify` (#14363).
@@ -122,9 +123,14 @@ sample interval at 5 s so 30 s is six rows). Never use a PID or serial you did n
 
 ### Stop conditions and cleanup
 
-Abort a run, record why, and do not retry blindly when the host load average rises above 4 during
-the window, another process starts an emulator, free disk falls under 10 GiB, or the emulator
-exits on its own. Cleanup after every session: `kill <pid>` of the emulators you started only (by
+Abort a run, record why, and do not retry blindly when:
+
+- the host load average rises above 4 during the window;
+- another process starts an emulator;
+- free disk falls under 10 GiB;
+- the emulator exits on its own.
+
+Cleanup after every session: `kill <pid>` of the emulators you started only (by
 the PIDs you recorded), `avdmanager delete avd -n am-cost-37-1`, and remove any restored
 `config.ini` edits.
 

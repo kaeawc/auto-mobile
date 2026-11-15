@@ -1,8 +1,8 @@
 # Build source revision
 
-A navigation build is identified by `(appId, versionCode, contentHash)`. That key
+`(appId, versionCode, contentHash)` identifies a navigation build. That key
 is hard to map back to source, so an app may also declare the git branch and
-commit it was built from. The revision is display metadata: it never takes part
+commit it came from. The revision is display metadata: it never takes part
 in build-key identity, matching, filtering or diffing.
 
 ## Declaration
@@ -27,10 +27,11 @@ No SDK runtime API is involved; the keys work whether or not the SDK is linked.
 
 ## Validation
 
-The daemon accepts a revision only when both values are present: the branch is
-trimmed, non-empty, at most 255 characters and free of control characters; the
-sha is trimmed, lower-cased and 7–64 hex characters. Anything else is treated as
-no declaration, and the build keeps its plain build key. Resolution never fails
+The daemon accepts a revision only when both values are present. It trims the
+branch, which must be non-empty, at most 255 characters and free of control
+characters. It trims and lower-cases the sha, which must be 7–64 hex characters.
+The daemon treats anything else as no declaration, and the build keeps its plain
+build key. Resolution never fails
 or retries because of a revision.
 
 ## Recording

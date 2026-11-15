@@ -24,7 +24,7 @@ know decodes as `UNKNOWN` on both platforms. Transport descriptors add `faultEnf
 `faultEnforcement` is `ENFORCED` when the SDK applies a matched fault rule itself, `EVALUATE_ONLY`
 when it returns a decision the host must apply, and `NONE` when no rule can take effect. Only a
 `SUPPORTED` transport in a DEBUG build reports anything other than `NONE`, because fault rules
-exist only in DEBUG builds. `faultActions` lists the rule actions an `ENFORCED` transport applies;
+exist only in DEBUG builds. The `faultActions` field lists the rule actions an `ENFORCED` transport applies;
 any other action is matched, recorded as `fault_outcome: unsupported` and not applied.
 
 An unregistered family is never `SUPPORTED`: missing registration reads as host opt-in rather
@@ -54,7 +54,7 @@ moves traffic:
 
 - `WebSocketNetworkCaptureAdapter.send(_:on:connectionId:completionHandler:)` and
   `receive(on:connectionId:completionHandler:)`, used instead of the task's own `send` and
-  `receive`. `latency` holds the frame for `delayMs`. `error` and `closeConnection` close the task
+  `receive`. The `latency` action holds the frame for `delayMs`. The `error` and `closeConnection` actions close the task
   with `goingAway`, or reset it for a `reset` error type, and complete with
   `URLError(.networkConnectionLost)`. Rules match `SEND` or `RECEIVE` by direction.
 - `NWConnectionNetworkCaptureAdapter.start(_:queue:endpoint:connectionId:requestId:onFault:)`,
@@ -79,10 +79,10 @@ through. Background sessions and the forwarding-only adapter methods (`recordFra
 - **Background sessions** ignore `protocolClasses`. `registerURLSession` detects them by their
   `identifier`, leaves the configuration unchanged and returns mode `delegateForwarding` with an
   adapter. The host keeps its own delegate and calls the adapter from it.
-- **Idempotency.** Each registration call may be repeated. The protocol is installed once per
+- **Idempotency.** Each registration call may be repeated. The SDK installs the protocol once per
   configuration; registration state is a set of families, so a repeat does not change the
-  descriptors. A `URLProtocol` registration returns no adapter, so the same request cannot also be
-  recorded through the delegate path.
+  descriptors. A `URLProtocol` registration returns no adapter, so the delegate path cannot also
+  record the same request.
 - **Adapters** are stateless forwarders over one `NetworkCaptureRecorder`. Use one adapter per
   task or connection. A repeated call returns a fresh adapter; forwarding the same callback to two
   adapters records it twice.
@@ -144,5 +144,5 @@ and records capabilities before and after registration. Its manifest contains th
 navigation events with their assigned sequence numbers and WKWebView lifecycle envelopes. The
 judge checks one event per completed transition, contiguous navigation ordering, and host opt-in
 capabilities. On iPad the fixture requests a new scene and records a transition using its actual
-session identifier; on iPhone it reports multi-scene as not applicable. `HostTransportRegistryTests`
+session identifier. On iPhone it reports multi-scene as not applicable. `HostTransportRegistryTests`
 covers transport registration and the capability matrix in-process.

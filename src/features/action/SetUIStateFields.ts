@@ -1,4 +1,5 @@
 import { isAndroidHintText } from "./androidHintText";
+import { matchTextValue } from "./formattedTextMatch";
 import { VALUE_REDACTED_ATTRIBUTE } from "../../models/Element";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -25,6 +26,7 @@ import { SearchableHierarchy } from "../utility/SearchableNode";
 import { readDropdownDescendantValue } from "./dropdownValue";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { findIosToggleControl } from "./iosToggleControl";
+import { focusForInput } from "./textChipActivation";
 import type { TapAtCoordinate } from "./TapAtCoordinate";
 import {
   CONTAINS_IGNORE_CASE,
@@ -63,6 +65,8 @@ export interface InternalFieldResult extends FieldResult {
 
 interface FieldVerificationOutcome {
   verified?: boolean;
+  /** Raw observed text when it matched only after formatting normalization. */
+  normalizedObserved?: string;
   observation?: ObserveResult;
   error?: string;
   stopRetrying?: boolean;
@@ -87,12 +91,20 @@ type FieldApplicationResult = {
 
 type FieldValueVerification = {
   verified: boolean;
+  normalized?: boolean;
   observation?: ObserveResult;
   observedValue?: string | boolean;
   unverifiable?: boolean;
 };
 
 const DEFAULT_MAX_RETRIES = 3;
+
+/** Result fields for a text value that matched only after formatting normalization. */
+function normalizedMarker(
+  observed: string | undefined,
+): Pick<FieldResult, "normalized" | "observed"> {
+  return observed === undefined ? {} : { normalized: true, observed };
+}
 
 export class SetUIStateFields {
   private readonly hierarchy = new SearchableHierarchy();
@@ -152,7 +164,7 @@ export class SetUIStateFields {
         }
 
         // Detect field type
-        fieldType = this.fieldTypeDetector.detect(element);
+        fieldType = this.fieldTypeDetector.detect(element, fieldSpec);
         logger.info(
           `[SetUIState] Field type detected: ${fieldType} for ${this.describeSelector(fieldSpec.selector)}`,
         );
@@ -168,6 +180,7 @@ export class SetUIStateFields {
             verified: true,
             fieldType,
             skipped: true,
+            ...this.alreadyCorrectMarker(element, alreadyCorrect),
           };
         }
 
@@ -201,6 +214,7 @@ export class SetUIStateFields {
             attempts,
             verified: verification.verified,
             fieldType,
+            ...normalizedMarker(verification.normalizedObserved),
             freshObservation: verification.observation,
             warnings: applyResult.warnings,
           };
@@ -248,7 +262,13 @@ export class SetUIStateFields {
       return { observation: verifyResult.observation };
     }
     if (verifyResult.verified) {
-      return { verified: true, observation: verifyResult.observation };
+      return {
+        verified: true,
+        observation: verifyResult.observation,
+        ...(verifyResult.normalized && typeof verifyResult.observedValue === "string"
+          ? { normalizedObserved: verifyResult.observedValue }
+          : {}),
+      };
     }
 
     return {
@@ -518,21 +538,26 @@ export class SetUIStateFields {
   /**
    * Check if field already has the correct value
    */
+  private alreadyCorrectMarker(
+    element: Element,
+    alreadyCorrect: true | "normalized",
+  ): Pick<FieldResult, "normalized" | "observed"> {
+    return normalizedMarker(
+      alreadyCorrect === "normalized" ? this.fieldTypeDetector.getTextValue(element) : undefined,
+    );
+  }
+
+  /** Whether the field already holds the requested state; "normalized" for a reformatted text value. */
   private isFieldAlreadyCorrect(
     element: Element,
     fieldSpec: FieldSpec,
     fieldType: FieldType,
-  ): boolean {
+  ): boolean | "normalized" {
     switch (fieldType) {
       case "text":
         // A redacted value is unknown, not empty, so it is never already correct.
         if (fieldSpec.value !== undefined && element[VALUE_REDACTED_ATTRIBUTE] !== "true") {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return (
-            currentValue === fieldSpec.value ||
-            (fieldSpec.value === "" &&
-              isAndroidHintText(element.class, element["hint-text"], currentValue))
-          );
+          return this.matchFieldText(element, fieldSpec.value);
         }
         return false;
 
@@ -701,28 +726,27 @@ export class SetUIStateFields {
     clearText: ClearTextLike;
   }): Promise<FieldApplicationResult> {
     if (fieldSpec.value === undefined) {
-      return { success: false, error: "value is required for text fields" };
+      return { success: false, error: "value is required for text fields", stopRetrying: true };
     }
 
     const selectorDesc = this.describeSelector(fieldSpec.selector);
 
-    // The focus action verifies that this editable field, rather than a
-    // previously focused field, owns input before ClearText can mutate it.
-    logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
-    const tapStart = Date.now();
-    const tapResult = await this.focusTextField(element, fieldSpec, focusRecovery, {
-      progress,
+    const focusFailure = await focusForInput(element, {
+      selectorDesc,
       signal,
+      tap: () =>
+        this.getTapOnElement().execute(
+          element["resource-id"]
+            ? { elementId: element["resource-id"], action: "tap" }
+            : this.buildTapOptions(fieldSpec.selector, "tap"),
+          { progress, signal },
+        ),
+      refresh: () => this.refreshFieldElement(fieldSpec, element, signal),
+      focus: (target) =>
+        this.focusTextField(target, fieldSpec, focusRecovery, { progress, signal }),
     });
-    signal?.throwIfAborted();
-    logger.debug(
-      `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
-    );
-    if (!tapResult.success || tapResult.focusVerified !== true) {
-      return {
-        success: false,
-        error: `Failed to tap/focus on field: ${tapResult.error ?? "focus was not verified"}`,
-      };
+    if (focusFailure) {
+      return focusFailure;
     }
 
     // Clear existing text
@@ -797,7 +821,14 @@ export class SetUIStateFields {
     { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
   ): Promise<FieldApplicationResult> {
     if (fieldSpec.selected === undefined) {
-      return { success: false, error: "selected is required for checkbox/toggle fields" };
+      // An argument/type mismatch cannot change between attempts (#18350).
+      return {
+        success: false,
+        stopRetrying: true,
+        error:
+          `${this.describeSelector(fieldSpec.selector)} is a checkbox/toggle: selected is required. ` +
+          "Pass selected: true/false, or tapOn it and use sendKeys to type a value.",
+      };
     }
 
     // Check current state
@@ -838,7 +869,7 @@ export class SetUIStateFields {
     signal?: AbortSignal,
   ): Promise<FieldApplicationResult> {
     if (fieldSpec.value === undefined) {
-      return { success: false, error: "value is required for dropdown fields" };
+      return { success: false, error: "value is required for dropdown fields", stopRetrying: true };
     }
 
     // Tap to open dropdown
@@ -919,11 +950,10 @@ export class SetUIStateFields {
             return { verified: false, observation, unverifiable: true };
           }
           const observedValue = this.fieldTypeDetector.getTextValue(element);
+          const match = this.matchFieldText(element, fieldSpec.value);
           return {
-            verified:
-              observedValue === fieldSpec.value ||
-              (fieldSpec.value === "" &&
-                isAndroidHintText(element.class, element["hint-text"], observedValue)),
+            verified: match !== false,
+            ...(match === "normalized" ? { normalized: true } : {}),
             observation,
             observedValue,
           };
@@ -955,6 +985,20 @@ export class SetUIStateFields {
       default:
         return { verified: true, observation };
     }
+  }
+
+  /**
+   * Compare a text field with the requested value: true for an exact (or
+   * hint-only empty) match, "normalized" when only the app's formatting differs
+   * (#18350). Password fields never reach here; their verification is skipped.
+   */
+  private matchFieldText(element: Element, requested: string): boolean | "normalized" {
+    const observed = this.fieldTypeDetector.getTextValue(element);
+    if (requested === "") {
+      return observed === "" || isAndroidHintText(element.class, element["hint-text"], observed);
+    }
+    const match = matchTextValue(requested, observed);
+    return match === "exact" ? true : match === "normalized" ? "normalized" : false;
   }
 
   /**

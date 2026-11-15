@@ -15,7 +15,7 @@ CtrlProxy encode one definition. The daemon reduces the payload to these fields
   field, so a value cannot reach a client even if a future SDK sent one.
 - **Inspection is unavailable.** There is no read path. An inspection adapter, if one
   is added, must be host-provided and opt-in, must name exact items in an allowlist,
-  must redact per field and bound value size before anything leaves the app, and must
+  must redact per field and bound value size before anything leaves the app. It must
   emit an audit event per read. Until then `inspection` is `unavailable` and the
   `secure_state` `read` operation stays unavailable.
 - **Deletion is exact.** `deletion` is `enabled` only when the host set
@@ -28,8 +28,8 @@ CtrlProxy encode one definition. The daemon reduces the payload to these fields
   `namespace_reset` and `write` stay unsupported. `resetKeychain` is the separate,
   simulator-wide reset.
 - **Unknown is not disabled.** An SDK that predates this field, or a malformed
-  capability, is reported as `deletion: unknown` with `SDK_TOO_OLD`; an unreachable
-  runner as `BRIDGE_UNAVAILABLE`. The storage routes exist only in Debug builds, so a
+  capability, reports `deletion: unknown` with `SDK_TOO_OLD`. An unreachable
+  runner reports `BRIDGE_UNAVAILABLE`. The storage routes exist only in Debug builds, so a
   release build is always unreachable here.
 
 ## Store states

@@ -37,8 +37,8 @@ A test that depends on the last two layers belongs on a real device.
 Unknown fields are refused, so an APK or image reference cannot ride along. At least one prop or
 feature is required.
 
-Values are 1–91 characters of `[A-Za-z0-9 ._/+:-]`. 91 is the classic `PROP_VALUE_MAX` less its
-terminator, and the character set leaves nothing a device shell could interpret if a later
+Values are 1–91 characters of `[A-Za-z0-9 ._/+:-]`. The limit of 91 is the classic `PROP_VALUE_MAX` less its
+terminator. The character set leaves nothing a device shell could interpret if a later
 executor passes the value to `setprop` or writes it into `build.prop`.
 
 Props are limited to the `Build` identity fields. `ro.build.fingerprint`, `ro.build.tags`,

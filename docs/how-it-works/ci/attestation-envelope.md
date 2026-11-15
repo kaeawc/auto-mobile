@@ -19,9 +19,9 @@ schema is inside?
 ```
 
 The payload carries the type tag (`payloadType`), its independent version (`payloadVersion`), the
-tier, the producer's timestamp and the result. Because the signature covers the whole payload, a
-result cannot be flipped from fail to pass, and a tier 3 payload cannot be relabeled as tier 1. The
-key id and algorithm are signed too, so a signature cannot be replayed under another key id or scheme.
+tier, the producer's timestamp and the result. Because the signature covers the whole payload, nobody
+can flip a result from fail to pass or relabel a tier 3 payload as tier 1. The signature also covers
+the key id and algorithm, so nobody can replay it under another key id or scheme.
 
 ## Serialization
 
@@ -48,7 +48,7 @@ matches:
 - Object keys sorted by UTF-16 code unit (JCS), not by UTF-8 bytes and not by locale. The two orders
   differ for characters outside the Basic Multilingual Plane, so Go must not use its default map-key order.
 - Strings escaped minimally: `"` and `\`, the short forms `\b \f \n \r \t`, other control characters as
-  lowercase `\u00xx`; everything else, including `<`, `>`, `&`, U+2028 and U+2029, stays raw UTF-8
+  lowercase `\u00xx`. Everything else, including `<`, `>`, `&`, U+2028 and U+2029, stays raw UTF-8
   (Go's `encoding/json` escapes those by default and must be configured not to).
 - Numbers as ECMAScript `Number.prototype.toString` (JCS 3.2.2.3). The payload carries integers and
   gate durations.

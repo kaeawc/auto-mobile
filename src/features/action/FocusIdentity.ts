@@ -239,6 +239,50 @@ function rangeOf(screen: Pick<FocusScreen, "focused" | "elements">): string {
   return ranged ? stringProp(ranged, "range-info") : "";
 }
 
+/**
+ * The focused control's own value before an arrow press (#17209): its `range-info`, or that of a
+ * node inside it with the same bounds (a Compose slider's merged semantics). A container (a
+ * settings row, a card, a pager page) whose smaller child reports a range has none of its own.
+ * Undefined without a focused control or a value.
+ */
+export interface FocusRangeRead {
+  /** The focused node's resource id, class and bounds. */
+  readonly node: string;
+  readonly range: string;
+}
+
+export function ownRangeOf(
+  screen: Pick<FocusScreen, "focused" | "elements">,
+): FocusRangeRead | undefined {
+  const { focused } = screen;
+  if (!focused) {
+    return undefined;
+  }
+  const same = screen.elements.filter((element) => boundsEqual(element.bounds, focused.bounds));
+  const ranged = [focused, ...same].find((element) => stringProp(element, "range-info") !== "");
+  if (!ranged) {
+    return undefined;
+  }
+  const node = [
+    stringProp(focused, "resource-id"),
+    focused.class ?? "",
+    boundsText(focused.bounds),
+  ];
+  return { node: node.join("|"), range: stringProp(ranged, "range-info") };
+}
+
+/**
+ * Whether the press between two reads changed the focused control's own value instead of moving
+ * focus: the same node holds focus and its `range-info` differs.
+ */
+export function changedOwnRange(
+  before: FocusRangeRead,
+  screen: Pick<FocusScreen, "focused" | "elements">,
+): boolean {
+  const after = ownRangeOf(screen);
+  return after !== undefined && after.node === before.node && after.range !== before.range;
+}
+
 /** Whether the control's `range-info` changed on the first press and came back on the second. */
 function rangeRoundTripped(
   older: Pick<ReadIdentity, "range">,

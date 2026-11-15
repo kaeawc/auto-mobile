@@ -7,7 +7,7 @@ prototype runtime support. No cross-platform implementation is inferred from an 
 ## Support matrix
 
 Columns: AOSP `default` (API 30 only; API 36 AOSP not checked), `google_apis` (the AutoMobile
-default image, API 36), `google_apis` with GMS disabled, `google_apis_playstore` (API 36),
+default image, API 36). The remaining columns are `google_apis` with GMS disabled, `google_apis_playstore` (API 36),
 physical Android, iOS Simulator (iOS 26.5/27.0 framework presence only) and physical iPhone.
 
 No SDK has been run in a host app, so no cell is `verified`. Every physical-device cell is

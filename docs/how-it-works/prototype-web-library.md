@@ -1,10 +1,10 @@
 # Prototype web library
 
-The prototype web renderer is meant to become an npm library any website can use to embed a
-prototype in a device frame, the web member of the embeddable renderer family (#13720) beside the
+The goal is to ship the prototype web renderer as an npm library any website can use to embed a
+prototype in a device frame. It is the web member of the embeddable renderer family (#13720) beside the
 Compose library and the `AutoMobilePrototype` Swift package
-([Native prototype embedding](prototype-embedding.md)). The renderer itself is described in
-[Prototype web renderer](prototype-web-renderer.md).
+([Native prototype embedding](prototype-embedding.md)). [Prototype web renderer](prototype-web-renderer.md)
+describes the renderer itself.
 
 No library package is published yet: there is no `packages/prototype-web/`, `mount`,
 `<automobile-prototype>` element or interactive runtime. What exists today is the groundwork below.
@@ -30,8 +30,8 @@ The planned package, API, options and release are in the devlog entry under Back
     server's page builder and resource readers rethrow as an `ActionableError` with the same
     message.
 - `test/features/prototype/web/stillBrowserBundle.test.ts` fails on any Node builtin, the contract
-  JSON, zod, the server logger or `ActionableError` in the closure, and on a bundle over 500,000
-  bytes of HTML, JS and CSS counted together, minified (no separate gzip limit).
+  JSON, zod, the server logger or `ActionableError` in the closure. It also fails on a bundle over
+  500,000 bytes of HTML, JS and CSS counted together, minified (no separate gzip limit).
 
 ## Embed envelope
 

@@ -77,8 +77,8 @@ that as a mismatch rather than a success. Phone images whose
 `config_freeformWindowManagement` is false may refuse freeform even with both settings
 on; the tool then returns `success: false` with the settings receipt.
 
-The two settings are written only when they are not already `1`. Their prior values
-(`null` when unset) are returned as `restore.settings`, bound to the device serial and
+The tool writes the two settings only when they are not already `1`. It returns their prior values
+(`null` when unset) as `restore.settings`, bound to the device serial and
 `/proc/sys/kernel/random/boot_id` like the `setDeviceResources` receipts. Restore writes
 them back with `settings put` or `settings delete` and reads them back.
 

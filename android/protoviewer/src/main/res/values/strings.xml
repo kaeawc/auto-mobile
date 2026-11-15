@@ -53,6 +53,8 @@
   <string name="local_network_denied">Local-network permission denied. Network access is off. Enable the switch to request permission again.</string>
   <!-- Viewer band identifying imported content with network access enabled. -->
   <string name="network_provenance">Imported prototype · Network enabled</string>
+  <!-- Viewer band naming the sensitive platform modules (such as clipboard or share) an imported prototype uses; %1$s is a comma-separated list of module identifiers. -->
+  <string name="sensitive_module_provenance">Imported prototype · Uses %1$s</string>
   <!-- Accessible click action on a library row; %1$s is the prototype label. -->
   <string name="open_prototype">Open %1$s</string>
   <!-- Import screen error line; %1$s is a technical path or token, %2$s the reason. Translators may reorder the placeholders. -->

@@ -3,9 +3,12 @@
 The proposed store layout for CI attestations (#11973, epic #11972). It is the input to the schema in
 #11979; #11973 stays open (`needs-decision`) until the owner accepts or changes it.
 
-Fixed constraints: Neon is the only authoritative store; rows are immutable and append-only; expiry
-is a TTL filter or a tombstone applied at read time, never an in-place edit; no GitHub-side cache may
-be the sole basis for a skip, it may only downgrade.
+Fixed constraints:
+
+- Neon is the only authoritative store.
+- Rows are immutable and append-only.
+- Expiry is a TTL filter or a tombstone applied at read time, never an in-place edit.
+- No GitHub-side cache may be the sole basis for a skip; it may only downgrade.
 
 ## 1. One table, not one per tier
 
@@ -35,9 +38,9 @@ A cache added then must follow these rules:
    visible on the next request.
 3. **TTL** is at most 60 seconds and never beyond the row's own `expires_at`.
 4. **Tombstones and key revocation must not wait for the TTL.** A tombstone write invalidates the
-   entry in the writing instance; with more than one instance the 60-second TTL is the only bound, so
-   key revocation is checked against the key registry on every read, outside the cache. A cached hit
-   is re-checked against `expires_at` and the key registry before it is served.
+   entry in the writing instance. With more than one instance the 60-second TTL is the only bound, so
+   every read checks key revocation against the key registry, outside the cache. The cache re-checks
+   a cached hit against `expires_at` and the key registry before serving it.
 5. A cache may only lower a decision (skip to advisory or ignore). It is never the sole basis for a skip.
 
 ## What this unblocks

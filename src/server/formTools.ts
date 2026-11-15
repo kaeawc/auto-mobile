@@ -66,6 +66,8 @@ const fieldResultSchema = z.object({
   error: z.string().optional(),
   fieldType: z.enum(["text", "checkbox", "toggle", "dropdown", "unknown"]).optional(),
   skipped: z.boolean().optional(),
+  normalized: z.boolean().optional(),
+  observed: z.string().optional(),
   notAttempted: z.boolean().optional(),
   timedOut: z.boolean().optional(),
 });
@@ -172,6 +174,8 @@ export function createSetUIStateHandler({
         error: f.error,
         fieldType: f.fieldType,
         skipped: f.skipped,
+        normalized: f.normalized,
+        observed: f.observed,
         notAttempted: f.notAttempted,
         timedOut: f.timedOut,
       })),

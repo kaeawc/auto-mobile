@@ -15,8 +15,9 @@ spec and the web page:
   `opened`, `rear_display`, `flipped` and `tent` (`src/models/DisplayPanel.ts`), the names
   `setPosture` takes. `POSTURE_PANEL_ROLES` says which panel a posture lights.
 - What a spec can read: platform state `/device/widthClass` (`compact`, `medium` or `expanded` at
-  600 and 840 dp on Android; `compact` or `regular` on iOS) and, on Android, `/device/posture`
-  (`flat`, `tabletop` or `book`), from `platformModules.device.state` in the prototype contract.
+  600 and 840 dp on Android; `compact` or `regular` on iOS). On Android it can also read
+  `/device/posture` (`flat`, `tabletop` or `book`). Both come from `platformModules.device.state`
+  in the prototype contract.
 
 ## Frame schema v2
 
@@ -37,24 +38,24 @@ A v2 frame adds optional fields to a v1 frame; a v1 entry is a v2 frame with one
 - `mask`: `rect` (default) or `round`, and `input`: `touch` (default), `dpad` or `rotary`. These
   describe the device, not the renderer's behaviour.
 
-`source` gains `hinge`, the hinge geometry's source (required when a frame has a hinge), and
-`kinds`, a per-field source kind (`publicSpec`, `avdProfile`, `simulatorProfile` or `measured`)
+The `source` object gains `hinge`, the hinge geometry's source (required when a frame has a hinge),
+and `kinds`. The `kinds` field is a per-field source kind (`publicSpec`, `avdProfile`, `simulatorProfile` or `measured`)
 for `screen`, `insets` and `hinge`, so the registry can mix measured and published values and say
 which is which.
 
 ## Foldables
 
-Book-style foldables (a vertical hinge across a wide inner panel) and flip-style foldables (a
-horizontal hinge across a tall inner panel, with a small cover screen) differ in which panel a
-posture lights and how the hinge splits it.
+Book-style foldables have a vertical hinge across a wide inner panel. Flip-style foldables have a
+horizontal hinge across a tall inner panel, with a small cover screen. The two differ in which
+panel a posture lights and how the hinge splits it.
 
 - **What a spec sees.** The active panel's size sets `/device/widthClass`. On Android the posture
   maps to `/device/posture`: `opened` is `flat`, a horizontal `half_opened` is `tabletop`, a
   vertical `half_opened` is `book`. iOS has no posture state, so an iOS frame never sets it. The
   prototype contract needs no new signal: `widthClass` and `posture` already exist.
 - **Reflow.** The still renderer lays the spec out on the active panel. With an occluding hinge it
-  lays out on the panel minus the hinge, as Android reports the display feature; with a seamless
-  fold it lays out across the whole panel. `closed` on a book foldable and on a flip renders the
+  lays out on the panel minus the hinge, as Android reports the display feature. With a seamless
+  fold it lays out across the whole panel. A `closed` posture on a book foldable and on a flip renders the
   cover panel.
 - **Changing posture** in the page is a fourth view dimension beside variant, revision and
   orientation, so each posture is pre-rendered like an orientation.
@@ -67,7 +68,7 @@ posture lights and how the hinge splits it.
   behaviour. A watch is `compact` and has no landscape view.
 - **TV.** A TV frame has no bezel padding beyond its stand, no status or navigation bar and
   `input: "dpad"`. On a `dpad` frame the renderer marks the first focusable element with a focus
-  ring, because a 10-foot UI with no focus is not a usable preview: a spec node, or a part drawn
+  ring, because a 10-foot UI with no focus is not a usable preview. A focusable element is a spec node, or a part drawn
   inside one (a tab bar item, a dialog action), whose role is button, checkbox, switch, slider,
   tab or text box, and not disabled. An open dialog takes focus from the screen below, as on both
   platforms. A TV is landscape only.
@@ -116,5 +117,5 @@ Snapshots stay bounded by testing each dimension once rather than their product:
 - one reference spec per form factor in the CI browser check.
 
 A unit test asserts that each `postures` entry names a panel the frame has, at most once per
-posture, and that a hinge lies on its panel; the v1 cutout and safe-area checks run on every
+posture, and that a hinge lies on its panel. The v1 cutout and safe-area checks run on every
 panel.

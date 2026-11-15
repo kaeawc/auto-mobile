@@ -71,7 +71,7 @@ class AvailableDeviceImagesSectionUiTest {
                     "runtime",
                     "Renamed running device",
                     platform = "android",
-                    stableId = bootedImage.identity.stableId,
+                    source = ShellDeviceSource(stableId = bootedImage.identity.stableId),
                   ),
                 ),
               onBootDevice = { booted = it },

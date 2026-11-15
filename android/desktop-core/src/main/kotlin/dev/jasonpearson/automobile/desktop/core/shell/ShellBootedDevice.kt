@@ -37,20 +37,25 @@ internal fun BootedDeviceInfo.forShell(): BootedDeviceInfo {
   )
 }
 
+/**
+ * Source-image facts for a [shellBootedDevice]: the image it was booted from (null falls back to
+ * the runtime ID) and whether it is an emulator or simulator.
+ */
+internal data class ShellDeviceSource(val stableId: String? = null, val isVirtual: Boolean = true)
+
 /** A shell device built from runtime fields alone, for Fake mode and placeholder lists. */
 internal fun shellBootedDevice(
   deviceId: String,
   name: String,
   platform: String,
   state: String = "booted",
-  isVirtual: Boolean = true,
-  stableId: String? = null,
+  source: ShellDeviceSource = ShellDeviceSource(),
 ): BootedDeviceInfo =
   BootedDeviceInfo(
       name = name,
       platform = platform,
-      isVirtual = isVirtual,
-      identity = DeviceIdentity(stableId ?: deviceId),
+      isVirtual = source.isVirtual,
+      identity = DeviceIdentity(source.stableId ?: deviceId),
       runtime =
         DeviceRuntime(
           deviceId = deviceId,

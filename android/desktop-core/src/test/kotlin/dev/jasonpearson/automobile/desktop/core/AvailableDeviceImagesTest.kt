@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.DeviceIdentity
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceLifecycle
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceRuntime
+import dev.jasonpearson.automobile.desktop.core.shell.ShellDeviceSource
 import dev.jasonpearson.automobile.desktop.core.shell.shellBootedDevice
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -31,7 +32,7 @@ class AvailableDeviceImagesTest {
               deviceId = "emulator-5554",
               name = "Pixel 8",
               platform = "android",
-              stableId = "Pixel_8",
+              source = ShellDeviceSource(stableId = "Pixel_8"),
             ),
           ),
         platform = "android",
@@ -53,7 +54,7 @@ class AvailableDeviceImagesTest {
               deviceId = udid,
               name = "iPhone 15",
               platform = "ios",
-              stableId = udid,
+              source = ShellDeviceSource(stableId = udid),
             ),
           ),
         platform = "ios",
@@ -73,7 +74,7 @@ class AvailableDeviceImagesTest {
               deviceId = "emulator-5554",
               name = "Pixel 7",
               platform = "android",
-              stableId = "Pixel_7",
+              source = ShellDeviceSource(stableId = "Pixel_7"),
             ),
           ),
         platform = "android",
@@ -96,13 +97,13 @@ class AvailableDeviceImagesTest {
               deviceId = runtimeId,
               name = "Unknown ($runtimeId)",
               platform = "android",
-              stableId = runtimeId,
+              source = ShellDeviceSource(stableId = runtimeId),
             ),
             shellBootedDevice(
               deviceId = "emulator-5556",
               name = unknownRuntimeId,
               platform = "android",
-              stableId = unknownRuntimeId,
+              source = ShellDeviceSource(stableId = unknownRuntimeId),
             ),
           ),
         platform = "android",
@@ -125,7 +126,7 @@ class AvailableDeviceImagesTest {
                 deviceId = "android-runtime-id",
                 name = "Android device",
                 platform = "android",
-                stableId = sharedStableId,
+                source = ShellDeviceSource(stableId = sharedStableId),
               ),
             ),
           platform = "ios",
@@ -148,7 +149,7 @@ class AvailableDeviceImagesTest {
                 deviceId = sharedStableId,
                 name = "iOS device",
                 platform = "ios",
-                stableId = sharedStableId,
+                source = ShellDeviceSource(stableId = sharedStableId),
               ),
             ),
           platform = "android",

@@ -87,4 +87,18 @@ class ShellBootedDeviceTest {
     assertTrue(device.identityUnresolved)
     assertFalse(device.isIos)
   }
+
+  @Test
+  fun `shellBootedDevice applies the source image and virtual flag`() {
+    val device =
+      shellBootedDevice(
+        "serial",
+        "Pixel",
+        platform = "android",
+        source = ShellDeviceSource(stableId = "Pixel_8", isVirtual = false),
+      )
+    assertEquals("Pixel_8", device.identity.stableId)
+    assertFalse(device.identityUnresolved)
+    assertFalse(device.isVirtual)
+  }
 }

@@ -26,8 +26,18 @@ import org.junit.Test
 class LeftSidebarPanelUiTest {
   private val devices =
     listOf(
-      shellBootedDevice("pixel-runtime", "Pixel", platform = "android", stableId = "pixel-avd"),
-      shellBootedDevice("phone-runtime", "iPhone", platform = "ios", stableId = "phone-image"),
+      shellBootedDevice(
+        "pixel-runtime",
+        "Pixel",
+        platform = "android",
+        source = ShellDeviceSource(stableId = "pixel-avd"),
+      ),
+      shellBootedDevice(
+        "phone-runtime",
+        "iPhone",
+        platform = "ios",
+        source = ShellDeviceSource(stableId = "phone-image"),
+      ),
     )
 
   private data class SidebarSpec(

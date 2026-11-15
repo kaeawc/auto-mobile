@@ -105,26 +105,33 @@ class PrototypeFakeMediaEngine {
 
   fun simulate(request: SimRequest): Failure? {
     if (request.player !in players) return Failure.UNKNOWN_PLAYER
-    val status =
-      when (request.event) {
-        "media.ended" -> ENDED
-        "media.error" -> ERROR
-        "media.statusChanged" -> request.status?.takeIf { it in SIM_STATUSES }
-        else -> null
-      }
-    val code = request.code
-    if (status == null || (status == ERROR && (code == null || code !in ERROR_CODES))) {
-      return Failure.INVALID_ARGS
-    }
+    val status = simStatus(request) ?: return Failure.INVALID_ARGS
+    val error =
+      if (status == ERROR) errorCode(request.code) ?: return Failure.INVALID_ARGS else null
     request.advanceMs?.let(::advance)
-    val player = players.getValue(request.player)
-    when (status) {
-      BUFFERING -> player.state = player.state.copy(buffering = true)
-      READY -> update(request.player) { it.copy(buffering = false, status = READY, error = null) }
-      ENDED -> settle(request.player, error = null)
-      else -> settle(request.player, error = code ?: return Failure.INVALID_ARGS)
-    }
+    applySimStatus(request.player, status, error)
     return null
+  }
+
+  /** The status a `media.*` event drives its player into, or `null` when the event is invalid. */
+  private fun simStatus(request: SimRequest): String? =
+    when (request.event) {
+      "media.ended" -> ENDED
+      "media.error" -> ERROR
+      "media.statusChanged" -> request.status?.takeIf { it in SIM_STATUSES }
+      else -> null
+    }
+
+  /** [code] when it is one of the contract's media error codes, else `null`. */
+  private fun errorCode(code: String?): String? = code?.takeIf { it in ERROR_CODES }
+
+  /** Drive [player] into [status]; [error] is the code when [status] is `error`. */
+  private fun applySimStatus(player: String, status: String, error: String?) {
+    when (status) {
+      BUFFERING -> players.getValue(player).let { it.state = it.state.copy(buffering = true) }
+      READY -> update(player) { it.copy(buffering = false, status = READY, error = null) }
+      else -> settle(player, error)
+    }
   }
 
   fun release(player: String): Failure? =

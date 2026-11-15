@@ -27,8 +27,8 @@ The host writer stages a sibling `.tmp-<token>` directory, writes the manifest l
 place; replacement first backs up the old directory to `.old-<token>` and restores it if the commit
 rename fails. Callers serialize writes. The reader refuses unknown versions before validating
 version-specific fields and never changes files. A bad manifest, spec, count or verified-byte total is
-corrupt; missing, unreadable, unsafe, empty/oversized or hash-mismatched assets are omitted from the
-verified snapshot and reported as sorted problems (the viewer shows its missing-asset placeholder and
+corrupt. The reader omits missing, unreadable, unsafe, empty/oversized or hash-mismatched assets from the
+verified snapshot and reports them as sorted problems (the viewer shows its missing-asset placeholder and
 exposes problems via `inspect`). Unlike Android's slug directories, iOS stores one prototype with no
 manifest id, label or savedAt. Asset failures leave the prototype loadable; reading never repairs or
 deletes. The writer permits spec references absent from the request (reported by the reader as missing
@@ -42,9 +42,9 @@ generated at test time).
 ## Viewer template release asset
 
 Release automation ships `AutoMobilePrototypeViewer.zip` with a single top-level `PrototypeViewer.app/`.
-The universal arm64 + x86_64 simulator app is ad-hoc signed by `scripts/ios/prototype-viewer-build.sh`,
-packaged with `ditto -c -k --keepParent` by `scripts/ios/build-prototype-viewer-release.sh` (preserving
-executable mode and signature). `build-prototype-viewer.yml` verifies both architectures,
+The script `scripts/ios/prototype-viewer-build.sh` ad-hoc signs the universal arm64 + x86_64 simulator app.
+Then `scripts/ios/build-prototype-viewer-release.sh` packages it with `ditto -c -k --keepParent` (preserving
+executable mode and signature). The `build-prototype-viewer.yml` workflow verifies both architectures,
 `MinimumOSVersion`, the signature, and the absence of `Assets.car`, `InfoPlist.strings` and
 `CFBundleIconName` before upload.
 
@@ -78,6 +78,7 @@ resolving to either uploaded-ID form. Files contain 1–4 `{asset, name, mimeTyp
 Names are 1–128 UTF-8 bytes, cannot start with a dot, and cannot contain path separators or
 C0/C1 controls, NBSP, U+2028–U+202E, or U+2066–U+2069. Windows reserved device names,
 colons, trailing dots, and ordinary spaces are allowed by this platform-neutral contract. MIME values are nonempty RFC token `type/subtype` values, with no parameters.
+
 No device-local media type is introduced. A complete `shareAssetIds` inventory enables static
 unknown-ID refusal; bundle references use the existing asset lookup, and pure resolution always
 checks the supplied uploaded inventory. Every referenced entry must include a nonnegative
@@ -90,6 +91,7 @@ The pure `resolvePrototypeShare` twins produce vCard 3.0 (`text/x-vcard`, `publi
 order. TEXT properties escape backslash, comma, semicolon and CR/LF; the URI-valued `URL`
 property is preserved verbatim. Lines use CRLF, and lines fold at
 75 UTF-8 octets (continuation space included), without splitting a Unicode scalar.
+
 No Contacts permission is needed. Each string is bounded by `MAX_PROTOTYPE_SHARE_TEXT_BYTES`
 (65536); literal and resolved arguments use the same rules. Library imports refuse secure
 state in every share string, including nested contact/file values and follow-up handlers.
@@ -118,8 +120,8 @@ The contract has no system-sheet dispatcher or fake-mode behavior. `platformMode
 The injected agent never advertises `prototype_platform_permissions_v1`: a grant would go to the host app it
 is borrowing. Each canonical permission's Info.plist usage key and `simctl privacy` service come from
 `schemas/prototype-platform-permissions.json`, and a `requires.permissions[].purpose` is the usage string. On a
-simulator the host grants and denies with `simctl privacy grant|revoke` before launch. `notifications`,
-`bluetooth`, `nearbyWifi` and `speech` have no `simctl privacy` service, so the host reports them
+simulator the host grants and denies with `simctl privacy grant|revoke` before launch. The `notifications`,
+`bluetooth`, `nearbyWifi` and `speech` permissions have no `simctl privacy` service, so the host reports them
 `notGrantableOnSimulator` with `verified: false` and leaves them to the system-alert policy. No Viewer
 advertises the module yet (#14299). See the permission table in `prototype-ux.md`.
 
@@ -141,18 +143,18 @@ activity, and snaps without predictive scrubbing for `none`. Reduced motion stil
 
 iOS `buttonStyle` applies `.glass`/`.glassProminent` on iOS 26+, using bordered buttons
 below 26 with a substituted note. `hover` applies lift/highlight on iOS 17+ and is render-only.
-The renderer's tab bars, app bars and sheets are custom drawn to retain per-item identifiers;
-`tab.role`, `bottomAccessory`, `navigationTitle` and `sheet.sizing` are reported as ignored.
-`bottomAccessory` is node-only and structurally validated; its descendants provide no targets,
+The renderer's tab bars, app bars and sheets are custom drawn to retain per-item identifiers.
+The agent reports `tab.role`, `bottomAccessory`, `navigationTitle` and `sheet.sizing` as ignored.
+The `bottomAccessory` field is node-only and structurally validated; its descendants provide no targets,
 references or capabilities on either renderer. iOS ignores all Android fields.
 
 ## Icon effects
 
 `prototype_icon_effects_v1` is advertised on iOS 17 and later. Icon `effect`
-selects native SF Symbol effects through a pure type/version decision table:
-bounce, pulse, scale.up, variableColor and replace need 17; wiggle, rotate and
-breathe need 18 and fall back to bounce, none and pulse on 17; drawOn needs 26
-and otherwise uses replace. `trigger: {key}` or `{data}` replays on value changes;
+selects native SF Symbol effects through a pure type/version decision table.
+The bounce, pulse, scale.up, variableColor and replace effects need 17. The wiggle, rotate and
+breathe effects need 18 and fall back to bounce, none and pulse on 17. The drawOn effect needs 26
+and otherwise uses replace. A `trigger: {key}` or `{data}` replays on value changes;
 `repeat` is "infinite" or 1–20 and cannot coexist with trigger. Replace follows
 name changes. Reduced/off profiles rest; reduced replace uses a plain crossfade.
 The host reports fallback notes with node paths, using the discovered OS version
@@ -162,13 +164,13 @@ animated-effect budget, including expanded list instances.
 The iOS `hide_for_capture` hold removes repeated symbol modifiers, returning icons to
 rest until the last capture token releases or expires. Restoring restarts native
 repeats. Local `PrototypeIconMotionActivity` tracks mounted repeated effects and
-masks activity during capture; finite native repeats remain conservatively active
+masks activity during capture. Finite native repeats remain conservatively active
 until unmounted because SF Symbols provides no completion callback. iOS has no
-shared motion-active wire signal or shimmer reporter yet; this local signal is
-not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
+shared motion-active wire signal or shimmer reporter yet. This local signal does not
+reach the host, and captures that bypass `hide_for_capture` do not rest effects.
 
-Node `attentionLoop: {effect: "pulse" | "spin", periodMs, iterations?}` is validated against the shared
-contract, including integer period 400–4000 ms, finite iterations 1–20 or `"infinite"`, the
+The shared contract validates node `attentionLoop: {effect: "pulse" | "spin", periodMs, iterations?}`.
+It checks integer period 400–4000 ms, finite iterations 1–20 or `"infinite"`, the
 eight-node expanded-tree limit, and identity rest-pose conflicts in style and conditional styles.
 The agent renders no attention loops and does not advertise `prototype_loops_v1`; the host
 refuses a loop spec against it. Shimmer does not consume the attention-loop limit.
@@ -232,16 +234,16 @@ device-verified.
 
 The host core in `src/features/prototype/disposableApp/` is shared with Android. See "Disposable
 apps" in `docs/how-it-works/plat/android/prototype-ux.md` for the registry, template choice, TTL and
-removal rules. iOS stamping (#14186) is not wired yet. The iOS-specific parts are:
+removal rules. The host does not wire iOS stamping (#14186) yet. The iOS-specific parts are:
 
 - **Identity.** The bundle id is `dev.jasonpearson.automobile.app.<slug>-<sha256(slug) 8 hex>`. It
   keeps the slug's hyphens, the same pattern `prototypeBundleId` uses for saved Viewer copies under
   `dev.jasonpearson.automobile.proto.`.
 - **Info.plist.** Usage descriptions come from `requires.permissions`: each entry's `purpose` is
   written under its usage key. The table is `DISPOSABLE_APP_IOS_USAGE_KEYS`, which the saved-Viewer
-  installer also reads. `notifications` and `nearbyWifi` have no usage key. `UIBackgroundModes`
+  installer also reads. Neither `notifications` nor `nearbyWifi` has a usage key. The `UIBackgroundModes` key
   comes from `requires.background`: `audio` and `microphone` map to `audio`, `location` to
   `location`, `call` to `voip`, `connectedDevice` to `bluetooth-central`, `transfer` to
-  `processing` and `remoteNotification` to `remote-notification`. `camera` has no iOS background
+  `processing` and `remoteNotification` to `remote-notification`. The `camera` value has no iOS background
   mode.
 - **Signer.** A simulator does not report a signer, so removal relies on the reserved prefix alone.

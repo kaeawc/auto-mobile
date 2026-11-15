@@ -37,17 +37,19 @@ strings; they do not share the state-key restriction.
 
 Feed-scale budgets (#14183). Lazy-list rows live in `/data`, so `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` never sits
 below `MAX_PROTOTYPE_LIST_ITEMS`, and `list.maxItems` shares the list cap. Data may use
-`MAX_PROTOTYPE_DATA_BYTES` (786432) of the spec, which stays below `MAX_PROTOTYPE_SPEC_BYTES` so the node
-tree keeps room. `MAX_PROTOTYPE_DATA_WRITE_BYTES` equals it: later host patches re-validate the whole spec
+`MAX_PROTOTYPE_DATA_BYTES` (786432) of the spec. That stays below `MAX_PROTOTYPE_SPEC_BYTES` so the node
+tree keeps room. The write cap `MAX_PROTOTYPE_DATA_WRITE_BYTES` equals it: later host patches re-validate the whole spec
 against the data cap, so a write cap above it would let paging grow data that no patch could survive. The
-response cap (256 KiB) stays below both. The byte, node, depth, image, storage and in-flight limits
+response cap (256 KiB) stays below both.
+
+The byte, node, depth, image, storage and in-flight limits
 are independent of row count: they bound frame size, memory and tree cost, and none of them grows with lazy
 rows. A row carries at most `MAX_PROTOTYPE_REPEAT_PATH_CELLS` / `MAX_PROTOTYPE_LIST_ITEMS` (32) scalar fields
 across a full list. Host validation is linear in rows (`benchmark/prototype-feed-limits.ts`). Feeds beyond these caps page or trim with `maxItems`; per-runtime
 budgets and multi-spec apps are not part of the contract.
 
 Stack-screen budgets (#14213). Renderers draw only a stack's top screen, so node and image bounds
-apply per screen rather than to every screen at once, and `MAX_PROTOTYPE_SPEC_NODES` /
+apply per screen rather than to every screen at once. The `MAX_PROTOTYPE_SPEC_NODES` /
 `MAX_PROTOTYPE_SPEC_IMAGES` (5x one screen) bound validation and wire cost for the whole spec. The
 rule is static and identical in the host, Kotlin and Swift validators: a push cannot be refused on
 the device, so no runtime "active path" is counted. Two stacks drawn side by side add their largest
@@ -68,7 +70,7 @@ have 1-8 entries.
 
 The single structural rule source is `schemas/prototype-spec-contract.json`, imported by TypeScript and
 packaged as a JVM protocol resource. TypeScript's Zod schema supplies inferred types and the final typed
-decode; Kotlin uses kotlinx.serialization sealed hierarchies. `validatePrototypeSpec` /
+decode; Kotlin uses kotlinx.serialization sealed hierarchies. The functions `validatePrototypeSpec` /
 `PrototypeSpecValidator.validate` are the complete entry points (structure, limits and cross-references
 precede typed decode); never bypass them with a model decoder. Untagged dimension, detent, page-target and
 scalar unions have explicit Kotlin serializers; only arbitrary emit payloads keep `JsonElement`. Validated
@@ -78,26 +80,28 @@ integer fields normalize decimal/exponent spellings before Kotlin decoding (`100
 ### Advertised spec schema
 
 The Zod spec converts to a JSON Schema of about 56k tokens, almost all of the `prototype` tool
-definition. `tools/list` therefore advertises a terse `spec`: the top-level fields with their JSON types,
-the required list, `additionalProperties: false` and the root node type names, with no `$ref` or
+definition. The `tools/list` response therefore advertises a terse `spec`: the top-level fields with their JSON types,
+the required list, `additionalProperties: false` and the root node type names. It has no `$ref` or
 `$defs`, because strict clients reject references in tool input schemas. The full schema is the
 `automobile:prototype/spec-schema` resource (a standalone draft-07 document whose recursive `$ref`s point
-at its own root), built on first read. `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` inlines that schema in `spec`
-instead, with its references rebased to `#/properties/spec`. The proxy reads the flag for its cold list
-built from `schemas/tool-definitions.json` and sends `true` on its connection presentation profile
-(`__autoMobilePrototypeFullSchema` on the profile's `setToolEnabled` write), so the daemon inlines the
+at its own root), built on first read. Setting `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` inlines that schema in `spec`
+instead, with its references rebased to `#/properties/spec`.
+
+The proxy reads the flag for its cold list
+built from `schemas/tool-definitions.json`. It sends `true` on its connection presentation profile
+(`__autoMobilePrototypeFullSchema` on the profile's `setToolEnabled` write). The daemon then inlines the
 schema in that connection's `tools/list` even when the daemon process itself runs without the flag. The
 daemon's own flag sets the default for every connection; a client cannot opt a flagged daemon back to
-the terse form, because only `true` is forwarded and absence means no preference. Either way the server
+the terse form, because the proxy forwards only `true` and absence means no preference. Either way the server
 validates with `validatePrototypeSpec`, so the advertised form never changes what is accepted.
 The `publish` `frame` is checked with `z.json()` but advertised as `{}`, because `z.json()` converts to a
 recursive `$defs` pair.
 
 ## Data model (#11673)
 
-`data` is an optional top-level plain JSON object, agent-owned and read-only on the device (objects, arrays,
-strings, finite numbers, booleans; no null; arbitrary object keys). `state` stays the user-owned scalar map:
-`setState`, `toggle`, `increment`, `decrement` target only declared state keys, including per-row keys; a
+The `data` field is an optional top-level plain JSON object, agent-owned and read-only on the device (objects, arrays,
+strings, finite numbers, booleans; no null; arbitrary object keys). The `state` field stays the user-owned scalar map.
+The `setState`, `toggle`, `increment` and `decrement` actions target only declared state keys, including per-row keys. A
 key present only in data fails like any undeclared key. A full `show` replaces data. CtrlProxy and the iOS
 agent advertise `prototype_data_model_v1`.
 
@@ -145,10 +149,10 @@ is missing.
   `<node>.repeat.items.path` with `Repeat path cell limit exceeded`, before projection. Cell counts and
   projected lists are cached by pointer within a validation call.
 - `MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH` (16384 UTF-16 units) bounds the sum of replacement lengths per
-  bindable field at each substitution stage (data in text-kind fields, then repeat in every bindable field
-  per item, including repeat placeholders inserted by data). Literal characters, unresolved repeat
-  placeholders and state placeholders (state changes after show) are not counted.
-  `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL` (4194304 units) bounds rebuilt text per validation: each recognised
+  bindable field at each substitution stage. The stages are data in text-kind fields, then repeat in every bindable field
+  per item, including repeat placeholders inserted by data. The limit does not count literal characters, unresolved repeat
+  placeholders or state placeholders (state changes after show).
+  The `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL` limit (4194304 units) bounds rebuilt text per validation. Each recognised
   data stage and each repeat item charges authored stage length plus replacement length (a data-resolved
   field inside a repeat is charged once per item). Purely literal fields and state placeholders are free.
   Crossing it fails at the field with `Substituted text total limit exceeded`. During state interpolation a
@@ -165,24 +169,25 @@ is missing.
   `{index}` and `{key}` inside it bind afterwards like authored text, it is never rescanned for data
   placeholders, and data values cannot be escaped.
 - A condition uses exactly one of `key`, `data`, `platform`, `valid`, `all`, `any`, `not` (see Conditions). A `key` or `data` form
-  takes exactly one comparison: `equals` (same scalar type and value; numbers by value, -0 equals 0),
-  `notEquals` (its inverse, including missing or non-scalar), `gt` or `lt` (numbers only, otherwise false), or data-only `empty`. State-key forms additionally accept `contains`, `startsWith`, `lengthGt` or `lengthLt`.
+  takes exactly one comparison: `equals`, `notEquals`, `gt`, `lt` or data-only `empty`. With `equals` the
+  operands match in scalar type and value (numbers by value, -0 equals 0). The `notEquals` comparison is its
+  inverse, including missing or non-scalar. The `gt` and `lt` comparisons take numbers only, otherwise false. State-key forms additionally accept `contains`, `startsWith`, `lengthGt` or `lengthLt`.
   Data `equals`/`notEquals` operands are literals; a repeat placeholder there is rejected (state operands
   still bind). `bottomSheet.openWhen` keeps its boolean `{key, equals}` form. Component props are never
   bound in `repeat.items.path` or a condition's `data`; `repeat.key` passes through expansion unchanged.
 
 The host validates data and repeat paths and sends authored bindings unchanged. The device resolves them
-before repeat expansion: path items are projected, text is bound, conditions become in-memory constants. All
+before repeat expansion: it projects path items, binds text and turns conditions into in-memory constants. All
 data-model uses (top-level data, path items, `repeat.key`, data conditions, recognised text placeholders)
-require `prototype_data_model_v1`; the host refuses an older device before any upload or show, naming the
-first usage field (data first, then node fields in document order, depth-first), counting the others, with
-an update/relaunch hint and a literal-content fallback. `status` reports a deep copy of the last successful
-show's data next to state, `inspect` reports and adopts device data, dismiss clears it, absent data is
-omitted. Events never carry data.
+require `prototype_data_model_v1`. The host refuses an older device before any upload or show. The refusal names the
+first usage field (data first, then node fields in document order, depth-first) and counts the others. It carries
+an update/relaunch hint and a literal-content fallback. The `status` result reports a deep copy of the last successful
+show's data next to state. The `inspect` result reports and adopts device data, dismiss clears it, and status
+omits absent data. Events never carry data.
 
 Android: CtrlProxy keeps the original validated spec for state-write validation, persistence, replay and
 status. Both render entry points (`mapPrototypeSpec` and the runtime's incremental mapper) resolve the
-authored spec; the runtime caches the resolved root per (root, data) identity pair and the resolved spec per
+authored spec. The runtime caches the resolved root per (root, data) identity pair and the resolved spec per
 authored spec instance, so state writes and repeated `renderModel()` calls do not re-resolve. The controller
 guards the authored tree, checks authored anchors before validation (to preserve error precedence),
 validates, resolves, guards the resolved tree, and re-checks anchors if resolution changed the root.

@@ -43,7 +43,7 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 
 ### Adaptive layouts
 
-`adaptive` requires `prototype_adaptive_v1` and a closed `kind`. `listDetail` takes `list` and `detail` node slots plus a declared string `selectionKey`; empty string means no selection. `navigationSuite` takes 1–8 unique `{value,label}` items, a declared string `stateKey` naming an item, and `content`. `supporting` takes `main`, `supporting`, and a declared boolean `openKey`. Slots are ordinary node subtrees.
+`adaptive` requires `prototype_adaptive_v1` and a closed `kind`. The `listDetail` kind takes `list` and `detail` node slots plus a declared string `selectionKey`; empty string means no selection. The `navigationSuite` kind takes 1–8 unique `{value,label}` items, a declared string `stateKey` naming an item, and `content`. `supporting` takes `main`, `supporting`, and a declared boolean `openKey`. Slots are ordinary node subtrees.
 
 Material adaptive scaffolds use native window classes: two panes at expanded, one below; navigation uses bar/rail/drawer at compact/medium/expanded. Compact list selection shows detail; Back clears the key. There is no shared breakpoint or `minWidth`. iOS uses compact/regular, and successful shows report the difference in `platformNotes`.
 
@@ -181,7 +181,7 @@ An authored indicator can live outside the pager:
 ```
 
 When a pager settles on another page the device sends one `page_changed` event whose
-`name` is the pager id and whose `payload` is the new zero-based page index, the same
+`name` is the pager id and whose `payload` is the new zero-based page index. This is the same
 shape as the iOS agent (#11409). The event `pages` map still carries every pager.
 
 `bottomSheet.openWhen` is `{key, equals}` with a **boolean** equals value. Its
@@ -201,8 +201,8 @@ as text, reserves a 48 dp minimum touch target, and is reached by `observe` / `t
 label.
 
 - **Bound controls emit `change`.** `switch`, `checkbox`, `radioGroup`, `segmentedButton`, filter `chip`,
-  `slider`, `textField`, pickers and `stateKey` selection write the bound key, emit `change` (`{key, value}`;
-  `{keys, values}` for several; only when the value moved) and then run the node's own `onTap`. A `setState`
+  `slider`, `textField`, pickers and `stateKey` selection write the bound key and emit `change` only when the value moved. The payload is `{key, value}`, or
+  `{keys, values}` for several. They then run the node's own `onTap`. A `setState`
   that would make a bound value the wrong type is rejected like any binding type change.
 - `button` runs `onTap`; without one it is drawn but inert. `tonal` and `elevated` are filled-tonal and
   elevated; a leading `icon` draws before the label.
@@ -238,14 +238,14 @@ label.
   (`clearAndSetSemantics`), so `observe` sees only the dialog. Closing writes `!equals` to the key and emits
   `change`, then a button runs its `onTap`. Title is its text, `text` a separate text node, `child` sits
   between text and buttons; buttons are tagged `<testTag>.confirm` / `<testTag>.dismiss`. A snackbar sits at
-  the window bottom and is not modal (the page stays in the tree); it stays until closed unless
+  the window bottom and is not modal (the page stays in the tree). It stays until closed unless
   `durationMs` (1..600000, wall-clock, not scaled by the animator) closes it by writing `!equals`. Its
   `action` (`<testTag>.action`) closes it, then runs `onTap`. Title, text and snackbar text resolve state
   placeholders.
 - `timePicker`: Material dial bound to two integer keys; a change stores both and emits one `change`
   (`{keys, values}`, or `{key, value}` if one moved). `datePicker`: Material calendar bound to a
   `YYYY-MM-DD` string. Both report their value as accessibility state (`07:30` in 24-hour form,
-  `2026-10-08`), move when a re-show or `setState` rebinds, and reject a `setState` that would put an
+  `2026-10-08`) and move when a re-show or `setState` rebinds. Both reject a `setState` that would put an
   out-of-range hour, minute or date in a bound key.
 
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
@@ -273,12 +273,12 @@ prototype shows, or keep display text in a string key.
 ## Text field options
 
 `textField` binds an initialized string state key. Optional `label` is a nonempty floating
-label; `variant` is `filled` (default) or `outlined`; nonempty `supportingText` appears below
-the field. `keyboardType` is `text` (default), `number`, `decimal`, `email`, `phone`, `url`,
-or `password`. `secure` masks text; `multiline` enables multiple lines. `minLines` and
+label. The `variant` field is `filled` (default) or `outlined`. A nonempty `supportingText` appears below
+the field. The `keyboardType` field is `text` (default), `number`, `decimal`, `email`, `phone`, `url`,
+or `password`. The `secure` flag masks text; `multiline` enables multiple lines. Both `minLines` and
 `maxLines` are integers in 1..20, permitted only with `multiline: true`; `minLines` cannot
 exceed `maxLines`. Multiline text cannot use `secure: true` or `keyboardType: "password"`.
-`maxLength` is an integer in 1..10000 and shows a character counter; the initial bound
+The `maxLength` field is an integer in 1..10000 and shows a character counter; the initial bound
 value cannot exceed it (UTF-16 length).
 
 All these options require `prototype_text_field_options_v1`. A device without the capability
@@ -287,16 +287,20 @@ app with `launchApp prototype: true`, or drop the textField options.
 
 `textField.errorWhen` accepts any condition form and immediately forces error styling when true, independently of `checks` and `validateOn`. Optional `errorText` requires `errorWhen` and is nonempty, at most 256 UTF-16 units. The caption is `errorText`, else the currently shown check message, else `supportingText`; with no caption the error styling still appears. Both fields require `prototype_string_conditions_v1`. Forced errors do not change validity in change events, `{valid}` or `requireValid`; those remain checks-only. A field without checks does not track blur validation.
 
-A `textField` may also declare `trailingIcon: {icon, label, onTap?}` (a built-in icon, its
-nonempty accessible `label` and optional 1-32 `onTap` actions, for example a clear button that
-`setState`s the field's key to an empty string; without `onTap` it is decoration),
-`imeAction` (`done`, `next`, `search`, `send` or `go`: the keyboard's action key) and
-`onSubmit` (1-32 actions run when that key is pressed; without `imeAction` the key is
-`done`). Multiline text has no IME action, so `imeAction` and `onSubmit` are refused with
+A `textField` may also declare three optional fields:
+
+- `trailingIcon: {icon, label, onTap?}`: a built-in icon, its
+  nonempty accessible `label` and optional 1-32 `onTap` actions. An example is a clear button that
+  `setState`s the field's key to an empty string. Without `onTap` it is decoration.
+- `imeAction` (`done`, `next`, `search`, `send` or `go`): the keyboard's action key.
+- `onSubmit`: 1-32 actions that run when the user presses that key. Without `imeAction` the key is
+  `done`.
+
+Multiline text has no IME action, so validation refuses `imeAction` and `onSubmit` with
 `multiline: true`. These need `prototype_text_field_actions_v1`, with the same refusal.
 
-Android draws `trailingIcon` as an `IconButton` (its `label` is the content description, its tag is
-`<testTag>.trailingIcon`) in the field's trailing slot and maps `imeAction` to Compose
+Android draws `trailingIcon` as an `IconButton` in the field's trailing slot. Its `label` is the content description and its tag is
+`<testTag>.trailingIcon`. Android maps `imeAction` to Compose
 `ImeAction` with `KeyboardActions`; `next` also moves focus. iOS maps `imeAction` to `submitLabel`
 and `onSubmit`, and draws the trailing icon as an SF Symbol button inside the field.
 

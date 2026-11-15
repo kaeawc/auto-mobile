@@ -21,7 +21,7 @@ from. At least one of its fields is required:
 `colors`, `typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
 inferred from backgrounds.
 
-Role overrides are literal colors, so they apply unchanged in light and dark: pair them with a
+Role overrides are literal colors, so they apply unchanged in light and dark. Pair them with a
 fixed `mode`, or rely on `seed`/`source` for a mode-aware scheme and override only the roles that
 must match a brand. With no `mode`, a `colors.background` (else `colors.surface`) override decides
 light or dark from its luminance, ahead of the authored-background inference, for both the content
@@ -103,22 +103,22 @@ notes.
 
 ## Light and dark values
 
-A shown prototype has exactly one resolved mode, light or dark: an explicit `theme.mode`
+A shown prototype has exactly one resolved mode, light or dark. The first match decides it: an explicit `theme.mode`
 (`system` reads the system setting), else the luminance of a flat `colors.background` (else
-`colors.surface`) override, else the first opaque hex background on the root's leading chain, else
+`colors.surface`) override. Failing those, it is the first opaque hex background on the root's leading chain, else
 the system setting. Every per-mode form below reads that one resolved mode. A device needs
 `prototype_theme_modes_v1` for them; the host refuses such a spec for an older CtrlProxy.
 
-- **Colour pairs.** Every colour slot (`style.background`, `style.color`, `style.shadowColor`,
+- **Colour pairs.** Every colour slot accepts a hex value, a role name, or `{light, dark}` where each
+  side is a hex value or a role name. The slots are `style.background`, `style.color`, `style.shadowColor`,
   `style.border.color`, gradient stops, `window.placement.scrim` and the `bottomSheet` `scrim`,
-  including inside `styleWhen`) accepts a hex value, a role name, or `{light, dark}` where each
-  side is a hex value or a role name. Both sides are required. The side for the resolved mode is
-  taken first, and is then a literal colour or a role looked up in the active scheme.
+  including inside `styleWhen`. Both sides are required. The renderer takes the side for the resolved mode, which is
+  then a literal colour or a role looked up in the active scheme.
 - **Role maps.** The scheme is built in this order: seed, device or default scheme, then the flat
   `colors.<role>` overrides (both modes), then `colors.light` or `colors.dark` for the resolved
   mode. A role named in both the flat overrides and the mode map takes the map's value in that
   mode and the flat value in the other. A role name inside a pair resolves against this final
-  scheme, so there is no precedence to decide between a node's pair and the theme maps: the pair
+  scheme, so there is no precedence to decide between a node's pair and the theme maps. The pair
   picks the name or literal, the scheme supplies the role's colour.
 - **Mode inference ignores per-mode values.** `colors.light` / `colors.dark` and a `{light, dark}`
   background never decide the mode, because they depend on it. A pair background is skipped by
@@ -128,8 +128,8 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
 - **Gradient stops** accept role names; a role is the scheme's colour unchanged.
 - **Scrims** (`window.placement.scrim` and the `bottomSheet` `scrim`) accept role names with one
   special case. The `scrim` role, alone or as the side of a pair for the resolved mode, draws the
-  scheme's scrim colour at the default scrim opacity (40%), the same value an omitted `bottomSheet`
-  scrim uses, so `"scrim": "scrim"` dims rather than hides the app. Any other role (`surface`,
+  scheme's scrim colour at the default scrim opacity (40%). An omitted `bottomSheet`
+  scrim uses the same value, so `"scrim": "scrim"` dims rather than hides the app. Any other role (`surface`,
   `primary`, …) draws its scheme colour unchanged, which is opaque unless the theme overrides it
   with alpha. A hex scrim keeps exactly its authored alpha. A `dialog` authors no scrim; its
   fixed scrim is the `scrim` role at 32%.
@@ -141,13 +141,13 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
   `{light: assetId, dark: assetId}`. Only the asset for the resolved mode is decoded and drawn;
   both ids are checked at `show` and reported in `missingAssets`, and both stay retained with the
   prototype.
-- **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and window scrim are resolved in the show's mode and count as solid only when fully opaque (an opaque role counts; the `scrim` role in a scrim slot never does). The root counts only when drawn over the whole window (#11408): `width` and `height` both `fill` (omitted fullscreen- and sheet-root dimensions default to `fill`), no `anchor`, no `maxWidth`/`maxHeight` cap, no `aspectRatio`, no non-zero `offset`, no rounded corner and no `pressScale` below one. A root failing any of these lets the app show at an edge or corner, so only an opaque fullscreen scrim behind it can still make the window opaque. A chromeless fullscreen window can report `true` when opacity is 100 and its root or scrim is solid; a fullscreen window with the translucent dismiss bar still reports false.
+- **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and window scrim are resolved in the show's mode and count as solid only when fully opaque (an opaque role counts; the `scrim` role in a scrim slot never does). The root counts only when drawn over the whole window (#11408). That needs `width` and `height` both `fill` (omitted fullscreen- and sheet-root dimensions default to `fill`). It also needs no `anchor`, no `maxWidth`/`maxHeight` cap, no `aspectRatio`, no non-zero `offset`, no rounded corner and no `pressScale` below one. A root failing any of these lets the app show at an edge or corner, so only an opaque fullscreen scrim behind it can still make the window opaque. A chromeless fullscreen window can report `true` when opacity is 100 and its root or scrim is solid; a fullscreen window with the translucent dismiss bar still reports false.
 
 ## Live appearance (#11221, `prototype_appearance_v1`)
 
 The controller resolves the mode once per show and keeps it current. That one value drives the host chrome (dismiss bar, Close control), the window scrim, every colour and image pair and the window metadata, so they cannot draw in different modes. No window reads its own Compose configuration for it, so windows from a display or app-layer window context follow the same value.
 
-- **Override.** `show_prototype` takes a top-level `appearance`: `"device"` (default), `"light"` or `"dark"`. It stands in for the system setting only: it decides a spec with `theme.mode: "system"` or one whose mode would otherwise fall through to the device, and does not beat an explicit `light`/`dark` mode, a flat `background`/`surface` override or an authored opaque background. It belongs to the show (a later show of the same id without it follows the device). An unknown value fails the request and leaves what is showing untouched.
-- **Re-theme.** The mode is resolved again after each interaction (a pager page or `styleWhen` state can change the background it is inferred from) and on every configuration change (night mode; on API 31+ the Material You palette, so `colors.source: "device"` re-reads after a wallpaper change). The window, runtime, state, pager pages and text-field contents are kept; only colours change. A prototype hidden by the lock screen or because its app left the foreground is resolved too and returns in the current mode.
+- **Override.** `show_prototype` takes a top-level `appearance`: `"device"` (default), `"light"` or `"dark"`. It stands in for the system setting only. It decides a spec with `theme.mode: "system"` or one whose mode would otherwise fall through to the device. It does not beat an explicit `light`/`dark` mode, a flat `background`/`surface` override or an authored opaque background. It belongs to the show (a later show of the same id without it follows the device). An unknown value fails the request and leaves what is showing untouched.
+- **Re-theme.** The renderer resolves the mode again after each interaction, since a pager page or `styleWhen` state can change the background it infers from. It also resolves on every configuration change (night mode; on API 31+ the Material You palette, so `colors.source: "device"` re-reads after a wallpaper change). The window, runtime, state, pager pages and text-field contents stay; only colours change. A prototype hidden by the lock screen or because its app left the foreground resolves too and returns in the current mode.
 - **Event.** When the resolved mode changes the device sends one `prototype_event` with `kind: "appearance_changed"`, `name: null`, `payload: {mode, source}` on the normal sequence, buffering and replay path. Nothing is sent when the mode stays the same (repeated configuration change, device flip under an explicit mode or override, palette change), nor for the show itself.
-- **Report.** A successful `show_prototype` result and each `inspect_prototypes` entry carry `appearance: {mode, source, deviceDark}`. `source` names the deciding step: `explicit`, `override`, `roleLuminance`, `authoredBackground` or `system` (`theme.mode: "system"` reports `system`, or `override` when the show pinned it). `deviceDark` is the device's own setting. The host `prototype` tool reports it only in device answers (show, inspect), not host-local `status` (#11416). The prototype's window entry in a hierarchy capture carries it as `prototypeAppearance` next to `prototypePlacement` and `prototypeOpaque`; an APK without `prototype_appearance_v1` omits it.
+- **Report.** A successful `show_prototype` result and each `inspect_prototypes` entry carry `appearance: {mode, source, deviceDark}`. The `source` field names the deciding step: `explicit`, `override`, `roleLuminance`, `authoredBackground` or `system` (`theme.mode: "system"` reports `system`, or `override` when the show pinned it). `deviceDark` is the device's own setting. The host `prototype` tool reports it only in device answers (show, inspect), not host-local `status` (#11416). The prototype's window entry in a hierarchy capture carries it as `prototypeAppearance` next to `prototypePlacement` and `prototypeOpaque`; an APK without `prototype_appearance_v1` omits it.

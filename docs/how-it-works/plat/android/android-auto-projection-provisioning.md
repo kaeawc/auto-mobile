@@ -28,16 +28,16 @@ device uses an AVD snapshot that a person signed in to once.
 - **Inputs first.** `provisionDevice` resolves the host inputs before any lease, creation or boot,
   and refuses with one `unsupported` error naming every missing path, because the run could only
   fail after a long boot.
-- **Placement.** The projection runs after the session is bound (beside the manufacturer profile),
+- **Placement.** The projection runs after the session binds (beside the manufacturer profile),
   inside the provision's try block, so its failure rolls back a created emulator like any other
-  post-boot step. It is bounded by the provision's total deadline as well as its abort signal; a
+  post-boot step. The provision's total deadline bounds it as well as its abort signal; a
   request without `androidAuto` never reaches it, so its abort handling is unchanged.
 - **Session hold.** The caller cannot heartbeat the bound session before the call returns, so both
-  post-bind steps run under a hold (`holdAcquiringSession`): one execution registered on that
-  session, which the heartbeat monitor's unsettled-execution veto honours up to the provision
+  post-bind steps run under a hold (`holdAcquiringSession`). The hold is one execution registered on that
+  session. The heartbeat monitor's unsettled-execution veto honours it up to the provision
   deadline. The hold ends before rollback and restarts the pre-first-heartbeat grace from its
-  release (moving only `lastHeartbeat`), so the caller gets the full grace for its first heartbeat
-  and an unclaimed session is still reaped as `missing-first-heartbeat` once it ends.
+  release (moving only `lastHeartbeat`). The caller therefore gets the full grace for its first heartbeat,
+  and the monitor still reaps an unclaimed session as `missing-first-heartbeat` once the hold ends.
 - **Hold cancellation.** The hold's execution aborts on real session or device loss (a released
   session, a retired device), and both post-bind steps run under that signal. Recoveries that keep
   the session (session-preserving recovery, an adb server reset, a discovery quarantine) cancel with
@@ -52,17 +52,17 @@ device uses an AVD snapshot that a person signed in to once.
   and then failed on.
 - **`killDevice`.** Stops the emulator's DHU within the shutdown deadline and forgets its host port
   redirect only once the kill succeeds, since a failed kill leaves the emulator and its redirect in
-  place. Stopping an owned DHU before the kill writes a marker in the resolved AVD directory (for a
-  kill target name with no AVD directory, the AVD the running emulator reports): the next launch
-  skips the unusable quickboot snapshot with `-no-snapshot-load` and consumes the marker only once
+  place. Stopping an owned DHU before the kill writes a marker in the resolved AVD directory. For a
+  kill target name with no AVD directory, that is the AVD the running emulator reports. The next launch
+  skips the unusable quickboot snapshot with `-no-snapshot-load`. It consumes the marker only once
   that launch reaches boot readiness, even across a daemon restart (#17903, #17929). A launch that
   exits first keeps the marker; a kill that fails after the write costs at most one cold boot. A post-kill stop that
   outlives the deadline keeps the serial's shutdown reservation until it settles, whether the rest
   of the shutdown succeeds or fails, so a replacement never boots under it.
-- **Session end without a kill.** When the session holding the phone ends (release, heartbeat reap,
-  idle expiry, a cancelled session) or moves to another device, a session-release and device-unbound
-  listener stops its DHU and removes the redirect this provisioner added, as pending device cleanup,
-  so the emulator keeps running with host port 5277 free.
+- **Session end without a kill.** The session holding the phone can end (release, heartbeat reap,
+  idle expiry, a cancelled session) or move to another device. A session-release and device-unbound
+  listener then stops its DHU and removes the redirect this provisioner added, as pending device cleanup.
+  The emulator keeps running with host port 5277 free.
   - A phone another live session already holds is skipped. A replaced serial only stops the old DHU
     and forgets its redirect, without blocking the new device.
   - The redirect stays while a DHU that would not exit still dials it.
@@ -88,11 +88,11 @@ changes nothing when it already holds, so a rerun on a provisioned phone reports
 `already-done` and reuses the running DHU session.
 
 Before the first step the provisioner polls `adb get-state` on a bounded backoff (up to 60 s)
-until the phone reads `device`: right after boot adb can still report the emulator `offline`, and
+until the phone reads `device`. Right after boot adb can still report the emulator `offline`, and
 every step needs a working transport. The wait also stops one state check (plus a margin) before
-the caller's deadline, and the deadline's abort cuts a re-check delay short, so a short deadline
+the caller's deadline. The deadline's abort cuts a re-check delay short, so a short deadline
 still ends in the offline error rather than a generic timeout. A phone that stays offline fails
-the run before any step, so nothing on it changed: `provisionDevice` reports that error as
+the run before any step, so nothing on it changed. The `provisionDevice` tool reports that error as
 `device_offline` even when the rollback of a device it created then fails, which `cleanup` still
 reports.
 
@@ -107,16 +107,16 @@ reports.
   **Version and permission info** after the first tap, so each tap matches any known label of the
   row and the count carries across the relabel.
 - **Head unit server** reads as on when port 5277 is listening on the phone. The server binds some
-  time after **Start head unit server** is tapped, so the provisioner re-checks on a bounded backoff
+  time after the tap on **Start head unit server**. The provisioner therefore re-checks on a bounded backoff
   (250 ms doubling to 2 s, five re-checks) before reporting it as not listening.
-- **Transport** is `adb emu redir add tcp:5277:5277`, not `adb forward`: a forward is dropped with the
+- **Transport** is `adb emu redir add tcp:5277:5277`, not `adb forward`. A forward drops with the
   adb transport and takes the projection with it. A bound host port 5277 counts as redirected only when
-  this provisioner redirected it to the same device; any other holder, such as another emulator's
-  leftover redirect, is refused rather than risk projecting the wrong phone. The DHU dials host port
-  5277, so one emulator per host projects at a time: a concurrent call for the same device joins the
-  run in progress, and the provisioner refuses another device while a run is in progress or another
-  device's DHU has not exited. An unhealthy but live DHU still holds the port, so it is refused too
-  (naming the device), not stopped: provisioning never tears down another device's projection.
+  this provisioner redirected it to the same device. The provisioner refuses any other holder, such as another emulator's
+  leftover redirect, rather than risk projecting the wrong phone. The DHU dials host port
+  5277, so one emulator per host projects at a time. A concurrent call for the same device joins the
+  run in progress. The provisioner refuses another device while a run is in progress or another
+  device's DHU has not exited. An unhealthy but live DHU still holds the port, so the provisioner refuses that too
+  (naming the device) and does not stop it: provisioning never tears down another device's projection.
 - **Welcome screen.** **Continue** accepts Android Auto's terms on the user's behalf, so it is tapped
   only when the request sets `acceptAndroidAutoTerms`; otherwise a pending screen is reported as
   `skipped`.
@@ -126,18 +126,23 @@ reports.
 A launch fails as `no-connect` when no `connected.` line arrives before the connect timeout, and as
 `stalled` when the DHU exits or repeats `Ping timeout` within the settle window after connecting. The
 DHU prints `connected.` even when the head unit server is down, so the settle window is what tells a
-held connection from that case. The launch reports `connected` only after the pipe accepts
-`focus video`; a write the DHU's closed console rejects (EPIPE) is a `stalled` launch. Error
-listeners on the child and on its stdin are attached before the first write, so a later EPIPE or
-process error marks the session not running instead of escaping as an unhandled `error` event.
+held connection from that case.
+
+The launch reports `connected` only after the pipe accepts
+`focus video`; a write the DHU's closed console rejects (EPIPE) is a `stalled` launch. The launch
+attaches error listeners on the child and on its stdin before the first write. A later EPIPE or
+process error then marks the session not running instead of escaping as an unhandled `error` event.
+
 A failed launch settles only after its DHU exited through the session's bounded stop (SIGTERM, then
 SIGKILL), so a relaunch never races the old process. A DHU that survives both settles as
-`unkillable` with the session that still owns it; the provisioner keeps that session tracked (unhealthy,
+`unkillable` with the session that still owns it. The provisioner keeps that session tracked (unhealthy,
 alive) and fails the provisioning without relaunching. Because it stays in the session map, the
-single-projection check refuses other devices while it lives, and the next provision of the same
-device retries its stop before any relaunch; once the process exits, launches proceed. A run that fails after it
-started its own DHU (the welcome-screen step is the only one after it) stops that DHU, so the failure
-does not leave host port 5277 held; if the stop fails, the session stays tracked the same way. Caller
+single-projection check refuses other devices while it lives. The next provision of the same
+device retries its stop before any relaunch; once the process exits, launches proceed.
+
+A run that fails after it
+started its own DHU (the welcome-screen step is the only one after it) stops that DHU. The failure
+therefore does not leave host port 5277 held. If the stop fails, the session stays tracked the same way. Caller
 paths (`apkDirectory`, `dhuPath`, `dhuConfig`) resolve against the daemon's launch directory, because
 the detached daemon runs from the home directory.
 After a failure the provisioner waits the injected backoff,
@@ -147,34 +152,34 @@ default.
 ## Head-unit actions
 
 `tapAt` and `pressButton` with `display: "headUnit"` act on the projected head unit instead of the
-phone. During projection the phone's signals stay still: the accessibility tree does not track the
+phone. During projection the phone's signals stay still. The accessibility tree does not track the
 car virtual displays, `activeWindow` stays on Android Auto's `GhostActivity`, and the car app's own
 `gfxinfo` frame stats do not move, because Android Auto's presentation draws the projected UI. So
 this path never enters `BaseVisualChange` or `AwaitIdle`:
 
-- **Input** is written to the console of the DHU the daemon's provisioner already runs for that
-  serial (`desktopHeadUnitConsole`). The action only writes commands; it never starts or stops a DHU,
-  and a serial with no healthy tracked DHU, or one still provisioning, is refused. `tapAt` becomes
+- **Input** goes to the console of the DHU the daemon's provisioner already runs for that
+  serial (`desktopHeadUnitConsole`). The action only writes commands; it never starts or stops a DHU.
+  It refuses a serial with no healthy tracked DHU, or one still provisioning. A `tapAt` becomes
   `tap <x> <y>` in head-unit pixels; D-pad, select, back and rotary buttons become `dpad …`; home and
-  media buttons become `keycode …`. Fields with no console equivalent (long press, double tap,
-  coordinate spaces, image points, `durationMs`) are refused, not approximated.
+  media buttons become `keycode …`. The action refuses fields with no console equivalent (long press, double tap,
+  coordinate spaces, image points, `durationMs`) rather than approximating them.
 - **Change detection** compares the projected apps' template stacks before and after the input
   (`CarAppTemplateReader.readProjected`, the same reads as observe's projected block, which leaves
   observe's services snapshot alone). Each projected session contributes its top screen class,
   template type and title, and stack depth. When no projected app answers the template route before
   the input, the action compares SHA-256 hashes of DHU `screenshot <file>` captures instead
-  (`DhuScreenshotHashSource`, written to the host temp directory, or `%PUBLIC%` when the temp path
-  has whitespace the console may split on, and removed after hashing). Once the DHU prints
+  (`DhuScreenshotHashSource`). Captures go to the host temp directory, or `%PUBLIC%` when the temp path
+  has whitespace the console may split on, and are removed after hashing. Once the DHU prints
   `Don't have video focus`, the session reports no video focus until `focus video` is sent again:
   the source then sends no capture, and a wait in progress ends at its next poll. With
   no data on either side the effect is reported as unknown rather than unchanged.
-- **Idle** polls the same source until two consecutive reads agree with no template `loading`. A read
-  that still matches the screen before the input is accepted only after the unchanged settle window,
-  so a slow push is not read as a no-op; the wait ends at its timeout either way.
-- **Fence** (`HeadUnitFence`, one per daemon, keyed by serial) records the head unit each action left:
+- **Idle** polls the same source until two consecutive reads agree with no template `loading`. The wait accepts a read
+  that still matches the screen before the input only after the unchanged settle window,
+  so a slow push does not count as a no-op. The wait ends at its timeout either way.
+- **Fence** (`HeadUnitFence`, one per daemon, keyed by serial) records the head unit each action left. It holds
   the console's panel (a per-process instance label and the DHU's launch config) and the
-  `package/carSessionId` set from the template read. The next action's pre-input read must match it,
-  or the action is refused before any command is sent; the refusal records the new state, so a retry
+  `package/carSessionId` set from the template read. The next action's pre-input read must match it.
+  Otherwise the action is refused before any command is sent; the refusal records the new state, so a retry
   goes through. A screenshot read leaves the recorded apps as they were. Apps without the template
   route are invisible to it, so a switch to one of them is not caught.
 

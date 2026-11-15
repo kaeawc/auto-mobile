@@ -33,27 +33,31 @@ Part of [the session-only provider experiment](session-broker-experiment.md).
 ```
 
 `androidProfileArchetypes` and `iosClassifications` classify installed AVD
-profiles (`phone`, `tablet`, or `foldable`) and simulator device types; without them Android acquisition fails with
-`catalog_metadata_invalid`. iPhone Duo requests are supported whenever the simulator
+profiles (`phone`, `tablet`, or `foldable`) and simulator device types. Without them Android acquisition fails with
+`catalog_metadata_invalid`. iPhone Duo requests work whenever the simulator
 device type and a compatible runtime are installed, without an opt-in or separate
 capability advertisement. Creating a Duo for a
 `duo` archetype request needs both a Duo `archetypes` entry and a Duo
-`modelTypes` entry; a Duo model-type request needs only the `modelTypes` entry;
-an exact Duo model needs neither. `defaults.ios.os.archetypes` (optional, at most one
-entry per archetype, each `{ archetype, selector, preferredVersion }`) replaces `os` for
-that hardware archetype only when the request omits the OS, so a host can pin phones and
-tablets to exact 26.5 while `duo` defaults to 27.1; explicit request selectors stay as
+`modelTypes` entry. A Duo model-type request needs only the `modelTypes` entry, and
+an exact Duo model needs neither.
+
+The optional `defaults.ios.os.archetypes` list holds at most one
+entry per archetype, each `{ archetype, selector, preferredVersion }`. An entry replaces `os` for
+that hardware archetype only when the request omits the OS. A host can therefore pin phones and
+tablets to exact 26.5 while `duo` defaults to 27.1. Explicit request selectors stay as
 requested, and provenance records the entry used as `osDefaultArchetype`. Android `os` selectors use the release version (`16`),
 not the API level (`36`); at equal versions the resolver prefers `google_apis`
-over `google_apis_playstore`. Android hardware defaults map archetypes to installed
+over `google_apis_playstore`.
+
+Android hardware defaults map archetypes to installed
 profile IDs through `defaults.android.hardware.profiles`, for example
 `[{ "archetype": "foldable", "profileId": "pixel_9_pro_fold", "memoryMb": 4096 }]`
 with `androidProfileArchetypes: { "pixel_9_pro_fold": "foldable" }`. The optional
 `memoryMb` is an integer of at least 2048 MB and constrains creation and reuse.
-Unmapped foldables are refused without reservation with non-retryable
+The broker refuses unmapped foldables without reservation with non-retryable
 `unsupported_hardware`; they never fall back to phone hardware. A request may instead
-name one installed profile with `{ "kind": "exact-profile", "profileId": "pixel_9" }`; it
-must be classified in `androidProfileArchetypes` and reuses only idle devices of that
+name one installed profile with `{ "kind": "exact-profile", "profileId": "pixel_9" }`. That profile
+must have a class in `androidProfileArchetypes`, and the request reuses only idle devices of that
 profile. Foldable baseline
 reset restores opened posture and a 180-degree hinge before final health checks.
 
@@ -140,8 +144,8 @@ Daemon protocol:
 The token plus the complete request configuration define operation identity. After
 an ambiguous reply, query the same identity. Replay returns the durable receipt
 (including pre-admission refusals when catalog/default resolution fails) and never
-allocates a replacement; a concurrent caller cannot replace a committed receipt
-with its own failure; if receipt persistence fails the RPC fails without claiming a
+allocates a replacement. A concurrent caller cannot replace a committed receipt
+with its own failure. If receipt persistence fails the RPC fails without claiming a
 terminal result. A new execution attempt needs a new request ID.
 
 **Release reply budget** (`SESSION_BROKER_RELEASE_REPLY_BUDGET_MS`, via broker
@@ -190,7 +194,7 @@ auto-mobile --daemon session-info <session-uuid> --json
   cleanup as reported.
 - Abandonment consumes the original identity (even one the daemon has not seen) and
   returns its terminal failed receipt; late preparation cannot allocate from it.
-  `cleanupPending: true` persists while an original prepare runs or durable native
+  The `cleanupPending: true` value persists while an original prepare runs or durable native
   cleanup remains; `false` means no local prepare remains and the journal confirmed
   native absence. Abandon and release have a 240 s request budget. Release returns
   `released`, `cleanup_pending`, or `unknown_session` (not cleanup proof; query the
@@ -211,28 +215,31 @@ never authorizes deletion. Inventory reports `runtime.heldBy: "session_broker"`.
 
 One host registry and one native journal authority. The broker adds durable request
 receipts and admission reservations to the same SQLite database, using immediate
-transactions for cross-process admission; assignment generations and native journal
+transactions for cross-process admission. Assignment generations and native journal
 operations stay private, and allocation indices are never public session
 identities. Provider-local SQLite only (no Talos PostgreSQL change).
+
 An executed migration unknown to this daemon disables registry exclusion for generic
-acquisition: the `files_only` diagnostic names the path, migrations, recorded writer
-versions and remedy, and a warning is logged once per process per registry path.
-Managed bindings are not enforced
-in files-only mode: this daemon can allocate a device held only by a managed binding,
-because allocation claim files alone decide ownership. Outside files-only mode the
-`device_claims` table decides Android and iOS allocation (#11811 step d): a claim is an
-optimistic compare-and-set on the device's row (judge a foreign owner's liveness, then
-write only if the row, including its `updated_at_ms`, is unchanged). For one more release the
+acquisition. The `files_only` diagnostic names the path, migrations, recorded writer
+versions and remedy, and the daemon logs a warning once per process per registry path.
+Files-only mode does not enforce managed bindings: this daemon can allocate a device held only by a managed binding,
+because allocation claim files alone decide ownership.
+
+Outside files-only mode the
+`device_claims` table decides Android and iOS allocation (#11811 step d). A claim is an
+optimistic compare-and-set on the device's row: judge a foreign owner's liveness, then
+write only if the row, including its `updated_at_ms`, is unchanged. For one more release the
 winner also writes its allocation claim file, so a daemon that cannot use the table and falls
-back to the files still sees it; a winner whose claim file a files-deciding daemon took meanwhile
-gives the row back. A claim the files decided is recorded by the same compare-and-set and never
-replaces a row a live foreign owner holds. Watch and TV, and any claim no table can decide, are
-decided by the claim files. The device-claims mirror skips
+back to the files still sees it. A winner whose claim file a files-deciding daemon took meanwhile
+gives the row back. The same compare-and-set records a claim the files decided, and it never
+replaces a row a live foreign owner holds. The claim files decide Watch and TV, and any claim no table can decide.
+
+The device-claims mirror skips
 reads, writes, opens and retries until daemon restart. Writers and ownership readers
 requiring current registry evidence still fail with non-retryable
-`registry_schema_unsupported`; its payload includes recorded writer versions and the
+`registry_schema_unsupported`. Its payload includes recorded writer versions, and the
 schema guard runs before any migration or write. Migration provenance records only
-migrations executed by the current upgrade; earlier migrations remain unknown.
+migrations the current upgrade executed; earlier migrations remain unknown.
 In broker mode, `daemon/capabilities` describes the schema and its compatibility on
 an already-open registry connection without opening or migrating a registry.
 
@@ -261,15 +268,17 @@ granted session before the model starts; they are not part of the acquisition re
 
 There is no slot launch configuration, reset command, slot MCP capability/resource, or
 slot-only acquisition/refusal protocol. On the first daemon start after upgrade, migration 008 retires legacy slot assignments, journals and free-pool
-records before device discovery and session recovery: it stops legacy product
+records before device discovery and session recovery. It stops legacy product
 devices through the ordinary shutdown path, confirms native state, then removes the
 records (AVD/simulator images stay). Live owners, broker overlap, incomplete
 inventory or an unconfirmed stop leave retirement pending for a later startup (a
 broker provider fails startup; an ordinary daemon warns and continues). The
-verification pass is bounded to 30 s. Broker records and their private scope
+verification pass is bounded to 30 s.
+
+Broker records and their private scope
 survive; registry locations, SQL storage names and migration keys stay compatible.
-Unknown executed migrations are never upgraded or modified by an older daemon.
-Managed bindings are not enforced in files-only mode.
+An older daemon never upgrades or modifies unknown executed migrations.
+Files-only mode does not enforce managed bindings.
 Upgrade the daemons sharing managed devices to a release that includes these migrations.
 The retained native-resource budget variable is documented under
 [environment variables](../using/environment-variables.md).

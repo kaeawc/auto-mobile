@@ -14,7 +14,7 @@ this capability before a host sends these fields.
   order within the outer and inner groups: first is bottom-most, later layers sit on top.
   Blur radius `b` uses Gaussian sigma `b/2` (CSS-like blur). Android adapts this to
   the platform blur filter, whose minimum nonzero sigma is approximately 0.5 px.
-  `color` takes the same hex, role or `{light,dark}` forms as `shadowColor`. `shadows` excludes both
+  The `color` field takes the same hex, role or `{light,dark}` forms as `shadowColor`. The `shadows` field excludes both
   `elevation` and `shadowColor`, including explicit zero elevation.
 - `cornerStyle` is `circular` (default) or `continuous`, including with `cornerRadius: "full"`.
   Continuous corners use dependency-free cubic smoothing (approximately 0.6), tapering
@@ -83,12 +83,12 @@ The text properties (`textSize`, `fontWeight`, `textAlign`, `maxLines`,
 `textDecoration`, `lineHeight` or `letterSpacing` keeps what the `textStyle` role
 or the theme supplies.
 
-Colors accept `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits, or one
-of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
+Colors accept `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits. They also accept one
+of the 36 Material 3 `ColorScheme` role names. These include `primary`, `onPrimary`,
 `primaryContainer`, `secondary`, `tertiary`, `background`, `surface`, `onSurface`,
-`surfaceVariant`, `surfaceContainer` and its `Low`/`High`/`Highest`/`Lowest`
-steps, `surfaceBright`, `surfaceDim`, `error`, `outline`, `scrim`, and the rest
-of the scheme, 36 in all). A role resolves against the prototype's active theme
+`surfaceVariant`, and `surfaceContainer` with its `Low`/`High`/`Highest`/`Lowest`
+steps. The rest are `surfaceBright`, `surfaceDim`, `error`, `outline`, `scrim`, and the remainder
+of the scheme. A role resolves against the prototype's active theme
 (`theme.mode`, `colors.seed`, device colour, `colors.<role>` overrides), so it follows light/dark and the
 seed. No short hex, other named colors, CSS functions, or separate color opacity. Style
 properties that do not apply to a node have no rendering effect; their shape is
@@ -116,14 +116,14 @@ The error is at the pager's `.axis`: "A vertical pager cannot appear inside a ve
 
 The horizontal counterpart (#14165): a horizontal (or default-axis) pager or a carousel cannot have
 any horizontal scroll ancestor, because a horizontal scroll measures its child with an infinite
-width that their lazy layouts cannot take. The errors are at the pager or carousel itself: "A
+width. Their lazy layouts cannot take that width. The errors are at the pager or carousel itself: "A
 horizontal pager cannot appear inside a horizontal scroll" and "A carousel cannot appear inside a
 horizontal scroll".
 
 Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
-stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and `tapOn`; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Dot indicators are the pager `indicator` field (see Carousel and pager indicator). On iOS dp means points.
+stay unchanged. Accessibility, observe and `tapOn` see every visible page, including partly visible peek and fixed-size pages. Android marks the current page selected only for pagers with positive peek or a fixed pageSize. The iOS renderer marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager. Plain pagers expose only the current page on both. Neither platform exposes pages fully off-screen. Dot indicators are the pager `indicator` field (see Carousel and pager indicator). On iOS dp means points.
 
 ## Icon effects
 
@@ -158,9 +158,9 @@ notes describe the conditional fallback explicitly.
 The iOS `hide_for_capture` hold removes repeated symbol modifiers, returning icons to
 rest until the last capture token releases or expires. Restoring restarts native
 repeats. Local `PrototypeIconMotionActivity` tracks mounted repeated effects and
-masks activity during capture; finite native repeats remain conservatively active
+masks activity during capture. Finite native repeats remain conservatively active
 until unmounted because SF Symbols provides no completion callback. iOS has no
-shared motion-active wire signal or shimmer reporter yet; this local signal is
-not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
+shared motion-active wire signal or shimmer reporter yet. This local signal does not
+reach the host, and captures that bypass `hide_for_capture` do not rest effects.
 
 Android uses a self-contained Compose animation with 600 ms cycles.

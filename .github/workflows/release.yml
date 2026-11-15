@@ -71,6 +71,12 @@ jobs:
             echo "Conveyor desktop publish requires a release tag with major >= 1: $TAG" >&2
             exit 1
           fi
+          # resolve-conveyor-version rejects leading zeros (01.0.0, 00.0.96); reject them here too,
+          # before verify-and-release publishes the release (#5542).
+          if [[ "${DESKTOP_PUBLISHER:-jpackage}" == "conveyor" && ! "$TAG" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Conveyor desktop publish needs a plain MAJOR.MINOR.PATCH tag without leading zeros: $TAG" >&2
+            exit 1
+          fi
 
           # Prepare Release must dispatch this workflow on the tag, not merely
           # name it. docker/metadata-action derives semver tags from github.ref.

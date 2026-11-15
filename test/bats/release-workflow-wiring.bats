@@ -1258,6 +1258,18 @@ run_validate_release_tag() {
   [ "$status" -eq 0 ]
   run run_validate_release_tag 1.0.0 conveyor
   [ "$status" -eq 0 ]
+  run run_validate_release_tag 10.2.3 conveyor
+  [ "$status" -eq 0 ]
+}
+
+@test "release.yml rejects leading-zero tags in Conveyor mode before publishing (#5542)" {
+  require_mikefarah_yq
+  local tag
+  for tag in 01.0.0 00.0.96 1.01.0 1.0.07; do
+    run run_validate_release_tag "$tag" conveyor
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'without leading zeros'* ]]
+  done
 }
 
 @test "release.yml passes the release tag to Conveyor unchanged (#5542)" {

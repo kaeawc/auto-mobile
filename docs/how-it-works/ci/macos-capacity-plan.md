@@ -43,7 +43,7 @@ Package are gone; those jobs run on GitHub only.
 Both groups also match `.circleci/**`, so a config change revalidates itself.
 Apart from the small setup jobs in `config.yml`, all Linux CI runs on GitHub
 Actions.
-Swift coverage keeps its existing trigger: `merge.yml`'s `swift-code-coverage` job
+Swift coverage keeps its trigger: `merge.yml`'s `swift-code-coverage` job
 starts a `run-swift-coverage-main` pipeline for coverage-input changes and
 downloads the badge.
 
@@ -102,12 +102,12 @@ these hold; otherwise it runs on hosted `macos-26` / `macos-latest`:
   override: any other value sends every Mac job to hosted runners);
 - the `Mac Pool Routing` job did not output `hosted` for that pool.
 
-A job labelled for a pool with no online runner queues forever, and its required
-check with it, so the routing job checks the pools at the start of every run.
+A job labelled for a pool with no online runner queues forever, with its required
+check, so the routing job checks the pools at the start of every run.
 
 **Mac Pool Routing (#17580).** An advisory Linux job (`ubuntu-latest`, no
-`needs`, no job `if`) runs `scripts/ci/mac-pool-routing.sh`. The script lists the
-repository's self-hosted runners via the REST runners API and outputs `small`
+`needs`, no job `if`) runs `scripts/ci/mac-pool-routing.sh`. It lists the
+repository's self-hosted runners via the REST API and outputs `small`
 (`automobile-mac`) and `heavy` (`automobile-mac-heavy`), each `self-hosted` or
 `hosted`. A pool is `hosted` when no runner carrying exactly that label is
 `online`; a busy online runner still counts, because the job waits for it rather
@@ -148,17 +148,17 @@ job does not skip it.
 - The four PR SwiftPM build/coverage jobs cache dependencies in
   `$RUNNER_TEMP/automobile-swiftpm-cache` on the Mac, symlinked from the isolated
   home's `Library/Caches/org.swift.swiftpm`. Home cleanup removes only the link,
-  leaving the directory available for the cache post-step to save (#11580).
+  leaving the directory for the cache post-step to save (#11580).
   The cache action uses the workspace-relative literal
   `../../_temp/automobile-swiftpm-cache`: the same literal on every runner process
   shares one cache entry and must resolve to `$RUNNER_TEMP/automobile-swiftpm-cache`.
-  Each isolate step warns if the directories differ, without failing the job.
-  Hosted runners keep their existing two cache paths; DerivedData is unchanged.
+  Each isolate step warns, without failing, if the directories differ.
+  Hosted runners keep their two cache paths; DerivedData is unchanged.
 - `Mac Runner Queue` is an advisory Linux watchdog, with a 15 minute queue-age
   threshold and 30 second polls. It waits for Fast Validation before observing
   Mac jobs on GitHub-hosted `ubuntu-latest`, which provides gh, jq, and timeout.
   It watches self-hosted jobs that exist while it runs and exits once none is
-  queued. Later Prototype Simulator (`needs: ios-xcode-build`) is deliberately
+  queued. Later Prototype Simulator (`needs: ios-xcode-build`) is
   unwatched so Linux is not held for the whole Mac phase; that job is advisory
   and starts after a heavy-pool job has just run.
 - A red `Mac Runner Queue` result names queued jobs
@@ -174,14 +174,14 @@ job does not skip it.
   have tight `timeout-minutes` (25, or 30 for the Playground fallback).
 - Build Xcode Projects is one job that builds Playground and then CtrlProxy in
   separate named steps (#11580). Two matrix legs would run serially on the heavy
-  runner anyway and repeat the setup. Prototype Simulator `needs`
+  runner and repeat the setup. Prototype Simulator `needs`
   that job, so the runner serves the build behind the required `iOS Build` gate
   first; it still runs whatever the build's result.
 - The PR-time XcodeGen drift check (#10939) is the `Check XcodeGen Project
   Drift` step of Build Xcode Projects, so it runs on the heavy lane.
 - Every moved job isolates `HOME`, `TMPDIR`, the XDG dirs and
   `CFFIXED_USER_HOME` under `$RUNNER_TEMP`, checks out with `clean: true`, and
-  removes the isolated home at the end, like the existing self-hosted jobs.
+  removes the isolated home, like the existing self-hosted jobs.
 - Xcode: hosted runners use `maxim-lobanov/setup-xcode`. Self-hosted runners use
   `scripts/ci/select-self-hosted-xcode.sh <version>`, which exports
   `DEVELOPER_DIR` for that job only, so concurrent jobs do not fight over
@@ -211,7 +211,7 @@ job does not skip it.
 **Exception: XCTestRunner Simulator Tests (`run-ios-sim` label or iOS SDK contract inputs).** The
 lane still runs on hosted `macos-26` for same-repo PRs. Its daemon steps start
 an AutoMobile daemon on the default port and install gems and Homebrew packages,
-which would collide with the owner's own daemon and tooling on this Mac. Moving
+which would collide with the owner's daemon and tooling. Moving
 it needs a dedicated runner user (see owner steps) and an isolated daemon port.
 It runs only on the label or on changes to layers the iOS SDK contract suite crosses, so it
 awaits an owner decision.
@@ -219,9 +219,8 @@ awaits an owner decision.
 **N for the small pool: 4.** Swift package builds and the desktop Gradle build
 are CPU-bound and each can use most of the cores. Four small jobs plus the heavy
 lane keep about one performance core per process plus headroom for the owner's
-own work. Memory (128 GiB) is not the limit. That is five runner processes in
-total: the existing `mac` runner plus three new small runners, and one heavy
-runner.
+work. Memory (128 GiB) is not the limit. That is five runner processes: the
+existing `mac` runner, three new small runners and one heavy runner.
 
 ## Namespace macOS (#11012)
 
@@ -262,10 +261,15 @@ ports. Use that fallback only with the heavy runner under a dedicated user.
 | XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `macos-26` (exception, see above)   | `macos-26`     |
 | merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a            |
 | nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
+| Xcode 27.2 (Advisory): packages, projects, tvOS/watchOS/visionOS runners       | hosted `xcode-27`                          | `xcode-27`     |
 
 Self-hosted and Namespace placements take effect once the owner steps below are done; until
 then the moved jobs run on hosted `macos-26`. A self-hosted placement falls back to
 hosted for any run where Mac Pool Routing finds that pool offline.
+
+The Xcode 27.2 row comes from `ios-xcode-27-2.yml`, a separate advisory workflow that selects
+27.2 explicitly (the image default is 27.1) and is not in the ruleset
+([devlog](../../devlog/2026-11-15-xcode-27-2-advisory-workflow.md)).
 
 ## Owner steps
 
@@ -280,7 +284,7 @@ These need a login or a credential.
    parameter `run-nightly-macos` = `true` (boolean). Until this exists the nightly
    macOS jobs do not run anywhere.
 3. **Project Settings → Advanced:** leave "Auto-cancel redundant workflows" as it
-   is; post-merge coalescing does not rely on it (see above).
+   is; post-merge coalescing does not rely on it.
 4. After the first nightly, check that the `xcode: "26.6"` image still exists
    (the sweep fails at VM start if CircleCI retires it). Also check that Build Desktop
    App (macos) can install JDK 21 and the Android command-line tools on the
@@ -340,8 +344,7 @@ Run on the Mac as the user that owns `~/actions-runner`:
 1. In the Namespace dashboard, create a macOS (Apple Silicon) runner profile
    named `auto-mobile-macos`, so jobs can request
    `namespace-profile-auto-mobile-macos`. Do this **before** merging: with the
-   kill switch off, a same-repo WebRTC PR otherwise waits for a profile that does
-   not exist.
+   kill switch off, a same-repo WebRTC PR otherwise waits for a missing profile.
 2. Run one WebRTC PR (or add the `webrtc` label) and confirm
    `iOS Device Capture to WHEP` captures on the Namespace VM (ScreenCaptureKit
    needs a window server session; the job's simulator-window probe fails loudly

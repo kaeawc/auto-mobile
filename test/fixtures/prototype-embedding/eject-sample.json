@@ -1,0 +1,171 @@
+{
+  "id": "ejectSample",
+  "window": { "placement": { "type": "fullscreen" } },
+  "theme": {
+    "colors": {
+      "primary": "#6750A4",
+      "surface": "#FFFBFE",
+      "dark": { "primary": "#80D0BCFF", "surface": "#1C1B1F" }
+    }
+  },
+  "state": { "email": "a@b.test", "notes": "", "pin": "", "query": "", "count": 3 },
+  "data": { "items": [{ "name": "Alpha" }, { "name": "Beta" }, { "name": "Gamma" }] },
+  "root": {
+    "type": "stack",
+    "id": "main",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "column",
+        "testTag": "home",
+        "children": [
+          { "type": "text", "text": "Ejected \"sample\" costs $5", "testTag": "title" },
+          {
+            "type": "text",
+            "spans": [{ "text": "Spans " }, { "text": "joined" }],
+            "onTap": [{ "type": "push", "stack": "main", "screen": "settings" }]
+          },
+          {
+            "type": "row",
+            "testTag": "buttons",
+            "children": [
+              {
+                "type": "button",
+                "label": "Filled",
+                "testTag": "filled",
+                "onTap": [
+                  { "type": "push", "stack": "main", "screen": "detail" },
+                  { "type": "emit", "name": "next" }
+                ]
+              },
+              { "type": "button", "label": "Tonal", "variant": "tonal" },
+              { "type": "button", "label": "Elevated", "variant": "elevated" },
+              { "type": "button", "label": "Outlined", "variant": "outlined" },
+              {
+                "type": "button",
+                "label": "Text",
+                "variant": "text",
+                "onTap": [{ "type": "replace", "stack": "main", "screen": "detail" }]
+              },
+              { "type": "spacer", "testTag": "gap" },
+              { "type": "divider", "orientation": "vertical" }
+            ]
+          },
+          {
+            "type": "box",
+            "testTag": "fields",
+            "children": [
+              {
+                "type": "textField",
+                "stateKey": "email",
+                "label": "Email",
+                "placeholder": "you@example.test",
+                "supportingText": "Work address",
+                "keyboardType": "email",
+                "testTag": "email"
+              },
+              {
+                "type": "textField",
+                "stateKey": "notes",
+                "variant": "filled",
+                "multiline": true,
+                "label": "Notes"
+              },
+              { "type": "textField", "stateKey": "pin", "secure": true, "placeholder": "PIN" }
+            ]
+          },
+          {
+            "type": "list",
+            "testTag": "feed",
+            "repeat": { "items": { "path": "/items" }, "as": "item", "key": "name" },
+            "header": { "type": "text", "text": "Header" },
+            "footer": { "type": "text", "text": "Footer" },
+            "children": [
+              {
+                "type": "listItem",
+                "headline": "{item.name}",
+                "supporting": "Row {index}",
+                "testTag": "row_{index}",
+                "onTap": [{ "type": "push", "stack": "main", "screen": "detail" }]
+              }
+            ]
+          },
+          {
+            "type": "list",
+            "axis": "horizontal",
+            "repeat": { "items": { "path": "/items" }, "as": "item", "key": "name" },
+            "children": [
+              {
+                "type": "card",
+                "testTag": "card_{index}",
+                "children": [{ "type": "text", "text": "{item.name}" }]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "searchBar",
+            "stateKey": "query",
+            "testTag": "search",
+            "child": { "type": "text", "text": "Suggestions", "testTag": "suggestions" }
+          },
+          {
+            "type": "adaptive",
+            "kind": "listDetail",
+            "testTag": "panes",
+            "list": { "type": "text", "text": "List pane", "testTag": "listPane" },
+            "detail": { "type": "text", "text": "Detail pane", "testTag": "detailPane" }
+          }
+        ]
+      },
+      "detail": {
+        "type": "scroll",
+        "testTag": "detail",
+        "child": {
+          "type": "column",
+          "children": [
+            {
+              "type": "button",
+              "label": "Back",
+              "variant": "text",
+              "testTag": "back",
+              "onTap": [{ "type": "pop", "stack": "main" }]
+            },
+            {
+              "type": "scroll",
+              "axis": "horizontal",
+              "child": { "type": "text", "text": "Wide" }
+            }
+          ]
+        }
+      },
+      "settings": {
+        "type": "stack",
+        "id": "inner",
+        "start": "general",
+        "screens": {
+          "general": {
+            "type": "column",
+            "children": [
+              {
+                "type": "button",
+                "label": "Advanced",
+                "onTap": [{ "type": "push", "stack": "inner", "screen": "advanced" }]
+              }
+            ]
+          },
+          "advanced": {
+            "type": "column",
+            "children": [
+              {
+                "type": "button",
+                "label": "Home",
+                "onTap": [{ "type": "popToRoot", "stack": "main" }]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

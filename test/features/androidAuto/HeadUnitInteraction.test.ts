@@ -3,11 +3,15 @@ import {
   HeadUnitInteraction,
   deriveHeadUnitEffect,
   headUnitButtonCommands,
+  headUnitProjection,
+  headUnitProjectionChanged,
   headUnitRead,
   headUnitScreens,
   headUnitTapCommand,
   type HeadUnitIdleTiming,
+  type HeadUnitProjection,
 } from "../../../src/features/androidAuto/HeadUnitInteraction";
+import { parseAndroidAutoProjectionServices } from "../../../src/features/observe/android/projectedCarApps";
 import { HeadUnitFence } from "../../../src/features/androidAuto/HeadUnitFence";
 import { DhuScreenshotHashSource } from "../../../src/features/androidAuto/HeadUnitScreenshotHash";
 import type { CarAppProjectedTemplates } from "../../../src/models/CarAppTemplates";
@@ -18,6 +22,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   FIXTURE_CAR_APP_PACKAGE,
   fixtureProjectedTemplates,
+  projectionServicesDump,
 } from "../../helpers/androidAutoProjectionFixtures";
 
 type TopTemplate = NonNullable<
@@ -422,5 +427,142 @@ describe("HeadUnitInteraction fence", () => {
     await run;
     await interaction().run(["dpad back"]);
     expect(session.commands).toEqual(["tap 640 200", "dpad back"]);
+  });
+});
+
+/** The captured services dump with the fixture's List template on the head unit. */
+const BOUND = headUnitProjection(parseAndroidAutoProjectionServices(projectionServicesDump("one")));
+/** The same bindings before the fixture was opened: no fixture app, no navigation host. */
+const BEFORE_FIXTURE: HeadUnitProjection = {
+  templateHosts: [],
+  apps: BOUND.apps.filter((app) => app.packageName !== FIXTURE_CAR_APP_PACKAGE),
+};
+
+/**
+ * A head unit whose Android Auto bindings move to `afterCommand` on input, with template reads and
+ * screenshot hashes that do the same.
+ */
+function projectionSetup(options: {
+  projection: [HeadUnitProjection | undefined, HeadUnitProjection | undefined];
+  templates?: [CarAppProjectedTemplates | undefined, CarAppProjectedTemplates | undefined];
+  hashes?: [string | undefined, string | undefined];
+}) {
+  const session = new FakeSession();
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  let sent = false;
+  const pick = <T>(pair: [T, T] | undefined): T | undefined => pair?.[sent ? 1 : 0];
+  let projectionReads = 0;
+  const dhuConsole = {
+    sendCommand: (command: string) => {
+      session.sendCommand(command);
+      sent = true;
+    },
+    isRunning: () => session.isRunning(),
+  };
+  const interaction = new HeadUnitInteraction(
+    dhuConsole,
+    { read: async () => pick(options.templates) },
+    timer,
+    {
+      timing: TIMING,
+      ...(options.hashes ? { screenshots: { hash: async () => pick(options.hashes) } } : {}),
+      projection: {
+        read: async () => {
+          projectionReads++;
+          return pick(options.projection);
+        },
+      },
+    },
+  );
+  return { session, interaction, projectionReads: () => projectionReads };
+}
+
+describe("HeadUnitInteraction Android Auto bindings", () => {
+  test("the captured dump reads as the navigation host plus every bound app", () => {
+    expect(BOUND.templateHosts).toEqual([
+      "com.google.android.projection.gearhead/.apphost.TemplateNavigationService",
+    ]);
+    expect(BOUND.apps).toContainEqual({ packageName: FIXTURE_CAR_APP_PACKAGE, userId: 0 });
+    expect(headUnitProjectionChanged(BEFORE_FIXTURE, BOUND)).toBe(true);
+    expect(headUnitProjectionChanged(BOUND, { ...BOUND, apps: [...BOUND.apps] })).toBe(false);
+    expect(headUnitProjectionChanged(undefined, BOUND)).toBe(false);
+  });
+
+  test("an app without the route opening reads as changed even when its pixels cannot be read", async () => {
+    const { interaction, projectionReads } = projectionSetup({
+      projection: [BEFORE_FIXTURE, BOUND],
+    });
+    const result = await interaction.run(["tap 400 110"]);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "projectedApps changed" });
+    expect(result.projection).toEqual({ before: BEFORE_FIXTURE, after: BOUND });
+    expect(projectionReads()).toBe(2);
+  });
+
+  test("a newly bound app overrides an unchanged screenshot, as activeWindow does", async () => {
+    const { interaction } = projectionSetup({
+      projection: [BEFORE_FIXTURE, BOUND],
+      hashes: ["launcher", "launcher"],
+    });
+    const result = await interaction.run(["tap 400 110"]);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "projectedApps changed" });
+  });
+
+  test("a newly bound app overrides unchanged templates of another projected app", async () => {
+    const { interaction } = projectionSetup({
+      projection: [BEFORE_FIXTURE, BOUND],
+      templates: [MENU, MENU],
+    });
+    const result = await interaction.run(["tap 400 110"]);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "projectedApps changed" });
+    expect(result.after?.[0].depth).toBe(1);
+  });
+
+  test("a template change keeps its own basis and the bindings are not reported", async () => {
+    const { interaction } = projectionSetup({
+      projection: [BEFORE_FIXTURE, BOUND],
+      templates: [MENU, LIST],
+    });
+    const result = await interaction.run(["tap 400 110"]);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "carAppTemplates changed" });
+    expect(result.projection).toEqual({ before: BEFORE_FIXTURE, after: BOUND });
+  });
+
+  test("unchanged bindings prove nothing: the screen read decides", async () => {
+    const { interaction } = projectionSetup({
+      projection: [BOUND, BOUND],
+      hashes: ["list", "list"],
+    });
+    const result = await interaction.run(["dpad down"]);
+    expect(result.effect).toEqual({ screenChanged: false, basis: "screenshot unchanged" });
+    expect(result.projection).toBeUndefined();
+  });
+
+  test("a failed bindings read leaves the screen read's effect and skips the after read", async () => {
+    const { interaction, projectionReads } = projectionSetup({ projection: [undefined, BOUND] });
+    const result = await interaction.run(["dpad down"]);
+    expect(result.effect).toEqual({ basis: "no template data" });
+    expect(projectionReads()).toBe(1);
+  });
+
+  test("a throwing bindings read is logged and treated as no read", async () => {
+    const session = new FakeSession();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const interaction = new HeadUnitInteraction(
+      { sendCommand: (command) => session.sendCommand(command), isRunning: () => true },
+      { read: async () => MENU },
+      timer,
+      {
+        timing: TIMING,
+        projection: {
+          read: async () => {
+            throw new Error("adb offline");
+          },
+        },
+      },
+    );
+    const result = await interaction.run(["tap 5 5"]);
+    expect(result.effect).toEqual({ screenChanged: false, basis: "carAppTemplates unchanged" });
   });
 });

@@ -16,7 +16,9 @@ import path from "node:path";
 import { findToolDefinitionsDrift } from "./lib/toolDefinitionsDrift";
 import {
   applyRequiresColumn,
+  applyRequiresKey,
   findDocsRequiresDrift,
+  findRequiresKeyDrift,
   findMissingToolRows,
   findToolRequirementsDrift,
   REFUSAL_HELPER,
@@ -133,8 +135,9 @@ function docsProblems(definitions: unknown[]): string[] {
       ...findDocsRequiresDrift(markdown, declared),
     ].map((problem) => `${page}: ${problem}`);
   });
+  const tools = readDocs(DOCS_PATH);
   return [
-    ...findDocsRequiresDrift(readDocs(DOCS_PATH), declared).map(
+    ...[...findRequiresKeyDrift(tools), ...findDocsRequiresDrift(tools, declared)].map(
       (problem) => `${DOCS_PATH}: ${problem}`,
     ),
     ...pageProblems,
@@ -174,7 +177,8 @@ function writeDocs(definitions: unknown[]): void {
   const declared = declaredRequirements(definitions);
   for (const page of [DOCS_PATH, ...toolPages().keys()]) {
     const resolvedPath = path.resolve(process.cwd(), page);
-    fs.writeFileSync(resolvedPath, applyRequiresColumn(readDocs(page), declared));
+    const withColumn = applyRequiresColumn(readDocs(page), declared);
+    fs.writeFileSync(resolvedPath, page === DOCS_PATH ? applyRequiresKey(withColumn) : withColumn);
     console.log(`Updated tool requirements in ${resolvedPath}`);
   }
 }

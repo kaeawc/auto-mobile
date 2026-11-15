@@ -134,7 +134,8 @@ write. It writes at most once per `minIntervalMs` (whole milliseconds, 1000 to o
 
 The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
 only when the spec emits them or writes them into `/data`. The reference the runtimes copy is `prototypeLocationEventSummary`
-(`prototypeLocationPrivacy.ts`), with shared cases in
+(`prototypeLocationPrivacy.ts`). It and its Kotlin (`PrototypeLocationEventSummary.kt`, `android/protocol`)
+and Swift (`PrototypeLocationEventSummary.swift`) twins replay the shared cases in
 `test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
 the Android and iOS transports, reduces any decoded `location.updated` data to those two fields. It logs the
 names (never the values) of anything it dropped.

@@ -87,7 +87,8 @@ first-record order, so it can change after `disable()` and `enable()`.
   (its `GhostActivity`), not the projected app, while the projected app keeps recording. When the
   foreground is gearhead, the reader runs `dumpsys activity services` (about 40 ms and 360 KB on API
   36, under the same 1.5 s deadline). It reuses a successful dump per device for 1 s, so
-  back-to-back observations do not re-dump. It takes each ServiceRecord whose binding client is a
+  back-to-back observations do not re-dump. A head-unit action's before and after
+  bindings reads dump fresh, so the after read never reuses the before dump. The reader takes each ServiceRecord whose binding client is a
   gearhead process, excluding gearhead's own services.
 - A ServiceRecord block ends only at the next ServiceRecord, an indented section header such as
   `Connection bindings to services:`, or an unindented line. In-record fields such as

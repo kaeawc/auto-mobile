@@ -7,18 +7,21 @@ import Foundation
 ///
 /// On iOS the runtime fills the snapshot from `deliveredNotifications()` and
 /// `pendingNotificationRequests()`, with the request identifier as `tag`.
-public enum PrototypeNotificationsReport {
-    public static let tagPrefix = "proto:"
+enum PrototypeNotificationsReport {
+    static let tagPrefix = "proto:"
 
-    /// The prototype notification id a `proto:<id>` tag names, or nil for any other tag.
-    public static func id(ofTag tag: JSONValue?) -> String? {
-        guard let text = tag?.stringValue, text.hasPrefix(tagPrefix), text.count > tagPrefix.count else {
-            return nil
-        }
-        return String(text.dropFirst(tagPrefix.count))
+    /// The prototype notification id a `proto:<id>` tag names, or nil for any other tag. The prefix is
+    /// matched on UTF-16 code units, like TypeScript and Kotlin, so an id that starts with a combining
+    /// mark still matches.
+    static func id(ofTag tag: JSONValue?) -> String? {
+        guard let text = tag?.stringValue else { return nil }
+        let units = Array(text.utf16)
+        let prefix = Array(tagPrefix.utf16)
+        guard units.count > prefix.count, units.starts(with: prefix) else { return nil }
+        return String(decoding: units[prefix.count...], as: UTF16.self)
     }
 
-    public static func of(_ snapshot: JSONValue) -> JSONValue {
+    static func of(_ snapshot: JSONValue) -> JSONValue {
         let input = snapshot.objectFields ?? [:]
         let badge = finite(input["badge"])
         let validBadge = badge.map { $0 >= 0 && $0 == $0.rounded(.towardZero) } ?? false
@@ -26,7 +29,7 @@ public enum PrototypeNotificationsReport {
             "permission": .string(input["permission"]?.stringValue ?? "unavailable"),
             "badge": validBadge ? .number(badge ?? 0) : .number(0),
             "channels": .array(
-                entries(input["channels"]).compactMap(channel).sorted { $0.id < $1.id }.map(\.json)
+                entries(input["channels"]).compactMap(channel).sorted { precedes($0.id, $1.id) }.map(\.json)
             ),
             "active": .array(entries(input["posted"]).compactMap(active).sorted(by: ordered).map(\.json)),
             "pending": .array(entries(input["pending"]).compactMap(pending).sorted(by: ordered).map(\.json)),
@@ -40,7 +43,12 @@ public enum PrototypeNotificationsReport {
     }
 
     private static func ordered(_ left: Sorted, _ right: Sorted) -> Bool {
-        left.time != right.time ? left.time < right.time : left.id < right.id
+        left.time != right.time ? left.time < right.time : precedes(left.id, right.id)
+    }
+
+    /// Code-unit order, as TypeScript and Kotlin compare strings; Swift's `<` uses canonical equivalence.
+    private static func precedes(_ left: String, _ right: String) -> Bool {
+        left.utf16.lexicographicallyPrecedes(right.utf16)
     }
 
     private static func channel(_ entry: [String: JSONValue]) -> Sorted? {

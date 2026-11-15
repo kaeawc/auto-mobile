@@ -289,5 +289,51 @@
       "active": [],
       "pending": []
     }
+  },
+  {
+    "name": "ids match and sort by UTF-16 code unit, including a leading combining mark",
+    "snapshot": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [],
+      "posted": [
+        { "tag": "proto:é", "channel": "messages", "title": "Precomposed", "postedAt": 6000 },
+        { "tag": "proto:éz", "channel": "messages", "title": "Decomposed", "postedAt": 6000 },
+        { "tag": "proto:́upload", "channel": "messages", "title": "Combining", "postedAt": 6001 }
+      ],
+      "pending": []
+    },
+    "report": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [],
+      "active": [
+        {
+          "id": "éz",
+          "channel": "messages",
+          "title": "Decomposed",
+          "ongoing": false,
+          "actions": [],
+          "postedAt": 6000
+        },
+        {
+          "id": "é",
+          "channel": "messages",
+          "title": "Precomposed",
+          "ongoing": false,
+          "actions": [],
+          "postedAt": 6000
+        },
+        {
+          "id": "́upload",
+          "channel": "messages",
+          "title": "Combining",
+          "ongoing": false,
+          "actions": [],
+          "postedAt": 6001
+        }
+      ],
+      "pending": []
+    }
   }
 ]

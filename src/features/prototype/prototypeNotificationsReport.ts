@@ -16,7 +16,7 @@ import { PROTOTYPE_NOTIFICATION_TAG_PREFIX } from "../systemTray/notificationDum
  * - A record without a string `channel` and `title` is dropped. An absent `body`, `group` or an
  *   unreadable `progress` is omitted; `ongoing` defaults to `false` and `actions` to `[]`.
  * - `channels` sort by id, `active` by `postedAt` then id, and `pending` by `fireAt` then id. Ids
- *   compare by code unit, so the twins agree on ASCII ids.
+ *   compare by UTF-16 code unit, as the twins do.
  */
 
 const progressSchema = z.union([

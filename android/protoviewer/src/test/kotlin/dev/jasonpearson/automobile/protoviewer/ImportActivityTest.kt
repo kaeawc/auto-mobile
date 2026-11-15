@@ -1,11 +1,17 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -24,6 +30,7 @@ internal class FakeLibraryImporter : LibraryImporter {
 
 @RunWith(RobolectricTestRunner::class)
 class ImportActivityTest {
+  @get:Rule val compose = createComposeRule()
   private val importer = FakeLibraryImporter()
 
   @Before
@@ -38,6 +45,81 @@ class ImportActivityTest {
         blocklist = FakeContentBlocklist(),
       )
     }
+  }
+
+  @Test
+  fun capabilityRejectionShowsUpdateAndOpensPlayUrl() {
+    val rejected =
+      LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON, listOf("future_a"))
+    val opened = mutableListOf<String>()
+    compose.setContent {
+      ImportStatus(importStatusText(null, rejected), rejected.missingCapabilities, opened::add) {}
+    }
+    val context = ApplicationProvider.getApplicationContext<ProtoViewerApplication>()
+    compose
+      .onNodeWithText(context.getString(R.string.import_requires_capabilities, "future_a"))
+      .assertIsDisplayed()
+    compose
+      .onNodeWithText(context.getString(R.string.update_protoviewer))
+      .assertIsDisplayed()
+      .performClick()
+    assertEquals(listOf(PROTOVIEWER_STORE_URL), opened)
+  }
+
+  @Test
+  fun activityConnectsCapabilityRejectionToStoreIntent() {
+    importer.result =
+      LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON, listOf("future_a"))
+    val controller =
+      Robolectric.buildActivity(
+          ImportActivity::class.java,
+          Intent(Intent.ACTION_VIEW, Uri.parse("content://external/file")),
+        )
+        .setup()
+    try {
+      val activity = controller.get()
+      compose.onNodeWithText(activity.getString(R.string.update_protoviewer)).performClick()
+      val opened = shadowOf(activity).nextStartedActivity
+      assertEquals(Intent.ACTION_VIEW, opened.action)
+      assertEquals(PROTOVIEWER_STORE_URL, opened.data.toString())
+      assertFalse(activity.isFinishing)
+    } finally {
+      controller.pause().stop().destroy()
+    }
+  }
+
+  @Test
+  fun specOnlyRejectionDoesNotOfferUpdate() {
+    val rejected =
+      LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON, emptyList())
+    compose.setContent {
+      ImportStatus(importStatusText(null, rejected), rejected.missingCapabilities, {}) {}
+    }
+    val context = ApplicationProvider.getApplicationContext<ProtoViewerApplication>()
+    compose.onNodeWithText(context.getString(R.string.unsupported)).assertIsDisplayed()
+    compose.onNodeWithText(context.getString(R.string.update_protoviewer)).assertDoesNotExist()
+  }
+
+  @Test
+  fun ordinaryRejectionDoesNotOfferUpdate() {
+    val rejected = LibraryImportResult.Rejected("spec.json", "Invalid")
+    compose.setContent {
+      ImportStatus(importStatusText(null, rejected), rejected.missingCapabilities, {}) {}
+    }
+    val context = ApplicationProvider.getApplicationContext<ProtoViewerApplication>()
+    compose
+      .onNodeWithText(context.getString(R.string.import_rejected, rejected.path, rejected.reason))
+      .assertIsDisplayed()
+    compose.onNodeWithText(context.getString(R.string.update_protoviewer)).assertDoesNotExist()
+  }
+
+  @Test
+  fun updateOpenerUsesViewIntentAndIgnoresMissingHandler() {
+    var opened: Intent? = null
+    openProtoViewerUpdate(PROTOVIEWER_STORE_URL) { opened = it }
+    assertEquals(Intent.ACTION_VIEW, opened?.action)
+    assertEquals(PROTOVIEWER_STORE_URL, opened?.data.toString())
+    openProtoViewerUpdate(PROTOVIEWER_STORE_URL) { throw ActivityNotFoundException() }
   }
 
   @Test

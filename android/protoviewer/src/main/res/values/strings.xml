@@ -59,6 +59,10 @@
   <string name="open_prototype">Open %1$s</string>
   <!-- Import screen error line; %1$s is a technical path or token, %2$s the reason. Translators may reorder the placeholders. -->
   <string name="import_rejected">%1$s: %2$s</string>
+  <!-- Import capability error; %1$s is a comma-separated list of technical capability names, which must not be translated. -->
+  <string name="import_requires_capabilities">This prototype needs a newer ProtoViewer. Missing capabilities: %1$s</string>
+  <!-- Import screen button opening the ProtoViewer Play Store page; also its accessible name. -->
+  <string name="update_protoviewer">Update ProtoViewer</string>
   <!-- Import screen error after an interrupted import is restored. -->
   <string name="import_interrupted">Import interrupted; open the file again</string>
   <!-- Import screen error when the import service is unavailable. -->

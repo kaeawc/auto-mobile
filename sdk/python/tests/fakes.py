@@ -28,7 +28,8 @@ class FakeClock:
 
 @dataclass
 class FakeRunner:
-    """Answers ``--daemon <command>`` from queued results, recording every argv."""
+    """Answers ``--daemon <command>`` / ``--cli <command>`` from queued results, recording
+    every argv."""
 
     responses: dict[str, list[CommandResult]] = field(default_factory=dict)
     calls: list[list[str]] = field(default_factory=list)
@@ -47,7 +48,9 @@ class FakeRunner:
     ) -> CommandResult:
         self.calls.append(list(argv))
         self.envs.append(env)
-        command = argv[list(argv).index("--daemon") + 1]
+        args = list(argv)
+        mode = "--daemon" if "--daemon" in args else "--cli"
+        command = args[args.index(mode) + 1]
         queue = self.responses.get(command) or []
         if not queue:
             raise AssertionError(f"unexpected command {list(argv)}")

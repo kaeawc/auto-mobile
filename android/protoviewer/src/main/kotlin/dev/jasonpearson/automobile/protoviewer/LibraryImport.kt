@@ -29,7 +29,12 @@ data class LibraryImportRequest(val action: ImportAction?, val uri: String?)
 sealed interface LibraryImportResult {
   data class Imported(val entry: LibraryEntry) : LibraryImportResult
 
-  data class Rejected(val path: String, val reason: String) : LibraryImportResult
+  data class Rejected(
+    val path: String,
+    val reason: String,
+    /** Non-null only for capability gates; empty when only spec validation failed. */
+    val missingCapabilities: List<String>? = null,
+  ) : LibraryImportResult
 }
 
 fun interface LibraryImporter {
@@ -137,7 +142,11 @@ class ValidatedLibraryImporter(
       return LibraryImportResult.Rejected("spec.json:${policy.error.path}", policy.error.message)
     val supported = PrototypeSpecValidator.validate(bundle.spec, capabilities, library = true)
     if (supported is PrototypeSpecValidation.Failure || !capabilities.containsAll(bundle.requires))
-      return LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON)
+      return LibraryImportResult.Rejected(
+        "spec.json",
+        UNSUPPORTED_PROTOTYPE_REASON,
+        (bundle.requires - capabilities).sorted(),
+      )
     return assets.invalidPath(bundle)?.let {
       LibraryImportResult.Rejected(it, "Invalid image dimensions")
     }

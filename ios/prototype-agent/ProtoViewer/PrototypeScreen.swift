@@ -22,6 +22,8 @@ struct PrototypeScreen: View {
     @State private var loadReport = PrototypeLoadReport()
     @State private var pending: Action?
     @State private var content: PrototypeLibraryContent?
+    /// R6 (#15636): sensitive modules the loaded spec uses, named in the app-owned provenance region.
+    @State private var sensitiveModules: [String] = []
     @State private var storage: URL?
     @State private var error: Error?
     @State private var confirmsReset = false
@@ -72,6 +74,24 @@ struct PrototypeScreen: View {
                     Image(systemName: "network").accessibilityHidden(true)
                 }
                 .accessibilityLabel("Network is enabled for imported prototypes")
+                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.bar)
+            }
+            // App-owned and outside the clipped prototype content, so a spec cannot cover it.
+            if !sensitiveModules.isEmpty {
+                let modules = sensitiveModules.joined(separator: ", ")
+                Label {
+                    Text(String(
+                        localized: "Uses \(modules)",
+                        comment: "PrototypeScreen chrome: viewer band naming the sensitive platform modules an imported prototype uses; placeholder is a comma-separated list of module identifiers."
+                    ))
+                } icon: {
+                    Image(systemName: "hand.raised").accessibilityHidden(true)
+                }
+                .accessibilityIdentifier("sensitive-provenance")
                 .font(.footnote)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
@@ -219,6 +239,7 @@ struct PrototypeScreen: View {
             try store.markOpened(entry.libraryId)
             storage = directory
             content = loaded
+            sensitiveModules = PrototypeLibraryProvenance.sensitiveModules(loaded.spec)
             rendererActive = importRefusal == nil
             if rendererActive { startWatchdog() }
         } catch {

@@ -16,17 +16,14 @@ enum PrototypeContentReport {
         ].joined(separator: "\n")
     }
 
-    /// A `mailto:` draft to the contact. Only unreserved ASCII stays literal, so a label holding
-    /// `&`, `=`, `#` or a newline cannot add or end a header.
+    /// A `mailto:` draft to the contact. `URLComponents` percent-encodes `&`, `=`, `#` and newlines in
+    /// the values but leaves `+`, which mail clients may read as a space, so it is encoded as well.
     static func mailURL(subject: String, body: String) -> URL? {
-        URL(string: "mailto:\(contactEmail)?subject=\(encode(subject))&body=\(encode(body))")
-    }
-
-    private static let unreserved = CharacterSet(
-        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
-    )
-
-    private static func encode(_ value: String) -> String {
-        value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = contactEmail
+        components.queryItems = [URLQueryItem(name: "subject", value: subject), URLQueryItem(name: "body", value: body)]
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        return components.url
     }
 }

@@ -142,9 +142,18 @@ final class PrototypeContentBlocklistTests: XCTestCase {
             "label: A&b=c#d\ne+f\nspecSha256: \(String(repeating: "c", count: 64))\nsource: share"
         )
         let url = try XCTUnwrap(PrototypeContentReport.mailURL(subject: "Report: x", body: "A&b=c#d\ne+f"))
-        XCTAssertEqual(
-            url.absoluteString,
-            "mailto:automobile+coc@jasonpearson.dev?subject=Report%3A%20x&body=A%26b%3Dc%23d%0Ae%2Bf"
-        )
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.scheme, "mailto")
+        XCTAssertEqual(components.path, "automobile+coc@jasonpearson.dev")
+        XCTAssertEqual(components.queryItems, [
+            URLQueryItem(name: "subject", value: "Report: x"),
+            URLQueryItem(name: "body", value: "A&b=c#d\ne+f"),
+        ])
+        // Only the separator `&` stays literal; nothing in a value can add or end a header.
+        let query = try XCTUnwrap(components.percentEncodedQuery)
+        XCTAssertEqual(query.split(separator: "&").count, 2)
+        for reserved in ["+", "#", "\n", "="] {
+            XCTAssertEqual(query.components(separatedBy: reserved).count - 1, reserved == "=" ? 2 : 0, reserved)
+        }
     }
 }

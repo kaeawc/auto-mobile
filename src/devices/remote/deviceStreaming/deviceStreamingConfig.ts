@@ -3,6 +3,7 @@
  * Nothing is built without an explicit opt-in: remote minutes are billed to the configured
  * Google Cloud project.
  */
+import { ENV, readEnvBool, readEnvTrimmed } from "../../../config/env";
 import { ActionableError } from "../../../models/ActionableError";
 import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
 import type { IdGenerator } from "../../../utils/IdGenerator";
@@ -28,6 +29,21 @@ export interface DeviceStreamingConfig {
 export interface ResolvedDeviceStreamingConfig {
   projectId: string;
   guards: RemoteDeviceGuards;
+}
+
+/**
+ * Reads the configuration from the environment. Values are passed through unvalidated so
+ * {@link resolveDeviceStreamingConfig} names a malformed cap instead of silently using the default.
+ */
+export function readDeviceStreamingConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): DeviceStreamingConfig {
+  const maxSessionMinutes = readEnvTrimmed(ENV.DEVICE_STREAMING_MAX_SESSION_MINUTES, env);
+  return {
+    optIn: readEnvBool(ENV.DEVICE_STREAMING, env),
+    projectId: readEnvTrimmed(ENV.DEVICE_STREAMING_PROJECT, env),
+    maxSessionMinutes: maxSessionMinutes === undefined ? undefined : Number(maxSessionMinutes),
+  };
 }
 
 /** Optional `domain:` prefix, then 6-30 lowercase letters, digits or hyphens starting with a letter. */

@@ -349,4 +349,57 @@ describe("prototype simulate and timer reports", () => {
     expect(patched).toMatchObject({ success: true });
     expect(patched.warning).toContain('cancelTimer id "unknown"');
   });
+  test("simulate push input: event needs data, and excludes advanceTimeMs (#14285)", () => {
+    const push = { type: "message", data: { text: "Hi" } };
+    const accepted = [
+      { action: "simulate", id: "np", event: "notifications.push", data: push },
+      {
+        action: "simulate",
+        id: "np",
+        event: "notifications.push",
+        data: push,
+        transport: "system",
+      },
+    ];
+    for (const input of accepted) {
+      expect(prototypeSchema.safeParse(input).success).toBe(true);
+    }
+    const refused = [
+      { action: "simulate", id: "np", event: "notifications.push" },
+      { action: "simulate", event: "notifications.push", data: push },
+      { action: "simulate", id: "np", event: "notifications.push", data: push, advanceTimeMs: 1 },
+      { action: "simulate", id: "np", advanceTimeMs: 1, data: push },
+      { action: "simulate", id: "np", advanceTimeMs: 1, transport: "auto" },
+      { action: "simulate", id: "np", event: "notifications.opened", data: push },
+      { action: "simulate", id: "np", event: "notifications.push", data: push, transport: "fcm" },
+      { action: "show", id: "np", event: "notifications.push", data: push },
+    ];
+    for (const input of refused) {
+      expect({ input, ok: prototypeSchema.safeParse(input).success }).toEqual({ input, ok: false });
+    }
+  });
+
+  test("simulate push is unavailable on a device with no push route and sends nothing", async () => {
+    const input = {
+      action: "simulate",
+      id: "np",
+      event: "notifications.push",
+      data: { type: "message", data: { text: "Hi" } },
+    };
+    for (const device of [android, ios]) {
+      expect(await call(device, input)).toMatchObject({ success: false, code: "unavailable" });
+    }
+    expect(proxy.advanceClockRequests).toEqual([]);
+  });
+
+  test("simulate push refuses an oversized payload with invalid_args", async () => {
+    const result = await call(android, {
+      action: "simulate",
+      id: "np",
+      event: "notifications.push",
+      data: { type: "message", data: { text: "x".repeat(4096) } },
+    });
+    expect(result).toMatchObject({ success: false, code: "invalid_args" });
+    expect(result.error).toContain("4096 bytes");
+  });
 });

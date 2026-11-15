@@ -1,5 +1,9 @@
 import { prototypeDegradedEffectSchema } from "../../features/prototype/prototypeDegradedEffects";
 import { z } from "zod/v4";
+import {
+  PROTOTYPE_PUSH_DELIVERIES,
+  PROTOTYPE_PUSH_ERROR_CODES,
+} from "../../features/prototype/prototypePushSimulate";
 import { MAX_PROTOTYPE_FEEDBACK_LOG_ENTRIES } from "../../features/prototype/prototypeFeedbackLog";
 import {
   PROTOTYPE_EVENT_KINDS,
@@ -433,6 +437,24 @@ export const prototypeOutputSchema = z.object({
     ),
   cleared: prototypeClearedOutputField,
   fired: z.number().int().min(0).max(10000).optional(),
+  transport: z
+    .enum(["connection", "system"])
+    .optional()
+    .describe("simulate event only: the transport that carried the push"),
+  handled: z
+    .boolean()
+    .optional()
+    .describe("simulate event only: true when a notifications.push handler ran"),
+  delivery: z
+    .enum(PROTOTYPE_PUSH_DELIVERIES)
+    .optional()
+    .describe("simulate event only: foreground, background or notification"),
+  code: z
+    .enum(PROTOTYPE_PUSH_ERROR_CODES)
+    .optional()
+    .describe(
+      "simulate event only: invalid_args (payload refused), unavailable (no route) or platform_error",
+    ),
   success: z.boolean(),
   error: z.string().optional(),
   prototypes: z

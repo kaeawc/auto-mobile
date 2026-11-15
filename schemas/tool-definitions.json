@@ -4518,7 +4518,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -7259,7 +7267,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -13847,7 +13863,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -17449,7 +17473,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -28247,7 +28279,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -30870,7 +30910,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -36950,7 +36998,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -40382,7 +40438,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -42732,7 +42796,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -49898,7 +49970,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -51931,7 +52011,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -55381,7 +55469,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -58366,7 +58462,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",
@@ -60539,7 +60643,15 @@
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": ["skeleton"]
+                },
+                {
+                  "required": ["unchanged"]
+                }
+              ]
             },
             {
               "type": "object",

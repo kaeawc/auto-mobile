@@ -190,8 +190,11 @@ the action was never gated.
 In diff mode (`--actions-diff-observe`) `settled`, `settleMs` and `settlePolls`
 ride on the diff alongside `activeWindow` and `freshness`, so one accessor works
 in both modes. A diff with no node, display or field change, projected or not,
-carries `unchanged: true` and leaves out `skeleton`, `context` and `keyboard`;
-every other diff carries them.
+whose `skeleton`, `context` and `keyboard` equal the ones the baseline's response
+delivered, carries `unchanged: true` and leaves those three out; every other diff
+carries them. A baseline whose response carried no skeleton never yields
+`unchanged: true`. The advertised diff arm
+requires `skeleton` or `unchanged`.
 
 A requested post-action screenshot is published under the same `observationId`
 as the hierarchy it should match. Only a settle-gated action can replace its

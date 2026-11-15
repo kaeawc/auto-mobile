@@ -176,6 +176,35 @@ function finalizePlainToolResponse<T>(
   return response;
 }
 
+/**
+ * Only the stateless success reductions (#18348), with no bounding or spill: the
+ * delivery path for device-binding results, which ingress reads after the handler
+ * returns and which must therefore never become a `resourceLink`.
+ */
+export function reduceStatelessToolResponse<T>(response: T, ctx: FinalizeToolResponseContext): T {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+  const envelopeView = readToolEnvelopePayload(response);
+  if (!envelopeView) {
+    return response;
+  }
+  const reduced = reduceAgentFacingEnvelope(
+    ctx,
+    envelopeView.payload,
+    envelopeView.envelope,
+    undefined,
+  );
+  if (reduced) {
+    writeToolEnvelopePayload(
+      envelopeView,
+      reduced,
+      envelopeView.textPart ? new ToolResponseSerialization().text(reduced) : undefined,
+    );
+  }
+  return response;
+}
+
 function keepsStructuredExtras(ctx: FinalizeToolResponseContext): boolean {
   return ctx.internal === true || ctx.args?.includeExtras === true;
 }

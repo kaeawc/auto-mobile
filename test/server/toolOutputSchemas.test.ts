@@ -15,6 +15,7 @@ import {
   setDeviceStateResultSchema,
 } from "../../src/server/toolOutputSchemas";
 import { describe, expect, test } from "bun:test";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { toJSONSchema, type z } from "zod/v4";
 import {
   elementBoundsSchema,
@@ -490,6 +491,30 @@ describe("observationOutputSchema: discriminated union of full observation vs di
     const noOp = observeDiffSchema.parse({ isDiff: true, unchanged: true, changed: [] });
     expect(noOp.unchanged).toBe(true);
     expect(noOp.skeleton).toBeUndefined();
+  });
+
+  test("the advertised diff arm states the skeleton-or-unchanged rule too (#18348)", () => {
+    const tapOn = generatedDefinitions.find((definition) => definition.name === "tapOn")!;
+    const outputSchema = tapOn.outputSchema as {
+      $defs?: object;
+      properties: { observation: { anyOf: object[] } };
+    };
+    // Only the diff arm (with the shared `$defs` it references): the full arm
+    // would accept the object on its own terms.
+    const validate = compileAjv2020({
+      ...outputSchema.properties.observation.anyOf[0],
+      $defs: outputSchema.$defs,
+    });
+    const identity = {
+      isDiff: true,
+      observationId: "o1",
+      deviceId: "emulator-5554",
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      changed: [],
+    };
+    expect(validate(identity)).toBe(false);
+    expect(validate({ ...identity, unchanged: true })).toBe(true);
+    expect(validate({ ...identity, skeleton: [] })).toBe(true);
   });
 
   test("the FULL union rejects a malformed diff — it cannot silently fall through to the permissive full-observation arm (PR #6242 review PRRT_kwDOP-GF5M6fq3iN)", () => {

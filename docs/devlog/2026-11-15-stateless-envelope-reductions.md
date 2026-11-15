@@ -32,7 +32,13 @@ Both removals moved to one envelope step for agent-facing successes. It needs no
 session, store or output flag. Internal calls and failures keep both fields. An
 action diff with no change carries `unchanged: true` instead of the skeleton. It
 does so only when the unprojected diff is empty too, because the projection drops
-non-actionable added rows that `context` would show.
+non-actionable added rows that `context` would show, and only when the projected
+`skeleton`, `context` and `keyboard` equal what the baseline's response delivered:
+node deltas collapse the keyboard and ignore regenerated synthetic ids, so a
+keyboard shown over an unchanged app or a child reorder that renames an id-less
+container would otherwise leave the client holding a stale surface. Device-binding
+tools (`getAndroid`, `getApple`, `startDevice`) skip plain finalization so they are
+never spilled, so they apply the stateless reductions on their own path.
 
 ## Consequences
 

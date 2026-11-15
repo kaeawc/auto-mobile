@@ -2441,6 +2441,91 @@ describe("finalizeToolResponse", () => {
       },
     );
 
+    /** A tapOn over `next` after an observe of `baseline`, as delivered (#18348). */
+    function tapAfterObserve(baseline: ObserveResult, next: ObserveResult) {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+      const result = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
+      );
+      return observeDiffSchema.parse(structuredPayload(result).observation);
+    }
+
+    test("a keyboard shown over an unchanged app is not reported as unchanged (#18348)", () => {
+      const next = sameScreenObserve();
+      const key = {
+        text: "Q",
+        clickable: true,
+        bounds: { left: 0, top: 100, right: 50, bottom: 150 },
+      };
+      setElementProvenance(key, {
+        group: 1,
+        enter: 1,
+        exit: 1,
+        keyboardPackage: "example.keyboard",
+      });
+      next.elements = { clickable: [key], text: [key], scrollable: [], media: [] };
+      flatChildren(next.viewHierarchy!.hierarchy.node).push({
+        extras: { "automobile:imePackage": "example.keyboard" },
+        node: [key],
+      });
+
+      const observation = tapAfterObserve(sameScreenObserve(), next);
+
+      expect(observation.isDiff).toBe(true);
+      expect("unchanged" in observation ? observation.unchanged : undefined).toBeUndefined();
+      expect(observation.keyboard).toEqual({ visible: true, package: "example.keyboard" });
+      expect(observation.skeleton?.map((row) => row.elementId)).toEqual(["<ime>"]);
+    });
+
+    test("a regenerated synthetic selector id is not reported as unchanged (#18348)", () => {
+      const withSyntheticId = (viewId: string): ObserveResult => {
+        const observation = sameScreenObserve();
+        const row = flatChild(observation.viewHierarchy!.hierarchy.node, 0);
+        // An id-less clickable row: its selector is the synthetic `view-id`.
+        delete row["resource-id"];
+        row["view-id"] = viewId;
+        row.clickable = "true";
+        observation.elements = {
+          clickable: [{ ...row, bounds: { left: 0, top: 0, right: 100, bottom: 50 } }],
+          scrollable: [],
+          text: [],
+          media: [],
+        };
+        return observation;
+      };
+
+      const observation = tapAfterObserve(
+        withSyntheticId("s2-0000000000000001"),
+        withSyntheticId("s2-0000000000000002"),
+      );
+
+      expect(observation.isDiff).toBe(true);
+      expect("unchanged" in observation ? observation.unchanged : undefined).toBeUndefined();
+      expect(observation.skeleton?.map((row) => row.elementId)).toEqual(["s2-0000000000000002"]);
+
+      expect(observation.isDiff).toBe(true);
+      expect("unchanged" in observation ? observation.unchanged : undefined).toBeUndefined();
+      expect(observation.skeleton?.map((row) => row.elementId)).toEqual(["s2-0000000000000002"]);
+    });
+
+    test("an unchanged selector surface still answers unchanged (#18348)", () => {
+      const observation = tapAfterObserve(sameScreenObserve(), sameScreenObserve());
+
+      expect("unchanged" in observation ? observation.unchanged : undefined).toBe(true);
+      expect(observation.skeleton).toBeUndefined();
+    });
+
     test("a diff with no surviving readout row omits `context` entirely rather than emitting `[]`", () => {
       const { store } = makeStore();
       const withSkeletonElements = (): ObserveResult => ({

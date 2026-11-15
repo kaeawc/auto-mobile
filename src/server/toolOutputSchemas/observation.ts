@@ -427,7 +427,10 @@ export const observeDiffSchema = z
     message: "A diff carries `skeleton` unless it is `unchanged: true` (#6221 item 4.1, #18348)",
     path: ["skeleton"],
   });
-requireObservationJoinKeysOnTheWire(observeDiffSchema);
+// The refinement does not export, so the advertised schema states it too (#18348).
+requireObservationJoinKeysOnTheWire(observeDiffSchema, (jsonSchema) => {
+  jsonSchema.anyOf = [{ required: ["skeleton"] }, { required: ["unchanged"] }];
+});
 
 /**
  * `observation`, as embedded on an action tool result (issue #6221 item 4): a

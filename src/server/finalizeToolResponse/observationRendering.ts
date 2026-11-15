@@ -322,6 +322,9 @@ export function renderObservePayload(observeResult: ObserveResult, state: Finali
     cloneObservation: ctx.cloneObservation,
     resolveProjection: () => resolveObserveProjection(ctx.args),
   }).render(observeResult, uncapped, sanitized);
+  if (state.pendingBaselineUpdate && served.skeleton !== undefined) {
+    recordDeliveredSelectorSurface(sanitized, served);
+  }
   attachObservationScreenshotUri(
     served,
     observeResult.screenshotCaptureAttempted,
@@ -469,6 +472,9 @@ function resolveActionObservationDiff(
         toScreen: observationScreenIdentity(sanitized),
       };
     }
+    if (observationOut === servedObservation && servedObservation.skeleton !== undefined) {
+      recordDeliveredSelectorSurface(sanitized, servedObservation);
+    }
     pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
   }
   return { observationOut, observationDiff, pendingBaselineUpdate };
@@ -537,17 +543,26 @@ function emitActionObservationDiff(
   );
   const observationOut = emitFull
     ? servedObservation
-    : wireActionDiff(diff, () =>
-        // Projection drops non-actionable added/removed rows, so an empty
-        // projected diff can still hide a new readout `context` would show.
-        isEmptyObserveDiff(
-          diffObserveResult(baseline, sanitized, {
-            collapseKeyboard: true,
-            skipStatusBar: true,
-            scalarFields: SKELETON_DIFF_SCALAR_FIELDS,
-          }),
-        ),
+    : wireActionDiff(
+        diff,
+        () =>
+          // Projection drops non-actionable added/removed rows, so an empty
+          // projected diff can still hide a new readout `context` would show.
+          isEmptyObserveDiff(
+            diffObserveResult(baseline, sanitized, {
+              collapseKeyboard: true,
+              skipStatusBar: true,
+              scalarFields: SKELETON_DIFF_SCALAR_FIELDS,
+            }),
+          ),
+        // Node deltas miss what the client acts on: a keyboard shown, hidden,
+        // moved or switched over an unchanged app, and a synthetic id regenerated
+        // by a child reorder the diff re-pairs.
+        () => deliveredSelectorSurface.get(baseline) === selectorSurfaceKey(diff),
       );
+  if (!emitFull) {
+    recordDeliveredSelectorSurface(sanitized, diff);
+  }
   const observationDiff: ObservationDiffMetadata = {
     mode: emitFull ? "full" : "diff",
     reason: emitFull ? "screen_changed" : "diff_emitted",
@@ -620,15 +635,35 @@ function dropDiffNodeLists(
 function wireActionDiff(
   diff: ReturnType<typeof diffObserveResult>,
   unprojectedDiffIsEmpty: () => boolean,
+  selectorSurfaceUnchanged: () => boolean,
 ): Partial<ReturnType<typeof diffObserveResult>> {
   const wireDiff = dropDiffNodeLists(diff);
-  if (!isEmptyObserveDiff(diff) || !unprojectedDiffIsEmpty()) {
+  if (!isEmptyObserveDiff(diff) || !unprojectedDiffIsEmpty() || !selectorSurfaceUnchanged()) {
     return wireDiff;
   }
   delete wireDiff.skeleton;
   delete wireDiff.context;
   delete wireDiff.keyboard;
   return { ...wireDiff, unchanged: true };
+}
+
+type SelectorSurface = Pick<ObserveResult, "skeleton" | "context" | "keyboard">;
+
+/**
+ * The `skeleton`, `context` and `keyboard` the response that set each baseline
+ * delivered, keyed by that baseline object (the session cache stores it by
+ * reference). A baseline with no entry, such as one whose response carried no
+ * skeleton, never answers `unchanged: true`.
+ */
+const deliveredSelectorSurface = new WeakMap<ObserveResult, string>();
+
+function selectorSurfaceKey(surface: SelectorSurface): string {
+  return JSON.stringify([surface.skeleton ?? [], surface.context ?? [], surface.keyboard ?? null]);
+}
+
+/** Uncommitted entries are harmless: only a delivered response becomes a baseline. */
+function recordDeliveredSelectorSurface(baseline: ObserveResult, surface: SelectorSurface): void {
+  deliveredSelectorSurface.set(baseline, selectorSurfaceKey(surface));
 }
 
 function isEmptyObserveDiff(diff: ReturnType<typeof diffObserveResult>): boolean {

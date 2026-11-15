@@ -82,7 +82,7 @@ import { runWithToolSelectionContext } from "../../src/features/toolSelection/to
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import * as os from "os";
 import { toolJson } from "../helpers/toolResponse";
-import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/wire/constants";
 import { DefaultFeatureFlagApplier } from "../../src/features/featureFlags/FeatureFlagApplier";
 import { withWireConnection } from "../helpers/mcpConnection";
 
@@ -1123,30 +1123,22 @@ describe("startDevice handler", () => {
         fakeMatcher.setBootedResult(androidDevice);
         const args =
           toolName === "getAndroid" ? { avdName: androidDevice.name } : { platform: "android" };
-        const raw = await withWireConnection(args, (wireArgs) =>
+        // The registry handler is the delivery path: ingress finalizes nothing further.
+        const delivered = await withWireConnection(args, (wireArgs) =>
           ToolRegistry.getTool(toolName)!.handler(wireArgs),
         );
-        expect(toolJson(raw).timing).toBeDefined();
-
-        // Registry `register()` tools take the plain finalization path.
-        const omitsAcquisitionTiming = ToolRegistry.getTool(toolName)!.omitsAcquisitionTiming;
-        expect(omitsAcquisitionTiming).toBe(true);
-        const delivered = finalizeToolResponse(structuredClone(raw), {
-          name: toolName,
-          plainTool: true,
-          omitsAcquisitionTiming,
-        });
         expect("timing" in toolJson(delivered)).toBe(false);
         const payload = startResultSchema.parse(toolJson(delivered));
         expect(payload.readiness).toBeDefined();
         expect(payload.runtime.session.sessionUuid).toBeDefined();
+        // Never spilled: ingress reads the session from the inline envelope.
+        expect(JSON.stringify(delivered)).not.toContain("resource_link");
 
-        const internal = finalizeToolResponse(structuredClone(raw), {
-          name: toolName,
-          plainTool: true,
-          omitsAcquisitionTiming,
-          internal: true,
-        });
+        // An internal caller still receives the tree the handler attached.
+        const internal = await withWireConnection(
+          { ...args, [INTERNAL_NO_DIFF_PARAM]: true },
+          (wireArgs) => ToolRegistry.getTool(toolName)!.handler(wireArgs),
+        );
         expect(toolJson(internal).timing).toBeDefined();
       } finally {
         setDebugPerfEnabled(false);

@@ -58,6 +58,13 @@ const failure = (error: string): VirtualPrototypeInputOutcome => ({
 const NO_FOCUS =
   "No text field has focus on the headless virtual device. Tap a textField or searchBar with tapOn first, or pass sendKeys a selector.";
 
+/** One input to plan: the control's own write, its actions, and the focus it leaves. */
+interface PlannedInput {
+  own: PrototypeState;
+  actions: Record<string, unknown>[];
+  focus: Focus | undefined;
+}
+
 /** The shown prototype a selector reached and the node it matched there. */
 interface Located {
   id: string;
@@ -93,7 +100,10 @@ export class VirtualPrototypeInputs {
     }
     const own = interactionOwnWrite(interaction, snapshot.state);
     const focus = interaction.type === "focus" ? focusOf(id, interaction.key, target) : undefined;
-    return { ...this.run(id, snapshot, own, interaction.actions, focus), target: node };
+    return {
+      ...this.run(id, snapshot, { own, actions: interaction.actions, focus }),
+      target: node,
+    };
   }
 
   /**
@@ -191,16 +201,18 @@ export class VirtualPrototypeInputs {
     const value = [...next(typeof stored === "string" ? stored : "")]
       .slice(0, focus.maxLength)
       .join("");
-    return this.run(focus.id, shown.snapshot, { [focus.key]: value }, [], focus);
+    return this.run(focus.id, shown.snapshot, {
+      own: { [focus.key]: value },
+      actions: [],
+      focus,
+    });
   }
 
   /** Plans the interaction, delivers its events, then leaves its final state on the device. */
   private run(
     id: string,
     snapshot: VirtualPrototypeSnapshot,
-    own: PrototypeState,
-    actions: Record<string, unknown>[],
-    focus: Focus | undefined,
+    { own, actions, focus }: PlannedInput,
   ): VirtualPrototypeInputOutcome {
     const plan = planVirtualInteraction(snapshot, own, actions);
     if (plan.rejection !== undefined) {

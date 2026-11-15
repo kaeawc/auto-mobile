@@ -367,6 +367,7 @@ passive, default and high to active; optional \`description\` and \`showBadge\`)
   event. Delivery is inexact.
 - A \`notifications.push\` handler receives a simulated server push and also needs
   \`prototype_platform_push_v1\`; read \`{event: "/type"}\` and \`{event: "/data/..."}\` there.
+  Deliver one with \`prototype {action:"simulate",id,event:"notifications.push",data:{type,data?,notification?}}\`.
 - \`cancel\` takes exactly one of \`id\`, \`group\` or \`all: true\`.
 - Taps, action buttons and inline replies arrive at \`platform.on\` handlers
   (\`notifications.opened|action|reply|dismissed\`); read \`{event: "/notificationId"}\`,

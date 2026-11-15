@@ -21,12 +21,14 @@ final class PrototypeLibraryStore {
     private let files: any PrototypeLibraryFileSystem
     private let clock: any PrototypeClock
     private let libraryId: () -> String
+    private let blocklist: (any PrototypeContentBlocklist)?
 
     init(
         root: URL, storageRoot: URL,
         files: any PrototypeLibraryFileSystem = PrototypeLibraryDiskFileSystem(),
         clock: any PrototypeClock = SystemPrototypeClock(),
-        libraryId: @escaping () -> String = { UUID().uuidString.lowercased() }
+        libraryId: @escaping () -> String = { UUID().uuidString.lowercased() },
+        blocklist: (any PrototypeContentBlocklist)? = nil
     )
         throws
     {
@@ -35,6 +37,7 @@ final class PrototypeLibraryStore {
         self.files = files
         self.clock = clock
         self.libraryId = libraryId
+        self.blocklist = blocklist
         guard !self.storageRoot.path.hasPrefix(self.root.path + "/"),
               !self.root.path.hasPrefix(self.storageRoot.path + "/"), self.storageRoot != self.root
         else {
@@ -51,11 +54,15 @@ final class PrototypeLibraryStore {
         var entries: [PrototypeLibraryEntry] = []
         var skipped = 0
         var total = 0
+        let hidden = blocklist?.hiddenSpecHashes ?? []
         for child in children.sorted() {
             do {
                 let directory = try directory(child)
                 try files.assertRealDirectory(directory)
                 let entry = try metadata(child)
+                // Hidden content is absent, not unavailable: the list, MCP open and the viewer
+                // (load goes through list) all see it as not found.
+                if entry.isHidden(by: hidden) { continue }
                 let bytes = try files.byteCount(directory)
                 guard bytes <= Self.maxBytes - total else {
                     skipped += 1
@@ -167,6 +174,41 @@ final class PrototypeLibraryStore {
         }
     }
 
+    /// Records a received entry's spec as hidden, then deletes every received entry with that spec
+    /// (bundle, metadata and storage); only the hash stays, in the blocklist. Returns the deleted
+    /// entries. There is no unhide.
+    @discardableResult
+    func hide(_ entry: PrototypeLibraryEntry) throws -> [PrototypeLibraryEntry] {
+        guard entry.isReceived, let blocklist else {
+            throw PrototypeLibraryFailure(path: entry.libraryId, message: "Only received prototypes can be hidden")
+        }
+        try blocklist.hide(entry.specSha256)
+        return try purgeHidden()
+    }
+
+    /// Deletes every stored entry the blocklist hides, so hidden content never holds library quota.
+    /// App start repeats it, so an entry whose delete failed is retried. Every entry is attempted;
+    /// the failures are reported together.
+    @discardableResult
+    func purgeHidden() throws -> [PrototypeLibraryEntry] {
+        let hidden = blocklist?.hiddenSpecHashes ?? []
+        guard !hidden.isEmpty else { return [] }
+        var deleted: [PrototypeLibraryEntry] = []
+        var failures: [String] = []
+        for child in try files.children(root).sorted() {
+            // Staging directories and unreadable metadata cannot prove a hidden spec; list() skips them.
+            guard let entry = try? metadata(child), entry.isHidden(by: hidden) else { continue }
+            do {
+                try delete(entry.libraryId)
+                deleted.append(entry)
+            } catch { failures.append(error.localizedDescription) }
+        }
+        if !failures.isEmpty {
+            throw PrototypeLibraryFailure(path: "library", message: failures.joined(separator: "; "))
+        }
+        return deleted
+    }
+
     /// Internal commit seam: callers supply provenance, never read it from imported bundle metadata.
     @discardableResult
     func add(
@@ -176,6 +218,10 @@ final class PrototypeLibraryStore {
     )
         throws -> PrototypeLibraryEntry
     {
+        // Checked before anything is staged; the importer's earlier list() already hides any match.
+        if source.isReceived, blocklist?.hiddenSpecHashes.contains(bundle.specSha256) == true {
+            throw PrototypeLibraryImportFailure.hidden
+        }
         let id = libraryId()
         let destination = try directory(id)
         try validate(bundle.spec)

@@ -551,6 +551,105 @@
           }
         }
       }
+    },
+    "Hide %@?": {
+      "comment": "LibraryView Hide confirmation title; placeholder is the prototype name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide %@?"
+          }
+        }
+      }
+    },
+    "Hide": {
+      "comment": "LibraryView row action on a received prototype: hides it and its copies on this device.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide"
+          }
+        }
+      }
+    },
+    "This prototype and every copy of it are deleted with their stored values, and copies you receive later are hidden on this device. This cannot be undone.": {
+      "comment": "LibraryView Hide confirmation message.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This prototype and every copy of it are deleted with their stored values, and copies you receive later are hidden on this device. This cannot be undone."
+          }
+        }
+      }
+    },
+    "Report": {
+      "comment": "LibraryView row action on a received prototype: opens a mail draft to the published report contact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Report"
+          }
+        }
+      }
+    },
+    "ProtoViewer content report": {
+      "comment": "Subject of the report mail draft sent to the published contact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ProtoViewer content report"
+          }
+        }
+      }
+    },
+    "Describe the problem here.\n\n%@": {
+      "comment": "Report mail body; placeholder identifies the prototype (label, hash, source).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Describe the problem here.\n\n%@"
+          }
+        }
+      }
+    },
+    "No mail app can send the report. Write to %@.": {
+      "comment": "Shown when no mail app opens the report draft; placeholder is the contact address.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No mail app can send the report. Write to %@."
+          }
+        }
+      }
+    },
+    "Report a problem": {
+      "comment": "Settings row that opens a mail draft to the published report contact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Report a problem"
+          }
+        }
+      }
+    },
+    "To report objectionable content or abuse, write to %@. Use Report in a received prototype's menu to include which one.": {
+      "comment": "Settings footer under Report a problem; placeholder is the contact address.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To report objectionable content or abuse, write to %@. Use Report in a received prototype's menu to include which one."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

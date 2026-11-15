@@ -3,11 +3,13 @@ import Foundation
 enum PrototypeLibraryImportFailure: Error, Equatable, LocalizedError {
     case invalid(path: String, message: String)
     case needsNewerViewer(missing: [String])
+    /// Received content whose spec the user hid on this device (#16437).
+    case hidden
 
     var path: String {
         switch self {
         case let .invalid(path, _): path
-        case .needsNewerViewer: "$"
+        case .needsNewerViewer, .hidden: "$"
         }
     }
 
@@ -15,6 +17,7 @@ enum PrototypeLibraryImportFailure: Error, Equatable, LocalizedError {
         switch self {
         case let .invalid(_, message): message
         case let .needsNewerViewer(missing): "Needs a newer ProtoViewer: \(missing.joined(separator: ", "))"
+        case .hidden: "This prototype is hidden on this device"
         }
     }
 

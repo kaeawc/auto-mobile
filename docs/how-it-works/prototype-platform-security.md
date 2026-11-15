@@ -4,8 +4,8 @@ Threat model for the platform vocabulary (`requires`, the `platform` action, `pl
 handlers, `{platform}` reads; see "Platform actions and events" in
 [the prototype specification](plat/android/prototype-ux.md)). Specs are untrusted input: they come
 from an agent, from a saved file, or from an import into ProtoViewer
-([ProtoViewer](protoviewer.md)). Each rule below names where it is enforced. Rules marked
-_not yet enforced_ are tracked in the linked issue.
+([ProtoViewer](protoviewer.md)). Each rule below names where it is enforced. The linked issue
+tracks each rule marked _not yet enforced_.
 
 ## Threats
 
@@ -45,11 +45,12 @@ Swift validators refuse these bindings when `library: true`, reporting the sink 
 for `secure` text fields. Pointer overlap includes parents, children and repeat `{index}` segments;
 literal value bindings stay opaque. A `setData`, `appendData`, `prependData` or `upsertData` whose
 `value` is `{data}` or `{platform}` read of tainted state taints its `/data` destination, so
-copies and copies of copies are refused too. Copies routed through state are tracked in
-TypeScript, Kotlin and Swift as well: a `setState` whose value is a sensitive `{platform}` read,
-or text naming a tainted data or platform placeholder or a tainted repeat row, taints its key; a
-`{state}` read of a tainted key taints a data destination and is itself a sink in a request, a
-`{key}` text placeholder or a `state:` storage key. A key holding a repeat placeholder matches
+copies and copies of copies are refused too.
+
+TypeScript, Kotlin and Swift also track copies routed through state. A `setState` taints its key
+when its value is a sensitive `{platform}` read, or text naming a tainted data or platform
+placeholder or a tainted repeat row. A `{state}` read of a tainted key taints a data destination.
+It is itself a sink in a request, a `{key}` text placeholder or a `state:` storage key. A key holding a repeat placeholder matches
 every key sharing its literal prefix. The contract marks location fixes and auth user IDs as
 sensitive state. Successful MCP-direct shows include a warning for each sink, unless the
 expanded sink scan exceeds 4194304 bytes. Then they include one warning that the sinks are

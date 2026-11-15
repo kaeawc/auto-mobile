@@ -16,8 +16,8 @@ The platform gate admits Android and iOS for every device-aware tool, and watchO
 tvOS and visionOS for the tools listed in `APPLE_PLATFORM_SUPPORTED_TOOLS`. Plain
 tools look up their own target or need no device, so they carry no platform entry.
 A handler can still answer `unsupported` for a platform the gate admits (for example
-an Android-only action on an iOS device); those checks are not a registry gate and
-are not reflected in the list.
+an Android-only action on an iOS device). Those checks are not a registry gate, and
+the list does not reflect them.
 
 ## Drift check
 
@@ -26,8 +26,9 @@ Validation check) fails when:
 
 - the committed `schemas/tool-definitions.json` differs from the live derivation;
 - a `featureFlagDisabledMessage(flag, tool)` call in `src/` names a tool that does
-  not declare that flag, a tool declares a flag with no such refusal, or a call's
-  flag or tool is not a string literal (the registry's own `debug` gate excepted);
+  not declare that flag, or a tool declares a flag with no such refusal. It also
+  fails when a call's flag or tool is not a string literal (the registry's own
+  `debug` gate excepted);
 - `APPLE_PLATFORM_SUPPORTED_TOOLS` lists a tool that is not registered, or a
   device-aware tool whose input schema refuses a platform the gate admits;
 - a `docs/tools.md` tool row's Requires cell differs from the definition.

@@ -39,37 +39,40 @@ Shared contract #12071 adds `axis` (default horizontal), `pageSpacing` (0), stri
 spacing/peek 0..10000, fixed size 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`). Any explicit option requires
 `prototype_pager_options_v1`; older agents are refused with a relaunch hint. Non-default options render
 with a native view-aligned ScrollView, lazy stacks, scroll content margins and viewport/fixed page
-frames; pagers whose options all resolve to defaults keep the paged TabView / wrap-size drag path. A
-vertical pager can have no vertical scroll ancestor (omitted scroll axis is vertical). Current page =
+frames; pagers whose options all resolve to defaults keep the paged TabView / wrap-size drag path.
+
+A vertical pager can have no vertical scroll ancestor (omitted scroll axis is vertical). Current page =
 first fully visible page; events, placeholders and navigation bindings keep their meaning. Every visible
 page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and
 `tapOn`; fully off-screen pages are not. Android marks the current page selected only for pagers with
-positive peek or fixed `pageSize`; iOS marks it selected on the options path and not on the legacy paged
-pager; plain pagers expose only the current page on both.
+positive peek or fixed `pageSize`. iOS marks it selected on the options path and not on the legacy paged
+pager. Plain pagers expose only the current page on both.
 
 ## Carousel and pager indicator (not device-verified)
 
 `prototype_carousel_v1` gates carousels and pager indicator fields. A pager may declare
 `indicator: "dots"` (default `none`) and `indicatorPlacement: "over" | "below"`.
 Placement applies only with dots; otherwise it is accepted and ignored. iOS defaults to `below`:
-a row below horizontal pages or a column beside vertical pages. `over` preserves the full page size
-and overlays the bottom or end edge, inset 8 pt. Android defaults to `over`. The current page is
-filled; plain circles are hidden from accessibility and hit testing. A `carousel` is a horizontally scrolling,
+a row below horizontal pages or a column beside vertical pages. With `over`, the indicator keeps the
+full page size and overlays the bottom or end edge, inset 8 pt. Android defaults to `over`. The current page is
+filled; plain circles are hidden from accessibility and hit testing.
+
+A `carousel` is a horizontally scrolling,
 snapping row, one item per child (at least one; `repeat` expands like `row`); `itemWidth` (dp, > 0,
 <= 10000) required; `variant` `multiBrowse` (default), `hero` or `uncontained`; `itemSpacing` dp >= 0. No
 page index, event or `setPage` target (use a `pager` if the page matters). The host refuses a show on a
-CtrlProxy or iOS agent without the capability. iOS draws every variant as fixed-width items in a
-horizontal `ScrollView` with `scrollTargetBehavior(.viewAligned)` (no multi-browse/hero size changes;
-all items stay accessible) and reports a `carousel` platform note.
+CtrlProxy or iOS agent without the capability. On iOS, every variant draws as fixed-width items in a
+horizontal `ScrollView` with `scrollTargetBehavior(.viewAligned)`, with no multi-browse/hero size
+changes and all items accessible. It reports a `carousel` platform note.
 
 ## Pull-to-refresh (`scroll.refresh`, not device-verified)
 
 A vertical `scroll` may declare `refresh: {stateKey, onRefresh}` (1-32 actions, same union as `onTap`).
-`stateKey` must be a declared boolean state key that shows the indicator while true; horizontal scroll
-with `refresh` is rejected at `<path>.refresh`. A pull writes true (emitting `change`) then runs
+Its `stateKey` must be a declared boolean state key that shows the indicator while true; validation
+rejects a horizontal scroll with `refresh` at `<path>.refresh`. A pull writes true (emitting `change`) then runs
 `onRefresh`; the prototype's own `setState`, or a `patch` of `/state/<key>` with `baseRevision`, writes
-false to end it. A pull while true is ignored. Repeat/component placeholders bind in the key and actions.
-Capability `prototype_refresh_v1`; older CtrlProxy/iOS agents are refused before sending.
+false to end it. A pull while true does nothing. Repeat/component placeholders bind in the key and actions.
+Capability `prototype_refresh_v1`; the host refuses older CtrlProxy/iOS agents before sending.
 
 iOS uses `refreshable` on the `ScrollView`: the closure sets the key, runs the actions and stays open
 until the key is false (or the view goes away). A key set true without a pull shows a plain
@@ -84,7 +87,7 @@ until the key is false (or the view goes away). A key set true without a pull sh
 `onSubmit`. Number, decimal and phone pads have no Return key, so a focused such field shows a keyboard
 toolbar button named for the action that runs `onSubmit` and dismisses the pad (#12998). The trailing
 icon is an SF Symbol button beside the field (plain glyph without `onTap`), named by `label`, with
-identifier `<testTag>.trailingIcon` for `tapOn`. `leadingIcon`
+identifier `<testTag>.trailingIcon` for `tapOn`. The `leadingIcon`
 (`prototype_text_field_leading_icon_v1`) is a decorative SF Symbol before the text, hidden from
 accessibility.
 
@@ -95,8 +98,9 @@ is revealed by swiping right, `end` by swiping left (sides are physical, not RTL
 holds 1-3 entries `{label, icon?, role?, color?, onTap}` (`role` `default` or `destructive`; `color` hex
 or role overrides background; `onTap` 1-32 actions); the first entry sits at the screen edge. Release
 past 40% of the revealed width, or a fling past open velocity, leaves the row open; dragging beyond
-rubber-bands. `fullSwipe: true`: past 60% (or a hard fling) runs the side's first entry and closes. One
-row open at a time; tapping an open row closes it instead of running `onTap`. Revealed buttons get test
+rubber-bands. `fullSwipe: true`: past 60% (or a hard fling) runs the side's first entry and closes.
+
+One row is open at a time; tapping an open row closes it instead of running `onTap`. Revealed buttons get test
 tag `<rowTestTag>.swipe.<index>` (start entries first, then end), existing only while open. Every entry
 is also an accessibility action (VoiceOver/TalkBack). Reduced motion or `motion: "none"` snaps. Put
 swipeActions on repeated rows; inside a horizontal `pager` or `carousel` they are refused (drag
@@ -116,7 +120,7 @@ drives them by coordinate gesture. Placeholders bind as for `onTap`. Each list i
 
 ## Search bar contract (#12069)
 
-Shared `searchBar` node: required string `stateKey` initialized in state; optional `placeholder`,
+Shared `searchBar` node: required string `stateKey` initialized in state. Optional fields: `placeholder`,
 catalog `leadingIcon`, one or two `trailingActions` (`{icon, label, onTap?}`, nonempty label),
 boolean-state `activeKey`, `variant` (`bar` default, or `docked`), `onSubmit` and a single `child` (needs
 `activeKey`; true shows it). Bar expands to fill its parent; docked stays in place with results under
@@ -165,8 +169,8 @@ assets when the renderer lacks it.
   trailing text/actions, select and option labels.
 
 Rendering stays inside the prototype window on both platforms so `observe`/`tapOn` reach the normal
-hierarchy (Android uses an in-window surface, not DropdownMenu/Popup; iOS an in-window list, not system
-Menu/Picker; iOS shows report the substitution in `platformNotes`). The select field and menu surface
+hierarchy. Android uses an in-window surface, not DropdownMenu/Popup. iOS uses an in-window list, not
+system Menu/Picker, and iOS shows report the substitution in `platformNotes`. The select field and menu surface
 carry the node `testTag`. Select option rows are `<testTag>.<value>`; menu item rows `<testTag>.<index>`
 (zero-based, dividers counted). Android adds row tags only when `testTag` is set; iOS falls back to
 `(testTag ?? id).<value|index>`.
@@ -180,10 +184,10 @@ Tooltip `anchorTo` must resolve to exactly one other node id after host componen
 
 Tooltips are hoisted into the top hosting layer, outside the page's layout and anchor layer.
 `anchorTo` uses the rendered target's global bounds; `anchor` uses host-resolved bounds plus offsets.
-An unrendered target leaves state unchanged and draws nothing. `PrototypePlacement.place` resolves
-caret side, bubble origin and caret offset from target, bubble and window geometry. `top` means the
-bubble is below the target; logical start/end mirror in RTL. Placement flips to the opposite side
-when needed, chooses the larger space when neither fits, clamps to an eight-point window margin,
+An unrendered target leaves state unchanged and draws nothing. The `PrototypePlacement.place` function resolves
+caret side, bubble origin and caret offset from target, bubble and window geometry. The `top` side
+means the bubble is below the target; logical start/end mirror in RTL. Placement flips to the opposite side
+when needed and chooses the larger space when neither fits. It clamps to an eight-point window margin
 and keeps the caret aimed at the target center within the bubble's corner inset. Menus use the same
 placement module while preserving their bottom-end alignment when they fit below.
 

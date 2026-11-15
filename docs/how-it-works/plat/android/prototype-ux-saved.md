@@ -6,11 +6,11 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 
 `SavedPrototypeLaunch.intent(context, id)` targets the explicit
 `SavedPrototypeActivity` component with data `automobile-saved-prototype:/<id>`
-(the single path segment is encoded with `Uri.Builder`) and
-`FLAG_ACTIVITY_NEW_DOCUMENT`. No extras are read: intents select only an id,
+(`Uri.Builder` encodes the single path segment) and
+`FLAG_ACTIVITY_NEW_DOCUMENT`. The activity reads no extras: intents select only an id,
 never a spec or assets. `documentLaunchMode="intoExisting"` matches component and
 data via `Intent.filterEquals`, giving each id its own task while reusing the
-same id's task. Shortcut publishing may add flags; shortcut removal is limited to
+same id's task. Shortcut publishing may add flags; shortcut removal uses only
 `disableShortcuts` (see "Saved prototypes on the Android home screen").
 
 A document relaunch calls `onNewIntent`, updates the activity's intent and reloads
@@ -67,11 +67,12 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   button by label and reports `pinned` only after `listSaved` confirms (#12266; launcher dialogs differ, see below).
 - A launcher caches its workspace, so a new or updated shortcut can stay invisible (#14887). After a
   `pinned` result, or a save whose shortcut was `updated`, the host looks for the label on the home
-  screen, swiping through the following workspace pages (Pixel Launcher puts a new pin on page 2)
-  until the label appears, a page repeats, or ten pages are checked. If it is missing, it resolves
-  the default launcher (`cmd package resolve-activity`), and when that package is a known launcher
-  runs `am force-stop` plus a HOME intent once, waits for the launcher's tree to go quiet, and scans
-  again from the reset page. The result reports `launcherRestarted` and `shortcutVisible`; an
+  screen. It swipes through the following workspace pages (Pixel Launcher puts a new pin on page 2)
+  until the label appears, a page repeats, or ten pages are checked. If the label is missing, the
+  host resolves the default launcher (`cmd package resolve-activity`). When that package is a known
+  launcher, it runs `am force-stop` plus a HOME intent once, waits for the launcher's tree to go
+  quiet, and scans again from the reset page.
+- The save result reports `launcherRestarted` and `shortcutVisible`; an
   unknown launcher is left alone with a warning. It is on by default on emulators and physical
   devices; `restartLauncher:false` opts out. It never runs on a pending pin (no shortcut exists
   yet) and runs at most once per call.
@@ -91,10 +92,11 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   mirror (#12268) restores the saved content, never the icons.
 - The accessibility-bound CtrlProxy may call `requestPinShortcut` with no activity visible (its
   process is a bound foreground service).
-- The dialog is `AddItemActivity` (`QuickstepAddItemActivity` on API 37 Pixel Launcher) and its
-  shape differs by API and launcher: a platform AlertDialog with "ADD AUTOMATICALLY" (AOSP
-  Launcher3), a bottom sheet with an "Add to home screen" `Button` (Pixel Launcher before API 37),
-  or a Compose sheet whose labels are plain text under a clickable parent (Pixel Launcher, API 37).
+- The dialog is `AddItemActivity` (`QuickstepAddItemActivity` on API 37 Pixel Launcher). Its
+  shape differs by API and launcher. AOSP Launcher3 shows a platform AlertDialog with "ADD
+  AUTOMATICALLY". Pixel Launcher before API 37 shows a bottom sheet with an "Add to home screen"
+  `Button`. Pixel Launcher on API 37 shows a Compose sheet whose labels are plain text under a
+  clickable parent.
   The accept match is by label and covers all three (fixtures in
   `test/fixtures/android-pin-dialog/`); a launcher with another label is reported
   (`unrecognized` or a timeout) and Cancel is never tapped.

@@ -7,8 +7,9 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 `prototype_flow_grid_v1` gates `flow` (wrapping row) and `grid`. Both support
 children and repeat, with normal node/depth budgets. Flow's optional integer
 `maxLines >= 1` clips overflow visually without removing hierarchy children.
-`style.spacing` is the item gap; finite nonnegative `style.runSpacing` is the
-line/row gap and has the same bounds as spacing (meaningful only on flow/grid).
+Spacing works like this: `style.spacing` is the item gap, and finite nonnegative
+`style.runSpacing` is the line/row gap. It has the same bounds as spacing
+(meaningful only on flow/grid).
 Grid requires integer `columns` in 1..12 or `{minWidth: dp}` (finite, > 0).
 Spacing applies to both axes unless runSpacing overrides the row gap. Grid is
 always non-lazy, preserves every child in the hierarchy, and never scrolls
@@ -23,12 +24,17 @@ to the resolved runtime count. Shared fixtures define host validation behavior.
 `indicator: "dots"` (default `none`) and `indicatorPlacement: "over" | "below"`.
 Placement applies only with dots; otherwise it is accepted and ignored. Android defaults to `over`:
 a centred row at the bottom or a column at the end edge, inset 8 dp, preserving the full page size.
-`below` gives pages the remaining space and places a centred row under horizontal pages or a column
+With `below`, pages get the remaining space, with a centred row under horizontal pages or a column
 beside vertical pages. iOS defaults to `below`. The current page is filled; dots add no semantics node.
 
 A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
-`repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is
-`multiBrowse` (default), `hero` or `uncontained`; `itemSpacing` is dp >= 0. It has no page index,
+`repeat` expands like `row`). Its fields:
+
+- `itemWidth` (dp, > 0, <= 10000) is required.
+- `variant` is `multiBrowse` (default), `hero` or `uncontained`.
+- `itemSpacing` is dp >= 0.
+
+It has no page index,
 event or `setPage` target; use a `pager` when the page matters. The host refuses a show on a
 CtrlProxy or iOS agent without the capability before sending it, and the iOS result carries a
 `carousel` platform note.
@@ -41,9 +47,9 @@ until scrolled in. A repeat that expands to no items draws nothing.
 ## Pull-to-refresh (`scroll.refresh`)
 
 A vertical `scroll` may declare `refresh: {stateKey, onRefresh}` (1-32 actions in `onRefresh`, the
-same union as `onTap`). `stateKey` names a boolean state key that shows the refresh indicator
-while it is true; it must be boolean if declared, and a horizontal scroll with `refresh` is
-rejected at `<path>.refresh`. A pull writes true to the key (emitting a `change` event) and then
+same union as `onTap`). The `stateKey` names a boolean state key that shows the refresh indicator
+while it is true; it must be boolean if declared. Validation rejects a horizontal scroll with
+`refresh` at `<path>.refresh`. A pull writes true to the key (emitting a `change` event) and then
 runs `onRefresh`; the prototype's own `setState`, or a `patch` of `/state/<key>` with a
 `baseRevision`, writes false to end it. A pull while the key is already true is ignored. Repeat
 and component placeholders bind in the key and the actions like `onTap`. The capability is
@@ -52,8 +58,8 @@ it.
 
 Android draws it with Material `PullToRefreshBox` around the scroll; the authored `testTag` and
 size modifiers sit on the box. iOS uses `refreshable`, whose async closure stays open until the key
-is false again; a key set true without a pull (an agent patch) shows a plain `ProgressView` at the
-top because SwiftUI cannot start `refreshable` programmatically.
+is false again. A key set true without a pull (an agent patch) shows a plain `ProgressView` at the
+top, because SwiftUI cannot start `refreshable` programmatically.
 
 ## Chat lists (`prototype_chat_scroll_v1`, #14232)
 
@@ -67,11 +73,15 @@ A vertical `scroll` can be a conversation view:
 | `onStartReached` | 1 to 32 actions run once each time the scroll reaches its start (edge-triggered; a list that fits never fires), for loading older history.                             |
 
 The options need a vertical scroll (`Chat scroll options need a vertical scroll` at the option's
-path), and `atEndKey` a declared boolean state key. `scrollTo {scroll, to, animated?}` moves the
-scroll whose `id` is `scroll`; exactly one scroll may carry that id (`Unknown scroll id`,
-`Duplicate scroll id` at `.scroll`). `to` is `"start"`, `"end"` or `{key: value}`, a `repeat.key`
-value of a row inside the scroll; a key that is not laid out drops the request. `animated` defaults
-to true. Scrolling is not a state change and emits nothing. A composer is a row with a `textField`
+path), and `atEndKey` a declared boolean state key. The action `scrollTo {scroll, to, animated?}`
+moves the scroll whose `id` is `scroll`:
+
+- Exactly one scroll may carry that id (`Unknown scroll id`, `Duplicate scroll id` at `.scroll`).
+- `to` is `"start"`, `"end"` or `{key: value}`, a `repeat.key` value of a row inside the scroll; a
+  key that is not laid out drops the request.
+- `animated` defaults to true.
+
+Scrolling is not a state change and emits nothing. A composer is a row with a `textField`
 (`imeAction: "send"`, `onSubmit`) and a send `iconButton`, padded with
 `safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}`. Rows off
 screen are absent from `observe`; `swipeOn lookFor` still finds them. The iOS agent advertises the
@@ -80,16 +90,23 @@ capability too (#14671, SwiftUI `ScrollViewReader` with the same edge-trigger ru
 ## Swipe actions
 
 A `row` or `listItem` may declare `swipeActions: {start?, end?, fullSwipe?}` (needs
-`prototype_swipe_actions_v1`). `start` is revealed by swiping right and `end` by swiping left
+`prototype_swipe_actions_v1`). Swiping right reveals `start` and swiping left reveals `end`
 (mirrored in right-to-left layouts is not done: sides are physical). Each side holds 1-3 entries
-`{label, icon?, role?, color?, onTap}`: `label` is the button text and its accessibility name,
-`icon` a built-in icon name (an SF Symbol on iOS), `role` `default` (primary colours) or
-`destructive` (error colours), `color` a hex or theme role that overrides the background, and
-`onTap` 1-32 actions. The first entry of a side sits at the screen edge. A release past 40% of
+`{label, icon?, role?, color?, onTap}`:
+
+- `label` is the button text and its accessibility name.
+- `icon` is a built-in icon name (an SF Symbol on iOS).
+- `role` is `default` (primary colours) or `destructive` (error colours).
+- `color` is a hex or theme role that overrides the background.
+- `onTap` is 1-32 actions.
+
+The first entry of a side sits at the screen edge. A release past 40% of
 the revealed width, or a fling past the open velocity, leaves the row open; a drag beyond the
 revealed width resists (rubber-band). With `fullSwipe: true` a drag past 60% of the row (or a hard
 fling) runs the swiped side's first entry and closes the row. Only one row is open at a time, and a
-tap on an open row closes it instead of running its `onTap`. Revealed buttons get the test tag
+tap on an open row closes it instead of running its `onTap`.
+
+Revealed buttons get the test tag
 `<rowTestTag>.swipe.<index>`, counting `start` entries first and then `end`; they exist only while
 the row is open. Every entry is also an accessibility action (TalkBack custom action, VoiceOver
 action) on the row, so assistive technology can run it without swiping. Reduced motion or spec
@@ -111,9 +128,10 @@ single-tap delay applies only to nodes declaring `onDoubleTap`; `onTap` with onl
 fires immediately. Long-press uses the platform default
 (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
 
-Each list is also a named TalkBack action (#15123): `onLongPress` is the node's long-click action labelled
-`Long press` (on a node with `onTap` too, the labelled `combinedClickable` long click, never a second copy), and
-`onDoubleTap` a custom action `Double tap`, since TalkBack's own double tap activates `onTap`. The names are
+Each list is also a named TalkBack action (#15123). The `onLongPress` list is the node's long-click
+action labelled `Long press` (on a node with `onTap` too, the labelled `combinedClickable` long
+click, never a second copy). The `onDoubleTap` list is a custom action `Double tap`, since
+TalkBack's own double tap activates `onTap`. The names are
 fixed English defaults. The extractor maps only known action ids (`ViewHierarchyExtractor.kt`), so
 `observe` may not report these custom actions.
 
@@ -149,10 +167,10 @@ sees every result row.
 ## Loading and empty states (#14207, `prototype_loading_states_v1`)
 
 A data condition may test emptiness instead of comparing: `{data: "/feed", empty: true}` holds
-when the value is missing, `[]`, `{}` or `""` (`null` cannot be stored in `/data`), and
-`empty: false` holds otherwise. `empty` takes the place of `equals`, `notEquals`, `gt` and `lt`
-(exactly one is required), and `{key, empty}` is rejected at `<path>.empty` with
-`empty applies only to data conditions`. Like other data conditions it is resolved on the device
+when the value is missing, `[]`, `{}` or `""` (`null` cannot be stored in `/data`). With
+`empty: false` it holds otherwise. The `empty` field takes the place of `equals`, `notEquals`,
+`gt` and `lt` (exactly one is required). Validation rejects `{key, empty}` at `<path>.empty` with
+`empty applies only to data conditions`. Like other data conditions, the device resolves it
 against the current `/data`, so a request response or data action flips it.
 
 Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `column` or `card`
@@ -160,7 +178,9 @@ over its background and inside its clip; any other node type is rejected at
 `<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
 animator scale 0 no band is drawn. Android also hides the band during the bounded capture hold
 renewed by each window-metadata read, so screenshots see the plain placeholder. A `repeat` of literal
-placeholder rows makes a skeleton list. The iOS agent advertises the capability too (#14689): it
-sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over the node, reads
-"Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
-Reduce Motion, and rejects shimmer on other node types at the same path.
+placeholder rows makes a skeleton list.
+
+The iOS agent advertises the capability too (#14689). It sweeps the same band (1.2 s, 35% white,
+clipped to the node's corner shape) over the node and reads "Loading" to VoiceOver with the
+updates-frequently trait. It draws no band under `motion: "none"` or Reduce Motion, and rejects
+shimmer on other node types at the same path.

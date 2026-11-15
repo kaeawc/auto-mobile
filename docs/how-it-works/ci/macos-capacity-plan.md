@@ -41,8 +41,8 @@ Package are gone; those jobs run on GitHub only.
 | `run-main-desktop` | `android/desktop-app/**`, `android/desktop-core/**`                       | Build Desktop App (macos)                                 |
 
 Both groups also match `.circleci/**`, so a config change revalidates itself.
-Apart from the small setup jobs in `config.yml`, CircleCI runs no Linux jobs; Linux CI
-runs only on GitHub Actions.
+Apart from the small setup jobs in `config.yml`, all Linux CI runs on GitHub
+Actions.
 Swift coverage keeps its existing trigger: `merge.yml`'s `swift-code-coverage` job
 starts a `run-swift-coverage-main` pipeline for coverage-input changes and
 downloads the badge.
@@ -50,7 +50,7 @@ downloads the badge.
 **Coalescing.** Each post-merge job first runs
 `scripts/ci/circleci-main-superseded.sh <group>`. If a newer main commit changes a
 path in the same group, that commit's pipeline also runs the job on a tree that
-contains this one, so the older job halts (green) before doing any work. The last
+contains this one. The older job then halts (green) before doing any work. The last
 commit in a burst that touches the group is never superseded, so a burst of N
 merges costs one run for that commit. The check fails open: if it cannot read
 main, the job runs. CircleCI's project-level "auto-cancel redundant workflows" is
@@ -141,7 +141,7 @@ job does not skip it.
   `package.json`, `android/gradle/libs.versions.toml`, or
   `.github/workflows/pull_request.yml` changed (#11580).
   Otherwise its no-op leg reports from Linux with the same required check name.
-  The minimal installer installs the published npm package but also reads the
+  The minimal installer installs the published npm package. It also reads the
   checkout's compileSdk TOML during the initial SDK advisory, before applying
   the preset, when adb and an SDK path are detected (including non-interactive
   mode). The main-push installer remains unconditional.
@@ -160,7 +160,8 @@ job does not skip it.
   It watches self-hosted jobs that exist while it runs and exits once none is
   queued. Later Prototype Simulator (`needs: ios-xcode-build`) is deliberately
   unwatched so Linux is not held for the whole Mac phase; that job is advisory
-  and starts after a heavy-pool job has just run. A red result names queued jobs
+  and starts after a heavy-pool job has just run.
+- A red `Mac Runner Queue` result names queued jobs
   and their pools: no runner in that pool is online or the pool is saturated. A
   pool that was offline when the run started already went to hosted macOS unless
   Mac Pool Routing failed open. To force hosted macOS, set `AUTOMOBILE_MAC_POOLS_ENABLED`
@@ -172,8 +173,8 @@ job does not skip it.
   jobs never overlap, and each job owns the simulators it creates. Heavy jobs
   have tight `timeout-minutes` (25, or 30 for the Playground fallback).
 - Build Xcode Projects is one job that builds Playground and then CtrlProxy in
-  separate named steps (#11580). As two matrix legs they ran one after the other
-  on the heavy runner anyway and repeated the setup. Prototype Simulator `needs`
+  separate named steps (#11580). Two matrix legs would run serially on the heavy
+  runner anyway and repeat the setup. Prototype Simulator `needs`
   that job, so the runner serves the build behind the required `iOS Build` gate
   first; it still runs whatever the build's result.
 - The PR-time XcodeGen drift check (#10939) is the `Check XcodeGen Project
@@ -212,8 +213,8 @@ lane still runs on hosted `macos-26` for same-repo PRs. Its daemon steps start
 an AutoMobile daemon on the default port and install gems and Homebrew packages,
 which would collide with the owner's own daemon and tooling on this Mac. Moving
 it needs a dedicated runner user (see owner steps) and an isolated daemon port.
-It runs only on the label or on changes to the layers the iOS SDK contract suite crosses, so this
-was left for an owner decision.
+It runs only on the label or on changes to layers the iOS SDK contract suite crosses, so it
+awaits an owner decision.
 
 **N for the small pool: 4.** Swift package builds and the desktop Gradle build
 are CPU-bound and each can use most of the cores. Four small jobs plus the heavy
@@ -243,7 +244,7 @@ Routing, in order:
 The job keeps its one capture retry for the known ScreenCaptureKit flake and has
 a 30-minute timeout. On the heavy lane it isolates `HOME` like the other
 self-hosted jobs, but it still starts an AutoMobile daemon and MediaMTX on fixed
-ports, so use that fallback only with the heavy runner under a dedicated user.
+ports. Use that fallback only with the heavy runner under a dedicated user.
 
 ## Job → runner
 
@@ -268,7 +269,7 @@ hosted for any run where Mac Pool Routing finds that pool offline.
 
 ## Owner steps
 
-These need a login or a credential, so they were not done in the change.
+These need a login or a credential.
 
 ### CircleCI (web app; do not script them against the API)
 
@@ -281,20 +282,19 @@ These need a login or a credential, so they were not done in the change.
 3. **Project Settings → Advanced:** leave "Auto-cancel redundant workflows" as it
    is; post-merge coalescing does not rely on it (see above).
 4. After the first nightly, check that the `xcode: "26.6"` image still exists
-   (the sweep fails at VM start if CircleCI retires it) and that Build Desktop
+   (the sweep fails at VM start if CircleCI retires it). Also check that Build Desktop
    App (macos) can install JDK 21 and the Android command-line tools on the
    image. Neither has run on CircleCI yet.
 
 ### Self-hosted Mac runners
 
-Registering runners needs a registration token, so it was not done here. Run on
-the Mac as the user that owns `~/actions-runner`:
+Run on the Mac as the user that owns `~/actions-runner`:
 
 1. Keep an Xcode 26.x installed (currently 26.6 at `/Applications/Xcode.app`,
    next to Xcode 27.1 beta) with its iOS platform
    (`xcodebuild -downloadPlatform iOS`). Swift Packages, Build Root SPM Package,
    Build Xcode Projects, the Playground fallback and Prototype Simulator request
-   26.6; `bash scripts/ci/select-self-hosted-xcode.sh 26.6` uses 26.6 when
+   26.6. Then `bash scripts/ci/select-self-hosted-xcode.sh 26.6` uses 26.6 when
    installed and otherwise the newest installed 26.x at or above it,
    printing which it chose (#11422). It never selects Xcode 27.
 2. Get a registration token (valid for one hour):
@@ -313,7 +313,7 @@ the Mac as the user that owns `~/actions-runner`:
    `--labels automobile-mac-heavy`). It must NOT carry `automobile-mac`, or small jobs could
    land on it and overlap a simulator job. Preferably install it under a dedicated macOS user so
    its CoreSimulator device set, `~/Library` and launchd services are separate from the owner's
-   simulators and AutoMobile daemon; log in as that user once so its LaunchAgent can start.
+   simulators and AutoMobile daemon. Log in as that user once so its LaunchAgent can start.
 5. Check the pools:
 
    ```bash

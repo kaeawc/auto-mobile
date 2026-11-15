@@ -8,8 +8,8 @@ rendering, asset transport, the wire messages, the `prototype` MCP tool and the
 expressions, URLs, image bytes or migration instructions.
 
 Conventions: the renderer is Compose; sizes and positions use dp; prototype opacity is a
-percentage; app-element anchoring is supported; `observe` includes prototype nodes by default;
-existing tap and text tools target prototype nodes; screenshots come from `observe`, with no
+percentage; app-element anchoring is supported. `observe` includes prototype nodes by default,
+and existing tap and text tools target prototype nodes. Screenshots come from `observe`, with no
 separate screenshot tool. Focus belongs to the window host: accessibility set-text does not require
 focus, human keyboard input does.
 

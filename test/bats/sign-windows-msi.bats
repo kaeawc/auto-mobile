@@ -206,3 +206,22 @@ FAKE
   [ "$(cat "${TEST_ROOT}/posted-secret")" = "s3cr3t value&=" ]
   grep -Fxq "signed=true" "$GITHUB_OUTPUT"
 }
+
+@test "Git Bash: a native jq.exe that emits CRLF leaves no CR in the token" {
+  export_all_creds
+  # Windows-native jq.exe in text mode ends every line with CRLF.
+  cat >"${TEST_ROOT}/jq" <<'FAKE'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'tok-abc\r\n'
+FAKE
+  chmod +x "${TEST_ROOT}/jq"
+  export JQ="${TEST_ROOT}/jq"
+  run bash "$SCRIPT" "$MSI"
+  [ "$status" -eq 0 ]
+  # The fake java writes the token plus one LF; no CR may precede it.
+  [ "$(od -An -c "$JAVA_ENV_LOG" | tr -d ' ')" = 'tok-abc\n' ]
+  [[ "$output" == *"::add-mask::tok-abc"* ]]
+  [[ "$output" != *$'\r'* ]]
+  grep -Fxq "signed=true" "$GITHUB_OUTPUT"
+}

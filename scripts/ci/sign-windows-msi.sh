@@ -107,7 +107,10 @@ token_json="$(printf '%s' "${AZURE_CLIENT_SECRET}" | "${CURL}" -sSf --retry 3 \
   --data-urlencode "client_secret@-" \
   --data-urlencode "scope=https://codesigning.azure.net/.default")"
 
-TRUSTED_SIGNING_TOKEN="$(printf '%s' "${token_json}" | "${JQ}" -r '.access_token // empty')"
+# A Windows-native jq.exe writes CRLF in text mode and `$(...)` strips only the
+# LF, so a trailing CR would reach jsign's Authorization header. `-j` drops the
+# delimiter and `tr -d '\r'` removes any CR that remains.
+TRUSTED_SIGNING_TOKEN="$(printf '%s' "${token_json}" | "${JQ}" -j '.access_token // empty' | tr -d '\r')"
 if [ -z "${TRUSTED_SIGNING_TOKEN}" ]; then
   echo "sign-windows-msi: Entra ID token response carried no access_token" >&2
   exit 1

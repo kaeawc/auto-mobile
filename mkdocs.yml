@@ -420,6 +420,7 @@ nav:
           - "Browser, Android and iOS parity checks": how-it-works/prototype-web-renderer-checks.md
           - "Still renderer": how-it-works/prototype-web-renderer-still.md
           - "Still renderer coverage": how-it-works/prototype-web-renderer-coverage.md
+          - "Still renderer coverage (continued)": how-it-works/prototype-web-renderer-coverage-2.md
           - "Skins, frames and the device frame registry": how-it-works/prototype-web-renderer-frames.md
       - "Headless prototype mode": how-it-works/prototype-headless.md
       - "Prototype web frames for every form factor": how-it-works/prototype-web-frames-v2.md

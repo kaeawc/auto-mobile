@@ -18,12 +18,15 @@ fence reset ownership.
 Keep-booted is operational cleanup (#14358, #14364): no baseline diff or post-clean
 certification is required, and certification metadata never blocks it.
 
-**Baseline** (persists across sessions of the incarnation): package membership for
-all packages and users; identities and runtime grants for third-party apps only
-(avoids a per-system-package `dumpsys` sweep); global (once) and system/secure
-(per user) settings dumps; display overrides; locale; timezone; SHA-256 digest of
-the account inventory (never raw names); file inventories under `/sdcard/Download`,
-`DCIM`, `Pictures`, `Movies`, `Documents`.
+**Baseline** (persists across sessions of the incarnation):
+
+- package membership for all packages and users;
+- identities and runtime grants for third-party apps only (avoids a per-system-package
+  `dumpsys` sweep);
+- global (once) and system/secure (per user) settings dumps;
+- display overrides, locale and timezone;
+- SHA-256 digest of the account inventory (never raw names);
+- file inventories under `/sdcard/Download`, `DCIM`, `Pictures`, `Movies`, `Documents`.
 
 **Every release**: journal reverts in reverse order, then unconditional baseline
 cleaning (so journal ops cannot reintroduce drift):
@@ -34,9 +37,9 @@ cleaning (so journal ops cannot reintroduce drift):
   grants not in the baseline for retained third-party apps per user; never run
   device-wide `pm reset-permissions`.
 - Restore changed/missing global/system/secure keys. Delete an added key only when
-  the session journal proves the session created it (a raw `ns:key` row with an
+  the session journal proves the session created it. Proof is a raw `ns:key` row with an
   absent prior, or a key owned by a journaled rotation, screen-reader or keep-awake
-  tool). Keys absent from the baseline without that evidence, such as
+  tool. Keys absent from the baseline without that evidence, such as
   system-maintained ringtone, alarm and `opa_enabled` settings, are preserved
   (settings commands target the captured user, including 0). Non-critical failures warn and
   continue; connectivity, adb/developer, or accessibility restoration failure is
@@ -57,25 +60,25 @@ exhausted drain never starts snapshot fallback. Success reports `mode:
 
 **Failure/fallback**: hard failure or failed health uses the injected snapshot
 fallback if configured, otherwise journaled destruction; ownership loss never
-publishes idle or runs fallback under a stale fence. `maxUses` retires the same
-way. Fallback health must pass before idle; the report uses the completed
+publishes idle or runs fallback under a stale fence. Reaching `maxUses` retires the same
+way. Fallback health must pass before idle. The report uses the completed
 fallback's mode (`snapshot`/`wipe-data`) and keeps both the cleaning/retirement
-reason and the snapshot's fallback reason. `androidKeepBootedFallback:
+reason and the snapshot's fallback reason. Setting `androidKeepBootedFallback:
 "snapshot"` injects it (omitted/`"destroy"` keeps destruction); it and
 `androidKeepBootedMaxUses` are valid only in keep-booted mode. Snapshot support
 needs the daemon readiness and identity ports; missing ports reject startup.
 
 Snapshot fallback uses an exclusive binding fence, not the old boot UUID (restore
 can change it). After successful restore (or wipe-data replacement) exact
-target/boot checks rebind the incarnation, prune prior mutation journals and
+target/boot checks rebind the incarnation and prune prior mutation journals. They
 recapture a keep-booted baseline under the new boot identity; recapture or final
 health failure requires destruction. Fallback native phases carry a `snapshot:`
 prefix alongside the keep-booted phases.
 
 **Limits**: does not remove accounts/secrets, reset retained app databases/data,
-undo system package updates, rebuild overwritten/deleted baseline files,
+or undo system package updates. It does not rebuild overwritten/deleted baseline files,
 comprehensively restore AppOps/permission flags, remove users, or clean
-secondary-user shared storage/media-provider state. Residual state is accepted when
+secondary-user shared storage/media-provider state. The broker accepts residual state when
 commands and health checks succeed; it is not equivalent to snapshot/wipe-data
 isolation.
 
@@ -120,9 +123,9 @@ requires Android defaults and `reuseAndroidCleanDevices: true`).
 `androidResetTimeoutMs` is a positive integer ms (max 2147483647), accepted only
 for snapshot mode or keep-booted with snapshot fallback (ignored keys rejected).
 Default 600000 covers the whole release reset: cleaning, fallback, rebinding,
-final health. Keep-booted keeps its 30 s cap; the fallback gets a fresh
-cancellable budget bounded by the remaining deadline minus the settlement reserve;
-individual snapshot commands keep a 30 s cap; clock root and transport reconnection
+final health. Keep-booted keeps its 30 s cap. The fallback gets a fresh
+cancellable budget bounded by the remaining deadline minus the settlement reserve.
+Individual snapshot commands keep a 30 s cap; clock root and transport reconnection
 keep their own bounded timeouts.
 
 Snapshot mode captures the reserved, hidden broker baseline only on a freshly

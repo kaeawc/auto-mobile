@@ -42,17 +42,17 @@ the prototype as app UI.
   versions field text (`textEpochs`); the iOS field binds live state on the main actor, so no stale
   in-flight edit exists.
 - **Spec byte cap (differs from Android).** Android re-encodes the whole spec after each write and
-  rejects over `MAX_PROTOTYPE_SPEC_BYTES` (1 MiB UTF-8). The agent keeps no raw bytes: it measures the
+  rejects over `MAX_PROTOTYPE_SPEC_BYTES` (1 MiB UTF-8). The agent keeps no raw bytes. It measures the
   spec outside `state` once from the `show_prototype` request's `spec` (re-serialized, whitespace not
-  counted) and adds the candidate state's JSON size per write. `Spec byte limit exceeded` therefore
+  counted). It then adds the candidate state's JSON size per write. `Spec byte limit exceeded` therefore
   matches up to a few bytes of encoder difference. Sessions built without a request (unit tests) count
   state alone.
 
 ## Entry point: `launchApp { prototype: true }`
 
-The entry point (#10567) on an iOS simulator: resolves the dylib, allocates port and token,
-launches with `SIMCTL_CHILD_*`, connects (retrying refused connections every 200 ms for about 15 s,
-because a first launch on a freshly booted simulator can take seconds to bind the listener), and
+The entry point (#10567) on an iOS simulator resolves the dylib, allocates port and token, and
+launches with `SIMCTL_CHILD_*`. It connects, retrying refused connections every 200 ms for about 15 s,
+because a first launch on a freshly booted simulator can take seconds to bind the listener. It then
 records the agent against device and bundle id so `prototype` can connect. A normal `launchApp` injects nothing; an existing `DYLD_INSERT_LIBRARIES` is preserved. On a
 physical device the option fails with a simulator-only error. If `prototype` targets an app not
 launched this way it fails with a relaunch hint instead of relaunching (that would lose state).
@@ -85,8 +85,8 @@ AutoMobile does not launch these, so edit the scheme (Run > Arguments > Environm
   each pager's page; `reset: true` starts fresh (`prototype_show_in_place_v1`; host refuses `reset` on
   older agents). For a variant carousel, compose the spec yourself.
 - No `display`, no `persistence: "device"`; `layer: "app"` ignored.
-- `theme.design` defaults to `platform` (#15244); an `android: {...}` namespace block is ignored with a
-  `platformNotes` entry; system Reduce Motion and `prefersCrossFadeTransitions` map to the reduced
+- `theme.design` defaults to `platform` (#15244). An `android: {...}` namespace block is ignored with a
+  `platformNotes` entry. System Reduce Motion and `prefersCrossFadeTransitions` map to the reduced
   motion profile (crossfades); iOS reports only the horizontal size class (compact, regular).
 - `inspect` reports the single prototype, with no `suspended` and no `deviceDroppedEvents`.
 - SwiftUI in the app's process rather than Compose in CtrlProxy; no accessibility service.
@@ -97,7 +97,7 @@ AutoMobile does not launch these, so edit the scheme (Run > Arguments > Environm
 `inspect` (#10494) adopts the device's prototypes into host `status`/`awaitEvent` state after a session
 release or daemon restart. On iOS the host sends `get_prototype_status` and adopts the reply: `id`,
 `state`, `pages`, `lastSequence` (the agent's event ledger, so the host resumes past it) and
-`persistent: false`; also `visible` (window on screen), which the host does not surface. No
+`persistent: false`. The reply also carries `visible` (window on screen), which the host does not surface. No
 `suspended`, offline replay or `deviceDroppedEvents`. A host-listed prototype the agent no longer shows
 is dropped. The agent advertises `prototype_inspect_v1`; without it the host refuses `inspect` before
 sending anything and asks to relaunch with `launchApp { prototype: true }`.
@@ -105,10 +105,10 @@ sending anything and asks to relaunch with `launchApp { prototype: true }`.
 ## Native presentations and touches (#15463)
 
 A native presentation (`.sheet`, `.alert`, `.confirmationDialog`, `.popover`) presented from the
-overlay window's root lives in the prototype window, but no prototype hit rect covers it, so
+overlay window's root lives in the prototype window, but no prototype hit rect covers it. So
 `PassthroughWindow.hitTest` also claims touches for it, computed at hit time from the presented
 controller (`PrototypeNativePresentationHitRegion`). A modal presentation claims the whole window,
-so an outside tap dismisses it; a sheet whose selected detent is at or below
+so an outside tap dismisses it. A sheet whose selected detent is at or below
 `largestUndimmedDetentIdentifier` (`presentationBackgroundInteraction`) claims only its own frame and
 lets other touches reach the app. Menus use a system window and need no claim.
 
@@ -135,15 +135,15 @@ intermediate position, so a check of the lift waits for a stable `observe`.
 - **Motion.** Keyboard duration, ease-in-out (UIKit's keyboard curve is private); instant under
   `motion: "none"` or Reduce Motion (`PrototypeKeyboardLift.animationDuration`).
 - **Modal bottom sheet (`bottomSheet` node).** It draws in the top layer, but lays out and scrims
-  inside the window's frame for the placement, not the whole screen (`PrototypeModalSheetFrame`): the
-  `sheet` placement's frame (already above the keyboard), a `floating` root's reported frame, or the
+  inside the window's frame for the placement, not the whole screen (`PrototypeModalSheetFrame`). The
+  frame is the `sheet` placement's frame (already above the keyboard), a `floating` root's reported frame, or the
   window. Detents are fractions of that frame, and its scrim and `modal.N` touch rect stop at its edge,
   so touches outside a partial-height window still reach the app. In a window that does not itself
   move (floating, fullscreen, top sheet) the frame ends at the keyboard's top edge, so a field in the
   sheet stays visible.
-- **Lazy `list` rows.** A modal declared in a lazy list's row template opens: `openModals` decodes the
-  rows of a list whose template declares a modal (`PrototypeLazyModalRows`, cached per row so view
-  identity survives re-renders) because the visible cells never draw modals in place.
+- **Lazy `list` rows.** A modal declared in a lazy list's row template opens. The visible cells
+  never draw modals in place, so `openModals` decodes the rows of a list whose template declares a
+  modal (`PrototypeLazyModalRows`, cached per row so view identity survives re-renders).
 
 ## Light and dark values
 
@@ -178,8 +178,9 @@ device-verified. One mode is resolved per shown prototype ([Appearance](prototyp
   resolved id is drawn. Nav items draw the image at 24 pt if uploaded, else `icon`, else a placeholder
   square. Both ids of a pair appear in `missingAssets` until uploaded.
 - **Malformed values** fail `show_prototype` with `Invalid prototype spec: <path>: ...` and leave the
-  shown prototype untouched: a pair not exactly `{light, dark}` strings, a bad side/stop/scrim, an empty
-  id in an image pair, unknown gradient type, linear without angle, fewer than 2 or more than 4 stops,
-  position outside 0..1, or a non-`{role: hex}` `theme.colors.light|dark`. Shared invalid fixtures all
+  shown prototype untouched. Malformed means a pair not exactly `{light, dark}` strings, a bad
+  side/stop/scrim, an empty id in an image pair, or an unknown gradient type. It also means linear
+  without angle, fewer than 2 or more than 4 stops, position outside 0..1, or a non-`{role: hex}`
+  `theme.colors.light|dark`. Shared invalid fixtures all
   fail on iOS (`PrototypeThemeModesTests`). Host-only: the image-count limit, and a single unknown value
   in a pre-existing slot (draws that slot's fallback).

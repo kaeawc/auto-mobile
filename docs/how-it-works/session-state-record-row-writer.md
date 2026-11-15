@@ -24,18 +24,18 @@ SessionManager
 - A `DesiredRow` is a full row image, so replacing an unwritten desire is sound:
   `live(binding, activity) | released(reason, binding) | terminal(reason, binding,
   journaled)`. `released`/`terminal` carry the binding because `markReleased` is an
-  UPDATE: if the row does not exist yet, the writer upserts with the release status.
-  Replacement applies to an **unwritten** desire only; an issued write occupies the
-  slot until it settles or hits its deadline; after the deadline the next same-UUID write
-  may issue while the old statement is parked, still tracked for late/refused callbacks,
-  `settled` and `drain`. A terminal desire is never replaced
-  by a non-terminal one unless the slot was lifted (`fenced` -> `creating`).
+  UPDATE. If the row does not exist yet, the writer upserts with the release status.
+- Replacement applies to an **unwritten** desire only. An issued write occupies the
+  slot until it settles or hits its deadline. After the deadline the next same-UUID write
+  may issue while the old statement is parked. The writer still tracks the parked statement
+  for late/refused callbacks, `settled` and `drain`. The writer never replaces a terminal desire
+  with a non-terminal one unless the slot was lifted (`fenced` -> `creating`).
 - Writer invariant: **an intent on disk implies the slot is `fenced`** (or `releasing`
   with `fence: "terminal"`). Startup replay has no generation guard, only "the row's
-  reason is not terminal", so every path that replaces or refuses a durable terminal
-  intent must call `journal.resolve` synchronously with the transition: the `fenced`
-  -> `creating` lift, a superseded fence, a terminal write the generation guard
-  refuses. Otherwise a restart would terminalize a newer incarnation of the same UUID.
+  reason is not terminal". Every path that replaces or refuses a durable terminal
+  intent must therefore call `journal.resolve` synchronously with the transition. The paths
+  are the `fenced` -> `creating` lift, a superseded fence, and a terminal write the generation
+  guard refuses. Otherwise a restart would terminalize a newer incarnation of the same UUID.
 - Cross-daemon safety keeps `expectedRowGeneration` and `unlessTerminal*` in SQL, plus a
   generation guard on terminal writes. Before classifying a generation advance as foreign, the release path awaits
   that incarnation's in-flight own row writes after reading the row (#12547), bounded
@@ -54,17 +54,17 @@ SessionManager
 
 ## 6. Row writer implementation
 
-Implemented: SessionRowWriter owns the drain-write set ,
-terminal retry scheduling and the non-terminal snapshot map (adapter surface:
-`noteRelease`, `noteLive`, `canIssueRelease`, `scheduleRetry`; in production
-`pending(uuid)` means only "retry owed"). Create/rebind upserts, activity and ownership
+SessionRowWriter owns the drain-write set, terminal retry scheduling and the
+non-terminal snapshot map. Its adapter surface is `noteRelease`, `noteLive`,
+`canIssueRelease` and `scheduleRetry`; in production `pending(uuid)` means only
+"retry owed". Create/rebind upserts, activity and ownership
 statements go through `upsertLive`, `recordLiveActivity`,
-`replaceLiveOwnership` (pass-through, same await sequence), and the
+`replaceLiveOwnership` (pass-through, same await sequence). The
 superseded-row state lives in `SessionRowWriter.superseded`
-(`src/daemon/supersededRowReasserts.ts`: remembered superseded reasons, release-reason
-predecessors, refused release writes, pending-rewrite counts, rows under pending
-non-terminal releases, owed rewrites with backoff/timers/drain attempt, keyed off the
-writer's drain flag). Row policy stays with the manager as per-entry callbacks
+(`src/daemon/supersededRowReasserts.ts`), keyed off the writer's drain flag. It holds
+remembered superseded reasons, release-reason predecessors, refused release writes,
+pending-rewrite counts, rows under pending non-terminal releases, and owed rewrites with
+backoff/timers/drain attempt. Row policy stays with the manager as per-entry callbacks
 (`retry`, `retryDuringDrain`) so every read, statement and await keeps its order.
 
 The per-UUID desire/settled/drain engine in `sessionRowWriter.ts` is test-exercised;
@@ -95,13 +95,13 @@ hops.
 
 `liftTerminalFence` performs deletion, volatile-intent clearing, journal resolution and
 writer cancellation in one synchronous turn. Successful writes, refusals,
-rejected-creation fence adoption and startup replay keep the terminal admission fence
-(resolving an intent must not make an ended UUID reusable) and cancel only the matching
+rejected-creation fence adoption and startup replay keep the terminal admission fence,
+since resolving an intent must not make an ended UUID reusable. They cancel only the matching
 snapshot without eagerly removing the manager retry entry. Actual lifts remove the
 snapshot and cancel terminal desires and scheduled retries together. Plan-label minting
 keeps its shadow probe and reason-state deletion between snapshot deletion and journal
-resolution; startup keeps recovered-intent/probe/adopted-owner deletion before
-resolution; retry-drop keeps cancel-retry and superseded bookkeeping before resolution.
+resolution. Startup keeps recovered-intent/probe/adopted-owner deletion before
+resolution. Retry-drop keeps cancel-retry and superseded bookkeeping before resolution.
 A durable `record` clearing the volatile signal is not a fence lift. A non-terminal
 commit also deletes the volatile intent, resolves the journal and cancels a terminal
 retry (skipped when no terminal snapshot is fenced), and forced terminal snapshots
@@ -111,8 +111,8 @@ At most one unexpired standalone desire per UUID may issue; parked statements st
 tracked for callbacks and drain. Production bun:sqlite is synchronous, so the
 overwrite regression parks injected statements and retry/precondition work around the
 actual manager lift/publication. Fault tests use in-memory persistence and journal
-files only. The synchronous journal fake models hang/delay as a whole-process pause
-(an injected supervisor advances FakeTimer without firing JS callbacks; an in-process
-rebind cannot run inside it); rejected journal syscalls yield the volatile result;
-persistence hang/delay suspends across FakeTimer turns; crash cases discard the manager
+files only. The synchronous journal fake models hang/delay as a whole-process pause: an
+injected supervisor advances FakeTimer without firing JS callbacks, and an in-process
+rebind cannot run inside it. Rejected journal syscalls yield the volatile result.
+Persistence hang/delay suspends across FakeTimer turns. Crash cases discard the manager
 and replay the committed disk prefix via `rehydratePersistedSessions`.

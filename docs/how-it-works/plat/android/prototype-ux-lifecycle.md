@@ -4,9 +4,11 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 
 
 Chromeless fullscreen is the default on a device advertising `prototype_window_chrome_v1` (#12064),
-and the bar is opt-in. The host escape is a stationary two-finger long press (1 s) anywhere on the window that cancels authored touch handling for that gesture and
-reveals a small dismiss pill for 5 s (a second hold restarts the timeout; a replacing show hides it). A
-host-owned wrapper exposes the `Dismiss AutoMobile prototype` accessibility dismiss action without touch,
+and the bar is opt-in. The host escape is a stationary two-finger long press (1 s) anywhere on the window.
+It cancels authored touch handling for that gesture and reveals a small dismiss pill for 5 s. A second
+hold restarts the timeout, and a replacing show hides the pill.
+
+A host-owned wrapper exposes the `Dismiss AutoMobile prototype` accessibility dismiss action without touch,
 and touch exploration (TalkBack) keeps the pill permanently visible. Both dismiss with reason `user` and
 stay usable at spec opacity 0. Back is not the exit: it only dismisses while a text field makes the window
 focusable. Agent dismiss, a replacing show, authored dismiss, the five-minute idle TTL, last-client
@@ -20,18 +22,20 @@ opacity, and its height is excluded from the authored viewport. Both fullscreen 
 and fade only authored content and its scrim.
 
 The dismiss bar's button and the persistent (`persistence: "device"`) sheet and floating Close control are one
-circular close chip (#15119), the twin of the iOS chip: a 32 dp opaque `prototypeCloseColors` fill with a
-Close glyph, no text label, a 48 dp hit target, and the shared host id `automobile-prototype-dismiss`
+circular close chip (#15119), the twin of the iOS chip. It is a 32 dp opaque `prototypeCloseColors` fill with a
+Close glyph, no text label and a 48 dp hit target. It carries the shared host id `automobile-prototype-dismiss`
 (`testTag`, exposed as the resource id) with content description `Dismiss AutoMobile prototype`. The persistent
 chip sits top-end inside the system-bar and cutout insets; the bar keeps its inset-aware row. The brief
-chromeless escape pill keeps its text and carries the same id (#15120). The `automobile-` `testTag` prefix is
-reserved on every platform (the validators reject an authored tag with it), observe sees the controls by that id,
-and `tapOn` moves its point off them or fails naming the control that covers the whole target. Session-scoped sheets and floating windows still draw no host control
+chromeless escape pill keeps its text and carries the same id (#15120).
+
+The `automobile-` `testTag` prefix is reserved on every platform: the validators reject an authored tag with it.
+Observe sees the controls by that id. `tapOn` moves its point off them or fails naming the control that covers
+the whole target. Session-scoped sheets and floating windows still draw no host control
 (they end through the agent's `dismiss`, a replacing show, the TTL or a disconnect).
 
-A `persistence: "device"` prototype outlives its host session: it is not dismissed when the last client
-disconnects (including a show queued after that edge), has no idle TTL, and keeps its assets until
-dismissal. Because nobody may be connected to remove it, sheet and floating windows carry an opaque "Close"
+A `persistence: "device"` prototype outlives its host session. The last client disconnecting does not
+dismiss it (including a show queued after that edge), it has no idle TTL, and it keeps its assets until
+dismissal. Nobody may be connected to remove it, so its sheet and floating windows carry an opaque "Close"
 control above the authored content, and opacity fades only the content. Fullscreen defaults to `bar`; a
 device with `prototype_window_chrome_v1` also honours explicit `none` with the hidden escape. It ends
 through that control, the dismiss row or pill (`user`), `dismiss_prototype` (`agent`), a replacing show, or
@@ -39,14 +43,14 @@ service unbind/destroy (`teardown`). Keyguard hiding is unchanged.
 
 Events a persisted prototype emits while no client is connected (checked per event
 against the live client count) go to a bounded ring in `PrototypeController`
-(`PrototypeOfflineEventBuffer`, 200 events, oldest dropped and counted). The ring
-is flushed under the controller mutex, so order is preserved: when a client
+(`PrototypeOfflineEventBuffer`, 200 events, oldest dropped and counted). The controller
+flushes the ring under its mutex, so order holds: when a client
 connects (`onClientConnected`), before the next live event, and before an
 `inspect_prototypes` reply. Session-scoped prototypes never use it. `inspect_prototypes`
 returns one `prototype_result` with `prototypes` (`id`, `persistent`, `state`,
 `pages`, `lastSequence`) and `droppedEvents`, the cumulative count dropped from
 the ring. The host adopts the report into its status store and event buffers,
-because the host clears both on session release. Both behaviours are advertised
+because the host clears both on session release. The device advertises both behaviours
 as `prototype_persistence_replay_v1`; a host refuses `inspect` without it.
 
 Every dismissal emits one `prototype_event` with `kind: "dismissed"`, null `name` and
@@ -70,19 +74,19 @@ dismiss rather than moving content onto another display; it never revives on ret
 The service's default display is used; display selection is #9308.
 
 Show-time keyguard/screen checks fail closed. Screen and window signals hide the
-window while locked or noninteractive and restore the same runtime on unlock;
-no dismissal event is emitted for temporary hiding. Own-package accessibility
-events are dropped before hierarchy debouncing and navigation tracking.
+window while locked or noninteractive and restore the same runtime on unlock.
+Temporary hiding emits no dismissal event. CtrlProxy drops own-package accessibility
+events before hierarchy debouncing and navigation tracking.
 
 ## Foreground scoping (#10261)
 
-A session prototype is tied to the app (package) it was shown over, matching the iOS agent, which lives inside the app. When that app leaves the foreground the window is hidden (state, pages and the idle TTL are kept; no `dismissed` event, no sequence allocation) and when the app returns the same runtime is shown again. A `window.persistence: "device"` prototype is a standalone mock and is not tied to an app.
+A session prototype belongs to the app (package) it was shown over, matching the iOS agent, which lives inside the app. When that app leaves the foreground the host hides the window, keeping state, pages and the idle TTL, with no `dismissed` event and no sequence allocation. When the app returns the host shows the same runtime again. A `window.persistence: "device"` prototype is a standalone mock that belongs to no app.
 
 - **Anchor.** Each `show` (including an in-place replace) reads the application window in front (the active application-type accessibility window, else the topmost) and clears any suspension. If none qualifies the prototype is unscoped and stays up everywhere.
-- **Signal.** `TYPE_WINDOW_STATE_CHANGED` events already delivered to CtrlProxy; no new poller. An event moves the foreground only when its window is `TYPE_APPLICATION` and its package is not CtrlProxy's own and not in the ignore set, so IME, system dialogs, this prototype's own overlays and the shade are never candidates. Ignore set: `com.android.systemui`, `com.google.android.permissioncontroller`, `com.android.permissioncontroller`, `com.google.android.packageinstaller`, `com.android.packageinstaller`, `android` (resolver, ANR and crash dialogs). A dialog of the same app is the same package. An event whose window type cannot be read is ignored (fails open: nothing hides).
+- **Signal.** `TYPE_WINDOW_STATE_CHANGED` events already delivered to CtrlProxy; no new poller. An event moves the foreground only when its window is `TYPE_APPLICATION` and its package is not CtrlProxy's own and not in the ignore set. IME, system dialogs, this prototype's own overlays and the shade are therefore never candidates. Ignore set: `com.android.systemui`, `com.google.android.permissioncontroller`, `com.android.permissioncontroller`, `com.google.android.packageinstaller`, `com.android.packageinstaller`, `android` (resolver, ANR and crash dialogs). A dialog of the same app is the same package. An event whose window type cannot be read is ignored (fails open: nothing hides).
 - **Debounce.** A flip either way applies only after the new state holds 400 ms (`PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS`).
-- **Hidden means gone.** The window is removed: no touches, absent from `observe`. `inspect` reports `suspended: true` on the entry and the hierarchy capture carries top-level `prototypeSuspended: true`, so `layer: "prototype"` calls fail with "hidden because the app it was shown over is not in front" rather than "no prototype is showing". `inspect` also reports optional `hiddenReason`: `app_layer_window_hidden` when the app in front hides an app-layer window, or `device_blocked` when locked or screen off; the host carries it into status and `prototype_hidden` layer refusals. A show reports `visible: false` with the same `notVisibleReason`; older devices retain `no_prototype_window_on_screen`. Hidden reasons are absent when visible or suspended.
-- **Host side.** The host stores `suspended` from `inspect` and surfaces it on `prototype` status entries (as fresh as the last `inspect`; a new `show` or an `inspect` after the app returns clears it); an `awaitEvent` that times out on a suspended prototype carries the same explanation as a `warning`. Absent on iOS.
+- **Hidden means gone.** The host removes the window: no touches, absent from `observe`. The `inspect` reply reports `suspended: true` on the entry and the hierarchy capture carries top-level `prototypeSuspended: true`. Calls with `layer: "prototype"` therefore fail with "hidden because the app it was shown over is not in front" rather than "no prototype is showing". The `inspect` reply also reports optional `hiddenReason`: `app_layer_window_hidden` when the app in front hides an app-layer window, or `device_blocked` when locked or screen off. The host carries it into status and `prototype_hidden` layer refusals. A show reports `visible: false` with the same `notVisibleReason`; older devices retain `no_prototype_window_on_screen`. Hidden reasons are absent when visible or suspended.
+- **Host side.** The host stores `suspended` from `inspect` and surfaces it on `prototype` status entries, as fresh as the last `inspect`. A new `show` or an `inspect` after the app returns clears it. An `awaitEvent` that times out on a suspended prototype carries the same explanation as a `warning`. Absent on iOS.
 - **Separate from other hides.** Suspension is its own state (`PrototypeForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen check OR suspension, so any restore path that calls `show` while suspended is refused, and ending suspension does not undo a capture hide held by another component.
 - Dismissal, TTL expiry and teardown release the anchor; a hidden prototype still expires on its idle TTL.
 
@@ -93,7 +97,7 @@ Secure windows are not detected: no trusted signal exists.
 A bottom sheet moves above the keyboard whenever it is shown and returns to the screen edge when it hides.
 
 - **Scope.** Only a `sheet` window with `edge: "bottom"`; fullscreen, floating, dialog, top and side sheets never move. A `bottomSheet` node rides with its window and needs no handling.
-- **Source.** The input-method window's bounds from the accessibility window list (`TYPE_INPUT_METHOD`), not the prototype window's `WindowInsets.Type.ime()`: prototype windows are `TYPE_ACCESSIBILITY_OVERLAY` and not the IME target, and the platform dispatches the IME inset only to the target, so a sheet over another app's field would read 0. Lift is `screenBottom - ime.top` (0 when no input-method window has bounds).
+- **Source.** The input-method window's bounds from the accessibility window list (`TYPE_INPUT_METHOD`), not the prototype window's `WindowInsets.Type.ime()`. Prototype windows are `TYPE_ACCESSIBILITY_OVERLAY` and not the IME target. The platform dispatches the IME inset only to the target, so a sheet over another app's field would read 0. Lift is `screenBottom - ime.top` (0 when no input-method window has bounds).
 - **Mechanism.** The host relayouts on the `TYPE_WINDOWS_CHANGED` events it already receives, setting the bottom-gravity window's `y` to the lift. Moving the window moves its touch region; touch-through and the foreground-suspension and capture hides act on the same params and `isBlocked`.
 - **No system panning.** A bottom sheet sets `SOFT_INPUT_ADJUST_NOTHING`, so the platform does not also resize or pan it.
 - **Motion.** The position jumps: the accessibility source reports no per-frame values (`WindowInsetsAnimation` only reaches the IME target), so `motion: "none"` has nothing to disable.

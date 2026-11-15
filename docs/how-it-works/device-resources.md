@@ -6,12 +6,12 @@ such as lifecycle, readiness, session, lock, and orientation is grouped under `r
 There are no legacy aliases, and unknown facts are explicit `null` values. See
 [the device-description audit](device-description-audit.md).
 
-Configured-image enrichment is shared by tools and resources. A booted virtual device retains
+Tools and resources share configured-image enrichment. A booted virtual device retains
 its configured `display`, `capabilityInventory`, `deviceType`, `runtimeId`, and Android
 `image.{path,target,basedOn}` provenance when those facts are available. Physical devices and
 virtual devices started outside AutoMobile keep unavailable image-only facts as `null`.
-`runtime.locked` is populated only by the existing Android keyguard probe; otherwise it is
-`null`. `runtime.orientation` comes from a bounded live orientation probe (Android) and remains
+Only the existing Android keyguard probe populates `runtime.locked`; otherwise it is
+`null`. The `runtime.orientation` field comes from a bounded live orientation probe (Android) and remains
 `null` where no safe read signal exists (currently iOS).
 
 Apple Watch simulators are `platform: "watchos"` ([decision](../devlog/2026-10-28-watchos-platform.md)).
@@ -50,7 +50,7 @@ incomplete result. `listDevices` adds
 `enrichment: { complete: false, missing: ["configuredImages"], retryable: true, retryAfterMs: 1000 }`
 when its configured-image fallback times out or fails. Images report `catalogComplete: false`
 and `catalogObservations.android.error: { code: "timeout", message, retryable: true,
-retryAfterMs: 1000, missing: ["catalog"] }`; `missing` also includes `"configuredInventory"`
+retryAfterMs: 1000, missing: ["catalog"] }`. The `missing` list also includes `"configuredInventory"`
 if that stage has not finished, and its configured-inventory observation carries equivalent
 retry hints. `retryAfterMs` suggests how long to wait before retrying, not when completion is
 guaranteed.
@@ -152,7 +152,7 @@ that a requested reduction succeeded.
 emulator and iOS Simulator snapshots. It shares the controllers' native inventory
 and state readers without issuing writes or creating restoration receipts, and
 never derives observations from requested configuration. Every catalog target
-must be verified for an enabled/disabled group; mixed or partially absent evidence
+must be verified for an enabled/disabled group. Mixed or partially absent evidence
 is unknown, wholly absent or unapproved read paths are unsupported, and native
 read failures are logged and reported as unknown. Physical devices currently
 return complete unsupported snapshots with reasons. For iOS Simulators,

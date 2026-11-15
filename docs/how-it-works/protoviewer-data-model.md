@@ -34,15 +34,16 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
 
 - Entries: `bundle.json`, `spec.json`, `assets/[0-9a-f]{64}\.(png|jpg|webp)` and
   `fonts/[0-9a-f]{64}\.(ttf|otf)`. It rejects directories, parent-relative or absolute paths,
-  backslashes, NUL, non-ASCII names, `__MACOSX`, duplicate names, symlink or nonregular Unix file-type attributes,
-  encrypted entries, compression methods other than STORED and DEFLATE, and multi-disk archives.
+  backslashes, NUL, non-ASCII names, `__MACOSX` and duplicate names. It also rejects symlink or
+  nonregular Unix file-type attributes, encrypted entries, compression methods other than STORED
+  and DEFLATE, and multi-disk archives.
 - `bundle.json`: `{ "bundleFormatVersion": 1, "specSha256": "...", "assets": [{id,file,sha256,mediaType}], "fonts": [...], "requires": [capabilities] }`.
   Strict; no label, source or storage. Each platform's importer translates it into its own store
   layout.
-- The reader streams, counts inflated bytes rather than trusting header sizes, allows at most 36
-  entries, applies the per-file caps from `schemas/prototype-asset-contract.json`, one compressed
-  cap and one expanded cap derived from the contract, and a ratio cap; it verifies sha256 after
-  inflating, stages in a fresh directory and commits atomically.
+- The reader streams, counts inflated bytes rather than trusting header sizes, and allows at most
+  36 entries. It applies the per-file caps from `schemas/prototype-asset-contract.json`, one
+  compressed cap and one expanded cap derived from the contract, and a ratio cap. It verifies
+  sha256 after inflating, stages in a fresh directory and commits atomically.
 - A bare spec (`*.json`, `application/json`, at most 1 MiB, no assets) is also accepted.
 - **Export rebuilds a canonical bundle** from `spec.json` plus only the assets the spec references:
   never storage, `library.json`, a source URL or last-opened time. A preflight scan warns before
@@ -82,11 +83,11 @@ Android implements them; the iOS viewer does not yet (#16437).
 - Hiding deletes. Confirming Hide or Block deletes every matching received entry (bundle, metadata
   and viewer storage); only the hash or host stays, in the blocklist. The confirmation says so. App
   start repeats the sweep, so an entry whose delete failed before its metadata was removed is
-  retried. A later file or share import of hidden content, or of content from a blocked host, is
-  rejected as `Hidden` ("hidden on this device") before anything is staged or stored, so hidden
-  content does not hold library quota. The repository repeats that check under its lock when it
-  commits the entry, and the purge lists through the same lock after Hide records the hash, so an
-  import that races Hide is either rejected or deleted by that purge. There is no unhide.
+  retried. The app rejects a later file or share import of hidden content, or of content from a
+  blocked host, as `Hidden` ("hidden on this device"). It does so before anything is staged or
+  stored, so hidden content does not hold library quota. The repository repeats that check under
+  its lock when it commits the entry. The purge lists through the same lock after Hide records the
+  hash, so an import that races Hide is either rejected or deleted by that purge. There is no unhide.
 - Report opens the user's mail app addressed to the published contact
   (`automobile+coc@jasonpearson.dev`, the project's code-of-conduct enforcement address) with the
   label, spec SHA-256, source and host. The app sends nothing itself and attaches no bundle bytes.
@@ -114,10 +115,12 @@ must match in both directions; listed-but-unreferenced IDs fail with `unreferenc
 `requires` is advisory, sorted and unique. The reader validates strict spec JSON with the existing
 validator; library policy/capability checks remain the importing app's responsibility.
 
-Canonical export preserves spec bytes verbatim, uses compact manifest JSON without a newline,
-sorts manifest arrays by ID (UTF-16 code units, exact identity without Unicode normalization)
+Canonical export preserves spec bytes verbatim and uses compact manifest JSON without a newline.
+It sorts manifest arrays by ID (UTF-16 code units, exact identity without Unicode normalization)
 and ZIP asset/font entries by filename, and deduplicates identical
-content paths. ZIP entries are STORED, flags 0, DOS date/time 1980-01-01 00:00:00, made-by/version
+content paths.
+
+ZIP entries are STORED, flags 0, DOS date/time 1980-01-01 00:00:00, made-by/version
 20 (MS-DOS), external attributes 0, with no extras, comments or descriptors. Private record and
 library metadata never enter the transport manifest; authored spec bytes are not redacted.
 The shared `test/fixtures/prototype-bundle/corpus.json` contains the error vocabulary, limits,
@@ -133,15 +136,15 @@ app-owned parent directory; callers serialize commits and the Node adapter uses 
    stream-limited reads. The caller-supplied MIME type and filename are ignored. On Android the
    exported `ImportActivity` accepts only `content://` data from other authorities and rejects
    `file://` and ProtoViewer's own authority. The MCP route (section 7) never goes through that
-   exported entry point: it uses a separate, non-exported internal import path that reads only from
-   the app-scoped inbox directory (canonical-path check, regular files only, the inbox entry is
-   deleted after the import attempt) and runs the same steps 2 to 8.
+   exported entry point. It uses a separate, non-exported internal import path that reads only from
+   the app-scoped inbox directory and runs the same steps 2 to 8. That path checks the canonical
+   path, accepts regular files only, and deletes the inbox entry after the import attempt.
 2. The strict zip reader (section 4) for bundles.
 3. Strict JSON parse: BOM strip, duplicate keys rejected, depth-limited.
-4. The full validator (TS and Kotlin full; Swift reject-only port): unknown keys rejected,
-   `window.layer: "system"` rejected, `secure` and `password` bindings into request URL, headers, query or
-   body and into `storage` rejected, forbidden request headers (`Host`, `Connection`, `Upgrade`,
-   `Proxy-*`, `Cookie`) and CR/LF rejected, and `via: "host"` rejected for library prototypes.
+4. The full validator (TS and Kotlin full; Swift reject-only port). It rejects unknown keys and
+   `window.layer: "system"`. It rejects `secure` and `password` bindings into request URL, headers,
+   query or body and into `storage`. It rejects forbidden request headers (`Host`, `Connection`,
+   `Upgrade`, `Proxy-*`, `Cookie`) and CR/LF, and `via: "host"` for library prototypes.
 5. Capability check: `PROTOTYPE_SPEC_CAPABILITY_GATES` against the app's capability set, yielding
    "needs a newer ProtoViewer" rather than a partial render. `requires` in `bundle.json` is advisory
    and cross-checked.
@@ -150,7 +153,7 @@ app-owned parent directory; callers serialize commits and the Node adapter uses 
    `bundle.json` entry and a matching zip entry, and every `bundle.json` entry must have a zip entry.
    A missing referenced asset rejects the whole import with the offending path; it is never
    committed with a placeholder. iOS must not rely on the placeholder behaviour of
-   `PrototypeSavedLayout` for imports, and the corpus gains invalid fixtures for a missing image, a
+   `PrototypeSavedLayout` for imports. The corpus has invalid fixtures for a missing image, a
    missing font and a manifest entry without a zip entry (#13620).
 7. There is no static network scan, because URLs are templated. Network policy is applied at request
    time (section 6).
@@ -159,5 +162,5 @@ app-owned parent directory; callers serialize commits and the Node adapter uses 
 Version compatibility: there is no `specVersion`. Compatibility is the strict validator of the
 app's release plus the capability gates. There are no migrations. A store-installed app lags or
 leads the MCP server, so the host also checks capabilities before an MCP save (section 7,
-capability handshake); step 5 stays the authority for every import, including builds that predate
+capability handshake). Step 5 stays the authority for every import, including builds that predate
 the handshake.

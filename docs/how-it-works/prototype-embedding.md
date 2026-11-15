@@ -55,11 +55,11 @@ units and escapes `$`; Swift uses `\u{X}` scalars.
 Compose or SwiftUI scaffold with no renderer dependency, for teams that want to own their screens.
 It resolves the prototype like the native resource, expands `components`, and writes one file.
 
-- `prototypeEjectMapping.ts` classifies every contract node type as scaffolded or `"stub"`. It is
-  typed over every node type, and a test compares it with the contract, so a new node type fails
-  until someone classifies it. Each dialect's emitter table is typed over the scaffolded set.
-- The subset is fixed (layout, text, buttons, fields, lists, `stack`); every other node type is a
-  stub. A stub keeps its `testTag` and children so the screen map and recorded flows still find
+- `prototypeEjectMapping.ts` classifies every contract node type as scaffolded or `"stub"`. Its type
+  covers every node type, and a test compares it with the contract, so a new node type fails
+  until someone classifies it. Each dialect's emitter table has a type over the scaffolded set.
+- The subset is fixed (layout, text, buttons, fields, lists, `stack`); the emitter writes every
+  other node type as a stub. A stub keeps its `testTag` and children so the screen map and recorded flows still find
   them.
 - It is not round-trip. Nothing reads the ejected code back, and re-reading the resource
   overwrites nothing; the app copies the file once.

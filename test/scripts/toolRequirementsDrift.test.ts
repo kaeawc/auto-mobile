@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
   applyRequiresColumn,
+  applyRequiresKey,
   findDocsRequiresDrift,
+  findRequiresKeyDrift,
   findMissingToolRows,
   findToolRequirementsDrift,
   renderRequiresCell,
+  renderRequiresKey,
+  REQUIRES_KEY_END,
+  REQUIRES_KEY_START,
   scanFeatureFlagRefusals,
   type FeatureFlagRefusalScan,
 } from "../../scripts/lib/toolRequirementsDrift";
@@ -103,6 +108,16 @@ describe("findToolRequirementsDrift (#18141)", () => {
   });
 });
 
+const emoji = (glyph: string, label: string) =>
+  `<span role="img" aria-label="${label}" title="${label}">${glyph}</span>`;
+const cell = (body: string) => `<span class="tool-requires">${body}</span>`;
+const SDK = emoji("🧩", "sdkEmbed");
+const DEBUG = emoji("🐞", "debugBuild");
+const ANDROID = emoji("🤖", "Android");
+const IOS = emoji("🍎", "iOS");
+const TVOS = emoji("📺", "tvOS");
+const WATCHOS = emoji("⌚", "watchOS");
+
 describe("docs/tools.md Requires column (#18141)", () => {
   const requires = new Map<string, string[]>([
     ["observe", ["platform:android", "platform:ios", "platform:tvos"]],
@@ -111,13 +126,16 @@ describe("docs/tools.md Requires column (#18141)", () => {
     ["rotateCrown", ["platform:watchos"]],
   ]);
 
-  test("renders gates as code and only non-default platforms", () => {
-    expect(renderRequiresCell(requires.get("observe")!)).toBe("Android, iOS, tvOS");
-    expect(renderRequiresCell(requires.get("sqlQuery")!)).toBe("<code>sdkEmbed</code>");
-    expect(renderRequiresCell([])).toBe("—");
-    expect(renderRequiresCell(requires.get("rotateCrown")!)).toBe("watchOS");
+  test("renders gates and only non-default platforms as emoji with hover text", () => {
+    expect(renderRequiresCell(requires.get("observe")!)).toBe(cell(`${ANDROID} ${IOS} ${TVOS}`));
+    expect(renderRequiresCell(requires.get("sqlQuery")!)).toBe(cell(SDK));
+    expect(renderRequiresCell([])).toBe(cell("—"));
+    expect(renderRequiresCell(requires.get("rotateCrown")!)).toBe(cell(WATCHOS));
     expect(renderRequiresCell(["debugBuild", "platform:watchos"])).toBe(
-      "<code>debugBuild</code> · watchOS",
+      cell(`${DEBUG} · ${WATCHOS}`),
+    );
+    expect(renderRequiresCell(["featureFlag:device-condition"])).toBe(
+      cell(`${emoji("🚩", "featureFlag:device-condition")} <code>device-condition</code>`),
     );
   });
 
@@ -141,8 +159,8 @@ describe("docs/tools.md Requires column (#18141)", () => {
     expect(applied.split("\n").slice(1, 6)).toEqual([
       "| Tool | What it does | Requires |",
       "| --- | --- | --- |",
-      "| 👁️ <code>observe</code> | Read the screen | Android, iOS, tvOS |",
-      "| [<code>sqlQuery</code>](x.md) | Run SQL | <code>sdkEmbed</code> |",
+      `| 👁️ <code>observe</code> | Read the screen | ${cell(`${ANDROID} ${IOS} ${TVOS}`)} |`,
+      `| [<code>sqlQuery</code>](x.md) | Run SQL | ${cell(SDK)} |`,
       "| <code>unknown</code> | Not registered | — |",
     ]);
     expect(applied.split("\n").slice(7)).toEqual(markdown.split("\n").slice(7));
@@ -157,8 +175,45 @@ describe("docs/tools.md Requires column (#18141)", () => {
       "| <code>sqlQuery</code> | Run SQL |   —   |",
     ].join("\n");
     expect(findDocsRequiresDrift(markdown, requires)).toEqual([
-      'sqlQuery: docs say "—", definitions say "<code>sdkEmbed</code>"',
+      `sqlQuery: docs say "—", definitions say "${cell(SDK)}"`,
     ]);
+  });
+});
+
+describe("docs/tools.md Requires key (#18361)", () => {
+  const page = (body: string) =>
+    ["## Requires column", REQUIRES_KEY_START, body, REQUIRES_KEY_END, "## Next"].join("\n");
+
+  test("key lists every gate and platform emoji", () => {
+    const key = renderRequiresKey();
+    expect(key.split("\n")[0]).toBe("| Emoji | Requirement | Meaning |");
+    for (const glyph of ["🧩", "🐞", "🚩", "🤖", "🍎", "⌚", "📺", "🥽"]) {
+      expect(key).toContain(`| ${glyph} |`);
+    }
+    expect(key).toContain("| `featureFlag:<key>` |");
+  });
+
+  test("missing markers, then a stale key, are reported; applying fills and is idempotent", () => {
+    expect(findRequiresKeyDrift("## Requires column")).toEqual([
+      `Requires key markers ${REQUIRES_KEY_START} / ${REQUIRES_KEY_END} are missing`,
+    ]);
+    const stale = page("| Emoji | Requirement | Meaning |\n| --- | --- | --- |\n| 🧩 | `x` | y |");
+    expect(findRequiresKeyDrift(stale)).toEqual([
+      "Requires key table differs from the generated key",
+    ]);
+    const applied = applyRequiresKey(stale);
+    expect(applied).toContain(renderRequiresKey());
+    expect(applied.endsWith(`${REQUIRES_KEY_END}\n## Next`)).toBe(true);
+    expect(findRequiresKeyDrift(applied)).toEqual([]);
+    expect(applyRequiresKey(applied)).toBe(applied);
+  });
+
+  test("padding added by the formatter is not drift", () => {
+    const padded = applyRequiresKey(page(""))
+      .split("\n")
+      .map((line) => (line.startsWith("|") ? line.replaceAll(" | ", "   |   ") : line))
+      .join("\n");
+    expect(findRequiresKeyDrift(padded)).toEqual([]);
   });
 });
 

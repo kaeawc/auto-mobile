@@ -71,7 +71,9 @@ Success does not prove the intended control responded. The result's `warnings`
 flag two cases:
 
 - The activated element's bounds do not contain the matched element's bounds, so
-  a different control may have responded. Not reported for `action: "focus"`.
+  a different control may have responded. Not reported for `action: "focus"`,
+  nor for an `ensureChecked` tap on a row's own toggle once the row's new checked
+  state is verified.
 - The tap or double tap reported success but the screen did not change. Moving
   TalkBack focus counts as a change. Not reported for `action: "focus"` once the
   field's focus is verified.

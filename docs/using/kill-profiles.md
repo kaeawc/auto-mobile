@@ -1,8 +1,8 @@
 # Kill profiles
 
-| Tool                        | What it does                                                                                                                                                                                                              | Requires |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| ☠️ <code>killProfile</code> | Android: simulate an OEM background-kill policy on a stock device with standby buckets, appops, Doze, permission revocation, foreground-change kills, timed screen-off cleanup, boot-receiver observations and force-stop | —        |
+| Tool                        | What it does                                                                                                                                                                                                              | Requires                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| ☠️ <code>killProfile</code> | Android: simulate an OEM background-kill policy on a stock device with standby buckets, appops, Doze, permission revocation, foreground-change kills, timed screen-off cleanup, boot-receiver observations and force-stop | <span class="tool-requires">—</span> |
 
 `killProfile` simulates the effects of Android background restrictions on one installed app.
 Profiles approximate OEM policies; their evidence status and notes describe the limits.

@@ -101,6 +101,21 @@ export function mismatchWarnings(
 }
 
 /**
+ * True when the activated element lies inside the matched element: the row's own radio button or
+ * checkbox. A verified `ensureChecked` flip of the matched row confirms that this child was the
+ * intended control, so its mismatch warning is withheld unless verification fails (#18351).
+ */
+export function activatedInsideMatched(
+  selection: Pick<ElementSelectionResult, "element" | "matchedElement">,
+  activated: Element,
+): boolean {
+  const matched = selection.matchedElement ?? selection.element ?? undefined;
+  return (
+    !!matched?.bounds && !!activated.bounds && containsBounds(matched.bounds, activated.bounds)
+  );
+}
+
+/**
  * Append a no-change warning when a TalkBack accessibility action claimed success (`claimed` is
  * set) but the observed effect shows the screen did not change.
  */
@@ -115,3 +130,54 @@ export function appendNoChangeWarning(
     ];
   }
 }
+
+/** Mismatch warnings withheld until an ensureChecked verification decides them (#18351). */
+interface PendingCheckedMismatch {
+  pendingCheckedMismatchWarnings?: string[];
+}
+
+/**
+ * Mismatch warnings for a tap's activated element. A row's own toggle under ensureChecked is held
+ * back, then dropped when the checked-state verification confirms the matched row flipped, and
+ * reported otherwise (#18351).
+ */
+export const heldMismatch = {
+  record(
+    state: PendingCheckedMismatch & {
+      options: Pick<TapOnElementOptions, "ensureChecked">;
+      requestedAction: TapOnElementOptions["action"];
+    },
+    target: {
+      finalSelection: Pick<ElementSelectionResult, "element" | "matchedElement">;
+      tapElement: Element;
+      activationWarnings: string[];
+    },
+  ): void {
+    const warnings = mismatchWarnings(
+      state.requestedAction,
+      target.finalSelection,
+      target.tapElement,
+    );
+    if (
+      state.options.ensureChecked !== undefined &&
+      activatedInsideMatched(target.finalSelection, target.tapElement)
+    ) {
+      state.pendingCheckedMismatchWarnings = warnings;
+    } else {
+      target.activationWarnings.push(...warnings);
+    }
+  },
+
+  /** `verified` means the ensureChecked post-tap check ran; `result.success` is its verdict. */
+  release(
+    result: Pick<TapOnElementResult, "success" | "warnings">,
+    state: PendingCheckedMismatch,
+    verified: boolean,
+  ): void {
+    const pending = state.pendingCheckedMismatchWarnings;
+    state.pendingCheckedMismatchWarnings = undefined;
+    if (pending?.length && !(verified && result.success)) {
+      result.warnings = [...(result.warnings ?? []), ...pending];
+    }
+  },
+};

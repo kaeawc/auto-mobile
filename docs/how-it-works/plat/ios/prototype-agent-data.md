@@ -71,7 +71,7 @@ accepted patches take the next revision too.
 ## Storage capability
 
 Advertises `prototype_storage_v1` and the `clear_prototype_storage` request (#12526;
-[contract](../android/prototype-ux-storage.md#prototype-spec-storage)). Values live in the host app's sandbox at
+[contract](../android/prototype-ux-storage.md)). Values live in the host app's sandbox at
 `Application Support/AutoMobilePrototypeAgent/storage/<id>.json` (`FilePrototypeStorageStore`), never in
 the app's files or `UserDefaults`; the viewer app uses the same code in its own sandbox. Writes are
 atomic and the id is percent-encoded into the file name. A file that doesn't decode (or is far over the

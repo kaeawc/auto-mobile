@@ -1,4 +1,4 @@
-# Prototype spec: storage
+# Prototype spec: storage (#12522)
 
 Part of [the agent-authored prototype specification](prototype-ux.md).
 

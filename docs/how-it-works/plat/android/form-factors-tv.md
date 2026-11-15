@@ -1,4 +1,4 @@
-# Android form factors: Android TV
+# Android form factors: Android TV (go)
 
 Part of [Android form factors](form-factors.md).
 

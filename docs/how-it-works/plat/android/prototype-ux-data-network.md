@@ -6,7 +6,7 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 
 The three features compose: a `request` writes its response into `/data`, data actions edit `/data`
 from a tap, and `storage` makes chosen `state` and `/data` values survive a re-show or relaunch.
-The detailed contracts are [Data actions](prototype-ux-actions.md#data-actions-12519), [Storage](prototype-ux-storage.md#prototype-spec-storage) and
+The detailed contracts are [Data actions](prototype-ux-actions.md#data-actions-12519), [Storage](prototype-ux-storage.md) and
 [Request action](prototype-ux-request.md#request-action-12523); this section is the one-page overview and the capability
 map.
 

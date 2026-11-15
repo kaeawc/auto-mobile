@@ -66,7 +66,7 @@ matched by pager id and clamped to the new page count.
 The new spec's `state`
 is authoritative. The device drops values the user changed by tapping or typing
 unless the spec includes them. The exception is the keys the spec's `storage` block lists, whose
-stored values replace the spec's (see [Storage](prototype-ux-storage.md#prototype-spec-storage)). The device rebuilds the window content from the new
+stored values replace the spec's (see [Storage](prototype-ux-storage.md)). The device rebuilds the window content from the new
 runtime, so a text field shows the spec's value and the device drops edits still in flight from
 the previous showing. Event sequences continue per id, as for any
 re-show.

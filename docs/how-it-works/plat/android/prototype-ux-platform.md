@@ -1,4 +1,4 @@
-# Prototype spec: platform actions and events
+# Prototype spec: platform actions and events (#14294)
 
 Part of [the agent-authored prototype specification](prototype-ux.md).
 

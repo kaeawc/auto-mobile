@@ -28,7 +28,8 @@ setup() {
 echo "\$*" >> "${CURL_LOG}"
 for arg in "\$@"; do
   case "\$arg" in
-    client_secret@*) cat "\${arg#client_secret@}" > "${TEST_ROOT}/posted-secret" ;;
+    client_secret@-) cat > "${TEST_ROOT}/posted-secret" ;;
+    client_secret@*) echo "client_secret must be read from stdin, got \$arg" >&2; exit 9 ;;
   esac
 done
 if [ -n "\${FAKE_TOKEN_JSON:-}" ]; then printf '%s' "\${FAKE_TOKEN_JSON}"; else printf '%s' '{"access_token":"tok-abc"}'; fi
@@ -107,8 +108,10 @@ export_all_creds() {
   grep -Fq "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token" "$CURL_LOG"
   grep -Fq "scope=https://codesigning.azure.net/.default" "$CURL_LOG"
   grep -Fq "grant_type=client_credentials" "$CURL_LOG"
-  # The client secret is posted from a file, never on the command line.
+  # The client secret is piped on stdin, never on the command line or in a
+  # file path that Windows-native curl would have to resolve.
   ! grep -Fq "s3cr3t" "$CURL_LOG"
+  grep -Fq "client_secret@-" "$CURL_LOG"
   [ "$(cat "${TEST_ROOT}/posted-secret")" = "s3cr3t value&=" ]
 
   local args
@@ -184,4 +187,22 @@ export_all_creds() {
     [ "$(yq -r ".jobs.build.steps[] | select(.name == \"Sign Windows MSI\") | .env.${secret}" "$WORKFLOW")" = "\${{ secrets.${secret} }}" ]
     [ "$(yq -r ".jobs.\"build-candidate-desktop-app-installers\".secrets.${secret}" .github/workflows/prepare-release.yml)" = "\${{ secrets.${secret} }}" ]
   done
+}
+
+@test "Git Bash: the secret never depends on cygpath or an MSYS temp path" {
+  export_all_creds
+  # A cygpath that fails if called, and a curl that only accepts stdin, model
+  # Git Bash with a Windows-native curl that cannot open /tmp/... paths.
+  cat >"${TEST_ROOT}/cygpath" <<FAKE
+#!/usr/bin/env bash
+echo "cygpath \$*" >> "${TEST_ROOT}/cygpath.log"
+exit 1
+FAKE
+  chmod +x "${TEST_ROOT}/cygpath"
+  PATH="${TEST_ROOT}:${PATH}" TMPDIR="/tmp" run bash "$SCRIPT" "$MSI"
+  [ "$status" -eq 0 ]
+  [ ! -e "${TEST_ROOT}/cygpath.log" ]
+  ! grep -Eq "client_secret@/" "$CURL_LOG"
+  [ "$(cat "${TEST_ROOT}/posted-secret")" = "s3cr3t value&=" ]
+  grep -Fxq "signed=true" "$GITHUB_OUTPUT"
 }

@@ -97,14 +97,14 @@ if [ -z "${jar}" ]; then
   fi
 fi
 
-secret_file="${work_dir}/client-secret"
-(umask 077 && printf '%s' "${AZURE_CLIENT_SECRET}" >"${secret_file}")
-
-token_json="$("${CURL}" -sSf --retry 3 \
+# The secret goes to curl on stdin (`@-`), not argv or a temp file: in Git Bash
+# the Windows-native curl cannot open an MSYS `/tmp/...` path embedded after
+# `client_secret@`, because MSYS path conversion skips that argument form.
+token_json="$(printf '%s' "${AZURE_CLIENT_SECRET}" | "${CURL}" -sSf --retry 3 \
   -X POST "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
   --data-urlencode "grant_type=client_credentials" \
   --data-urlencode "client_id=${AZURE_CLIENT_ID}" \
-  --data-urlencode "client_secret@${secret_file}" \
+  --data-urlencode "client_secret@-" \
   --data-urlencode "scope=https://codesigning.azure.net/.default")"
 
 TRUSTED_SIGNING_TOKEN="$(printf '%s' "${token_json}" | "${JQ}" -r '.access_token // empty')"

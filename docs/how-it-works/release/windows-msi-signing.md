@@ -19,7 +19,7 @@ The Windows desktop installer is Authenticode-signed with Azure Trusted Signing 
    `Get-AuthenticodeSignature` reports `Valid` and a timestamp.
 4. `Stage installer` copies the signed file to `AutoMobile-<version>-windows.msi`.
 
-The client secret is posted from a `0600` temp file. The token is masked and reaches jsign as
+The client secret reaches curl on stdin (`client_secret@-`). The token is masked and reaches jsign as
 `--storepass env:TRUSTED_SIGNING_TOKEN`, so neither appears on a command line.
 
 ## Secrets

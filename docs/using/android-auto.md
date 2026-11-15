@@ -151,6 +151,8 @@ The result gains a `headUnit` block:
   ends after about three seconds either way.
 - `before` and `after`: the top screen of each projected session, read before and after the input.
   Absent with the screenshot fallback.
+- `projection`: when Android Auto bound or released an app or a template host during the action,
+  its `templateHosts` and bound `apps` before and after.
 
 AutoMobile reads `effect` from the first source available:
 
@@ -159,6 +161,12 @@ AutoMobile reads `effect` from the first source available:
 | Projected apps' template stacks (`carAppTemplates.projected[]`)  | `carAppTemplates changed` or `carAppTemplates unchanged` | Each app's top screen class, stack depth and top template content; a tab switch or changed item on the same screen counts. A list scroll counts only when the template reports different items |
 | DHU screenshot, when no projected app has the template route     | `screenshot changed` or `screenshot unchanged`           | Changed pixels from unchanged ones, but not which screen is shown                                                                                                                              |
 | Nothing (a `--headless` DHU without video focus returns at once) | `no template data`; `screenChanged` is absent            | The input went out, but whether it changed the screen is unknown                                                                                                                               |
+
+When the source above reports no change, or cannot tell, AutoMobile also compares the apps and
+template hosts Android Auto has bound before and after the input. If they differ, `screenChanged` is
+`true` with `basis: "projectedApps changed"`: the head unit opened an app or app category it had not
+bound, including an app without the template route. Unchanged bindings do not mean an unchanged
+screen, because Android Auto keeps every connected app bound while another one is shown.
 
 Before sending input, the action checks that the head unit is still the one the previous head-unit
 action left. That means the same DHU process, the same config, and the same projected apps and car

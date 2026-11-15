@@ -159,6 +159,13 @@ runtime that posts the notification. They are a reply of at most 1 KiB, a resolv
 most 5 KiB, and at most 4 updates per second per notification, coalesced to the latest. No runtime
 posts notifications yet, so none of these is enforced today; the host never posts one.
 
+The module's report (#14277) is `{permission, badge, channels, active, pending}`.
+`prototypeNotificationsReport` builds it from a platform snapshot: Android's active notifications, or
+iOS's delivered and pending requests. It keeps only `proto:<id>` tags and reports them as `id`. The
+Kotlin and Swift `PrototypeNotificationsReport` twins replay
+`test/fixtures/prototype-notifications/report.json`. No runtime sends the report yet, so `status` and
+`inspect` do not show it.
+
 Title and body limits count UTF-16 code units. The 5 KiB total counts UTF-8 bytes of the resolved
 title, body and `data`, and is meant to fail the call on its own (`invalid_args` when over). A code
 unit is at most 3 bytes, so every literal at the per-field limits fits (at most 4,480 bytes). Text

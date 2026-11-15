@@ -89,7 +89,7 @@ class ImportActivityTest {
   }
 
   @Test
-  fun specOnlyRejectionOmitsCapabilityNamesButOffersUpdate() {
+  fun specOnlyRejectionDoesNotOfferUpdate() {
     val rejected =
       LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON, emptyList())
     compose.setContent {
@@ -97,7 +97,7 @@ class ImportActivityTest {
     }
     val context = ApplicationProvider.getApplicationContext<ProtoViewerApplication>()
     compose.onNodeWithText(context.getString(R.string.unsupported)).assertIsDisplayed()
-    compose.onNodeWithText(context.getString(R.string.update_protoviewer)).assertIsDisplayed()
+    compose.onNodeWithText(context.getString(R.string.update_protoviewer)).assertDoesNotExist()
   }
 
   @Test

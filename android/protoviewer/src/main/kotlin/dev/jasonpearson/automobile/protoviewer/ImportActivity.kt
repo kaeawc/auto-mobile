@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.IntentCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -164,7 +165,8 @@ internal fun ImportStatus(
     Modifier.windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()),
   ) {
     Text(text)
-    if (missingCapabilities != null) {
+    // Only a named capability gap is fixable by updating; a spec-only failure is not.
+    if (!missingCapabilities.isNullOrEmpty()) {
       TextButton(onClick = { openUrl(PROTOVIEWER_STORE_URL) }) {
         Text(stringResource(R.string.update_protoviewer))
       }
@@ -179,7 +181,7 @@ internal const val PROTOVIEWER_STORE_URL =
 /** A missing browser/store handler leaves the import screen available. */
 internal fun openProtoViewerUpdate(url: String, startActivity: (Intent) -> Unit) {
   try {
-    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
   } catch (error: ActivityNotFoundException) {
     Log.w("ProtoViewerImport", "No app can open the ProtoViewer update page", error)
   }

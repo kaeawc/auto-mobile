@@ -45,16 +45,21 @@ The last route, for emulators and rooted devices: taken only when `adb shell` al
 (`id -u`), so a runner that injects without root always wins. AutoMobile never runs
 `adb root` itself, because that restarts adbd.
 
-**Shape.** `uinputPenScript` writes the command script Android's `uinput` tool reads: a `register`
-of the pen the probe verified (`INPUT_PROP_DIRECT`; `BTN_TOOL_PEN`, `BTN_TOOL_RUBBER`, `BTN_TOUCH`,
-`BTN_STYLUS`, `BTN_STYLUS2`; `ABS_X`/`Y` sized to the display in rotation 0, a `wm size` override winning over the physical size, `ABS_PRESSURE` 0..4095,
-`ABS_DISTANCE` 0..255, `ABS_TILT_X`/`Y` ±90), a 4 s wait for the device to attach, then the request as frames every 16 ms with the instrumentation planner's interpolation. A
-stroke is `BTN_TOOL_PEN` (`BTN_TOOL_RUBBER` for an eraser) and `BTN_TOUCH` down with pressure,
+**Shape.** `uinputPenScript` writes the command script Android's `uinput` tool reads. It starts with
+a `register` of the pen the probe verified: `INPUT_PROP_DIRECT`; `BTN_TOOL_PEN`, `BTN_TOOL_RUBBER`,
+`BTN_TOUCH`, `BTN_STYLUS`, `BTN_STYLUS2`; `ABS_PRESSURE` 0..4095, `ABS_DISTANCE` 0..255 and
+`ABS_TILT_X`/`Y` ±90. The `ABS_X`/`Y` axes are sized to the display in rotation 0, with a `wm size`
+override winning over the physical size. A 4 s wait for the device to attach follows, then the
+request as frames every 16 ms with the instrumentation planner's interpolation.
+
+A stroke is `BTN_TOOL_PEN` (`BTN_TOOL_RUBBER` for an eraser) and `BTN_TOUCH` down with pressure,
 then touch up and the tool out. Tilt and orientation interpolate per frame and invert InputReader's
 mapping into integer-degree `ABS_TILT_X`/`Y` values, including the opening frame; strokes with neither tilt nor orientation emit
 no tilt events. Barrel masks 32 and 64 press `BTN_STYLUS` and `BTN_STYLUS2` before the opening
 `SYN_REPORT` and release before `BTN_TOUCH` up. A hover is
-`BTN_TOOL_PEN` in range with `ABS_DISTANCE` and no `BTN_TOUCH`. Screen points in the current rotation
+`BTN_TOOL_PEN` in range with `ABS_DISTANCE` and no `BTN_TOUCH`.
+
+Screen points in the current rotation
 map to natural-orientation digitizer coordinates by inverting the recorder's touch mapping
 (`buildScaler`). The host pipes the script through base64 into `uinput -` on the device and reads
 the tool's exit status back from a marker line; the device closes the pen when the tool exits.
@@ -72,7 +77,7 @@ the tool's exit status back from a marker line; the device closes the pen when t
 | A script over 100 KB of base64 (about ten seconds) | Refused, nothing sent: adbd runs it as one `sh -c` argument       |
 
 Runs hold one lock per device id that the instrumentation route shares, so a pen and an
-instrumentation stroke never play at once; it is keyed by device id because every tool call builds
+instrumentation stroke never play at once. The device id is the lock key because every tool call builds
 its own adb client. The 4 s attach wait, rotated displays and a pre-API 31 device are
 unverified on hardware.
 
@@ -95,17 +100,23 @@ accessibility service and its WebSocket server. API 30's `am` rejects the flag (
 rejects the flag reports it. Instrumentation shares CtrlProxy's process, so killing either kills
 both.
 
-**Run.** The instrumentation validates the request, gets a `UiAutomation` with `FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`
-(without it the system silences CtrlProxy's own accessibility service for the duration), plays the
-planned `MotionEvent`s through `injectInputEvent`, and reports `success`, `error`, `injected` and
+**Run.** The instrumentation validates the request and gets a `UiAutomation` with
+`FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`. Without that flag the system silences CtrlProxy's own
+accessibility service for the duration. It then plays the planned `MotionEvent`s through
+`injectInputEvent` and reports `success`, `error`, `injected` and
 `elapsedMs` as `INSTRUMENTATION_RESULT` lines. The host side is `createInstrumentationDispatch`.
 
-**Pieces.** `PointerInjectionPlanner` (framework-free: a hover is ENTER, interpolated MOVEs every 16 ms
-and EXIT; a stroke is DOWN, MOVEs, UP with pressure, distance, tilt and orientation interpolated
-between waypoints) and its validation; `PointerRequestCodec`; `PointerInjectionExecutor` (schedules
-events and, if one is refused or throws or the run is cancelled, closes the pointer with CANCEL or
-HOVER_EXIT);
-`UiAutomationPointerSink` (the only class that touches `MotionEvent`). CtrlProxy advertises
+**Pieces.**
+
+- `PointerInjectionPlanner` and its validation. It is framework-free: a hover is ENTER, interpolated
+  MOVEs every 16 ms and EXIT; a stroke is DOWN, MOVEs, UP with pressure, distance, tilt and
+  orientation interpolated between waypoints.
+- `PointerRequestCodec`.
+- `PointerInjectionExecutor` schedules events. If one is refused or throws or the run is cancelled,
+  it closes the pointer with CANCEL or HOVER_EXIT.
+- `UiAutomationPointerSink`, the only class that touches `MotionEvent`.
+
+CtrlProxy advertises
 `stylus_input_v1` and `hover_input_v1` (API 31+); `hoverAt` uses the route.
 
 **Failure modes.**
@@ -130,7 +141,7 @@ The nested `pointer` option keeps its shape and gains `tilt`, `orientation` (rad
 (`primary`, `secondary`); `pressure` may be any 0..1. A plain stylus (`pressure` omitted or 1) still uses
 `adb input stylus`, so existing calls are unchanged. Anything the shell cannot inject, and every stylus
 `dragPath` (per-point `pressure` and `tilt`, holds as repeats of the first and last point), goes through
-`dispatchRichStylus` and instrumentation or root-only uinput. `strokeRequest` sets only the features the request
+`dispatchRichStylus` and instrumentation or root-only uinput. The `strokeRequest` helper sets only the features the request
 needs (`variablePressure`, `extendedAxes`, `path`), so a refusal names the real reason, and the refusal
 comes before the display fence and any dispatch hook. A failure after dispatch is
 `StylusOutcomeIndeterminateError` (do not retry) unless the route says nothing was sent

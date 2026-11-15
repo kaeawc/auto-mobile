@@ -21,8 +21,9 @@ concurrency. [STATUS.md](STATUS.md) has the build gate, concurrency archetypes a
 - The tvOS and visionOS runner targets compile an explicit file subset of `Sources/CtrlProxy`, so
   a listed file must not use a type from an unlisted one. Fast Validation's
   `ctrl-proxy-target-types` check (`scripts/ios/check-ctrl-proxy-target-types.ts`) reports any
-  top-level project type a target uses but does not compile; fix it by listing the defining file
-  in `project.yml` or moving the new type to a file the subset does not compile.
+  project type a target uses but does not compile, including a nested type declared only in an
+  extension the target does not compile. Fix it by listing the defining file in `project.yml` or
+  moving the new type to a file the subset does not compile.
 
 ## IPA packaging
 
@@ -67,7 +68,7 @@ The SDK and highlight-core targets use the Swift 6 language mode (#5839). Types 
   `OSAllocatedUnfairLock`.
 
 `AutoMobileCrashes.signalCrashFilePath` / `previousSignalHandlers` are intentionally not locked: the
-C signal handler must stay lock-free and async-signal-safe. `ViewHierarchyWalker` is a public enum
+C signal handler must stay lock-free and async-signal-safe. The `ViewHierarchyWalker` type is a public enum
 with synchronous `walk(bundleId:)` / `computeHash(_:)`, so it uses nonisolated public facades over
 an isolated internal implementation rather than whole-type `@MainActor`. The floor is iOS 17 /
 macOS 15, so use `OSAllocatedUnfairLock`, not `Mutex` (iOS 18).
@@ -87,8 +88,8 @@ handler's execution-only duration. No perf tree means no added wire fields.
 A deadline breach or a total strictly greater than 2,000 ms emits one
 `gesture_phases command=... <phase>Ms=... totalMs=... deadlineRemainingMs=...`
 warning under subsystem `dev.jasonpearson.automobile`, category `GesturePerformer`.
-Unexecuted phases are omitted; deadline remaining is signed, or `none`. The
-frontmost app is not queried. The daemon preserves phase children on failures,
+The warning omits unexecuted phases; deadline remaining is signed, or `none`. The
+runner does not query the frontmost app. The daemon preserves phase children on failures,
 adds them to requested iOS swipe timing, includes a received swipe failure's
 summary in its error, and warns with phases when the pending request has already
 been removed. It does not extend deadlines or wait for late replies.
@@ -150,7 +151,9 @@ events use screen space. On the mismatch path the runner reads the observed app'
 `windows.firstMatch.frame` once per gesture. When that window has the app frame's
 size and a different origin, an automatic point-offset tap, swipe, or drag adds the
 window origin: `base` is the window origin and `coordinateConstruction` is
-`windowOriginPlusPointOffset`. Full-screen apps and iPhones have no mismatch and
+`windowOriginPlusPointOffset`.
+
+Full-screen apps and iPhones have no mismatch and
 perform no extra read. Normalized (multi-panel) selections and a forced `legacy`
 strategy are not translated. SpringBoard alerts merged into a windowed app's
 hierarchy arrive in screen space, so observe subtracts the same translation from
@@ -163,6 +166,7 @@ come from the runner process, not the target app; fallback/unknown readings are
 explicit. Each failed sample is omitted and named in `sampleErrors`. Only the
 necessary app frame attribute is read: no additional window enumeration or
 candidate-element snapshot query, and no cheap public bundle identifier getter.
+
 Optional fields include `route`, `targetDisplayId`, `targetDisplayReason`, `deviceIdiom`
 (`phone` or `other`), `mainDisplayId`,
 `applicationDisplayId`, `screens` (`displayId`, `isMain`), `synthesizedPoint`,

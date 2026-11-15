@@ -136,12 +136,13 @@ accepts only `policy-tier`, `verified-match`, `stale`, `env-mismatch`,
 `hash-mismatch`, or `no-attestation`. An `ignore` accepts any listed reason;
 `transport-unavailable`, `invalid-response`, and `unauthenticated` are valid only
 with `ignore`. Unknown values, invalid pairs, and non-string details are rejected.
+
 Free-form details and upload IDs are omitted from client results, and reports
 use only fixed reason text, so service text cannot echo credentials. Provider and service-client inspection and JSON serialization reveal
 only the class name; credential-bearing state uses ES private fields. Error text,
 exception causes, and response bodies are never logged. Reporter input must have
 a valid decision, a safe-integer tier from 1 through 3, and a 40- or 64-character
-lowercase hexadecimal commit SHA; invalid input warns with fixed text and sends
+lowercase hexadecimal commit SHA. Invalid input warns with fixed text and sends
 nothing, including no token request.
 
 ## Failure matrix

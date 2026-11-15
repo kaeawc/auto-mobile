@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protoviewer
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -162,9 +163,43 @@ class ViewerSurfaceTest {
     compose.onNodeWithTag("network-provenance").assertDoesNotExist()
   }
 
-  private fun install(root: String, placement: String = """{"type":"fullscreen"}""") {
+  @Test
+  fun sensitiveModuleIsNamedInTheReservedBandAboveContent() {
+    install(
+      """{"type":"button","testTag":"send","label":"Send","onTap":[{"type":"platform","call":"share.open","args":{"text":{"value":"Hi"}}}]}""",
+      requires = """{"platform":["share"]}""",
+    )
+    launch()
+    val band =
+      compose
+        .onNodeWithTag("sensitive-provenance")
+        .assertIsDisplayed()
+        .assertTextEquals("Imported prototype · Uses share")
+        .getUnclippedBoundsInRoot()
+    val content = compose.onNodeWithTag("viewer-content").getUnclippedBoundsInRoot()
+    assertTrue(band.bottom > band.top)
+    assertTrue(band.bottom <= content.top)
+  }
+
+  @Test
+  fun nonSensitiveModuleShowsNoSensitiveBand() {
+    install(
+      """{"type":"button","testTag":"tick","label":"Tick","onTap":[{"type":"platform","call":"haptics.perform","args":{"effect":{"value":"tick"}}}]}""",
+      requires = """{"platform":["haptics"]}""",
+    )
+    launch()
+    compose.onNodeWithTag("network-provenance").assertIsDisplayed()
+    compose.onNodeWithTag("sensitive-provenance").assertDoesNotExist()
+  }
+
+  private fun install(
+    root: String,
+    placement: String = """{"type":"fullscreen"}""",
+    requires: String? = null,
+  ) {
+    val required = requires?.let { "\"requires\":$it," }.orEmpty()
     val spec =
-      """{"id":"surface","motion":"none","window":{"placement":$placement},"state":{"open":true,"choice":"a"},"root":$root}"""
+      """{"id":"surface","motion":"none","window":{"placement":$placement},$required"state":{"open":true,"choice":"a"},"root":$root}"""
     val validated = PrototypeSpecValidator.validate(spec)
     assertTrue(
       validated.toString(),

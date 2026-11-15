@@ -20,9 +20,12 @@ GitHub Actions job that counts only statuses created by `circleci-app[bot]`.
 
 Release and signing workflows (`build-ctrl-proxy-ios-ipa`, `build-network-filter-probe`,
 `build-prototype-agent`, `build-screen-capture-helper`, the desktop installers) run on GitHub. If they
-ever move, use one context, for example `automobile-apple-signing`, with all three restriction types: a
-security group (a team containing only the owner), a project restriction (this project only), and an
-expression restriction such as `pipeline.git.branch == "main" or pipeline.git.tag starts-with "v"`.
+ever move, use one context, for example `automobile-apple-signing`, with all three restriction types:
+
+- a security group (a team containing only the owner);
+- a project restriction (this project only);
+- an expression restriction such as `pipeline.git.branch == "main" or pipeline.git.tag starts-with "v"`.
+
 Attach it only in workflows whose jobs carry `filters: { branches: { only: main } }` / tag filters.
 CircleCI fails the workflow as `Unauthorized` when a restriction does not match
 ([Contexts](https://circleci.com/docs/guides/security/contexts/)).
@@ -40,10 +43,12 @@ CircleCI fails the workflow as `Unauthorized` when a restriction does not match
 
 ## Validation
 
-`test/scripts/circleciMacosMigrationPolicy.test.ts` checks, among others, that pull requests schedule
-only the advisory Playground simulator job, that no CircleCI job mirrors a required GitHub check name,
-that `nightly.yml` and `merge.yml` schedule no GitHub-hosted macOS job, and that no CircleCI workflow
-attaches a context and the macOS executor pins signing off.
+`test/scripts/circleciMacosMigrationPolicy.test.ts` checks, among others, that:
+
+- pull requests schedule only the advisory Playground simulator job;
+- no CircleCI job mirrors a required GitHub check name;
+- `nightly.yml` and `merge.yml` schedule no GitHub-hosted macOS job;
+- no CircleCI workflow attaches a context and the macOS executor pins signing off.
 
 ## Background
 

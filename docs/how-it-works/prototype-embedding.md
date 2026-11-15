@@ -55,11 +55,11 @@ units and escapes `$`; Swift uses `\u{X}` scalars.
 Compose or SwiftUI scaffold with no renderer dependency, for teams that want to own their screens.
 It resolves the prototype like the native resource, expands `components`, and writes one file.
 
-- `prototypeEjectMapping.ts` classifies every contract node type as scaffolded or `"stub"`. It is
-  typed over every node type, and a test compares it with the contract, so a new node type fails
-  until someone classifies it. Each dialect's emitter table is typed over the scaffolded set.
-- The subset is fixed (layout, text, buttons, fields, lists, `stack`); every other node type is a
-  stub. A stub keeps its `testTag` and children so the screen map and recorded flows still find
+- `prototypeEjectMapping.ts` classifies every contract node type as scaffolded or `"stub"`. Its type
+  covers every node type, and a test compares it with the contract, so a new node type fails
+  until someone classifies it. Each dialect's emitter table has a type over the scaffolded set.
+- The subset is fixed (layout, text, buttons, fields, lists, `stack`); the emitter writes every
+  other node type as a stub. A stub keeps its `testTag` and children so the screen map and recorded flows still find
   them.
 - It is not round-trip. Nothing reads the ejected code back, and re-reading the resource
   overwrites nothing; the app copies the file once.
@@ -74,13 +74,16 @@ It resolves the prototype like the native resource, expands `components`, and wr
 
 - `test/fixtures/prototype-embedding/sample.json` is rendered through the resource by
   `scripts/prototype/generateEmbeddingSamples.ts` into `samples/prototype-embedding/` and, for the
-  SwiftUI host, the `EmbedConsumer` fixture under `ios/prototype-agent/Fixtures/`.
+  SwiftUI host, the `EmbedConsumer` fixture under `ios/prototype-agent/Fixtures/`. The same script
+  renders `eject-sample.json` through the eject resource into `java/prototypes/eject/` and
+  `EmbedConsumer`, so the builds below compile both eject dialects.
   `nativePrototypeSamples.test.ts` (and the script's `--check`) fail when they drift from the output.
 - The samples are pinned to LF in `.gitattributes` and excluded from oxfmt, so neither a Windows
   checkout nor the formatter can make them differ from the resource output.
 - `scripts/android/validate-prototype-compose-consumer.sh` compiles the Android sample against the
   locally published renderer in a minified consumer app; the iOS library build compiles
-  `EmbedConsumer`.
+  `EmbedConsumer` in Swift 6 language mode. The ejected SwiftUI state class is `@MainActor` for
+  that mode.
 
 ## Background
 

@@ -4,8 +4,8 @@ Threat model for the platform vocabulary (`requires`, the `platform` action, `pl
 handlers, `{platform}` reads; see "Platform actions and events" in
 [the prototype specification](plat/android/prototype-ux.md)). Specs are untrusted input: they come
 from an agent, from a saved file, or from an import into ProtoViewer
-([ProtoViewer](protoviewer.md)). Each rule below names where it is enforced. Rules marked
-_not yet enforced_ are tracked in the linked issue.
+([ProtoViewer](protoviewer.md)). Each rule below names where it is enforced. The linked issue
+tracks each rule marked _not yet enforced_.
 
 ## Threats
 
@@ -32,10 +32,9 @@ Imported specs already lose privileged windows, host requests and AGSL shaders
 
 **R1: imported specs use no `sensitive` call.** `sensitive` in the contract's `platformModules`
 table marks calls and events that touch personal data (clipboard, share, contacts, location,
-camera and microphone output). The TypeScript and Kotlin strict validators refuse sensitive calls
-and handlers when `library: true`, with the call or handler's path; the shared fixtures are in
-`test/fixtures/prototype-spec/library-modules/`. The Swift validator does not apply this rule yet.
-Relaxing this is an owner decision
+camera and microphone output). The TypeScript, Kotlin and Swift strict validators refuse sensitive
+calls and handlers when `library: true`, with the call or handler's path; the shared fixtures are in
+`test/fixtures/prototype-spec/library-modules/`. Relaxing this is an owner decision
 ([#15636](https://github.com/kaeawc/auto-mobile/issues/15636)).
 
 **R2: sensitive results cannot reach a network or storage sink.** A `/data` path written by a
@@ -45,11 +44,12 @@ Swift validators refuse these bindings when `library: true`, reporting the sink 
 for `secure` text fields. Pointer overlap includes parents, children and repeat `{index}` segments;
 literal value bindings stay opaque. A `setData`, `appendData`, `prependData` or `upsertData` whose
 `value` is `{data}` or `{platform}` read of tainted state taints its `/data` destination, so
-copies and copies of copies are refused too. Copies routed through state are tracked in
-TypeScript, Kotlin and Swift as well: a `setState` whose value is a sensitive `{platform}` read,
-or text naming a tainted data or platform placeholder or a tainted repeat row, taints its key; a
-`{state}` read of a tainted key taints a data destination and is itself a sink in a request, a
-`{key}` text placeholder or a `state:` storage key. A key holding a repeat placeholder matches
+copies and copies of copies are refused too.
+
+TypeScript, Kotlin and Swift also track copies routed through state. A `setState` taints its key
+when its value is a sensitive `{platform}` read, or text naming a tainted data or platform
+placeholder or a tainted repeat row. A `{state}` read of a tainted key taints a data destination.
+It is itself a sink in a request, a `{key}` text placeholder or a `state:` storage key. A key holding a repeat placeholder matches
 every key sharing its literal prefix. The contract marks location fixes and auth user IDs as
 sensitive state. Successful MCP-direct shows include a warning for each sink, unless the
 expanded sink scan exceeds 4194304 bytes. Then they include one warning that the sinks are
@@ -84,10 +84,11 @@ authenticated host connection, never from spec content, intents or links. Import
 accept them only while host attach is enabled, which is off by default. _Not yet enforced_
 ([#15638](https://github.com/kaeawc/auto-mobile/issues/15638)).
 
-**R6: provenance.** While a sensitive module is active in an imported prototype, ProtoViewer's
-app-reserved provenance region names it. The region sits outside the spec's drawable bounds, so a
-spec cannot cover it. _Not yet enforced_
-([#15636](https://github.com/kaeawc/auto-mobile/issues/15636)).
+**R6: provenance.** When an imported prototype uses a sensitive call or handler, ProtoViewer's
+app-reserved provenance region names its modules. The region sits outside the spec's drawable
+bounds, so a spec cannot cover it. Android (`PrototypeLibraryProvenance` in `:protocol`) and iOS
+(`PrototypeLibraryProvenance` in the agent core) derive the module list with the R1 walk. Under R1
+a validated import lists none, so the region stays hidden until R1 is relaxed.
 
 ## Out of scope
 

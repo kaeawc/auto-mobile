@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  activatedInsideMatched,
   activationTargetMismatchWarning,
   appendNoChangeWarning,
   mismatchWarnings,
@@ -94,5 +95,26 @@ describe("tapOn wiring helpers", () => {
     const silent = fresh();
     appendNoChangeWarning(silent, { matched: label });
     expect(silent.warnings).toEqual(["kept", screenReaderNoChangeWarning(label, owner)]);
+  });
+});
+
+describe("activatedInsideMatched (#18351)", () => {
+  // The Screen timeout row from #18351 and its own RadioButton.
+  const row: Element = { bounds: { left: 0, top: 1226, right: 1080, bottom: 1381 } };
+  const radio: Element = {
+    "resource-id": "android:id/checkbox",
+    bounds: { left: 53, top: 1261, right: 137, bottom: 1345 },
+  };
+
+  test("is true for a row's own toggle and false for a control outside the match", () => {
+    expect(activatedInsideMatched({ element: radio, matchedElement: row }, radio)).toBe(true);
+    expect(activatedInsideMatched({ element: label, matchedElement: label }, container)).toBe(
+      false,
+    );
+  });
+
+  test("is false when either side has no bounds", () => {
+    expect(activatedInsideMatched({ element: unbounded({}) }, radio)).toBe(false);
+    expect(activatedInsideMatched({ element: row }, unbounded({}))).toBe(false);
   });
 });

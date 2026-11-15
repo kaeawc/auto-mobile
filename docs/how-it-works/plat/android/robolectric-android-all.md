@@ -10,9 +10,9 @@ every Robolectric class at `classMethod` with `AssertionError at MavenArtifactFe
 Every Robolectric module applies `automobile.robolectric-sdk-pin`, which applies
 `automobile.robolectric-android-all`. That convention:
 
-1. Works out the module's SDK levels from its `src/test*` sources: every `@Config(sdk = ...)`
-   level (`Config.OLDEST_SDK` counts as Robolectric's oldest SDK), every `robolectric.properties`
-   `sdk=` pin, and Robolectric's oldest SDK when there is no primary pin, since that is its default
+1. Works out the module's SDK levels from its `src/test*` sources. It takes every `@Config(sdk = ...)`
+   level (`Config.OLDEST_SDK` counts as Robolectric's oldest SDK) and every `robolectric.properties`
+   `sdk=` pin. It adds Robolectric's oldest SDK when there is no primary pin, since that is its default
    without a manifest. This is a configuration-cache `ValueSource`, so editing a test's SDK list
    invalidates the cached configuration.
 2. Resolves those jars through one non-transitive `robolectricAndroidAll<sdk>` configuration per

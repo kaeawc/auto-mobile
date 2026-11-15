@@ -96,9 +96,9 @@ enum PrototypeLibraryModuleRule {
 /// R6: the `sensitive` platform modules an imported prototype uses, for ProtoViewer's app-reserved
 /// provenance region (#15636). R1 refuses these in a library today, so a validated import yields
 /// none; the region is the backstop if R1 is relaxed.
-public enum PrototypeLibraryProvenance {
+enum PrototypeLibraryProvenance {
     /// Module names in UTF-16 order; malformed data yields none, since the loader reports it.
-    public static func sensitiveModules(_ spec: Data) -> [String] {
+    static func sensitiveModules(_ spec: Data) -> [String] {
         guard let fields = (try? JSONDecoder().decode(JSONValue.self, from: spec))?.objectFields else { return [] }
         return sensitiveModules(fields)
     }

@@ -27,20 +27,20 @@ The client secret is posted from a `0600` temp file. The token is masked and rea
 `prepare-release.yml` forwards these repository secrets. All six are optional in the reusable
 workflow:
 
-| Secret                     | Value                                                     |
-| -------------------------- | --------------------------------------------------------- |
-| `AZURE_TENANT_ID`          | Entra ID tenant of the service principal                  |
-| `AZURE_CLIENT_ID`          | Service principal application (client) ID                 |
-| `AZURE_CLIENT_SECRET`      | Service principal client secret                           |
+| Secret                     | Value                                                      |
+| -------------------------- | ---------------------------------------------------------- |
+| `AZURE_TENANT_ID`          | Entra ID tenant of the service principal                   |
+| `AZURE_CLIENT_ID`          | Service principal application (client) ID                  |
+| `AZURE_CLIENT_SECRET`      | Service principal client secret                            |
 | `TRUSTED_SIGNING_ENDPOINT` | Account endpoint, `https://<region>.codesigning.azure.net` |
-| `TRUSTED_SIGNING_ACCOUNT`  | Trusted Signing account name                              |
-| `TRUSTED_SIGNING_PROFILE`  | Certificate profile name                                  |
+| `TRUSTED_SIGNING_ACCOUNT`  | Trusted Signing account name                               |
+| `TRUSTED_SIGNING_PROFILE`  | Certificate profile name                                   |
 
-| Secrets set | Result                                                  |
-| ----------- | ------------------------------------------------------- |
-| None        | Warning annotation; the MSI ships unsigned.             |
-| Some        | The step exits 2 and names the missing secrets.         |
-| All         | The MSI is signed, then verified.                       |
+| Secrets set | Result                                          |
+| ----------- | ----------------------------------------------- |
+| None        | Warning annotation; the MSI ships unsigned.     |
+| Some        | The step exits 2 and names the missing secrets. |
+| All         | The MSI is signed, then verified.               |
 
 ## Setup
 

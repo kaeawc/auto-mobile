@@ -8,7 +8,7 @@
 ## Context
 
 The desktop release pipeline (#4712) shipped the Windows `.msi` unsigned. Windows SmartScreen
-warns on it and UAC shows *Publisher: Unknown*. Since June 2023 code-signing keys must live on
+warns on it and UAC shows _Publisher: Unknown_. Since June 2023 code-signing keys must live on
 FIPS 140-2 hardware, so the Apple pattern of a `.p12` in a GitHub secret is not possible on
 Windows. Windows has no notarization step, and SmartScreen reputation builds from install
 telemetry.

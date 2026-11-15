@@ -1,8 +1,8 @@
 # MCP SDK v2 and stateless daemon layer
 
-How the daemon's MCP layer is built on the SDK v2 split packages: a stateless server per request,
-one explicit session key, our own request handlers, list-change delivery, and the Tasks and Skills
-extensions (epic #4665).
+How the daemon's MCP layer is built on the SDK v2 split packages (epic #4665). It covers a stateless
+server per request, one explicit session key, our own request handlers, list-change delivery, and the
+Tasks and Skills extensions.
 
 The extensions are on their own page:
 
@@ -23,10 +23,10 @@ checker rejects a v1-error-shape test client.
 The stdio transport frames stdin itself (`src/server/stdioRequestFramer.ts`) because the
 SDK's read buffer closes the transport on a message over 10 MB (#18330). It admits a
 message up to `STDIO_REQUEST_MAX_BYTES` (the 256 MiB HTTP and control-socket cap less
-64 KiB of proxy envelope) and answers a larger request with JSON-RPC `-32600` by its
+64 KiB of proxy envelope). It answers a larger request with JSON-RPC `-32600` by its
 top-level id, discarding the bytes and keeping the session open. When that id cannot
 be read (a notification, a batch, an `id` of `null`, or an id that is not a string or
-number), no response is sent: the transport reports the request through `onerror`, so a
+number), the transport sends no response. It reports the request through `onerror`, so a
 caller must not wait for a reply.
 
 ## Stateless daemon MCP layer
@@ -74,7 +74,7 @@ indexing, request-scope execution cancellation, keyless binding cleanup, and shu
 
 Modern HTTP requests validate W3C version `00` trace context from `params._meta` using the
 SDK's trace keys. For batches, the first message carrying `_meta` selects the request context.
-`mcpTraceContext` installs it inside the detached async root around SDK dispatch, so concurrent
+The `mcpTraceContext` module installs it inside the detached async root around SDK dispatch, so concurrent
 requests stay isolated and work started by a request inherits its context. Invalid traceparents
 give no context; malformed tracestate or baggage is dropped independently, with limits of 512
 and 8192 characters respectively. Daemon logger wiring reads only the active trace id and adds
@@ -85,28 +85,31 @@ Modern discovery advertises `tools.listChanged`, `resources.listChanged` and `re
 lazily creates one in-memory event bus on its first modern request and bridges the process-wide
 list-change and resource-update broadcasters onto it. All per-request SDK handlers share that bus, so
 `subscriptions/listen` can acknowledge and filter tools/resources list changes and resource updates across requests.
+
 Resource-update resolvers receive the union of exact URIs on open listen streams, including page URIs;
 the bridge publishes each affected subscribed URI once and the SDK filters delivery per stream.
 Tracking is limited to 256 distinct URIs per stream and 4,096 URI memberships across streams
 (shared URIs count once per stream). Over-limit streams receive HTTP 429 before acknowledgement,
 with one warning per endpoint bridge lifetime; stream closure releases their memberships.
 The bridge detaches once admission stops and all requests close, or when the endpoint is cleared.
+
 Listen streams use the same cancellation index, shutdown snapshot, disconnect abort, and
 endpoint keepalive as other modern requests; SDK keepalive is disabled. Cache hints remain private,
 with a 5s tools-list TTL for clients without a listen stream. The stdio proxy keeps its existing
 hand-built server and does not read this flag.
 
 The trace id appears only in logger file/stream records written while the request's own async
-context is active; MCP logging notifications, sink-stall records and direct `console` output do not
-carry it, and the JSON format embeds it in `message` rather than as its own field.
+context is active. MCP logging notifications, sink-stall records and direct `console` output do not
+carry it. The JSON format embeds it in `message` rather than as its own field.
 
 ## Control-socket forwards in process (#11820)
 
 The socket server does not reach the tools over the HTTP endpoint. Each forward gets
 its own MCP client and its own stateless server from the factory the endpoint uses
-(`src/daemon/statelessMcpServerFactory.ts`: `buildMcpRequestContext` reads the context from
-headers or from the forward's struct, `createStatelessMcpServer` builds the server), linked by
-an `InMemoryTransport` pair in `InProcessMcpDispatcher` (`src/daemon/inProcessMcpDispatcher.ts`).
+(`src/daemon/statelessMcpServerFactory.ts`). In that factory, `buildMcpRequestContext` reads the
+context from headers or from the forward's struct, and `createStatelessMcpServer` builds the server.
+An `InMemoryTransport` pair in `InProcessMcpDispatcher` (`src/daemon/inProcessMcpDispatcher.ts`)
+links the two.
 
 A forward keeps the HTTP hop's properties:
 
@@ -116,7 +119,7 @@ A forward keeps the HTTP hop's properties:
   `LoopbackMcpClient`'s v1 mapping, and an aborted call still rejects with the caller's own
   abort reason.
 - **Async context.** The dispatcher enters each server from a root `AsyncResource`
-  captured when the daemon builds it, so a handler sees its own request's abort signal, request
+  captured when the daemon builds it. A handler therefore sees its own request's abort signal, request
   context, tool selection, acquisition receipt and display pin, never the socket handler's.
 - **Per-request cancellation.** A forward runs under its own request scope, cancelled before
   its server closes. Because the pair is private to the forward, an aborted call's
@@ -126,11 +129,10 @@ A forward keeps the HTTP hop's properties:
   accepting forwards when it quiesces ingress, and closes running forwards with
   `DaemonHandoffInterruptionError` beside the HTTP requests.
 
-`test/daemon/mcpForwardByteParity.integration.test.ts` pins this: the same socket frames go
-through an MCP client over the real HTTP endpoint and through the dispatcher, and the socket
+`test/daemon/mcpForwardByteParity.integration.test.ts` pins this. The same socket frames go
+through an MCP client over the real HTTP endpoint and through the dispatcher. The socket
 lines must be byte-identical (results, tool and protocol errors, lists, progress, socket
-cancel, every refusal fixture), with a context-leak probe that also shows an unrooted pair
-would leak.
+cancel, every refusal fixture). A context-leak probe also shows an unrooted pair would leak.
 
 There is no device-control transport recovery (reconnect, pin, replay). The
 `device_control_transport_failure` wire type stays because the proxy and the daemon client still
@@ -153,7 +155,7 @@ per-session tool binding and `tools/list` filtering in daemon mode.
   every call.
 - Precedence (#13315): the header wins. The exception is the daemon's own
   in-process forward (`InProcessMcpDispatcher`, which marks its request scope
-  `trustedForwarder` and builds the server with `trustForwardedMcpSessionId`): the in-band
+  `trustedForwarder` and builds the server with `trustForwardedMcpSessionId`). There the in-band
   `__mcpSessionId` the socket server injects names the originating client, so it outranks the
   forward's connection key. An in-band id from any other source, such as a plain HTTP client
   putting `__mcpSessionId` in the tool arguments beside a header, never overrides the header.

@@ -22,13 +22,13 @@ The row writer is on its own page:
 ## 2. Terminal release durability
 
 `FileTerminalReleaseJournal` (`src/daemon/terminalReleaseJournal.ts`) keeps one append-only JSONL
-file per daemon in `<dataDir>/terminal-release-intents/`. `appendDurable` is write plus
-`fsyncSync`, run before the DB write is issued. The first create fsyncs the parent directory;
-compaction writes a sibling, fsyncs, renames and fsyncs the directory. Directory fsyncs are
-skipped on win32. `record()` returns `"durable"` or `"volatile"`: the default
+file per daemon in `<dataDir>/terminal-release-intents/`. Its `appendDurable` method is write plus
+`fsyncSync`, run before the daemon issues the DB write. The first create fsyncs the parent directory;
+compaction writes a sibling, fsyncs, renames and fsyncs the directory. On win32 the journal skips
+directory fsyncs. The `record()` method returns `"durable"` or `"volatile"`. The default
 `NoopTerminalReleaseJournal` (only `Daemon.startOn` attaches the file journal) and a failed append
-return `volatile`, which is also the answer where the directory fsync is skipped. A torn final line
-is ignored and a corrupt mid-file line is discarded with a warning.
+return `volatile`, which is also the answer where the directory fsync is skipped. Replay ignores a
+torn final line and discards a corrupt mid-file line with a warning.
 
 - Crash after the intent, before the row: the next start applies it
   (`applyRecoveredTerminalReleaseIntents`, first in `rehydratePersistedSessions`). A dead peer's
@@ -137,8 +137,8 @@ Rules:
 - Incarnation identity stays "the `Session` object in the record" (`state.session`,
   or `identity.deref()` after the session is gone). `Session` is unchanged.
 - Per-incarnation history stays in identity-keyed side tables
-  (`finalizedSessionReleases`, per-`Session` row-facet maps): not lifecycle, and they
-  must outlive the slot being reoccupied (`ended` -> `creating`) because
+  (`finalizedSessionReleases`, per-`Session` row-facet maps). They are not lifecycle, and they
+  must outlive the slot being reoccupied (`ended` -> `creating`). Both
   `releaseFinalizedSession` and `releaseThatEnded` read an older incarnation's
   `ReleaseReasonState` while a newer one is live. Only the UUID-keyed latest-identity
   lookup moves into the slot.
@@ -182,20 +182,22 @@ unreachable under the slot design (the from-state assertion replaces it).
 Only a recovery rebind (`RebindSessionOptions.recovery`: Android AVD recovery or System UI
 replacement, i.e. an explicit bind carrying `expectedExistingSessionDeviceId`, and the terminal-release
 recovery) counts. A client-chosen move (`setActiveDevice`, an explicit bind without that expectation)
-and the undo of a cancelled one change the serial but neither bump the generation nor notify (#15456;
-the conservative reading: when the cause is unclear the rebind is treated as a move). A
-serial-changing recovery rebind increments `Session.deviceGeneration` (absent
-means zero) and records `previousDeviceId`, the serial before the latest recovery (a later client-chosen move keeps both unchanged, so they describe the last recovery, not the current move), preserving the session
-UUID and stable AVD/UDID identity. These two fields are in-memory only, have no DB
+and the undo of a cancelled one change the serial but neither bump the generation nor notify (#15456).
+When the cause is unclear, the conservative reading treats the rebind as a move.
+
+A serial-changing recovery rebind increments `Session.deviceGeneration` (absent
+means zero) and records `previousDeviceId`, the serial before the latest recovery. It preserves the
+session UUID and stable AVD/UDID identity. A later client-chosen move keeps both fields unchanged, so
+they describe the last recovery, not the current move. These two fields are in-memory only, have no DB
 schema or migration, and reset on daemon restart/rehydration. Same-serial rebinds,
 including forced ones, preserve them. `sessionDeviceBinding` defines the shared
 client shape; session-info and active-sessions use its diagnostic field names.
 
 After persistence and live binding/index publication, SessionManager emits once
 per serial-changing recovery rebind through an injected emitter. The process broadcaster
-feeds only the notification-subscribed sockets that hold the session (acquired or restored it,
-hold its autolock route, or last routed a call to it; a derived `base:label` is held through its
-base), then proxies filter again to held sessions,
+feeds only the notification-subscribed sockets that hold the session. A socket holds it when it
+acquired or restored it, holds its autolock route, or last routed a call to it; a derived
+`base:label` is held through its base. Proxies then filter again to held sessions,
 and the MCP server forwards `session_device_rebound` as an info logging message.
 Fan-out failures warn without failing recovery. Admitted daemon tool results add
 `_meta["automobile/sessionDevice"]` only after generation zero; steady-state
@@ -251,7 +253,7 @@ in production. The test-local oracle is a frozen copy of the old predicates.
    retain them indefinitely; known-id reads must keep them until continuations clean
    up (or prove equivalent atomic cleanup), never silently drop them as absent.
 4. **Admission is not tag-only**: release ops outlive removal and can outlive WeakSet
-   cleanup on a published incarnation, so a non-terminal `releasing` tag can be
+   cleanup on a published incarnation. A non-terminal `releasing` tag can therefore be
    current and admitted after that cleanup, while a terminal-fenced published session
    stays blocked even without WeakSet membership. Mapping: current-by-tag/fence, then
    `!view.isReleasing(publishedSession)`. Superseded/stale ops never replace a newer
@@ -263,10 +265,10 @@ in production. The test-local oracle is a frozen copy of the old predicates.
    join, not a UUID-only predicate).
 
 Per-UUID known-id derivation stays constant-time. The test-local oracle checks the real
-public union's order and membership after operations and microtask yields (29 seeds
-including a pinned corpus, 36 random steps, three forced reincarnations in `beforeAll`;
-also a shutdown drain and rehydration of a recoverable row with the in-memory
-persistence/journal; no devices or SQLite).
+public union's order and membership after operations and microtask yields. It runs 29 seeds
+including a pinned corpus, 36 random steps and three forced reincarnations in `beforeAll`.
+It also covers a shutdown drain and rehydration of a recoverable row with the in-memory
+persistence/journal, with no devices or SQLite.
 
 ### S7 guard findings
 
@@ -298,9 +300,9 @@ new legal transitions:
 
 `sessionManager.waitOutSettled.test.ts` pins native microtask turns with FakeTimer
 using controlled issuer continuations and real gated manager operations. With
-`settled`, controlled release resumed at turn 3 (not 5) and rebind at turn 3 (not 2);
-in real operations release resumed at turn 5 (not 13) and rebind at 24 (not 23);
-recreation wakes on publication, sees the creation still present, then cannot observe
+`settled`, controlled release resumed at turn 3 (not 5) and rebind at turn 3 (not 2).
+In real operations release resumed at turn 5 (not 13) and rebind at 24 (not 23).
+Recreation wakes on publication, sees the creation still present, then cannot observe
 another tag change when that facet clears, so it never finishes. Hence all three
 original waits stay, including recreation's microtask yield.
 

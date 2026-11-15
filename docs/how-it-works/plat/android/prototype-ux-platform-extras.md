@@ -113,9 +113,9 @@ activity, and snaps without predictive scrubbing for `none`. Reduced motion stil
 
 iOS `buttonStyle` applies `.glass`/`.glassProminent` on iOS 26+, using bordered buttons
 below 26 with a substituted note. `hover` applies lift/highlight on iOS 17+ and is render-only.
-The renderer's tab bars, app bars and sheets are custom drawn to retain per-item identifiers;
-`tab.role`, `bottomAccessory`, `navigationTitle` and `sheet.sizing` are reported as ignored.
-`bottomAccessory` is node-only and structurally validated; its descendants provide no targets,
+The renderer custom-draws its tab bars, app bars and sheets to retain per-item identifiers, and
+reports `tab.role`, `bottomAccessory`, `navigationTitle` and `sheet.sizing` as ignored. The
+`bottomAccessory` field is node-only and structurally validated; its descendants provide no targets,
 references or capabilities on either renderer. iOS ignores all Android fields.
 
 ## Glass surfaces and scroll edges
@@ -123,8 +123,8 @@ references or capabilities on either renderer. iOS ignores all Android fields.
 `style.surface` is a closed enum containing only `"glass"`. Optional strict
 `style.glass: {variant?, tint?, interactive?}` takes `regular|clear` (default
 regular), an existing hex/role/light-dark colour slot, and a boolean (default
-false). `glass` without `surface: "glass"` in the same style is invalid, including
-`styleWhen` entries; conditional glass options must repeat the surface. `cornerRadius` chooses the
+false). The `glass` field without `surface: "glass"` in the same style is invalid, including
+`styleWhen` entries; conditional glass options must repeat the surface. The `cornerRadius` field chooses the
 shape; omission uses a capsule. Base and conditional styles require
 `prototype_glass_v1`; bundles must list every required capability.
 
@@ -150,9 +150,9 @@ to be glass. All four fields are node-only (invalid in window.ios/theme.ios) and
 require only the glass capability on iOS; Android ignores them with field paths
 in platformNotes.
 
-Reduce Transparency and Increase Contrast are handled by the system's Liquid
-Glass implementation. iOS 17–25 and Android below API 31 do not advertise
-`prototype_glass_v1`, so glass is refused there: there is no simulated
+The system's Liquid Glass implementation handles Reduce Transparency and
+Increase Contrast. On iOS 17–25 and Android below API 31 the device does not advertise
+`prototype_glass_v1`, so the host refuses glass there: there is no simulated
 translucent fill, material substitute or fallback capability. An Android
 renderer advertising glass must report any approximation (clear variant,
 ignored `interactive`) in `platformNotes`.
@@ -201,11 +201,11 @@ and `uninstallApp` actions remain separate from this artifact pipeline.
 - **Template.** The host picks the smallest flavor whose capabilities cover
   `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities
   and the closest flavor.
-- **Registry.** `disposable-apps.json` under the AutoMobile data dir is keyed by device id. Each
-  record holds appId, slug, platform, label, spec sha256, template, signer, installedAt and
-  expiresAt. Writes are serialized and atomic. A corrupt file or record is skipped with a warning.
-  An install writes its record, with the new expiresAt, as soon as the package is on the device and
-  before permissions are applied. A permission failure then surfaces as an error saying the app is
+- **Registry.** The registry file `disposable-apps.json` under the AutoMobile data dir keys records
+  by device id. Each record holds appId, slug, platform, label, spec sha256, template, signer,
+  installedAt and expiresAt. The host serializes writes and makes them atomic. It skips a corrupt
+  file or record with a warning. An install writes its record, with the new expiresAt, as soon as
+  the package is on the device and before the host applies permissions. A permission failure then surfaces as an error saying the app is
   installed without its permissions, and the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and

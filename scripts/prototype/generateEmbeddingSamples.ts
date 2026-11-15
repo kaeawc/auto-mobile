@@ -15,14 +15,17 @@
  * them, so the same two builds compile the hand-owned Compose and SwiftUI output too.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { deflateSync } from "node:zlib";
 import path from "node:path";
 import {
   readNativePrototype,
   type NativePrototypeSources,
 } from "../../src/features/prototype/nativePrototype";
 import { readPrototypeEject } from "../../src/features/prototype/prototypeEject";
-import { prototypeSpecSchema } from "../../src/features/prototype/prototypeSpec";
+import {
+  prototypeSpecSchema,
+  type PrototypeSpec,
+} from "../../src/features/prototype/prototypeSpec";
+import { walkPrototypeNodes } from "../../src/features/prototype/prototypeNodeChildren";
 import type { MirroredSavedPrototype } from "../../src/features/prototype/savedPrototypeMirror";
 
 const REPO = path.join(import.meta.dir, "../..");
@@ -34,6 +37,11 @@ export const IOS_FIXTURE_SOURCES =
   "ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer";
 /** The version written into samples; pinned so samples do not churn on every release. */
 export const SAMPLE_LIBRARY_VERSION = "0.0.0-sample";
+/**
+ * Placeholder LAN host: 192.168.1.10 stands in for the machine serving the sample endpoint.
+ * Replace it with that machine's LAN address (the iOS egress checks reject the Android
+ * emulator alias 10.0.2.2).
+ */
 export const IOS_SAMPLE_REQUEST_URL = "http://192.168.1.10:8080/greeting";
 
 function crc32(bytes: Uint8Array): number {
@@ -47,6 +55,41 @@ function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+function adler32(bytes: Uint8Array): number {
+  let a = 1;
+  let b = 0;
+  for (const byte of bytes) {
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
+  }
+  return ((b << 16) | a) >>> 0;
+}
+
+/**
+ * A zlib stream of stored (BTYPE=00, uncompressed) deflate blocks, so the PNG bytes are the same
+ * on every runtime and platform; a compressor's output is not guaranteed to be.
+ */
+function storedZlib(data: Uint8Array): Uint8Array {
+  const maxBlock = 0xffff;
+  const blockCount = Math.max(1, Math.ceil(data.length / maxBlock));
+  const out = Buffer.alloc(2 + blockCount * 5 + data.length + 4);
+  // CMF 0x78 (deflate, 32K window), FLG 0x01 (no dictionary, fastest; 0x7801 % 31 === 0).
+  out[0] = 0x78;
+  out[1] = 0x01;
+  let offset = 2;
+  for (let block = 0; block < blockCount; block++) {
+    const start = block * maxBlock;
+    const length = Math.min(maxBlock, data.length - start);
+    out[offset] = block === blockCount - 1 ? 1 : 0;
+    out.writeUInt16LE(length, offset + 1);
+    out.writeUInt16LE(~length & 0xffff, offset + 3);
+    Buffer.from(data.subarray(start, start + length)).copy(out, offset + 5);
+    offset += 5 + length;
+  }
+  out.writeUInt32BE(adler32(data), offset);
+  return out;
+}
+
 function pngChunk(type: string, data: Uint8Array): Uint8Array {
   const typeBytes = Buffer.from(type, "ascii");
   const chunk = Buffer.alloc(12 + data.length);
@@ -57,7 +100,7 @@ function pngChunk(type: string, data: Uint8Array): Uint8Array {
   return chunk;
 }
 
-function heroPng(): Uint8Array {
+export function heroPng(): Uint8Array {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(96, 0);
   header.writeUInt32BE(96, 4);
@@ -77,9 +120,25 @@ function heroPng(): Uint8Array {
   return Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     pngChunk("IHDR", header),
-    pngChunk("IDAT", deflateSync(pixels)),
+    pngChunk("IDAT", storedZlib(pixels)),
     pngChunk("IEND", Buffer.alloc(0)),
   ]);
+}
+
+/** A copy of `spec` whose every node `onTap` request, at any nesting depth, targets `url`. */
+export function withRequestUrl(spec: PrototypeSpec, url: string): PrototypeSpec {
+  const copy = structuredClone(spec);
+  walkPrototypeNodes(copy, (node) => {
+    if (!Array.isArray(node.onTap)) {
+      return;
+    }
+    for (const action of node.onTap) {
+      if (typeof action === "object" && action !== null && action.type === "request") {
+        action.url = url;
+      }
+    }
+  });
+  return copy;
 }
 
 /**
@@ -140,19 +199,9 @@ export async function renderEmbeddingSamples(
   if (androidHero) {
     files.set(`${ANDROID_SAMPLE_ROOT}/${androidHero.path}`, heroPng());
   }
-  const iosSpec = structuredClone(prototypeSpecSchema.parse(spec));
-  if (iosSpec.root.type === "column") {
-    for (const node of iosSpec.root.children) {
-      if (node.type === "button") {
-        for (const action of node.onTap ?? []) {
-          if (action.type === "request") {
-            action.url = IOS_SAMPLE_REQUEST_URL;
-          }
-        }
-      }
-    }
-  }
-  const iosSources = sampleSources(iosSpec);
+  const iosSources = sampleSources(
+    withRequestUrl(prototypeSpecSchema.parse(spec), IOS_SAMPLE_REQUEST_URL),
+  );
   const ios = await readNativePrototype({ id, platform: "ios" }, iosSources);
   for (const file of ios.files) {
     // The host compiles inside the fixture target; the spec ships with the iOS sample layout.

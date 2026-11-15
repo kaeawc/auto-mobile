@@ -11,6 +11,58 @@ describe("FieldTypeDetector", () => {
   });
 
   describe("detect", () => {
+    describe("checkable text chip given a value (#18350)", () => {
+      // Material time picker minute chip in text-input mode before focus.
+      const minuteChip = (overrides: Partial<Element> = {}): Element =>
+        createElement({
+          class: "com.google.android.material.chip.Chip",
+          text: "00",
+          "content-desc": "0 minutes",
+          checkable: "true",
+          checked: "false",
+          clickable: "true",
+          focusable: "true",
+          ...overrides,
+        });
+
+      test("classifies a focusable checkable chip as text when given a string value", () => {
+        expect(detector.detect(minuteChip(), { value: "45" })).toBe("text");
+      });
+
+      test("classifies a checkable node exposing set_text as text when given a value", () => {
+        const chip = minuteChip({ focusable: "false", actions: ["click", "set_text"] });
+        expect(detector.detect(chip, { value: "45" })).toBe("text");
+      });
+
+      test("keeps the chip a checkbox without a value or with selected", () => {
+        expect(detector.detect(minuteChip())).toBe("checkbox");
+        expect(detector.detect(minuteChip(), { selected: true })).toBe("checkbox");
+        expect(detector.detect(minuteChip(), { value: "45", selected: true })).toBe("checkbox");
+      });
+
+      test("keeps a non-focusable, non-editable checkable node a checkbox", () => {
+        expect(detector.detect(minuteChip({ focusable: "false" }), { value: "45" })).toBe(
+          "checkbox",
+        );
+      });
+
+      test("keeps native CheckBox, RadioButton and Switch classes as toggles/checkboxes", () => {
+        const intent = { value: "on" };
+        expect(detector.detect(minuteChip({ class: "android.widget.CheckBox" }), intent)).toBe(
+          "checkbox",
+        );
+        expect(
+          detector.detect(
+            minuteChip({ class: "com.google.android.material.radiobutton.MaterialRadioButton" }),
+            intent,
+          ),
+        ).toBe("checkbox");
+        expect(detector.detect(minuteChip({ class: "android.widget.Switch" }), intent)).toBe(
+          "toggle",
+        );
+      });
+    });
+
     describe("text field detection", () => {
       test("detects Android EditText as text", () => {
         const element = createElement({

@@ -274,10 +274,10 @@ export const observeDiffNodeChangeSchema = z
  * `isDiff: true`, which the full-object arm ({@link observationSummarySchema})
  * never carries.
  *
- * `skeleton` is ALWAYS present here (issue #6221 item 4.1) — the same
- * actionable-only rows `observe`/action tools emit on a full observation — so a
- * client always has a selector surface to act on, regardless of whether a
- * diff baseline happened to exist. Every entry's internal `key` is documented
+ * `skeleton` is present on every diff that changed something (issue #6221
+ * item 4.1) — the same actionable-only rows `observe`/action tools emit on a
+ * full observation. A diff that changed nothing carries `unchanged: true`
+ * instead (#18348): the previous response already delivered that skeleton. Every entry's internal `key` is documented
  * as non-selector so it is never mistaken for one (item 4.3): `added`/`removed`
  * entries already carry a real selector directly in their `attributes`
  * (resource-id/view-id/text/content-desc), and `changed` entries — which do NOT
@@ -306,9 +306,19 @@ export const observeDiffSchema = z
     ...observationScreenshotOutputFields,
     skeleton: z
       .array(skeletonElementSchema)
+      .optional()
       .describe(
-        "Always present alongside a diff (issue #6221 item 4.1): the same " +
-          "actionable-only selector surface a full observation's `skeleton` carries.",
+        "Present alongside every diff that changed something (issue #6221 item 4.1): the same " +
+          "actionable-only selector surface a full observation's `skeleton` carries. " +
+          "Absent when `unchanged` is true.",
+      ),
+    unchanged: z
+      .literal(true)
+      .optional()
+      .describe(
+        "Nothing changed since the previous response (#18348): no node, display or " +
+          "field change. `skeleton`, `context` and `keyboard` are left out because the " +
+          "previous response already carried them.",
       ),
     context: z
       .array(skeletonElementSchema)

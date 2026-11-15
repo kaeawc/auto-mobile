@@ -1530,13 +1530,14 @@ describe("finalizeToolResponse", () => {
       // ...AND it still carries a full, usable actionable-only skeleton — never
       // absent just because a diff was emitted.
       expect(Array.isArray(obsSc.skeleton)).toBe(true);
-      expect(obsSc.skeleton.length).toBeGreaterThan(0);
-      expect(obsSc.skeleton[0].elementId).toBe("com.example:id/btn");
-      expect(obsSc.skeleton[0].affordances).toContain("tap");
+      const skeleton = requireValue(obsSc.skeleton);
+      expect(skeleton.length).toBeGreaterThan(0);
+      expect(skeleton[0].elementId).toBe("com.example:id/btn");
+      expect(skeleton[0].affordances).toContain("tap");
 
       // Text mirror agrees.
       const parsed = JSON.parse(finalized.content[0].text);
-      expect(parsed.observation.skeleton.length).toBe(obsSc.skeleton.length);
+      expect(parsed.observation.skeleton.length).toBe(skeleton.length);
     });
 
     test("a diffed observation carries `activeWindow` and `freshness` with the same shape as full mode (issue #6258)", () => {
@@ -2312,8 +2313,9 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBe(true);
       expect(obsSc.viewHierarchy).toBeUndefined();
       expect(Array.isArray(obsSc.skeleton)).toBe(true);
-      expect(obsSc.skeleton.length).toBeGreaterThan(0);
-      expect(obsSc.skeleton[0].elementId).toBe("com.example:id/btn");
+      const skeleton = requireValue(obsSc.skeleton);
+      expect(skeleton.length).toBeGreaterThan(0);
+      expect(skeleton[0].elementId).toBe("com.example:id/btn");
     });
 
     test("a diffed observation ALSO carries the state-readout `context` alongside `skeleton` (issue #6256)", () => {
@@ -5424,7 +5426,8 @@ describe("actions-compact-metadata", () => {
     serverConfig.setActionsCompactMetadataEnabled(false);
     const full = emit();
     expectFull(full);
-    expect(structuredPayload(full).element).toEqual(element);
+    // The duplicate element is dropped whatever the metadata setting (#18348).
+    expect(structuredPayload(full)).not.toHaveProperty("element");
     const expected = JSON.stringify(full);
     expect(JSON.stringify(emit())).toBe(expected);
     emit(action().observation as Record<string, unknown>, { name: "observe" });
@@ -5454,7 +5457,7 @@ describe("actions-compact-metadata", () => {
     expectFull(emit());
   });
   test.each(["environment", "feature-flag"])(
-    "%s opt-out restores every block and duplicate element",
+    "%s opt-out restores every block but not the duplicate element (#18348)",
     (source) => {
       if (source === "environment") {
         serverConfig.setActionsCompactMetadataEnabled(
@@ -5470,7 +5473,7 @@ describe("actions-compact-metadata", () => {
       for (let i = 0; i < 2; i++) {
         const response = emit();
         expectFull(response);
-        expect(structuredPayload(response).element).toEqual(element);
+        expect(structuredPayload(response)).not.toHaveProperty("element");
       }
       expect(records.size).toBe(0);
     },

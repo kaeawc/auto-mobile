@@ -178,7 +178,9 @@ the action was never gated.
 
 In diff mode (`--actions-diff-observe`) `settled`, `settleMs` and `settlePolls`
 ride on the diff alongside `activeWindow` and `freshness`, so one accessor works
-in both modes.
+in both modes. A diff with no node, display or field change, projected or not,
+carries `unchanged: true` and leaves out `skeleton`, `context` and `keyboard`;
+every other diff carries them.
 
 A requested post-action screenshot is published under the same `observationId`
 as the hierarchy it should match. Only a settle-gated action can replace its
@@ -241,15 +243,22 @@ unstable gfx metrics, and partial back stacks remain inline even if unchanged.
 The first action response sends available blocks in full, changes resend the
 changed block, and a new session or any device switch sends available blocks
 in full again. `screenSize`, `display`, and observation/device join keys remain
-present. A top-level `element` is omitted only when deeply equal to
-`selectedElement.matchedElement` and its output schema allows omission.
+present.
 
 Compaction follows projection and diff emission. With `--actions-diff-observe`,
 only metadata actually emitted by the diff can be compacted (including its
 `freshness` passthrough); the hierarchy diff baseline is unchanged. With
-`--actions-no-observe`, there are no observation blocks to compact or remember,
-but duplicate element removal still applies. An empty snapshot on a device
-switch invalidates the previous device's metadata without claiming delivery.
+`--actions-no-observe`, there are no observation blocks to compact or remember.
+An empty snapshot on a device switch invalidates the previous device's metadata
+without claiming delivery.
+
+Two reductions apply to every agent-facing success, whatever the compaction
+setting and with or without a session. A top-level `element` is omitted when it
+names the same node as `selectedElement.matchedElement` (same identity attributes
+and bounds, an empty label counting as absent) and its output schema allows
+omission. A `getAndroid`, `getApple` or `startDevice` success never carries the
+per-command `timing` tree, even with `debug-perf` on; `readiness.elapsedMs` carries
+the total. Internal calls and failures keep both fields.
 
 Only blocks that survive artifact and oversized-residue spills **inline** are
 remembered as sent, and artifacts are always written from the uncompacted payload;
@@ -266,3 +275,4 @@ after that point leaves the client without the omitted block until it changes.
 ## Background
 
 - [Post-action screenshot timing](../../devlog/2026-11-10-interaction-loop-screenshot-timing.md)
+- [Stateless success reductions in the response envelope](../../devlog/2026-11-15-stateless-envelope-reductions.md)

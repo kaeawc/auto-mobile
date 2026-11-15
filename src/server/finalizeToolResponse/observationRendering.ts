@@ -535,7 +535,19 @@ function emitActionObservationDiff(
     { payload, baseline, sanitized, servedObservation, diff },
     ctx,
   );
-  const observationOut = emitFull ? servedObservation : dropDiffNodeLists(diff);
+  const observationOut = emitFull
+    ? servedObservation
+    : wireActionDiff(diff, () =>
+        // Projection drops non-actionable added/removed rows, so an empty
+        // projected diff can still hide a new readout `context` would show.
+        isEmptyObserveDiff(
+          diffObserveResult(baseline, sanitized, {
+            collapseKeyboard: true,
+            skipStatusBar: true,
+            scalarFields: SKELETON_DIFF_SCALAR_FIELDS,
+          }),
+        ),
+      );
   const observationDiff: ObservationDiffMetadata = {
     mode: emitFull ? "full" : "diff",
     reason: emitFull ? "screen_changed" : "diff_emitted",
@@ -597,6 +609,26 @@ function dropDiffNodeLists(
   delete wireDiff.added;
   delete wireDiff.removed;
   return wireDiff;
+}
+
+/**
+ * The diff as delivered. A diff with nothing in it (no node, display or field
+ * change) answers "nothing changed": the client still holds the skeleton the
+ * baseline response delivered, so restating it is pure repetition (#18348).
+ * `unchanged: true` says so instead; capture provenance stays.
+ */
+function wireActionDiff(
+  diff: ReturnType<typeof diffObserveResult>,
+  unprojectedDiffIsEmpty: () => boolean,
+): Partial<ReturnType<typeof diffObserveResult>> {
+  const wireDiff = dropDiffNodeLists(diff);
+  if (!isEmptyObserveDiff(diff) || !unprojectedDiffIsEmpty()) {
+    return wireDiff;
+  }
+  delete wireDiff.skeleton;
+  delete wireDiff.context;
+  delete wireDiff.keyboard;
+  return { ...wireDiff, unchanged: true };
 }
 
 function isEmptyObserveDiff(diff: ReturnType<typeof diffObserveResult>): boolean {

@@ -4340,11 +4340,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -4512,7 +4517,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -7076,11 +7081,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -7248,7 +7258,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -13659,11 +13669,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -13831,7 +13846,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -17256,11 +17271,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -17428,7 +17448,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -28049,11 +28069,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -28221,7 +28246,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -30667,11 +30692,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -30839,7 +30869,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -36742,11 +36772,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -36914,7 +36949,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -40169,11 +40204,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -40341,7 +40381,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -42514,11 +42554,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -42686,7 +42731,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -49669,11 +49714,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -49841,7 +49891,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -51697,11 +51747,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -51869,7 +51924,7 @@
                   "$ref": "#/$defs/__schema48"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -55142,11 +55197,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -55314,7 +55374,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -58122,11 +58182,16 @@
                   "$ref": "#/$defs/__schema41"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema42"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -58294,7 +58359,7 @@
                   "$ref": "#/$defs/__schema51"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {
@@ -60290,11 +60355,16 @@
                   "$ref": "#/$defs/__schema36"
                 },
                 "skeleton": {
-                  "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
+                  "description": "Present alongside every diff that changed something (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries. Absent when `unchanged` is true.",
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/__schema37"
                   }
+                },
+                "unchanged": {
+                  "description": "Nothing changed since the previous response (#18348): no node, display or field change. `skeleton`, `context` and `keyboard` are left out because the previous response already carried them.",
+                  "type": "boolean",
+                  "const": true
                 },
                 "context": {
                   "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
@@ -60462,7 +60532,7 @@
                   "$ref": "#/$defs/__schema49"
                 }
               },
-              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
+              "required": ["isDiff", "observationId", "deviceId", "display", "changed"],
               "additionalProperties": {}
             },
             {

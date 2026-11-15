@@ -82,6 +82,8 @@ import { runWithToolSelectionContext } from "../../src/features/toolSelection/to
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import * as os from "os";
 import { toolJson } from "../helpers/toolResponse";
+import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+import { DefaultFeatureFlagApplier } from "../../src/features/featureFlags/FeatureFlagApplier";
 import { withWireConnection } from "../helpers/mcpConnection";
 
 import type { AndroidAutoProjectionApplier } from "../../src/features/androidAuto/AndroidAutoProjectionService";
@@ -1102,6 +1104,43 @@ describe("startDevice handler", () => {
       setDebugPerfEnabled(false);
     }
   });
+
+  it.each(["getAndroid", "startDevice"] as const)(
+    "%s: a persisted debug-perf flag keeps the timing tree out of the delivered envelope (#18348)",
+    async (toolName) => {
+      // The flag is persisted: one earlier --debug-perf run turns it back on at every startup.
+      new DefaultFeatureFlagApplier().apply("debug-perf", true);
+      try {
+        fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+        fakeMatcher.setBootedResult(androidDevice);
+        const args =
+          toolName === "getAndroid" ? { avdName: androidDevice.name } : { platform: "android" };
+        const raw = await withWireConnection(args, (wireArgs) =>
+          ToolRegistry.getTool(toolName)!.handler(wireArgs),
+        );
+        expect(toolJson(raw).timing).toBeDefined();
+
+        // Registry `register()` tools take the plain finalization path.
+        const delivered = finalizeToolResponse(structuredClone(raw), {
+          name: toolName,
+          plainTool: true,
+        });
+        expect("timing" in toolJson(delivered)).toBe(false);
+        const payload = startResultSchema.parse(toolJson(delivered));
+        expect(payload.readiness).toBeDefined();
+        expect(payload.runtime.session.sessionUuid).toBeDefined();
+
+        const internal = finalizeToolResponse(structuredClone(raw), {
+          name: toolName,
+          plainTool: true,
+          internal: true,
+        });
+        expect(toolJson(internal).timing).toBeDefined();
+      } finally {
+        setDebugPerfEnabled(false);
+      }
+    },
+  );
 
   it("falls through to image when no booted device matches", async () => {
     fakeDeviceUtils.setBootedDevices("android", []);

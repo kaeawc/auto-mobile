@@ -121,18 +121,14 @@ import dev.jasonpearson.automobile.desktop.core.layout.selectElement
 import dev.jasonpearson.automobile.desktop.core.layout.toggleTapTargetIssues
 import dev.jasonpearson.automobile.desktop.core.layout.updateConnectionStatus
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import dev.jasonpearson.automobile.desktop.core.mcp.AvailableEmulator
-import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser
-import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
-import dev.jasonpearson.automobile.desktop.core.mcp.SystemImage
-import dev.jasonpearson.automobile.desktop.core.mcp.knownSourceImageId
 import dev.jasonpearson.automobile.desktop.core.mcp.supportsDaemonInput
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.platform.NoOpNotificationHandler
@@ -155,7 +151,11 @@ import dev.jasonpearson.automobile.desktop.core.shell.SearchResultProvider
 import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShell
 import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShellOptions
 import dev.jasonpearson.automobile.desktop.core.shell.buildDefaultCommands
-import dev.jasonpearson.automobile.desktop.core.shell.toSidebarDeviceInfo
+import dev.jasonpearson.automobile.desktop.core.shell.deviceId
+import dev.jasonpearson.automobile.desktop.core.shell.forShell
+import dev.jasonpearson.automobile.desktop.core.shell.isIos
+import dev.jasonpearson.automobile.desktop.core.shell.knownSourceImageId
+import dev.jasonpearson.automobile.desktop.core.shell.shellBootedDevice
 import dev.jasonpearson.automobile.desktop.core.snapshot.SnapshotsDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboardOptions
@@ -225,15 +225,12 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
 
 internal fun availableDeviceImages(
   images: List<DeviceImageInfo>,
-  booted: List<BootedDevice>,
+  booted: List<BootedDeviceInfo>,
   platform: String,
 ): List<DeviceImageInfo> {
   val bootedStableIds =
     booted
-      .filter { device ->
-        val isIOS = device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical
-        if (platform == "ios") isIOS else !isIOS
-      }
+      .filter { device -> if (platform == "ios") device.isIos else !device.isIos }
       .mapNotNull { it.knownSourceImageId() }
       .toSet()
   return images.filter { it.platform == platform && it.identity.stableId !in bootedStableIds }
@@ -407,8 +404,6 @@ enum class Dashboard(val title: String, val icon: String) {
   Failures("Failures", "💥"),
 }
 
-// DeviceType, BootedDevice, AvailableEmulator, SystemImage — defined in desktop.core.mcp
-
 // Known launcher packages, in preference order. Must equal KNOWN_ANDROID_LAUNCHER_PACKAGES in
 // src/features/observe/androidLauncherRegistry.ts (#14056);
 // test/features/observe/androidLauncherRegistry.test.ts fails when they differ.
@@ -441,7 +436,7 @@ private const val LIVE_SCREENSHOT_INTERVAL_MS = 1_000L
  * Select the default app to show in the navigation graph. Priority: foreground app >
  * launcher/springboard > first app in list
  */
-private fun selectDefaultApp(apps: List<InstalledApp>, deviceType: DeviceType?): String? {
+private fun selectDefaultApp(apps: List<InstalledApp>, isIOS: Boolean): String? {
   // First priority: foreground app
   apps
     .find { it.isForeground }
@@ -450,7 +445,6 @@ private fun selectDefaultApp(apps: List<InstalledApp>, deviceType: DeviceType?):
     }
 
   // Second priority: launcher (Android) or springboard (iOS)
-  val isIOS = deviceType == DeviceType.iOSSimulator || deviceType == DeviceType.iOSPhysical
   if (isIOS) {
     apps
       .find { it.packageName == IOS_SPRINGBOARD }
@@ -644,36 +638,15 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
   // Mock devices list (only used in Fake mode)
   val mockBootedDevices = remember {
     listOf(
-      BootedDevice(
-        "pixel8",
-        "Pixel 8 API 35",
-        DeviceType.AndroidEmulator,
-        "Running",
-        "com.example.myapp",
-        System.currentTimeMillis() - 300000,
-      ),
-      BootedDevice(
-        "pixel7",
-        "Pixel 7 API 34",
-        DeviceType.AndroidEmulator,
-        "Running",
-        "com.android.launcher3",
-        System.currentTimeMillis() - 600000,
-      ),
-      BootedDevice(
-        "iphone15",
-        "iPhone 15 Pro",
-        DeviceType.iOSSimulator,
-        "Booted",
-        "com.apple.springboard",
-        System.currentTimeMillis() - 180000,
-      ),
+      shellBootedDevice("pixel8", "Pixel 8 API 35", platform = "android", state = "Running"),
+      shellBootedDevice("pixel7", "Pixel 7 API 34", platform = "android", state = "Running"),
+      shellBootedDevice("iphone15", "iPhone 15 Pro", platform = "ios", state = "Booted"),
     )
   }
 
   // Real device info (when connected to MCP)
-  var realDevice by remember { mutableStateOf<BootedDevice?>(null) }
-  var realDevices by remember { mutableStateOf<List<BootedDevice>>(emptyList()) }
+  var realDevice by remember { mutableStateOf<BootedDeviceInfo?>(null) }
+  var realDevices by remember { mutableStateOf<List<BootedDeviceInfo>>(emptyList()) }
   var deviceImages by remember {
     mutableStateOf<List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>>(
       emptyList(),
@@ -785,8 +758,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
     desktopSessionPanesFor(
       isRealMode = dataSourceMode == DataSourceMode.Real && clientProvider != null,
       activeDeviceId = activeDeviceId,
-      isIos =
-        realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical,
+      isIos = realDevice?.isIos == true,
     )
   SideEffect { desktopSessionPanes.value = shownPanes }
   // Live view and screen sharing need a session the daemon admits on the stream sockets. Watching
@@ -964,29 +936,14 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
             is ResourceReadResult.Success -> {
               val parsed = DeviceResourceParser.parseBootedDevices(result.content)
               val allDevices = parsed?.devices ?: emptyList()
-              val allBootedDevices = allDevices.map { dev ->
-                val deviceType =
-                  when {
-                    dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
-                    dev.platform == "ios" -> DeviceType.iOSPhysical
-                    dev.isVirtual -> DeviceType.AndroidEmulator
-                    else -> DeviceType.AndroidPhysical
-                  }
-                BootedDevice(
-                  id = dev.runtime.deviceId ?: dev.identity.stableId,
-                  name = dev.name,
-                  type = deviceType,
-                  status = dev.runtime.lifecycle.state,
-                  stableId = dev.identity.stableId,
-                )
-              }
+              val allBootedDevices = allDevices.map { it.forShell() }
               realDevices = allBootedDevices
               val firstDevice = allBootedDevices.firstOrNull()
               if (firstDevice != null) {
                 realDevice = firstDevice
-                activeDeviceId = firstDevice.id
+                activeDeviceId = firstDevice.deviceId
                 LOG.info(
-                  "Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}",
+                  "Set realDevice from MCP: ${firstDevice.name} (${firstDevice.deviceId}), total devices: ${allBootedDevices.size}",
                 )
               }
             }
@@ -1068,30 +1025,16 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                     .filter {
                       it.name != "Unknown" && it.runtime.lifecycle.state == "booted"
                     }
-                    .map { dev ->
-                      val deviceType =
-                        when {
-                          dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
-                          dev.platform == "ios" -> DeviceType.iOSPhysical
-                          dev.isVirtual -> DeviceType.AndroidEmulator
-                          else -> DeviceType.AndroidPhysical
-                        }
-                      BootedDevice(
-                        id = dev.runtime.deviceId ?: dev.identity.stableId,
-                        name = dev.name,
-                        type = deviceType,
-                        status = dev.runtime.lifecycle.state,
-                        stableId = dev.identity.stableId,
-                      )
-                    }
+                    .map { it.forShell() }
                 realDevices = newDevices
                 // Clear active device if it's no longer in the list
-                if (activeDeviceId != null && newDevices.none { it.id == activeDeviceId }) {
+                if (activeDeviceId != null && newDevices.none { it.deviceId == activeDeviceId }) {
                   activeDeviceId = null
                   realDevice = null
                 }
                 if (
-                  userSelectedDeviceId != null && newDevices.none { it.id == userSelectedDeviceId }
+                  userSelectedDeviceId != null &&
+                    newDevices.none { it.deviceId == userSelectedDeviceId }
                 ) {
                   // A reappearing device must not silently inherit the old explicit pick.
                   userSelectedDeviceId = null
@@ -1615,7 +1558,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                 installedApps = result.data
                 // Auto-select foreground app if none selected (only on first load)
                 if (isFirstLoad && selectedAppId == null) {
-                  selectedAppId = selectDefaultApp(result.data, realDevice?.type)
+                  selectedAppId = selectDefaultApp(result.data, realDevice?.isIos == true)
                   LOG.info("Auto-selected app: $selectedAppId")
                 }
               }
@@ -1657,7 +1600,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
           is Result.Success -> {
             installedApps = result.data
             if (selectedAppId == null) {
-              selectedAppId = selectDefaultApp(result.data, null)
+              selectedAppId = selectDefaultApp(result.data, isIOS = false)
             }
           }
           else -> {}
@@ -1676,29 +1619,11 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
     }
 
   // Compute platform based on device type for iOS/Android-specific data flow
-  val isIOSDevice =
-    realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
+  val isIOSDevice = realDevice?.isIos == true
   val platformString = if (isIOSDevice) "ios" else "android"
   // Publish it to the control session, which was created before the device list resolved.
   SideEffect { controlPlatform.value = platformString }
   val storagePlatform = if (isIOSDevice) StoragePlatform.iOS else StoragePlatform.Android
-
-  val availableEmulators = remember {
-    listOf(
-      AvailableEmulator("pixel6", "Pixel 6 API 33", DeviceType.AndroidEmulator, "33"),
-      AvailableEmulator("pixel5", "Pixel 5 API 31", DeviceType.AndroidEmulator, "31"),
-      AvailableEmulator("iphone14", "iPhone 14", DeviceType.iOSSimulator),
-      AvailableEmulator("ipad", "iPad Pro (12.9-inch)", DeviceType.iOSSimulator),
-    )
-  }
-  val systemImages = remember {
-    listOf(
-      SystemImage("android-35", "Android 15 (VanillaIceCream)", "Android", "35"),
-      SystemImage("android-34", "Android 14 (UpsideDownCake)", "Android", "34"),
-      SystemImage("ios-17", "iOS 17.2", "iOS", "17.2"),
-      SystemImage("ios-16", "iOS 16.4", "iOS", "16.4"),
-    )
-  }
 
   // Test flow replay state
   var testFlowScreens by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -1849,8 +1774,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
           showBottomPane = showBottomPane,
           onToggleBottomPane = { showBottomPane = !showBottomPane },
           deviceName = realDevice?.name,
-          foregroundApp =
-            realDevice?.foregroundApp ?: installedApps.find { it.isForeground }?.packageName,
+          foregroundApp = installedApps.find { it.isForeground }?.packageName,
           crashCount = crashCount,
           anrCount = anrCount,
           nonFatalCount = nonFatalCount,
@@ -2243,7 +2167,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                     activeDeviceId = null
                     isDevicePanelExpanded = true
                   } else if (mockBootedDevices.isNotEmpty()) {
-                    activeDeviceId = mockBootedDevices.first().id
+                    activeDeviceId = mockBootedDevices.first().deviceId
                     isDevicePanelExpanded = false
                   }
                 },
@@ -2252,22 +2176,22 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                 onRetryDetection = { mcpConnectRetryCounter++ },
                 activeDeviceId = activeDeviceId,
                 suppressAutoSelect = true,
-                bootedDevices = sidebarDevices.map { it.toSidebarDeviceInfo() },
+                bootedDevices = sidebarDevices,
                 onDeviceSelected = { deviceId, _ ->
                   sidebarDevices
-                    .firstOrNull { it.id == deviceId }
+                    .firstOrNull { it.deviceId == deviceId }
                     ?.let { device ->
-                      userSelectedDeviceId = device.id
-                      activeDeviceId = device.id
+                      userSelectedDeviceId = device.deviceId
+                      activeDeviceId = device.deviceId
                       realDevice = device
                       isDevicePanelExpanded = false
                     }
                 },
                 onKillDevice = { deviceId ->
                   sidebarDevices
-                    .firstOrNull { it.id == deviceId }
+                    .firstOrNull { it.deviceId == deviceId }
                     ?.let { device ->
-                      killDeviceErrors = killDeviceErrors - device.id
+                      killDeviceErrors = killDeviceErrors - device.deviceId
                       screenshotScope.launch(ioDispatcher) {
                         try {
                           // On a Unix daemon this is the desktop session's client, so a device
@@ -2277,17 +2201,18 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                           // call is sessionless and a held device refuses it, shown on the row
                           // below.
                           val client = clientProvider?.invoke()
-                          val platform = device.toSidebarDeviceInfo().platform
+                          val platform = device.platform
                           LOG.info(
-                            "Killing device ${device.name} (${device.id}) via ${client?.transportName}",
+                            "Killing device ${device.name} (${device.deviceId}) via ${client?.transportName}",
                           )
-                          val result = client?.killDevice(device.name, device.id, platform)
+                          val result = client?.killDevice(device.name, device.deviceId, platform)
                           if (result?.success == false) {
                             LOG.warn("Failed to kill device: ${result.message}")
                             killDeviceErrors =
-                              killDeviceErrors + (device.id to (result.message ?: "Failed to kill"))
+                              killDeviceErrors +
+                                (device.deviceId to (result.message ?: "Failed to kill"))
                             if (result.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
-                              desktopSessionState.reportHeldElsewhere(device.id)
+                              desktopSessionState.reportHeldElsewhere(device.deviceId)
                             }
                           }
                         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -2295,19 +2220,19 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                         } catch (e: McpConnectionException) {
                           LOG.warn("Failed to kill device ${device.name}", e)
                           killDeviceErrors =
-                            killDeviceErrors + (device.id to (e.message ?: "Failed to kill"))
+                            killDeviceErrors + (device.deviceId to (e.message ?: "Failed to kill"))
                         } catch (e: IOException) {
                           LOG.warn("Failed to kill device ${device.name}", e)
                           killDeviceErrors =
-                            killDeviceErrors + (device.id to (e.message ?: "Failed to kill"))
+                            killDeviceErrors + (device.deviceId to (e.message ?: "Failed to kill"))
                         } catch (e: IllegalArgumentException) {
                           LOG.warn("Failed to kill device ${device.name}", e)
                           killDeviceErrors =
-                            killDeviceErrors + (device.id to (e.message ?: "Failed to kill"))
+                            killDeviceErrors + (device.deviceId to (e.message ?: "Failed to kill"))
                         } catch (e: UnsupportedOperationException) {
                           LOG.warn("Failed to kill device ${device.name}", e)
                           killDeviceErrors =
-                            killDeviceErrors + (device.id to (e.message ?: "Failed to kill"))
+                            killDeviceErrors + (device.deviceId to (e.message ?: "Failed to kill"))
                         }
                       }
                     }

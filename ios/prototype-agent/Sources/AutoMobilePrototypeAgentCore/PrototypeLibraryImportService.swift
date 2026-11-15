@@ -27,7 +27,9 @@ actor PrototypeLibraryImportService {
     init(root: URL, storageRoot: URL, inbox: URL, warning: @escaping @Sendable (String) -> Void) {
         read = { try PrototypeLibraryFileReader().read($0) }
         commit = { bytes, source in
-            let store = try PrototypeLibraryStore(root: root, storageRoot: storageRoot)
+            let store = try PrototypeLibraryStore(
+                root: root, storageRoot: storageRoot, blocklist: PrototypeDefaultsContentBlocklist()
+            )
             try PrototypeLibraryImporter(store: store).importData(bytes, source: source)
         }
         cleanup = { try PrototypeLibraryInbox(root: inbox).cleanup($0) }

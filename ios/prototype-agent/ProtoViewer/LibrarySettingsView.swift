@@ -10,6 +10,16 @@ struct LibrarySettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmsNetwork = false
 
+    private var reportURL: URL? {
+        PrototypeContentReport.mailURL(
+            subject: String(
+                localized: "ProtoViewer content report",
+                comment: "Subject of the report mail draft sent to the published contact."
+            ),
+            body: ""
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -30,6 +40,16 @@ struct LibrarySettingsView: View {
                     Text(
                         "Off by default. When enabled, private LAN addresses are allowed. Loopback, link-local addresses, and AutoMobile daemon ports on LAN addresses are blocked."
                     )
+                }
+                if let reportURL {
+                    Section {
+                        Link("Report a problem", destination: reportURL)
+                            .accessibilityIdentifier("report-problem")
+                    } footer: {
+                        Text(
+                            "To report objectionable content or abuse, write to \(PrototypeContentReport.contactEmail). Use Report in a received prototype's menu to include which one."
+                        )
+                    }
                 }
                 Section {
                     NavigationLink("Open-source licenses") { LicensesView() }

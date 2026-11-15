@@ -37,6 +37,12 @@ const INTERNAL: Record<string, string> = {
   AUTO_MOBILE_STARTUP_BENCHMARK_OUTPUT: "Legacy startup benchmark harness output file.",
   AUTOMOBILE_STARTUP_BENCHMARK_LABEL: "Startup benchmark harness sample label.",
   AUTO_MOBILE_STARTUP_BENCHMARK_LABEL: "Legacy startup benchmark harness sample label.",
+  AUTOMOBILE_DEVICE_STREAMING:
+    "Device Streaming opt-in; inert until the AdbConnect transport (#14464) makes it reachable.",
+  AUTOMOBILE_DEVICE_STREAMING_PROJECT:
+    "Device Streaming project id; inert until the AdbConnect transport (#14464) lands.",
+  AUTOMOBILE_DEVICE_STREAMING_MAX_SESSION_MINUTES:
+    "Device Streaming session cap; inert until the AdbConnect transport (#14464) lands.",
 };
 
 function sourceFiles(directory: string): string[] {

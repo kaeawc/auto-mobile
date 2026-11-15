@@ -543,26 +543,7 @@ function emitActionObservationDiff(
   );
   const observationOut = emitFull
     ? servedObservation
-    : wireActionDiff(
-        diff,
-        () =>
-          // Projection drops non-actionable added/removed rows, so an empty
-          // projected diff can still hide a new readout `context` would show.
-          isEmptyObserveDiff(
-            diffObserveResult(baseline, sanitized, {
-              collapseKeyboard: true,
-              skipStatusBar: true,
-              scalarFields: SKELETON_DIFF_SCALAR_FIELDS,
-            }),
-          ),
-        // Node deltas miss what the client acts on: a keyboard shown, hidden,
-        // moved or switched over an unchanged app, and a synthetic id regenerated
-        // by a child reorder the diff re-pairs.
-        () => deliveredSelectorSurface.get(baseline) === selectorSurfaceKey(diff),
-      );
-  if (!emitFull) {
-    recordDeliveredSelectorSurface(sanitized, diff);
-  }
+    : deliveredActionDiff(diff, baseline, sanitized);
   const observationDiff: ObservationDiffMetadata = {
     mode: emitFull ? "full" : "diff",
     reason: emitFull ? "screen_changed" : "diff_emitted",
@@ -570,6 +551,33 @@ function emitActionObservationDiff(
     toScreen: observationScreenIdentity(sanitized),
   };
   return { observationOut, observationDiff };
+}
+
+/** The diff as delivered, recorded as the selector surface the client now holds. */
+function deliveredActionDiff(
+  diff: ReturnType<typeof diffObserveResult>,
+  baseline: ObserveResult,
+  sanitized: ObserveResult,
+): Partial<ReturnType<typeof diffObserveResult>> {
+  const wireDiff = wireActionDiff(
+    diff,
+    () =>
+      // Projection drops non-actionable added/removed rows, so an empty
+      // projected diff can still hide a new readout `context` would show.
+      isEmptyObserveDiff(
+        diffObserveResult(baseline, sanitized, {
+          collapseKeyboard: true,
+          skipStatusBar: true,
+          scalarFields: SKELETON_DIFF_SCALAR_FIELDS,
+        }),
+      ),
+    // Node deltas miss what the client acts on: a keyboard shown, hidden,
+    // moved or switched over an unchanged app, and a synthetic id regenerated
+    // by a child reorder the diff re-pairs.
+    () => deliveredSelectorSurface.get(baseline) === selectorSurfaceKey(diff),
+  );
+  recordDeliveredSelectorSurface(sanitized, diff);
+  return wireDiff;
 }
 
 /** Skipped for a response the client will never receive (#10081). */

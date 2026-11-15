@@ -27,6 +27,12 @@ struct PrototypeBarScrollState: Equatable {
     }
 }
 
+/// Fallback top inset for fullscreen app bars without authored safe-area padding.
+func prototypeTopAppBarTopPadding(placementType: String, hasSafeAreaPadding: Bool, safeTop: CGFloat) -> CGFloat {
+    guard !hasSafeAreaPadding, placementType != "sheet", placementType != "floating" else { return 0 }
+    return safeTop
+}
+
 struct PrototypeNodeSafeInsets {
     let navInsets: PrototypeSafeInsets
     let styledInsets: PrototypeSafeInsets

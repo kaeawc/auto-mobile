@@ -692,7 +692,8 @@
 
     /// A small (default), centerAligned, medium or large top app bar. The title is a header; the
     /// navigation icon and actions are icon buttons labelled by their `label` and identified
-    /// `<tag>.navigation` and `<tag>.actions.<index>`. Insets come only from `safeAreaPadding`.
+    /// `<tag>.navigation` and `<tag>.actions.<index>`. Fullscreen bars without `safeAreaPadding`
+    /// clear the content's top safe inset inside their background; authored insets use the generic node path.
     @MainActor
     struct PrototypeTopAppBarView: View {
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -746,6 +747,11 @@
             }
             .modifier(PrototypeBarClip(fraction: node.onScroll == "enterAlways" ? fraction : 0))
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, prototypeTopAppBarTopPadding(
+                placementType: model.spec?.window.placement.type ?? "fullscreen",
+                hasSafeAreaPadding: node.safeAreaPadding != nil,
+                safeTop: model.contentSafeInsets.top
+            ))
             .background(style?.hasAuthoredFill ?? false ? .clear : colors.surface)
         }
 

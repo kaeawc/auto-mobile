@@ -23,11 +23,13 @@ export function exactTextMissMessage(text: string, containerHint = ""): string {
 
 /**
  * Why a focus lookup failed. `not-found-inputs-listed` is a miss whose error already names the
- * editable fields on screen, so the target did not scroll away (#17463).
+ * editable fields on screen, so the target did not scroll away (#17463). `matched-non-input` is a
+ * selector that matched a visible element that is not editable until tapped (#18351).
  */
 export type TapFocusFailure =
   | "not-found"
   | "not-found-inputs-listed"
+  | "matched-non-input"
   | "no-visible-tap-area"
   | "navigation-bar";
 

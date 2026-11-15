@@ -4,10 +4,10 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 
 ## Effects (#15128, #15129, `prototype_effects_v1`)
 
-`style.effects` is an array of 1-4 effects drawn in order. The list is closed and data-only: a
-`source` key, `type: "shader"`, a fifth effect, an unknown type and an out-of-range param are each
-rejected at the offending path, identically in the TS, Kotlin and Swift validators (so the spec's
-opening rule, no code, holds). `schemas/prototype-spec-contract.json` (`definitions.effect`) is the
+`style.effects` is an array of 1-4 effects drawn in order. The list is closed and data-only. The TS, Kotlin and Swift validators each
+reject a `source` key, `type: "shader"`, a fifth effect, an unknown type and an out-of-range param at the offending path, identically.
+So the spec's
+opening rule, no code, holds. The file `schemas/prototype-spec-contract.json` (`definitions.effect`) is the
 source of truth; the shared corpus pins it.
 
 | `type`                | Params (all optional unless marked)                                                | Android floor |
@@ -51,17 +51,17 @@ in `PrototypeEffectShaders`.
 
 - **Layers.** Distortions (`blur`, `pixelate`, `chromaticAberration`, `wave`, `ripple`) are one
   chained layer `RenderEffect` around the node's background and content, in authored order, clipped
-  to the node's bounds. `gradientMesh` paints between the background and the content. `shimmer`,
+  to the node's bounds. The `gradientMesh` effect paints between the background and the content. `shimmer`,
   `glow`, `vignette` and `noise` paint over the content, clipped to the node's shape, undistorted.
   Effects sit inside the node, so the host dismiss controls and the node's observe bounds are untouched.
   A node with a distortion clips anything that overflows its bounds, as the effect itself must not.
 - **API floors and fallback.** Brush-based looks (`shimmer`, `glow`, `vignette`) draw on any API,
-  `blur` needs 31, the AGSL ones 33. Below its floor an effect is omitted and the node renders
+  `blur` needs 31, the AGSL ones 33. Below its floor the renderer omits an effect and the node renders
   unshaded. The device reports every omitted effect as `degradedEffects: [{path, type, reason:
-  "api"}]` on the show result and on `inspect_prototypes` (omitted when empty; older hosts see the
-  same frame). `path` is the node's render identity (the `root.child...` key the renderer and
-  `observe` use) plus the authored effect index, `<identity>.style.effects[<i>]`, and follows the
-  `styleWhen` style in force when the reply is built. `reason: "budget"` entries use the same form.
+  "api"}]` on the show result and on `inspect_prototypes`. The field is omitted when empty, and older hosts see the
+  same frame. The entry's `path` is the node's render identity (the `root.child...` key the renderer and
+  `observe` use) plus the authored effect index, `<identity>.style.effects[<i>]`. It follows the
+  `styleWhen` style in force when the device builds the reply. Entries with `reason: "budget"` use the same form.
 - **Settled by the renderer (conservative choices).**
   - `phase` and `animate` move only `shimmer`, `wave` and `ripple`; `noise`, `gradientMesh`,
     `glow`, `vignette`, `blur`, `pixelate` and `chromaticAberration` are static looks and ignore
@@ -70,13 +70,17 @@ in `PrototypeEffectShaders`.
     scheme, a `{light, dark}` pair picks the shown mode; `scrim` is its plain scheme colour.
   - A `shimmer` band never exceeds 0.5 alpha; with no colour it is white at 0.35. `glow` is an
     inward edge glow (it never leaves the node), `vignette` defaults to black.
-  - Defaults when omitted: `noise` amount 0.1, grain 1 dp, seed 0, monochrome; `gradientMesh`
-    softness 0.5; `shimmer` angle 20, width 0.3; `glow` radius 12 dp, intensity 0.6; `vignette`
-    intensity 0.4, radius 0.7; `chromaticAberration` offset 2 dp; `wave` and `ripple` amplitude 4 dp,
-    wavelength 48 dp, `ripple` centre `{0.5, 0.5}`.
+  - Defaults when omitted:
+    - `noise`: amount 0.1, grain 1 dp, seed 0, monochrome.
+    - `gradientMesh`: softness 0.5.
+    - `shimmer`: angle 20, width 0.3.
+    - `glow`: radius 12 dp, intensity 0.6.
+    - `vignette`: intensity 0.4, radius 0.7.
+    - `chromaticAberration`: offset 2 dp.
+    - `wave` and `ripple`: amplitude 4 dp, wavelength 48 dp; `ripple` centre `{0.5, 0.5}`.
 - **Time.** An animated effect reads one per-node frame clock (`withFrameNanos`). It does not
   advance under `motion: "none"`, animator duration scale 0, while the window is not shown, or in
-  direct `PrototypeSpecContent` callers (previews and screenshots), so those keep the authored
+  direct `PrototypeSpecContent` callers (previews and screenshots). Those keep the authored
   `phase`. `noise` is seeded from `seed` alone.
 - **Frame budget.** If a node's frame interval stays above 32 ms for 30 frames in a row the node
   freezes its phase and `inspect_prototypes` lists its animated effects with reason `budget`. The
@@ -92,10 +96,10 @@ Rules for the `map` node (#14309) and its renderers (#14310, #14311):
 - **Backends.** A spec never names a tile URL or SDK. An optional `backend` defaults to `auto`: MapLibre on
   Android, MapKit on iOS. Google Maps is an Android opt-in backend, offered only when the runtime holds a
   host-configured key. MapLibre on iOS stays optional, for the offline style and pixel parity.
-- **Styles.** `mapStyle` is a closed list, never a URL (`style` is the shared node style). `plain` is the default: offline and deterministic (a
+- **Styles.** `mapStyle` is a closed list, never a URL (`style` is the shared node style). The default is `plain`: offline and deterministic (a
   background colour, an optional grid and graticule, then markers and polylines), with no network. CI and every
-  screenshot test use it. `streets` draws tiles from the runtime's configured source. `satellite` is not offered.
-  On iOS, MapKit always fetches Apple tiles, so `plain` there is drawn by MapLibre iOS or by an
+  screenshot test use it. The `streets` style draws tiles from the runtime's configured source. The runtimes do not offer `satellite`.
+  On iOS, MapKit always fetches Apple tiles, so MapLibre iOS draws `plain` there, or an
   `MKTileOverlay` with `canReplaceMapContent` serving local tiles.
 - **Tile source.** The `streets` source is configured once per runtime (ProtoViewer settings, or the daemon
   pushing configuration to a disposable app), never per spec. The public OpenStreetMap tile server is never
@@ -129,18 +133,18 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
 ```
 
 - `camera` is a literal `{lat, lng, zoom, bearing?, tilt?}` (lat -90 to 90, lng -180 to 180, zoom 0 to
-  22, bearing 0 to 360, tilt 0 to 60) or `{data}`, a `/data` pointer to such an object. `fit` is `none`,
-  `markers` or `route`; `mapStyle` is `plain` (default) or `streets`.
-- `backend` is `auto` (default), `google` or `maplibre`. `auto` needs only `prototype_platform_map_v1`; any
+  22, bearing 0 to 360, tilt 0 to 60) or `{data}`, a `/data` pointer to such an object. The `fit` value is `none`,
+  `markers` or `route`. The `mapStyle` value is `plain` (default) or `streets`.
+- `backend` is `auto` (default), `google` or `maplibre`. The `auto` backend needs only `prototype_platform_map_v1`. Any
   other value also needs `prototype_platform_map_<backend>_v1`, which the `map` module's `backends` table
   lists. `show`, `patch` and `replaceNode` refuse a backend whose capability the runtime does not advertise,
   at `<node>.backend`.
-- `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. `id`, `lat`, `lng`,
+- `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. The fields `id`, `lat`, `lng`,
   `title` (also the accessibility label) and the optional `heading` (degrees clockwise from north) are
-  templates resolved per item. `icon` is a Material icon name, or `{"asset": "<id>"}` naming an image uploaded
+  templates resolved per item. The `icon` field is a Material icon name, or `{"asset": "<id>"}` naming an image uploaded
   in the spec's `assets`, never a URL (#16491). Given a complete uploaded-asset inventory, all three
-  validators refuse an unknown id at `<node>.markers.icon.asset`, and the bundle export lists the asset with the
-  spec's other images on Android and iOS. `animateMs` (0 to 2000) eases a moved marker.
+  validators refuse an unknown id at `<node>.markers.icon.asset`. The bundle export lists the asset with the
+  spec's other images on Android and iOS. The `animateMs` field (0 to 2000) eases a moved marker.
   Every marker is an accessibility node with the identifier `<mapId>/marker/<id>`, so `observe` and `tapOn`
   reach it.
 - `polylines` (1 to 8) each draw the `{lat, lng}` points of the `/data` array at `path`, with an optional
@@ -148,7 +152,7 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
 - `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
   path that receives the settled camera.
 - Every `emit` a marker tap runs, including those in its nested `onSuccess`, `onError` and `startTimer`
-  actions, reports `markerId` (the tapped marker's resolved `id`) in its event context after the authored
+  actions, reports `markerId` (the tapped marker's resolved `id`) in its event context. It follows the authored
   entries, under the same byte budget. The contract lists the name in
   `platformModules.map.events.markerTap.emitContext`. All three validators refuse an authored
   `context.markerId` inside `onMarkerTap`. Outside it, `markerId` is an ordinary context name.
@@ -180,9 +184,9 @@ The `webView` node (contract only: no renderer draws it and no runtime advertise
 - `url` is `https://` only (pattern `webViewUrl`, at most 2048 characters), with placeholders allowed after the
   literal scheme. There is no inline `html` field and no script field: a spec carries no markup or code.
 - `allowedOrigins` holds 1 to 8 unique exact origins, `https://host[:port]` in lowercase with no path and no
-  default `:443` (pattern `webOrigin`). Every host must be a DNS name: `localhost`, `*.localhost` and any host a
+  default `:443` (pattern `webOrigin`). Every host must be a DNS name. The validators refuse `localhost`, `*.localhost` and any host a
   URL parser reads as an IP address (a last label that is decimal or `0x` hexadecimal, or a bracketed IPv6
-  literal) are refused. Refusing every IP literal, not only private ranges, keeps the three validators equal:
+  literal). Refusing every IP literal, not only private ranges, keeps the three validators equal:
   JavaScript, the JVM and Swift disagree on numeric host spellings such as `2130706433`.
 - When the URL's authority is literal, `https://<authority>` (lowercased, an explicit `:443` dropped) must be
   one of `allowedOrigins`. A templated authority is checked by the runtime once it resolves.
@@ -195,9 +199,9 @@ The `webView` node (contract only: no renderer draws it and no runtime advertise
 - `javaScript` defaults to `false`; `true` is accepted and never comes with a bridge. Page subresources cannot
   be checked at a resolved address the way `request` is, so an imported (ProtoViewer) prototype may show a
   `webView` only while network for imported prototypes is on. Turning it off replaces the entire imported
-  prototype with a refusal; turning it on restores rendering. The refusal names the first `webView` depth first
+  prototype with a refusal, and turning it on restores rendering. The refusal names the first `webView` depth first
   in a fixed order (adaptive slots, a list's `header` and `footer`, `child`, `children`, then `screens` by key),
-  pinned by `test/fixtures/prototype-spec/webview-import/cases.json`; an MCP `open` gets one outcome per load.
+  pinned by `test/fixtures/prototype-spec/webview-import/cases.json`. An MCP `open` gets one outcome per load.
 - `onNavigate` and `onBlockedNavigation` are action lists. `{type: "platform", call: "webview.back"}` and
   `webview.reload` take `args: {node}`; a literal `node` must be the id of a `webView` node ("Unknown webView").
   The `webview` module has no state; its `webview.navigate` event exists so a simulation can deliver it.
@@ -212,18 +216,18 @@ A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series
 reads the `/data` array at `path` (objects only, at most `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` like any data array), taking each
 point's numeric `y` member and optional `x` label member. A literal `path` must resolve to an array
 when the spec is shown, and every point must be an object with a numeric `y`. A repeat-bound path is
-bound per row. `yRange {min, max}` fixes the axis (max above min); otherwise it spans the values
-and the goal, and bars rise from zero. `xLabels` (`none`, `ends`, `all`) draws the first series'
-x labels below the plot. `goal` is a dashed reference line; a `ring` takes exactly one series and a
+bound per row. The `yRange {min, max}` field fixes the axis (max above min). Otherwise the axis spans the values
+and the goal, and bars rise from zero. The `xLabels` field (`none`, `ends`, `all`) draws the first series'
+x labels below the plot. The `goal` field is a dashed reference line. A `ring` takes exactly one series and a
 positive goal and draws that series' latest value against it. The capability is
 `prototype_chart_v1`.
 
 Android draws it with Compose `Canvas` and no new dependency. The render mapper reads the points
-from the current `/data` on every mapping pass, so a data action, request or patch redraws it. Points
-a later write broke (a non-object, a non-numeric `y`) are skipped rather than failing the frame. The
+from the current `/data` on every mapping pass, so a data action, request or patch redraws it. The mapper skips points
+a later write broke (a non-object, a non-numeric `y`) rather than failing the frame. The
 chart is one accessibility node labelled with its summary ("Line chart, Heart rate, 24 points, min
-58, max 141, latest 72"; "Ring chart, Steps today, 6500 of 10000"); an authored
+58, max 141, latest 72"; "Ring chart, Steps today, 6500 of 10000"). An authored
 `contentDescription` replaces it, and `observe` reports it. The x labels are visual only. The iOS
 agent advertises the capability too (#14679): it draws the same four variants with Swift Charts and
-describes line, area and bar charts to VoiceOver with an `AXChartDescriptor`; its summary text is
+describes line, area and bar charts to VoiceOver with an `AXChartDescriptor`. Its summary text is
 checked against the shared `chart-variants.json` fixture.

@@ -33,10 +33,12 @@ Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
 and its retry window is judged against the lane cap at its own end time. A
 wall-budget timeout whose own attempt calibration reaches
 `AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN` (default 2.5x) skips the same-runner retry
-and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`, a `TypeScript Code Coverage (N/2)` part) qualifies
-itself: its last step (`if: failure()`) runs
-`scripts/ci/rerun-contended-runner.sh dispatch` against the job's own step summary,
-and on attempt 1 only dispatches the `workflow_dispatch` Rerun contended runner
+and reports `RUNNER-CONTENDED`.
+
+A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`, a `TypeScript Code Coverage (N/2)` part) qualifies
+itself. Its last step (`if: failure()`) runs
+`scripts/ci/rerun-contended-runner.sh dispatch` against the job's own step summary.
+On attempt 1 only, that step dispatches the `workflow_dispatch` Rerun contended runner
 workflow (#12758). That workflow waits, bounded, for the run to finish,
 re-verifies from the fetched logs that every failed job is a unit lane carrying
 the marker, then reruns the failed jobs once. Fork PRs have a read-only token, so
@@ -93,9 +95,9 @@ reports these sites if a listed file loses its restore proof.
   restores the single command. Windows host integration runs all existing
   unsafe-tier files in one isolated process beside safe shards that also include
   unlisted files; `AUTOMOBILE_INTEGRATION_TEST_WORKERS=1` restores its single command.
-  Unlike `scripts/prepush-integration-safe.sh`, Windows integration processes are
-  not given isolated `AUTOMOBILE_*` state paths, so a safe-tier file that falls
-  back to a default path can meet the unsafe process; fix a Windows-only flake
+  Unlike `scripts/prepush-integration-safe.sh`, the Windows lane does not give integration processes
+  isolated `AUTOMOBILE_*` state paths. A safe-tier file that falls
+  back to a default path can therefore meet the unsafe process. Fix a Windows-only flake
   that appears only with concurrency in the test or reclassify the file `unsafe`,
   with `AUTOMOBILE_INTEGRATION_TEST_WORKERS=1` as the kill switch.
   Any passthrough argument or non-empty `AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS`
@@ -136,11 +138,11 @@ suppression. Changed-file selection remains Bun's responsibility.
 On Merge's instrumented lane (`scripts/test-ts.sh coverage`) runs as two
 `TypeScript Code Coverage (N/2)` part jobs of two shards each. A 4-core runner
 is already CPU-bound at two instrumented Bun shards, so a third shard on the
-same host does not help; the split halves wall time instead, keeping each shard
+same host does not help. The split halves wall time instead, keeping each shard
 inside its 720 s budget on the slower runner class. Part P
 (`AUTOMOBILE_COVERAGE_PART`/`AUTOMOBILE_COVERAGE_PARTS`) takes every second
 discovered file from offset P-1 and numbers its shards after the earlier
-parts', so the parts interleave like one four-shard lane and their chunk
+parts'. The parts therefore interleave like one four-shard lane and their chunk
 reports and calibration labels never collide. The `TypeScript Code Coverage`
 job joins the parts (`scripts/ci/merge-ts-coverage-parts.sh`) for the badge
 and runs the 100 ms gate over every chunk report. Coverage discovery skips

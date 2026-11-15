@@ -23,8 +23,8 @@ A device without a capability is refused before uploads or show, with a message 
 capability. Device-side verification is the manual run in `skills/manual-test/prototype-acceptance.md`
 ("Data, storage and network").
 
-Behaviour per feature lives in the sections above: a data write bumps the data revision and emits one
-`change` named for the path; storage precedence is the six rules under Storage; the request lifecycle
+Behaviour per feature lives in the sections above. A data write bumps the data revision and emits one
+`change` named for the path. Storage precedence is the six rules under Storage. The request lifecycle
 (`statusKey`, `<into>__meta`, atomic completion, latest-wins cancellation, `prototype_request` event) is
 under Request action.
 
@@ -41,17 +41,21 @@ under Request action.
 
 **Host egress policy.** Host requests refuse localhost names, loopback, unspecified and link-local
 addresses, emulator host aliases, and IPv6 forms embedding those IPv4 destinations.
-SIIT and both NAT64 prefixes use the embedded IPv4 classification;
+SIIT and both NAT64 prefixes use the embedded IPv4 classification.
 Teredo and site-local IPv6 addresses are refused. Every DNS
-answer must be permitted; the connection is pinned to a validated IP while retaining the original
-HTTP authority and TLS hostname. Daemon HTTP ports (including the configured port and fallback
-range) and CtrlProxy's port are refused on private addresses; public addresses remain permitted on
-those ports. Redirects are checked at each hop (at most five); HTTPS-to-HTTP redirects are refused.
+answer must be permitted. The host pins the connection to a validated IP while retaining the original
+HTTP authority and TLS hostname.
+
+Daemon HTTP ports (including the configured port and fallback
+range) and CtrlProxy's port are refused on private addresses. Public addresses remain permitted on
+those ports. The host checks redirects at each hop (at most five) and refuses HTTPS-to-HTTP redirects.
 An origin change removes all authored headers. Host, connection/framing, Cookie, Origin and Proxy-
 headers and Expect are not accepted from requests. Other RFC1918 destinations remain permitted
 on ordinary ports, including `10.1.2.3` and `192.168.1.10`.
 A policy refusal is `blocked_destination`: the destination
-is not permitted. The same policy applies to host WebSocket and SSE channel transports.
+is not permitted.
+
+The same policy applies to host WebSocket and SSE channel transports.
 The WebSocket handshake connects to the validated pinned address with the authored Host and TLS
 server name, ignores proxy environment variables, and never follows a redirect: a handshake
 redirect is `handshake_failed`. SSE redirects are re-checked at each hop. A channel policy refusal
@@ -68,14 +72,14 @@ headers omit content-encoding and content-length because they describe the encod
 
 **Cleartext and transport security.** CtrlProxy declares `INTERNET` and a `network_security_config`
 with cleartext permitted, so `http://` works for `via: "device"` on Android. On iOS, `via: "device"`
-runs inside the target app and obeys its App Transport Security: IP addresses are exempt (`localhost`
-is too, but the agent's destination policy refuses it), other cleartext hosts fail with `network` and a message pointing to `via: "host"` or `https://`.
+runs inside the target app and obeys its App Transport Security. IP addresses are exempt (`localhost`
+is too, but the agent's destination policy refuses it). Other cleartext hosts fail with `network` and a message pointing to `via: "host"` or `https://`.
 `via: "host"` is not subject to ATS.
 
 **Saved prototypes.** A saved Android prototype (see
 [Saved prototypes on the Android home screen](prototype-ux-saved.md#saved-prototypes-on-the-android-home-screen)) supports
 `request` actions with `via: "device"`, under the same
-[device destination policy](prototype-ux-patch.md#device-destination-policy). `via: "host"` has no host to run it there, so it fails with an `invalid_request`
+[device destination policy](prototype-ux-patch.md#device-destination-policy). A `via: "host"` request has no host to run it there, so it fails with an `invalid_request`
 error whose message points to `via: "device"`.
 
 **Limits.**
@@ -125,9 +129,9 @@ the first container has depth 1. The existing TypeScript
 edge alignment aligns the same node edge to the target edge, centered along the
 other axis, preserving authored node dimensions, then applies the offset.
 
-The host resolves selectors against the app hierarchy with the prototype excluded,
-using tap's resolution (a text match is promoted to its clickable owner) with
-`unique` selection, and converts the element's px bounds to dp once with the
+The host resolves selectors against the app hierarchy with the prototype excluded.
+It uses tap's resolution (a text match is promoted to its clickable owner) with
+`unique` selection. It converts the element's px bounds to dp once with the
 display density the capture reports (`px * 160 / densityDpi`). Resolution happens at
 show, not live. A missing, ambiguous (candidates listed), empty or off-screen element
 fails the call before anything is shown. The result reports `anchors` (each anchored
@@ -142,19 +146,19 @@ unresolved. A host only sends anchors to a CtrlProxy advertising `prototype_anch
 older APKs decode and ignore them, so the host refuses the show there. Element anchors
 resolve against the default display (another `display` is refused). On an iOS simulator
 the injected prototype agent positions anchors too, advertising the same
-`prototype_anchor_v1` capability in its handshake; there, hierarchy bounds and spec sizes
+`prototype_anchor_v1` capability in its handshake. There, hierarchy bounds and spec sizes
 are both points, so nothing is converted (see the
 [iOS prototype agent](../ios/prototype-agent-components.md#anchors)).
 
-The renderer lays an anchored node at its screen rectangle by subtracting the window's
+The renderer lays an anchored node at its screen rectangle. It subtracts the window's
 screen origin and the node's own position inside the window (cutout, system bars, the
-fullscreen host row, safe-area and authored padding). An anchored node below the root
-is drawn in a window-level layer above the author tree (modal content: above its modal),
-so its parent neither reserves a slot for it nor clips it, and its touch target and
-accessibility bounds are where it is drawn (#10803). It is shown while all its
-ancestors are; it does not inherit their opacity. Cover sizes the
-node to the bounds, ignoring authored width/height. Window size is determined by
-placement/content, not by implicitly resizing to an anchor:
+fullscreen host row, safe-area and authored padding). The renderer draws an anchored node below the root
+in a window-level layer above the author tree (modal content: above its modal).
+Its parent neither reserves a slot for it nor clips it, and its touch target and
+accessibility bounds match where it appears (#10803). It shows while all its
+ancestors show, but it does not inherit their opacity. Cover sizes the
+node to the bounds, ignoring authored width/height. Placement and content set window size,
+not implicit resizing to an anchor:
 
 - fullscreen and sheet windows take anchors on any node; content outside the window
   (above a bottom sheet, or under the fullscreen host row) is clipped;

@@ -40,16 +40,16 @@ from the Material 3 baseline scheme with `theme.colors` overrides (flat, then pe
 `theme.colors.seed` or `source: device` makes the device derive its own scheme, so only the roles
 the spec overrides are known then, and text using any other role is not checked. The background
 starts at the `surface` role and follows authored `style.background` values, compositing
-translucent ones. Under a `gradient`, a `style.alpha`, or a component that paints its own surface
+translucent ones. A `gradient`, a `style.alpha`, or a component that paints its own surface
 (`card`, `dialog`, `bottomSheet`, `snackbar`, `topAppBar`, `bottomNav`, `tabBar`, `button`, `fab`,
-`chip`) the background is unknown and contrast is not checked. `styleWhen` overrides are not
+`chip`) makes the background unknown. The lint then skips contrast. `styleWhen` overrides are not
 evaluated.
 
 ### Pseudo-locale (#14126)
 
 `show` takes `pseudoLocale: true`. The device receives a copy of the spec in which every `text`,
 `label`, `placeholder`, `headline`, `title`, `supporting`, `supportingText`, `trailingText`, check `message` and span `text` is
-accented, padded by about 40% and wrapped in `[ ]`, so truncation and clipping are visible without a
+accented, padded by about 40% and wrapped in `[ ]`. Truncation and clipping then show without a
 translation. `{key}`, `{data:/pointer}` and `{item.field}` bindings are left intact, as are
 `contentDescription`, state, data, request bodies, `emit` context and payload, `repeat` and option `value`s. The authored
 spec is what status, `patch` and the accessibility lint see, so `patch` ops (other than a
@@ -118,9 +118,8 @@ Only the rule table is shared; walkers and model decoders are independent. Neith
 Zod or kotlinx.serialization exception messages. Human error messages describe
 the failure; exact path parity is the shared contract.
 
-JSON supplied as an already-decoded TypeScript value is measured as compact
-JSON, while string input measures original bytes. Only JSON-representable values
-are accepted. Duplicate JSON object keys must be avoided by authors; standard
+The validator measures JSON supplied as an already-decoded TypeScript value as compact
+JSON, while string input measures original bytes. It accepts only JSON-representable values. Authors must avoid duplicate JSON object keys. Standard
 JSON decoders retain the last value. They are not unknown fields.
 
 ## Worked examples
@@ -248,9 +247,9 @@ the exact byte boundary (whitespace included) and the emit payload boundary. Fix
 pinned to LF for Windows; no binary assets are included. The worked examples above are committed as
 `doc-example-N.json` fixtures and `test/parity/prototypeSpec.test.ts` asserts they match this page.
 
-Reference concept slices live in `test/fixtures/prototype-concepts/<concept>/`: `today.json` (a
+Reference concept slices live in `test/fixtures/prototype-concepts/<concept>/`. Each holds `today.json` (a
 whole concept app written only with capabilities Android and iOS both advertise, with literal `data`
-in place of a mock backend), `concept.json` (`{issue, name, capabilities}`, the gate capabilities the
+in place of a mock backend). It also holds `concept.json` (`{issue, name, capabilities}`, the gate capabilities the
 three strict policies must derive) and a `README.md` listing every required capability and each
 workaround or dead end with its spec path. The TypeScript, Kotlin and Swift suites load every concept
 directory; TypeScript also requires a `testTag` on every interactive node, a spec `id` of

@@ -16,15 +16,24 @@ Advertises `prototype_data_model_v1` for the shared
 an agent without it, before uploads or show. Core resolves bindings once per show: path repeats become
 projected literal items, text placeholders scalar text, data conditions constants.
 
-Decode order: guard data; refuse non-object authored children; two independent node budgets (ordinary
-nodes and nonempty literal-repeat instances use the expanded budget; path-bound, empty or malformed
-templates use the authored-template budget once) and depth limit; guard
-`MAX_PROTOTYPE_REPEAT_PATH_CELLS` in container pre-order; check substituted text against the per-field
-limit and the 4,194,304 UTF-16 rebuilt-text total per show (inside a repeat, a data-resolved field is
-charged once per item even without repeat placeholders; literal fields and state placeholders are not
-charged); refuse nested repeats; resolve with projected items cached per pointer; guard the resolved
-tree; expand repeats. State placeholders are clamped to the shared UTF-16 substituted-text limit. State
-interpolation then uses the ordinary expanded tree. `repeat.key` is accepted but rows keep positional
+Decode order:
+
+1. Guard data.
+2. Refuse non-object authored children.
+3. Apply two independent node budgets and the depth limit. Ordinary
+   nodes and nonempty literal-repeat instances use the expanded budget. Path-bound, empty or malformed
+   templates use the authored-template budget once.
+4. Guard `MAX_PROTOTYPE_REPEAT_PATH_CELLS` in container pre-order.
+5. Check substituted text against the per-field
+   limit and the 4,194,304 UTF-16 rebuilt-text total per show. Inside a repeat, the decoder charges a data-resolved field
+   once per item even without repeat placeholders. It does not charge literal fields and state placeholders.
+6. Refuse nested repeats.
+7. Resolve with projected items cached per pointer.
+8. Guard the resolved tree.
+9. Expand repeats.
+
+The decoder clamps state placeholders to the shared UTF-16 substituted-text limit. State
+interpolation then uses the ordinary expanded tree. The decoder accepts `repeat.key`, but rows keep positional
 identity until keyed patching (#11675).
 
 Data is agent-owned and read-only except via the data actions; inspect/status report it with state. Two
@@ -35,13 +44,13 @@ host's traversal order; the strict boundary also enforces the host data byte-cos
 ## Data actions capability
 
 Advertises `prototype_data_actions_v1` for `setData`, `appendData`, `prependData`, `removeData`
-([contract](../android/prototype-ux-actions.md#data-actions-12519)). `PrototypeRepeat` binds a whole `{index}`
+([contract](../android/prototype-ux-actions.md#data-actions-12519)). The `PrototypeRepeat` type binds a whole `{index}`
 path segment and `{item}`/`{index}` values per row at expansion, so row actions arrive concrete.
-`PrototypeSession` resolves `{value}`/`{state}`/`{data}`, applies `PrototypeDataWrite` (twin of the
+The `PrototypeSession` type resolves `{value}`/`{state}`/`{data}` and applies `PrototypeDataWrite` (twin of the
 host's `applyPrototypeDataWrite`: codes `invalid_path`, `invalid_value`, `not_found`, `not_array`,
-`limit_exceeded`; `MAX_PROTOTYPE_DATA_WRITE_BYTES`) and rebuilds the tree from the authored root with
-`PrototypeSpec.replacingData`, so data text, repeat rows and conditions refresh. A write the tree can't
-be rebuilt for within show limits is refused.
+`limit_exceeded`; `MAX_PROTOTYPE_DATA_WRITE_BYTES`). It then rebuilds the tree from the authored root with
+`PrototypeSpec.replacingData`, so data text, repeat rows and conditions refresh. The session refuses a write when it
+can't rebuild the tree for it within show limits.
 
 The shared prepend contract uses `prependData {path,value}` (one resolved row) and writer/event
 `{op:"prepend",value:[row],maxItems?,revision}` at the written array path. It needs lazy-list,
@@ -54,9 +63,9 @@ row is gone. Prepend, anchoring and per-stack-entry list scroll restore are not 
 until the acceptance run.
 
 A refused write changes and emits nothing and does not stop the rest of the action list. An accepted
-write bumps the id's data revision (monotonic per id, never rewound by re-show; every show is one
-revision, so the first reports 1 as on Android, #13040) and emits one `change` event named by the
-written `/data/...` path (the array for an append) with payload `{op, value?, revision}`; extend/prepend values may be absent when over the emit byte budget, which abandons the host mirror. The counter is shared with `prototype_patch_v1` (#11675): device state writes and
+write bumps the id's data revision. The revision is monotonic per id, and re-show never rewinds it. Every show is one
+revision, so the first reports 1 as on Android (#13040). The write also emits one `change` event named by the
+written `/data/...` path (the array for an append) with payload `{op, value?, revision}`. Extend/prepend values may be absent when over the emit byte budget, which abandons the host mirror. The counter is shared with `prototype_patch_v1` (#11675): device state writes and
 accepted patches take the next revision too.
 
 ## Storage capability
@@ -69,13 +78,13 @@ atomic and the id is percent-encoded into the file name. A file that doesn't dec
 byte limit) is logged, deleted and treated as empty.
 
 `PrototypeStorageCoordinator` is the only code touching a `PrototypeStorageStore`.
-`PrototypeModel.show` calls `prepare` first: `PrototypeStorageRestore` (twin of the host's
-`restorePrototypeStorage`) applies precedence, deletes entries that no longer fit, and hands restored
+The `PrototypeModel.show` method calls `prepare` first. There `PrototypeStorageRestore` (twin of the host's
+`restorePrototypeStorage`) applies precedence and deletes entries that no longer fit. It hands restored
 state/data to `PrototypeSession.show(_:restoredState:)` before first draw (no `change` event, no data
 revision bump). After each transition `sessionChanged` writes moved listed keys on a trailing 400 ms
 debounce (injected `PrototypeClock`); dismissal, next show, `get_prototype_status` and app
 background/end flush immediately. A write that would exceed `MAX_PROTOTYPE_STORAGE_BYTES` still applies
-live, keeps the previous stored value and is listed in `skippedKeys`. `reset: true` does not clear
+live, keeps the previous stored value and is listed in `skippedKeys`. A `reset: true` show does not clear
 storage.
 
 `get_prototype_status` (and standalone `inspect_prototypes`) carries
@@ -86,11 +95,11 @@ The iOS saved prototype is its own app, so `deleteSaved` uninstalls it and its s
 ## Request action capability
 
 Advertises `prototype_network_v1` and `prototype_network_device_v1` for `request`
-([contract](../android/prototype-ux-request.md#request-action-12523)). `PrototypeSession` twins the host's
-`applyPrototypeRequestOutcome`: a tap resolves bindings against committed state/data
-(`PrototypeRequestResolver`, twin of `resolvePrototypeRequest`; `{key}` and `{data:/pointer}` bound in
-one pass so substituted values are never rescanned), moves `statusKey` to `loading` and issues a start
-command. `completeRequest` later writes `into`, then `<into>__meta` (dropping `headers` if over the data
+([contract](../android/prototype-ux-request.md#request-action-12523)). The `PrototypeSession` type twins the host's
+`applyPrototypeRequestOutcome`. A tap resolves bindings against committed state/data
+(`PrototypeRequestResolver`, twin of `resolvePrototypeRequest`). It binds `{key}` and `{data:/pointer}` in
+one pass, so it never rescans substituted values. The tap then moves `statusKey` to `loading` and issues a start
+command. Later, `completeRequest` writes `into`, then `<into>__meta` (dropping `headers` if over the data
 write limit), moves the status key, emits the `prototype_request` event and runs `onSuccess`/`onError`
 in that order. An unbuildable request (unresolvable binding, invalid URL) or a refused one
 (`too_many_in_flight` at 4) completes at once as an error. A newer request to the same `into` cancels
@@ -98,13 +107,15 @@ the older: it writes nothing, leaves the status key, runs no follow-up and repor
 (`durationMs` 0, the session has no clock). Dismissal, a replacing show of another prototype and `reset`
 cancel all; a same-id replace keeps them.
 
-`PrototypeRequestValidator` repeats the host's static rules at show (URL scheme, method, bodies on
-GET/HEAD, `into` naming an object member, `statusKey` naming a declared string state key, header names,
-entry counts, `timeoutMs` 1..30000, follow-up lists 1..32, reserved `prototype_request` emit name,
-`MAX_PROTOTYPE_ACTION_DEPTH`); `PrototypeRepeat` binds `url`, `statusKey`, `into`, header/query strings,
-binding objects and nested follow-up lists per row. Query entries are set in sorted key order (UTF-16
-code units, like JS `sort()`) on every runtime (the Swift decoder holds `query` unordered, so the rule is
-canonical), so the resolved URL and event `url` match the host. The query is edited on raw
+`PrototypeRequestValidator` repeats the host's static rules at show: URL scheme, method, bodies on
+GET/HEAD, and `into` naming an object member. It also checks `statusKey` naming a declared string state key, header names,
+entry counts, `timeoutMs` 1..30000, follow-up lists 1..32, the reserved `prototype_request` emit name and
+`MAX_PROTOTYPE_ACTION_DEPTH`. The `PrototypeRepeat` type binds `url`, `statusKey`, `into`, header/query strings,
+binding objects and nested follow-up lists per row.
+
+Every runtime sets query entries in sorted key order (UTF-16
+code units, like JS `sort()`), so the resolved URL and event `url` match the host. The Swift decoder holds `query` unordered,
+so the rule is canonical. The runtime edits the query on raw
 `&`-separated pieces: a set key replaces its first piece in place (later duplicates removed), new keys
 append, untouched pieces keep spelling (`flag`, `%20`). A string body without an author `Content-Type`
 is `text/plain; charset=utf-8`; other JSON bodies `application/json`.
@@ -118,18 +129,18 @@ tests):
   side-effecting call never runs twice (events still broadcast). Each pending call remembers its owning
   connection (`PrototypeHostRouting`); when it closes its calls end as `network` even if an older
   connection remains. The host's `prototype_response` arrives as an ordinary request line routed to the
-  driver, never replied to. When the device drops a host call (superseded, dismissed, reset, timed out)
-  it sends `{"type":"prototype_request_cancel","requestId"}` to the owner (skipped if gone); the host
+  driver, never replied to. When the device drops a host call (superseded, dismissed, reset, timed out),
+  it sends `{"type":"prototype_request_cancel","requestId"}` to the owner (skipped if gone). The host
   aborts the fetch, frees its slot, sends no reply and ignores a late response. A silent host ends as
   `timeout` after `timeoutMs` + 2 s; no connected host, or the last leaving, ends as `network`. Host side:
   `createPrototypeRequestHost` wired via `attachIosPrototypeRequests`, which also cancels the device's
   requests on connection close.
-- **`via: "device"`.** Core owns the `PrototypeHttpClient` protocol and links no HTTP library; the agent
-  injects `PrototypeURLSessionClient`: a dedicated ephemeral `URLSession` (never `.shared`, so app
-  cookies, cache and credentials are untouched), the contract's 30 s ceiling, `timeoutMs` as a total
-  deadline, stops reading a 2xx body and fails `too_large` past 262144 bytes (or when `Content-Length`
-  announces more; a non-2xx body is never read, so it is `http_error` however large), maps URLSession
-  errors to contract codes, reports duration from task metrics. Tested over a `URLProtocol` stub.
+- **`via: "device"`.** Core owns the `PrototypeHttpClient` protocol and links no HTTP library. The agent
+  injects `PrototypeURLSessionClient`, built on a dedicated ephemeral `URLSession` (never `.shared`, so app
+  cookies, cache and credentials stay untouched). It applies the contract's 30 s ceiling and treats `timeoutMs` as a total
+  deadline. It stops reading a 2xx body and fails `too_large` past 262144 bytes, or when `Content-Length`
+  announces more. It never reads a non-2xx body, so that is `http_error` however large. It maps URLSession
+  errors to contract codes and reports duration from task metrics. Tests run it over a `URLProtocol` stub.
 
 The package has no HTTP library dependency; another client would be a second `PrototypeHttpClient`
 conformance chosen where the agent builds the driver, with no Core change.
@@ -150,11 +161,18 @@ Android doc, [Data, storage and network](../android/prototype-ux-data-network.md
 
 ### Destination policy (#13815)
 
-`via: "device"` requests are checked by `PrototypeEgressPolicy` before starting, against every DNS
-answer, and at each redirect. Refused: `localhost` and `*.localhost`; loopback (`127.0.0.0/8`, `[::1]`),
-unspecified, link-local and multicast addresses and Android emulator host aliases; names with no DNS
-answer or any refused answer, and ambiguous numeric spellings; the daemon's HTTP ports (3000-3010, 8765)
-on private addresses. Other private (RFC1918) and public addresses are permitted. A refusal completes as
+`PrototypeEgressPolicy` checks `via: "device"` requests before starting, against every DNS
+answer, and at each redirect. It refuses:
+
+- `localhost` and `*.localhost`;
+- loopback (`127.0.0.0/8`, `[::1]`),
+  unspecified, link-local and multicast addresses and Android emulator host aliases;
+- names with no DNS
+  answer or any refused answer, and ambiguous numeric spellings;
+- the daemon's HTTP ports (3000-3010, 8765)
+  on private addresses.
+
+Other private (RFC1918) and public addresses are permitted. A refusal completes as
 `blocked_destination`. Neither transport has an allowlist.
 
 **`localhost` on a simulator.** The simulator shares the Mac's network stack, but `localhost`,
@@ -163,9 +181,9 @@ for `via: "host"`, see the Android doc's [host egress policy](../android/prototy
 To reach a Mac service, bind it to a non-loopback interface and use the LAN address on a non-daemon port
 (e.g. `http://192.168.1.10:8080/feed`). Nothing is reversed on iOS (Android uses `adb reverse`).
 
-**App Transport Security.** `via: "device"` is subject to the app's ATS: IP-literal `http://` hosts are
-exempt (as is `localhost`, refused first by the policy); any other cleartext host is blocked
-(`NSURLErrorAppTransportSecurityRequiresSecureConnection`) and completes as a typed `network` error
+**App Transport Security.** Device requests (`via: "device"`) are subject to the app's ATS. IP-literal `http://` hosts are
+exempt (as is `localhost`, which the policy refuses first). ATS blocks any other cleartext host
+(`NSURLErrorAppTransportSecurityRequiresSecureConnection`). The request then completes as a typed `network` error
 telling the author to use `via: "host"` (which runs without ATS) or `https://`. The viewer template sets
 `NSAllowsArbitraryLoads` in `Viewer/Info.plist`, so a viewer runs any URL.
 

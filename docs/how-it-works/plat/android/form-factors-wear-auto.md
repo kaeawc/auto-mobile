@@ -13,29 +13,35 @@ Hierarchy and tap path should match a phone's; the gaps are three Wear-specific 
 
 ## Android Auto (DHU): no-go
 
-The DHU is a host desktop app; the phone's Android Auto app streams the car UI as video over an ADB-forwarded socket (`tcp:5277`), and Car App Library templates are rendered by the host, not the app under test. So the phone's accessibility tree has no car screen, and driving the DHU is desktop automation outside the ADB model. `androidx.car.app.testing` (`TestCarContext`, `ScreenController`) tests templates in unit tests and is the recommended route. AutoMobile can still provision projection headlessly and send head-unit input through the DHU console ([Android Auto projection provisioning](android-auto-projection-provisioning.md)), and reads opted-in apps' templates ([Car App Library template snapshots](car-app-templates.md)).
+The DHU is a host desktop app. The phone's Android Auto app streams the car UI as video over an ADB-forwarded socket (`tcp:5277`), and the host renders Car App Library templates, not the app under test. So the phone's accessibility tree has no car screen, and driving the DHU is desktop automation outside the ADB model. `androidx.car.app.testing` (`TestCarContext`, `ScreenController`) tests templates in unit tests and is the recommended route. AutoMobile can still provision projection headlessly and send head-unit input through the DHU console ([Android Auto projection provisioning](android-auto-projection-provisioning.md)), and reads opted-in apps' templates ([Car App Library template snapshots](car-app-templates.md)).
 
 ## Android Automotive OS: go
 
 ### CtrlProxy setup for the foreground user (#14918)
 
 An automotive image usually has a headless system user, so the driver is a secondary user (often 10).
-`pm grant` and `pm path` default to user 0, `pm list packages` to all users, and `dumpsys accessibility`
-dumps every user's state in id order (so an untargeted read sees user 0's empty one); `settings` already
-follows the current user on Android 10+. When the booted device's `formFactor` is `automotive`,
-`resolveSetupUser` (`src/ctrlProxy/setupUser.ts`) reads `am get-current-user` and CtrlProxy's install
-check, enabled-services read, enable, disable, rebind writes and the local-network grant target that user,
+The commands `pm grant` and `pm path` default to user 0, and `pm list packages` to all users. The command `dumpsys accessibility`
+dumps every user's state in id order, so an untargeted read sees user 0's empty one. The `settings` command already
+follows the current user on Android 10+.
+
+When the booted device's `formFactor` is `automotive`,
+`resolveSetupUser` (`src/ctrlProxy/setupUser.ts`) reads `am get-current-user`. CtrlProxy's install
+check, enabled-services read, enable, disable, rebind writes and the local-network grant then target that user,
 and the rebind health check reads that user's `User state[` block. A device that is not automotive issues
 no extra command and the exact commands it always did. An unreadable user is an `ActionableError` naming
-the user problem. User 0 is the driver only on a build without a headless system user: when an automotive
-device reports user 0, `ro.fw.mu.headless_system_user` (what `UserManager.isHeadlessSystemUserMode()`
-reads) is checked, and on a headless build the read throws `ForegroundUserPendingError`. Runner readiness
-treats that like a missing framework service and retries setup within its budget, so `sys.boot_completed`
-alone never lets CtrlProxy be set up for user 0 before the switch to the driver user. A freshly
+the user problem.
+
+User 0 is the driver only on a build without a headless system user. When an automotive
+device reports user 0, setup checks `ro.fw.mu.headless_system_user` (what `UserManager.isHeadlessSystemUserMode()`
+reads), and on a headless build the read throws `ForegroundUserPendingError`. Runner readiness
+treats that like a missing framework service and retries setup within its budget. So `sys.boot_completed`
+alone never lets CtrlProxy be set up for user 0 before the switch to the driver user.
+
+A freshly
 created AVD can also answer the first setup command with `adb: device still authorizing` before it
-finishes the adb key handshake; readiness retries that within the same budget too, so the
-create-and-boot path does not roll back the new AVD for it. Verified on the API 34 image below; the gate relies on the AVD's form factor, so a
-physical head unit is not covered.
+finishes the adb key handshake. Readiness retries that within the same budget too, so the
+create-and-boot path does not roll back the new AVD for it. This is verified on the API 34 image below. The gate relies on the AVD's form factor, so it does not cover a
+physical head unit.
 
 An AAOS image is a normal Android build with a car SystemUI; app windows are in the accessibility tree.
 

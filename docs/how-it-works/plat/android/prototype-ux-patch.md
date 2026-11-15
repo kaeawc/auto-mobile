@@ -21,12 +21,12 @@ saw, from a landed patch reply or a device `/data` write event, never moving bac
 is absent until one arrives after the show; the device's `inspect` reply has no revision
 of its own, so `inspect` keeps the host's.
 
-Ops apply in order, completely or not at all. `add`, `replace`, `remove` and
-`test` address `/data` or `/data` followed by an RFC 6901 JSON pointer: `~0`
-escapes `~`, `~1` escapes `/`; array indices are canonical non-negative decimal
-integers, and `-` appends for `add` only. Parent paths must exist. `replace`,
-`remove` and `test` require the addressed value to exist. `add`, `replace` and
-`test` carry `value`; `remove` does not. State ops address exactly
+Ops apply in order, completely or not at all. The ops `add`, `replace`, `remove` and
+`test` address `/data` or `/data` followed by an RFC 6901 JSON pointer. In the pointer, `~0`
+escapes `~` and `~1` escapes `/`. Array indices are canonical non-negative decimal
+integers, and `-` appends for `add` only. Parent paths must exist. The ops `replace`,
+`remove` and `test` require the addressed value to exist. The ops `add`, `replace` and
+`test` carry `value`, and `remove` does not. State ops address exactly
 `/state/<key>`, where keys match `[A-Za-z_][A-Za-z0-9_]{0,63}` and values are
 strings, booleans or finite numbers.
 
@@ -35,9 +35,9 @@ one node in the tree, cannot be the root or inside a repeat, and the replacement
 must keep that id. Replacement nodes cannot contain `use` nodes or element
 anchors. Inline the component, use a bounds anchor, or use `show`.
 
-The agent writes data; the user writes state. Data-only patches and patches
-containing only data ops and `replaceNode` ignore `baseRevision`, until the device has written the
-prototype's data with a data action (see [Data actions](prototype-ux-actions.md#data-actions-12519)): from then on a
+The agent writes data, and the user writes state. Data-only patches and patches
+containing only data ops and `replaceNode` ignore `baseRevision`. That holds until the device has written the
+prototype's data with a data action (see [Data actions](prototype-ux-actions.md#data-actions-12519)). From then on a
 `/data` op also needs `baseRevision` and conflicts with newer overlapping device writes. Any state
 op, including `test`, requires `baseRevision`. A device supporting the capability
 must refuse the whole patch with `conflict` if the user changed a touched state
@@ -51,23 +51,29 @@ runs the full validator before sending. Errors preserve deterministic paths.
 The host validates state ops against the agent-declared state and leaves value
 comparison for `/state` `test` to the device; its copy cannot know user edits.
 
-Patches are FIFO per device, one in flight at a time; a pending show makes patch refuse as busy, and shows are not delayed by patches. If a dispatched show and an acknowledged patch overlap, their device-side order is unknown: the host forgets its spec, warns, and requires a further successful show before patching. A failed dispatched show, dismissed event, successful dismiss, session release, device removal or unbinding also ends tracking. Inspect retains each reported tracked id and drops missing ids (adopted siblings do not end tracking); a fifth-surface refusal with `replaceOthers: false` retains the acknowledged specs. A timeout or connection loss after dispatch is indeterminate and requires a new show; a failure before dispatch keeps the tracked copy; an atomic device refusal leaves it unchanged. A successful patch refreshes shown status data and sets the entry's `lastAction` to `patch` (kept by a later `inspect`, reset by the next `show`), without changing `lastResult`, timestamps or event snapshots.
+Patches are FIFO per device, one in flight at a time. A pending show makes patch refuse as busy, and patches do not delay shows. If a dispatched show and an acknowledged patch overlap, their device-side order is unknown. The host then forgets its spec, warns, and requires a further successful show before patching. A failed dispatched show, dismissed event, successful dismiss, session release, device removal or unbinding also ends tracking.
+
+Inspect retains each reported tracked id and drops missing ids (adopted siblings do not end tracking); a fifth-surface refusal with `replaceOthers: false` retains the acknowledged specs. A timeout or connection loss after dispatch is indeterminate and requires a new show; a failure before dispatch keeps the tracked copy; an atomic device refusal leaves it unchanged. A successful patch refreshes shown status data and sets the entry's `lastAction` to `patch` (kept by a later `inspect`, reset by the next `show`), without changing `lastResult`, timestamps or event snapshots.
 
 ## Re-showing a prototype
 
-`show_prototype` always carries a full spec; `patch_prototype` is the gated content/state/node contract (#11675).
+`show_prototype` always carries a full spec, and `patch_prototype` is the gated content/state/node contract (#11675).
 When `spec.id` is the prototype already on screen and `reset` is absent or false,
-the device replaces it in place: it keeps the display the prototype is on (the
-request's `displayId` is ignored), and each pager keeps its settled page,
-matched by pager id and clamped to the new page count. The new spec's `state`
-is authoritative; values the user changed by tapping or typing are not carried
-over unless the spec includes them, except the keys its `storage` block lists, whose
-stored values replace the spec's (see [Storage](prototype-ux-storage.md#prototype-spec-storage)). The window content is rebuilt from the new
-runtime, so a text field shows the spec's value and edits still in flight from
-the previous showing are dropped. Event sequences continue per id, as for any
-re-show. `reset: true`, a different id, or nothing on screen is a fresh show:
-pages start from the spec and the requested display is used. `reset` is only
-sent when true; a device that predates it ignores the field and always starts
+the device replaces it in place. It keeps the display the prototype is on and ignores the
+request's `displayId`. Each pager keeps its settled page,
+matched by pager id and clamped to the new page count.
+
+The new spec's `state`
+is authoritative. The device drops values the user changed by tapping or typing
+unless the spec includes them. The exception is the keys the spec's `storage` block lists, whose
+stored values replace the spec's (see [Storage](prototype-ux-storage.md#prototype-spec-storage)). The device rebuilds the window content from the new
+runtime, so a text field shows the spec's value and the device drops edits still in flight from
+the previous showing. Event sequences continue per id, as for any
+re-show.
+
+A fresh show happens on `reset: true`, a different id, or nothing on screen:
+pages start from the spec and the device uses the requested display. The host sends `reset` only
+when true. A device that predates it ignores the field and always starts
 fresh. The host reports a `display` that a same-id show ignored as a `warning`
 on the tool result.
 

@@ -181,9 +181,15 @@ export class TargetFocus {
       ...this.deps.target.prototypeIdentifiers,
       ...(result.identifiers ?? []),
     ];
-    // A miss that lists the on-screen inputs is not a scroll problem (#17463).
+    // A miss that lists the on-screen inputs, or names the visible non-input the selector
+    // matched, is not a scroll problem (#17463, #18351).
     const failure = result[tapFocusFailure];
-    if (!result.success && failure && failure !== "not-found-inputs-listed") {
+    if (
+      !result.success &&
+      failure &&
+      failure !== "not-found-inputs-listed" &&
+      failure !== "matched-non-input"
+    ) {
       return {
         ...result,
         error: `${result.error} ${FOCUS_SCROLL_HINT}`,

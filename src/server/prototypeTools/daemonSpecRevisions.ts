@@ -1,3 +1,4 @@
+import type { VirtualPrototypeInputs } from "../../features/prototype/headless/VirtualPrototypeInputs";
 import type { PrototypeShownSpecs } from "../../features/prototype/PrototypeShownSpecs";
 import { PrototypeSpecRevisions } from "../../features/prototype/prototypeSpecRevisions";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -27,4 +28,18 @@ export function setDaemonPrototypeShownSpecsReader(
 /** Specs the shared daemon host has seen acknowledged, for read-only resources (#13729). */
 export function daemonPrototypeShownSpecs(): PrototypeShownSpecs | undefined {
   return shownSpecsReader?.();
+}
+
+/** Set by the runtime module when it is evaluated; until then no virtual device exists. */
+let virtualInputsReader: (() => VirtualPrototypeInputs | undefined) | undefined;
+
+export function setDaemonVirtualPrototypeInputsReader(
+  reader: () => VirtualPrototypeInputs | undefined,
+): void {
+  virtualInputsReader = reader;
+}
+
+/** Interaction tools on the daemon host's headless virtual device (#18360), once it exists. */
+export function daemonVirtualPrototypeInputs(): VirtualPrototypeInputs | undefined {
+  return virtualInputsReader?.();
 }

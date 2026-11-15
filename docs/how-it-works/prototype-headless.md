@@ -64,14 +64,50 @@ default.
 
 ## Event dispatch
 
-`VirtualPrototypeDevice.dispatch({id, kind, name, payload?, state?, pages?})` is the single entry
-for user input: it merges state and pages, allocates the next sequence and pushes a
-`prototype_event` to the transport's listeners, so the event coordinator buffers it and awaitEvent
-returns it as from hardware. The keys an input changes are stamped with its revision. Nothing calls
-`dispatch` yet: the web page runs its actions in the browser and posts nothing back, and interaction
-tools (`tapOn`, `inputText`) are not routed to the virtual device. Timers and `simulate`
-(`prototype_timers_v1`) are unsupported, and there is no project export.
+`VirtualPrototypeDevice.dispatch({id, kind, name, payload?, state?, pages?, stacks?, context?})`
+is the single entry for user input. It merges state, pages and stacks, allocates the next
+sequence and pushes a `prototype_event` to the transport's listeners, so the event coordinator
+buffers it and awaitEvent returns it as from hardware. The keys an input changes are stamped with
+its revision. A `dismissed` event removes the prototype.
+
+## Interaction tools
+
+In headless mode `tapOn` and `sendKeys` register `shouldEnsureDevice: () => !headless` and a
+`nonDeviceHandler` (`src/server/interactionTools/headlessPrototypeInput.ts`). They act on the daemon
+host's `VirtualPrototypeInputs`, which the prototype runtime publishes through
+`setDaemonVirtualPrototypeInputsReader`. Before the first prototype call there is none, and both
+tools fail with "call prototype show first".
+
+`VirtualPrototypeInputs` reads `snapshots()` (newest prototype first) and plans with
+`virtualPrototypeInteraction.ts`:
+
+- **Target.** A depth-first walk of what a device would draw: nodes whose `visibleWhen` holds
+  (`conditionHolds`; undecidable parts count as visible), open `openWhen` overlays, the current
+  pager page and the top stack screen. Repeat templates are skipped. A dialog's `confirm` and
+  `dismiss` buttons are targets too. An exact, case-insensitive match on `text`, `label`,
+  `headline`, `title`, `placeholder` or `contentDescription` wins over a substring match.
+  `elementId`/`testTag` match `id` or `testTag`. The handler is the nearest ancestor-or-self with
+  an interaction. A disabled handler (`enabledWhen`), a toggle on a non-boolean key, or no handler
+  at all is `handled: false` and raises nothing.
+- **Interaction.** `textField`/`searchBar` with a `stateKey` take focus. `switch`, `checkbox` and
+  `chip` with a `stateKey` toggle it. A dialog button closes its `openWhen`. Any node with
+  `onTap` runs it.
+- **Order.** This follows `PrototypeRuntime.control` and `run`. The control's own write and its
+  `change` come first, then the actions in order. `emit` carries the state at that point, and one trailing
+  `change` names every key the list changed. `setPage` raises `page_changed`, then its `stateKey`
+  `change`. Stack actions raise `screen_changed`. `dismiss` stops the list and raises
+  `dismissed {reason: "user"}` with no trailing change.
+- **Refusal.** `virtualInteractionRefusal` checks the whole list before anything runs. It refuses
+  actions outside the runnable set, `emit.requireValid`, emit context other than
+  `state`/`page`/`data`/`value`, non-scalar `setState` values, and stack actions with `params` or on
+  a stack with `routes`.
+- **Text.** `typeText` and `clearText` write the focused key as one control write (one `change`),
+  truncated to the field's `maxLength`. `hideKeyboard` and dismissal clear focus.
+
+Timers and `simulate` (`prototype_timers_v1`) are unsupported. There is no screenshot, `tapAt` or
+node bounds, because nothing lays the page out without a browser, and there is no project export.
 
 ## Background
 
 - [Headless prototype follow-ups](../devlog/2026-11-11-prototype-headless-follow-ups.md)
+- [Headless taps run on the host, not in a browser](../devlog/2026-11-15-prototype-headless-input.md)

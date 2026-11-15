@@ -19,6 +19,7 @@ import type { PrototypeSpecRevisions } from "../../features/prototype/prototypeS
 import {
   daemonPrototypeSpecRevisions,
   setDaemonPrototypeShownSpecsReader,
+  setDaemonVirtualPrototypeInputsReader,
 } from "./daemonSpecRevisions";
 import { MAX_MOCK_DOCUMENT_BYTES } from "../../features/prototype/prototypeMockSchema";
 import { mockBackendOutput } from "./mockBackend";
@@ -107,6 +108,7 @@ import {
 } from "./inspection";
 import { performPrototypeAction } from "./mutation";
 import { VirtualPrototypeDevice } from "../../features/prototype/headless/VirtualPrototypeDevice";
+import { VirtualPrototypeInputs } from "../../features/prototype/headless/VirtualPrototypeInputs";
 import {
   headlessPrototypeRefusal,
   isHeadlessPrototypeMode,
@@ -373,6 +375,8 @@ interface PrototypeHost {
   mocks: PrototypeMockBackendRegistry;
   /** The headless virtual device (#17974); holds state only while headless calls use it. */
   virtualDevice: VirtualPrototypeDevice;
+  /** tapOn and sendKeys on the virtual device (#18360). */
+  virtualInputs: VirtualPrototypeInputs;
   /** Subscribes any lifecycle hook that was not yet available; a no-op once all are active. */
   ensureLifecycle(): void;
   dispose(): void;
@@ -406,6 +410,8 @@ function createPrototypeHost(
     dependencies.lifecycle ?? defaultPrototypeLifecycle(),
     events,
   );
+  const virtualDevice =
+    dependencies.virtualDevice ?? new VirtualPrototypeDevice(prototypeClock(dependencies));
   let disposed = false;
   return {
     store,
@@ -421,8 +427,8 @@ function createPrototypeHost(
       channels,
     },
     mocks,
-    virtualDevice:
-      dependencies.virtualDevice ?? new VirtualPrototypeDevice(prototypeClock(dependencies)),
+    virtualDevice,
+    virtualInputs: new VirtualPrototypeInputs(virtualDevice),
     ensureLifecycle: cleanup.ensureSubscribed,
     dispose: () => {
       if (!disposed) {
@@ -467,6 +473,7 @@ export function daemonPrototypeShownSpecs(): PrototypeShownSpecs | undefined {
   return daemonPrototypeHost?.store.shownSpecs;
 }
 setDaemonPrototypeShownSpecsReader(daemonPrototypeShownSpecs);
+setDaemonVirtualPrototypeInputsReader(() => daemonPrototypeHost?.virtualInputs);
 
 /**
  * A private host is disposed with its registration. The shared host is disposed only by the

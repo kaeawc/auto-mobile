@@ -19,6 +19,7 @@ import type { PrototypeAssetUpload } from "../prototypeAssets";
 import type { PrototypeData, PrototypeJson, PrototypeSpec } from "../prototypeSpec";
 import type { PrototypeShowOverrides } from "../PrototypeTransport";
 import { VIRTUAL_PROTOTYPE_CAPABILITIES } from "./headlessPrototypeMode";
+import type { VirtualPrototypeSnapshot, VirtualPrototypeStep } from "./virtualPrototypeInteraction";
 import contract from "../../../../schemas/prototype-spec-contract.json";
 
 /** Per-id counters survive dismissal and replacement, as the controller ledger does. */
@@ -50,6 +51,9 @@ export interface VirtualPrototypeInput {
   /** State keys the input changed, merged into the prototype's state before the event is sent. */
   state?: PrototypeState;
   pages?: Record<string, number>;
+  /** Stack navigation the input left, replacing each named stack's snapshot. */
+  stacks?: NonNullable<PrototypeEvent["stacks"]>;
+  context?: Record<string, PrototypeJson>;
 }
 
 const SAVED_REFUSAL: PrototypeResult = {
@@ -468,6 +472,9 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
     if (input.pages !== undefined) {
       entry.pages = { ...entry.pages, ...input.pages };
     }
+    if (input.stacks !== undefined) {
+      entry.stacks = { ...entry.stacks, ...structuredClone(input.stacks) };
+    }
     entry.ledger.lastSequence += 1;
     const event: PrototypeEvent = {
       type: "prototype_event",
@@ -477,12 +484,54 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
       kind: input.kind,
       name: input.name,
       payload: input.payload ?? null,
+      ...(input.context === undefined ? {} : { context: structuredClone(input.context) }),
       state: { ...entry.state },
       pages: { ...entry.pages },
       ...(Object.keys(entry.stacks).length ? { stacks: structuredClone(entry.stacks) } : {}),
     };
+    if (input.kind === "dismissed") {
+      // The device removes a prototype the user dismissed before its terminal event arrives.
+      this.shown.delete(input.id);
+    }
     [...this.listeners].forEach((listener) => listener(event));
     return true;
+  }
+
+  /**
+   * What each shown prototype holds, newest first: the one on top is searched first by a tap.
+   * Copies, so a caller planning an input cannot change the device.
+   */
+  snapshots(): { id: string; snapshot: VirtualPrototypeSnapshot }[] {
+    return [...this.shown.entries()].reverse().map(([id, entry]) => ({
+      id,
+      snapshot: structuredClone({
+        spec: entry.spec,
+        state: entry.state,
+        pages: entry.pages,
+        stacks: entry.stacks,
+      }),
+    }));
+  }
+
+  /** Delivers an input's events in order; returns each event's sequence. */
+  dispatchSteps(id: string, steps: readonly VirtualPrototypeStep[]): number[] {
+    return steps.flatMap((step) => {
+      const entry = this.shown.get(id);
+      const stateChanged =
+        entry !== undefined &&
+        Object.keys(step.state).some((key) => entry.state[key] !== step.state[key]);
+      const delivered = this.dispatch({
+        id,
+        kind: step.kind,
+        name: step.name,
+        payload: step.payload,
+        ...(stateChanged ? { state: step.state } : {}),
+        pages: step.pages,
+        stacks: step.stacks,
+        ...(step.context === undefined ? {} : { context: step.context }),
+      });
+      return delivered ? [entry!.ledger.lastSequence] : [];
+    });
   }
 
   /** Ids the virtual device is showing, oldest first. */

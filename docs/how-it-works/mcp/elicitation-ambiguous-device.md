@@ -52,8 +52,8 @@ One flow, an `ambiguous_device_target` refusal, may ask a supervising client whi
   question in every era: the legacy wrapper, the MRTR wrapper and the task path return the refusal
   without asking. The refusal is recorded with outcome `disabled`.
 - A legacy connection remembers a `decline` or `cancel` per candidate set (sorted, de-duplicated
-  device ids) in a `DeclineMemory` created once per `installToolCallDispatcher`, i.e. per stateful
-  client connection; the next identical ambiguity is recorded as `remembered` and not asked. `accept`,
+  device ids) in a `DeclineMemory`. The dispatcher creates one per `installToolCallDispatcher`, i.e. per stateful
+  client connection. The next identical ambiguity is recorded as `remembered` and not asked. `accept`,
   `timeout`, `invalid` and `error` are not remembered, and a different set asks again. Modern requests
   are stateless and remember nothing.
 
@@ -74,7 +74,7 @@ Every ambiguous-device refusal on a call without `deviceId` produces one `Elicit
   the request envelope (modern).
 - `era`: `legacy` push or `modern` MRTR/task.
 - `outcome`: `not_offered` (client cannot be asked: the denominator for the rest), `asked` (modern
-  question handed back; the answer arrives on a later request), then `accept`, `decline`, `cancel`,
+  question handed back; the answer arrives on a later request). The answer outcomes are `accept`, `decline`, `cancel`,
   `timeout` (legacy only), `invalid` (accepted an unoffered device, malformed or missing answer) or
   `error` (the ask itself failed).
 - `latencyMs`: ask to answer on the injected timer, for legacy asks and modern answers; absent for
@@ -89,7 +89,7 @@ so tests assert records with a fake.
 ### Real-client conformance
 
 `test/server/claudeCodeElicitation.integration.test.ts` drives a real Claude Code (at least 2.1.311, named by
-`AUTOMOBILE_CLAUDE_BIN`; skipped without one, and a `claude` on PATH is never spawned) with a loopback stand-in for the
+`AUTOMOBILE_CLAUDE_BIN`). It skips without one and never spawns a `claude` on PATH. It pairs the client with a loopback stand-in for the
 Anthropic API against a stdio stub built on the production dispatcher. It runs in the advisory nightly
 job `claude-code-elicitation-conformance` against a pinned binary and never touches a device. Measured
 against 2.1.311: headless `-p` declares `elicitation: {form, url}` on `initialize` and answers the

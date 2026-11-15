@@ -2,8 +2,8 @@
 
 How a mirrored device screen converts a **viewport point** (a pixel clicked or dragged on the
 rendered canvas) into a **device coordinate** for the typed daemon input helpers (`inputTap`,
-`inputSwipe`), and the client-side policies that decide which pointer and keyboard gestures
-become daemon input (#1099). A third-party daemon client can reproduce all of it without reading
+`inputSwipe`). The page also covers the client-side policies that decide which pointer and
+keyboard gestures become daemon input (#1099). A third-party daemon client can reproduce all of it without reading
 Compose code; for the daemon itself see the [daemon overview](../daemon.md). The reference implementation is the Compose-free
 `DeviceScreenCoordinateMapper` in the `desktop-domain` module
 (`dev.jasonpearson.automobile.desktop.domain`); the desktop inspector's
@@ -16,9 +16,9 @@ A device-screen view honors one of two modes (`DeviceScreenControlMode`):
 - **Inspector** (default) — a click selects the deepest UI element under the
   cursor and hover highlights elements. Existing consumers (including the Android IDE plugin,
   which shares `desktop-core`) stay in this mode.
-- **Control** — a click maps to a device coordinate forwarded as a tap, a drag
+- **Control** — a click maps to a device coordinate forwarded as a tap, and a drag
   maps to a start/end pair forwarded as a swipe (see
-  [Drag-to-swipe policy](#drag-to-swipe-policy)), and a keystroke received **while
+  [Drag-to-swipe policy](#drag-to-swipe-policy)). A keystroke received **while
   the view holds focus** maps to a button press, a discrete key or typed text (see
   [Keyboard forwarding policy](#keyboard-forwarding-policy)). Element selection and
   hover highlighting are suppressed.
@@ -153,7 +153,7 @@ pinned at drag start. A snapshot arriving mid-drag must not rescale the gesture.
   gesture when zoomed out).
 - In the point space, `24` sits just above both platforms' touch slop. A pixel
   frame publishes the matching finite, positive `nativeScale` on both its
-  hierarchy and screenshot messages; the daemon divides by the same scale before
+  hierarchy and screenshot messages. The daemon divides by the same scale before
   an iOS gesture reaches the point-based runner, preserving 24 points at every
   scale. Android publishes `nativeScale: 1`.
 - A pixel frame without matching finite, positive scale metadata is not safe for
@@ -162,8 +162,8 @@ pinned at drag start. A snapshot arriving mid-drag must not rescale the gesture.
 - **Paired declarations are all-or-nothing.** A screenshot/hierarchy pair is a
   canonical-pixel frame only when **both** declare `coordinateSpace: "px"` and
   carry the same finite, positive `nativeScale`. If one omits the declaration or
-  they differ, the client binds neither into the snapshot and uses the legacy
-  aspect-only check and unscaled 24-unit threshold; it never combines the `px`
+  they differ, the client binds neither into the snapshot. It then uses the legacy
+  aspect-only check and unscaled 24-unit threshold, and never combines the `px`
   message's scale with an undeclared counterpart. When both declare pixels but
   scale metadata is absent, invalid or unequal, control fails closed.
 - A below-threshold drag is **not** promoted to a tap: actuating an input the user
@@ -220,9 +220,9 @@ enumerate any one host's keymap.
   in a preview/capture-phase handler will consume Tab, arrows, Enter and Escape
   before the canvas sees them. The host must stand that handler down while the
   canvas holds focus, but only for **keystrokes the policy will claim**, decided
-  per event, not by a blanket "canvas is focused" flag: toolkits do not rerun a
-  preview handler while an unconsumed event bubbles up, so a blanket flag creates a
-  dead zone where a declined keystroke reaches neither device nor host. The
+  per event, not by a blanket "canvas is focused" flag. Toolkits do not rerun a
+  preview handler while an unconsumed event bubbles up. A blanket flag therefore
+  creates a dead zone where a declined keystroke reaches neither device nor host. The
   reference client asks `DeviceControlSession.wouldForwardKey` (the same decision
   as dispatch); chords answer "no", so chorded host shortcuts keep working.
 - Control mode is **inert without a frame snapshot** (same fail-closed rule as
@@ -266,7 +266,7 @@ therefore be forwarded to the device on Windows.
 
 A client may opt a chord in with `forwardedChords` (default **empty**). Entries
 match a device key **or a produced character**, case-insensitively (letter chords
-like Ctrl-S have no device key), and each names the **exact chord-modifier set**
+like Ctrl-S have no device key). Each names the **exact chord-modifier set**
 (`ctrl`/`alt`/`meta`) it forwards, so `OfCharacter('s', ctrl = true)` forwards
 Ctrl-S only; Meta-S and Alt-S stay with the host. Shift is not part of the match.
 
@@ -314,7 +314,7 @@ Applied in this order:
   error (`append cannot type "A" with Android key events`) surfaced through the
   normal error path.
 - `Escape` is the only key bound to a device _button_ (matches Android's hardware
-  ESC mapping; `pressButton` works on both platforms). `home`, `recent`, `power`,
+  ESC mapping; `pressButton` works on both platforms). The buttons `home`, `recent`, `power`,
   `volume_up`, `volume_down`, `menu` have no unambiguous key (Home = "line start"
   elsewhere) and belong on explicit on-screen affordances.
 
@@ -335,9 +335,9 @@ Applied in this order:
 - Keyboard, text and button inputs share the **same** ordered, bounded dispatch
   queue as taps and swipes, and a successful keystroke starts the same post-input
   refresh wait. An ignored keystroke starts no wait and shows no error.
-- **Consumption is not delivery.** A keystroke the policy accepted is consumed even
-  if the bounded queue rejected it (the overload error was already surfaced;
-  falling through would type into the host UI). Read the handler's boolean as
+- **Consumption is not delivery.** The view consumes a keystroke the policy accepted
+  even if the bounded queue rejected it (the client already surfaced the overload
+  error; falling through would type into the host UI). Read the handler's boolean as
   "should this event be consumed", not "was this forwarded".
 
 ## Fit-to-viewport sizing
@@ -402,7 +402,7 @@ Policies are pure Kotlin (no Compose or daemon), unit tested directly.
 ## Which frame the mapping runs against
 
 This document defines the mapping, not _which_ frame a control client may map
-against. A correctly mapped coordinate through a stale frame taps the wrong pixel:
-use one coherent screenshot-and-hierarchy snapshot from the selected device, pin
+against. A correctly mapped coordinate through a stale frame taps the wrong pixel.
+Use one coherent screenshot-and-hierarchy snapshot from the selected device, pin
 it for the whole gesture, and wait for a newer coherent frame after dispatch before
 presenting the input as complete.

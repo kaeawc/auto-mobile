@@ -10,8 +10,8 @@ Current facts that design builds on:
 
 - Patches (`PrototypePatch` in `android/protocol`, `PrototypePatch.swift` in
   `AutoMobilePrototypeAgentCore`) write only under `/data` and `/state` (`add`, `replace`, `test`,
-  `remove`); `replaceNode` is the only way to change the node tree. `root`, `window` and `theme` are
-  not patchable and `replaceNode` cannot replace the root; those changes need a whole-spec `show`.
+  `remove`). The `replaceNode` operation is the only way to change the node tree. The `root`,
+  `window` and `theme` fields are not patchable and `replaceNode` cannot replace the root; those changes need a whole-spec `show`.
 - `components` / `use` expansion exists only on the host (`expandPrototypeComponents` in
   `src/features/prototype/prototypeComponents.ts`). Devices receive expanded specs, and the
   ProtoViewer import path accepts only expanded specs.

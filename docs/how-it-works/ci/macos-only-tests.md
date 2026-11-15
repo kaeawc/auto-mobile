@@ -17,8 +17,8 @@ classification enforces it, instead of a guard in each test file.
   cheaply.
 - `scripts/test-ts.sh` skips macOS-only files whenever the host is not macOS:
   `unit`, `changed`, `integration`, `coverage` and the randomized nightly lane.
-  macOS hosts run every file. `AUTOMOBILE_MACOS_ONLY_TESTS=include` runs them
-  anywhere and `skip` drops them even on macOS (to reproduce a Linux lane).
+  Hosts on macOS run every file. Setting `AUTOMOBILE_MACOS_ONLY_TESTS=include` runs them
+  anywhere, and `skip` drops them even on macOS (to reproduce a Linux lane).
   - Lanes that hand Bun an explicit file list (sharded Linux unit lanes, the
     per-file CI integration loop, randomized nightly, coverage) drop the skipped
     files from that list. The skip list is read once at lane start from
@@ -32,9 +32,9 @@ classification enforces it, instead of a guard in each test file.
     Windows.
   - Bun replaces the config's `pathIgnorePatterns` with any
     `--path-ignore-patterns` flag (#15237). A lane that relies on the config
-    therefore carries none: the unit lane's own two patterns
+    therefore carries none. The unit lane's own two patterns
     (`**/*.integration.test.ts`, `test/stress/**`) move into the generated
-    config (`write-bunfig <out> --ignore <glob>`), and lanes that keep their own
+    config (`write-bunfig <out> --ignore <glob>`). Lanes that keep their own
     flags (Windows safe integration shards, the Linux integration filter)
     restate the few macOS-only integration files as flags next to them.
   - Explicit targets (`test-ts.sh unit test/utils/ios-cmdline-tools`) drop the

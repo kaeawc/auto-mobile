@@ -84,7 +84,7 @@ test("native coverage is exactly today's SwiftUI control set", () => {
   ).toEqual(["button", "datePicker", "pasteButton", "slider", "timePicker"]);
 });
 
-for (const doc of ["android/prototype-ux.md", "ios/prototype-agent.md"]) {
+for (const doc of ["android/prototype-ux-theme.md", "ios/prototype-agent-native-look.md"]) {
   test(`design coverage table in ${doc} matches the contract`, () => {
     const prose = readFileSync(
       new URL(`../../../docs/how-it-works/plat/${doc}`, import.meta.url),

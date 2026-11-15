@@ -1,16 +1,16 @@
 # Headless prototype mode
 
-Headless mode runs the `prototype` tool against a virtual device the daemon holds in memory, so
-show, patch, dismiss, status, inspect, awaitEvent, mock backends, the accessibility lint and the
-`automobile:prototype/<id>/web` and `automobile:prototype/native?id=<id>` resources work with no
-adb, emulator or simulator.
+Headless mode runs the `prototype` tool against a virtual device the daemon holds in memory.
+Show, patch, dismiss, status, inspect, awaitEvent, mock backends, the accessibility lint and the
+`automobile:prototype/<id>/web` and `automobile:prototype/native?id=<id>` resources then work with
+no adb, emulator or simulator.
 
 ## Selection
 
-Headless mode is explicit. `AUTOMOBILE_HEADLESS=1` (any `readEnvBool` truthy value) or `--headless`
-selects it; `--headless` sets the variable during startup, before a daemon is spawned, so the
-daemon inherits it through `daemonProcessEnvironment`. It is never chosen automatically when no
-device is found. A daemon that is already running keeps the mode it started with.
+Headless mode is explicit. Setting `AUTOMOBILE_HEADLESS=1` (any `readEnvBool` truthy value) or
+passing `--headless` selects it. The `--headless` flag sets the variable during startup, before the
+CLI spawns a daemon, so the daemon inherits it through `daemonProcessEnvironment`. The host never
+picks headless mode automatically when it finds no device. A daemon that is already running keeps the mode it started with.
 
 `registerPrototypeTools` passes `shouldEnsureDevice: () => !headless` and a `nonDeviceHandler`
 to `ToolRegistry.registerDeviceAware`. In headless mode the registry resolves no device (no
@@ -22,8 +22,8 @@ other tool is unaffected.
 
 `VirtualPrototypeDevice` (`src/features/prototype/headless/`) implements `AndroidPrototypeClient`,
 the CtrlProxy surface `AndroidPrototypeTransport` forwards to. The prototype runtime's
-`clientFactory` returns the host's virtual device for the virtual device id, so the shared Android
-path runs unchanged: spec validation, capability gates, asset staging, the status store, the
+`clientFactory` returns the host's virtual device for the virtual device id. The shared Android
+path therefore runs unchanged: spec validation, capability gates, asset staging, the status store, the
 shown-spec mirror and spec revisions, the event coordinator and the patch queue. The virtual device
 keeps state only:
 
@@ -32,9 +32,9 @@ keeps state only:
   Referenced image, font and shader asset ids with no upload are returned as `missingAssets`, so
   the host's re-upload path runs as on hardware.
 - `patch` applies ops with `applyPrototypePatch` and raises the revision. As in CtrlProxy, each
-  state key keeps the revision that last wrote it (a show, a patch or an input), and a `/state`
-  patch is refused without a `baseRevision`, with one newer than the device's, or with `conflict`
-  naming the keys it touches that were written after its `baseRevision`.
+  state key keeps the revision that last wrote it (a show, a patch or an input). The device refuses
+  a `/state` patch without a `baseRevision` or with one newer than the device's. It also refuses,
+  with `conflict` naming them, a patch touching keys written after its `baseRevision`.
 - `inspect` reports every shown id with its state, pages, data and last sequence.
 - `dismiss` removes one id or all of them.
 - Saved prototypes are refused.
@@ -46,14 +46,19 @@ It is an injected dependency (`PrototypeToolDependencies.virtualDevice`); tests 
 
 `supportsCommand` answers from `VIRTUAL_PROTOTYPE_CAPABILITIES`: the spec features the web renderer
 draws and the in-memory protocol (`prototype_patch_v1`, `prototype_persistence_replay_v1`,
-`prototype_show_in_place_v1`). `VIRTUAL_PROTOTYPE_UNSUPPORTED_CAPABILITIES` lists what needs a real
-device: system windows and `window.layer`/`persistence` (`prototype_window_options_v1`), window
-chrome, displays and multi-surface, element anchors, appearance pinning, blur backdrops, custom
-shaders, dead taps, device-side network, platform modules (haptics, sound, clipboard and the other
-`prototype_platform_*` modules), saved prototypes, storage and timers. A spec needing one is refused
-by the existing gate, exactly as an older CtrlProxy refuses it; nothing is silently approximated.
-`headlessPrototypeRefusal` refuses `save`, `listSaved`, `deleteSaved`, `open`, `clearStorage`,
-`simulate` and `display` before anything runs.
+`prototype_show_in_place_v1`). The `VIRTUAL_PROTOTYPE_UNSUPPORTED_CAPABILITIES` list names what
+needs a real device:
+
+- system windows and `window.layer`/`persistence` (`prototype_window_options_v1`);
+- window chrome, displays and multi-surface;
+- element anchors, appearance pinning, blur backdrops, custom shaders and dead taps;
+- device-side network;
+- platform modules (haptics, sound, clipboard and the other `prototype_platform_*` modules);
+- saved prototypes, storage and timers.
+
+The existing gate refuses a spec needing one, exactly as an older CtrlProxy refuses it; nothing is
+silently approximated. Before anything runs, `headlessPrototypeRefusal` refuses `save`,
+`listSaved`, `deleteSaved`, `open`, `clearStorage`, `simulate` and `display`.
 
 ## Marking results as virtual
 
@@ -93,7 +98,7 @@ tools fail with "call prototype show first".
   `chip` with a `stateKey` toggle it. A dialog button closes its `openWhen`. Any node with
   `onTap` runs it.
 - **Order.** This follows `PrototypeRuntime.control` and `run`. The control's own write and its
-  `change` come first, then the actions in order. `emit` carries the state at that point, and one trailing
+  `change` come first, then the actions in order. `emit` carries the state at that point. One trailing
   `change` names every key the list changed. `setPage` raises `page_changed`, then its `stateKey`
   `change`. Stack actions raise `screen_changed`. `dismiss` stops the list and raises
   `dismissed {reason: "user"}` with no trailing change.

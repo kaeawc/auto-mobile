@@ -12,38 +12,40 @@ hierarchy, tap and screenshot operations; these are its capabilities and limits.
   swipe settles, a dump checks for the exact `AppGroupCell -- <appName>` identifier. When gallery
   rows are readable but the app row is missing, the driver searches by scrolling later, then
   earlier, settling 1500 ms before each dump. Each direction stops at an unchanged row set,
-  no rows, or eight steps. A row found by scrolling is tapped at its visible centre normalized
-  by the window size, followed by the first widget preview and add taps; rows with less than
-  24 pt visible need another scroll within the cap, and rows covered by the picker's navigation
-  bar are nudged earlier before tapping. A row in the initial dump preserves the calibrated flow.
-  If the search misses and another attempt remains, with `--udid <simulator UDID>` the host
-  relaunches clockface using `xcrun simctl terminate <udid> com.apple.clockface`, waits 3000 ms
-  for respawn, and retries within `maxAttempts` without the retry delay. The final attempt
+  no rows, or eight steps.
+- The driver taps a row found by scrolling at its visible centre normalized by the window size,
+  followed by the first widget preview and add taps. Rows with less than 24 pt visible need
+  another scroll within the cap. The driver nudges rows covered by the picker's navigation bar
+  earlier before tapping. A row in the initial dump preserves the calibrated flow.
+- If the search misses and another attempt remains, with `--udid <simulator UDID>` the host
+  relaunches clockface using `xcrun simctl terminate <udid> com.apple.clockface`. It waits 3000 ms
+  for respawn and retries within `maxAttempts` without the retry delay. The final attempt
   skips relaunch and its wait. Without a relaunch dependency it stops with that command as
   recovery guidance. An initial dump with no gallery row identifiers preserves the calibrated
-  flow. The result's `galleryRowMisses` counts missing-row attempts. App and widget
-  display names verify the resulting cell identifier. When the face leaves both name fields
-  empty, a cell verifies when its host bundle id and widget kind equal `hostBundleId` and
-  `widgetKind` (`--host-bundle-id`, `--widget-kind`, given together), or otherwise only as the
-  one cell added since that attempt's header dump (every earlier cell id still present, the count
-  up by exactly one) whose labels hold the app name.
-- Before each edit the header dump is checked: a cell that already matches (or, on a retry, the
-  one nameless cell added since the first attempt's header dump) returns success with
-  `alreadyPresent: true` and adds nothing, so a retry after a missed readback adds no duplicate.
+  flow. The result's `galleryRowMisses` counts missing-row attempts.
+- App and widget display names verify the resulting cell identifier. When the face leaves both
+  name fields empty, a cell verifies when its host bundle id and widget kind equal `hostBundleId`
+  and `widgetKind` (`--host-bundle-id`, `--widget-kind`, given together). Otherwise it verifies
+  only as the one cell added since that attempt's header dump whose labels hold the app name.
+  That means every earlier cell id is still present and the count is up by exactly one.
+- Before each edit the driver checks the header dump. A cell that already matches returns
+  success with `alreadyPresent: true` and adds nothing. On a retry, so does the one nameless cell
+  added since the first attempt's header dump, so a retry after a missed readback adds no
+  duplicate.
 - Home is lossy and non-idempotent, so opening the stack allows three home/swipe-up rounds. Each
   round polls twice after its first swipe; if the header and Edit button are not visible, it
   sends up to three more swipes, polling twice after each.
 - Cell verification allows ten dumps. Failed verification retries the whole flow up to
-  `maxAttempts` (default 3, range 1–5; `--attempts`), waiting `retryDelayMs` between attempts
+  `maxAttempts` (default 3, range 1–5; `--attempts`). It waits `retryDelayMs` between attempts
   (default 20000 ms, integer range 0–120000; `--retry-delay-ms`) for gallery indexing after
   installation. Polls settle 250 ms between dumps. Header failures, errors and cancellation stop
   the flow. A successful gesture alone does not establish widget presence.
-- The script drives the runner WebSocket and makes no daemon tool call, so with `--session-uuid`
-  it holds that one-shot CLI session like a `--cli` invocation: it claims the session's liveness
-  under its own owner token, declares a `cli` idle window covering the session's idle age (from
-  `daemon/sessionInfo`'s `lastUsedAt`, so a session an earlier hold kept is not cut short) plus
-  twice the base window, refreshes it every quarter window, and leaves the session at least the
-  base window after the run (one-hour daemon cap).
+- The script drives the runner WebSocket and makes no daemon tool call. With `--session-uuid`
+  it therefore holds that one-shot CLI session like a `--cli` invocation. It claims the session's
+  liveness under its own owner token. It declares a `cli` idle window covering the session's idle
+  age plus twice the base window. The idle age comes from `daemon/sessionInfo`'s `lastUsedAt`, so
+  a session an earlier hold kept is not cut short. The script refreshes the window every quarter
+  window and leaves the session at least the base window after the run (one-hour daemon cap).
 
 ## Capability boundary
 

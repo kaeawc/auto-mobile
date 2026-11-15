@@ -21,8 +21,8 @@ the tvOS, watchOS and visionOS runner builds, that cannot block a merge.
 ## Decision
 
 Option 2, `.github/workflows/ios-xcode-27-2.yml`. The two matrix jobs are needs of the required
-`iOS Build` roll-up, so a matrix leg would make the gate wait for a preview runner, and a red leg
-would need `continue-on-error` to keep the gate green. The matrix jobs also route owner PRs to
+`iOS Build` roll-up, so a matrix leg would make the gate wait for a preview runner. A red leg
+would also need `continue-on-error` to keep the gate green. The matrix jobs also route owner PRs to
 the self-hosted Macs, which have no Xcode 27.2. A separate workflow has its own check names
 outside the ruleset, runs only on hosted `xcode-27`, and builds unsigned.
 

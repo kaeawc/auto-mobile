@@ -261,10 +261,15 @@ ports, so use that fallback only with the heavy runner under a dedicated user.
 | XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `macos-26` (exception, see above)   | `macos-26`     |
 | merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a            |
 | nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
+| Xcode 27.2 (Advisory): packages, projects, tvOS/watchOS/visionOS runners       | hosted `xcode-27`                          | `xcode-27`     |
 
 Self-hosted and Namespace placements take effect once the owner steps below are done; until
 then the moved jobs run on hosted `macos-26`. A self-hosted placement falls back to
 hosted for any run where Mac Pool Routing finds that pool offline.
+
+The Xcode 27.2 row comes from `ios-xcode-27-2.yml`, a separate advisory workflow that selects
+27.2 explicitly (the image default is 27.1) and is not in the ruleset
+([devlog](../../devlog/2026-11-15-xcode-27-2-advisory-workflow.md)).
 
 ## Owner steps
 

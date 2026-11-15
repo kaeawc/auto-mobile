@@ -1,0 +1,186 @@
+name: "Xcode 27.2 (Advisory)"
+
+# Advisory Xcode 27.2 lane on the hosted `xcode-27` preview image (#18363). The required
+# iOS jobs in pull_request.yml stay on Xcode 26.6 and are untouched. This workflow is a
+# separate run, so its jobs are not in the green-main ruleset, are not needs of the
+# required "iOS Build" roll-up, and cannot delay or fail it. Xcode 27.1 is the image
+# default, so every job selects 27.2 explicitly and fails if another version is active.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ios-xcode-27-2.yml"
+      - ".github/actions/ensure-ios-simulator-runtime/**"
+      - "ios/**"
+      - "scripts/ios/**"
+      - "Package.swift"
+      - "Package.resolved"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ios-xcode-27-2.yml"
+      - ".github/actions/ensure-ios-simulator-runtime/**"
+      - "ios/**"
+      - "scripts/ios/**"
+      - "Package.swift"
+      - "Package.resolved"
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  XCODE_VERSION: "27.2"
+
+jobs:
+  swift-packages:
+    name: "Swift Packages (Xcode 27.2, Advisory)"
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Select Xcode 27.2"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: "Verify Xcode 27.2 is active"
+        run: |
+          xcodebuild -version
+          active="$(xcodebuild -version | awk 'NR == 1 { print $2 }')"
+          if [[ "${active}" != "${XCODE_VERSION}" && "${active}" != "${XCODE_VERSION}".* ]]; then
+            echo "::error::Expected Xcode ${XCODE_VERSION}, but Xcode ${active} is active."
+            exit 1
+          fi
+          swift --version
+
+      - name: "Resolve Swift package dependencies"
+        shell: bash
+        run: |
+          for package in ios/screen-capture ios/network-filter ios/audio-loopback ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+            (cd "${package}" && swift package resolve)
+          done
+
+      # Unsigned: the advisory lane never imports signing certificates.
+      - name: "Build Swift Packages"
+        run: ./scripts/ios/swift-build.sh
+
+      - name: "Test Swift Packages"
+        run: ./scripts/ios/swift-test.sh
+
+      - name: "Build root Package.swift"
+        run: swift build -c release
+
+      - name: "Build AutoMobilePrototype library and embed consumer"
+        run: bash scripts/ios/prototype-library-build.sh
+
+  xcode-projects:
+    name: "Build Xcode Projects (Xcode 27.2, Advisory)"
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Select Xcode 27.2"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: "Verify Xcode 27.2 is active"
+        run: |
+          xcodebuild -version
+          active="$(xcodebuild -version | awk 'NR == 1 { print $2 }')"
+          if [[ "${active}" != "${XCODE_VERSION}" && "${active}" != "${XCODE_VERSION}".* ]]; then
+            echo "::error::Expected Xcode ${XCODE_VERSION}, but Xcode ${active} is active."
+            exit 1
+          fi
+          swift --version
+
+      - name: "Install XcodeGen"
+        run: ./scripts/ios/install-xcodegen.sh
+
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      - name: "Resolve Xcode project Swift package dependencies"
+        shell: bash
+        run: |
+          for package in ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy; do
+            (cd "${package}" && swift package resolve)
+          done
+
+      - name: "Build Xcode Project (Playground)"
+        id: build-xcode-playground
+        env:
+          AUTOMOBILE_XCODE_DERIVED_DATA: "${{ runner.temp }}/automobile-derived-data-Playground"
+        run: ./scripts/ios/xcode-build.sh Playground
+
+      - name: "Build Xcode Project (CtrlProxy)"
+        if: ${{ !cancelled() && steps.build-xcode-playground.conclusion != 'skipped' }}
+        env:
+          AUTOMOBILE_XCODE_DERIVED_DATA: "${{ runner.temp }}/automobile-derived-data-CtrlProxy"
+        run: ./scripts/ios/xcode-build.sh CtrlProxy
+
+  simulator-runners:
+    name: "Build ${{ matrix.platform.name }} Runner (Xcode 27.2, Advisory)"
+    runs-on: xcode-27
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { name: "tvOS", id: "tvos" }
+          - { name: "watchOS", id: "watchos" }
+          - { name: "visionOS", id: "visionos" }
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: "Select Xcode 27.2"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: "Verify Xcode 27.2 is active"
+        run: |
+          xcodebuild -version
+          active="$(xcodebuild -version | awk 'NR == 1 { print $2 }')"
+          if [[ "${active}" != "${XCODE_VERSION}" && "${active}" != "${XCODE_VERSION}".* ]]; then
+            echo "::error::Expected Xcode ${XCODE_VERSION}, but Xcode ${active} is active."
+            exit 1
+          fi
+          swift --version
+
+      - name: "Install XcodeGen"
+        run: ./scripts/ios/install-xcodegen.sh
+
+      - name: "Ensure ${{ matrix.platform.name }} platform support"
+        run: xcodebuild -downloadPlatform "${{ matrix.platform.name }}"
+
+      # Build check only: the release workflows still build and upload the archives.
+      - name: "Build ${{ matrix.platform.name }} runner archive"
+        env:
+          PLATFORM_ID: ${{ matrix.platform.id }}
+        run: |
+          output="${RUNNER_TEMP}/${PLATFORM_ID}-runner-macos.zip"
+          if [[ "${PLATFORM_ID}" == "tvos" ]]; then
+            bash scripts/ios/build-tvos-runner-release.sh --output "${output}"
+          else
+            bash scripts/ios/build-simulator-runner-release.sh --platform "${PLATFORM_ID}" --output "${output}"
+          fi

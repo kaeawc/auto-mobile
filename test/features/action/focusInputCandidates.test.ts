@@ -90,9 +90,10 @@ describe("focus not-found error names on-screen inputs (#17463)", () => {
   async function notFound(
     action: "focus" | "tap",
     observeResult = observation(),
+    text = "Mobile phone",
   ): Promise<TapTargetUnavailableError> {
     try {
-      await tapOn()["handleElementNotFound"]({ action, text: "Mobile phone" }, { observeResult });
+      await tapOn()["handleElementNotFound"]({ action, text }, { observeResult });
     } catch (error) {
       if (error instanceof TapTargetUnavailableError) {
         return error;
@@ -130,5 +131,56 @@ describe("focus not-found error names on-screen inputs (#17463)", () => {
     const error = await notFound("tap");
     expect(error.reason).toBe("not-found");
     expect(error.message).toBe("Element not found with provided text 'Mobile phone'");
+  });
+
+  /** A Material time picker: the minute chip is checkable, and only the hour field is an input. */
+  const timePicker = (minuteTop = 800) =>
+    observation(
+      createHierarchyForTest({
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: [
+              {
+                bounds: { left: 100, top: 800, right: 400, bottom: 1000 },
+                class: "android.widget.EditText",
+                "resource-id": "hour_input",
+                text: "6",
+                focusable: true,
+              },
+              {
+                bounds: { left: 600, top: minuteTop, right: 900, bottom: minuteTop + 200 },
+                class: "com.google.android.material.chip.Chip",
+                "resource-id": "minute_chip",
+                "content-desc": "0 minutes",
+                text: "00",
+                clickable: true,
+                checkable: true,
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+  test("a focus selector matching a visible non-input names it and the tap-then-type step (#18351)", async () => {
+    const error = await notFound("focus", timePicker(), "0 minutes");
+    expect(error.reason).toBe("matched-non-input");
+    expect(error.message).toBe(
+      "'0 minutes' matched an on-screen element that is not a text input yet: " +
+        '{elementId "minute_chip", label "0 minutes"} (affordances: tap, toggle). ' +
+        'Tap it first (tapOn {elementId: "minute_chip"}), then call sendKeys without a selector.',
+    );
+  });
+
+  test("a non-input match off screen keeps listing the on-screen inputs (#18351)", async () => {
+    const error = await notFound("focus", timePicker(2600), "0 minutes");
+    expect(error.reason).toBe("not-found-inputs-listed");
+    expect(error.message).toStartWith("Element not found with provided text '0 minutes'. ");
+  });
+
+  test("a tap miss never reports a non-input match (#18351)", async () => {
+    const error = await notFound("tap", timePicker(), "45 minutes");
+    expect(error.reason).toBe("not-found");
   });
 });

@@ -21,7 +21,7 @@ import org.junit.jupiter.api.TestFactory
 class PrototypeLocationEventSummaryTest {
   private val fixture: JsonObject =
     Json.parseToJsonElement(
-        File(fixtureDirectory().parentFile, "prototype-location/event-summary.json").readText()
+        File(fixtureDirectory().parentFile, "prototype-location/event-summary.json").readText(),
       )
       .jsonObject
 
@@ -53,16 +53,16 @@ class PrototypeLocationEventSummaryTest {
         buildJsonObject {
           put("accuracyM", "12")
           put("approximate", false)
-        }
-      )
+        },
+      ),
     )
     assertNull(
       PrototypeLocationEventSummary.of(
         buildJsonObject {
           put("accuracyM", 12)
           put("approximate", JsonPrimitive("false"))
-        }
-      )
+        },
+      ),
     )
   }
 }

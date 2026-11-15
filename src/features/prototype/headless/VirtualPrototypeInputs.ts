@@ -4,10 +4,12 @@ import {
   findVirtualTapTarget,
   interactionOwnWrite,
   isInertInteraction,
+  isVirtualFieldFocusable,
   planVirtualInteraction,
   virtualInteractionRefusal,
   type VirtualPrototypeSnapshot,
   type VirtualTapSelector,
+  type VirtualTapTarget,
 } from "./virtualPrototypeInteraction";
 
 /** One event an input raised on the virtual device, as awaitEvent will return it. */
@@ -41,10 +43,10 @@ interface Focus {
   maxLength?: number;
 }
 
-/** The device surface the inputs need: what is shown, and delivery of planned events. */
+/** The device surface the inputs need: what is shown, delivery of planned events, final state. */
 export type VirtualPrototypeInputDevice = Pick<
   VirtualPrototypeDevice,
-  "snapshots" | "dispatchSteps"
+  "snapshots" | "dispatchSteps" | "settle"
 >;
 
 const failure = (error: string): VirtualPrototypeInputOutcome => ({
@@ -53,10 +55,22 @@ const failure = (error: string): VirtualPrototypeInputOutcome => ({
   events: [],
 });
 
+const NO_FOCUS =
+  "No text field has focus on the headless virtual device. Tap a textField or searchBar with tapOn first, or pass sendKeys a selector.";
+
+/** The shown prototype a selector reached and the node it matched there. */
+interface Located {
+  id: string;
+  snapshot: VirtualPrototypeSnapshot;
+  target: VirtualTapTarget;
+  node: { type: string; id?: string };
+}
+
 /**
  * Interaction tools on the headless virtual device (#18360): `tapOn` taps a node of the shown
- * spec and `sendKeys` types into the text field a tap focused, delivering the same events the
- * device runtime would through `VirtualPrototypeDevice.dispatch`, so awaitEvent returns them.
+ * spec and `sendKeys` types into the text field a tap or its selector focused, delivering the same
+ * events the device runtime would through `VirtualPrototypeDevice.dispatch`, so awaitEvent returns
+ * them.
  */
 export class VirtualPrototypeInputs {
   private focus: Focus | undefined;
@@ -64,6 +78,72 @@ export class VirtualPrototypeInputs {
   constructor(private readonly device: VirtualPrototypeInputDevice) {}
 
   tap(selector: VirtualTapSelector): VirtualPrototypeInputOutcome {
+    const located = this.locate(selector);
+    if (!("snapshot" in located)) {
+      return located;
+    }
+    const { id, snapshot, target, node } = located;
+    const interaction = target.interaction;
+    if (!interaction || !target.enabled || isInertInteraction(interaction, snapshot.state)) {
+      return { success: true, prototypeId: id, target: node, handled: false, events: [] };
+    }
+    const refusal = virtualInteractionRefusal(interaction.actions, snapshot.spec);
+    if (refusal) {
+      return { ...failure(refusal), prototypeId: id, target: node };
+    }
+    const own = interactionOwnWrite(interaction, snapshot.state);
+    const focus = interaction.type === "focus" ? focusOf(id, interaction.key, target) : undefined;
+    return { ...this.run(id, snapshot, own, interaction.actions, focus), target: node };
+  }
+
+  /**
+   * Focuses the text field a `sendKeys` selector names, as the device's focus action does: no tap
+   * handler runs, and a match that is not an enabled textField or searchBar is refused.
+   */
+  focusOn(selector: VirtualTapSelector): VirtualPrototypeInputOutcome {
+    const located = this.locate(selector);
+    if (!("snapshot" in located)) {
+      return located;
+    }
+    const { id, target, node } = located;
+    const interaction = target.interaction;
+    if (interaction?.type !== "focus") {
+      return {
+        ...failure(
+          `The sendKeys selector ${JSON.stringify(selector)} matched a ${node.type}, not a textField or searchBar; name the field to type into.`,
+        ),
+        prototypeId: id,
+        target: node,
+      };
+    }
+    if (!target.enabled) {
+      return {
+        ...failure(`The ${node.type} the sendKeys selector names is disabled.`),
+        prototypeId: id,
+        target: node,
+      };
+    }
+    this.focus = focusOf(id, interaction.key, target);
+    return {
+      success: true,
+      prototypeId: id,
+      target: node,
+      handled: true,
+      focusedKey: interaction.key,
+      events: [],
+    };
+  }
+
+  typeText(text: string, operation: VirtualTextOperation): VirtualPrototypeInputOutcome {
+    return this.writeFocused((current) => (operation === "replace" ? text : `${current}${text}`));
+  }
+
+  clearText(): VirtualPrototypeInputOutcome {
+    return this.writeFocused(() => "");
+  }
+
+  /** The first shown prototype, newest first, with a visible node the selector names. */
+  private locate(selector: VirtualTapSelector): Located | VirtualPrototypeInputOutcome {
     const shown = this.device.snapshots();
     if (shown.length === 0) {
       return failure(
@@ -87,61 +167,50 @@ export class VirtualPrototypeInputs {
       type: String(target.node.type),
       ...(typeof target.node.id === "string" ? { id: target.node.id } : {}),
     };
-    const interaction = target.interaction;
-    if (!interaction || !target.enabled || isInertInteraction(interaction, snapshot.state)) {
-      return { success: true, prototypeId: id, target: node, handled: false, events: [] };
-    }
-    const refusal = virtualInteractionRefusal(interaction.actions, snapshot.spec);
-    if (refusal) {
-      return { ...failure(refusal), prototypeId: id, target: node };
-    }
-    if (interaction.type === "focus") {
-      const maxLength = target.node.maxLength;
-      this.focus = {
-        id,
-        key: interaction.key,
-        ...(typeof maxLength === "number" ? { maxLength } : {}),
+    if (target.undecidable !== undefined) {
+      return {
+        ...failure(
+          `The headless virtual device cannot decide the ${target.undecidable} yet; run the input on a device.`,
+        ),
+        prototypeId: id,
+        target: node,
       };
     }
-    const own = interactionOwnWrite(interaction, snapshot.state);
-    return { ...this.run(id, snapshot, own, interaction.actions), target: node };
-  }
-
-  typeText(text: string, operation: VirtualTextOperation): VirtualPrototypeInputOutcome {
-    return this.writeFocused((current) => (operation === "replace" ? text : `${current}${text}`));
-  }
-
-  clearText(): VirtualPrototypeInputOutcome {
-    return this.writeFocused(() => "");
+    return { id, snapshot, target, node };
   }
 
   private writeFocused(next: (current: string) => string): VirtualPrototypeInputOutcome {
     const focus = this.focus;
     const shown = focus && this.device.snapshots().find((entry) => entry.id === focus.id);
-    if (!focus || !shown) {
+    if (!focus || !shown || !isVirtualFieldFocusable(shown.snapshot, focus.key)) {
+      // A field hidden, patched away or left on another screen can no longer take input.
       this.focus = undefined;
-      return failure(
-        "No text field has focus on the headless virtual device. Tap a textField or searchBar with tapOn first, or pass sendKeys a selector.",
-      );
+      return failure(NO_FOCUS);
     }
     const stored = shown.snapshot.state[focus.key];
     const value = [...next(typeof stored === "string" ? stored : "")]
       .slice(0, focus.maxLength)
       .join("");
-    return this.run(focus.id, shown.snapshot, { [focus.key]: value }, []);
+    return this.run(focus.id, shown.snapshot, { [focus.key]: value }, [], focus);
   }
 
+  /** Plans the interaction, delivers its events, then leaves its final state on the device. */
   private run(
     id: string,
     snapshot: VirtualPrototypeSnapshot,
     own: PrototypeState,
     actions: Record<string, unknown>[],
+    focus: Focus | undefined,
   ): VirtualPrototypeInputOutcome {
     const plan = planVirtualInteraction(snapshot, own, actions);
-    const sequences = this.device.dispatchSteps(id, plan.steps);
-    if (plan.dismissed || plan.blurred) {
-      this.focus = undefined;
+    if (plan.rejection !== undefined) {
+      return { ...failure(plan.rejection), prototypeId: id };
     }
+    const sequences = this.device.dispatchSteps(id, plan.steps);
+    if (!plan.dismissed) {
+      this.device.settle(id, plan);
+    }
+    this.focus = plan.dismissed || plan.blurred ? undefined : (focus ?? this.focus);
     return {
       success: true,
       prototypeId: id,
@@ -154,4 +223,9 @@ export class VirtualPrototypeInputs {
       })),
     };
   }
+}
+
+function focusOf(id: string, key: string, target: VirtualTapTarget): Focus {
+  const maxLength = target.node.maxLength;
+  return { id, key, ...(typeof maxLength === "number" ? { maxLength } : {}) };
 }

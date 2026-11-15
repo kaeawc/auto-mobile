@@ -111,4 +111,45 @@ describe("headless tapOn and sendKeys (#18360)", () => {
       "does not support sendKeys key commands",
     );
   });
+
+  test("tapOn treats a positive duration as the longPress it means on a device", async () => {
+    const { deps, events } = await harness();
+    await expect(
+      headlessTapOnHandler(tapOn({ text: "Send" }, { duration: 500 }), deps),
+    ).rejects.toThrow("tapOn action longPress");
+    await expect(
+      headlessTapOnHandler(tapOn({ text: "Send" }, { action: "tap", duration: 500 }), deps),
+    ).rejects.toThrow("duration applies only to longPress");
+    expect(events).toEqual([]);
+  });
+
+  test("sendKeys refuses unique selection rather than typing into the first match", async () => {
+    const { deps, events } = await harness();
+    const args = {
+      selector: { text: "Email" },
+      selectionStrategy: "unique",
+      commands: [{ action: "type", text: "x", operation: "insert", mode: "auto" }],
+    } as SendKeysArgs;
+    await expect(headlessSendKeysHandler(args, deps)).rejects.toThrow(
+      "does not support sendKeys selectionStrategy unique",
+    );
+    expect(events).toEqual([]);
+  });
+
+  test("a sendKeys selector naming a button is refused without tapping it", async () => {
+    const { deps, events } = await harness();
+    const focus = {
+      selector: { text: "Email" },
+      commands: [{ action: "clear" }],
+    } as SendKeysArgs;
+    await headlessSendKeysHandler(focus, deps);
+    const button = {
+      selector: { text: "Send" },
+      commands: [{ action: "type", text: "x", operation: "insert", mode: "auto" }],
+    } as SendKeysArgs;
+    await expect(headlessSendKeysHandler(button, deps)).rejects.toThrow(
+      "not a textField or searchBar",
+    );
+    expect(events).toEqual([]);
+  });
 });

@@ -20,6 +20,7 @@ import type { PrototypeData, PrototypeJson, PrototypeSpec } from "../prototypeSp
 import type { PrototypeShowOverrides } from "../PrototypeTransport";
 import { VIRTUAL_PROTOTYPE_CAPABILITIES } from "./headlessPrototypeMode";
 import type { VirtualPrototypeSnapshot, VirtualPrototypeStep } from "./virtualPrototypeInteraction";
+import { boundPages, normalizePagerState } from "./virtualPrototypePagers";
 import contract from "../../../../schemas/prototype-spec-contract.json";
 
 /** Per-id counters survive dismissal and replacement, as the controller ledger does. */
@@ -124,30 +125,6 @@ function stateGuardReply(
   };
 }
 
-/**
- * Each root pager's position, as `PrototypeRuntime.boundPages` derives it on a show: a numeric
- * value of its `stateKey` first, else the retained position, else 0, clamped to its pages.
- */
-function boundPages(
-  spec: Record<string, unknown>,
-  state: PrototypeState,
-  previous: Record<string, number>,
-): Record<string, number> {
-  const pages: Record<string, number> = {};
-  walkPrototypeNodes({ root: spec.root }, (node) => {
-    if (node.type !== "pager" || typeof node.id !== "string") {
-      return;
-    }
-    const last = Math.max(0, (Array.isArray(node.children) ? node.children.length : 0) - 1);
-    const bound = typeof node.stateKey === "string" ? state[node.stateKey] : undefined;
-    // An own-property read: a pager id such as `constructor` must not find Object.prototype's.
-    const kept = Object.hasOwn(previous, node.id) ? previous[node.id] : undefined;
-    const position = typeof bound === "number" ? Math.trunc(bound) : (kept ?? 0);
-    pages[node.id] = Math.min(Math.max(position, 0), last);
-  });
-  return pages;
-}
-
 type PrototypeStacks = NonNullable<PrototypeEvent["stacks"]>;
 type PrototypeStackSnapshot = PrototypeStacks[string];
 type RouteParams = NonNullable<PrototypeStackSnapshot["params"]>[number];
@@ -243,26 +220,6 @@ function routeParamType(value: unknown): "string" | "number" | "boolean" | undef
     return "boolean";
   }
   return typeof value === "number" && Number.isFinite(value) ? "number" : undefined;
-}
-
-/**
- * `state` with each integral value bound to a pager clamped to its pages, as
- * `PrototypeRuntime.normalizePagerState` writes it back, so state and pages never disagree.
- */
-function normalizePagerState(spec: Record<string, unknown>, state: PrototypeState): PrototypeState {
-  const normalized = { ...state };
-  walkPrototypeNodes({ root: spec.root }, (node) => {
-    if (node.type !== "pager" || typeof node.stateKey !== "string") {
-      return;
-    }
-    const value = normalized[node.stateKey];
-    if (typeof value !== "number" || !Number.isInteger(value)) {
-      return;
-    }
-    const last = Math.max(0, (Array.isArray(node.children) ? node.children.length : 0) - 1);
-    normalized[node.stateKey] = Math.min(Math.max(value, 0), last);
-  });
-  return normalized;
 }
 
 const asState = (value: unknown): PrototypeState =>
@@ -532,6 +489,25 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
       });
       return delivered ? [entry!.ledger.lastSequence] : [];
     });
+  }
+
+  /**
+   * Leaves an input's final state, pages and stacks on a shown prototype without an event: an
+   * action list that restores a key after an intermediate `emit` raises no trailing `change`,
+   * yet the device ends with the restored value, as `PrototypeRuntime.run` leaves it.
+   */
+  settle(id: string, final: Pick<VirtualPrototypeSnapshot, "state" | "pages" | "stacks">): void {
+    const entry = this.shown.get(id);
+    if (!entry) {
+      return;
+    }
+    if (Object.keys(final.state).some((key) => entry.state[key] !== final.state[key])) {
+      entry.ledger.revision += 1;
+      stampChangedKeys(entry.stateRevisions, entry.state, final.state, entry.ledger.revision);
+      entry.state = { ...final.state };
+    }
+    entry.pages = { ...final.pages };
+    entry.stacks = structuredClone(final.stacks);
   }
 
   /** Ids the virtual device is showing, oldest first. */

@@ -52,8 +52,14 @@ on a device.
   closed dialogs and sheets, other pager pages and stack screens below the top cannot be tapped.
   A tap on a node goes to the nearest enclosing node that handles taps. Switches, checkboxes and
   chips toggle their state key, and a dialog's confirm and dismiss buttons close it.
+- Text selectors match what the device shows: `{key}` placeholders filled from state, and a text
+  field's current value. A search bar's results can be tapped only while it is expanded.
 - `sendKeys` with `type` and `clear` commands writes to the `textField` or `searchBar` that a
-  `tapOn` focused, or that its `selector` names. `maxLength` is applied.
+  `tapOn` focused, or that its `selector` names. `maxLength` is applied. A `selector` that names
+  anything other than a text field fails without tapping it. Typing fails once the focused field
+  is hidden or disabled; focus it again.
+- A tap whose state write the prototype would reject, such as a number into a text field's key,
+  fails and nothing changes.
 - The result lists `events` (`sequence`, `kind`, `name`) and `virtualDevice`. `handled: false`
   means the tap reached nothing that handles it, or the control is disabled.
 
@@ -66,7 +72,11 @@ and nothing changes. That includes `request`, data actions, `platform`, timers, 
 Not supported in headless mode:
 
 - `tapOn` with `sibling`, `container`, `index`, `subtext`, `ensureChecked`, `display`, a
-  non-default `selectionStrategy`, an `accessibilityLink` selector, or an `action` other than tap.
+  non-default `selectionStrategy`, an `accessibilityLink` selector, or an `action` other than tap
+  (a positive `duration` means `longPress`).
+- `sendKeys` with a non-default `selectionStrategy`.
+- `visibleWhen` or `enabledWhen` conditions on `data`, `platform` or `valid` around the target:
+  the input fails with "cannot decide". Run it on a device.
 - `sendKeys` `key` commands.
 - Nodes inside `repeat` templates.
 - `tapAt` and screenshots: there is no rendered layout to tap or capture. Read

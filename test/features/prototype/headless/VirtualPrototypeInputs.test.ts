@@ -268,4 +268,198 @@ describe("VirtualPrototypeInputs (#18360)", () => {
     const inputs = new VirtualPrototypeInputs(new VirtualPrototypeDevice(new FakeTimer()));
     expect(inputs.tap({ text: "Save" }).error).toContain("prototype show first");
   });
+
+  test("string conditions decide visibleWhen and enabledWhen instead of failing open", async () => {
+    const { inputs, events } = await shown(
+      column(
+        {
+          type: "button",
+          label: "Send",
+          enabledWhen: { key: "email", contains: "@" },
+          onTap: [{ type: "emit", name: "sent" }],
+        },
+        {
+          type: "button",
+          label: "Hint",
+          visibleWhen: { key: "email", lengthGt: 20 },
+          onTap: [{ type: "emit", name: "hint" }],
+        },
+      ),
+      { state: { email: "invalid" } },
+    );
+    expect(inputs.tap({ text: "Send" })).toMatchObject({ success: true, handled: false });
+    expect(inputs.tap({ text: "Hint", exactText: true }).success).toBe(false);
+    expect(events).toEqual([]);
+  });
+
+  test("a condition the virtual device cannot decide refuses the tap", async () => {
+    const { inputs, events } = await shown(
+      column({
+        type: "button",
+        label: "Go",
+        enabledWhen: { data: "/data/ready", equals: true },
+        onTap: [{ type: "emit", name: "go" }],
+      }),
+      { data: { ready: false } },
+    );
+    expect(inputs.tap({ text: "Go" })).toMatchObject({
+      success: false,
+      error: expect.stringContaining("cannot decide the enabledWhen"),
+    });
+    expect(events).toEqual([]);
+  });
+
+  test("a state write to a pager's stateKey moves the pager to that page", async () => {
+    const { inputs, device } = await shown(
+      column(
+        { type: "button", label: "Jump", onTap: [{ type: "setState", key: "page", value: 5 }] },
+        {
+          type: "pager",
+          id: "p",
+          stateKey: "page",
+          children: [
+            { type: "text", text: "First" },
+            { type: "button", label: "Second", onTap: [{ type: "emit", name: "second" }] },
+          ],
+        },
+      ),
+      { state: { page: 0 } },
+    );
+    inputs.tap({ text: "Jump" });
+    expect(device.snapshots()[0]?.snapshot).toMatchObject({ state: { page: 1 }, pages: { p: 1 } });
+    expect(inputs.tap({ text: "Second" })).toMatchObject({ success: true, handled: true });
+  });
+
+  test("typing fails once the focused field is hidden", async () => {
+    const { inputs, events } = await shown(
+      column(
+        {
+          type: "textField",
+          id: "name",
+          label: "Name",
+          stateKey: "name",
+          visibleWhen: { key: "editing", equals: true },
+        },
+        {
+          type: "button",
+          label: "Done",
+          onTap: [{ type: "setState", key: "editing", value: false }],
+        },
+      ),
+      { state: { name: "", editing: true } },
+    );
+    inputs.tap({ testTag: "name" });
+    inputs.tap({ text: "Done" });
+    expect(inputs.typeText("Ada", "insert")).toMatchObject({
+      success: false,
+      error: expect.stringContaining("No text field has focus"),
+    });
+    expect(events.map((event) => event.payload)).toEqual([{ key: "editing", value: false }]);
+  });
+
+  test("a key restored after an intermediate emit ends restored on the device", async () => {
+    const { inputs, events, device } = await shown(
+      column({
+        type: "button",
+        label: "Blink",
+        onTap: [
+          { type: "setState", key: "n", value: 1 },
+          { type: "emit", name: "middle" },
+          { type: "setState", key: "n", value: 0 },
+        ],
+      }),
+      { state: { n: 0 } },
+    );
+    inputs.tap({ text: "Blink" });
+    expect(events.map((event) => [event.name, event.state])).toEqual([["middle", { n: 1 }]]);
+    expect(device.snapshots()[0]?.snapshot.state).toEqual({ n: 0 });
+  });
+
+  test("a write the validator rejects is refused before any event or state lands", async () => {
+    const { inputs, events, device } = await shown(
+      column(
+        { type: "textField", id: "q", label: "Query", stateKey: "query" },
+        {
+          type: "button",
+          label: "Break",
+          onTap: [
+            { type: "emit", name: "before" },
+            { type: "setState", key: "query", value: 1 },
+          ],
+        },
+      ),
+      { state: { query: "" } },
+    );
+    expect(inputs.tap({ text: "Break" })).toMatchObject({
+      success: false,
+      error: expect.stringContaining("rejects writing query"),
+    });
+    expect(events).toEqual([]);
+    expect(device.snapshots()[0]?.snapshot.state).toEqual({ query: "" });
+  });
+
+  test("a collapsed search bar's results are not tappable", async () => {
+    const { inputs, events } = await shown(
+      column(
+        {
+          type: "searchBar",
+          id: "search",
+          stateKey: "q",
+          activeKey: "active",
+          placeholder: "Search",
+          child: {
+            type: "button",
+            label: "Hidden result",
+            onTap: [{ type: "emit", name: "picked" }],
+          },
+        },
+        { type: "button", label: "Expand", onTap: [{ type: "toggle", key: "active" }] },
+      ),
+      { state: { q: "", active: false } },
+    );
+    expect(inputs.tap({ text: "Hidden result" }).success).toBe(false);
+    inputs.tap({ text: "Expand" });
+    expect(inputs.tap({ text: "Hidden result" })).toMatchObject({ success: true, handled: true });
+    expect(events.at(-1)?.name).toBe("picked");
+  });
+
+  test("text selectors match interpolated text and a field's current value", async () => {
+    const { inputs } = await shown(
+      column(
+        { type: "text", text: "Hello {name}" },
+        { type: "textField", id: "city", label: "City", stateKey: "city" },
+      ),
+      { state: { name: "Ada", city: "Paris" } },
+    );
+    expect(inputs.tap({ text: "Hello Ada", exactText: true })).toMatchObject({
+      target: { type: "text" },
+    });
+    expect(inputs.tap({ text: "Hello {name}", exactText: true }).success).toBe(false);
+    expect(inputs.tap({ text: "Paris", exactText: true })).toMatchObject({
+      target: { type: "textField", id: "city" },
+      focusedKey: "city",
+    });
+  });
+
+  test("focusOn focuses a field without running handlers and refuses a button", async () => {
+    const { inputs, events } = await shown(
+      column(
+        {
+          type: "textField",
+          id: "email",
+          label: "Email",
+          stateKey: "email",
+          onTap: [{ type: "emit", name: "tapped" }],
+        },
+        { type: "button", label: "Send", onTap: [{ type: "emit", name: "sent" }] },
+      ),
+      { state: { email: "" } },
+    );
+    expect(inputs.focusOn({ text: "Email" })).toMatchObject({ success: true, focusedKey: "email" });
+    expect(inputs.focusOn({ text: "Send" })).toMatchObject({
+      success: false,
+      error: expect.stringContaining("matched a button, not a textField"),
+    });
+    expect(events).toEqual([]);
+  });
 });

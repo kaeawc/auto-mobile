@@ -10,11 +10,12 @@ import { ActionableError } from "../../models/ActionableError";
 import { createStructuredToolResponse } from "../../utils/toolUtils";
 import { daemonVirtualPrototypeInputs } from "../prototypeTools/daemonSpecRevisions";
 import type { SendKeysArgs, TapOnArgs } from "../interactionToolTypes";
+import { resolveTapOnAction } from "./tapHandlers";
 
 /** The virtual device inputs `tapOn` and `sendKeys` drive in headless mode. */
 export type HeadlessPrototypeInputs = Pick<
   VirtualPrototypeInputs,
-  "tap" | "typeText" | "clearText"
+  "tap" | "focusOn" | "typeText" | "clearText"
 >;
 
 /** Where the handlers find the inputs and whether headless mode is on; tests inject both. */
@@ -52,8 +53,10 @@ function tapOnRefusal(args: TapOnArgs): string | undefined {
   if (option) {
     return `tapOn ${option}`;
   }
-  if ((args.action ?? "tap") !== "tap") {
-    return `tapOn action ${args.action}`;
+  // A positive duration without an action is a longPress, as on a device; tap with one throws.
+  const action = resolveTapOnAction(args);
+  if (action !== "tap") {
+    return `tapOn action ${action}`;
   }
   if (args.selectionStrategy !== undefined && args.selectionStrategy !== "first") {
     return `tapOn selectionStrategy ${args.selectionStrategy}`;
@@ -76,18 +79,22 @@ function responseFor(outcome: VirtualPrototypeInputOutcome, message: string) {
 
 type HeadlessSelector = TapOnArgs["selector"] | NonNullable<SendKeysArgs["selector"]>;
 
+type SelectorInput = (
+  selector: Parameters<HeadlessPrototypeInputs["tap"]>[0],
+) => VirtualPrototypeInputOutcome;
+
 /** Tries each `textAny` variant in order; the first that matches a node wins, as on a device. */
-function tapSelector(
-  inputs: HeadlessPrototypeInputs,
+function withSelector(
+  input: SelectorInput,
   selector: HeadlessSelector,
   exactText: boolean,
 ): VirtualPrototypeInputOutcome {
   if (!("textAny" in selector) || selector.textAny === undefined) {
-    return inputs.tap({ ...selector, exactText });
+    return input({ ...selector, exactText });
   }
   let outcome: VirtualPrototypeInputOutcome = { success: false, events: [] };
   for (const text of selector.textAny) {
-    outcome = inputs.tap({ text, exactText });
+    outcome = input({ text, exactText });
     if (outcome.target !== undefined) {
       break;
     }
@@ -106,7 +113,12 @@ export async function headlessTapOnHandler(
       `The headless virtual device does not support ${refusal}; tap with a plain text, elementId or testTag selector, or run on a device.`,
     );
   }
-  const outcome = tapSelector(inputsOrThrow(deps), args.selector, args.exactText === true);
+  const inputs = inputsOrThrow(deps);
+  const outcome = withSelector(
+    (selector) => inputs.tap(selector),
+    args.selector,
+    args.exactText === true,
+  );
   return responseFor(
     outcome,
     outcome.handled === false
@@ -144,10 +156,16 @@ export async function headlessSendKeysHandler(
       "The headless virtual device does not support sendKeys container or display; pass a plain selector.",
     );
   }
+  if (args.selectionStrategy !== undefined && args.selectionStrategy !== "first") {
+    throw new ActionableError(
+      `The headless virtual device does not support sendKeys selectionStrategy ${args.selectionStrategy}; it focuses the first match. Pass a selector that names one field, or run on a device.`,
+    );
+  }
   const inputs = inputsOrThrow(deps);
   const outcomes: VirtualPrototypeInputOutcome[] = [];
   if (args.selector !== undefined) {
-    outcomes.push(tapSelector(inputs, args.selector, false));
+    // Focus, not tap: a selector naming a button must not run its handlers (#18360).
+    outcomes.push(withSelector((selector) => inputs.focusOn(selector), args.selector, false));
   }
   for (const command of args.commands) {
     if (outcomes.some((outcome) => !outcome.success)) {

@@ -2,8 +2,10 @@ import type { PrototypeEvent, PrototypeState } from "../../observe/android/ctrlP
 import { resolvePrototypeDataPointer } from "../prototypeData";
 import { prototypeNodeChildren } from "../prototypeNodeChildren";
 import type { PrototypeJson } from "../prototypeSpec";
-import { record, type Raw } from "../prototypeTemplate";
-import { conditionHolds } from "../web/webCondition";
+import { record, renderScalar, type Raw } from "../prototypeTemplate";
+import { validatePrototypeSpec } from "../prototypeValidation";
+import { decide } from "../web/webCondition";
+import { boundPages, normalizePagerState } from "./virtualPrototypePagers";
 import contract from "../../../../schemas/prototype-spec-contract.json";
 
 /**
@@ -58,6 +60,11 @@ export interface VirtualTapTarget {
   interaction?: VirtualInteraction;
   /** False when the handling control's `enabledWhen` does not hold: the tap does nothing. */
   enabled: boolean;
+  /**
+   * The condition on the path to the target the virtual device cannot decide (a `data`,
+   * `platform` or `valid` condition), if any: the input is refused rather than guessed.
+   */
+  undecidable?: string;
 }
 
 export interface VirtualInteractionPlan {
@@ -66,6 +73,12 @@ export interface VirtualInteractionPlan {
   dismissed: boolean;
   /** A `hideKeyboard` action ran: the focused field loses focus. */
   blurred: boolean;
+  /** The state, pages and stacks the interaction leaves, whether or not an event carries them. */
+  state: PrototypeState;
+  pages: Record<string, number>;
+  stacks: PrototypeStacks;
+  /** Why the device runtime's validator rejects a write: nothing is applied or emitted. */
+  rejection?: string;
 }
 
 const TEXT_FIELDS = ["text", "label", "headline", "title", "placeholder", "contentDescription"];
@@ -88,6 +101,11 @@ const RUNNABLE_ACTIONS = new Set([
 ]);
 const STACK_ACTIONS = new Set(["push", "pop", "popToRoot", "replace"]);
 const CONTEXT_BINDINGS = new Set(["state", "page", "data", "value"]);
+/** Fields the device interpolates `{key}` state tokens into before it renders them. */
+const INTERPOLATED_FIELDS = new Set(["text", "title"]);
+const STATE_TOKEN = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+/** Placeholders only a pager page binds; elsewhere the device renders them literally. */
+const PAGER_TOKENS = new Set(["page", "pageCount"]);
 
 /** The objects among `values`, in order. */
 const records = (values: readonly unknown[]): Raw[] =>
@@ -112,6 +130,10 @@ function ownInteraction(node: Raw): VirtualInteraction | undefined {
   }
   return actions.length > 0 ? { type: "tap", actions } : undefined;
 }
+
+/** A search bar renders its results only while its `activeKey` holds true. */
+const isExpanded = (node: Raw, state: PrototypeState): boolean =>
+  typeof node.activeKey === "string" && state[node.activeKey] === true;
 
 /** A pager's current page: the only one a tap reaches. */
 function pagerChildren(node: Raw, id: string, snapshot: VirtualPrototypeSnapshot): Raw[] {
@@ -138,34 +160,126 @@ function visibleChildren(node: Raw, snapshot: VirtualPrototypeSnapshot): Raw[] {
   if (node.type === "stack" && id !== undefined) {
     return stackChildren(node, id, snapshot);
   }
+  if (node.type === "searchBar" && !isExpanded(node, snapshot.state)) {
+    return [];
+  }
   return records(prototypeNodeChildren(node).map(({ value }) => value));
 }
 
-function isShown(node: Raw, state: PrototypeState): boolean {
-  const visible =
-    node.visibleWhen === undefined ||
-    conditionHolds(node.visibleWhen, { state, platform: "android" });
-  return visible && (!OPEN_WHEN_NODES.has(String(node.type)) || isOpen(node, state));
+type Decision = boolean | undefined;
+
+function allOf(decisions: Decision[]): Decision {
+  if (decisions.includes(false)) {
+    return false;
+  }
+  return decisions.includes(undefined) ? undefined : true;
 }
 
-function textMatches(node: Raw, text: string, exact: boolean): boolean {
-  const wanted = text.trim().toLowerCase();
-  return TEXT_FIELDS.some((field) => {
+function anyOf(decisions: Decision[]): Decision {
+  if (decisions.includes(true)) {
+    return true;
+  }
+  return decisions.includes(undefined) ? undefined : false;
+}
+
+/** A string operator as `PrototypeCondition.holds` reads it: a non-string value never holds. */
+function stringOperator(raw: Raw, value: unknown): Decision {
+  const text = typeof value === "string" ? value : undefined;
+  if (typeof raw.contains === "string") {
+    return text !== undefined && text.includes(raw.contains);
+  }
+  if (typeof raw.startsWith === "string") {
+    return text !== undefined && text.startsWith(raw.startsWith);
+  }
+  if (typeof raw.lengthGt === "number") {
+    return text !== undefined && text.length > raw.lengthGt;
+  }
+  if (typeof raw.lengthLt === "number") {
+    return text !== undefined && text.length < raw.lengthLt;
+  }
+  return undefined;
+}
+
+/**
+ * A `visibleWhen` or `enabledWhen` condition as the device runtime decides it, string operators
+ * included; undefined for what the virtual device does not model (`data`, `platform`, `valid`).
+ */
+export function decideVirtualCondition(condition: unknown, state: PrototypeState): Decision {
+  const raw = record(condition);
+  if (!raw) {
+    return undefined;
+  }
+  if (Array.isArray(raw.all)) {
+    return allOf(raw.all.map((entry) => decideVirtualCondition(entry, state)));
+  }
+  if (Array.isArray(raw.any)) {
+    return anyOf(raw.any.map((entry) => decideVirtualCondition(entry, state)));
+  }
+  if (raw.not !== undefined) {
+    const inner = decideVirtualCondition(raw.not, state);
+    return inner === undefined ? undefined : !inner;
+  }
+  if (typeof raw.key === "string") {
+    const text = stringOperator(raw, state[raw.key]);
+    if (text !== undefined) {
+      return text;
+    }
+  }
+  return decide(raw, { state, platform: "android" });
+}
+
+/** Whether a node is shown; undefined when its `visibleWhen` cannot be decided here. */
+function isShown(node: Raw, state: PrototypeState): Decision {
+  if (OPEN_WHEN_NODES.has(String(node.type)) && !isOpen(node, state)) {
+    return false;
+  }
+  return node.visibleWhen === undefined ? true : decideVirtualCondition(node.visibleWhen, state);
+}
+
+function interpolated(text: string, state: PrototypeState): string {
+  return text.replace(STATE_TOKEN, (whole, key: string) =>
+    !PAGER_TOKENS.has(key) && Object.hasOwn(state, key) ? renderScalar(state[key]) : whole,
+  );
+}
+
+/**
+ * The text a node shows, as `prototypeNodeText` renders it: `{key}` state tokens interpolated in
+ * text and titles, and a text field's or search bar's current value from its bound key.
+ */
+function renderedTexts(node: Raw, state: PrototypeState): string[] {
+  const authored = TEXT_FIELDS.flatMap((field) => {
     const value = node[field];
     if (typeof value !== "string") {
-      return false;
+      return [];
     }
+    return [INTERPOLATED_FIELDS.has(field) ? interpolated(value, state) : value];
+  });
+  const key = typeof node.stateKey === "string" ? node.stateKey : undefined;
+  const bound = key === undefined ? undefined : state[key];
+  return FOCUS_NODES.has(String(node.type)) && typeof bound === "string" && bound !== ""
+    ? [...authored, bound]
+    : authored;
+}
+
+function textMatches(node: Raw, text: string, exact: boolean, state: PrototypeState): boolean {
+  const wanted = text.trim().toLowerCase();
+  return renderedTexts(node, state).some((value) => {
     const own = value.trim().toLowerCase();
     return exact ? own === wanted : own.includes(wanted);
   });
 }
 
-function selectorMatches(node: Raw, selector: VirtualTapSelector, exact: boolean): boolean {
+function selectorMatches(
+  node: Raw,
+  selector: VirtualTapSelector,
+  exact: boolean,
+  state: PrototypeState,
+): boolean {
   if (selector.elementId !== undefined || selector.testTag !== undefined) {
     const wanted = selector.elementId ?? selector.testTag;
     return node.id === wanted || node.testTag === wanted;
   }
-  return selector.text !== undefined && textMatches(node, selector.text, exact);
+  return selector.text !== undefined && textMatches(node, selector.text, exact, state);
 }
 
 /** A dialog's confirm and dismiss buttons close it, then run their own actions. */
@@ -183,6 +297,8 @@ function dialogButtonTargets(node: Raw): Raw[] {
 interface Visit {
   node: Raw;
   handler?: { node: Raw; interaction: VirtualInteraction };
+  /** The undecidable `visibleWhen` on the path to this node, if any. */
+  undecidable?: string;
 }
 
 function handlerFor(node: Raw, inherited: Visit["handler"]): Visit["handler"] {
@@ -194,20 +310,26 @@ function handlerFor(node: Raw, inherited: Visit["handler"]): Visit["handler"] {
   return own ? { node, interaction: own } : inherited;
 }
 
+const nodeName = (node: Raw): string =>
+  typeof node.id === "string" ? `${String(node.type)} ${node.id}` : `a ${String(node.type)}`;
+
 /** Every tappable node in render order, each with the nearest ancestor-or-self that handles it. */
 function visibleNodes(snapshot: VirtualPrototypeSnapshot): Visit[] {
   const root = record(snapshot.spec.root);
   const pending: Visit[] = root ? [{ node: root }] : [];
   const visits: Visit[] = [];
   while (pending.length > 0) {
-    const { node, handler: inherited } = pending.shift()!;
-    if (!isShown(node, snapshot.state)) {
+    const { node, handler: inherited, undecidable: above } = pending.shift()!;
+    const shown = isShown(node, snapshot.state);
+    if (shown === false) {
       continue;
     }
+    const undecidable =
+      above ?? (shown === undefined ? `visibleWhen on ${nodeName(node)}` : undefined);
     const handler = handlerFor(node, inherited);
-    visits.push({ node, handler });
+    visits.push({ node, handler, ...(undecidable ? { undecidable } : {}) });
     const children = [...dialogButtonTargets(node), ...visibleChildren(node, snapshot)];
-    pending.unshift(...children.map((child) => ({ node: child, handler })));
+    pending.unshift(...children.map((child) => ({ node: child, handler, undecidable })));
   }
   return visits;
 }
@@ -218,23 +340,42 @@ export function findVirtualTapTarget(
   selector: VirtualTapSelector,
 ): VirtualTapTarget | undefined {
   const visits = visibleNodes(snapshot);
+  const matches = (exact: boolean) => (visit: Visit) =>
+    selectorMatches(visit.node, selector, exact, snapshot.state);
   const match =
-    visits.find((visit) => selectorMatches(visit.node, selector, true)) ??
-    (selector.exactText === true
-      ? undefined
-      : visits.find((visit) => selectorMatches(visit.node, selector, false)));
-  if (!match) {
-    return undefined;
-  }
-  const handler = match.handler;
+    visits.find(matches(true)) ??
+    (selector.exactText === true ? undefined : visits.find(matches(false)));
+  return match ? tapTarget(match, snapshot.state) : undefined;
+}
+
+function tapTarget(visit: Visit, state: PrototypeState): VirtualTapTarget {
+  const handler = visit.handler;
   const enabledWhen = handler?.node.enabledWhen;
+  const enabled = enabledWhen === undefined ? true : decideVirtualCondition(enabledWhen, state);
+  const undecidable =
+    visit.undecidable ??
+    (enabled === undefined ? `enabledWhen on ${nodeName(handler!.node)}` : undefined);
   return {
-    node: match.node,
+    node: visit.node,
     interaction: handler?.interaction,
-    enabled:
-      enabledWhen === undefined ||
-      conditionHolds(enabledWhen, { state: snapshot.state, platform: "android" }),
+    enabled: enabled === true,
+    ...(undecidable ? { undecidable } : {}),
   };
+}
+
+/**
+ * Whether a text field bound to `key` is still shown, decidably visible and enabled, so it can
+ * take input: a field hidden, patched away or left behind on another stack screen cannot.
+ */
+export function isVirtualFieldFocusable(snapshot: VirtualPrototypeSnapshot, key: string): boolean {
+  return visibleNodes(snapshot).some((visit) => {
+    const handler = visit.handler;
+    if (handler?.node !== visit.node || handler.interaction.type !== "focus") {
+      return false;
+    }
+    const target = tapTarget(visit, snapshot.state);
+    return handler.interaction.key === key && target.enabled && !target.undecidable;
+  });
 }
 
 function findNode(spec: Raw, type: string, id: string): Raw | undefined {
@@ -344,9 +485,27 @@ class Draft {
     });
   }
 
+  /** Why the validator rejected a write, once one was: later writes and actions do nothing. */
+  rejection: string | undefined = undefined;
+
+  /**
+   * Writes `values` as `writeInteractionSpec` does: validated against the spec first, pager-bound
+   * keys clamped to their pages and each bound pager moved to the written page. Returns the keys
+   * that changed; a rejected write changes nothing and records why.
+   */
   write(values: PrototypeState): string[] {
-    const moved = Object.keys(values).filter((key) => this.state[key] !== values[key]);
-    this.state = { ...this.state, ...values };
+    if (this.rejection !== undefined || Object.keys(values).length === 0) {
+      return [];
+    }
+    const state = normalizePagerState(this.spec, { ...this.state, ...values });
+    const checked = validatePrototypeSpec({ ...this.spec, state });
+    if (!checked.success) {
+      this.rejection = `The prototype rejects writing ${Object.keys(values).join(", ")}: ${checked.error.path}: ${checked.error.message}. Nothing was applied.`;
+      return [];
+    }
+    const moved = Object.keys(state).filter((key) => this.state[key] !== state[key]);
+    this.state = state;
+    this.pages = boundPages(this.spec, state, this.pages);
     return moved;
   }
 
@@ -476,14 +635,33 @@ export function planVirtualInteraction(
   draft.change(draft.write(own));
   const baseline = { ...draft.state };
   const touched = new Set<string>();
-  actions.some((action) => runAction(action, draft, touched));
+  actions.some((action) => draft.rejection !== undefined || runAction(action, draft, touched));
+  if (draft.rejection !== undefined) {
+    // Planned before anything is delivered, so a rejected write leaves the device untouched.
+    return {
+      steps: [],
+      dismissed: false,
+      blurred: false,
+      state: snapshot.state,
+      pages: snapshot.pages,
+      stacks: snapshot.stacks,
+      rejection: draft.rejection,
+    };
+  }
   if (draft.dismissed) {
     // A dismissed prototype is no longer active, so no trailing change follows its event.
     draft.event("dismissed", null, { reason: "user" });
   } else {
     draft.change([...touched].filter((key) => baseline[key] !== draft.state[key]));
   }
-  return { steps: draft.steps, dismissed: draft.dismissed, blurred: draft.blurred };
+  return {
+    steps: draft.steps,
+    dismissed: draft.dismissed,
+    blurred: draft.blurred,
+    state: draft.state,
+    pages: draft.pages,
+    stacks: draft.stacks,
+  };
 }
 
 /** The own write a tap's interaction makes before its actions. */

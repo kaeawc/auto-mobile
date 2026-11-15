@@ -17,9 +17,27 @@ running.
   `RemoteAdbTransport`, reinstall and enable CtrlProxy, read the device identity
   (manufacturer, brand, model). It reports cost and whole minutes remaining for
   tool responses.
+- **Composition** (`createRemoteDeviceAcquisitionFromEnv`): reads the
+  configuration from the environment and builds the acquisition with the Device
+  Streaming provider and Android setup. CtrlProxy is installed through
+  `AndroidCtrlProxyRemoteInstaller`, which drops the serial's
+  `AndroidCtrlProxyManager` state and then runs a forced `setup`. Without the
+  opt-in it builds nothing; an opted-in but invalid configuration throws.
 
 The transport is the `DirectAccessService.AdbConnect` bridge (#14464). Until it
-lands, acquisition is not reachable from any tool or from the broker.
+lands, the composition has no transport to receive, so acquisition is not
+reachable from any tool or from the broker, and `releaseAll` is not yet
+registered as a daemon shutdown stage.
+
+## Configuration
+
+These variables are registered as internal while acquisition is unreachable.
+
+| Variable                                          | Use                                                            | Default |
+| ------------------------------------------------- | -------------------------------------------------------------- | ------- |
+| `AUTOMOBILE_DEVICE_STREAMING`                     | Opt-in flag; `1`/`true` enables. Sessions are billed.          | off     |
+| `AUTOMOBILE_DEVICE_STREAMING_PROJECT`             | Google Cloud project id billed for sessions.                   | unset   |
+| `AUTOMOBILE_DEVICE_STREAMING_MAX_SESSION_MINUTES` | Positive whole-number cap on one session, extensions included. | `30`    |
 
 ## Token source
 

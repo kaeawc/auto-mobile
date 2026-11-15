@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createDeviceStreamingProvider,
   DEFAULT_MAX_SESSION_MINUTES,
+  readDeviceStreamingConfig,
   resolveDeviceStreamingConfig,
 } from "../../../../src/devices/remote/deviceStreaming/deviceStreamingConfig";
 import { DeviceStreamingRemoteDeviceProvider } from "../../../../src/devices/remote/deviceStreaming/DeviceStreamingRemoteDeviceProvider";
@@ -70,5 +71,35 @@ describe("createDeviceStreamingProvider", () => {
         { host: new FakeHostCommandExecutor(), timer: new FakeTimer() },
       ),
     ).toThrow("off by default");
+  });
+});
+
+describe("readDeviceStreamingConfig", () => {
+  test("is not opted in when nothing is set", () => {
+    expect(readDeviceStreamingConfig({})).toEqual({
+      optIn: false,
+      projectId: undefined,
+      maxSessionMinutes: undefined,
+    });
+  });
+
+  test("reads the opt-in, trimmed project id and cap", () => {
+    expect(
+      readDeviceStreamingConfig({
+        AUTOMOBILE_DEVICE_STREAMING: "true",
+        AUTOMOBILE_DEVICE_STREAMING_PROJECT: " my-project-1 ",
+        AUTOMOBILE_DEVICE_STREAMING_MAX_SESSION_MINUTES: " 45 ",
+      }),
+    ).toEqual({ optIn: true, projectId: "my-project-1", maxSessionMinutes: 45 });
+  });
+
+  test("passes a malformed cap through so validation names it", () => {
+    const config = readDeviceStreamingConfig({
+      AUTOMOBILE_DEVICE_STREAMING: "1",
+      AUTOMOBILE_DEVICE_STREAMING_PROJECT: "my-project-1",
+      AUTOMOBILE_DEVICE_STREAMING_MAX_SESSION_MINUTES: "lots",
+    });
+
+    expect(() => resolveDeviceStreamingConfig(config)).toThrow("positive whole number of minutes");
   });
 });

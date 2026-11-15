@@ -232,6 +232,7 @@ Compare `requiredCapabilities` with `AutoMobilePrototype.capabilities` (Android)
 ## Samples
 
 `samples/prototype-embedding/` in the AutoMobile repository holds the resource's output for one
-sample prototype on each platform. Its request goes to `10.0.2.2`, the Android emulator's host
-alias. The iOS egress checks refuse that address, loopback and `localhost`. On iOS, use the
-machine's LAN address on a port other than the daemon's, or a `hostHandler`.
+sample prototype on each platform. The Android sample requests `http://10.0.2.2:8080/greeting`,
+the Android emulator's host alias. The iOS sample uses the placeholder
+`http://192.168.1.10:8080/greeting`; replace `192.168.1.10` with the machine's LAN address. Both
+samples ship a generated `hero.png` image.

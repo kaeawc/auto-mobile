@@ -15,6 +15,7 @@
  * them, so the same two builds compile the hand-owned Compose and SwiftUI output too.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { deflateSync } from "node:zlib";
 import path from "node:path";
 import {
   readNativePrototype,
@@ -33,6 +34,53 @@ export const IOS_FIXTURE_SOURCES =
   "ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer";
 /** The version written into samples; pinned so samples do not churn on every release. */
 export const SAMPLE_LIBRARY_VERSION = "0.0.0-sample";
+export const IOS_SAMPLE_REQUEST_URL = "http://192.168.1.10:8080/greeting";
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ ((crc & 1) === 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Uint8Array): Uint8Array {
+  const typeBytes = Buffer.from(type, "ascii");
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  typeBytes.copy(chunk, 4);
+  Buffer.from(data).copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(chunk.subarray(4, 8 + data.length)), 8 + data.length);
+  return chunk;
+}
+
+function heroPng(): Uint8Array {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(96, 0);
+  header.writeUInt32BE(96, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const pixels = Buffer.alloc(96 * (1 + 96 * 4));
+  for (let y = 0; y < 96; y++) {
+    const row = y * (1 + 96 * 4);
+    for (let x = 0; x < 96; x++) {
+      const pixel = row + 1 + x * 4;
+      pixels[pixel] = 0;
+      pixels[pixel + 1] = 0;
+      pixels[pixel + 2] = 255;
+      pixels[pixel + 3] = 255;
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(pixels)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
 
 /**
  * The sample is served as a saved prototype whose image has a known type but no bytes, so the
@@ -78,21 +126,44 @@ export async function renderEjectSamples(spec: unknown): Promise<Map<string, str
 }
 
 /** Repository-relative path to file content for every generated native-host sample file. */
-export async function renderEmbeddingSamples(spec: unknown): Promise<Map<string, string>> {
+export async function renderEmbeddingSamples(
+  spec: unknown,
+): Promise<Map<string, string | Uint8Array>> {
   const sources = sampleSources(spec);
   const id = prototypeSpecSchema.parse(spec).id;
-  const files = new Map<string, string>();
+  const files = new Map<string, string | Uint8Array>();
   const android = await readNativePrototype({ id, platform: "android" }, sources);
   for (const file of android.files) {
     files.set(`${ANDROID_SAMPLE_ROOT}/${file.path}`, `${file.content.trimEnd()}\n`);
   }
-  const ios = await readNativePrototype({ id, platform: "ios" }, sources);
+  const androidHero = android.assets.find((asset) => asset.id === "hero");
+  if (androidHero) {
+    files.set(`${ANDROID_SAMPLE_ROOT}/${androidHero.path}`, heroPng());
+  }
+  const iosSpec = structuredClone(prototypeSpecSchema.parse(spec));
+  if (iosSpec.root.type === "column") {
+    for (const node of iosSpec.root.children) {
+      if (node.type === "button") {
+        for (const action of node.onTap ?? []) {
+          if (action.type === "request") {
+            action.url = IOS_SAMPLE_REQUEST_URL;
+          }
+        }
+      }
+    }
+  }
+  const iosSources = sampleSources(iosSpec);
+  const ios = await readNativePrototype({ id, platform: "ios" }, iosSources);
   for (const file of ios.files) {
     // The host compiles inside the fixture target; the spec ships with the iOS sample layout.
     const target = file.path.endsWith(".swift")
       ? `${IOS_FIXTURE_SOURCES}/${file.path}`
       : `${IOS_SAMPLE_ROOT}/${file.path}`;
     files.set(target, `${file.content.trimEnd()}\n`);
+  }
+  const iosHero = ios.assets.find((asset) => asset.id === "hero");
+  if (iosHero) {
+    files.set(`${IOS_SAMPLE_ROOT}/${iosHero.path}`, heroPng());
   }
   return files;
 }
@@ -101,7 +172,7 @@ function readSpec(relative: string): unknown {
   return JSON.parse(readFileSync(path.join(REPO, relative), "utf8"));
 }
 
-async function renderAllSamples(): Promise<Map<string, string>> {
+async function renderAllSamples(): Promise<Map<string, string | Uint8Array>> {
   return new Map([
     ...(await renderEmbeddingSamples(readSpec(SAMPLE_SPEC_PATH))),
     ...(await renderEjectSamples(readSpec(EJECT_SPEC_PATH))),
@@ -114,7 +185,13 @@ export async function driftedEmbeddingSamples(): Promise<string[]> {
   return [...files]
     .filter(([relative, content]) => {
       const absolute = path.join(REPO, relative);
-      return !existsSync(absolute) || readFileSync(absolute, "utf8") !== content;
+      if (!existsSync(absolute)) {
+        return true;
+      }
+      const committed = readFileSync(absolute);
+      return typeof content === "string"
+        ? committed.toString("utf8") !== content
+        : !committed.equals(Buffer.from(content));
     })
     .map(([relative]) => relative);
 }

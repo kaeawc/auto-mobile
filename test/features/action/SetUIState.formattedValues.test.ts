@@ -126,6 +126,24 @@ describe("SetUIState formatted values and checkable text chips (#18350)", () => 
     expect(result.fields[0].normalized).toBeUndefined();
   });
 
+  test("does not skip a field whose sign, decimal point or currency differs", async () => {
+    for (const [shown, requested] of [
+      ["5", "-5"],
+      ["15", "1.5"],
+      ["5", "$5"],
+    ]) {
+      node = { ...phoneField(shown), "resource-id": "com.example:id/amount" };
+      calls = [];
+      const result = await createSetUIState().execute({
+        fields: [{ selector: { elementId: "com.example:id/amount" }, value: requested }],
+      });
+
+      expect(result.fields[0].skipped).toBeUndefined();
+      expect(result.fields[0].normalized).toBeUndefined();
+      expect(calls).toContain(`input:${requested}`);
+    }
+  });
+
   const minuteChip = (overrides: Partial<Element> = {}): Element => ({
     bounds: { left: 600, top: 400, right: 800, bottom: 560 },
     "resource-id": "com.google.android.deskclock:id/material_minute_text_input",

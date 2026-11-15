@@ -26,7 +26,9 @@ export interface FieldResult {
   skipped?: boolean;
   /**
    * True when a text field's value matched only after ignoring formatting the app
-   * applied (spaces, punctuation, symbols), e.g. a phone number shown as "(415) 555-0142".
+   * applied (spaces, thousands commas, phone-number parentheses and dashes), e.g. a
+   * phone number shown as "(415) 555-0142". Signs, decimal points and currency symbols
+   * always count.
    */
   normalized?: boolean;
   /** The raw value the field showed when `normalized` is true. */

@@ -7,4 +7,10 @@ To try the import flow:
 2. Choose ProtoViewer. The prototype is validated and added to the library.
 3. Tap it to view it. Use the row menu to Relaunch, Reset or Share.
 
+Reporting and hiding received content (guideline 1.2): a prototype someone else sent (opened from Files or shared to ProtoViewer) has Report and Hide in its row menu (long press or swipe left).
+- Report opens a mail draft to automobile+coc@jasonpearson.dev with the prototype's name, content hash and how it arrived. The app sends nothing itself and attaches no prototype data.
+- Hide asks for confirmation, then deletes the prototype and every copy of it, and hides copies received later on this device. Importing the same prototype again fails with "This prototype is hidden on this device".
+- Settings > Report a problem shows the same contact address.
+Prototypes the user made are never offered Report or Hide. Received prototypes carry no sender identity on iOS, so there is no one to block; hiding by content applies instead.
+
 Network access for imported prototypes is off by default and is switched on only in the library settings.

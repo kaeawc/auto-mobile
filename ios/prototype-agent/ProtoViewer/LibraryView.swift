@@ -21,6 +21,8 @@ struct LibraryView: View {
     @State private var importsFile = false
     @State private var deletion: PrototypeLibraryEntry?
     @State private var confirmsDelete = false
+    @State private var hiding: PrototypeLibraryEntry?
+    @State private var confirmsHide = false
     @State private var export: PrototypeLibraryExport?
     @State private var confirmsShare = false
     @State private var sharesFile = false
@@ -87,6 +89,21 @@ struct LibraryView: View {
             Button("Cancel", role: .cancel) { deletion = nil }
         } message: {
             Text("The prototype and its stored values will be removed.")
+        }
+        .confirmationDialog(
+            String(
+                localized: "Hide \(hidingLabel)?",
+                comment: "Hide confirmation title; placeholder is the prototype name."
+            ),
+            isPresented: $confirmsHide,
+            titleVisibility: .visible
+        ) {
+            Button("Hide", role: .destructive) { hide() }
+            Button("Cancel", role: .cancel) { hiding = nil }
+        } message: {
+            Text(
+                "This prototype and every copy of it are deleted with their stored values, and copies you receive later are hidden on this device. This cannot be undone."
+            )
         }
         .confirmationDialog("Share prototype?", isPresented: $confirmsShare, titleVisibility: .visible) {
             Button("Share", systemImage: "square.and.arrow.up") { sharesFile = true }
@@ -198,6 +215,10 @@ struct LibraryView: View {
         deletion?.label ?? String(localized: "prototype", comment: "Fallback name in the delete confirmation.")
     }
 
+    private var hidingLabel: String {
+        hiding?.label ?? String(localized: "prototype", comment: "Fallback name in the delete confirmation.")
+    }
+
     private var exporter: PrototypeLibraryExporter { PrototypeLibraryExporter(store: store) }
 
     private var preflightMessage: String {
@@ -217,6 +238,14 @@ struct LibraryView: View {
     @ViewBuilder
     private func actions(_ entry: PrototypeLibraryEntry) -> some View {
         Button("Share", systemImage: "square.and.arrow.up") { prepareExport(entry) }
+        // Report and Hide apply only to prototypes someone else sent (#16437).
+        if entry.isReceived {
+            Button("Report", systemImage: "exclamationmark.bubble") { reportContent(entry) }
+            Button("Hide", systemImage: "eye.slash", role: .destructive) {
+                hiding = entry
+                confirmsHide = true
+            }
+        }
         Button("Delete", systemImage: "trash", role: .destructive) {
             deletion = entry
             confirmsDelete = true
@@ -295,6 +324,41 @@ struct LibraryView: View {
         } catch { report(error) }
         self.deletion = nil
         refresh()
+    }
+
+    private func hide() {
+        guard let hiding else { return }
+        // Like Delete, close every open viewer of the content being hidden, even if a delete fails:
+        // the list and the viewer no longer show hidden content either way.
+        let affected = entries.filter { $0.isHidden(by: [hiding.specSha256]) }
+        do { try store.hide(hiding) } catch { report(error) }
+        for entry in affected {
+            navigation.didDelete(libraryId: entry.libraryId)
+        }
+        self.hiding = nil
+        refresh()
+    }
+
+    private func reportContent(_ entry: PrototypeLibraryEntry) {
+        let subject = String(
+            localized: "ProtoViewer content report",
+            comment: "Subject of the report mail draft sent to the published contact."
+        )
+        let details = PrototypeContentReport.details(entry)
+        let body = String(
+            localized: "Describe the problem here.\n\n\(details)",
+            comment: "Report mail body; placeholder identifies the prototype (label, hash, source)."
+        )
+        guard let url = PrototypeContentReport.mailURL(subject: subject, body: body) else { return }
+        Task {
+            let opened = await UIApplication.shared.open(url)
+            guard !opened else { return }
+            actionError = String(
+                localized: "No mail app can send the report. Write to \(PrototypeContentReport.contactEmail).",
+                comment: "Shown when no mail app opens the report draft; placeholder is the contact address."
+            )
+            showsError = true
+        }
     }
 
     private func report(_ error: Error) {

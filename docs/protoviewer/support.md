@@ -9,6 +9,10 @@ This page is the support page for the app's store listings.
   [github.com/kaeawc/auto-mobile/issues](https://github.com/kaeawc/auto-mobile/issues). Include the
   app version (library settings), your device and OS version, and, if you can, the prototype that
   fails.
+- **Objectionable content or abuse:** write to
+  [automobile+coc@jasonpearson.dev](mailto:automobile+coc@jasonpearson.dev). In the app, choose
+  **Report** on a prototype someone sent you to start that email with the prototype's details, or
+  **Hide** to delete it and hide its copies on your device.
 - **Security problems:** report them privately as described in the
   [security policy](https://github.com/kaeawc/auto-mobile/blob/main/SECURITY.md), not in a public
   issue.

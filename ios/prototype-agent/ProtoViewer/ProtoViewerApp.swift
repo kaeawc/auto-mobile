@@ -19,7 +19,12 @@ struct ProtoViewerApp: App {
             let inbox = try FileManager.default.url(
                 for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
             ).appendingPathComponent("Inbox", isDirectory: true)
-            let store = try PrototypeLibraryStore(root: root, storageRoot: storage)
+            let store = try PrototypeLibraryStore(
+                root: root, storageRoot: storage, blocklist: PrototypeDefaultsContentBlocklist()
+            )
+            // Retry deletes of hidden content that failed earlier, so it never holds library quota.
+            do { try store.purgeHidden() }
+            catch { libraryLog.error("Hidden content purge failed: \(error.localizedDescription, privacy: .public)") }
             PrototypeLibraryStartupCleanup(
                 exporter: PrototypeLibraryExporter(store: store), inbox: PrototypeLibraryInbox(root: inbox)
             ).run { libraryLog.error("\($0, privacy: .public)") }

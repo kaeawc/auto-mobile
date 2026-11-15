@@ -69,7 +69,11 @@ actor PrototypeMcpInbox {
             let store = try PrototypeLibraryStore(root: libraryRoot, storageRoot: storageRoot)
             return try PrototypeLibraryImporter(store: store).importData(bytes, source: .mcp, label: label)
         }
-        entries = { try PrototypeLibraryStore(root: libraryRoot, storageRoot: storageRoot).list().entries }
+        entries = {
+            try PrototypeLibraryStore(
+                root: libraryRoot, storageRoot: storageRoot, blocklist: PrototypeDefaultsContentBlocklist()
+            ).list().entries
+        }
         self.warning = warning
     }
 

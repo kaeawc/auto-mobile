@@ -17,7 +17,8 @@ import {
   type EjectThemeColors,
 } from "./prototypeEjectTheme";
 import { swiftUiDialect } from "./prototypeEjectSwiftUi";
-import { block, EjectWriter, type EjectTodo } from "./prototypeEjectWriter";
+import { ktfmtLayout } from "./prototypeEjectKotlinLayout";
+import { block, EjectWriter, indent, type EjectTodo } from "./prototypeEjectWriter";
 import { record, type Raw } from "./prototypeTemplate";
 
 /**
@@ -88,26 +89,47 @@ function generate(id: string, platform: NativePrototypePlatform, spec: Raw): Gen
   };
 }
 
-function kotlinMap(entries: readonly [string, string][]): string {
+/** `name = factory<String, String>(pairs)` one pair per line, as ktfmt keeps a trailing comma. */
+function kotlinPairs(
+  head: string,
+  factory: string,
+  entries: readonly [string, string][],
+): string[] {
+  const call = `${factory}<String, String>`;
+  if (entries.length === 0) {
+    return [`${head} = ${call}()`];
+  }
   const pairs = entries.map(
-    ([key, value]) => `${stringLiteral(key, "kotlin")} to ${stringLiteral(value, "kotlin")}`,
+    ([key, value]) => `${stringLiteral(key, "kotlin")} to ${stringLiteral(value, "kotlin")},`,
   );
-  return `mapOf<String, String>(${pairs.join(", ")})`;
+  return [`${head} =`, ...indent(block(`${call}(`, pairs, ")"))];
 }
 
+/** Written in ktfmt's shape: block bodies, and a blank line between members. */
 function composeStateLines(g: Generated): string[] {
   return block(`class ${g.typeName}State {`, [
-    `private val starts: Map<String, String> = ${kotlinMap([...g.writer.stackStarts])}`,
+    ...kotlinPairs("private val starts: Map<String, String>", "mapOf", [...g.writer.stackStarts]),
     "private val stacks = mutableStateMapOf<String, List<String>>()",
-    `private val texts = mutableStateMapOf<String, String>().apply { putAll(${kotlinMap(g.texts)}) }`,
+    ...kotlinPairs("private val texts", "mutableStateMapOf", g.texts),
     "",
     "fun top(stack: String): String = path(stack).last()",
-    "fun push(stack: String, screen: String) { stacks[stack] = path(stack) + screen }",
-    "fun pop(stack: String) { val p = path(stack); if (p.size > 1) stacks[stack] = p.dropLast(1) }",
-    'fun popToRoot(stack: String) { stacks[stack] = listOf(starts[stack] ?: "") }',
-    "fun replace(stack: String, screen: String) { stacks[stack] = path(stack).dropLast(1) + screen }",
+    "",
+    ...block("fun push(stack: String, screen: String) {", ["stacks[stack] = path(stack) + screen"]),
+    "",
+    ...block("fun pop(stack: String) {", [
+      "val p = path(stack)",
+      "if (p.size > 1) stacks[stack] = p.dropLast(1)",
+    ]),
+    "",
+    ...block("fun popToRoot(stack: String) {", ['stacks[stack] = listOf(starts[stack] ?: "")']),
+    "",
+    ...block("fun replace(stack: String, screen: String) {", [
+      "stacks[stack] = path(stack).dropLast(1) + screen",
+    ]),
+    "",
     'fun text(key: String): String = texts[key] ?: ""',
-    "fun setText(key: String, value: String) { texts[key] = value }",
+    "",
+    ...block("fun setText(key: String, value: String) {", ["texts[key] = value"]),
     "",
     'private fun path(stack: String): List<String> = stacks[stack] ?: listOf(starts[stack] ?: "")',
   ]);
@@ -137,7 +159,7 @@ function composeFile(g: Generated): string {
     "",
     ...composeThemeLines(g.theme, `${name}Theme`),
   ];
-  return `${lines.join("\n")}\n`;
+  return `${ktfmtLayout(lines).join("\n")}\n`;
 }
 
 function swiftDictionary(entries: readonly [string, string][]): string {

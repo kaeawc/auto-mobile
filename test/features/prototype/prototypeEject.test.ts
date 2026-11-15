@@ -130,18 +130,18 @@ describe("automobile:prototype/eject for Compose", () => {
     );
     expect(kt).toContain('ui.push("main", "detail")\n');
     expect(kt).toContain("/* TODO(eject): emit action */");
-    expect(kt).toContain(
-      'TextButton(\n                onClick = {\n                    ui.pop("main")',
-    );
+    expect(kt).toContain('TextButton(\n        onClick = {\n          ui.pop("main")');
     expect(kt).toContain('Column(modifier = Modifier.testTag("chart")) {');
-    expect(kt).toContain('"email" to "a@b.test", "price" to "\\$5"');
+    expect(kt).toContain(
+      'mutableStateMapOf<String, String>(\n      "email" to "a@b.test",\n      "price" to "\\$5",\n    )',
+    );
   });
 
   test("exports theme roles as Material 3 color schemes", async () => {
     const kt = (await eject("android")).files[0].content;
     expect(kt).toContain("val dark = isSystemInDarkTheme()");
-    expect(kt).toContain("lightColorScheme(\n    primary = Color(0xFF6750A4),\n)");
-    expect(kt).toContain("darkColorScheme(\n    primary = Color(0x80D0BCFF),\n)");
+    expect(kt).toContain("=\n  lightColorScheme(\n    primary = Color(0xFF6750A4),\n  )");
+    expect(kt).toContain("=\n  darkColorScheme(\n    primary = Color(0x80D0BCFF),\n  )");
     const forced = await eject("android", { id: "dark", theme: { mode: "dark" }, root: shop.root });
     expect(forced.files[0].content).toContain("val dark = true");
     expect(forced.files[0].content).toContain(
@@ -214,7 +214,7 @@ describe("automobile:prototype/eject result", () => {
   test("a TODO stub keeps the unsupported node's children", async () => {
     const kt = (await eject("android")).files[0].content;
     expect(kt).toContain(
-      'Column(modifier = Modifier) {\n            Text(text = "TODO: topAppBar")\n            Text(text = "kept", modifier = Modifier)',
+      'Column(modifier = Modifier) {\n      Text(text = "TODO: topAppBar")\n      Text(text = "kept", modifier = Modifier)',
     );
   });
 
@@ -392,7 +392,7 @@ describe("automobile:prototype/eject result", () => {
     const kt = (await eject("android")).files[0].content;
     const swift = (await eject("ios")).files[0].content;
     expect(kt).toContain(
-      'fun popToRoot(stack: String) { stacks[stack] = listOf(starts[stack] ?: "") }',
+      'fun popToRoot(stack: String) {\n    stacks[stack] = listOf(starts[stack] ?: "")\n  }',
     );
     expect(swift).toContain(
       'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?? ""] }',

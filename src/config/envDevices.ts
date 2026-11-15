@@ -2,6 +2,28 @@ import type { EnvVarSpec } from "./envSpec";
 
 /** Device, emulator, simulator and CtrlProxy variables. */
 export const DEVICES_ENV = {
+  DEVICE_STREAMING: {
+    name: "AUTOMOBILE_DEVICE_STREAMING",
+    kind: "bool",
+    default: "off",
+    internal: true,
+    doc: "Opt in to renting Android Device Streaming devices, billed to the configured Google Cloud project.",
+  },
+  DEVICE_STREAMING_PROJECT: {
+    name: "AUTOMOBILE_DEVICE_STREAMING_PROJECT",
+    kind: "string",
+    default: "unset",
+    internal: true,
+    doc: "Google Cloud project id billed for Android Device Streaming sessions.",
+  },
+  DEVICE_STREAMING_MAX_SESSION_MINUTES: {
+    name: "AUTOMOBILE_DEVICE_STREAMING_MAX_SESSION_MINUTES",
+    kind: "int",
+    min: 1,
+    default: "30",
+    internal: true,
+    doc: "Upper bound on one Android Device Streaming session's length in minutes, extensions included.",
+  },
   CONTENT_SEEDER_APK_PATH: {
     name: "AUTOMOBILE_CONTENT_SEEDER_APK_PATH",
     kind: "string",

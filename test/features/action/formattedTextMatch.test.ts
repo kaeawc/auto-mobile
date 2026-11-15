@@ -38,6 +38,14 @@ describe("matchTextValue", () => {
     expect(matchTextValue("+5", "5")).toBe("mismatch");
     expect(matchTextValue("5-3", "53")).toBe("mismatch");
     expect(matchTextValue("(5)", "5")).toBe("mismatch");
+    expect(matchTextValue("1.23", "123")).toBe("mismatch");
+    expect(matchTextValue("-10", "10")).toBe("mismatch");
+  });
+
+  test("a sign on a long number is not phone formatting", () => {
+    expect(matchTextValue("-1234567", "1234567")).toBe("mismatch");
+    expect(matchTextValue("1234567", "-1234567")).toBe("mismatch");
+    expect(matchTextValue("1234567-", "1234567")).toBe("mismatch");
   });
 
   test("a value of only formatting characters must match exactly", () => {

@@ -5,6 +5,7 @@ import type { BootedDevice, Element, ObserveResult } from "../../../src/models";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveScreenForSetUIState } from "../../fakes/FakeSetUIStateDependencies";
+import { isFocusEditableElement } from "../../../src/features/utility/ElementResolver";
 
 // #18350: app-reformatted values, a checkable time-picker text chip, and
 // deterministic errors that must not be retried.
@@ -23,11 +24,14 @@ describe("SetUIState formatted values and checkable text chips (#18350)", () => 
       viewHierarchy: { hierarchy: { node: { node: [{ $: { ...node } }] } } },
     });
 
-  /** Simulates the app: `format` rewrites typed text; `onFocus` swaps the node. */
+  /**
+   * Simulates the app: `format` rewrites typed text; `onTap` swaps the node. Like
+   * the real focus-input resolver, `focus` finds only an editable node.
+   */
   const createSetUIState = ({
     format = (text: string) => text,
-    onFocus,
-  }: { format?: (text: string) => string; onFocus?: () => void } = {}) =>
+    onTap,
+  }: { format?: (text: string) => string; onTap?: () => void } = {}) =>
     new SetUIState(device, null, {
       observeScreen: fakeObserve,
       fieldTypeDetector: new FieldTypeDetector(),
@@ -35,9 +39,14 @@ describe("SetUIState formatted values and checkable text chips (#18350)", () => 
       tapOnElement: {
         execute: async (options) => {
           calls.push(`${options.action}:${options.elementId ?? options.text}`);
-          if (options.action === "focus") {
-            onFocus?.();
+          if (options.action === "tap") {
+            onTap?.();
+            return { success: true, action: options.action };
           }
+          if (!isFocusEditableElement(node)) {
+            return { success: false, action: options.action, error: "No editable element found" };
+          }
+          node = { ...node, focused: "true" };
           return { success: true, action: options.action, focusVerified: true };
         },
       },
@@ -131,6 +140,8 @@ describe("SetUIState formatted values and checkable text chips (#18350)", () => 
       ["5", "-5"],
       ["15", "1.5"],
       ["5", "$5"],
+      ["123", "1.23"],
+      ["10", "-10"],
     ]) {
       node = { ...phoneField(shown), "resource-id": "com.example:id/amount" };
       calls = [];
@@ -157,16 +168,11 @@ describe("SetUIState formatted values and checkable text chips (#18350)", () => 
     ...overrides,
   });
 
-  test("focuses and types into a checkable chip that becomes an EditText", async () => {
+  test("taps a checkable chip so it becomes an EditText, then focuses and types", async () => {
     node = minuteChip();
     const setUIState = createSetUIState({
-      onFocus: () => {
-        node = {
-          ...node,
-          class: "android.widget.EditText",
-          checkable: "false",
-          focused: "true",
-        };
+      onTap: () => {
+        node = { ...node, class: "android.widget.EditText", checkable: "false" };
       },
     });
     const result = await setUIState.execute({
@@ -181,10 +187,28 @@ describe("SetUIState formatted values and checkable text chips (#18350)", () => 
       verified: true,
     });
     expect(calls).toEqual([
+      "tap:com.google.android.deskclock:id/material_minute_text_input",
       "focus:com.google.android.deskclock:id/material_minute_text_input",
       "clear",
       "input:45",
     ]);
+  });
+
+  test("the minute chip alone has no editable affordance for the focus action", () => {
+    expect(isFocusEditableElement(minuteChip())).toBe(false);
+  });
+
+  test("stops with a next step when a tapped chip does not become editable", async () => {
+    node = minuteChip();
+    const result = await createSetUIState().execute({
+      fields: [{ selector: { text: "0 minutes" }, value: "45" }],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.fields[0].fieldType).toBe("text");
+    expect(result.fields[0].error).toContain("did not become an editable field");
+    expect(calls).not.toContain("clear");
+    expect(calls.some((call) => call.startsWith("focus:"))).toBe(false);
   });
 
   test("refuses a value for a non-editable checkable node once, with a next step", async () => {

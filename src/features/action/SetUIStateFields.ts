@@ -26,6 +26,7 @@ import { SearchableHierarchy } from "../utility/SearchableNode";
 import { readDropdownDescendantValue } from "./dropdownValue";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { findIosToggleControl } from "./iosToggleControl";
+import { focusForInput } from "./textChipActivation";
 import type { TapAtCoordinate } from "./TapAtCoordinate";
 import {
   CONTAINS_IGNORE_CASE,
@@ -730,23 +731,22 @@ export class SetUIStateFields {
 
     const selectorDesc = this.describeSelector(fieldSpec.selector);
 
-    // The focus action verifies that this editable field, rather than a
-    // previously focused field, owns input before ClearText can mutate it.
-    logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
-    const tapStart = Date.now();
-    const tapResult = await this.focusTextField(element, fieldSpec, focusRecovery, {
-      progress,
+    const focusFailure = await focusForInput(element, {
+      selectorDesc,
       signal,
+      tap: () =>
+        this.getTapOnElement().execute(
+          element["resource-id"]
+            ? { elementId: element["resource-id"], action: "tap" }
+            : this.buildTapOptions(fieldSpec.selector, "tap"),
+          { progress, signal },
+        ),
+      refresh: () => this.refreshFieldElement(fieldSpec, element, signal),
+      focus: (target) =>
+        this.focusTextField(target, fieldSpec, focusRecovery, { progress, signal }),
     });
-    signal?.throwIfAborted();
-    logger.debug(
-      `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
-    );
-    if (!tapResult.success || tapResult.focusVerified !== true) {
-      return {
-        success: false,
-        error: `Failed to tap/focus on field: ${tapResult.error ?? "focus was not verified"}`,
-      };
+    if (focusFailure) {
+      return focusFailure;
     }
 
     // Clear existing text

@@ -6,7 +6,9 @@ const WHITESPACE = /\s/gu;
 // A comma that separates a thousands group: "1,000" but not "1,5".
 const THOUSANDS_COMMA = /(?<=\d),(?=\d{3}(?!\d))/gu;
 // Digits with only phone formatting: an optional leading "+", spaces, parentheses, dashes.
-const PHONE_LIKE = /^\+?[\d\s()\-‐-–]+$/u;
+// It starts with "+", a digit or "(" and ends with a digit, so a leading or
+// trailing dash (a sign) is never phone formatting: "-1234567" stays signed.
+const PHONE_LIKE = /^\+?[\d(][\d\s()\-‐-–]*\d$/u;
 const PHONE_FORMATTING = /[()\-‐-–]/gu;
 const MIN_PHONE_DIGITS = 7;
 

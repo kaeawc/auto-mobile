@@ -238,6 +238,20 @@ final class PrototypeMcpInboxTests: XCTestCase {
     }
 
     @MainActor
+    func testHiddenImportIsRejectedWithHiddenReason() async throws {
+        let files = McpFiles(); files.state.withLock { $0.data["/mcp/inbox/r.automobile-proto"] = Data([1]) }
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, _ in throw PrototypeLibraryImportFailure.hidden },
+            entries: { [] }, warning: { _ in }
+        )
+        _ = await inbox.handle(.importBundle(request: "r", label: nil))
+        let written = try result(files)
+        XCTAssertEqual(written["status"], "rejected")
+        XCTAssertEqual(written["path"], "$")
+        XCTAssertEqual(written["reason"], "This prototype is hidden on this device")
+    }
+
+    @MainActor
     func testOpenDefersResultUntilLoadedAndWritesExactlyOnce() async throws {
         for success in [true, false] {
             let files = McpFiles(); let entry = entry

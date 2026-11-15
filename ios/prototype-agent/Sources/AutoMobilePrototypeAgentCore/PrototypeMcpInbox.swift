@@ -197,6 +197,8 @@ actor PrototypeMcpInbox {
         } catch let failure as PrototypeLibraryImportFailure {
             switch failure {
             case .needsNewerViewer: return .rejected(request, path: "capability", reason: failure.message)
+            // MCP imports are the user's own content and are never hidden; reject defensively if one is.
+            case .hidden: return .rejected(request, path: failure.path, reason: failure.message)
             case .invalid:
                 return .rejected(
                     request, path: failure.message == "Import byte cap exceeded" ? "content" : failure.path,

@@ -17,7 +17,8 @@ import {
   type EjectThemeColors,
 } from "./prototypeEjectTheme";
 import { swiftUiDialect } from "./prototypeEjectSwiftUi";
-import { block, EjectWriter, type EjectTodo } from "./prototypeEjectWriter";
+import { ktfmtLayout } from "./prototypeEjectKotlinLayout";
+import { block, EjectWriter, indent, type EjectTodo } from "./prototypeEjectWriter";
 import { record, type Raw } from "./prototypeTemplate";
 
 /**
@@ -88,26 +89,47 @@ function generate(id: string, platform: NativePrototypePlatform, spec: Raw): Gen
   };
 }
 
-function kotlinMap(entries: readonly [string, string][]): string {
+/** `name = factory<String, String>(pairs)` one pair per line, as ktfmt keeps a trailing comma. */
+function kotlinPairs(
+  head: string,
+  factory: string,
+  entries: readonly [string, string][],
+): string[] {
+  const call = `${factory}<String, String>`;
+  if (entries.length === 0) {
+    return [`${head} = ${call}()`];
+  }
   const pairs = entries.map(
-    ([key, value]) => `${stringLiteral(key, "kotlin")} to ${stringLiteral(value, "kotlin")}`,
+    ([key, value]) => `${stringLiteral(key, "kotlin")} to ${stringLiteral(value, "kotlin")},`,
   );
-  return `mapOf<String, String>(${pairs.join(", ")})`;
+  return [`${head} =`, ...indent(block(`${call}(`, pairs, ")"))];
 }
 
+/** Written in ktfmt's shape: block bodies, and a blank line between members. */
 function composeStateLines(g: Generated): string[] {
   return block(`class ${g.typeName}State {`, [
-    `private val starts: Map<String, String> = ${kotlinMap([...g.writer.stackStarts])}`,
+    ...kotlinPairs("private val starts: Map<String, String>", "mapOf", [...g.writer.stackStarts]),
     "private val stacks = mutableStateMapOf<String, List<String>>()",
-    `private val texts = mutableStateMapOf<String, String>().apply { putAll(${kotlinMap(g.texts)}) }`,
+    ...kotlinPairs("private val texts", "mutableStateMapOf", g.texts),
     "",
     "fun top(stack: String): String = path(stack).last()",
-    "fun push(stack: String, screen: String) { stacks[stack] = path(stack) + screen }",
-    "fun pop(stack: String) { val p = path(stack); if (p.size > 1) stacks[stack] = p.dropLast(1) }",
-    'fun popToRoot(stack: String) { stacks[stack] = listOf(starts[stack] ?: "") }',
-    "fun replace(stack: String, screen: String) { stacks[stack] = path(stack).dropLast(1) + screen }",
+    "",
+    ...block("fun push(stack: String, screen: String) {", ["stacks[stack] = path(stack) + screen"]),
+    "",
+    ...block("fun pop(stack: String) {", [
+      "val p = path(stack)",
+      "if (p.size > 1) stacks[stack] = p.dropLast(1)",
+    ]),
+    "",
+    ...block("fun popToRoot(stack: String) {", ['stacks[stack] = listOf(starts[stack] ?: "")']),
+    "",
+    ...block("fun replace(stack: String, screen: String) {", [
+      "stacks[stack] = path(stack).dropLast(1) + screen",
+    ]),
+    "",
     'fun text(key: String): String = texts[key] ?: ""',
-    "fun setText(key: String, value: String) { texts[key] = value }",
+    "",
+    ...block("fun setText(key: String, value: String) {", ["texts[key] = value"]),
     "",
     'private fun path(stack: String): List<String> = stacks[stack] ?: listOf(starts[stack] ?: "")',
   ]);
@@ -137,7 +159,7 @@ function composeFile(g: Generated): string {
     "",
     ...composeThemeLines(g.theme, `${name}Theme`),
   ];
-  return `${lines.join("\n")}\n`;
+  return `${ktfmtLayout(lines).join("\n")}\n`;
 }
 
 function swiftDictionary(entries: readonly [string, string][]): string {
@@ -151,28 +173,38 @@ function swiftDictionary(entries: readonly [string, string][]): string {
   return `Dictionary([${pairs.join(", ")}], uniquingKeysWith: { first, _ in first })`;
 }
 
+/**
+ * Main-actor isolated so the scaffold also compiles in Swift 6 language mode (#16499): Binding's
+ * closures are `@Sendable`, so they reach the state through `MainActor.assumeIsolated`.
+ */
 function swiftStateLines(g: Generated): string[] {
-  return block(`final class ${g.typeName}State: ObservableObject {`, [
-    "@Published private var stacks: [String: [String]] = [:]",
-    "@Published private var texts: [String: String]",
-    "private let starts: [String: String]",
-    "",
-    ...block("init() {", [
-      `starts = ${swiftDictionary([...g.writer.stackStarts])}`,
-      `texts = ${swiftDictionary(g.texts)}`,
+  return [
+    "@MainActor",
+    ...block(`final class ${g.typeName}State: ObservableObject {`, [
+      "@Published private var stacks: [String: [String]] = [:]",
+      "@Published private var texts: [String: String]",
+      "private let starts: [String: String]",
+      "",
+      ...block("init() {", [
+        `starts = ${swiftDictionary([...g.writer.stackStarts])}`,
+        `texts = ${swiftDictionary(g.texts)}`,
+      ]),
+      "",
+      'func top(_ stack: String) -> String { path(stack).last ?? "" }',
+      "func push(_ stack: String, _ screen: String) { stacks[stack] = path(stack) + [screen] }",
+      "func pop(_ stack: String) { let p = path(stack); if p.count > 1 { stacks[stack] = Array(p.dropLast()) } }",
+      'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?? ""] }',
+      "func replace(_ stack: String, _ screen: String) { stacks[stack] = Array(path(stack).dropLast()) + [screen] }",
+      ...block("func text(_ key: String) -> Binding<String> {", [
+        "Binding(",
+        '    get: { MainActor.assumeIsolated { self.texts[key] ?? "" } },',
+        "    set: { value in MainActor.assumeIsolated { self.texts[key] = value } }",
+        ")",
+      ]),
+      "",
+      'private func path(_ stack: String) -> [String] { stacks[stack] ?? [starts[stack] ?? ""] }',
     ]),
-    "",
-    'func top(_ stack: String) -> String { path(stack).last ?? "" }',
-    "func push(_ stack: String, _ screen: String) { stacks[stack] = path(stack) + [screen] }",
-    "func pop(_ stack: String) { let p = path(stack); if p.count > 1 { stacks[stack] = Array(p.dropLast()) } }",
-    'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?? ""] }',
-    "func replace(_ stack: String, _ screen: String) { stacks[stack] = Array(path(stack).dropLast()) + [screen] }",
-    ...block("func text(_ key: String) -> Binding<String> {", [
-      'Binding(get: { self.texts[key] ?? "" }, set: { self.texts[key] = $0 })',
-    ]),
-    "",
-    'private func path(_ stack: String) -> [String] { stacks[stack] ?? [starts[stack] ?? ""] }',
-  ]);
+  ];
 }
 
 function swiftRootModifiers(g: Generated): string[] {

@@ -3,6 +3,10 @@ import {
   MOCK_BACKEND_ID,
 } from "../../features/prototype/prototypeMockSchema";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
+import {
+  PROTOTYPE_PUSH_TRANSPORTS,
+  PROTOTYPE_SIMULATE_EVENTS,
+} from "../../features/prototype/prototypePushSimulate";
 import { z as specZ } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
 import { prototypeContractPatterns } from "../../features/prototype/prototypeContractPatterns";
@@ -370,6 +374,24 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .max(3600000)
         .optional()
         .describe("simulate only: advance the prototype clock without waiting"),
+      event: z
+        .enum(PROTOTYPE_SIMULATE_EVENTS)
+        .optional()
+        .describe(
+          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push",
+        ),
+      data: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "simulate event only: the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON",
+        ),
+      transport: z
+        .enum(PROTOTYPE_PUSH_TRANSPORTS)
+        .optional()
+        .describe(
+          "simulate event only: connection (the live runtime), system (the platform push path, reaches an app that is not running) or auto (default: connection when connected, else system)",
+        ),
       id: z
         .string()
         .min(1)
@@ -500,6 +522,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "ops",
     "baseRevision",
     "advanceTimeMs",
+    "event",
+    "data",
+    "transport",
     "label",
     "icon",
     "pin",
@@ -543,7 +568,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     open: ["id"],
     share: ["spec", "specPath", "assets", "url"],
     clearStorage: ["id"],
-    simulate: ["id", "advanceTimeMs"],
+    simulate: ["id", "advanceTimeMs", "event", "data", "transport"],
     dismiss: ["id", "all"],
     testSessionBegin: ["id", "goal", "cohort"],
     testSessionEnd: ["id"],

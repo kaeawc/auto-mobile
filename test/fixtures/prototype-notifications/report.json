@@ -1,0 +1,293 @@
+[
+  {
+    "name": "reports only proto-tagged records and strips the prefix",
+    "snapshot": {
+      "permission": "granted",
+      "badge": 1,
+      "channels": [{ "id": "messages", "importance": "high", "blocked": false }],
+      "posted": [
+        { "tag": "Discovery", "channel": "messages", "title": "Not ours", "postedAt": 1000 },
+        { "tag": null, "channel": "messages", "title": "Untagged", "postedAt": 1001 },
+        { "tag": "proto:", "channel": "messages", "title": "Empty id", "postedAt": 1002 },
+        {
+          "tag": "proto:welcome",
+          "channel": "messages",
+          "title": "Welcome",
+          "body": "Thanks for trying the prototype",
+          "actions": ["open", "later"],
+          "postedAt": 1003
+        }
+      ],
+      "pending": []
+    },
+    "report": {
+      "permission": "granted",
+      "badge": 1,
+      "channels": [{ "id": "messages", "importance": "high", "blocked": false }],
+      "active": [
+        {
+          "id": "welcome",
+          "channel": "messages",
+          "title": "Welcome",
+          "body": "Thanks for trying the prototype",
+          "ongoing": false,
+          "actions": ["open", "later"],
+          "postedAt": 1003
+        }
+      ],
+      "pending": []
+    }
+  },
+  {
+    "name": "a grouped pair reports both children with their group, ordered by postedAt then id",
+    "snapshot": {
+      "permission": "granted",
+      "badge": 2,
+      "channels": [{ "id": "chat", "importance": "default", "blocked": false }],
+      "posted": [
+        {
+          "tag": "proto:bob",
+          "channel": "chat",
+          "title": "Bob",
+          "body": "Lunch?",
+          "group": "thread",
+          "postedAt": 2000
+        },
+        {
+          "tag": "proto:alice",
+          "channel": "chat",
+          "title": "Alice",
+          "body": "On my way",
+          "group": "thread",
+          "postedAt": 2000
+        }
+      ],
+      "pending": []
+    },
+    "report": {
+      "permission": "granted",
+      "badge": 2,
+      "channels": [{ "id": "chat", "importance": "default", "blocked": false }],
+      "active": [
+        {
+          "id": "alice",
+          "channel": "chat",
+          "title": "Alice",
+          "body": "On my way",
+          "group": "thread",
+          "ongoing": false,
+          "actions": [],
+          "postedAt": 2000
+        },
+        {
+          "id": "bob",
+          "channel": "chat",
+          "title": "Bob",
+          "body": "Lunch?",
+          "group": "thread",
+          "ongoing": false,
+          "actions": [],
+          "postedAt": 2000
+        }
+      ],
+      "pending": []
+    }
+  },
+  {
+    "name": "progress is reported as a fraction or indeterminate and an out-of-range value is omitted",
+    "snapshot": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [{ "id": "transfers", "importance": "low" }],
+      "posted": [
+        {
+          "tag": "proto:upload",
+          "channel": "transfers",
+          "title": "Uploading",
+          "ongoing": true,
+          "progress": { "value": 0.4 },
+          "postedAt": 3000
+        },
+        {
+          "tag": "proto:sync",
+          "channel": "transfers",
+          "title": "Syncing",
+          "ongoing": true,
+          "progress": { "indeterminate": true },
+          "postedAt": 3001
+        },
+        {
+          "tag": "proto:broken",
+          "channel": "transfers",
+          "title": "Broken",
+          "progress": { "value": 1.5 },
+          "postedAt": 3002
+        }
+      ],
+      "pending": []
+    },
+    "report": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [{ "id": "transfers", "importance": "low", "blocked": false }],
+      "active": [
+        {
+          "id": "upload",
+          "channel": "transfers",
+          "title": "Uploading",
+          "ongoing": true,
+          "progress": { "value": 0.4 },
+          "actions": [],
+          "postedAt": 3000
+        },
+        {
+          "id": "sync",
+          "channel": "transfers",
+          "title": "Syncing",
+          "ongoing": true,
+          "progress": { "indeterminate": true },
+          "actions": [],
+          "postedAt": 3001
+        },
+        {
+          "id": "broken",
+          "channel": "transfers",
+          "title": "Broken",
+          "ongoing": false,
+          "actions": [],
+          "postedAt": 3002
+        }
+      ],
+      "pending": []
+    }
+  },
+  {
+    "name": "a cancelled notification is absent once the platform no longer lists it",
+    "snapshot": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [{ "id": "messages", "importance": "default", "blocked": false }],
+      "posted": [{ "tag": "proto:kept", "channel": "messages", "title": "Kept", "postedAt": 4000 }],
+      "pending": []
+    },
+    "report": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [{ "id": "messages", "importance": "default", "blocked": false }],
+      "active": [
+        {
+          "id": "kept",
+          "channel": "messages",
+          "title": "Kept",
+          "ongoing": false,
+          "actions": [],
+          "postedAt": 4000
+        }
+      ],
+      "pending": []
+    }
+  },
+  {
+    "name": "pending requests sort by fireAt then id and foreign identifiers are dropped",
+    "snapshot": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [],
+      "posted": [],
+      "pending": [
+        { "tag": "proto:later", "fireAt": 9000 },
+        { "tag": "other-app-reminder", "fireAt": 1000 },
+        { "tag": "proto:soon-b", "fireAt": 5000 },
+        { "tag": "proto:soon-a", "fireAt": 5000 },
+        { "tag": "proto:no-time" }
+      ]
+    },
+    "report": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [],
+      "active": [],
+      "pending": [
+        { "id": "soon-a", "fireAt": 5000 },
+        { "id": "soon-b", "fireAt": 5000 },
+        { "id": "later", "fireAt": 9000 }
+      ]
+    }
+  },
+  {
+    "name": "channels sort by id, blocked defaults to false and an entry without importance is dropped",
+    "snapshot": {
+      "permission": "denied",
+      "badge": 0,
+      "channels": [
+        { "id": "promos", "importance": "min", "blocked": true },
+        { "id": "alerts", "importance": "high" },
+        { "id": "nameless" }
+      ],
+      "posted": [],
+      "pending": []
+    },
+    "report": {
+      "permission": "denied",
+      "badge": 0,
+      "channels": [
+        { "id": "alerts", "importance": "high", "blocked": false },
+        { "id": "promos", "importance": "min", "blocked": true }
+      ],
+      "active": [],
+      "pending": []
+    }
+  },
+  {
+    "name": "malformed records are dropped and malformed optional fields omitted",
+    "snapshot": {
+      "permission": "granted",
+      "badge": 2.5,
+      "channels": [{ "id": "messages", "importance": "default", "blocked": false }],
+      "posted": [
+        { "tag": "proto:no-title", "channel": "messages", "postedAt": 5000 },
+        { "tag": "proto:bad-channel", "channel": 7, "title": "Bad", "postedAt": 5001 },
+        { "tag": "proto:no-time", "channel": "messages", "title": "No time" },
+        "not a record",
+        {
+          "tag": "proto:loose",
+          "channel": "messages",
+          "title": "Loose",
+          "body": null,
+          "group": 3,
+          "ongoing": "yes",
+          "actions": ["reply", 2, null],
+          "postedAt": 5002
+        }
+      ],
+      "pending": "not a list"
+    },
+    "report": {
+      "permission": "granted",
+      "badge": 0,
+      "channels": [{ "id": "messages", "importance": "default", "blocked": false }],
+      "active": [
+        {
+          "id": "loose",
+          "channel": "messages",
+          "title": "Loose",
+          "ongoing": false,
+          "actions": ["reply"],
+          "postedAt": 5002
+        }
+      ],
+      "pending": []
+    }
+  },
+  {
+    "name": "a snapshot that is not a record reports nothing",
+    "snapshot": null,
+    "report": {
+      "permission": "unavailable",
+      "badge": 0,
+      "channels": [],
+      "active": [],
+      "pending": []
+    }
+  }
+]

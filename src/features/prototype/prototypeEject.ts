@@ -151,28 +151,38 @@ function swiftDictionary(entries: readonly [string, string][]): string {
   return `Dictionary([${pairs.join(", ")}], uniquingKeysWith: { first, _ in first })`;
 }
 
+/**
+ * Main-actor isolated so the scaffold also compiles in Swift 6 language mode (#16499): Binding's
+ * closures are `@Sendable`, so they reach the state through `MainActor.assumeIsolated`.
+ */
 function swiftStateLines(g: Generated): string[] {
-  return block(`final class ${g.typeName}State: ObservableObject {`, [
-    "@Published private var stacks: [String: [String]] = [:]",
-    "@Published private var texts: [String: String]",
-    "private let starts: [String: String]",
-    "",
-    ...block("init() {", [
-      `starts = ${swiftDictionary([...g.writer.stackStarts])}`,
-      `texts = ${swiftDictionary(g.texts)}`,
+  return [
+    "@MainActor",
+    ...block(`final class ${g.typeName}State: ObservableObject {`, [
+      "@Published private var stacks: [String: [String]] = [:]",
+      "@Published private var texts: [String: String]",
+      "private let starts: [String: String]",
+      "",
+      ...block("init() {", [
+        `starts = ${swiftDictionary([...g.writer.stackStarts])}`,
+        `texts = ${swiftDictionary(g.texts)}`,
+      ]),
+      "",
+      'func top(_ stack: String) -> String { path(stack).last ?? "" }',
+      "func push(_ stack: String, _ screen: String) { stacks[stack] = path(stack) + [screen] }",
+      "func pop(_ stack: String) { let p = path(stack); if p.count > 1 { stacks[stack] = Array(p.dropLast()) } }",
+      'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?? ""] }',
+      "func replace(_ stack: String, _ screen: String) { stacks[stack] = Array(path(stack).dropLast()) + [screen] }",
+      ...block("func text(_ key: String) -> Binding<String> {", [
+        "Binding(",
+        '    get: { MainActor.assumeIsolated { self.texts[key] ?? "" } },',
+        "    set: { value in MainActor.assumeIsolated { self.texts[key] = value } }",
+        ")",
+      ]),
+      "",
+      'private func path(_ stack: String) -> [String] { stacks[stack] ?? [starts[stack] ?? ""] }',
     ]),
-    "",
-    'func top(_ stack: String) -> String { path(stack).last ?? "" }',
-    "func push(_ stack: String, _ screen: String) { stacks[stack] = path(stack) + [screen] }",
-    "func pop(_ stack: String) { let p = path(stack); if p.count > 1 { stacks[stack] = Array(p.dropLast()) } }",
-    'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?? ""] }',
-    "func replace(_ stack: String, _ screen: String) { stacks[stack] = Array(path(stack).dropLast()) + [screen] }",
-    ...block("func text(_ key: String) -> Binding<String> {", [
-      'Binding(get: { self.texts[key] ?? "" }, set: { self.texts[key] = $0 })',
-    ]),
-    "",
-    'private func path(_ stack: String) -> [String] { stacks[stack] ?? [starts[stack] ?? ""] }',
-  ]);
+  ];
 }
 
 function swiftRootModifiers(g: Generated): string[] {

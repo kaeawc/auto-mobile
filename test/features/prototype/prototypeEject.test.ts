@@ -173,6 +173,15 @@ describe("automobile:prototype/eject for SwiftUI", () => {
     expect(swift).toContain(".tint(ShopPrototypeTheme.primary)");
     expect(swift).toContain("alpha: 0.502) : UIColor(red: 0.404, green: 0.314, blue: 0.643");
   });
+
+  test("isolates the state to the main actor so Swift 6 accepts its Binding closures", async () => {
+    const swift = (await eject("ios")).files[0].content;
+    expect(swift).toContain("@MainActor\nfinal class ShopPrototypeState: ObservableObject {");
+    expect(swift).toContain('get: { MainActor.assumeIsolated { self.texts[key] ?? "" } },');
+    expect(swift).toContain(
+      "set: { value in MainActor.assumeIsolated { self.texts[key] = value } }",
+    );
+  });
 });
 
 describe("automobile:prototype/eject result", () => {

@@ -2472,7 +2472,12 @@ and needs `prototype_platform_notifications_scheduled_v1` as well; the same chan
 apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).
 A `notifications.push` handler receives a simulated push (`{type, data, notification?}`, at most
 4096 bytes of compact JSON, the APNs limit) and needs `prototype_platform_push_v1` on top of the
-module, gated per event rather than per call (#14285). On iOS, `min` and `low`
+module, gated per event rather than per call (#14285). The host delivers one with `prototype
+{action: "simulate", id, event: "notifications.push", data, transport?}`: it validates the payload
+first (`invalid_args`), then `auto` picks the live `connection` before the `system` push path, and
+the result reports `transport`, `handled` and `delivery`, or `code: "unavailable"` when neither route
+exists. No runtime supplies a route yet, so every device answers `unavailable`. The runtime-neutral
+expectations live in `test/fixtures/prototype-spec/push/traces.json`. On iOS, `min` and `low`
 map to the passive interruption level and `default` and `high` to active. No production runtime
 advertises the module yet.
 

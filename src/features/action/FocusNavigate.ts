@@ -18,7 +18,14 @@ import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
 import { describeFocus, elementMatchesTarget, stringProp } from "./FocusNavigateMatching";
-import { createFocusIdentity, focusKey, rangeOf, type FocusIdentity } from "./FocusIdentity";
+import {
+  changedOwnRange,
+  createFocusIdentity,
+  focusKey,
+  ownRangeOf,
+  type FocusIdentity,
+  type FocusRangeRead,
+} from "./FocusIdentity";
 import { FOCUS_NAVIGATE_DIRECTIONS, type FocusNavigateDirection } from "./FocusNavigateDirections";
 import { describeEntry, isViewTextField, trapMessage } from "./FocusTrapMessage";
 import {
@@ -438,6 +445,10 @@ interface FocusProgress {
   readonly arrivedBy: FocusNavigateDirection | undefined;
   /** Directions the focused control consumed by changing its own value instead of moving focus. */
   readonly adjusted: ReadonlySet<FocusNavigateDirection>;
+  /** Adjusting directions whose value change the walk undid with the opposite arrow (#17209). */
+  readonly restored: ReadonlySet<FocusNavigateDirection>;
+  /** Records that the last press changed the focused control's value and was undone (#17209). */
+  restoredAdjustment(direction: FocusNavigateDirection): void;
   /** Presses a stalled direction again because every escape from it failed; it stays undemoted. */
   resume(direction: FocusNavigateDirection): void;
   /**
@@ -452,10 +463,28 @@ interface ElementMemory {
   blocked: Set<FocusNavigateDirection>;
   tried: Set<FocusNavigateDirection>;
   adjusted: Set<FocusNavigateDirection>;
+  restored: Set<FocusNavigateDirection>;
 }
 
 function emptyMemory(): ElementMemory {
-  return { blocked: new Set(), tried: new Set(), adjusted: new Set() };
+  return { blocked: new Set(), tried: new Set(), adjusted: new Set(), restored: new Set() };
+}
+
+/** An arrow pressed on a control that reports its own value, to read back after it (#17209). */
+interface RangeProbe {
+  direction: FocusNavigateDirection;
+  before: FocusRangeRead;
+  /** The path's length before the press, to drop the read of a changed value from it. */
+  pathLength: number;
+}
+
+function rangeProbe(
+  screen: FocusScreen,
+  direction: FocusNavigateDirection,
+  pathLength: number,
+): RangeProbe | undefined {
+  const before = ownRangeOf(screen);
+  return before ? { direction, before, pathLength } : undefined;
 }
 
 /** Tracks presses in one direction that move focus without bringing it closer to the target. */
@@ -522,6 +551,13 @@ function createFocusProgress(): FocusProgress {
     get adjusted() {
       return memory.adjusted;
     },
+    get restored() {
+      return memory.restored;
+    },
+    restoredAdjustment(direction) {
+      memory.adjusted.add(direction);
+      memory.restored.add(direction);
+    },
     stalled: stall.stalled,
     resume: (direction) => stall.resume(direction),
     observe({ key, replaces, changedInPlace }, distance, containsTarget) {
@@ -565,7 +601,7 @@ function createFocusProgress(): FocusProgress {
 }
 
 function stuckMessage(progress: FocusProgress, focusedElement?: FocusPathEntry): string {
-  const { unchanged, blocked, tried, adjusted } = progress;
+  const { unchanged, blocked, tried, adjusted, restored } = progress;
   const unmoved = Math.max(1, unchanged, blocked.size);
   const presses = `${unmoved} ${unmoved === 1 ? "press" : "presses"}`;
   const base =
@@ -577,7 +613,10 @@ function stuckMessage(progress: FocusProgress, focusedElement?: FocusPathEntry):
   }
   // Say why: the control took the arrows as value changes (a slider), and it was left changed.
   const directions = FOCUS_NAVIGATE_DIRECTIONS.filter((direction) => adjusted.has(direction));
-  return `${base}; the focused control${describeEntry(focusedElement)} consumed ${directions.join(" and ")} by changing its own value instead of moving focus, so its value may have changed`;
+  const value = directions.every((direction) => restored.has(direction))
+    ? "and each change was undone with the opposite arrow"
+    : "so its value may have changed";
+  return `${base}; the focused control${describeEntry(focusedElement)} consumed ${directions.join(" and ")} by changing its own value instead of moving focus, ${value}`;
 }
 
 const STOPPED_SUFFIX = "; the target was not focused. Observe before retrying.";
@@ -674,6 +713,7 @@ export class FocusNavigate {
     const planTarget = createTargetPlanner();
     const trap: ExitContext["trap"] = {};
     let lastDirection: FocusNavigateDirection | undefined;
+    let probe: RangeProbe | undefined;
     const walk: WalkSearch = { seen: false, sweep: createRowSearch(), planTarget };
 
     for (;;) {
@@ -683,6 +723,17 @@ export class FocusNavigate {
         path,
         maxSteps > 0,
       );
+      const probed = probe;
+      probe = undefined;
+      if (probed && (await this.undoAdjustment(probed, screen, signal))) {
+        // The press changed the control's value: the read of the changed value is not a place
+        // the walk went, and the next read (value restored) counts as the press refused.
+        path.length = probed.pathLength;
+        progress.restoredAdjustment(probed.direction);
+        steps += 1;
+        await awaitWhileRequestIsLive(this.timer.sleep(settleMs), signal);
+        continue;
+      }
       const { focused } = screen;
       progress.observe(
         identify(focusedElement, screen, lastDirection),
@@ -705,7 +756,7 @@ export class FocusNavigate {
         const outcome = await this.exit(done, {
           screen,
           focusedElement,
-          adjusted: progress.adjusted.size > 0 || rangeOf(screen) !== "",
+          adjusted: progress.adjusted.size > 0,
           trap,
           refused: progress.blocked,
           select: options.select === true,
@@ -722,6 +773,7 @@ export class FocusNavigate {
       if (!direction) {
         throw new ActionableError("focusNavigate has no direction to press");
       }
+      probe = rangeProbe(screen, direction, path.length);
       await this.press(direction, signal);
       progress.pressed(direction, containsTarget);
       lastDirection = direction;
@@ -844,12 +896,6 @@ export class FocusNavigate {
       return continuing;
     }
     const { focused } = screen;
-    if (rangeOf(screen) !== "") {
-      // A control that reports a range (a Compose slider) takes every arrow as a value change,
-      // up and down included (#17209): pressing one to find out would change it. No press is
-      // left, so the walk leaves it with tab (see adjustableOutcome).
-      return undefined;
-    }
     const entry =
       matches.length === 0 ? leanbackEntry(focused, screen.elements, progress) : undefined;
     if (entry) {
@@ -874,6 +920,24 @@ export class FocusNavigate {
       return stalled;
     }
     return untried[0];
+  }
+
+  /**
+   * After an arrow pressed on a control that reports its own value (#17209): when the same control
+   * still holds focus with a different value, press the opposite arrow to put the value back and
+   * return true. A View SeekBar's up/down move focus, so they read as ordinary moves; a Compose
+   * slider on the TV image takes all four arrows, and each is undone once.
+   */
+  private async undoAdjustment(
+    probe: RangeProbe,
+    screen: FocusScreen,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    if (!changedOwnRange(probe.before, screen)) {
+      return false;
+    }
+    await this.press(OPPOSITE[probe.direction], signal);
+    return true;
   }
 
   /** How a walk that cannot continue ends: a trap escape to retry from, or the final result. */

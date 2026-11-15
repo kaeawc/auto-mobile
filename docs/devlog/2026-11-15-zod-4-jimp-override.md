@@ -41,6 +41,6 @@ pins it:
 
 ## Consequences
 
-The lock holds one `zod` copy at 4.6.7. Jimp's plugins run on Zod 4's v3-compatible API; the image
-backend tests and a resize/crop/blur/diff smoke pass, but a device-backed screenshot and
+The lock holds one `zod` copy at 4.6.7. Jimp's plugins run on Zod 4's v3-compatible API. The image
+backend tests and a resize/crop/blur/diff smoke pass. A device-backed screenshot and
 `compareScreenshot` run is still the check that Jimp works end to end.

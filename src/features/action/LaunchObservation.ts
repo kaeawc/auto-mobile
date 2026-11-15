@@ -298,7 +298,7 @@ export class LaunchObservation {
       {
         ...result,
         success: false,
-        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, lock, foregroundDescription, { expectedPackageName, coldBoot })}`,
+        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, lock, foregroundDescription, { expectedPackageName, coldBoot, expectedUserId, timeoutMs })}`,
       },
       expectedPackageName,
       latestObservation,
@@ -344,7 +344,17 @@ export class LaunchObservation {
     latestObservation: ObserveResult,
     lock: DeviceLockState | undefined,
     foregroundDescription: string,
-    { expectedPackageName, coldBoot }: { expectedPackageName: string; coldBoot?: boolean },
+    {
+      expectedPackageName,
+      coldBoot,
+      expectedUserId,
+      timeoutMs,
+    }: {
+      expectedPackageName: string;
+      coldBoot?: boolean;
+      expectedUserId?: number;
+      timeoutMs: number;
+    },
   ): string {
     // The hierarchy read itself can name the keyguard (`device_locked`) when the
     // lock sample is missing from the observation.
@@ -361,6 +371,10 @@ export class LaunchObservation {
       return lock?.locked === false
         ? "the system UI (notification shade) is covering the app."
         : "the system UI is covering the app and the lock state could not be determined, so it may be the lock screen or the notification shade; call `wakeAndUnlock` to clear a lock screen, or collapse the shade, then retry.";
+    }
+
+    if (this.isLaunchWindowNotYetDrawn(latestObservation, expectedPackageName, expectedUserId)) {
+      return `the task for \`${expectedPackageName}\` is current but its window did not reach the screen within ${timeoutMs} ms; the screen still shows \`${foregroundDescription}\`. Call observe { waitFor: { activeWindow: { appId: "${expectedPackageName}" } } } to wait longer.`;
     }
 
     if (coldBoot) {
@@ -523,7 +537,10 @@ export class LaunchObservation {
     const foregroundActivityPackage = this.getLaunchObservationPackageNames(observation).find(
       (packageName) => packageName !== expectedPackageName,
     );
-    if (!foregroundActivityPackage) {
+    if (
+      !foregroundActivityPackage ||
+      !this.isForegroundPackageHostedByCurrentTask(observation, foregroundActivityPackage)
+    ) {
       return false;
     }
 
@@ -551,6 +568,47 @@ export class LaunchObservation {
     result.foregroundActivityPackage = foregroundActivityPackage;
     result.verifiedBy = "task-provenance";
     return true;
+  }
+
+  /**
+   * Whether the visible package is the current task's own top activity, as a helper hosted in the
+   * target's task is. During a cold start `am start` makes the target's task current before its
+   * first window draws, so the previous app's window, from another task, is still on screen; that
+   * capture must keep the poll waiting rather than verify the launch (#18349).
+   */
+  private isForegroundPackageHostedByCurrentTask(
+    observation: ObserveResult,
+    foregroundPackage: string,
+  ): boolean {
+    const backStack = observation.backStack;
+    const currentTask = backStack?.tasks.find((task) => task.id === backStack.currentTaskId);
+    if (currentTask?.topActivity) {
+      return currentTask.topActivity.split("/")[0] === foregroundPackage;
+    }
+    return !backStack?.tasks.some(
+      (task) =>
+        task.id !== backStack.currentTaskId &&
+        (task.packageName === foregroundPackage ||
+          task.rootActivity?.split("/")[0] === foregroundPackage),
+    );
+  }
+
+  /** The target's task is current but another task's window is still on screen (#18349). */
+  private isLaunchWindowNotYetDrawn(
+    observation: ObserveResult,
+    expectedPackageName: string,
+    expectedUserId?: number,
+  ): boolean {
+    const foregroundPackage = this.getLaunchObservationPackageNames(observation).find(
+      (packageName) => packageName !== expectedPackageName,
+    );
+    return (
+      foregroundPackage !== undefined &&
+      observation.activeWindow?.systemOverlay !== true &&
+      (this.isForegroundTaskRootedAtPackage(observation, expectedPackageName, expectedUserId) ||
+        this.isForegroundTaskLaunchedByPackage(observation, expectedPackageName, expectedUserId)) &&
+      !this.isForegroundPackageHostedByCurrentTask(observation, foregroundPackage)
+    );
   }
 
   private isMissingForegroundWindow(observation: ObserveResult): boolean {

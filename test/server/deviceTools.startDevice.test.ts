@@ -1091,13 +1091,14 @@ describe("startDevice handler", () => {
     expect("timing" in result).toBe(false);
   });
 
-  it("keeps the timing tree on a success response behind debug-perf (#11636)", async () => {
+  it("the handler builds the timing tree behind debug-perf for internal callers (#11636, #18348)", async () => {
     setDebugPerfEnabled(true);
     try {
       fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
       fakeMatcher.setBootedResult(androidDevice);
 
-      const result = await callStartDevice({ platform: "android" });
+      // Agent-facing deliveries drop it; in-process callers still read it.
+      const result = await callStartDevice({ platform: "android", [INTERNAL_NO_DIFF_PARAM]: true });
 
       expect(result.timing).toBeDefined();
     } finally {

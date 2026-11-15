@@ -318,6 +318,7 @@ export class ToolRegistryClass {
           args,
           response,
           timer: this.timer,
+          omitsAcquisitionTiming: options.omitsAcquisitionTiming,
         });
       },
       defaultEnabled: options.defaultEnabled ?? true,
@@ -336,6 +337,7 @@ export class ToolRegistryClass {
       appUiResourceUri: options.appUiResourceUri,
       selectsActiveDevice: options.selectsActiveDevice,
       hostInventory: options.hostInventory,
+      omitsAcquisitionTiming: options.omitsAcquisitionTiming,
     });
   }
 

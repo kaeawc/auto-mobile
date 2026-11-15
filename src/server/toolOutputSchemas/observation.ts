@@ -420,7 +420,13 @@ export const observeDiffSchema = z
     importedPrototypeContent: importedPrototypeContentSchema.optional(),
     ...observationBackendFields,
   })
-  .passthrough();
+  .passthrough()
+  // A diff with no `skeleton` is valid only as the explicit no-op (#18348), so a
+  // malformed diff still fails this arm and every arm of `observationOutputSchema`.
+  .refine((diff) => diff.skeleton !== undefined || diff.unchanged === true, {
+    message: "A diff carries `skeleton` unless it is `unchanged: true` (#6221 item 4.1, #18348)",
+    path: ["skeleton"],
+  });
 requireObservationJoinKeysOnTheWire(observeDiffSchema);
 
 /**
@@ -430,11 +436,12 @@ requireObservationJoinKeysOnTheWire(observeDiffSchema);
  * The discriminator is `isDiff`: present and `true` on the diff arm, absent on
  * the full arm — and REJECTED as `true` on the full arm (issue #6221 item 4,
  * PR #6242 review PRRT_kwDOP-GF5M6fq3iN), so a malformed diff (missing its
- * mandatory `skeleton`) cannot silently fall through and validate against the
+ * `skeleton` without `unchanged: true`) cannot silently fall through and validate against the
  * full arm's `.passthrough()` instead. A client should branch on
  * `"isDiff" in observation && observation.isDiff === true` and, in EITHER
  * branch, can read `observation.skeleton` for a usable selector surface — the
- * diff arm always carries one (item 4.1).
+ * diff arm carries one unless it is `unchanged: true` (item 4.1, #18348), when
+ * the previous response's skeleton still applies.
  */
 export const observationOutputSchema = z.union([
   observeDiffSchema,

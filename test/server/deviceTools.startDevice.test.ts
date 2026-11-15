@@ -1105,6 +1105,14 @@ describe("startDevice handler", () => {
     }
   });
 
+  it("only the booted-device acquisition tools declare omitsAcquisitionTiming (#18348)", () => {
+    const declaring = ToolRegistry.getEveryRegisteredTool()
+      .filter((tool) => tool.omitsAcquisitionTiming === true)
+      .map((tool) => tool.name)
+      .sort();
+    expect(declaring).toEqual(["getAndroid", "getApple", "startDevice"]);
+  });
+
   it.each(["getAndroid", "startDevice"] as const)(
     "%s: a persisted debug-perf flag keeps the timing tree out of the delivered envelope (#18348)",
     async (toolName) => {
@@ -1121,9 +1129,12 @@ describe("startDevice handler", () => {
         expect(toolJson(raw).timing).toBeDefined();
 
         // Registry `register()` tools take the plain finalization path.
+        const omitsAcquisitionTiming = ToolRegistry.getTool(toolName)!.omitsAcquisitionTiming;
+        expect(omitsAcquisitionTiming).toBe(true);
         const delivered = finalizeToolResponse(structuredClone(raw), {
           name: toolName,
           plainTool: true,
+          omitsAcquisitionTiming,
         });
         expect("timing" in toolJson(delivered)).toBe(false);
         const payload = startResultSchema.parse(toolJson(delivered));
@@ -1133,6 +1144,7 @@ describe("startDevice handler", () => {
         const internal = finalizeToolResponse(structuredClone(raw), {
           name: toolName,
           plainTool: true,
+          omitsAcquisitionTiming,
           internal: true,
         });
         expect(toolJson(internal).timing).toBeDefined();

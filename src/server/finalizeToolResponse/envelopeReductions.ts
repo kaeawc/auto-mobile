@@ -10,13 +10,6 @@ import type { FinalizeToolResponseContext } from "./contracts";
  * every delivery mode (#18348).
  */
 
-/** Tools whose success response is the booted-device description (`buildBootedResponse`). */
-const BOOTED_ACQUISITION_TOOLS: ReadonlySet<string> = new Set([
-  "getAndroid",
-  "getApple",
-  "startDevice",
-]);
-
 /**
  * Whether `payload` is a success the client will read, not an internal
  * tool-to-tool call (PlanExecutor reads the full payload) or a failure, which
@@ -41,12 +34,13 @@ export function isAgentFacingSuccess(
  * persisted: one earlier `--debug-perf` run or `AUTOMOBILE_DEBUG_PERF=1` keeps it
  * on for every later daemon, so a handler-side gate alone does not keep the tree
  * out of a default client's response. `readiness.elapsedMs` carries the total.
+ * Applies to tools declaring the `omitsAcquisitionTiming` trait.
  */
 export function withoutAcquisitionTiming(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (!BOOTED_ACQUISITION_TOOLS.has(ctx.name) || !("timing" in payload)) {
+  if (ctx.omitsAcquisitionTiming !== true || !("timing" in payload)) {
     return payload;
   }
   const next = { ...payload };

@@ -483,18 +483,27 @@ describe("observationOutputSchema: discriminated union of full observation vs di
     expect((viaUnion as { isDiff?: true }).isDiff).toBe(true);
   });
 
-  test("rejects a diff with no `skeleton` at all (item 4.1: it must ALWAYS be present)", () => {
+  test("rejects a diff with no `skeleton` unless it is the `unchanged: true` no-op (item 4.1, #18348)", () => {
     const diffMissingSkeleton = { isDiff: true, added: [], removed: [], changed: [] };
     expect(() => observeDiffSchema.parse(diffMissingSkeleton)).toThrow();
+    expect(() => observeDiffSchema.parse({ ...diffMissingSkeleton, unchanged: false })).toThrow();
+    const noOp = observeDiffSchema.parse({ isDiff: true, unchanged: true, changed: [] });
+    expect(noOp.unchanged).toBe(true);
+    expect(noOp.skeleton).toBeUndefined();
   });
 
   test("the FULL union rejects a malformed diff — it cannot silently fall through to the permissive full-observation arm (PR #6242 review PRRT_kwDOP-GF5M6fq3iN)", () => {
-    // Before the fix, this object failed `observeDiffSchema` (missing the
-    // mandatory `skeleton`) but then matched `observationSummarySchema` anyway,
-    // since every field there was optional and `.passthrough()` let `isDiff`
-    // and the rest ride through unchecked.
+    // Before the fix, this object failed `observeDiffSchema` (no `skeleton` and
+    // not the `unchanged: true` no-op) but then matched `observationSummarySchema`
+    // anyway, since every field there was optional and `.passthrough()` let
+    // `isDiff` and the rest ride through unchecked.
     const malformedDiff = { isDiff: true, added: [], removed: [], changed: [] };
     expect(() => observationOutputSchema.parse(malformedDiff)).toThrow();
+    // A diff missing its required `changed` array is malformed even when unchanged.
+    expect(() => observationOutputSchema.parse({ isDiff: true, unchanged: true })).toThrow();
+    // The explicit no-op is the one skeleton-less diff the union accepts.
+    const noOp = observationOutputSchema.parse({ isDiff: true, unchanged: true, changed: [] });
+    expect((noOp as { unchanged?: true }).unchanged).toBe(true);
   });
 
   test("observationSummarySchema itself rejects `isDiff: true` — it is a genuinely-typed member, not just permissively passed through", () => {

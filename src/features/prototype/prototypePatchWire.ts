@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { PROTOTYPE_PATCH_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeResult, PrototypeState } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypePatchOp } from "./prototypePatch";

@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import { BrokerBatchRequestIds, batchClientDevice, renderClientRequest } from "./brokerBatch";

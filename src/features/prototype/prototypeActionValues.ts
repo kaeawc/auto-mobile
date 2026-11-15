@@ -1,5 +1,6 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { z } from "zod";
+import { z } from "zod/v3";
+import { prototypeOwnKeyRecordV3 } from "./prototypeOwnKeyRecord";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeJsonSchema } from "./prototypeJson";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
@@ -90,11 +91,9 @@ export const prototypeEmitContextBindingSchema: z.ZodType<PrototypeEmitContextBi
   z.object({ page: z.string().min(1) }).strict(),
   prototypeMatchBindingSchema,
 ]);
-// Retain arbitrary context names (Zod 3 record output alone drops __proto__).
-export const prototypeEmitContextSchema: z.ZodType<Record<string, PrototypeEmitContextBinding>> = z
-  .record(z.string().min(1), prototypeEmitContextBindingSchema)
-  .and(z.unknown())
-  .refine(
+// Retain arbitrary context names, including an own __proto__ that a plain record drops.
+export const prototypeEmitContextSchema: z.ZodType<Record<string, PrototypeEmitContextBinding>> =
+  prototypeOwnKeyRecordV3(z.string().min(1), prototypeEmitContextBindingSchema).refine(
     (context) => Object.keys(context).length <= contract.limits.MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES,
   );
 

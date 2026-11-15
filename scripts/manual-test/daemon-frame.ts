@@ -5,7 +5,7 @@ import * as daemonConstants from "../../src/daemon/wire/constants";
 import { DAEMON_FRAME_COMMANDS, DAEMON_FRAME_FLAGS, daemonFrameHelp } from "./daemonFrameHelp";
 import { substituteFramePlaceholders, type BrokerFrameIdentity } from "./daemonFramePlaceholders";
 import { existsSync, readFileSync } from "node:fs";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import { matchesProtection } from "./privateDaemonDeviceEvidence";
 import { brokerLedgerEntrySchema, brokerNativeDeviceSchema } from "./brokerDeviceLedger";

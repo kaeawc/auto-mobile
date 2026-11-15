@@ -22,6 +22,7 @@ import {
   prototypeClearedOutputField,
   prototypeStorageOutputField,
 } from "../prototypeStorageOutput";
+import { prototypeOwnKeyRecord } from "../../features/prototype/prototypeOwnKeyRecord";
 
 export const dataOutput = z.record(z.string(), z.json()).optional();
 
@@ -175,7 +176,7 @@ const prototypeEventOutputSchema = z.object({
   kind: z.enum(PROTOTYPE_EVENT_KINDS),
   name: z.string().nullable(),
   payload: z.json(),
-  context: z.record(z.string(), z.json()).and(z.unknown()).optional(),
+  context: prototypeOwnKeyRecord(z.string(), z.json()).optional(),
   contextTruncated: z.literal(true).optional(),
   state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   pages: z.record(z.string(), z.number().int().nonnegative()),
@@ -186,9 +187,7 @@ const prototypeEventOutputSchema = z.object({
         path: z.array(z.string().min(1)).min(1).max(32),
         depth: z.number().int().min(1).max(32),
         params: z
-          .array(
-            z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).and(z.unknown()),
-          )
+          .array(prototypeOwnKeyRecord(z.string(), z.union([z.string(), z.number(), z.boolean()])))
           .min(1)
           .max(32)
           .optional(),
@@ -469,9 +468,7 @@ export const prototypeOutputSchema = z.object({
               depth: z.number().int().min(1).max(32),
               params: z
                 .array(
-                  z
-                    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
-                    .and(z.unknown()),
+                  prototypeOwnKeyRecord(z.string(), z.union([z.string(), z.number(), z.boolean()])),
                 )
                 .min(1)
                 .max(32)

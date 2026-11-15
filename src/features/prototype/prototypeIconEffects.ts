@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { PROTOTYPE_ICON_EFFECTS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { keySchema, pointerSchema } from "./prototypeActionValues";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";

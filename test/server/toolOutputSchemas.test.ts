@@ -39,7 +39,11 @@ test("observe advertises and validates optional Wear surface kinds", () => {
   expect(observeResultSchema.parse({})).not.toHaveProperty("surface");
   expect(observeResultSchema.safeParse({ surface: "tray" }).success).toBe(false);
   const observe = generatedDefinitions.find((definition) => definition.name === "observe")!;
-  expect(observe.outputSchema?.properties.surface).toMatchObject({
+  const observeOutput: Record<string, unknown> = observe.outputSchema ?? {};
+  // Zod 4.6 extracts the reused enum into $defs; the advertised node is its $ref.
+  expect(
+    resolveJsonSchemaReference(observeOutput, observe.outputSchema?.properties.surface ?? {}),
+  ).toMatchObject({
     type: "string",
     enum: ["tile", "watchface", "launcher", "app"],
   });
@@ -73,7 +77,13 @@ test("observations advertise and validate the optional visionOS hierarchyBundleI
     expect(schema.parse({})).not.toHaveProperty("hierarchyBundleId");
   }
   const observe = generatedDefinitions.find((definition) => definition.name === "observe")!;
-  expect(structuredClone(observe.outputSchema?.properties.hierarchyBundleId)).toMatchObject({
+  const observeOutput: Record<string, unknown> = observe.outputSchema ?? {};
+  expect(
+    resolveJsonSchemaReference(
+      observeOutput,
+      observe.outputSchema?.properties.hierarchyBundleId ?? {},
+    ),
+  ).toMatchObject({
     type: "string",
     description: expect.stringContaining(
       "window app the runner that returned the hierarchy was started for",

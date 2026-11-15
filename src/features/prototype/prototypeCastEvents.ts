@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Data decoders for the `cast` platform module's events (#14239), the TypeScript reference that

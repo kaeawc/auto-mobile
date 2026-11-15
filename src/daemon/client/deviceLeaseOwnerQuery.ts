@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { Socket } from "node:net";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { errorMessage } from "../../utils/describeUnknownError";

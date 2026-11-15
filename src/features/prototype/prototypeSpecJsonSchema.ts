@@ -1,4 +1,4 @@
-import { z as specZ, type ZodTypeAny } from "zod";
+import { z as specZ, type ZodTypeAny } from "zod/v3";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { ENV, readEnvBool } from "../../config/env";
 import { enforceAnthropicToolSchemaSubset } from "../../utils/schemaHelpers";

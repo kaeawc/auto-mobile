@@ -1,4 +1,5 @@
-import { z } from "zod";
+import { z } from "zod/v3";
+import { prototypeOwnKeyRecordV3 } from "./prototypeOwnKeyRecord";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import {
@@ -11,8 +12,8 @@ import {
 type RouteParams = Record<string, string | number | boolean | PrototypeDataActionValue>;
 
 // Preserve the parsed union without copying every binding schema into navigation actions.
-export const routeParamsSchema: z.ZodType<RouteParams, z.ZodTypeDef, unknown> = z
-  .record(
+export const routeParamsSchema: z.ZodType<RouteParams, z.ZodTypeDef, unknown> =
+  prototypeOwnKeyRecordV3(
     z.string().regex(prototypeContractPatterns.pathKey),
     z.union([
       z.string(),
@@ -20,9 +21,7 @@ export const routeParamsSchema: z.ZodType<RouteParams, z.ZodTypeDef, unknown> = 
       z.boolean(),
       ...prototypeDataActionValueSchema.options.slice(0, 4),
     ]),
-  )
-  .and(z.unknown())
-  .refine((value) => Object.keys(value).length <= 16);
+  ).refine((value) => Object.keys(value).length <= 16);
 
 export const setStackActionSchema = z
   .object({
@@ -49,12 +48,10 @@ export function buildRouteSchema<Action extends z.ZodTypeAny>(
   const actions = buildPrototypeActionListSchema(actionSchema);
   return z
     .object({
-      params: z
-        .record(
-          z.string().regex(prototypeContractPatterns.pathKey),
-          z.enum(["string", "number", "boolean"]),
-        )
-        .and(z.unknown())
+      params: prototypeOwnKeyRecordV3(
+        z.string().regex(prototypeContractPatterns.pathKey),
+        z.enum(["string", "number", "boolean"]),
+      )
         .refine((value) => Object.keys(value).length <= 16)
         .optional(),
       onEnter: actions.optional(),

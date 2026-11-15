@@ -13,6 +13,7 @@ To add one, copy the [template](template.md).
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-15 | decision | [Move to Zod 4 and override Jimp's Zod 3 range](2026-11-15-zod-4-jimp-override.md)                                                 |
+| 2026-11-15 | decision | [Xcode 27.2 advisory lane as its own workflow](2026-11-15-xcode-27-2-advisory-workflow.md)                                         |
 | 2026-11-14 | decision | [Observation screenshots stay readable for a bounded window](2026-11-14-observation-screenshot-retention-window.md)                |
 | 2026-11-13 | decision | [Pin a `navigateTo` attempt to one transition](2026-11-13-pinned-navigate-transition.md)                                           |
 | 2026-11-13 | concept  | [iOS Simulator fleet capacity measurements](2026-11-13-ios-simulator-fleet-capacity-measurements.md)                               |

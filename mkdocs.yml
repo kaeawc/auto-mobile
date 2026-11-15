@@ -414,6 +414,7 @@ nav:
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
       - "2026-11-15: Move to Zod 4 and override Jimp's Zod 3 range": devlog/2026-11-15-zod-4-jimp-override.md
+      - "2026-11-15: Xcode 27.2 advisory lane as its own workflow": devlog/2026-11-15-xcode-27-2-advisory-workflow.md
       - "2026-11-14: Observation screenshots stay readable for a bounded window": devlog/2026-11-14-observation-screenshot-retention-window.md
       - "2026-11-13: Pin a navigateTo attempt to one transition": devlog/2026-11-13-pinned-navigate-transition.md
       - "2026-11-13: iOS Simulator fleet capacity measurements": devlog/2026-11-13-ios-simulator-fleet-capacity-measurements.md

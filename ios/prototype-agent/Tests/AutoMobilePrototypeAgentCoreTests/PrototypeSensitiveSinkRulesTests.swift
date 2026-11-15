@@ -86,11 +86,28 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
                 )
             }
         } else {
-            XCTAssertNoThrow(
-                try PrototypeSpecStrictValidator.validate(data: data, library: true),
-                file: file,
-                line: line
-            )
+            // R2 finds no sink; a library then refuses the spec's sensitive source itself (R1), as in Kotlin.
+            XCTAssertEqual(try errors(spec), [], file: file, line: line)
+            if let use = PrototypeLibraryModuleRule.uses(spec).first {
+                XCTAssertThrowsError(
+                    try PrototypeSpecStrictValidator.validate(data: data, library: true),
+                    file: file,
+                    line: line
+                ) {
+                    XCTAssertEqual(
+                        $0 as? PrototypeLoadError,
+                        .invalidSpec(path: use.path, message: use.message),
+                        file: file,
+                        line: line
+                    )
+                }
+            } else {
+                XCTAssertNoThrow(
+                    try PrototypeSpecStrictValidator.validate(data: data, library: true),
+                    file: file,
+                    line: line
+                )
+            }
         }
     }
 

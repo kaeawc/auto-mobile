@@ -74,13 +74,16 @@ It resolves the prototype like the native resource, expands `components`, and wr
 
 - `test/fixtures/prototype-embedding/sample.json` is rendered through the resource by
   `scripts/prototype/generateEmbeddingSamples.ts` into `samples/prototype-embedding/` and, for the
-  SwiftUI host, the `EmbedConsumer` fixture under `ios/prototype-agent/Fixtures/`.
+  SwiftUI host, the `EmbedConsumer` fixture under `ios/prototype-agent/Fixtures/`. The same script
+  renders `eject-sample.json` through the eject resource into `java/prototypes/eject/` and
+  `EmbedConsumer`, so the builds below compile both eject dialects.
   `nativePrototypeSamples.test.ts` (and the script's `--check`) fail when they drift from the output.
 - The samples are pinned to LF in `.gitattributes` and excluded from oxfmt, so neither a Windows
   checkout nor the formatter can make them differ from the resource output.
 - `scripts/android/validate-prototype-compose-consumer.sh` compiles the Android sample against the
   locally published renderer in a minified consumer app; the iOS library build compiles
-  `EmbedConsumer`.
+  `EmbedConsumer` in Swift 6 language mode. The ejected SwiftUI state class is `@MainActor` for
+  that mode.
 
 ## Background
 

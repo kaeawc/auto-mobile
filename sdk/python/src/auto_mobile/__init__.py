@@ -1,8 +1,16 @@
-"""Python SDK for AutoMobile: daemon lifecycle and bound MCP sessions."""
+"""Python SDK for AutoMobile: daemon lifecycle, diagnostics and bound MCP sessions."""
 
 from ._version import __version__
 from .client import AutoMobile
-from .daemon import CommandResult, CommandRunner, DaemonManager, DaemonStatus, SubprocessRunner
+from .daemon import (
+    CommandResult,
+    CommandRunner,
+    DaemonManager,
+    DaemonStatus,
+    DoctorCheck,
+    DoctorReport,
+    SubprocessRunner,
+)
 from .errors import (
     AutoMobileError,
     DaemonAuthenticationError,
@@ -27,6 +35,8 @@ __all__ = [
     "DaemonManager",
     "DaemonStatus",
     "DaemonUnavailableError",
+    "DoctorCheck",
+    "DoctorReport",
     "FileTokenProvider",
     "HttpResponse",
     "HttpTransport",

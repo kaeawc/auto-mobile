@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "auto-mobile"
 dynamic = ["version"]
-description = "Python SDK for the AutoMobile daemon: lifecycle and bound MCP sessions."
+description = "Python SDK for the AutoMobile daemon: lifecycle, diagnostics and bound MCP sessions."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

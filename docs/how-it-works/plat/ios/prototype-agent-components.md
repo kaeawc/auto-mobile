@@ -24,10 +24,10 @@ skips steps 2 and 3. Dark means luminance below 0.179.
 
 - **Authored background** (step 3, Android's `prototypeAuthoredTheme`). The leading chain is root, then
   its first visible child, etc.; a pager continues into its current page, a single-child node into
-  `child`; `visibleWhen`-hidden nodes are skipped. Background = node style with matching `styleWhen`
-  merged. Only a single hex with alpha >= 0.99 decides; roles and `{light, dark}` pairs are skipped.
-  `theme.colors.light|dark` never participate. Unlike Android, the inferred background is not painted
-  over the scheme's surface roles.
+  `child`; the chain skips `visibleWhen`-hidden nodes. Background = node style with matching `styleWhen`
+  merged. Only a single hex with alpha >= 0.99 decides; the agent skips roles and `{light, dark}` pairs.
+  `theme.colors.light|dark` never participate. Unlike Android, the agent does not paint the inferred
+  background over the scheme's surface roles.
 - **Override.** Request-level `appearance`: `device` (default), `light`, `dark`; scoped to that show.
   Other values fail with `appearance: Expected device, light or dark`. The simulator itself is not
   changed.
@@ -50,22 +50,24 @@ skips steps 2 and 3. Dark means luminance below 0.179.
 ## Anchors
 
 Node anchors (#9316) work as on [Android](../android/prototype-ux-data-network.md#anchors), in points. The host
-resolves each element anchor once at show against a fresh hierarchy of the app alone (the agent's own
-window is excluded: found by the root `automobile-prototype-window` marker for chromeless fullscreen,
-else by the dismiss control) and sends a bounds anchor. iOS hierarchy bounds are already points, so no
+resolves each element anchor once at show against a fresh hierarchy of the app alone and sends a
+bounds anchor. That hierarchy excludes the agent's own window, found by the root
+`automobile-prototype-window` marker for chromeless fullscreen, else by the dismiss control. On iOS, hierarchy bounds are already points, so no
 density conversion occurs; `anchors[].boundsPx` and `bounds` carry the same values. The host sends
 anchors only to agents advertising `prototype_anchor_v1` and otherwise refuses the show (relaunch hint);
 the agent refuses an unresolved element anchor.
 
-Anchored nodes are drawn in a window-level layer above the spec tree (above its modal for a node in a
-dialog), so a parent neither reserves a slot nor clips, and touch target and accessibility frame are
-where drawn. A node is placed at its anchor rect less the layer's screen origin (window origin plus
-layer position). Fullscreen `chrome: "none"`: layer starts at window top, no shift. `chrome: "bar"`:
-layer sits below the bar, anchors shift up by the bar and one under the bar is clipped. `cover` sizes to
-the bounds ignoring authored width/height; edges keep node size, align that edge, centre on the other
-axis; `start`/`end` follow layout direction; `offset` applies last in screen axes. Only the root of a
-floating prototype may be anchored (the layer places it; the rest of the screen stays touchable).
-Anchors are resolved once and do not follow scrolling.
+The agent draws anchored nodes in a window-level layer above the spec tree (above its modal for a
+node in a dialog). A parent neither reserves a slot nor clips, and touch target and accessibility
+frame sit where the node draws. The agent places a node at its anchor rect less the layer's screen
+origin (window origin plus layer position).
+
+Fullscreen `chrome: "none"`: layer starts at window top, no shift. With `chrome: "bar"` the layer
+sits below the bar, anchors shift up by the bar and the agent clips one under the bar. A `cover`
+anchor sizes to the bounds ignoring authored width/height. Edges keep node size, align that edge and
+centre on the other axis; `start`/`end` follow layout direction; `offset` applies last in screen
+axes. Only the root of a floating prototype may be anchored (the layer places it; the rest of the
+screen stays touchable). Anchors resolve once and do not follow scrolling.
 
 ## Material components
 
@@ -88,7 +90,7 @@ transition as a real tap, including on part identifiers.
 | `divider`, `badge`, `progress`  | Hairline, dot/count capsule, determinate `ProgressView`/ring, indeterminate sweep                                                                                             |
 | `timePicker`, `datePicker`      | Wheel `DatePicker` (one `change` per edit), graphical `DatePicker` in UTC days                                                                                                |
 | `dialog`, `snackbar`            | Drawn above the author tree in the prototype window; `<testTag>.confirm`, `.dismiss`, `.action`                                                                               |
-| `tooltip`, `drawer`             | Hoisted bubble/spotlight or modal side panel; see [Tooltip and drawer overlays](prototype-agent-contracts.md#tooltip-and-drawer-overlays)                                                                 |
+| `tooltip`, `drawer`             | Hoisted bubble/spotlight or modal side panel; see [Tooltip and drawer overlays](prototype-agent-contracts.md#tooltip-and-drawer-overlays)                                     |
 
 - **Dialog.** Its scrim covers the whole window (below the dismiss bar with `chrome: "bar"`) and takes
   every touch while open, even for floating/sheet placements; a snackbar takes touches only on itself.
@@ -102,9 +104,9 @@ transition as a real tap, including on part identifiers.
   17.0). Unmapped names draw `questionmark.square` in every icon slot. Filled/outlined `variant` uses
   that form where the table has one; otherwise, and for rounded/sharp/twoTone, the default symbol (often
   outlined; pass `variant: "filled"` for the closest Android match). Runtime lookup: chosen form, default
-  symbol, then `questionmark.square`. Unknown names from host/agent skew draw no glyph (icon nodes draw
-  their background/placeholder; nav items a placeholder square; other controls omit icon and spacing; a
-  nav item with neither icon nor image keeps `.none`). Container variants on buttons remain container
+  symbol, then `questionmark.square`. Unknown names from host/agent skew draw no glyph. Icon nodes draw
+  their background/placeholder, nav items a placeholder square, and other controls omit icon and
+  spacing; a nav item with neither icon nor image keeps `.none`. Container variants on buttons remain container
   styles. The agent advertises `prototype_icon_sf_symbols_v1` and neither
   `prototype_icon_set_material_v1` nor `prototype_icon_variant_v1`.
 - **Snackbar** `durationMs` closes by writing `!equals` to its `openWhen` key (plain timer behind
@@ -116,43 +118,51 @@ transition as a real tap, including on part identifiers.
   fixed named 300 ms spatial and 150 ms effects timings; the motion-token table is not available. Spec `motion: "none"` is instant; the reduced profile (Reduce Motion
   or `motion: "reduced"`) maps every pattern to crossfade. Session-only change direction, transition and stable entry identities leave
   wire stack snapshots unchanged. Reload resets presentation without animation.
-  `prototype_stack_patterns_v1` gates sharedAxisX/Y, fadeThrough, zoom and push/replace source.
-  Shared axes compose 30-point directional travel with opacity (X mirrors in RTL; both reverse on
-  pop). FadeThrough fades out first, then fades/scales in from 0.92. Zoom requires an action source
-  naming exactly one authored sharedKey node inside the target stack's screens, exempt from visibility pairing. `prototype_zoom_transition_v1` advertises native source-to-root container zoom on Android and
-  native interactive navigation zoom on iOS 18+. iOS 17 keeps platform push; older Android agents
-  keep fadeThrough. The new capability reports rendering only; patterns v1 remains the authoring gate. `platformNotes`
-  reports OS/capability fallbacks and non-interactive sharedAxisX/Y and fadeThrough pops.
-  A simultaneous drag beginning within 20 points of the leading window edge scrubs platform and slide,
-  including parallax and dimming. Release commits past half width or when predicted end translation
-  passes half width; otherwise it animates back without mutating the session. Fade/none retain the
-  60-point release-to-pop policy; composed patterns do too; iOS 18 native zoom owns its interactive pop while a native destination is present, including composed screens above it. A native pop removes that destination and its composed segment from the model. Replacing the root resets the native origin. Pop targeting follows visible screens and modal precedence.
-  Back-stack entries stay mounted, transparent, non-interactive and accessibility-hidden, preserving
-  scroll positions on pop within the bounded stack depth; removed entries are released after motion.
+- **Stack patterns.** The `prototype_stack_patterns_v1` capability gates sharedAxisX/Y, fadeThrough,
+  zoom and push/replace source. Shared axes compose 30-point directional travel with opacity (X
+  mirrors in RTL; both reverse on pop). FadeThrough fades out first, then fades/scales in from 0.92.
+  Zoom requires an action source naming exactly one authored sharedKey node inside the target
+  stack's screens, exempt from visibility pairing. The `prototype_zoom_transition_v1` capability
+  advertises native source-to-root container zoom on Android and native interactive navigation zoom
+  on iOS 18+. iOS 17 keeps platform push; older Android agents keep fadeThrough. The zoom capability
+  reports rendering only; patterns v1 remains the authoring gate. The `platformNotes` field reports
+  OS/capability fallbacks and non-interactive sharedAxisX/Y and fadeThrough pops.
+- **Interactive pop.** A simultaneous drag beginning within 20 points of the leading window edge
+  scrubs platform and slide, including parallax and dimming. Release commits past half width or when
+  predicted end translation passes half width; otherwise it animates back without mutating the
+  session. Fade/none retain the 60-point release-to-pop policy, and composed patterns do too. iOS 18
+  native zoom owns its interactive pop while a native destination is present, including composed
+  screens above it. A native pop removes that destination and its composed segment from the model.
+  Replacing the root resets the native origin. Pop targeting follows visible screens and modal
+  precedence.
+- **Back stack.** Back-stack entries stay mounted, transparent, non-interactive and
+  accessibility-hidden, preserving scroll positions on pop within the bounded stack depth; the agent
+  releases removed entries after motion.
   Navigation posts a screen-changed accessibility notification targeting the new native screen
   container after layout; accessibility escape uses the same animated pop path. Wrap a stack in a box
   to animate its own visibility.
 - **Text content transitions.** Text nodes accept `contentTransition: "numeric" | "crossfade" | "none"` (default `none`). Non-`none` requires `prototype_content_transition_v1`. Numeric changes roll only changed characters up for an increase and down for a decrease; formatting is stripped to digits, the first decimal point and a leading minus. Missing or equal numeric values crossfade; identical text stays still. Spans crossfade as a whole. Roll uses a spring (Android damping 0.8, stiffness 380; iOS duration 0.35 s, bounce 0.15); fades take 200 ms. Accessibility and observe expose the new text immediately. Android reduced motion uses fades and motion off snaps; iOS content transitions snap under reduced motion or motion off.
 
 - **Motion** matches Android (#10442, #10439): `visibleWhen` nodes fade/expand, `transition`
-  (`none`, `fade`, `expand`, `slide`) picks the animation, pager changes animate. `box`/`row`/`column`
-  animate size (`animateContentSize`) when a direct child appears, disappears or resolves a new
+  (`none`, `fade`, `expand`, `slide`) picks the animation, pager changes animate. The `box`/`row`/`column`
+  containers animate size (`animateContentSize`) when a direct child appears, disappears or resolves a new
   width/height, scoped to `PrototypeNode.containerLayoutSignature` so typing does not animate. Motion runs
   in the three profiles of the Android design (`PrototypeMotion.profile`: `full`, `reduced`, `off`).
   Spec `motion: "none"` is instant. System Reduce Motion (`UIAccessibility.isReduceMotionEnabled`), the cross-fade preference
   (`prefersCrossFadeTransitions`, iOS 14+) and spec `motion: "reduced"` select
-  `reduced`, never `off` (#15244; read through `PrototypeAccessibilityProviding`, faked in tests): `visibleWhen` transitions other than `none` become crossfades, container size, press
-  scale and swipe-row settles snap, and progress indicators and shimmer rest, while alpha and color
+  `reduced`, never `off` (#15244; read through `PrototypeAccessibilityProviding`, faked in tests).
+  Under `reduced`, `visibleWhen` transitions other than `none` become crossfades, and container size,
+  press scale and swipe-row settles snap. Progress indicators and shimmer rest, while alpha and color
   animations continue (`prototype_reduced_motion_v1`).
 - **Shared elements** (`prototype_shared_element_v1` and `prototype_shared_element_v2`):
   `sharedKey` aliases `shared: {key, as: "bounds"}`; the object form and repeat templates require v2.
   Two `visibleWhen` nodes use `matchedGeometryEffect(properties: .frame, isSource:)` in one
-  `@Namespace` per hosting root, under `full` only. `PrototypeSharedElementPlan` selects frame
+  `@Namespace` per hosting root, under `full` only. The `PrototypeSharedElementPlan` type selects frame
   matching for `element` and frame matching plus a crossfade for `bounds`. Both kinds crossfade
   under `reduced` and swap under `off`. Repeat children bind `story-{item.id}` only with
   `repeat.key: "id"`; resolved keys must be unique per side. Unmatched feed items render normally
   and count toward the spec-wide limit of 16 resolved keys.
-  Pairs cannot nest or cross dialog/bottomSheet boundaries; a pair split across hosting roots
+- **Shared element pairs** cannot nest or cross dialog/bottomSheet boundaries; a pair split across hosting roots
   (for example an anchored window layer) does not match geometry.
   The feed-card-to-detail-column spec in [Shared element morphs](../android/prototype-ux-motion.md#shared-element-morphs-15115-prototype_shared_element_v1)
   is the worked example for both platforms: the repeated card's `story-{item.id}` resolves to
@@ -161,25 +171,27 @@ transition as a real tap, including on part identifiers.
 
 ### Dismiss control
 
-The host's dismiss control (`automobile-prototype-dismiss`, "Dismiss prototype") cannot be removed by
-the spec. Fullscreen defaults to `window.chrome: "none"` (`prototype_window_chrome_v1`, not yet
+The spec cannot remove the host's dismiss control (`automobile-prototype-dismiss`, "Dismiss
+prototype"). Fullscreen defaults to `window.chrome: "none"` (`prototype_window_chrome_v1`, not yet
 device-verified): content and anchors fill the window including under the status bar (use top-edge
 `safeAreaPadding`). A host-owned two-finger ~1 s long press reveals a dismiss pill for 5 s (another hold
 restarts the deadline; single-pointer gestures can't reveal it; revealing is not TTL activity). The
 pill is permanently visible under VoiceOver/Switch Control, sits above modals, clears the top safe inset
-and is never faded by `window.opacity`; VoiceOver's escape gesture dismisses directly. All exits
-dismiss with reason `user`. Host dismiss, replacing show, authored dismiss, idle TTL and last-client
-disconnect keep working; Back is not the exit. Not device-verified: the two-finger press, VoiceOver
-escape, permanent assistive pill, opacity-0 escape and the `automobile-prototype-window` marker shape
-(present only on the root of a chromeless fullscreen prototype; others are found by the dismiss control).
+and is never faded by `window.opacity`; VoiceOver's escape gesture dismisses directly.
+
+All exits dismiss with reason `user`. Host dismiss, replacing show, authored dismiss, idle TTL and
+last-client disconnect keep working; Back is not the exit. Not device-verified: the two-finger press,
+VoiceOver escape, permanent assistive pill, opacity-0 escape and the `automobile-prototype-window`
+marker shape. That marker is present only on the root of a chromeless fullscreen prototype; the host
+finds others by the dismiss control.
 Sheet/floating chrome is unchanged (control at the window's top trailing corner). `lastResult.chrome`
 reports the effective chrome.
 
 The dismiss control removes a bottom sheet from `inspect` and its content from subsequent `observe` results. A swipe starting on sheet content does not reach the drag surface. A single plan cannot script a grabber drag.
 
 With `chrome: "bar"` the control sits in a translucent 44 pt bar across the top (clears status bar and
-cutout, follows the spec's theme) and the spec is laid out below it, so `safeAreaPadding` sees no top
-inset.
+cutout, follows the spec's theme). The agent lays the spec out below it, so `safeAreaPadding` sees no
+top inset.
 
 See the [`prototype` tool reference](../../../tools.md#prototype).
 

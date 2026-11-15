@@ -44,9 +44,9 @@ These variables are registered as internal while acquisition is unreachable.
 
 The access token comes from `gcloud auth print-access-token`, run through the
 host command seam; it carries the `cloud-platform` scope for user credentials, and
-gcloud keeps credential storage and refresh. A token is reused for 45 minutes
-(gcloud issues one-hour tokens), and concurrent callers share one gcloud run. A
-failed run is not cached.
+gcloud keeps credential storage and refresh. The broker reuses a token for 45 minutes
+(gcloud issues one-hour tokens), and concurrent callers share one gcloud run. It
+does not cache a failed run.
 
 ## Invariants
 
@@ -57,10 +57,10 @@ failed run is not cached.
 - A remote serial is a loopback port that a later session can reuse for a
   different device. Each connect drops the serial's cached CtrlProxy state and
   reads traits with an uncached reader.
-- A session is held from reservation until the provider confirms release.
-  `releaseAll` (session end, daemon shutdown) first cancels and drains
-  acquisitions still in progress, so none can return a live session afterwards,
-  then retries every held session and returns the ids it still could not release.
+- A session stays held from reservation until the provider confirms release.
+  The `releaseAll` call (session end, daemon shutdown) first cancels and drains
+  acquisitions still in progress, so none can return a live session afterwards.
+  It then retries every held session and returns the ids it still could not release.
 
 ## Background
 

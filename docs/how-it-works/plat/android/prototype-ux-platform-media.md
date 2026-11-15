@@ -21,12 +21,12 @@ that outlive a screen (mini-player, background audio, picture-in-picture):
   `audio`; `loop` is optional.
 - `source` is exactly one of `{asset: id}` (an uploaded media asset or a device `media:` id),
   `{url}` (an absolute `http` or `https` URL, the `mediaUrl` pattern), `{data: "/pointer"}` (resolved
-  at runtime) or `{sample}`: `tone440` and `silence` are synthesized audio, `colorBars` and
+  at runtime) or `{sample}`. For `{sample}`, `tone440` and `silence` are synthesized audio, `colorBars` and
   `countdown` are generated video.
 - The block needs `media` in `requires.platform`, so `prototype_platform_media_v1` gates it.
 
 The `media` module (`prototype_platform_media_v1`) has the calls `play`, `pause`, `toggle`, `stop`,
-`seek` (`positionMs`, 0-86400000), `seekBy` (`deltaMs`, ±86400000), `setRate` (`rate`, 0.25-4),
+`seek` (`positionMs`, 0-86400000) and `seekBy` (`deltaMs`, ±86400000). It also has `setRate` (`rate`, 0.25-4),
 `setVolume` (`volume`, 0-1, the player's own volume, never the device stream), `setMuted` and
 `setLoop`. Every call takes a `player` argument; a literal `{value}` must name a declared player.
 Its events are `media.statusChanged`, `media.ended` and `media.error`. State is per player at
@@ -48,8 +48,8 @@ one-key union), which is a node-scoped player released when the node leaves comp
   id.
 - Optional fields: `poster` (an image asset id), `controls` (`builtin` or `none`), `contentScale`
   (`fit`, `crop`, `fill`), `autoplay` (`true`, `false` or `"whenVisible"`), `muted`, `loop`,
-  `startMs` (0-86400000) and `positionKey`, a declared number state key the device mirrors the
-  position into; a slider bound to it holds device writes while it is dragged and seeks on release.
+  `startMs` (0-86400000) and `positionKey`. The `positionKey` field is a declared number state key the device mirrors the
+  position into. A slider bound to it holds device writes while it is dragged and seeks on release.
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
 - At most `MAX_PROTOTYPE_VIDEO_NODES` (64) `videoPlayer` nodes, counted in the authored tree and
@@ -140,7 +140,7 @@ The `cameraPreview` node is that viewfinder; a story-capture screen pairs it wit
 **Casting (#14239, module only).** The `cast` module (`prototype_platform_cast_v1`) covers Google
 Cast on Android and AirPlay on iOS with one vocabulary. Its calls are the remote-only controls:
 `cast.disconnect` (end the session and resume locally), `cast.stop` (end it and stop the receiver
-app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause and seek stay on the
+app) and `cast.setVolume` (`volume` 0-1, the remote device volume). Play, pause and seek stay on the
 `media.*` calls. A platform that cannot do an op (AirPlay `disconnect` or `setVolume`) fails with
 `unsupported`. Event data is a closed object (unknown keys are refused):
 
@@ -153,10 +153,10 @@ app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause 
 | `sessionFailed`   | `player`, `reason` (`media_not_castable`, `play_services_unavailable`, `network`, `receiver`), optional `protocol` |
 | `remoteVolume`    | `volume` (0-1)                                                                                                     |
 
-The host decodes them with `prototypeCastEventOf` (truncated data does not decode); Kotlin
+The host decodes them with `prototypeCastEventOf` (truncated data does not decode). Kotlin
 `PrototypeCastEvents` and Swift `PrototypeCastEvents` are the twins, and all three replay
-`test/fixtures/prototype-spec/cast/events.json`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
-`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
+`test/fixtures/prototype-spec/cast/events.json`. The `/platform/cast/state` value is `unavailable`, `noDevices`, `notConnected`,
+`connecting` or `connected`. It carries `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
 (the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
 reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises
 the module.
@@ -177,26 +177,26 @@ runtime permission (`VIBRATE` is a normal permission, declared by CtrlProxy) or 
 data. CtrlProxy and the iOS prototype agent register both modules and advertise the capabilities;
 the embedded Compose renderer leaves modules to the app.
 
-- **Android haptics** use the `Vibrator`: from API 29 `VibrationEffect.createPredefined` (click and
+- **Android haptics** use the `Vibrator`. From API 29 they use `VibrationEffect.createPredefined` (click and
   impactMedium click; tick, selection and impactLight tick; heavyClick, impactHeavy, longPress and
-  warning heavy click; doubleClick and success double click), `error` a two-pulse waveform; below
-  API 29 a tuned one-shot or waveform. There is no tapped `View` to call
+  warning heavy click; doubleClick and success double click), and `error` is a two-pulse waveform. Below
+  API 29 they use a tuned one-shot or waveform. There is no tapped `View` to call
   `performHapticFeedback(CONFIRM/REJECT)` on, so success, warning and error use these fallbacks.
-  Touch feedback off in system settings, or a device without a vibrator, is reported
+  The renderer reports touch feedback off in system settings, or a device without a vibrator
   (`suppressed` / `unavailable`). The `shutter` cue is `MediaActionSound`, `click` is the system
-  click sound effect, and `send` / `receive` are short system tones; no audio is bundled, and the
+  click sound effect, and `send` / `receive` are short system tones. The renderer bundles no audio, and the
   ringer (silent or vibrate) and the touch-sounds setting suppress them.
 - **iOS haptics** use `UIImpactFeedbackGenerator`, `UISelectionFeedbackGenerator` and
   `UINotificationFeedbackGenerator` (doubleClick is two impacts 80 ms apart). The Simulator does
-  not render haptics but the call still succeeds and is logged; "System Haptics" off and the silent
-  switch are not detectable, so nothing is reported suppressed. Sounds are `AudioServices` system
-  sounds (click 1104, send 1001, receive 1007, shutter 1108); `volume` is ignored and the host's
-  `AVAudioSession` is never touched.
+  not render haptics, but the call still succeeds and the agent logs it. "System Haptics" off and the silent
+  switch are not detectable, so the agent reports nothing as suppressed. Sounds are `AudioServices` system
+  sounds (click 1104, send 1001, receive 1007, shutter 1108); the agent ignores `volume` and never
+  touches the host's `AVAudioSession`.
 - **`feedbackLog`.** Each shown prototype keeps its last 64 calls, oldest first, and `prototype
   inspect` (and `status`) returns them as `feedbackLog: [{effect | sound, nodeId?, timeMs,
-  suppressed?}]`. `nodeId` is the one node whose tap, long-press or double-tap action made the
-  call, absent for a platform handler or when several nodes author the same call; `timeMs` is the
-  device clock. Failed calls are not logged; a show or dismissal clears the log.
+  suppressed?}]`. The `nodeId` field is the one node whose tap, long-press or double-tap action made the
+  call, absent for a platform handler or when several nodes author the same call. The `timeMs` field is the
+  device clock. The log skips failed calls; a show or dismissal clears the log.
 
 | Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

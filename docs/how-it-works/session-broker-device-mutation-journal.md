@@ -180,7 +180,7 @@ capture like other admission work.
 **Other tools**
 
 - Journaled non-read calls with an empty adapter result record opaque
-  `unobservable` intent. The `screenLock` tool can capture an unsecured baseline but not an
+  `unobservable` intent. The `screenLock` action can capture an unsecured baseline but not an
   existing secure credential, so it records `unobservable` without storing secrets.
   The `power` tool records `unobservable` because its restore registry (`restoreReceipt`,
   `powerRestore`) owns the priors. Prior reads are skipped when the scoped

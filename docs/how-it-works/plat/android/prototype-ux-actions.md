@@ -83,8 +83,8 @@ added:
 - `payload` is `{op: "set"|"append"|"extend"|"prepend"|"remove", value?, maxItems?, revision}`;
 - `validity` may accompany it.
 
-A `change` whose name is a data path must carry a valid payload or the host drops it. The
-`awaitEvent` tool returns it like any other event.
+A `change` whose name is a data path must carry a valid payload or the host drops it.
+`awaitEvent` returns it like any other event.
 
 Android: `PrototypeRuntime.writeData` (over the shared `PrototypeDataWriter`, a mirror of
 `applyPrototypeDataWrite`) applies a write to an immutable copy of `/data` and Compose re-renders `repeat`

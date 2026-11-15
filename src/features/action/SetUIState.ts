@@ -767,6 +767,7 @@ export class SetUIState extends BaseVisualChange {
       error: result.error,
       fieldType: result.fieldType,
       skipped: result.skipped,
+      ...(result.normalized ? { normalized: true, observed: result.observed } : {}),
     };
   }
 

@@ -1,5 +1,15 @@
 import { Element, VALUE_REDACTED_ATTRIBUTE } from "../../models/Element";
 import { FieldType } from "../../models/SetUIStateResult";
+import { isEditableElementProperties } from "../utility/elementProperties";
+
+/**
+ * What the caller asked to set. A checkable node given only a string `value`
+ * may be a text chip that becomes an editor once focused (Material time picker, #18350).
+ */
+export interface FieldIntent {
+  value?: string;
+  selected?: boolean;
+}
 
 /**
  * Platform-specific class patterns for field type detection
@@ -67,9 +77,10 @@ export class FieldTypeDetector {
   /**
    * Detect the field type for a given element
    * @param element - The element to analyze
+   * @param intent - The requested value, when known
    * @returns The detected field type
    */
-  detect(element: Element): FieldType {
+  detect(element: Element, intent?: FieldIntent): FieldType {
     const className = this.getClassName(element);
     const isCheckable = this.isCheckable(element);
     const isFocusable = this.isFocusable(element);
@@ -78,6 +89,11 @@ export class FieldTypeDetector {
     // Check for toggle first (checkable + switch/toggle class)
     if (isCheckable && this.matchesTogglePattern(className)) {
       return "toggle";
+    }
+
+    // A checkable text chip given a string value is set by focusing and typing.
+    if (isCheckable && this.acceptsTextIntent(element, className, intent)) {
+      return "text";
     }
 
     // Check for checkbox (checkable but not toggle)
@@ -101,6 +117,25 @@ export class FieldTypeDetector {
     }
 
     return "unknown";
+  }
+
+  /**
+   * Whether a checkable node given `value` (and no `selected`) takes text: a
+   * focusable or editable node that is not a native CheckBox/RadioButton.
+   */
+  private acceptsTextIntent(element: Element, className: string, intent?: FieldIntent): boolean {
+    if (typeof intent?.value !== "string" || intent.selected !== undefined) {
+      return false;
+    }
+    if (this.matchesCheckboxPattern(className)) {
+      return false;
+    }
+    return this.isFocusable(element) || isEditableElementProperties(element);
+  }
+
+  private matchesCheckboxPattern(className: string): boolean {
+    // Covers platform, AppCompat and Material CheckBox/RadioButton subclasses.
+    return className.includes("checkbox") || className.includes("radiobutton");
   }
 
   private getClassName(element: Element): string {

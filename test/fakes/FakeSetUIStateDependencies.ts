@@ -9,6 +9,7 @@ import type { ActionCall } from "../../src/features/action/ActionCall";
 import type { InputTextOptions } from "../../src/features/action/InputText";
 import {
   FieldTypeDetector,
+  type FieldIntent,
   type FieldTypeDetection,
 } from "../../src/features/action/FieldTypeDetector";
 import type {
@@ -348,9 +349,9 @@ export class FakeFieldTypeDetector implements FieldTypeDetection {
   private passwordOverrides: Map<string, boolean> = new Map();
   private realDetector: FieldTypeDetector = new FieldTypeDetector();
 
-  detect(element: Element): FieldType {
+  detect(element: Element, intent?: FieldIntent): FieldType {
     const key = element["resource-id"] ?? element.text ?? "";
-    return this.typeOverrides.get(key) ?? this.realDetector.detect(element);
+    return this.typeOverrides.get(key) ?? this.realDetector.detect(element, intent);
   }
 
   isChecked(element: Element): boolean {

@@ -53,8 +53,9 @@ import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.formatUiNumber
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
-import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
+import dev.jasonpearson.automobile.desktop.core.shell.isIos
+import dev.jasonpearson.automobile.desktop.core.shell.shellBootedDevice
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -729,7 +730,7 @@ private fun ActionCard(options: ActionCardOptions) {
 @Composable
 private fun DevicePickerOverlay(
   platform: TestPlatform,
-  onDeviceSelected: (BootedDevice) -> Unit,
+  onDeviceSelected: (BootedDeviceInfo) -> Unit,
   onDismiss: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
@@ -738,10 +739,10 @@ private fun DevicePickerOverlay(
   // Filter to only show devices matching the test platform
   val allDevices = remember {
     listOf(
-      BootedDevice("pixel8", "Pixel 8 API 35", DeviceType.AndroidEmulator, "Running"),
-      BootedDevice("pixel7", "Pixel 7 API 34", DeviceType.AndroidEmulator, "Running"),
-      BootedDevice("iphone15", "iPhone 15 Pro", DeviceType.iOSSimulator, "Booted"),
-      BootedDevice("iphone14", "iPhone 14", DeviceType.iOSSimulator, "Booted"),
+      shellBootedDevice("pixel8", "Pixel 8 API 35", platform = "android", state = "Running"),
+      shellBootedDevice("pixel7", "Pixel 7 API 34", platform = "android", state = "Running"),
+      shellBootedDevice("iphone15", "iPhone 15 Pro", platform = "ios", state = "Booted"),
+      shellBootedDevice("iphone14", "iPhone 14", platform = "ios", state = "Booted"),
     )
   }
 
@@ -749,8 +750,8 @@ private fun DevicePickerOverlay(
     remember(platform) {
       allDevices.filter { device ->
         when (platform) {
-          TestPlatform.Android -> device.type == DeviceType.AndroidEmulator
-          TestPlatform.iOS -> device.type == DeviceType.iOSSimulator
+          TestPlatform.Android -> device.isVirtual && !device.isIos
+          TestPlatform.iOS -> device.isVirtual && device.isIos
         }
       }
     }
@@ -789,7 +790,7 @@ private fun DevicePickerOverlay(
 
 @Composable
 private fun DevicePickerRow(
-  device: BootedDevice,
+  device: BootedDeviceInfo,
   onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
@@ -807,19 +808,14 @@ private fun DevicePickerRow(
   ) {
     // Device type icon
     Text(
-      when (device.type) {
-        DeviceType.AndroidEmulator,
-        DeviceType.AndroidPhysical -> "🤖"
-        DeviceType.iOSSimulator,
-        DeviceType.iOSPhysical -> "🍎"
-      },
+      if (device.isIos) "🍎" else "🤖",
       fontSize = 16.sp,
     )
 
     Column(modifier = Modifier.weight(1f)) {
       Text(device.name, fontSize = 12.sp)
       Text(
-        device.status,
+        device.runtime.lifecycle.state,
         fontSize = 10.sp,
         color = colors.text.normal.copy(alpha = 0.5f),
       )

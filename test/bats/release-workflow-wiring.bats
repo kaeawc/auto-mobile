@@ -1235,3 +1235,52 @@ load yq-helpers
     [ "$output" = '${{ inputs.upload-artifact }}' ]
   done
 }
+
+# Conveyor's app.version is the release tag verbatim and copied-site attaches to
+# the release matching it, so a 0-major tag (which Conveyor cannot use as a macOS
+# version) must fail before verify-and-release publishes anything (#5542).
+run_validate_release_tag() {
+  local tag="$1" publisher="$2" script
+  script="$(yq -r '.jobs."validate-release-tag".steps[]
+    | select(.id == "validate") | .run' ".github/workflows/release.yml")"
+  GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out" TAG="$tag" EVENT_NAME=workflow_dispatch \
+    REF_TYPE=tag REF_NAME="$tag" DESKTOP_PUBLISHER="$publisher" bash -c "$script"
+}
+
+@test "release.yml rejects a 0-major tag only in Conveyor mode (#5542)" {
+  require_mikefarah_yq
+  run run_validate_release_tag 0.0.96 conveyor
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'major >= 1'* ]]
+  run run_validate_release_tag 0.0.96 jpackage
+  [ "$status" -eq 0 ]
+  run run_validate_release_tag 0.0.96 ""
+  [ "$status" -eq 0 ]
+  run run_validate_release_tag 1.0.0 conveyor
+  [ "$status" -eq 0 ]
+  run run_validate_release_tag 10.2.3 conveyor
+  [ "$status" -eq 0 ]
+}
+
+@test "release.yml rejects leading-zero tags in Conveyor mode before publishing (#5542)" {
+  require_mikefarah_yq
+  local tag
+  for tag in 01.0.0 00.0.96 1.01.0 1.0.07; do
+    run run_validate_release_tag "$tag" conveyor
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'without leading zeros'* ]]
+  done
+}
+
+@test "release.yml passes the release tag to Conveyor unchanged (#5542)" {
+  require_mikefarah_yq
+  local script
+  script="$(yq -r '.jobs."resolve-conveyor-version".steps[]
+    | select(.id == "v") | .run' ".github/workflows/release.yml")"
+  GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out" TAG=1.0.0 bash -c "$script"
+  [ "$(cat "$BATS_TEST_TMPDIR/out")" = "version=1.0.0" ]
+  run env GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out2" TAG=0.0.96 bash -c "$script"
+  [ "$status" -ne 0 ]
+  run env GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out3" TAG=1.0.0-rc.1 bash -c "$script"
+  [ "$status" -ne 0 ]
+}

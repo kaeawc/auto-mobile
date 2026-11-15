@@ -19,10 +19,11 @@ running.
   tool responses.
 - **Composition** (`createRemoteDeviceAcquisitionFromEnv`): reads the
   configuration from the environment and builds the acquisition with the Device
-  Streaming provider and Android setup. CtrlProxy is installed through
-  `AndroidCtrlProxyRemoteInstaller`, which drops the serial's
-  `AndroidCtrlProxyManager` state and then runs a forced `setup`. Without the
-  opt-in it builds nothing; an opted-in but invalid configuration throws.
+  Streaming provider and the injected connect setup. On Android, CtrlProxy is
+  installed through `AndroidCtrlProxyRemoteInstaller`, which drops the serial's
+  `AndroidCtrlProxyManager` state and then runs a forced `setup` on a manager the
+  composition root supplies. Without the opt-in it builds nothing; an opted-in but
+  invalid configuration throws.
 
 The transport is the `DirectAccessService.AdbConnect` bridge (#14464). Until it
 lands, the composition has no transport to receive, so acquisition is not

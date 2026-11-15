@@ -5,8 +5,6 @@
  */
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import type { Timer } from "../../utils/SystemTimer";
-import { AndroidCtrlProxyRemoteInstaller } from "./androidCtrlProxyRemoteInstaller";
-import { AndroidRemoteDeviceConnectSetup } from "./androidRemoteDeviceConnectSetup";
 import {
   createDeviceStreamingProvider,
   readDeviceStreamingConfig,
@@ -27,8 +25,11 @@ export interface RemoteDeviceAcquisitionFactoryDependencies {
   /** The adb bridge to reserved devices (#14464). */
   transport: RemoteAdbTransport;
   env?: NodeJS.ProcessEnv;
-  /** Defaults to Android setup over `AndroidCtrlProxyManager`. */
-  setup?: RemoteDeviceConnectSetup;
+  /**
+   * Per-connect device preparation: `AndroidRemoteDeviceConnectSetup` over an
+   * `AndroidCtrlProxyRemoteInstaller` whose manager lookup the composition root supplies.
+   */
+  setup: RemoteDeviceConnectSetup;
   /** Defaults to the Device Streaming REST provider. */
   createProvider?: (
     config: DeviceStreamingConfig,
@@ -51,9 +52,7 @@ export function createRemoteDeviceAcquisitionFromEnv(
   return new RemoteDeviceAcquisition({
     provider,
     transport: deps.transport,
-    setup:
-      deps.setup ??
-      new AndroidRemoteDeviceConnectSetup({ ctrlProxy: new AndroidCtrlProxyRemoteInstaller() }),
+    setup: deps.setup,
     timer: deps.timer,
   });
 }

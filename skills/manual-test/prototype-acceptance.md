@@ -142,6 +142,54 @@ Platform notes to record:
   Load with `via:"device"` works (given a reachable URL); with `via:"host"` it fails with an
   `invalid_request` error saying host requests are not available in saved prototypes.
 
+## Realtime (#14269)
+
+Run on an Android emulator (Playground); record PASS/FAIL per `via` value. Precondition: the
+device advertises `prototype_platform_realtime_v1` (and `prototype_platform_realtime_device_v1`
+for `via:"device"`) in `prototype status` capabilities. If it does not, a `show` of this spec is
+refused before anything is sent: record BLOCKED, not FAIL. Design: "Realtime channels" in
+`docs/how-it-works/plat/android/prototype-ux.md`.
+
+**Servers.** For `via:"host"`, define a mock backend room so the host side is deterministic:
+`prototype defineBackend {backendId:"chat", backend:{rooms:[{path:"/rooms/:roomId",
+onConnect:[{"type":"welcome"}], echo:true}]}}`; the channel URL is
+`wss://chat.mock.automobile.invalid/rooms/lobby`. For `via:"device"`, use a public WebSocket echo
+server reachable from the emulator (`wss://`; the device refuses `localhost`, loopback and
+`10.0.2.2` as `blocked_destination`).
+
+**Spec.** One screen, id `rt-acceptance`, `requires.platform:["realtime"]`, state
+`{"status":"idle","draft":""}`, data `{"chat":{"messages":[]}}`, and
+`channels.chat {kind:"websocket", url, via, statusKey:"status", reconnect {maxAttempts:20,
+initialDelayMs:500, maxDelayMs:5000}, routes:[{actions:[appendData /data/chat/messages
+{event:""}]}]}`:
+
+- a `column` with `repeat {items:{path:"/chat/messages"}, as:"m"}` of `text` `{m}`;
+- `text` `{status}`; a `textField` bound to `draft`;
+- **Send** `[platform realtime.send {channel:"chat", body:{value:{state:draft}}}]`;
+  **Disconnect** `[platform realtime.disconnect {channel:"chat"}]`;
+  **Connect** `[platform realtime.connect {channel:"chat"}]`.
+
+Run the table once with `via:"host"` and once with `via:"device"`.
+
+| #   | Do                                                                                        | Expect (ground truth)                                                                                                                                  |
+| --- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `show` the spec; `awaitEvent kind:emit eventName:prototype_platform_event`                | `status` goes `connecting` then `open`; `realtime.status` events in that order; host: the welcome frame is the first row; `backendLog` shows the join |
+| 2   | Type `hello`, tap **Send** three times                                                    | Three `hello` rows (echo); `prototype status` `/platform/realtime/chat/framesIn` counts them; host: `backendLog` lists three client sends               |
+| 3   | Host only: `prototype publish {backendId:"chat", room:"/rooms/lobby", frame:"from agent"}` | A `from agent` row appears; the result reports `delivered: 1`                                                                                          |
+| 4   | `setDeviceState networkCondition {profile:"offline"}`                                     | `via:"device"`: within about 60 s (the 25 s ping detects the dead socket) `status` becomes `reconnecting` and `attempt` grows; Send while reconnecting queues (no error). `via:"host"`: record whether the CtrlProxy link survives |
+| 5   | `setDeviceState networkCondition {profile:"none"}`                                        | `status` returns to `open` within the backoff cap (5 s); sends queued in step 4 arrive once, in order; `attempt` resets to 0 after 5 s open             |
+| 6   | Tap **Disconnect**, then **Connect**                                                      | `closed` with `closeCode:1000`, then `connecting`, `open`; no reconnect between them                                                                   |
+| 7   | Patch the spec changing only the screen text; then patch the channel `url`                | The first patch keeps the connection (no status event); the second reconnects `chat` only                                                              |
+| 8   | `dismiss`                                                                                 | Window gone; host: `backendLog` shows the connection closed; no further `realtime.*` events                                                            |
+
+Platform notes to record:
+
+- **Saved Android prototype.** Save the spec with `via:"device"` and launch it from the home screen
+  with no host attached: step 1 and 2 pass. With `via:"host"` the channel errors at once with
+  `network`.
+- **API 37.** On an Android 17 image, a local-network `ws://` URL without
+  `ACCESS_LOCAL_NETWORK` fails with a message naming that permission.
+
 ## Cleanup
 
 Run `proxy1 release --client NAME` then `proxy1 close --client NAME`, or

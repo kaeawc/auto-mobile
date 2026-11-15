@@ -18,7 +18,7 @@ import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
 import { describeFocus, elementMatchesTarget, stringProp } from "./FocusNavigateMatching";
-import { createFocusIdentity, focusKey, type FocusIdentity } from "./FocusIdentity";
+import { createFocusIdentity, focusKey, rangeOf, type FocusIdentity } from "./FocusIdentity";
 import { FOCUS_NAVIGATE_DIRECTIONS, type FocusNavigateDirection } from "./FocusNavigateDirections";
 import { describeEntry, isViewTextField, trapMessage } from "./FocusTrapMessage";
 import {
@@ -705,7 +705,7 @@ export class FocusNavigate {
         const outcome = await this.exit(done, {
           screen,
           focusedElement,
-          adjusted: progress.adjusted.size > 0,
+          adjusted: progress.adjusted.size > 0 || rangeOf(screen) !== "",
           trap,
           refused: progress.blocked,
           select: options.select === true,
@@ -844,6 +844,12 @@ export class FocusNavigate {
       return continuing;
     }
     const { focused } = screen;
+    if (rangeOf(screen) !== "") {
+      // A control that reports a range (a Compose slider) takes every arrow as a value change,
+      // up and down included (#17209): pressing one to find out would change it. No press is
+      // left, so the walk leaves it with tab (see adjustableOutcome).
+      return undefined;
+    }
     const entry =
       matches.length === 0 ? leanbackEntry(focused, screen.elements, progress) : undefined;
     if (entry) {

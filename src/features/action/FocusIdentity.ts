@@ -229,7 +229,7 @@ function toggledInPlace(
  * The focused control's `range-info`, on the control or a node inside it (a Compose slider's
  * semantics can sit on a child), or empty when nothing there reports a range.
  */
-function rangeOf(screen: Pick<FocusScreen, "focused" | "elements">): string {
+export function rangeOf(screen: Pick<FocusScreen, "focused" | "elements">): string {
   const { focused } = screen;
   if (!focused) {
     return "";

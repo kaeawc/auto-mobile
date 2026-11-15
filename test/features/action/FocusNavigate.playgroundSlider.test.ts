@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
-  FOCUS_NAVIGATE_STALL_PRESSES,
   FocusNavigate,
   type FocusKeyPresser,
   type FocusNavigateDirection,
@@ -46,6 +45,8 @@ class FakePlaygroundHome implements FocusObserver, FocusKeyPresser {
   readonly presses: InputKeyName[] = [];
   focus: NodeId = "slider";
   value = 50;
+  /** True: up/down change the slider's value too, as a Compose slider does on the TV image. */
+  verticalAdjusts = false;
   /** Arrow presses the slider took as value changes. */
   valuePresses = 0;
 
@@ -141,7 +142,14 @@ class FakePlaygroundHome implements FocusObserver, FocusKeyPresser {
       return { success: true };
     }
     const next = this.moves[this.focus][direction];
-    if (next) {
+    if (
+      this.verticalAdjusts &&
+      this.focus === "slider" &&
+      (direction === "up" || direction === "down")
+    ) {
+      this.valuePresses += 1;
+      this.value += direction === "up" ? 1 : -1;
+    } else if (next) {
       this.focus = next;
     } else if (
       this.adjustable &&
@@ -171,8 +179,8 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: true, status: "focused" });
     expect(result.steps).toBeLessThan(12);
     expect(home.presses).toContain("tab");
-    // Each horizontal arrow is pressed on the slider once, so its value ends where it started.
-    expect(home.valuePresses).toBe(2);
+    // The slider reports a range, so left/right are never pressed on it: its value is untouched.
+    expect(home.valuePresses).toBe(0);
     expect(home.value).toBe(50);
   });
 
@@ -184,10 +192,7 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: false, status: "stuck" });
     expect(result.steps).toBeLessThan(30);
     expect(home.presses.filter((key) => key === "tab")).toEqual(["tab"]);
-    expect(home.valuePresses).toBeLessThanOrEqual(4);
-    expect(result.message).toContain(
-      'the focused control "slider_control" consumed left and right',
-    );
+    expect(home.valuePresses).toBe(0);
     expect(result.message).toContain("pressing tab did not move focus out of it either");
   });
 
@@ -201,8 +206,8 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: true, status: "focused" });
     expect(result.steps).toBeLessThan(20);
     expect(home.presses).toContain("tab");
-    expect(home.presses).toContain("arrow_up");
-    expect(home.valuePresses).toBeLessThanOrEqual(FOCUS_NAVIGATE_STALL_PRESSES * 2 + 1);
+    expect(home.presses[0]).toBe("tab");
+    expect(home.valuePresses).toBe(0);
   });
 
   test("with no value readout and no way out, it ends stuck rather than at max_steps (#17209)", async () => {
@@ -212,16 +217,31 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     });
     expect(result).toMatchObject({ success: false, status: "stuck" });
     expect(result.steps).toBeLessThan(30);
-    expect(result.message).toContain('the focused control "slider_control" consumed');
+    expect(home.valuePresses).toBe(0);
   });
 
-  test("a slider whose label never changes still ends stuck without tab", async () => {
+  test("a slider that takes up and down as value changes too is left with tab alone (#17209)", async () => {
+    const home = new FakePlaygroundHome(true);
+    home.verticalAdjusts = true;
+    const result = await new FocusNavigate(home, home, timer).execute({
+      until: { text: "Settings" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    expect(home.valuePresses).toBe(0);
+    expect(home.value).toBe(50);
+    expect(home.presses[0]).toBe("tab");
+  });
+
+  test("a slider that reports a range is left with tab without pressing left or right (#17209)", async () => {
     const home = new FakePlaygroundHome(true, false);
     const result = await new FocusNavigate(home, home, timer).execute({
       until: { text: "Settings" },
     });
-    expect(result).toMatchObject({ success: false, status: "stuck" });
-    expect(home.presses).not.toContain("tab");
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    expect(home.presses).toContain("tab");
+    // Right is pressed later, on the bottom bar; on the slider no press changed its value.
+    expect(home.valuePresses).toBe(0);
+    expect(home.presses.slice(0, home.presses.indexOf("tab"))).not.toContain("arrow_left");
   });
 
   test("a fixed-slot list row with a resource id still reads as moving while its list scrolls", async () => {

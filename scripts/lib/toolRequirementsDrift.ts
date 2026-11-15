@@ -204,25 +204,167 @@ export function findToolRequirementsDrift(
 
 const REQUIRES_HEADER = "Requires";
 const NO_REQUIREMENTS = "—";
+/** Class on every generated Requires cell; the docs stylesheet scopes the tool tables by it. */
+export const REQUIRES_CELL_CLASS = "tool-requires";
 
 /** Every device tool reaches these platforms unless its schema narrows them. */
 const DEFAULT_PLATFORMS = "android,ios";
 
+interface KeyEntry {
+  emoji: string;
+  /** The requirement as written in `_meta["automobile/requires"]`. */
+  entry: string;
+  /** Hover text and accessible name for the emoji. */
+  label: string;
+  meaning: string;
+}
+
+const FEATURE_FLAG_PREFIX = "featureFlag:";
+
+const GATE_KEY: readonly KeyEntry[] = [
+  {
+    emoji: "🧩",
+    entry: "sdkEmbed",
+    label: "sdkEmbed",
+    meaning: "start the daemon with `--embedded-sdk`",
+  },
+  {
+    emoji: "🐞",
+    entry: "debugBuild",
+    label: "debugBuild",
+    meaning: "start the daemon with `--debug` (the `debug` feature flag)",
+  },
+  {
+    emoji: "🚩",
+    entry: `${FEATURE_FLAG_PREFIX}<key>`,
+    label: "featureFlag",
+    meaning:
+      "some or all calls are refused while that feature flag (named beside the emoji) is off; enable it with `auto-mobile --daemon set-feature-flag <key> true`",
+  },
+];
+
+const PLATFORM_KEY: Readonly<Record<string, KeyEntry>> = Object.fromEntries(
+  (
+    [
+      ["android", "🤖"],
+      ["ios", "🍎"],
+      ["watchos", "⌚"],
+      ["tvos", "📺"],
+      ["visionos", "🥽"],
+    ] as const
+  ).map(([platform, emoji]) => [
+    platform,
+    {
+      emoji,
+      entry: `platform:${platform}`,
+      label: PLATFORM_LABELS[platform],
+      meaning: `the tool drives ${PLATFORM_LABELS[platform]} devices`,
+    },
+  ]),
+);
+
+function emojiSpan(emoji: string, label: string): string {
+  return `<span role="img" aria-label="${label}" title="${label}">${emoji}</span>`;
+}
+
+function gateBadge(entry: string): string {
+  if (entry.startsWith(FEATURE_FLAG_PREFIX)) {
+    const flag = entry.slice(FEATURE_FLAG_PREFIX.length);
+    return `${emojiSpan("🚩", entry)} <code>${flag}</code>`;
+  }
+  const key = GATE_KEY.find((gate) => gate.entry === entry);
+  return key === undefined ? `<code>${entry}</code>` : emojiSpan(key.emoji, key.label);
+}
+
+function platformBadge(platform: string): string {
+  const key = PLATFORM_KEY[platform];
+  return key === undefined ? platform : emojiSpan(key.emoji, key.label);
+}
+
 /**
- * The docs cell for a requirement list: gates as code, then the platforms the tool drives when
- * they differ from the Android and iOS every device tool reaches.
+ * The docs cell for a requirement list: an emoji per gate (a feature flag keeps its key), then
+ * an emoji per platform the tool drives when they differ from the Android and iOS every device
+ * tool reaches. Each emoji carries its meaning as hover text; the key table explains them.
  */
 export function renderRequiresCell(requires: readonly string[]): string {
-  const gates = requires
-    .filter((entry) => !entry.startsWith("platform:"))
-    .map((entry) => `<code>${entry}</code>`);
+  const gates = requires.filter((entry) => !entry.startsWith("platform:")).map(gateBadge);
   const platforms = requires
     .filter((entry) => entry.startsWith("platform:"))
     .map((entry) => entry.slice("platform:".length));
   const listed = platforms.length > 0 && platforms.join(",") !== DEFAULT_PLATFORMS;
-  const labels = platforms.map((platform) => PLATFORM_LABELS[platform] ?? platform).join(", ");
-  const parts = [...gates, ...(listed ? [labels] : [])];
-  return parts.length > 0 ? parts.join(" · ") : NO_REQUIREMENTS;
+  const parts = [...gates, ...(listed ? [platforms.map(platformBadge).join(" ")] : [])];
+  const body = parts.length > 0 ? parts.join(" · ") : NO_REQUIREMENTS;
+  return `<span class="${REQUIRES_CELL_CLASS}">${body}</span>`;
+}
+
+// --- docs/tools.md: the emoji key for the Requires column -------------------------------------
+
+export const REQUIRES_KEY_START = "<!-- requires-key:start -->";
+export const REQUIRES_KEY_END = "<!-- requires-key:end -->";
+
+/** The key table's rows: header first, then one row per gate and platform emoji. */
+function requiresKeyRows(): string[][] {
+  return [
+    ["Emoji", "Requirement", "Meaning"],
+    ...[...GATE_KEY, ...Object.values(PLATFORM_KEY)].map((key) => [
+      key.emoji,
+      `\`${key.entry}\``,
+      key.meaning,
+    ]),
+  ];
+}
+
+/** The generated key table, unpadded (the formatter aligns it). */
+export function renderRequiresKey(): string {
+  const [header, ...body] = requiresKeyRows();
+  return [row(header), row(header.map(() => "---")), ...body.map((values) => row(values))].join(
+    "\n",
+  );
+}
+
+interface KeyBlock {
+  start: number;
+  end: number;
+}
+
+function keyBlock(lines: readonly string[]): KeyBlock | undefined {
+  const start = lines.findIndex((line) => line.trim() === REQUIRES_KEY_START);
+  const end = lines.findIndex((line, index) => index > start && line.trim() === REQUIRES_KEY_END);
+  return start === -1 || end === -1 ? undefined : { start, end };
+}
+
+/** Replace the lines between the key markers with the generated key table. */
+export function applyRequiresKey(markdown: string): string {
+  const lines = markdown.split("\n");
+  const block = keyBlock(lines);
+  if (block === undefined) {
+    return markdown;
+  }
+  return [
+    ...lines.slice(0, block.start + 1),
+    "",
+    renderRequiresKey(),
+    "",
+    ...lines.slice(block.end),
+  ].join("\n");
+}
+
+/** Whether the key table between the markers matches the generated one (formatting-insensitive). */
+export function findRequiresKeyDrift(markdown: string): string[] {
+  const lines = markdown.split("\n");
+  const block = keyBlock(lines);
+  if (block === undefined) {
+    return [`Requires key markers ${REQUIRES_KEY_START} / ${REQUIRES_KEY_END} are missing`];
+  }
+  const actual = lines
+    .slice(block.start + 1, block.end)
+    .filter((line) => line.startsWith("|"))
+    .filter((_, index) => index !== 1)
+    .map((line) => cells(line).join(" | "));
+  const expected = requiresKeyRows().map((values) => values.join(" | "));
+  return actual.join("\n") === expected.join("\n")
+    ? []
+    : ["Requires key table differs from the generated key"];
 }
 
 function cells(line: string): string[] {

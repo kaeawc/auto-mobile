@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
@@ -38,7 +40,13 @@ class ImportActivity : ComponentActivity() {
         if (share != null) {
           ShareImportConfirmation(share, ::confirmShare) { finish() }
         } else {
-          ImportStatus(importStatusText(shareFailure, rejection)) { finish() }
+          ImportStatus(
+            importStatusText(shareFailure, rejection),
+            missingCapabilities = rejection?.missingCapabilities.takeIf { shareFailure == null },
+            openUrl = { url -> openProtoViewerUpdate(url, ::startActivity) },
+          ) {
+            finish()
+          }
         }
       }
     }
@@ -126,10 +134,17 @@ internal fun ShareImportConfirmation(
 }
 
 @Composable
-private fun importStatusText(shareFailure: Int?, failed: LibraryImportResult.Rejected?): String =
+internal fun importStatusText(shareFailure: Int?, failed: LibraryImportResult.Rejected?): String =
   when {
     shareFailure != null -> stringResource(shareFailure)
     failed != null && failed.isHidden -> stringResource(R.string.import_hidden)
+    failed?.missingCapabilities != null ->
+      if (failed.missingCapabilities.isEmpty()) stringResource(R.string.unsupported)
+      else
+        stringResource(
+          R.string.import_requires_capabilities,
+          failed.missingCapabilities.joinToString(", "),
+        )
     failed != null -> stringResource(R.string.import_rejected, failed.path, failed.reason)
     else -> stringResource(R.string.loading)
   }
@@ -139,11 +154,33 @@ internal val LibraryImportResult.Rejected.isHidden: Boolean
   get() = path == "library" && reason == LibraryError.Hidden.name
 
 @Composable
-internal fun ImportStatus(text: String, back: () -> Unit) {
+internal fun ImportStatus(
+  text: String,
+  missingCapabilities: List<String>? = null,
+  openUrl: (String) -> Unit = {},
+  back: () -> Unit,
+) {
   Column(
     Modifier.windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()),
   ) {
     Text(text)
+    if (missingCapabilities != null) {
+      TextButton(onClick = { openUrl(PROTOVIEWER_STORE_URL) }) {
+        Text(stringResource(R.string.update_protoviewer))
+      }
+    }
     TextButton(onClick = back) { Text(stringResource(R.string.back)) }
+  }
+}
+
+internal const val PROTOVIEWER_STORE_URL =
+  "https://play.google.com/store/apps/details?id=dev.jasonpearson.automobile.protoviewer"
+
+/** A missing browser/store handler leaves the import screen available. */
+internal fun openProtoViewerUpdate(url: String, startActivity: (Intent) -> Unit) {
+  try {
+    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+  } catch (error: ActivityNotFoundException) {
+    Log.w("ProtoViewerImport", "No app can open the ProtoViewer update page", error)
   }
 }

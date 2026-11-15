@@ -96,6 +96,17 @@ describe("sendKeys selector focus recovery", () => {
     expect(h.calls).toEqual(["focus"]);
   });
 
+  test("a selector that matched a visible non-input does not suggest scrolling (#18351)", async () => {
+    const h = createSendKeysFocusHarness();
+    const error =
+      "Failed to perform tap on element: '0 minutes' matched an on-screen element that is not a " +
+      'text input yet: {elementId "minute_chip", label "0 minutes"} (affordances: tap, toggle). ' +
+      'Tap it first (tapOn {elementId: "minute_chip"}), then call sendKeys without a selector.';
+    h.replies.push({ success: false, error, [tapFocusFailure]: "matched-non-input" });
+    expect((await h.action.execute(commands, selector)).error).toBe(error);
+    expect(h.calls).toEqual(["focus"]);
+  });
+
   for (const reason of ["no-visible-tap-area", "navigation-bar"] as const) {
     test(`${reason}: off-screen-but-present field gets the hint`, async () => {
       const h = createSendKeysFocusHarness();

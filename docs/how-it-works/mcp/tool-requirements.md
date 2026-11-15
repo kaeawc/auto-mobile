@@ -30,7 +30,13 @@ Validation check) fails when:
   flag or tool is not a string literal (the registry's own `debug` gate excepted);
 - `APPLE_PLATFORM_SUPPORTED_TOOLS` lists a tool that is not registered, or a
   device-aware tool whose input schema refuses a platform the gate admits;
-- a `docs/tools.md` tool row's Requires cell differs from the definition.
+- a tool row's Requires cell on `docs/tools.md` or a tool page differs from the
+  definition, or the emoji key table between the `requires-key` markers on
+  `docs/tools.md` differs from the generated key.
+
+The Requires cell renders each gate and each non-default platform as an emoji with
+its name as hover text, inside `<span class="tool-requires">`; the docs stylesheet
+keys on that class to keep those tables' tool names on one line.
 
 The pure checks live in `scripts/lib/toolRequirementsDrift.ts`.
 `bash scripts/update-tool-definitions.sh` regenerates both files and formats them.

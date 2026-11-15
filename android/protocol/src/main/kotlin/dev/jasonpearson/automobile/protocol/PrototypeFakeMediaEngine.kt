@@ -45,11 +45,11 @@ class PrototypeFakeMediaEngine {
   private class Player(var state: State, val loop: Boolean)
 
   private val players = LinkedHashMap<String, Player>()
-  private val emitted = mutableListOf<Event>()
+  private val log = PrototypeMediaEventLog()
 
   /** Every event reported so far, oldest first. */
   val events: List<Event>
-    get() = emitted.toList()
+    get() = log.events
 
   /** `/platform/media/players`: every loaded player's state, in load order. */
   fun snapshot(): Map<String, State> = players.mapValues { it.value.state }
@@ -58,7 +58,7 @@ class PrototypeFakeMediaEngine {
   fun load(player: String, durationMs: Long, loop: Boolean = false) {
     val state = State(false, 0, durationMs, false, READY)
     players[player] = Player(state, loop)
-    statusChanged(player, state)
+    log.statusChanged(player, state)
   }
 
   fun play(player: String): Failure? =
@@ -97,7 +97,7 @@ class PrototypeFakeMediaEngine {
             state.copy(positionMs = if (state.durationMs == 0L) 0L else position % state.durationMs)
         else -> {
           player.state = state.copy(positionMs = position)
-          end(id)
+          settle(id, error = null)
         }
       }
     }
@@ -112,7 +112,8 @@ class PrototypeFakeMediaEngine {
         "media.statusChanged" -> request.status?.takeIf { it in SIM_STATUSES }
         else -> null
       }
-    if (status == null || (status == ERROR && request.code !in ERROR_CODES)) {
+    val code = request.code
+    if (status == null || (status == ERROR && (code == null || code !in ERROR_CODES))) {
       return Failure.INVALID_ARGS
     }
     request.advanceMs?.let(::advance)
@@ -120,11 +121,8 @@ class PrototypeFakeMediaEngine {
     when (status) {
       BUFFERING -> player.state = player.state.copy(buffering = true)
       READY -> update(request.player) { it.copy(buffering = false, status = READY, error = null) }
-      ENDED -> {
-        player.state = player.state.copy(buffering = false)
-        end(request.player)
-      }
-      else -> fail(request.player, request.code!!)
+      ENDED -> settle(request.player, error = null)
+      else -> settle(request.player, error = code ?: return Failure.INVALID_ARGS)
     }
     return null
   }
@@ -138,42 +136,29 @@ class PrototypeFakeMediaEngine {
     val after = change(before)
     entry.state = after
     if (before.status != after.status || before.playing != after.playing) {
-      statusChanged(player, after)
+      log.statusChanged(player, after)
     }
     return null
   }
 
-  private fun end(player: String) {
-    val wasEnded = players.getValue(player).state.status == ENDED
+  /**
+   * Stop [player] in a terminal state: `ended` when [error] is null, else `error` with that code.
+   * The matching `media.ended` / `media.error` event fires only when the terminal state changes.
+   */
+  private fun settle(player: String, error: String?) {
+    val status = if (error == null) ENDED else ERROR
+    val before = players.getValue(player).state
+    val unchanged = before.status == status && before.error == error
     update(player) {
       it.copy(
         playing = false,
-        positionMs = if (it.durationMs >= 0) it.durationMs else it.positionMs,
-        status = ENDED,
-        error = null,
+        buffering = false,
+        positionMs = if (error == null && it.durationMs >= 0) it.durationMs else it.positionMs,
+        status = status,
+        error = error,
       )
     }
-    if (!wasEnded) emitted += Event("media.ended", mapOf("player" to player))
-  }
-
-  private fun fail(player: String, code: String) {
-    val state = players.getValue(player).state
-    val unchanged = state.status == ERROR && state.error == code
-    update(player) { it.copy(playing = false, buffering = false, status = ERROR, error = code) }
-    if (!unchanged) emitted += Event("media.error", mapOf("player" to player, "code" to code))
-  }
-
-  private fun statusChanged(player: String, state: State) {
-    emitted +=
-      Event(
-        "media.statusChanged",
-        mapOf(
-          "player" to player,
-          "status" to state.status,
-          "playing" to state.playing,
-          "positionMs" to state.positionMs,
-        ),
-      )
+    if (!unchanged) log.terminal(player, error)
   }
 
   companion object {
@@ -193,5 +178,36 @@ class PrototypeFakeMediaEngine {
         ?.member("value")
         ?.strings("values")
         .orEmpty()
+  }
+}
+
+/** The engine's reported `media.*` events, built from player state and kept oldest first. */
+private class PrototypeMediaEventLog {
+  private val emitted = mutableListOf<PrototypeFakeMediaEngine.Event>()
+
+  val events: List<PrototypeFakeMediaEngine.Event>
+    get() = emitted.toList()
+
+  fun statusChanged(player: String, state: PrototypeFakeMediaEngine.State) {
+    emitted +=
+      PrototypeFakeMediaEngine.Event(
+        "media.statusChanged",
+        mapOf(
+          "player" to player,
+          "status" to state.status,
+          "playing" to state.playing,
+          "positionMs" to state.positionMs,
+        ),
+      )
+  }
+
+  /** `media.ended` when [error] is null, else `media.error` carrying that code. */
+  fun terminal(player: String, error: String?) {
+    emitted +=
+      if (error == null) {
+        PrototypeFakeMediaEngine.Event("media.ended", mapOf("player" to player))
+      } else {
+        PrototypeFakeMediaEngine.Event("media.error", mapOf("player" to player, "code" to error))
+      }
   }
 }

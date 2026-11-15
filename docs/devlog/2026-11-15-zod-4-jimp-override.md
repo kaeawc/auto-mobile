@@ -44,3 +44,8 @@ pins it:
 The lock holds one `zod` copy at 4.6.7. Jimp's plugins run on Zod 4's v3-compatible API. The image
 backend tests and a resize/crop/blur/diff smoke pass. A device-backed screenshot and
 `compareScreenshot` run is still the check that Jimp works end to end.
+
+Zod 4.6.7 ships about 1 MB more runtime JavaScript than 3.25.76, which pushed the bundled
+`node_modules` (zod rides in with `@jimp/diff`) past its 2.5 MB budget. Jimp loads that copy only
+through its ESM `.` entry, so the pack trim drops its CJS twin and its `v3` and `mini` builds. The
+bundled closure fell from 3.27 MB to 1.82 MB, and the budget was not raised.

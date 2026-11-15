@@ -63,10 +63,13 @@ the `memoryMb` of the `defaults.android.hardware.profiles` entry naming that pro
 else of its archetype's entry, else none. Resolution reports
 `resolvedHardwareBy: "explicit-model"` and the exact `profileId`. Pool reuse requires
 an idle device created from the same `profileId` with the same `memoryMb`. `os`
-selectors combine with it as with archetypes. Hosts map each archetype through
+selectors combine with it as with archetypes.
+
+Hosts map each archetype through
 `defaults.android.hardware.profiles` and classify its installed profile in
 `androidProfileArchetypes`; a foldable never falls back to a phone. An unmapped or
 uninstalled foldable profile is refused with non-retryable `unsupported_hardware`.
+
 Each profile mapping may set `memoryMb` (an integer of at least 2048 MB), carried
 into AVD creation, binding fingerprints and pool matching. Fold profiles default
 to about 11.4 GiB, so a RAM override bounds guest memory on shared hosts. Omission
@@ -77,8 +80,8 @@ keeps the device out of the clean pool.
 
 An Android request may name an OEM manufacturer profile as `deviceProfile`
 (owner decision on #14058). It is a simulated effect, not a firmware guarantee:
-the profile's keyboard, display and background-kill behaviour are applied to the
-session's stock emulator after readiness, and nothing about the OEM's firmware,
+the daemon applies the profile's keyboard, display and background-kill behaviour to the
+session's stock emulator after readiness. Nothing about the OEM's firmware,
 SystemUI or vendor services is present. It is not a hardware selector: it never
 chooses, matches or fingerprints pool devices, and it is distinct from the
 resolved hardware `profile.profileId`. The kill facet needs the app it targets,
@@ -92,10 +95,10 @@ are not part of this boundary yet.
 A watchOS request names one exact Apple Watch simulator: `spec` is `provisionDevice`'s
 watch spec (a watchOS CoreSimulator runtime and an Apple Watch device type, nothing
 else). It has no hardware or OS selector and no host defaults, so
-`normalizeSessionDeviceRequirement` refuses it; `normalizeWatchSessionDeviceRequirement`
+`normalizeSessionDeviceRequirement` refuses it. Instead, `normalizeWatchSessionDeviceRequirement`
 validates it against the watch catalog and yields the exact profile
-`{ platform: "watchos", metadataState: "current", runtime, deviceType }`, and
-`matchWatchSessionDevice` accepts only a pooled watch with the same runtime and device
+`{ platform: "watchos", metadataState: "current", runtime, deviceType }`.
+Then `matchWatchSessionDevice` accepts only a pooled watch with the same runtime and device
 type. See `docs/devlog/2026-10-28-watchos-platform.md` for the broker behaviour.
 
 OS selectors are `exact`, `major`, `minimum`, and `omitted`. Their kind is
@@ -211,10 +214,9 @@ Known iOS model/runtime bounds can prove `runtime_incompatible`, and so can a
 release's `supportedDeviceTypeIds` (the runtime's `supportedDeviceTypes` from
 `simctl list runtimes -j`): a model missing from that list is incompatible with
 the runtime even inside its bounds. Non-exact OS selectors skip such a runtime
-when another satisfying one ships the model; the device-images
-`compatibleRuntimeIds`, the exact iOS pair check and its compatible
-alternatives, and the Apple TV and Apple Vision Pro spec checks apply the same
-rule. The resolver
+when another satisfying one ships the model. The same rule applies to the
+device-images `compatibleRuntimeIds`, the exact iOS pair check and its compatible
+alternatives, and the Apple TV and Apple Vision Pro spec checks. The resolver
 does not replace an exact model or exact/default-exact OS to repair the pair.
 Absent bounds and list produce `compatibility: "unknown"` so the native
 creation authority can attempt the preserved exact pair. Malformed bounds are

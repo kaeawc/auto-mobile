@@ -12,7 +12,15 @@ On an iOS simulator, launch with `-AppleLanguages (ar) -AppleLocale ar_SA` to ex
 
 On Android, exercise the developer pseudolocales `en-XA` and `ar-XB`, increase font scale, enable night mode, and check TalkBack labels and 48dp targets.
 
-Android strings live in `values/strings.xml`, each with a translator comment (checked by `StringsHygieneTest`); `NoHardcodedChromeStringsTest` fails on a literal in `Text(...)` or `contentDescription`. Debug builds enable pseudolocales. `ChromeA11yMatrixTest` (Robolectric, no new dependency) hosts the library, viewer chrome/status, reset and delete dialogs, the overflow menu and import status in a real activity per cell, across {en, ar-XB, en-XA} x {light, dark} x font scale {1.0, 2.0} x {phone, tablet}. Each cell asserts: no truncated or ellipsized text, a name and a 48dp target on every clickable or toggleable node, a heading, RTL mirroring of the network switch, and that the pseudolocale resources are really loaded. The Accessibility Test Framework was not added; these checks are in-repo semantics assertions.
+Android strings live in `values/strings.xml`, each with a translator comment (checked by `StringsHygieneTest`); `NoHardcodedChromeStringsTest` fails on a literal in `Text(...)` or `contentDescription`. Debug builds enable pseudolocales. The `ChromeA11yMatrixTest` suite (Robolectric, no new dependency) hosts the library, viewer chrome/status, reset and delete dialogs, the overflow menu and import status in a real activity per cell. Its cells span {en, ar-XB, en-XA} x {light, dark} x font scale {1.0, 2.0} x {phone, tablet}. Each cell asserts:
+
+- no truncated or ellipsized text;
+- a name and a 48dp target on every clickable or toggleable node;
+- a heading;
+- RTL mirroring of the network switch;
+- that the pseudolocale resources are really loaded.
+
+The Accessibility Test Framework was not added; these checks are in-repo semantics assertions.
 
 ## Validation boundaries
 

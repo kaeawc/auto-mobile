@@ -100,11 +100,11 @@ Percentiles and slow UI counts come directly from gfxinfo. Capture failures or
 missing fields produce an error line, continue with remaining scenarios, and exit 1.
 An idle dump with no percentile fields reports an error rather than inventing
 zero latency; its acceptance metric remains the actual frames rendered in 3 seconds.
-`--markdown` prints a table with the same fields and an error column. `--scenario`
-is repeatable; selected scenarios retain file order. `--package`, `--spec`, and
-`--scenarios` override defaults. `--device` is mandatory except for `--list` and
+The `--markdown` option prints a table with the same fields and an error column. The `--scenario`
+option is repeatable; selected scenarios retain file order. The `--package`, `--spec`, and
+`--scenarios` options override defaults. The `--device` option is mandatory except for `--list` and
 `--dry-run`; dry-run prints every command, including sleep and cleanup, and runs none.
-`PROTOTYPE_BENCH_ADB` and `PROTOTYPE_BENCH_CLI` accept executable paths, such as private
+The `PROTOTYPE_BENCH_ADB` and `PROTOTYPE_BENCH_CLI` variables accept executable paths, such as private
 CLI wrappers; the default CLI is `bun <repo>/src/index.ts --cli`.
 
 ### Feed benchmark
@@ -141,9 +141,9 @@ nonzero status. `--package` selects the gfxinfo package, and
 Rows contain a local-asset avatar, author, caption, counters and a Like state action.
 The harness supplies the tiny `benchmark-image` PNG. This measures placeholder/local-asset
 rows, not remote-image loading or representative image decoding (remote images are
-unavailable, #14181). The default spec has no network actions. `--paging` requires
+unavailable, #14181). The default spec has no network actions. The `--paging` option requires
 an HTTP(S) `--page-url` reachable from the device; the fixture response is
-`{"items":[...]}` with the same row fields and globally unique IDs. `request.append`
+`{"items":[...]}` with the same row fields and globally unique IDs. The `request.append` action
 extends `/data/feed/items`; the bounded list trims oldest rows at the contract cap.
 Use fresh IDs and an empty final page to stop end-triggered loading. This optional
 fixture variant needs a separate show/scroll acceptance run; the wrapper measures
@@ -186,7 +186,7 @@ at most once per `Prototype.interact`.
 `scroll` composes and measures every child up front (`Box(verticalScroll)`, no `LazyColumn`), so
 every row stays findable. The gated `PrototypeScrollMeasurementTest` (`PROTOTYPE_SCROLL_MEASURE=1`,
 optional `PROTOTYPE_SCROLL_MEASURE_OUT=<file>`) disposes and recomposes a fullscreen scroll of 36 dp
-rows 15 times after 5 warm-ups under Robolectric and times setContent through `waitForIdle` (first
+rows 15 times after 5 warm-ups under Robolectric. It times setContent through `waitForIdle` (first
 composition plus measure and layout; no draw). Robolectric numbers are not device frame times; the
 on-device figure for the benchmark list comes from
 `scripts/android/prototype-frame-benchmark.sh --scenario scroll`.

@@ -7,15 +7,15 @@ field and a 3×3 button grid.
 
 ## How the gate works
 
-Device-aware tools accept a tvOS device only when they are listed in
-`APPLE_PLATFORM_SUPPORTED_TOOLS.tvos` (`src/server/applePlatformToolSupport.ts`).
-Every other device-aware tool fails closed before its handler runs: a request
-that names `platform: "tvos"` is refused before target resolution, and a
-resolved Apple TV device is refused at dispatch. Device-management tools that
+A device-aware tool accepts a tvOS device only when
+`APPLE_PLATFORM_SUPPORTED_TOOLS.tvos` lists it (`src/server/applePlatformToolSupport.ts`).
+Every other device-aware tool fails closed before its handler runs. The server refuses a request
+that names `platform: "tvos"` before target resolution, and it refuses a
+resolved Apple TV device at dispatch. Device-management tools that
 look up their own target (`killDevice` and similar) refuse a `tvos` request by
-name unless they are allowlisted. Refusals carry a generic "does not support
-tvOS yet" message, a "not available on tvOS" message naming the missing runtime
-capability (`displayConfig`, `statusBar`, `clipboard`, `getAppPermissions`), or a
+name unless they are allowlisted. Refusals carry one of three messages. The first is a generic "does not support
+tvOS yet". The second is a "not available on tvOS" message naming the missing runtime
+capability (`displayConfig`, `statusBar`, `clipboard`, `getAppPermissions`). The third is a
 focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 `multiTouch`, `dragAndDrop`, `tapAny`).
 
@@ -28,19 +28,21 @@ runner withholds values for its first window. Any failed hierarchy, append-text 
 post-press snapshot stamps the current uptime conservatively before returning.
 Hierarchy and append-text propagate the snapshot error; a successful press still succeeds.
 Hierarchy, append-text and press requests carry the daemon's foreground-app hint.
-After the runner starts, the foreground restore re-launches that app and then polls the
+
+After the runner starts, the foreground restore re-launches that app. It then polls the
 hierarchy's `packageName` (250 ms interval, 5 s bound) until it names that app, since
-`simctl launch` returns before tvOS finishes the transition; the restore stays best-effort and
-cancellable, and a bound that expires is reported in the start result's message.
+`simctl launch` returns before tvOS finishes the transition. The restore stays best-effort and
+cancellable, and the start result's message reports a bound that expires.
+
 Append-text stamps the known keyboard-present tree again after typing completes.
 A type-19 keyboard node anywhere in a snapshot updates that timestamp and
 withholds every text-input value (types 45, 49, 50 and 52), regardless of focus
 or position in the tree. Withholding continues across snapshots without a
-keyboard until at least `settleWindow = 1.0` seconds have elapsed since the last
-keyboard snapshot, typing completion or snapshot failure and the current snapshot contains
+keyboard until two conditions hold. At least `settleWindow = 1.0` seconds have elapsed since the last
+keyboard snapshot, typing completion or snapshot failure. The current snapshot contains
 neither a keyboard nor an anonymous type-45, type-49 or type-52 input. Anonymous means identifier, label
 and placeholder are all empty after trimming whitespace and newlines; a nil
-placeholder is empty. Only then is the timestamp cleared. Backward or non-finite
+placeholder is empty. Only then does the gate clear the timestamp. Backward or non-finite
 clock readings fail closed; a non-finite stored timestamp also prevents release
 until it is replaced with a finite timestamp.
 
@@ -57,9 +59,9 @@ fields identified by secure metadata, always redact their values.
 
 - **pass**: allowlisted and verified working on an Apple TV simulator.
 - **refused-by-design**: fails closed because the capability does not exist on
-  tvOS (no touch surface, orientation, telephony or keyguard; the tvOS simulator
-  runtime lacks the simctl service; or the tool is Android-, Wear OS- or
-  watchOS-only).
+  tvOS. Either tvOS has no touch surface, orientation, telephony or keyguard, the tvOS simulator
+  runtime lacks the simctl service, or the tool is Android-, Wear OS- or
+  watchOS-only.
 - **not-supported**: fails closed today although tvOS could support it. The
   linked issue tracks enabling it; tools with no linked issue have none filed.
 - **host-only**: does not target a device, so the tvOS gate does not apply.

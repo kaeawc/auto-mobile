@@ -35,13 +35,14 @@ override fun onGetTemplate(): Template =
   `<applicationId>.automobile.carapptemplates`). Read-only; every entry point enforces
   `DebugInspectorAccess` (shell, root, own uid, CtrlProxy).
 - **Host reader** (`CarAppTemplateReader`). Runs `adb shell content call --user <u> --method snapshot`
-  for the foreground package (or, during Android Auto projection, each bound car app; see below), validates the document, and turns an enabled one into the
-  `carAppTemplates` block on the served `observe` copy, never on the cached observation. The user is
-  the observation's when it carries one, otherwise the foreground lookup's; a lookup naming another
-  package skips the read instead of falling back to user 0, so a secondary or work-profile app is
-  never read as the default user. While the user an app was last read as is still quiet (below), or a
-  lookup just failed, no lookup runs; a switch to another user's copy of that package is therefore
-  read once that entry expires. Overlapping observations of one app share one read.
+  for the foreground package (or, during Android Auto projection, each bound car app; see below). It
+  validates the document and turns an enabled one into the `carAppTemplates` block on the served
+  `observe` copy, never on the cached observation. The user is the observation's when it carries
+  one, otherwise the foreground lookup's. A lookup naming another package skips the read instead of
+  falling back to user 0, so the reader never reads a secondary or work-profile app as the default
+  user. No lookup runs while the user an app was last read as is still quiet (below), or a lookup
+  just failed. The reader therefore picks up a switch to another user's copy of that package once
+  that entry expires. Overlapping observations of one app share one read.
 
 ## Stack walk
 
@@ -67,14 +68,15 @@ first-record order, so it can change after `disable()` and `enable()`.
 ## Cost and invariants
 
 - An app without the route costs one failed `content call` per device, user and package every five
-  minutes. A route that answers disabled is asked again every thirty seconds. A completed Android
-  install attempt clears the package's quiet state and user hint on that device for all users, even
-  on failure; if no package name is available, it clears the device's quiet state and hints. The next
-  observation asks again without waiting for the TTL. A read that fails
-  (timeout, adb error, a payload that is not JSON or fails schema validation, the last logged as a
-  warning) is retried after five seconds, so a transient failure does not hide an enabled route for
-  five minutes. Expired entries are pruned. An enabled route is asked on every `observe`, bounded by
-  a 1.5 s deadline for the foreground lookup and another for the read.
+  minutes. The reader asks a route that answers disabled again every thirty seconds. A completed
+  Android install attempt clears the package's quiet state and user hint on that device for all
+  users, even on failure. If no package name is available, it clears the device's quiet state and
+  hints. The next observation asks again without waiting for the TTL.
+- The reader retries a failed read after five seconds, so a transient failure does not hide an
+  enabled route for five minutes. Failures are a timeout, an adb error, or a payload that is not
+  JSON or fails schema validation (the last logged as a warning). The reader prunes expired
+  entries. It asks an enabled route on every `observe`, bounded by a 1.5 s deadline for the
+  foreground lookup and another for the read.
 - A non-owner read of a held device makes no provider call.
 - When the route does not answer with an enabled document, the payload is unchanged, byte for byte.
 - No new permissions. The manifest provider is created at launch and answers `enabled: false`;
@@ -84,37 +86,43 @@ first-record order, so it can change after `disable()` and `enable()`.
 - During Android Auto projection the foreground package is `com.google.android.projection.gearhead`
   (its `GhostActivity`), not the projected app, while the projected app keeps recording. When the
   foreground is gearhead, the reader runs `dumpsys activity services` (about 40 ms and 360 KB on API
-  36, under the same 1.5 s deadline; a successful dump is reused per device for 1 s so back-to-back
-  observations do not re-dump; a head-unit action's before and after bindings reads dump fresh, so
-  the after read never reuses the before dump) and takes each ServiceRecord whose binding client
-  is a gearhead process, excluding gearhead's own services. A ServiceRecord block ends only at the
-  next ServiceRecord, an indented section header such as `Connection bindings to services:`, or an
-  unindented line: in-record fields such as ` startCommandResult=1` sit at indent 1. The bind intent carries no
-  `androidx.car.app.CarAppService` action (API 36 shows `intent={id=0/main cmp=<pkg>/<class>}`), so
-  Maps, media and Play services are candidates too, and only the apps whose route answers enabled
-  are kept; the others cost one cached failed call per absent TTL. Each app is read as the user in its ServiceRecord, with no foreground
-  lookup, through the same per-package path, so quiet entries, deadlines and shared in-flight reads
-  apply unchanged. The block then has `projectedBy`, `projectedNote` and `projected[]` (package,
-  sessions, error) instead of a top-level `packageName`. Android Auto does not say which bound app is
-  on the head unit (#17827), so every enabled app is listed by package name and none is marked
-  visible. A failed dump, or no bound app answering enabled, leaves the payload unchanged. A bound
-  app whose route last answered enabled but whose read fails (or is inside its five-second retry
-  interval) stays listed with no sessions and `error: "template_read_failed"`, so a head-unit action
-  reads its screen as unknown rather than gone; an app with no such answer is still dropped.
-- The `androidAuto` block (#17841) is resolved after `carAppTemplates` from the services snapshot that
-  read took for the same observation (kept past the dump's TTL), so it costs no extra device read. It is added only while gearhead is the foreground package
-  and one of gearhead's `.apphost.Template*Service` hosts (one per car app category; the captured
-  dump shows `TemplateNavigationService` bound by `gearhead:car`) has a live gearhead binding, which
-  is positive evidence that a head unit session hosts car app templates. `apps[]` keeps only bound
-  apps (package and user) whose route answered: Android Auto binds Maps, media, Play and Assistant services the same
-  way, and without a captured `cmd package query-services -a androidx.car.app.CarAppService` read,
-  an answering route is the only proof an app is a Car App Library app. Each entry carries the bound
-  components from the dump. The block never names a visible app: the bound set and the route's
-  answer stay the same while another app is on the head unit (#17827). The host's own state
-  (`dumpsys activity service <host>`, `activity state:RESUMED`/`isShowing:true`) does tell visibility
-  for a category with a single bound app, but it is not read.
-  Head unit config, resolution and screenshot are not reported. No projection seen leaves the
-  payload unchanged, byte for byte.
+  36, under the same 1.5 s deadline). It reuses a successful dump per device for 1 s, so
+  back-to-back observations do not re-dump. A head-unit action's before and after
+  bindings reads dump fresh, so the after read never reuses the before dump. The reader takes each ServiceRecord whose binding client is a
+  gearhead process, excluding gearhead's own services.
+- A ServiceRecord block ends only at the next ServiceRecord, an indented section header such as
+  `Connection bindings to services:`, or an unindented line. In-record fields such as
+  ` startCommandResult=1` sit at indent 1. The bind intent carries no
+  `androidx.car.app.CarAppService` action (API 36 shows `intent={id=0/main cmp=<pkg>/<class>}`).
+  Maps, media and Play services are therefore candidates too, and the reader keeps only the apps
+  whose route answers enabled. The others cost one cached failed call per absent TTL.
+- The reader reads each app as the user in its ServiceRecord, with no foreground lookup, through the
+  same per-package path. Quiet entries, deadlines and shared in-flight reads apply unchanged. The
+  block then has `projectedBy`, `projectedNote` and `projected[]` (package, sessions, error) instead
+  of a top-level `packageName`. Android Auto does not say which bound app is on the head unit
+  (#17827), so the block lists every enabled app by package name and marks none visible. A failed
+  dump, or no bound app answering enabled, leaves the payload unchanged.
+- A bound app whose route last answered enabled but whose read fails (or is inside its five-second
+  retry interval) stays listed with no sessions and `error: "template_read_failed"`. A head-unit
+  action then reads its screen as unknown rather than gone. The reader still drops an app with no
+  such answer.
+- The reader resolves the `androidAuto` block (#17841) after `carAppTemplates`, from the services
+  snapshot that read took for the same observation (kept past the dump's TTL). It costs no extra
+  device read. The block appears only while gearhead is the foreground package and one of
+  gearhead's `.apphost.Template*Service` hosts has a live gearhead binding. There is one host per
+  car app category; the captured dump shows `TemplateNavigationService` bound by `gearhead:car`.
+  That binding is positive evidence that a head unit session hosts car app templates.
+- The `apps[]` list keeps only bound apps (package and user) whose route answered. Android Auto binds
+  Maps, media, Play and Assistant services the same way. Without a captured
+  `cmd package query-services -a androidx.car.app.CarAppService` read, an answering route is the
+  only proof an app is a Car App Library app. Each entry carries the bound components from the
+  dump.
+- The block never names a visible app: the bound set and the route's answer stay the same while
+  another app is on the head unit (#17827). The host's own state
+  (`dumpsys activity service <host>`, `activity state:RESUMED`/`isShowing:true`) does tell
+  visibility for a category with a single bound app, but the reader does not read it. The block
+  omits head unit config, resolution and screenshot. No projection seen leaves the payload
+  unchanged, byte for byte.
 
 ## Host-rendered marker
 
@@ -129,9 +137,10 @@ measured on API 34 ext9 AAOS (#16744):
 - `activeWindow.activityName == "androidx.car.app.activity.CarAppActivity"`, which alone gives the
   marker without `hostPackage`.
 
-The marker is computed whenever the automotive block is built or its foreground activity refreshed,
-and again after reconciliation in case the hierarchy was replaced under the same activity. A stale
-marker is removed. Non-automotive observations have no `automotive` block, so they are unchanged.
+Observe computes the marker whenever it builds the automotive block or refreshes its foreground
+activity. It computes it again after reconciliation in case the hierarchy changed under the same
+activity, and removes a stale marker. Non-automotive observations have no `automotive` block, so
+they are unchanged.
 Action code should test it with `isCarAppHostRendered(result)`, or call `detectCarAppHostRenderedUi`
 on an observation that may lack the `automotive` block
 (`src/features/observe/automotive/carAppHostRenderedUi.ts`), rather than repeating the signals; the
@@ -141,18 +150,22 @@ host ignores the BACK key on these screens (#17498).
 
 The AAOS templates host (`com.google.android.apps.automotive.templates.host`) renders template screens
 inside the app's `CarAppActivity` and does not act on BACK, whether sent as a global action or an
-`input keyevent` (root cause tracked in #17501). `pressButton` `back` keeps BACK as its first attempt, so
-behavior is unchanged wherever BACK works. Only when the press dispatched, the screen did not change, and
-the screen is a template host (foreground activity `androidx.car.app.activity.CarAppActivity`, or nodes
-with the host's resource-id prefix) does it tap the host's Back affordance in a second observed
-interaction: `car_ui_toolbar_nav_icon_container` first, then `primary_header_action`, clickable with
-non-empty bounds. The target is re-resolved from that interaction's own pre-tap read, and the tap carries
-its `frameContext` and asserts the display fence before sending, so a screen that moved on is not tapped
-at stale coordinates. A tap that was dispatched without an acknowledged reply is reported as
-`indeterminate_outcome` with `retryable: false`, because it may already have navigated. The result names
-the tapped affordance in `backFallback`. Template detection is `detectCarAppHostRenderedUi`, the same
-check behind the host-rendered marker. The unit fixtures are trimmed captures from an API 34 AAOS
-emulator under `test/fixtures/automotive/car-app-templates/`.
+`input keyevent` (root cause tracked in #17501). The `pressButton` `back` action keeps BACK as its
+first attempt, so behavior is unchanged wherever BACK works.
+
+It falls back only when the press dispatched, the screen did not change, and the screen is a
+template host. A template host has foreground activity `androidx.car.app.activity.CarAppActivity`,
+or nodes with the host's resource-id prefix. The fallback taps the host's Back affordance in a
+second observed interaction: `car_ui_toolbar_nav_icon_container` first, then
+`primary_header_action`, clickable with non-empty bounds. It re-resolves the target from that
+interaction's own pre-tap read. The tap carries its `frameContext` and asserts the display fence
+before sending, so a screen that moved on never gets a tap at stale coordinates.
+
+A tap dispatched without an acknowledged reply reports `indeterminate_outcome` with
+`retryable: false`, because it may already have navigated. The result names the tapped affordance
+in `backFallback`. Template detection is `detectCarAppHostRenderedUi`, the same check behind the
+host-rendered marker. The unit fixtures are trimmed captures from an API 34 AAOS emulator under
+`test/fixtures/automotive/car-app-templates/`.
 
 ## Background
 

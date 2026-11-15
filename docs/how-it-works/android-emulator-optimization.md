@@ -21,10 +21,10 @@ Reuse the existing surfaces for other costs:
 - `deviceSnapshot` can use emulator VM snapshots. Prepared snapshots still need
   app/account identity isolation and restore validation; a faster boot is not
   proof that the resulting session is clean.
-- `AUTOMOBILE_EMULATOR_ARGS` accepts tokenized startup arguments. Experimental
-  `-read-only`, snapshot and boot-animation switches can be investigated through
-  that existing path. Read-only clones of one AVD are not supported as distinct
-  pool identities yet; do not use the escape hatch to bypass pool ownership.
+- `AUTOMOBILE_EMULATOR_ARGS` accepts tokenized startup arguments. You can investigate experimental
+  `-read-only`, snapshot and boot-animation switches through
+  that existing path. The pool does not support read-only clones of one AVD as distinct
+  identities yet; do not use the escape hatch to bypass pool ownership.
 - Device-pool autolock timeout releases a session; it does not promise emulator
   shutdown. Idle shutdown and warm-cap policies need explicit lifecycle
   reservations, ownership checks, pending-cleanup checks, and a bounded
@@ -50,7 +50,7 @@ Reuse the existing surfaces for other costs:
 | Linux CPU quotas / affinity / KSM / Cuttlefish | Linux/KVM worker and explicit limits with throughput tests                                  | Not available as cross-platform controls on a macOS emulator host                                                               |
 
 Local evidence is macOS/arm64 only: it does not validate Linux KVM/Cuttlefish, Windows
-hypervisors, custom images, or multi-host fleet density, and an unconfigured AVD cannot
+hypervisors, custom images, or multi-host fleet density. An unconfigured AVD cannot
 validate push, login, attachments or huddles (those need their own app fixtures and
 credentials).
 
@@ -89,7 +89,7 @@ Until the cause is known:
 - Omit `-feature -Vulkan` unless a workload needs it; it is unqualified beyond the qualification runs.
 
 When an emulator exits unexpectedly, the loss incident keeps the process exit signal and a bounded,
-redacted `outputTail` of emulator output from launch onward. `outputUnavailable: "adopted"` marks an
+redacted `outputTail` of emulator output from launch onward. The value `outputUnavailable: "adopted"` marks an
 emulator AutoMobile did not launch, so no output was tracked. Slot recovery (`onLoss`) stays off by
 default and never substitutes a different device.
 

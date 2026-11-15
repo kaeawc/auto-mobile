@@ -7,9 +7,9 @@ lean profile, on by default) and booting a clone of a settled, shut-down templat
 
 ## Sizing guidance
 
-Size boot concurrency by CPU-seconds over the first 600 s (iOS 27.0, iPhone 18 Pro, 16-core host): a
-first boot is about 775, about 442 with `minimal`, about 273 as a clone with `minimal`. k simultaneous
-boots cost slightly more than k times that. A clone takes about 3 s to create. Boot gating still applies:
+Size boot concurrency by CPU-seconds over the first 600 s (iOS 27.0, iPhone 18 Pro, 16-core host). A
+first boot is about 775, about 442 with `minimal`, about 273 as a clone with `minimal`. Running k simultaneous
+boots costs slightly more than k times that. A clone takes about 3 s to create. Boot gating still applies:
 even clone + `minimal` takes about two minutes to go quiet. The capacity model charges 0.055 core per
 settled simulator.
 
@@ -17,9 +17,8 @@ settled simulator.
 
 The simulator's launchd keeps its disabled database on the host, in
 `/private/var/tmp/com.apple.CoreSimulator.SimDevice.<UDID>/disabled.plist`, not in the device data
-directory. Written before first boot (directory mode 0700, binary plist mapping label to `true`), it is
-honored: `launchctl print-disabled system` inside the simulator lists the labels and no disabled job is
-loaded. It survives shutdown, reboot and `simctl erase`, and is keyed by UDID, so clones do not inherit
+directory. When written before first boot (directory mode 0700, binary plist mapping label to `true`), it takes
+effect: `launchctl print-disabled system` inside the simulator lists the labels and launchd loads no disabled job. It survives shutdown, reboot and `simctl erase`. CoreSimulator keys it by UDID, so clones do not inherit
 it. Behavior across a host reboot is untested.
 
 The post-boot path, `setDeviceResources`, runs `launchctl disable` and `bootout` for catalog services and
@@ -68,10 +67,10 @@ logs for newly created simulators before first boot. Default `false`, which writ
   application continue.
 - It hides apsd debug logs needed for push-flow debugging; remote push still works (no launchd job is
   disabled).
-- Only the `com.apple.apsd` subsystem is covered. apsd also logs under shared subsystems
+- Only the `com.apple.apsd` subsystem is covered. The apsd daemon also logs under shared subsystems
   (`com.apple.network`, `com.apple.PersistentConnection`, `com.apple.xpc`, `com.apple.CFNetwork`) and
-  with no subsystem; those stay on because the shared subsystems serve every other daemon and
-  uncategorized lines cannot be filtered by subsystem.
+  with no subsystem. Those stay on because the shared subsystems serve every other daemon and a
+  subsystem filter cannot match uncategorized lines.
 - No CPU benefit is claimed. To measure one, sample `ps` cputime deltas over 60 s for simulator
   `diagnosticd`, `apsd` and `logd`, and host `diagnosticd`.
 
@@ -84,8 +83,8 @@ and before any workload boot.
 
 ### Keys and storage
 
-- Templates are keyed by runtime identifier and build, Xcode build, device type and resolved default
-  pre-boot profile. Xcode build discovery is cached once per process with a 5 s timeout; an unknown build
+- A template key combines runtime identifier and build, Xcode build, device type and resolved default
+  pre-boot profile. The process caches Xcode build discovery once with a 5 s timeout; an unknown build
   disables cloning for that process. Runtime discovery uses the cached catalog.
 - Manifests and per-key locks live in the host-global `~/.auto-mobile/ios-sim-templates`, independent of
   `AUTOMOBILE_COORDINATION_DIR`. The path follows `os.userInfo().homedir` (HOME under Bun), so daemons
@@ -110,13 +109,13 @@ and before any workload boot.
 ### Clone relocation
 
 A booted simulator's data directory records absolute paths containing its own UDID, and `simctl clone`
-copies them verbatim: the LaunchServices store (`var/db/lsd/*.csstore`) maps every system app to a data
+copies them verbatim. The LaunchServices store (`var/db/lsd/*.csstore`) maps every system app to a data
 container under the template's directory, and about 130 other files and ten symlinks carry the same
 UDID. Unrelocated, a clone shares Safari and system-app data (tabs, history, cookies, website data) with
 its template and other clones (#15327). Clones of never-booted simulators do not have this problem.
 
 After `simctl clone` and before any boot, `SimulatorCloneRelocator` rewrites the template UDID to the
-clone UDID in place (both are 36 bytes, so file layouts stay intact) in every regular file and symlink of
+clone UDID in place (both are 36 bytes, so file layouts stay intact). It rewrites every regular file and symlink of
 the clone's data directory except the unified-log archives under `var/db/diagnostics`. Each non-empty
 SQLite WAL is first folded into its database with `sqlite3 <db> "PRAGMA wal_checkpoint(TRUNCATE)"`,
 since WAL frames carry checksums. A relocation failure deletes the clone and falls back to a plain
@@ -128,8 +127,8 @@ create. Relocating a 2 GB data directory takes 3 to 10 s.
   key and use the shared boot admission instrumentation; a build counts as an AutoMobile boot, so
   foreground boots can be refused retryably while it settles. Builders skip starting when the read-only
   capacity check reports no spare slot; a later creation retries.
-- A build applies the selected pre-boot profile, boots, requires the 60 s trailing mean of measured CPU
-  to stay below 15 percent of one core for 120 s (up to 900 s total), then shuts down and verifies
+- A build applies the selected pre-boot profile and boots. It requires the 60 s trailing mean of measured CPU
+  to stay below 15 percent of one core for 120 s (up to 900 s total). It then shuts down and verifies
   before publishing ready. The threshold tolerates a steady background service's 1-20 percent sawtooth
   (#15294). Missing CPU measurements reset the quiet window. Expect a build of about 13 minutes,
   holding a boot slot.
@@ -147,9 +146,9 @@ create. Relocating a 2 GB data directory takes 3 to 10 s.
 ### Maintenance
 
 `auto-mobile --ios-templates build` builds a template. Cleanup shares the build lock and supports forced
-manifest-owned removal (manifest-owned deletion re-checks the name). `--ios-templates clean --stale`
-removes templates whose recorded Xcode or runtime builds differ from the current catalog;
-`clean --all` and `clean --runtime <identifier>` also remove corrupt manifests and can remove untracked
+manifest-owned removal (manifest-owned deletion re-checks the name). The `--ios-templates clean --stale` command
+removes templates whose recorded Xcode or runtime builds differ from the current catalog.
+The `clean --all` and `clean --runtime <identifier>` also remove corrupt manifests and can remove untracked
 name matches. Unreadable files cannot always be assigned to a runtime and are safe to remove without
 deleting a simulator.
 

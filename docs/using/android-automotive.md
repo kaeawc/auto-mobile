@@ -95,7 +95,7 @@ work unchanged. On an API 34 `android-automotive` emulator, `observe`, screensho
 `swipeOn`, `launchApp`, `listApps`, `pressButton` `home` and `performanceTrace` all pass. Layout is
 wide and landscape. Behaviour on the cluster and passenger displays is unchecked. The full pass/fail
 matrix, including which car-service commands each image accepts, is in
-[Android form factors](../how-it-works/plat/android/form-factors.md#automotive-baseline-on-an-emulator).
+[Android form factors](../how-it-works/plat/android/form-factors-wear-auto.md#automotive-baseline-on-an-emulator).
 
 On automotive devices, `observe.automotive` reports these fields. Other device types omit the whole
 block.

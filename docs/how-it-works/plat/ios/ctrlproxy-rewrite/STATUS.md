@@ -33,16 +33,16 @@ swift test  -Xswiftc -warnings-as-errors
 
 CI runs `scripts/ios/swift-test.sh` (the same `-warnings-as-errors` invocation), which is the real
 gate. The host build never compiles the iOS-only `@MainActor`/XCUITest bodies (they sit
-behind `#if canImport(XCTest) && os(iOS)`), and Xcode keeps SDK-inferred main-actor
+behind `#if canImport(XCTest) && os(iOS)`). Xcode keeps SDK-inferred main-actor
 violations non-promotable even with `SWIFT_TREAT_WARNINGS_AS_ERRORS`, so iOS strict-concurrency
 warnings are only caught by an iOS-simulator `build-for-testing`.
 
 **Runtime caveat:** validate on the iOS **26.5** simulator runtime, not the 27.0 beta. On the
 beta the host app never reaches its fixture view controller (XCUITest "Unable to monitor
-event loop") and xcodebuild teardown hangs ~10 min. `name=iPhone 17` is ambiguous across
+event loop"). The xcodebuild teardown then hangs ~10 min. `name=iPhone 17` is ambiguous across
 runtimes, so pin the 26.5 device UDID (`xcrun simctl list devices`). Run a single on-device test with
-`xcodebuild test-without-building -xctestrun <...>.xctestrun -destination 'platform=iOS Simulator,id=<udid>' -only-testing:CtrlProxyUITests/HierarchyIntegrationTests`;
-never run `testRunService` (it waits forever). `HierarchyIntegrationTests` is
+`xcodebuild test-without-building -xctestrun <...>.xctestrun -destination 'platform=iOS Simulator,id=<udid>' -only-testing:CtrlProxyUITests/HierarchyIntegrationTests`.
+Never run `testRunService` (it waits forever). `HierarchyIntegrationTests` is
 `XCTSkipUnless`-guarded on the fixture appearing, so it skips rather than fails on the beta.
 
 ## Concurrency archetypes
@@ -66,12 +66,12 @@ never run `testRunService` (it waits forever). `HierarchyIntegrationTests` is
   closes the lost-update race instead.
 - **`CommandHandler` is a `Sendable` POD router, not `@MainActor`**, or its blocking SDK HTTP/DB
   calls would freeze XCUITest and starve `/health` (#5374). `handle` is `async -> any
-  WebSocketResponsePayload` (`Sendable & Encodable`); it `await`s the `@MainActor` UI collaborators
+  WebSocketResponsePayload` (`Sendable & Encodable`). It `await`s the `@MainActor` UI collaborators
   and async SDK clients and calls lock-confined ones synchronously. `encodeResponse` keeps the
   `WebSocketResponse`/`HierarchyUpdateResponse` downcasts for `perfTiming` injection.
 - **Command dispatch is a serial `Task` chain**: `commandTail` (an
   `OSAllocatedUnfairLock<Task<Void, Never>?>`) and `await previous?.value` preserve per-command
-  ordering (#5374) without a blocking queue hop and free the accept queue immediately.
+  ordering (#5374) without a blocking queue hop. They free the accept queue immediately.
   `WebSocketServer.handleMessage` brackets decode→handle→flush→encode in `perf.withScope`.
 - **Coders are fresh-per-call** (`.sortedKeys`), removing the shared mutable `JSONEncoder`.
 - **`ObjCExceptionCatcher` survives**: Swift still cannot catch XCUITest `NSException`s; the guard

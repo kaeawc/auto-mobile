@@ -24,7 +24,7 @@ or orbit never re-lays out the prototype. It builds on the page in
 
 - The viewport gets `perspective`; the stage and the shown view get `transform-style: preserve-3d`.
   The device orbit is a `rotateX`/`rotateY` on a box inside the stage that holds the views, not on
-  a view: rotate animates the views' own transforms, so both views keep the orbit through the turn,
+  a view. Rotate animates the views' own transforms, so both views keep the orbit through the turn,
   and the stage's pan and zoom stay in screen space outside it.
 - **Leaves.** The shown frame element stays in place as the fixed leaf, clipped at the hinge line
   with `clip-path`; it is never moved or re-rendered. The moving leaf is an `overflow: hidden` box
@@ -42,7 +42,7 @@ or orbit never re-lays out the prototype. It builds on the page in
   The shown view's DOM is byte-identical before and after.
 - **Hinge axis.** A vertical hinge (book) turns the right leaf with `rotateY`; a horizontal hinge
   (flip) turns the bottom leaf with `rotateX`. The axis and hinge position (the hinge's centre as a
-  share of its panel) come from the frame's `hinge`, given in portrait; landscape turns the frame a
+  share of its panel) come from the frame's `hinge`, given in portrait. Landscape turns the frame a
   quarter counterclockwise, so a book's hinge becomes horizontal and a flip's vertical.
 - **Scope of the 3D CSS.** Every 3D rule applies only while a view is wrapped (`data-device3d` on
   `body`), so the 2D page renders exactly as without the 3D view.
@@ -63,7 +63,7 @@ or orbit never re-lays out the prototype. It builds on the page in
 Posture is a pre-rendered view dimension, like orientation. While the hinge moves, the page shows
 the starting posture's view; when the angle crosses a posture threshold it switches to that
 posture's view, as a device reflows only when its device state changes. The thresholds are per
-device and come from the frame's `postures` data, not the script: the layout shown is the frame's
+device and come from the frame's `postures` data, not the script. The layout shown is the frame's
 posture whose `hingeDegrees` is nearest the hinge angle, so each threshold lies halfway between two
 of the frame's postures. The status line names that posture. `closed` on a book
 foldable draws the cover panel's view on the outside face of the moving leaf.

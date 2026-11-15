@@ -17,8 +17,6 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
-import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
-import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import kotlin.test.assertEquals
@@ -28,22 +26,19 @@ import org.junit.Test
 class LeftSidebarPanelUiTest {
   private val devices =
     listOf(
-        BootedDevice(
-          "pixel-runtime",
-          "Pixel",
-          DeviceType.AndroidEmulator,
-          connectedAt = 0,
-          stableId = "pixel-avd",
-        ),
-        BootedDevice(
-          "phone-runtime",
-          "iPhone",
-          DeviceType.iOSSimulator,
-          connectedAt = 0,
-          stableId = "phone-image",
-        ),
-      )
-      .map { it.toSidebarDeviceInfo() }
+      shellBootedDevice(
+        "pixel-runtime",
+        "Pixel",
+        platform = "android",
+        source = ShellDeviceSource(stableId = "pixel-avd"),
+      ),
+      shellBootedDevice(
+        "phone-runtime",
+        "iPhone",
+        platform = "ios",
+        source = ShellDeviceSource(stableId = "phone-image"),
+      ),
+    )
 
   private data class SidebarSpec(
     val mode: DataSourceMode = DataSourceMode.Real,

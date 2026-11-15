@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.DeviceFilterState
 import dev.jasonpearson.automobile.desktop.core.availableDeviceImages
 import dev.jasonpearson.automobile.desktop.core.loadDeviceFilter
-import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import dev.jasonpearson.automobile.desktop.core.saveDeviceFilter
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -39,7 +39,7 @@ import java.io.File
 @Composable
 internal fun AvailableDeviceImagesSection(
   images: List<DeviceImageInfo>,
-  bootedDevices: List<BootedDevice>,
+  bootedDevices: List<BootedDeviceInfo>,
   onBootDevice: (DeviceImageInfo) -> Unit,
   filterFile: File = File(System.getProperty("user.home"), ".automobile/device-filter.json"),
 ) {

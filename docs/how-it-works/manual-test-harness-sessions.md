@@ -7,16 +7,16 @@ Part of [the manual-test harness](manual-test-harness.md).
 `devices --batch-dir "$B" [--daemon K] [--timeout-ms 30000]` lists only running
 devices with a nonempty runtime device ID and lifecycle `booting`, `booted` or
 `shutting-down`. JSON: `batchDir`, `protectedDevices`, baseline availability, daemon
-liveness/errors, and rows with `deviceId`, `name`, `identity.stableId`, `platform`,
-`isVirtual`, `seenByDaemons` (visibility, not boot ownership), `pid` (+ optional
-`pidReason`; null for iOS and physical), `provenance`, `protected`, `poolStatus`,
-`heldBy` when exposed, optional `bootedBy: "daemon<N>"` (from `MT_DAEMON`) and
-`processAvdName` (the process's `-avd` argument).
+liveness/errors, and device rows. Each row has `deviceId`, `name`, `identity.stableId`,
+`platform`, `isVirtual`, `seenByDaemons` (visibility, not boot ownership), `pid` (+ optional
+`pidReason`; null for iOS and physical), `provenance`, `protected`, `poolStatus`, and
+`heldBy` when exposed. Rows also carry optional `bootedBy: "daemon<N>"` (from `MT_DAEMON`)
+and `processAvdName` (the process's `-avd` argument).
 
 Positive evidence is the `MT_BATCH`/`MT_DAEMON` environment an emulator inherits
-from its private daemon, read with `ps eww -o command= -p <pid>` for the one Android
-console-port listener PID `lsof` resolved (5000 ms per probe); this has not yet been
-observed on a live batch. A missing PID, failed/empty read, or any iOS simulator has
+from its private daemon. The harness reads it with `ps eww -o command= -p <pid>` for the
+one Android console-port listener PID `lsof` resolved (5000 ms per probe). This has not
+yet been observed on a live batch. A missing PID, failed/empty read, or any iOS simulator has
 no process evidence. Provenance:
 
 - `batch-booted`: the process carries exactly this batch's `MT_BATCH` marker.
@@ -31,18 +31,19 @@ never changes the launch result.
 
 `shutdown-devices --batch-dir "$B"` stops by default only unprotected virtual devices
 with positive `batch-booted` evidence. Unprotected `batch-inferred` devices are
-reported `inferred-not-stopped` (exit 1): verify the batch started them, then name
+reported `inferred-not-stopped` (exit 1). Verify the batch started them, then name
 them by exact device ID (serial/UDID) with `--device ID`; every iOS simulator needs
-this. A unique name may select a `batch-booted` device; an ambiguous selector stops
+this. A unique name may select a `batch-booted` device. An ambiguous selector stops
 nothing and reports `ambiguous` for every match (a separate unambiguous selector
-still applies). `foreign`, `preexisting`, `unknown` and physical devices are never
-sent a frame, even when named. `--daemon K` restricts the view, `--dry-run` reports
-without stopping, `--timeout-ms` defaults to 60000. Protection matches any of
-`deviceId`, `name`, `identity.stableId`, `processAvdName`; an empty or
-`Unknown (<serial>)` Android name without a process AVD name is refused when the
-protected list is nonempty. `heldBy: "other_daemon"` and every other `heldBy` string
-are refused locally (unknown hold labels count as held, never as permission). The
-harness asks a listing daemon's `killDevice` without `force` and never signals a
+still applies). The harness never sends a frame to `foreign`, `preexisting`,
+`unknown` and physical devices, even when named. The `--daemon K` option restricts
+the view, `--dry-run` reports without stopping, and `--timeout-ms` defaults to 60000.
+
+Protection matches any of `deviceId`, `name`, `identity.stableId`, `processAvdName`.
+When the protected list is nonempty, the harness refuses an empty or
+`Unknown (<serial>)` Android name without a process AVD name. It also refuses
+`heldBy: "other_daemon"` and every other `heldBy` string locally (unknown hold labels
+count as held, never as permission). The harness asks a listing daemon's `killDevice` without `force` and never signals a
 device process.
 
 | Outcome                | Meaning                                                                                                     |
@@ -70,8 +71,8 @@ daemon produced an inventory.
 
 Without inventories, `devices`/`shutdown-devices` fall back to
 `shared/devices-last.json`, reporting unprotected `batch-booted` and `batch-inferred`
-snapshot devices with refreshed PID evidence, exit 1 and no shutdown frames;
-selectors restrict the fallback (ambiguous gives `ambiguous`, missing gives
+snapshot devices with refreshed PID evidence, exit 1 and no shutdown frames.
+Selectors restrict the fallback (ambiguous gives `ambiguous`, missing gives
 `not-found`), and explicitly selected protected/foreign/preexisting/unknown devices
 keep their refusal rows. Run `devices` before stopping the daemon to retain
 evidence. A dead daemon's snapshot never authorizes signalling a device PID; restart
@@ -97,9 +98,9 @@ native absence. Devices the drain leaves running are reported as retained;
 ## Persistent stdio-proxy sessions
 
 Use `proxy1` (or `in-daemon-env.sh … proxy`) with `--client NAME`, resolved through
-`broker/clients.json`. `--dir` is exclusive with `--client` and is for plain proxies
+`broker/clients.json`. The `--dir` option is exclusive with `--client` and is for plain proxies
 in a separate non-broker batch; broker batches refuse sessionless proxy operations.
-`up`/`serve` require a private PID file naming a live process and an answering
+The `up`/`serve` commands require a private PID file naming a live process and an answering
 control socket (broker clients also `session-broker/v1`). Start the private daemon
 first; a proxy never wakes it.
 
@@ -117,39 +118,39 @@ bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role a-ph
 ```
 
 - `up` creates a fresh attempt ID and archives prior evidence, refusing an
-  already-live driver. `--resume` replays the exact persisted `request.json` and
-  `owner-token` bytes and never creates a replacement after a refusal; a terminal
+  already-live driver. The `--resume` flag replays the exact persisted `request.json`
+  and `owner-token` bytes and never creates a replacement after a refusal. A terminal
   capacity refusal stays refused after capacity frees, so use a fresh `up`.
 - `--expect ready` or `--expect failed:<code>` exits 0 for the expected outcome, 2 on
   mismatch. Without it, failed/pending outcomes are typed failure data.
 - `--profile` takes an archetype name or inline device requirement JSON; `--request`
   takes SessionConfig JSON or a file path and assigns a fresh attempt ID. Both are
   for `up`/`serve` and mutually exclusive.
-- `--owner driver` is the default; `--owner disposable` starts a recorded
-  harness-owned sleep process with a process start identity, and `owner-kill
-  --client NAME` signals only that owner after identity confirmation (tests owner
+- `--owner driver` is the default. The `--owner disposable` option starts a recorded
+  harness-owned sleep process with a process start identity. The `owner-kill
+  --client NAME` command signals only that owner after identity confirmation (tests owner
   death without killing an unrelated driver or parent).
 - `release --client NAME` releases the granted session with its stored token;
   `abandon --client NAME` consumes the stored request identity even if unknown to
   the daemon (240 s RPC budget). Release polls for cleanup; abandonment prints its
   receipt, which may still have `cleanupPending: true`. Verify settled cleanup and
-  native absence before continuing. `up` captures native info best-effort within 5 s
+  native absence before continuing. The `up` command captures native info best-effort within 5 s
   after readiness; `info` saves the native descriptor to `info.json` and feeds the ledger.
 - `close --client NAME` closes MCP/stdin and waits up to 240 s for a released receipt
-  of a granted session. `up` refuses while a client driver is alive. Release does not
+  of a granted session. The `up` command refuses while a client driver is alive. Release does not
   end the driver; run `close --client NAME` first, then retry `up`.
   A refused or failed attempt (e.g. `daemon_unavailable`,
   abandoned request) has no receipt: `close` returns at once with exit 0 and
   `release.outcome: "failed"` in `closed.json` (`receiptMissing: true` when the daemon
   holds no receipt or is unreachable). It then joins the driver's exit (5 s), including
   one resumed by `up --resume`, so the next `up` never sees "Previous attempt driver is
-  alive"; a lingering driver is signalled only when its recorded start identity
-  (`driver-identity`) still matches, otherwise `close` exits 2 without signalling.
-  `status` shows initialize/live outcome, grant/profile, typed failure, owner liveness
+  alive". It signals a lingering driver only when its recorded start identity
+  (`driver-identity`) still matches; otherwise `close` exits 2 without signalling.
+- `status` shows initialize/live outcome, grant/profile, typed failure, owner liveness
   and `daemonSocketAlive`; `--all` prints all clients.
 - `call` takes inline JSON or `@file`, `--timeout-ms` (default 900000) and `--full`,
   and requires a ready grant and live driver. Explicit selectors must match the
-  grant. `--allow-foreign-session OTHER` permits selectors for that named ready batch
+  grant. The `--allow-foreign-session OTHER` option permits selectors for that named ready batch
   client only, for a deliberate isolation test (the product must still refuse).
 - `release`/`abandon --as-client OTHER` use that batch client's stored token to test
   wrong-owner refusals and print an isolation notice. No token flag exists; tokens
@@ -185,9 +186,9 @@ uses the external CLI keeper without claiming ownership (the daemon rejects it f
 proxy-owned session).
 
 `--broker-binding CLIENT` reuses that batch client's unchanged request and token on
-the frame connection and keeps its ready grant on exit. `--broker-binding
-/absolute/request.json` acquires a standalone session on the same connection,
-heartbeats it and releases it on graceful exit; it can boot real devices, needs the
+the frame connection and keeps its ready grant on exit. With `--broker-binding
+/absolute/request.json`, the tool acquires a standalone session on the same connection,
+heartbeats it and releases it on graceful exit. It can boot real devices, needs the
 same boot gate, and is allowed only outside broker batches (untracked paths inside
 batches refuse with guidance to use `--broker-binding <client>`). Templates:
 `{{ownSessionId}}`, `{{clientSessionId:<name>}}` (cross-client tests),
@@ -214,18 +215,18 @@ as in the `cross-client-isolation-live` probe), `read_session_not_bound` (a read
 a session another connected client owns) and `session_ownership_lost`.
 Lifecycle probes accept only `{}` or an object containing only the client's own
 `sessionUuid`; device names and selectors refuse before sending. Resources/list,
-`automobile:devices/*` reads and `--allow-selector` remain forbidden. `--token-of
-OTHER` changes only the user status/release isolation frames to another batch
-client's stored token (binding and heartbeats keep their own); tokens are redacted
+`automobile:devices/*` reads and `--allow-selector` remain forbidden. The `--token-of
+OTHER` option changes only the user status/release isolation frames to another batch
+client's stored token (binding and heartbeats keep their own). Tokens are redacted
 and a notice is printed.
 
-`--hold-ms` defaults to 0. `--mode cancel` or `cancel-after:<ms>` destroys the
-socket (standalone grants end through owner loss). `cancel-keep-open[:<ms>]` (read
-window default 5000 ms) waits `--cancel-after-ms` (default 0), sends same-connection
+The `--hold-ms` option defaults to 0. The `--mode cancel` or `cancel-after:<ms>`
+mode destroys the socket (standalone grants end through owner loss). The
+`cancel-keep-open[:<ms>]` mode (read window default 5000 ms) waits `--cancel-after-ms` (default 0), sends same-connection
 `daemon/cancelRequest` for each ID, prints answers and a cancelled/answered summary,
 and closes gracefully. Deliberate cancel exits 0; missing transport exits 3. Send
 mode awaits every requested answer. Repeatable `--then '<method> <params
 json|@file>'` sends sequentially after the initial replies (send mode only).
-`--timeout-ms` defaults to 30000, `--count` to 1. Host restart/maintenance frames
+The `--timeout-ms` option defaults to 30000, `--count` to 1. Host restart/maintenance frames
 require `--allow-host-mutation`. No raw frame bypasses broker ownership or resident
 protection.

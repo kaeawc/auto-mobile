@@ -24,7 +24,9 @@ systemTray({
 On Android, use `systemTray({ action: "list", notification: { appId: "com.google.android.apps.messaging" } })`.
 The command collapses and reopens the shade to reset its scroll position, reads its initial contents, then swipes upward at most three times to collect more rows. It stops early when the rows no longer change and closes the shade before returning, so follow-up actions reopen at the top. Cancellation stops further package batches, swipes, and observations.
 
-The response contains `notifications`, `swipes`, `unattributedRows`, and `order: "encounter"`. Each notification includes `id` (when Android exposes a unique row ID), `appId`, `appLabel`, `title`, `body`, `actions`, `texts` (including custom-layout text), `inGroup`, `ownership` (the evidence class that attributed the row: `"header"` or `"dumpsys"`), and `tag` when the row maps to a prototype notification (see below). Missing title/body fields are `null`; only text exposed by the hierarchy is available. Child notifications can inherit their group's app header. Overlapping rows on consecutive pages are reconciled by their unique row IDs when available, otherwise by ordered row positions. Stable IDs or unchanged neighboring rows anchor the scroll displacement, so a row can update its title/body without becoming a duplicate. Without usable IDs or a continuity anchor, rows are retained separately. This positional fallback is best effort: replacement or reordered rows without native IDs cannot always be distinguished. Explicit end-of-scroll metadata stops the scan before unnecessary repeat observations.
+The response contains `notifications`, `swipes`, `unattributedRows`, and `order: "encounter"`. Each notification includes `id` (when Android exposes a unique row ID), `appId`, `appLabel`, `title`, `body`, `actions`, `texts` (including custom-layout text) and `inGroup`. It also includes `ownership` (the evidence class that attributed the row: `"header"` or `"dumpsys"`), and `tag` when the row maps to a prototype notification (see below). Missing title/body fields are `null`; only text exposed by the hierarchy is available. Child notifications can inherit their group's app header.
+
+The command reconciles overlapping rows on consecutive pages by their unique row IDs when available, otherwise by ordered row positions. Stable IDs or unchanged neighboring rows anchor the scroll displacement, so a row can update its title/body without becoming a duplicate. Without usable IDs or a continuity anchor, the command keeps rows separately. This positional fallback is best effort: replacement or reordered rows without native IDs cannot always be distinguished. Explicit end-of-scroll metadata stops the scan before unnecessary repeat observations.
 
 App filtering uses the notification's app header, not mentions in message text. Before scanning, the command verifies that this label is unique across a fresh installed-package inventory. Duplicate labels, incomplete inventories, or unavailable label metadata return an error instead of attributing ambiguous notifications. Encounter order is the shade's order, not a guarantee of posting time. This bounded scan may omit notifications beyond three swipes. `list` requires `notification.appId`; `find`, `tap` and `dismiss` keep their own criteria requirements.
 
@@ -34,27 +36,27 @@ SystemUI renders the **Silent** (low-importance) section without the per-row
 app-name header, so those rows carry no ownership evidence in the shade. The header is
 the primary evidence; rows that carry none are correlated against
 `adb shell dumpsys notification --noredact`, which is authoritative about the
-posting package. A header-less row is attributed to the requested app only when
-the text it renders matches that package's notification extras
-(`android.title` / `android.text` and their big/sub/summary variants) and no
-other package's record matches the same text — ambiguity is reported as
-unknown, never resolved by preference. Rows attributed this way carry
+posting package. The command attributes a header-less row to the requested app
+only when the text it renders matches that package's notification extras
+(`android.title` / `android.text` and their big/sub/summary variants). No other
+package's record may match the same text. Ambiguity is reported as unknown,
+never resolved by preference. Rows attributed this way carry
 `ownership: "dumpsys"`; header-attributed rows carry `ownership: "header"`.
 
-Only text the posting app supplied is correlated: the labels SystemUI renders
-itself — action buttons, expand/dismiss/snooze controls, the post timestamp and
-a running chronometer — are reported in `texts` but never used as ownership
-evidence. A record whose extras carry no readable text at all (a custom
-`RemoteViews` notification, or a redacted dump) could have posted any
-header-less row, so it keeps every such row ambiguous rather than letting a
+The correlation uses only text the posting app supplied. The labels SystemUI
+renders itself (action buttons, expand/dismiss/snooze controls, the post
+timestamp and a running chronometer) appear in `texts` but never count as
+ownership evidence. A record whose extras carry no readable text at all (a
+custom `RemoteViews` notification, or a redacted dump) could have posted any
+header-less row. It therefore keeps every such row ambiguous rather than letting a
 different package's matching extras claim it.
 
-The dump is read when the shade contains a header-less row, or a header row for
+The command reads the dump when the shade contains a header-less row, or a header row for
 the requested app (to name prototype tags below); `clearAll` skips the latter
 read. A redacted dump (`--noredact` unsupported or refused) prints value lengths rather
 than values, so it yields no correlation evidence: such rows stay unattributed
-instead of being guessed at. Every row no evidence class can attribute is
-counted in `unattributedRows` and named in the response message, so
+instead of being guessed at. The command counts every row no evidence class can
+attribute in `unattributedRows` and names it in the response message. That way
 `Listed 0 notifications` is distinguishable from "this app has no
 notifications".
 
@@ -62,10 +64,10 @@ notifications".
 
 Prototype apps post every notification with a `proto:` tag, which the dump
 prints as the fourth field of the record key (`<user>|<pkg>|<id>|<tag>|<uid>`).
-After a row is attributed by either evidence class, it carries `tag` when
-exactly one of the requested package's non-summary records could have rendered
-the row (shares its text, or has no readable extras) and that record is
-`proto:`-tagged and matches by the same extras rule used for ownership. Every
+Once either evidence class attributes a row, the row carries `tag` under two
+conditions. Exactly one of the requested package's non-summary records could
+have rendered the row (shares its text, or has no readable extras). That record
+is also `proto:`-tagged and matches by the same extras rule used for ownership. Every
 record of the package competes, tagged or not, so a same-text twin or a
 record whose body a collapsed row hides leaves `tag` absent. Group summary
 records are ignored, so a grouped pair maps each child to its own tag. An
@@ -91,11 +93,13 @@ A `dismiss` swipe says nothing about whether the row left the shade: an ongoing
 compares the swiped row with the post-swipe observation it already takes. The
 row is identified by its non-volatile texts (title, body, app label); the count
 of rows reading exactly that way must drop. A row that survives with a changed
-body (download progress, a timer, a media position) still counts as present when
-a row with the same title and app label remains within one row height of the
-swiped position, because CtrlProxy exposes no notification key. A same-titled
+body (download progress, a timer, a media position) still counts as present.
+That holds when a row with the same title and app label remains within one row
+height of the swiped position, because CtrlProxy exposes no notification key. A same-titled
 row with different text far from that position, or a differently titled row, is
-a different notification. If the row is still present the tool waits one
+a different notification.
+
+If the row is still present the tool waits one
 swipe settle (400 ms), observes once more, and returns `success: false` with
 `isError: true` when the row is still there. The message names
 "ongoing/non-clearable" only when the matched row lists accessibility actions
@@ -116,8 +120,8 @@ unverified swipes do not count as dismissals. App-filtered `dismissedCount`
 continues to use the before/after notification inventory. Cancellation still
 aborts the operation, and an unreadable shade before any swipe remains an error.
 
-Before the first swipe, every step that a loaded host can make slow is retried
-instead of failing the call: the initial shade read, the app-filtered listing
+Before the first swipe, the command retries every step that a loaded host can
+make slow instead of failing the call. These steps are the initial shade read, the app-filtered listing
 (a collapse that times out, a shade read mid-render that no notification record
 explains) and the notification-count `dumpsys`. Each step gets up to three
 attempts with a short exponential backoff (250 ms, then 500 ms); the shade
@@ -143,16 +147,18 @@ bound the operation.
 `find`, `tap`, `dismiss` and `clearAll` compare `notification.appId`'s label (and
 the id itself) only against a row's attribution element, so another app's name
 in a title or body never attributes the row to that app. On Android that is the
-`app_name_text` header label; a group child is attributed by its group's header.
+`app_name_text` header label; a group child takes its group's header.
 On iOS no separate label exists: a stacked row's `NotificationShortLookView`
 accessibility label leads with the app's display name
-(`"MESSAGES, Grouped, now, <title>, <body>"`), and only that leading name is
-compared. A lone banner's label starts at its time (`"now, <title>, <body>"`)
-and names no app, so it is attributed only when `postNotification` posted its
-exact title and body (the alert iOS displays, after any raw `aps` override) for
-that app, and no other app, on that device in this server process; otherwise
-the not-found error says the banner cannot be attributed. Each row is
-attributed by its own evidence, never by another row's. An Android row that
+(`"MESSAGES, Grouped, now, <title>, <body>"`), and the filter compares only that
+leading name.
+
+A lone banner's label starts at its time (`"now, <title>, <body>"`) and names no
+app. The filter attributes it only when `postNotification` posted its exact
+title and body for that app, and no other app, on that device in this server
+process. The title and body are the alert iOS displays, after any raw `aps` override. Otherwise the
+not-found error says the banner cannot be attributed. Each row's own evidence
+attributes it, never another row's. An Android row that
 renders no attribution element (for example a header-less Silent row) falls
 back to matching the app filter against all of its text.
 
@@ -166,8 +172,8 @@ group header. The `tap` action handles this automatically:
    `notification_children_container`), it descends into the group's children
    and tags each child candidate with a `groupNode` reference.
 2. **Detect** — After matching, `isMatchInCollapsedGroup` checks whether
-   the best match has a `groupNode`; this means the notification belongs to a
-   group, whether collapsed or expanded. `isNotificationGroupExpanded` first
+   the best match has a `groupNode`. A `groupNode` means the notification belongs
+   to a group, whether collapsed or expanded. The `isNotificationGroupExpanded` helper first
    identifies an expanded group structurally when a per-child
    `expandableNotificationRow` contains `status_bar_latest_event_content`.
    This structural signal is decisive. When it is absent, child-row geometry

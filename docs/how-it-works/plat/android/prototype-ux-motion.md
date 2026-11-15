@@ -7,12 +7,13 @@ Text nodes accept `contentTransition: "numeric" | "crossfade" | "none"` (default
 
 `scrollTransition: {axis, edge: {scale?, alpha?, rotation?}}` on a descendant
 of a scroll, pager, carousel or repeat interpolates from the authored edge values
-to identity at the viewport center. `axis` is `horizontal` or `vertical`.
-`scrollLinked: {source, range: [start, end], alpha?, scale?, offsetY?, offsetX?, blur?}`
+to identity at the viewport center. Its `axis` is `horizontal` or `vertical`.
+The `scrollLinked: {source, range: [start, end], alpha?, scale?, offsetY?, offsetX?, blur?}`
 uses the offset in dp of a scroll with that `id` in the same stack screen. The
 input endpoints increase; each output is a pair that may increase or decrease.
 Values interpolate linearly and clamp outside the input range. At least one
 output is required. Alpha is clamped to 0–1 and blur to a nonnegative radius. Android blur requires Android 12 or later.
+
 Both fields require `prototype_scroll_motion_v1`; each counts as one binding,
 with at most 16 bindings after component and repeat expansion. These are drawing
 transforms: layout slots, hit targets and reported bounds stay fixed. The
@@ -25,8 +26,8 @@ fades and expands in and fades and shrinks out; a pager page change driven by
 opts out and keeps every change instant. Motion is also off when the system
 animator duration scale is 0 (`adb shell settings put global
 animator_duration_scale 0`), so `observe` screenshots are settled with no
-extra waits; other scales are honored by Compose's animation clock. The scale is
-observed while the prototype is shown, so setting it to 0 after the prototype is up
+extra waits; other scales are honored by Compose's animation clock. The runtime
+observes the scale while the prototype is shown. Setting it to 0 after the prototype is up
 makes the next visibility or page change instant, and turning motion off
 mid-scroll snaps the pager to its target page. Only nodes with `visibleWhen` get
 an animation wrapper.
@@ -83,6 +84,7 @@ transition is `none`, preserving focus and keyboard attachment. With full or
 reduced motion and an animated transition, replacement attaches a new window
 while the outgoing window exits; focus transfers to the new window. Changes to
 display, layer or surface id also require a new window regardless of motion.
+
 Root Compose content animates for 300 ms; removal is scheduled through the host
 settle timer at 400 ms, independent of animation frames. Exiting windows become
 non-touchable immediately. Outgoing windows retain their hierarchy motion metadata
@@ -95,15 +97,17 @@ windows immediately to keep teardown bounded.
 Bottom sheets slide from the bottom, dialogs and menus fade and scale, and
 snackbars fade and slide. Scrims fade with their surfaces. Panels remain composed
 through exit, including when removed from the authored tree; a patch reopening a
-panel cancels its exit and re-enters. `SheetDismiss` and modal button actions commit
-at exit start, so runtime state and emitted action events change immediately;
-retained visual content finishes exiting afterward with input disabled and its
-semantics cleared. A dragged sheet follows the
+panel cancels its exit and re-enters. The `SheetDismiss` and modal button actions
+commit at exit start, so runtime state and emitted action events change immediately.
+Retained visual content finishes exiting afterward with input disabled and its
+semantics cleared.
+
+A dragged sheet follows the
 pointer directly and springs to the selected detent on release. Reduced motion
 uses fades without translation, scaling or detent springs. Off motion snaps and
 keeps the settled rendering unchanged. Window and modal transitions and detent
 settles participate in the motion-active signal, following the conventions of
-#15114 (see Motion-active signal): the surface reports itself through
+#15114 (see Motion-active signal). The surface reports itself through
 `ReportPrototypeMotion` while an exit or settle runs, so `observe` never captures it mid-flight.
 
 `repeat.stagger` is an integer 0–100 ms per instance, in item order. Only template
@@ -126,7 +130,7 @@ may carry loops, including repeat instances; shimmer does not consume that limit
 Finite loops settle at identity and contribute to settling motion while running. Infinite
 loops and shimmer contribute only to the intentional loop count. Reduced motion, motion
 none and animator scale 0 leave loops at rest. On Android each observe metadata read renews
-a 1500 ms capture hold: attention loops draw identity and shimmer draws no band during it,
+a 1500 ms capture hold. During it, attention loops draw identity and shimmer draws no band,
 so captures within the hold are identical when the rest of the scene is unchanged.
 
 The runtime renews its capture hold in the controller’s window-metadata read path, alongside
@@ -156,7 +160,7 @@ and rotation/offsets additively with style motion. Tracks do not change layout o
 semantics. Reduced motion drops spatial tracks and retains alpha; off disables playback.
 Finite playback contributes to the motion-active signal. The pure spring sampler uses a
 normalized damped ease derived from damping ratio 0.8 and stiffness 380, with exact endpoints.
-iOS runs one linear `KeyframeAnimator` phase per track and applies the same sampler as Android, so all three curves match across platforms. A `trigger.key` is a plain declared state key, not a per-row bound key, so every repeat instance plays on the same trigger; per-row triggers need a bound-key form and are not part of v1.
+On iOS, the runtime runs one linear `KeyframeAnimator` phase per track and applies the same sampler as Android, so all three curves match across platforms. A `trigger.key` is a plain declared state key, not a per-row bound key, so every repeat instance plays on the same trigger. Per-row triggers need a bound-key form and are not part of v1.
 
 ## Motion profiles (#15115, `prototype_reduced_motion_v1`)
 
@@ -222,8 +226,8 @@ are not supported.
 
 Under `full`, Android applies `sharedElement` for `as: "element"` (identical content, only the target
 draws) and `sharedBounds` for `as: "bounds"` (changing content, both sides crossfade), in one
-`SharedTransitionLayout`. iOS uses `matchedGeometryEffect(properties: .frame)` in one namespace;
-bounds also crossfades the two sides. The morph counts in the motion-active signal. Under
+`SharedTransitionLayout`. On iOS the runtime uses `matchedGeometryEffect(properties: .frame)` in one
+namespace; bounds also crossfades the two sides. The morph counts in the motion-active signal. Under
 `reduced` both kinds crossfade in place; under `off` they swap instantly. A pair visible at the
 same time keeps ordinary visibility behavior. Shape interpolation still needs `animate` on
 `cornerRadius`; image content scale snaps.
@@ -272,10 +276,10 @@ Fades and scales change no node, so two identical hierarchy reads do not prove a
 prototype has stopped moving. The prototype window's entry in a hierarchy capture
 carries `prototypeMotion: {active, loops}` next to `prototypePlacement`
 (`prototype_window_metadata_v1`; older APKs omit it and hosts read absence as
-settled). `active` counts the animations that will finish: `visibleWhen` and
+settled). The `active` field counts the animations that will finish: `visibleWhen` and
 retained-visibility transitions, `animate` style animations, `pressScale`,
-container size changes, swipe-row settles and pager scrolls. `loops` counts
-intentional infinite animations (today only the shimmer) and is ignored by hosts.
-`observe(waitFor: stable)` and the launcher/SystemUI quiet-tree wait do not settle
+container size changes, swipe-row settles and pager scrolls. The `loops` field counts
+intentional infinite animations (today only the shimmer) and hosts ignore it.
+Both `observe(waitFor: stable)` and the launcher/SystemUI quiet-tree wait do not settle
 while `active` is positive and stay bounded by their usual timeout. The count is
 zero after a single frame under `motion: "none"` or animator scale 0.

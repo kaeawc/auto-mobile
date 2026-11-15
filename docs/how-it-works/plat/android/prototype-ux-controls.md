@@ -14,6 +14,7 @@ and component `{props.x}` binding as node text; span actions bind like node onTa
 The resolved texts concatenate in order without separators: observe and accessibility show the
 full plain text (an explicit node contentDescription still overrides its accessible label).
 Spans do not count as nodes and require `prototype_rich_text_v1`; older devices are refused before show.
+
 A tappable span is part of the text node, not a separate accessibility node, and runs actions without opening URLs.
 On Android, activate it with `tapOn {accessibilityLink:"<span text>"}` or
 `tapOn {text:"<full plain text>", subtext:{text:"<span text>"}}` without `layer`:
@@ -26,15 +27,20 @@ On iOS, links are drawn as links and tap-through is by `tapAt` only; show report
 
 `linkify: {kinds, style?, onTap}` on a text node with `text` (not `spans`) turns @mentions,
 #hashtags and URLs in the resolved text into links, for content from data such as `{item.body}`.
-`kinds` lists 1 to 3 of `mention`, `hashtag` and `url`; `style` takes the span style fields; a tap on
-a match runs `onTap` (1 to 32 actions). The grammar is fixed and shared by every runtime
-(`test/fixtures/prototype-spec/linkify/cases.json`): a match starts at the start of the text or
-after whitespace; a mention is `@` and 1 to 30 of `[A-Za-z0-9_]` (so `ana@example.com` is not one);
-a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a URL is `http://` or
-`https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
-`{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
-value, a `setData` / `appendData` value or an emit context entry, for example
-`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused.
+Its `kinds` field lists 1 to 3 of `mention`, `hashtag` and `url`; `style` takes the span style
+fields. A tap on a match runs `onTap` (1 to 32 actions). The grammar is fixed and shared by every
+runtime (`test/fixtures/prototype-spec/linkify/cases.json`):
+
+- A match starts at the start of the text or after whitespace.
+- A mention is `@` and 1 to 30 of `[A-Za-z0-9_]` (so `ana@example.com` is not one).
+- A hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits.
+- A URL is `http://` or `https://` up to the next whitespace with trailing `.,;:!?'")]}` removed.
+
+Inside `onTap` only, `{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its
+kind. These work as a `setState` value, a `setData` / `appendData` value or an emit context entry,
+for example `setState profileHandle {match: "text"}` then `push profile`. A `{match}` binding
+anywhere else is refused.
+
 Inside a repeat, `onTap` also binds `{item: "field"}`, `{index: true}`, `{alias.field}` and `{index}`
 per row, including state keys such as `liked_{item.id}`. Repeat binding preserves `{match}` for
 tap-time resolution; emit payloads and `{value: ...}` literals remain opaque. A URL tap never opens a browser; that is the `links.open`
@@ -60,15 +66,15 @@ The select field and menu surface carry the node `testTag`. Select option rows u
 ## Tooltip and drawer
 
 `tooltip` requires `prototype_tooltip_v1`, nonblank `text`, boolean `openWhen: {key, equals}`,
-and exactly one of `anchorTo` or `anchor`. `anchorTo` names exactly one node id after component
-and repeat expansion; self references and absent targets report `Unknown anchorTo id`, and
+and exactly one of `anchorTo` or `anchor`. The `anchorTo` field names exactly one node id after
+component and repeat expansion. Self references and absent targets report `Unknown anchorTo id`, and
 multiple instances report `Duplicate anchorTo id`, at the tooltip's `.anchorTo` path. Bounds
 anchors use the host-resolved screen rectangle plus offset. Tooltips are hoisted overlays, not
 ordinary anchored layout children. An unlaid-out target draws no bubble or scrim and keeps state.
 
 The pure `placePrototypeBubble` function places tooltips inside the window with an 8 dp gap and
-margin. `caret` names the bubble edge pointing at the target: `top` places it below, `bottom`
-above, and `start`/`end` mirror with layout direction. `auto` prefers below. An unavailable side
+margin. The `caret` field names the bubble edge pointing at the target: `top` places it below, `bottom`
+above, and `start`/`end` mirror with layout direction. The `auto` value prefers below. An unavailable side
 flips to its opposite; auto can use horizontal space when neither vertical side fits. If neither
 side fits, the larger available side wins and the origin is clamped. The caret tracks the target
 center, clamped away from the bubble corners. Menu placement shares this calculation.
@@ -134,9 +140,11 @@ Format whitespace follows JavaScript whitespace (including NBSP); no format trim
 Patterns use ASCII `\d`, `\w`, `\s` and their complements `\D`, `\W`, `\S`; `\w` is
 `[A-Za-z0-9_]` and `\s` is space, tab, CR, LF, FF, VT. Dot matches one Unicode scalar except
 CR, LF, U+2028 and U+2029. Matching consumes the entire value, even with a final newline.
+
 Allowed: literals, dot, classes `[abc]` / `[^abc]`, literal ranges, those six shorthand escapes,
 escaped metacharacters, anchors ^ $, groups `(…)` / `(?:…)`, alternation |, and quantifiers
 `? * + {n} {n,} {n,m}`. Every written bound is <=100 and n<=m; open upper bounds are unbounded.
+
 Reject backreferences, lookahead/behind, named groups, lazy/possessive quantifiers, Unicode
 properties, inline flags, word boundaries `\b` / `\B`, and every other escape (including
 `\n`, `\x`, `\u`; use literal characters). Empty classes are rejected. A group repeated more
@@ -148,9 +156,9 @@ These exact rules and error substrings are pinned in the language-neutral checks
 
 Conditions `{valid: "email"}` and `{valid: ["email", "password"]}` mean all referenced keys
 are valid, including fields whose errors are not yet shown. They compose with all/any/not in
-visibleWhen, styleWhen and enabledWhen. enabledWhen is supported on the seven input types plus
+visibleWhen, styleWhen and enabledWhen. The enabledWhen condition is supported on the seven input types plus
 button, iconButton, fab, chip and listItem; false disables the control and skips its onTap.
-`emit` may specify `requireValid: ["email", "password"]` (1–8 keys). Any failing key aborts the
+An `emit` action may specify `requireValid: ["email", "password"]` (1–8 keys). Any failing key aborts the
 whole action list atomically, shows errors on every listed field, and sends
-`{kind:"validation_failed", keys:[…]}` naming only the failing keys. `change` events carry
+`{kind:"validation_failed", keys:[…]}` naming only the failing keys. The `change` events carry
 `validity: {key:boolean}` for checked keys. Both event kinds retain the usual event envelope.

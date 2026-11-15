@@ -69,7 +69,8 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
 
 **Report, hide and block** (App Store 1.2, Play UGC). They apply only to received content
 (`source` `file` or `share`); the user's own `mcp` and `paste` prototypes are never hidden.
-Android implements them; the iOS viewer does not yet (#16437).
+Both apps offer Report and Hide. Block needs a recorded link host, and only Android has link import,
+so only Android offers Block.
 
 - Identity: Block uses the link-origin host, the lowercase DNS host a link import (#14128) fetched
   the bundle from, recorded in `library.json` as `sourceHost` (null for every other source). The
@@ -77,21 +78,26 @@ Android implements them; the iOS viewer does not yet (#16437).
   share-sheet import has no sender identity, so it offers Hide and Report but not Block.
 - Hide stores the entry's `specSha256` locally. It hides that content, including identical copies
   received later, and blocks no one.
-- The blocklist (hidden spec hashes, blocked hosts) is local app state, never exported. A repository
-  decorator applies it to every reader, so a hidden entry is absent from the list, MCP `open` and
-  the viewer.
+- The blocklist (hidden spec hashes, blocked hosts) is local app state, never exported. Android
+  keeps it in shared preferences, and iOS keeps the hidden hashes in user defaults. Android's
+  repository decorator and the iOS store's listing apply it to every reader. A hidden entry is
+  therefore absent from the list, MCP `open` and the viewer.
 - Hiding deletes. Confirming Hide or Block deletes every matching received entry (bundle, metadata
   and viewer storage); only the hash or host stays, in the blocklist. The confirmation says so. App
   start repeats the sweep, so an entry whose delete failed before its metadata was removed is
   retried. The app rejects a later file or share import of hidden content, or of content from a
   blocked host, as `Hidden` ("hidden on this device"). It does so before anything is staged or
-  stored, so hidden content does not hold library quota. The repository repeats that check under
-  its lock when it commits the entry. The purge lists through the same lock after Hide records the
-  hash, so an import that races Hide is either rejected or deleted by that purge. There is no unhide.
+  stored, so hidden content does not hold library quota.
+- Import races: on Android the repository repeats the `Hidden` check under its lock when it
+  commits the entry. The purge lists through the same lock after Hide
+  records the hash, so an import that races Hide is either rejected or deleted by that purge. On iOS
+  the store checks before staging. An import that races Hide there is still hidden from every
+  reader, and the next app start deletes it. There is no unhide.
 - Report opens the user's mail app addressed to the published contact
   (`automobile+coc@jasonpearson.dev`, the project's code-of-conduct enforcement address) with the
   label, spec SHA-256, source and host. The app sends nothing itself and attaches no bundle bytes.
-  The library shows the same contact in a "Report a problem" row.
+  On Android the library shows the same contact in a "Report a problem" row; on iOS that row is in
+  Settings. When no mail app opens, iOS shows the address instead.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 

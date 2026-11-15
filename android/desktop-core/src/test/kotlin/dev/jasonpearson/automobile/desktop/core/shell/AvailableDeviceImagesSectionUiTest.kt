@@ -18,13 +18,11 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.DeviceFilterState
 import dev.jasonpearson.automobile.desktop.core.loadDeviceFilter
-import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceIdentity
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImage
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceLifecycle
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceRuntime
-import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
 import dev.jasonpearson.automobile.desktop.core.saveDeviceFilter
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -69,11 +67,10 @@ class AvailableDeviceImagesSectionUiTest {
               images = listOf(googleImage, plainImage, bootedImage, oldImage),
               bootedDevices =
                 listOf(
-                  BootedDevice(
+                  shellBootedDevice(
                     "runtime",
                     "Renamed running device",
-                    DeviceType.AndroidEmulator,
-                    connectedAt = 0,
+                    platform = "android",
                     stableId = bootedImage.identity.stableId,
                   ),
                 ),

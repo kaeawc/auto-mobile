@@ -1,11 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core
 
-import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceIdentity
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceLifecycle
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceRuntime
-import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
+import dev.jasonpearson.automobile.desktop.core.shell.shellBootedDevice
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -28,10 +27,10 @@ class AvailableDeviceImagesTest {
         images = images,
         booted =
           listOf(
-            BootedDevice(
-              id = "emulator-5554",
+            shellBootedDevice(
+              deviceId = "emulator-5554",
               name = "Pixel 8",
-              type = DeviceType.AndroidEmulator,
+              platform = "android",
               stableId = "Pixel_8",
             ),
           ),
@@ -50,10 +49,10 @@ class AvailableDeviceImagesTest {
         images = listOf(image(udid, platform = "ios")),
         booted =
           listOf(
-            BootedDevice(
-              id = udid,
+            shellBootedDevice(
+              deviceId = udid,
               name = "iPhone 15",
-              type = DeviceType.iOSSimulator,
+              platform = "ios",
               stableId = udid,
             ),
           ),
@@ -70,10 +69,10 @@ class AvailableDeviceImagesTest {
         images = listOf(image("Pixel_8")),
         booted =
           listOf(
-            BootedDevice(
-              id = "emulator-5554",
+            shellBootedDevice(
+              deviceId = "emulator-5554",
               name = "Pixel 7",
-              type = DeviceType.AndroidEmulator,
+              platform = "android",
               stableId = "Pixel_7",
             ),
           ),
@@ -93,16 +92,16 @@ class AvailableDeviceImagesTest {
         images = listOf(image(runtimeId), image(unknownRuntimeId)),
         booted =
           listOf(
-            BootedDevice(
-              id = runtimeId,
+            shellBootedDevice(
+              deviceId = runtimeId,
               name = "Unknown ($runtimeId)",
-              type = DeviceType.AndroidEmulator,
+              platform = "android",
               stableId = runtimeId,
             ),
-            BootedDevice(
-              id = "emulator-5556",
+            shellBootedDevice(
+              deviceId = "emulator-5556",
               name = unknownRuntimeId,
-              type = DeviceType.AndroidEmulator,
+              platform = "android",
               stableId = unknownRuntimeId,
             ),
           ),
@@ -122,10 +121,10 @@ class AvailableDeviceImagesTest {
           images = listOf(image(sharedStableId, platform = "ios")),
           booted =
             listOf(
-              BootedDevice(
-                id = "android-runtime-id",
+              shellBootedDevice(
+                deviceId = "android-runtime-id",
                 name = "Android device",
-                type = DeviceType.AndroidEmulator,
+                platform = "android",
                 stableId = sharedStableId,
               ),
             ),
@@ -145,10 +144,10 @@ class AvailableDeviceImagesTest {
           images = listOf(image(sharedStableId)),
           booted =
             listOf(
-              BootedDevice(
-                id = sharedStableId,
+              shellBootedDevice(
+                deviceId = sharedStableId,
                 name = "iOS device",
-                type = DeviceType.iOSSimulator,
+                platform = "ios",
                 stableId = sharedStableId,
               ),
             ),

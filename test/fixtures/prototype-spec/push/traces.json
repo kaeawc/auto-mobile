@@ -1,0 +1,323 @@
+[
+  {
+    "name": "a handled push appends the message and sets the sender",
+    "spec": {
+      "id": "np",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "data": {
+        "messages": []
+      },
+      "requires": {
+        "platform": ["notifications"],
+        "permissions": [
+          {
+            "name": "notifications",
+            "purpose": "Tell you about new messages"
+          }
+        ]
+      },
+      "notifications": {
+        "channels": [
+          {
+            "id": "chat",
+            "name": "Chat",
+            "importance": "high"
+          }
+        ]
+      },
+      "platform": {
+        "on": {
+          "notifications.push": [
+            {
+              "type": "appendData",
+              "path": "/data/messages",
+              "value": {
+                "event": "/data"
+              }
+            },
+            {
+              "type": "setState",
+              "key": "lastSender",
+              "value": {
+                "event": "/data/sender"
+              }
+            }
+          ]
+        }
+      },
+      "root": {
+        "type": "text",
+        "text": "Messages"
+      },
+      "state": {
+        "lastSender": ""
+      }
+    },
+    "steps": [
+      {
+        "push": {
+          "type": "message",
+          "data": {
+            "id": "m1",
+            "sender": "Ada",
+            "text": "Hi"
+          }
+        },
+        "expect": {
+          "data": {
+            "messages": [
+              {
+                "id": "m1",
+                "sender": "Ada",
+                "text": "Hi"
+              }
+            ]
+          },
+          "state": {
+            "lastSender": "Ada"
+          },
+          "events": [
+            {
+              "kind": "emit",
+              "name": "prototype_platform_event",
+              "payload": {
+                "event": "notifications.push",
+                "data": {
+                  "type": "message",
+                  "delivery": "foreground",
+                  "handled": true
+                },
+                "simulated": true
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "a second push appends after the first",
+    "spec": {
+      "id": "np",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "data": {
+        "messages": []
+      },
+      "requires": {
+        "platform": ["notifications"],
+        "permissions": [
+          {
+            "name": "notifications",
+            "purpose": "Tell you about new messages"
+          }
+        ]
+      },
+      "notifications": {
+        "channels": [
+          {
+            "id": "chat",
+            "name": "Chat",
+            "importance": "high"
+          }
+        ]
+      },
+      "platform": {
+        "on": {
+          "notifications.push": [
+            {
+              "type": "appendData",
+              "path": "/data/messages",
+              "value": {
+                "event": "/data"
+              }
+            },
+            {
+              "type": "setState",
+              "key": "lastSender",
+              "value": {
+                "event": "/data/sender"
+              }
+            }
+          ]
+        }
+      },
+      "root": {
+        "type": "text",
+        "text": "Messages"
+      },
+      "state": {
+        "lastSender": ""
+      }
+    },
+    "steps": [
+      {
+        "push": {
+          "type": "message",
+          "data": {
+            "id": "m1",
+            "sender": "Ada",
+            "text": "Hi"
+          }
+        },
+        "expect": {
+          "data": {
+            "messages": [
+              {
+                "id": "m1",
+                "sender": "Ada",
+                "text": "Hi"
+              }
+            ]
+          },
+          "state": {
+            "lastSender": "Ada"
+          },
+          "events": [
+            {
+              "kind": "emit",
+              "name": "prototype_platform_event",
+              "payload": {
+                "event": "notifications.push",
+                "data": {
+                  "type": "message",
+                  "delivery": "foreground",
+                  "handled": true
+                },
+                "simulated": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "push": {
+          "type": "message",
+          "data": {
+            "id": "m2",
+            "sender": "Grace",
+            "text": "Yo"
+          }
+        },
+        "expect": {
+          "data": {
+            "messages": [
+              {
+                "id": "m1",
+                "sender": "Ada",
+                "text": "Hi"
+              },
+              {
+                "id": "m2",
+                "sender": "Grace",
+                "text": "Yo"
+              }
+            ]
+          },
+          "state": {
+            "lastSender": "Grace"
+          },
+          "events": [
+            {
+              "kind": "emit",
+              "name": "prototype_platform_event",
+              "payload": {
+                "event": "notifications.push",
+                "data": {
+                  "type": "message",
+                  "delivery": "foreground",
+                  "handled": true
+                },
+                "simulated": true
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "an unhandled push with a notification changes no data",
+    "spec": {
+      "id": "np-alert",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "data": {
+        "messages": []
+      },
+      "requires": {
+        "platform": ["notifications"],
+        "permissions": [
+          {
+            "name": "notifications",
+            "purpose": "Tell you about new messages"
+          }
+        ]
+      },
+      "notifications": {
+        "channels": [
+          {
+            "id": "chat",
+            "name": "Chat",
+            "importance": "high"
+          }
+        ]
+      },
+      "root": {
+        "type": "text",
+        "text": "Messages"
+      },
+      "state": {
+        "lastSender": ""
+      }
+    },
+    "steps": [
+      {
+        "push": {
+          "type": "message",
+          "data": {
+            "id": "m2"
+          },
+          "notification": {
+            "title": "Ada",
+            "body": "Hi",
+            "channel": "chat"
+          }
+        },
+        "expect": {
+          "data": {
+            "messages": []
+          },
+          "state": {
+            "lastSender": ""
+          },
+          "events": [
+            {
+              "kind": "emit",
+              "name": "prototype_platform_event",
+              "payload": {
+                "event": "notifications.push",
+                "data": {
+                  "type": "message",
+                  "delivery": "foreground",
+                  "handled": false
+                },
+                "simulated": true
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

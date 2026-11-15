@@ -32736,6 +32736,24 @@
           "minimum": 1,
           "maximum": 3600000
         },
+        "event": {
+          "description": "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push",
+          "type": "string",
+          "enum": ["notifications.push"]
+        },
+        "data": {
+          "description": "simulate event only: the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "transport": {
+          "description": "simulate event only: connection (the live runtime), system (the platform push path, reaches an app that is not running) or auto (default: connection when connected, else system)",
+          "type": "string",
+          "enum": ["auto", "connection", "system"]
+        },
         "id": {
           "description": "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
           "type": "string",
@@ -33416,6 +33434,25 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 10000
+        },
+        "transport": {
+          "description": "simulate event only: the transport that carried the push",
+          "type": "string",
+          "enum": ["connection", "system"]
+        },
+        "handled": {
+          "description": "simulate event only: true when a notifications.push handler ran",
+          "type": "boolean"
+        },
+        "delivery": {
+          "description": "simulate event only: foreground, background or notification",
+          "type": "string",
+          "enum": ["foreground", "background", "notification"]
+        },
+        "code": {
+          "description": "simulate event only: invalid_args (payload refused), unavailable (no route) or platform_error",
+          "type": "string",
+          "enum": ["invalid_args", "unavailable", "platform_error"]
         },
         "success": {
           "type": "boolean"

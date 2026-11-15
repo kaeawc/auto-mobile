@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import XCTest
 
-/// Module load logging - this runs when the test module is first loaded
+/// Log once when the first AutoMobile test class is set up.
 private let _moduleLoadLog: Void = {
     let line = "[XCTestRunner] Module loaded at \(Date())\n"
     fputs(line, stderr)
@@ -13,35 +13,11 @@ private let _moduleLoadLog: Void = {
 /// Concurrency: nonisolated XCTest lifecycle hooks prepare an executor synchronously; executePlan
 /// awaits it directly and propagates cancellation. The executor acquires an issued device session.
 open class AutoMobileTestCase: XCTestCase {
-    override open class var defaultTestSuite: XCTestSuite {
-        // Ensure module load logging is triggered
+    override open class func setUp() {
+        super.setUp()
         _ = _moduleLoadLog
-        PerfTimer.log("defaultTestSuite START for \(self)")
-        if self == AutoMobileTestCase.self {
-            PerfTimer.log("defaultTestSuite: returning empty suite for base class")
-            return XCTestSuite(name: "AutoMobileTestCase")
-        }
-        PerfTimer.log("defaultTestSuite: registering observer")
+        // Register once before this class's tests, without overriding suite discovery.
         _ = AutoMobileTestObserver.registerIfNeeded()
-
-        let orderingSelection = resolveTimingOrderingSelection()
-        let timingAvailable = TestTimingCache.shared.hasTimings(sessionUuid: timingSessionIdGenerator())
-        logTimingOrdering(selection: orderingSelection, timingAvailable: timingAvailable)
-
-        let timingOrderingActive = orderingSelection.resolved != .disabled && timingAvailable
-        guard timingOrderingActive else {
-            PerfTimer.log("defaultTestSuite: timing ordering inactive; returning default suite")
-            return super.defaultTestSuite
-        }
-
-        PerfTimer.log("defaultTestSuite: calling super.defaultTestSuite")
-        let baseSuite = super.defaultTestSuite
-        let tests = baseSuite.tests
-        PerfTimer.log("defaultTestSuite: found \(tests.count) tests")
-        let orderedTests = orderTestsByTiming(tests, strategy: orderingSelection.resolved)
-        baseSuite.setValue(orderedTests, forKey: "tests")
-        PerfTimer.log("defaultTestSuite END for \(self)")
-        return baseSuite
     }
 
     open var planPath: String {
@@ -132,9 +108,6 @@ open class AutoMobileTestCase: XCTestCase {
     var executorFactory: (AutoMobilePlanExecutor.Configuration) -> AutoMobilePlanExecutor = {
         AutoMobilePlanExecutor(configuration: $0)
     }
-
-    /// Suite construction precedes test execution, so prefetch needs its own explicit filter value.
-    class var timingSessionIdGenerator: @Sendable () -> String { { UUID().uuidString } }
 
     private var executor: AutoMobilePlanExecutor?
     /// Inject a snapshot in tests without changing the process-wide environment.
@@ -266,8 +239,42 @@ open class AutoMobileTestCase: XCTestCase {
         }
         return fullName
     }
+}
 
-    private enum TimingOrderingStrategy: String {
+/// Opt-in timing ordering for runners that use custom XCTest suites.
+/// Overriding `defaultTestSuite` breaks `swift test --filter` selection on this toolchain;
+/// inherit directly from `AutoMobileTestCase` when filtered SwiftPM runs are required.
+open class AutoMobileTimingOrderedTestCase: AutoMobileTestCase {
+    override open class var defaultTestSuite: XCTestSuite {
+        PerfTimer.log("defaultTestSuite START for \(self)")
+        if self == AutoMobileTimingOrderedTestCase.self {
+            PerfTimer.log("defaultTestSuite: returning empty suite for base class")
+            return XCTestSuite(name: "AutoMobileTimingOrderedTestCase")
+        }
+        let orderingSelection = resolveTimingOrderingSelection()
+        let timingAvailable = TestTimingCache.shared.hasTimings(sessionUuid: timingSessionIdGenerator())
+        logTimingOrdering(selection: orderingSelection, timingAvailable: timingAvailable)
+
+        let timingOrderingActive = orderingSelection.resolved != .disabled && timingAvailable
+        guard timingOrderingActive else {
+            PerfTimer.log("defaultTestSuite: timing ordering inactive; returning default suite")
+            return super.defaultTestSuite
+        }
+
+        PerfTimer.log("defaultTestSuite: calling super.defaultTestSuite")
+        let baseSuite = super.defaultTestSuite
+        let tests = baseSuite.tests
+        PerfTimer.log("defaultTestSuite: found \(tests.count) tests")
+        let orderedTests = orderTestsByTiming(tests, strategy: orderingSelection.resolved)
+        baseSuite.setValue(orderedTests, forKey: "tests")
+        PerfTimer.log("defaultTestSuite END for \(self)")
+        return baseSuite
+    }
+
+    /// Suite construction precedes test execution, so prefetch needs its own explicit filter value.
+    class var timingSessionIdGenerator: @Sendable () -> String { { UUID().uuidString } }
+
+    enum TimingOrderingStrategy: String {
         case disabled = "none"
         case auto
         case durationAsc
@@ -279,7 +286,7 @@ open class AutoMobileTestCase: XCTestCase {
         let resolved: TimingOrderingStrategy
     }
 
-    private struct TimingCandidate {
+    struct TimingCandidate {
         let test: XCTest
         let index: Int
         let durationMs: Int?
@@ -370,11 +377,21 @@ open class AutoMobileTestCase: XCTestCase {
             return TimingCandidate(test: test, index: index, durationMs: durationMs)
         }
 
+        return orderTimingCandidates(candidates, strategy: strategy)
+    }
+
+    /// Sort cached durations without fetching timing data or constructing test cases.
+    class func orderTimingCandidates(
+        _ candidates: [TimingCandidate],
+        strategy: TimingOrderingStrategy
+    )
+        -> [XCTest]
+    {
         let withTiming = candidates.filter { $0.durationMs != nil }
         let withoutTiming = candidates.filter { $0.durationMs == nil }
 
-        if withTiming.isEmpty {
-            return tests
+        if strategy == .disabled || withTiming.isEmpty {
+            return candidates.map { $0.test }
         }
 
         let sortedWithTiming: [TimingCandidate]

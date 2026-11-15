@@ -56,7 +56,7 @@ import { TapDisplayRouter } from "./TapDisplayRouter";
 import { TapSemanticLinks } from "./TapSemanticLinks";
 import { TapTargetResolver } from "./TapTargetResolver";
 import { TapGestureDispatcher } from "./TapGestureDispatcher";
-import { appendNoChangeWarning, mismatchWarnings } from "./tapActivationTargetWarnings";
+import { appendNoChangeWarning, heldMismatch } from "./tapActivationTargetWarnings";
 import { type TapOnFocusOutcome } from "./TapSemanticLinks";
 import { recordXrNodeClick, settleXrNodeClick, type XrClickRecord } from "./xrPanelNodeClick";
 
@@ -157,6 +157,8 @@ interface TapExecutionState {
   focusTarget?: Element;
   focusLabelText?: string;
   ensureCheckedTapTimestamp?: number;
+  /** A row's own-toggle mismatch warnings, held for ensureChecked verification (#18351). */
+  pendingCheckedMismatchWarnings?: string[];
   completedDisplayGesture: boolean;
   settlePostTapEffect?: boolean;
   /** The match a TalkBack tap claimed to activate; warn if nothing changed (#17667, #17677). */
@@ -279,6 +281,7 @@ export class TapExecution {
     const { options, requestedAction, signal, perf } = state;
     state.completedDisplayGesture = this.host.didCompleteDisplayGesture(result, options.display);
     if (options.display !== undefined && result.staleDisplay) {
+      heldMismatch.release(result, state, false);
       // Legacy/iOS display gestures must not finalize optional post-state
       // metadata or confirm focus/checked state from an invalidated capture.
       return this.host.unverifiableDisplayPostState(result, options);
@@ -315,6 +318,7 @@ export class TapExecution {
       this.host.enforceFreshnessConsistencyWithEffect(state.previousObserveResult, result);
     }
 
+    heldMismatch.release(result, state, effectDerived);
     await this.host.confirmFocusAfterTap({
       result,
       options,
@@ -752,9 +756,7 @@ export class TapExecution {
       target.activationWarnings,
     );
     this.host.logClickableParentSelection(target.usedParent);
-    target.activationWarnings.push(
-      ...mismatchWarnings(requestedAction, target.finalSelection, target.tapElement),
-    );
+    heldMismatch.record(state, target);
     const planningHierarchy = await this.host
       .tapPoints()
       .prototypeTapHierarchy(target.viewHierarchy, target.tapElement, requestedAction);

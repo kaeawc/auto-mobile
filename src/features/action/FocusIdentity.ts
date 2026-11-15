@@ -263,7 +263,11 @@ export function ownRangeOf(
   if (!ranged) {
     return undefined;
   }
-  const node = [stringProp(focused, "resource-id"), focused.class ?? "", boundsText(focused.bounds)];
+  const node = [
+    stringProp(focused, "resource-id"),
+    focused.class ?? "",
+    boundsText(focused.bounds),
+  ];
   return { node: node.join("|"), range: stringProp(ranged, "range-info") };
 }
 

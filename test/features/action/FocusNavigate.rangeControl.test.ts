@@ -62,7 +62,12 @@ class FakeSettingsColumn implements FocusObserver, FocusKeyPresser {
 }
 
 function row(text: string, top: number): Element {
-  return { text, focusable: true, clickable: true, bounds: { left: 0, top, right: 1000, bottom: top + 100 } };
+  return {
+    text,
+    focusable: true,
+    clickable: true,
+    bounds: { left: 0, top, right: 1000, bottom: top + 100 },
+  };
 }
 
 describe("FocusNavigate around range controls (#17209)", () => {
@@ -75,17 +80,21 @@ describe("FocusNavigate around range controls (#17209)", () => {
 
   test("a focused row holding a progress bar is walked past with arrows", async () => {
     // The row itself reports no range; only the smaller ProgressBar inside it does.
-    const home = new FakeSettingsColumn("storage", {
-      storage: { element: () => row("Storage", 100), moves: { down: "about" } },
-      about: { element: () => row("About", 200), moves: { up: "storage", down: "done" } },
-      done: { element: () => row("Done", 300), moves: { up: "about" } },
-    }, () => [
+    const home = new FakeSettingsColumn(
+      "storage",
       {
-        class: "android.widget.ProgressBar",
-        "range-info": "current:40.0,min:0.0,max:100.0",
-        bounds: { left: 20, top: 160, right: 980, bottom: 180 },
+        storage: { element: () => row("Storage", 100), moves: { down: "about" } },
+        about: { element: () => row("About", 200), moves: { up: "storage", down: "done" } },
+        done: { element: () => row("Done", 300), moves: { up: "about" } },
       },
-    ]);
+      () => [
+        {
+          class: "android.widget.ProgressBar",
+          "range-info": "current:40.0,min:0.0,max:100.0",
+          bounds: { left: 20, top: 160, right: 980, bottom: 180 },
+        },
+      ],
+    );
     const result = await new FocusNavigate(home, home, timer).execute({ until: { text: "Done" } });
     expect(result).toMatchObject({ success: true, status: "focused", steps: 2 });
     expect(home.presses).toEqual(["arrow_down", "arrow_down"]);
@@ -102,24 +111,21 @@ describe("FocusNavigate around range controls (#17209)", () => {
       "range-info": `current:${home.value}.0,min:0.0,max:100.0`,
       bounds: { left: 0, top: 100, right: 1000, bottom: 200 },
     });
-    const home: FakeSettingsColumn = new FakeSettingsColumn(
-      "volume",
-      {
-        volume: {
-          element: seekBar,
-          moves: { down: "done" },
-          adjusts: ["left", "right"],
-        },
-        done: {
-          element: () => ({
-            text: "Done",
-            focusable: true,
-            bounds: { left: 1500, top: 120, right: 1700, bottom: 180 },
-          }),
-          moves: { up: "volume" },
-        },
+    const home: FakeSettingsColumn = new FakeSettingsColumn("volume", {
+      volume: {
+        element: seekBar,
+        moves: { down: "done" },
+        adjusts: ["left", "right"],
       },
-    );
+      done: {
+        element: () => ({
+          text: "Done",
+          focusable: true,
+          bounds: { left: 1500, top: 120, right: 1700, bottom: 180 },
+        }),
+        moves: { up: "volume" },
+      },
+    });
     const result = await new FocusNavigate(home, home, timer).execute({ until: { text: "Done" } });
     expect(result).toMatchObject({ success: true, status: "focused" });
     expect(home.presses).toContain("arrow_down");

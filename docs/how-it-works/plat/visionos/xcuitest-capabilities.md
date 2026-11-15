@@ -25,8 +25,8 @@ the runner can observe and act on, and what it cannot.
 - Every projection, including the default, exposes `hierarchyBundleId`: the bundle ID the runner
   that returned the hierarchy was launched with, recorded beside that client in the
   `visionosRunners` registry at registration. It is neither the hierarchy's `packageName` (the
-  snapshot identifier, which can be empty for an app) nor the latest `launchApp` target:
-  `launchApp` does not restart a connected runner, and a connect-only read of a device another
+  snapshot identifier, which can be empty for an app) nor the latest `launchApp` target. The tool
+  `launchApp` does not restart a connected runner. A connect-only read of a device another
   session holds reuses it as is, so the two can differ.
 - `hierarchyBundleId` is omitted when the runner was started or registered without a target, when
   the hierarchy is unavailable, and on other platforms.
@@ -37,18 +37,18 @@ the runner can observe and act on, and what it cannot.
   missing or disabled target is an invalid `identifier` parameter; remaining ambiguity is
   `ambiguous_element`.
 - A runner automating its own host app is restarted (reinstalling that app) when the host app is
-  gone: `uninstallApp` marks it; a removal outside that tool is detected when a runner command
-  reports the host app not running or not installed (retried once), or when `launchApp` of the
-  host bundle finds it not installed (launched once more). A runner the lifecycle does not own is
+  gone. The tool `uninstallApp` marks it. The lifecycle detects a removal outside that tool when a
+  runner command reports the host app not running or not installed (retried once). It also
+  detects it when `launchApp` of the host bundle finds it not installed (launched once more). A runner the lifecycle does not own is
   never restarted.
 
 ## Environment
 
 Launch uses `xcodebuild test-without-building` with `platform=visionOS Simulator,id=<udid>`.
 Use device type `Apple-Vision-Pro-4K`: on the `xrOS-26-5` runtime `simctl create` rejects the
-listed `Apple-Vision-Pro` type as incompatible. The table below was captured with a probe app
-(3×3 button grid `B00`…`B22`, status label, text field `field`, bottom-ornament button `orn`, a
-volumetric window, and an empty immersive space); the verbatim capture is
+listed `Apple-Vision-Pro` type as incompatible. A probe app produced the table below: a 3×3
+button grid `B00`…`B22`, status label, text field `field`, bottom-ornament button `orn`, a
+volumetric window, and an empty immersive space. The verbatim capture is
 `test/fixtures/visionos-xcuitest/probe-capture.json`.
 
 ## Capability table
@@ -77,7 +77,7 @@ stdout and stderr to its debug log.
 The runner binds its socket only after it has activated the target app, and
 sends its `connected` handshake on each accepted connection. Startup treats that
 handshake as ready (5 s per connection attempt, retried within a 60 s startup
-limit); it does not request a hierarchy, because the first hierarchy for a built-in app such as
+limit). It does not request a hierarchy, because the first hierarchy for a built-in app such as
 Settings or Safari can take about 8 s (#17199). Hierarchy requests default to a 20 s budget; taps
 and text input keep 5 s.
 

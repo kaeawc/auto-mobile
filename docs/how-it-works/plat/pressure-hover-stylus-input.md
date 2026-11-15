@@ -32,7 +32,7 @@ the pointer routes described below:
   `performTapCoordinates`, `performSwipe`, `performDrag`, `performPinch`, and the
   streaming `StrokeDescription` coordinator).
 - `adb shell input swipe`, with no source prefix so the shell defaults to
-  `touchscreen`. `ExecuteGesture.ts` uses it as its default swipe mode (the
+  `touchscreen`. The `ExecuteGesture.ts` module uses it as its default swipe mode (the
   accessibility swipe is the opt-in `a11y` mode), and `androidLongPress.ts` expresses
   a long press as a zero-distance swipe with a duration.
 
@@ -61,13 +61,13 @@ continuation, the only per-gesture knob is the target display
   `--axis` option exists for `scroll` only.
 - `motionevent` takes no `HOVER_*` action, so hover cannot be injected this way.
 
-It runs as the shell user, so it needs neither root nor an installed helper. The tool type
-is only set from the source from Android 12 (API 31): `Input.java` from `android-7.0.0_r36`
+It runs as the shell user, so it needs neither root nor an installed helper. The shell sets the
+tool type from the source only from Android 12 (API 31). In AOSP, `Input.java` from `android-7.0.0_r36`
 through `android-11.0.0_r48` builds the event with the legacy `MotionEvent.obtain` overload,
 which carries no tool type, while `android-12.0.0_r1` assigns it (#13081). **Measured**
-(#13082): on API 30 `input stylus` arrives as source `STYLUS` with tool type `UNKNOWN`; on API 31,
-32, 33 and 37 it arrives as `TOOL_TYPE_STYLUS`. `motionevent` accepts only `DOWN`, `UP`, `MOVE`
-and, from API 31, `CANCEL`; `HOVER_MOVE` is rejected as `Unknown action`. **Not checked:**
+(#13082): on API 30 `input stylus` arrives as source `STYLUS` with tool type `UNKNOWN`. On API 31,
+32, 33 and 37 it arrives as `TOOL_TYPE_STYLUS`. The `motionevent` command accepts only `DOWN`, `UP`, `MOVE`
+and, from API 31, `CANCEL`; it rejects `HOVER_MOVE` as `Unknown action`. **Not checked:**
 releases before API 24.
 
 `adb shell input` can therefore produce a _binary_ stylus (stylus tool type, full pressure
@@ -107,25 +107,25 @@ advertises a stylus-capable `InputDevice` but no tilt or distance axes (**Measur
 - **Pen nodes.** `InputNodeDiscovery.ts` finds the touch node and any separate
   single-touch pen node (`ABS_X`/`ABS_Y` plus `BTN_TOOL_PEN` or `BTN_TOOL_RUBBER`), and
   `GetEventReader` runs one `getevent -lt` process per node. The recording session shares
-  one merge across the primary and hotplug pen readers, ordering by bracketed kernel
-  timestamp within a 50 ms reorder window before reconstruction, with
-  insertion order for ties and original host arrival times preserved. Trailing lines
+  one merge across the primary and hotplug pen readers. It orders lines by bracketed kernel
+  timestamp within a 50 ms reorder window before reconstruction, using
+  insertion order for ties and preserving original host arrival times. Trailing lines
   drain on a timer; unstamped lines pass through immediately. Stopping a reader drops
   only its nodes' pending lines.
   An all-node `getevent -lt`
-  monitor watches add/remove notifications throughout recording. Added nodes are probed
+  monitor watches add/remove notifications throughout recording. The monitor probes added nodes
   with `getevent -lp <path>`; only pen-kind nodes get a reader and a timeline following
   the current display geometry. Removal stops that reader and cancels pending discovery.
-  Monitor or pen-reader failure is logged while finger recording continues.
+  The recorder logs a monitor or pen-reader failure while finger recording continues.
 - **Pen state.** `TouchFrameReconstructor.ts` tracks `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`/
   `BTN_TOOL_RUBBER`, `BTN_TOUCH`, `BTN_STYLUS`/`BTN_STYLUS2`, `ABS_TILT_X`/`ABS_TILT_Y` and
   `ABS_DISTANCE`/`ABS_MT_DISTANCE`. A pen in range without contact is hover and never
-  becomes a tap or swipe. A pen that comes into range and leaves again without ever touching
-  (a single-touch pen's tool key down then up, or a multitouch pen reporting a hover
-  distance until its tracking id ends) is reported once as a `hover` event with sampled
+  becomes a tap or swipe. A pen can come into range and leave again without ever touching:
+  a single-touch pen's tool key down then up, or a multitouch pen reporting a hover
+  distance until its tracking id ends. The recorder reports that once as a `hover` event with sampled
   positions and distance. A positioned stylus hover with a known distance range exports as
-  `hoverAt`; otherwise it produces a stop-result warning. Hover around a contact is not
-  reported. A multitouch digitizer with no hover distance cannot be told from contact.
+  `hoverAt`; otherwise it produces a stop-result warning. The recorder does not report hover
+  around a contact. A multitouch digitizer with no hover distance cannot be told from contact.
 - **Pressure axes.** A touch node reports `ABS_MT_PRESSURE`; a single-touch pen node
   reports the non-multitouch `ABS_PRESSURE` instead. Discovery reads each node's axis range
   from `getevent -p`, and the raw values are scaled to 0-1 against it; without a usable
@@ -133,28 +133,30 @@ advertises a stylus-capable `InputDevice` but no tilt or distance axes (**Measur
 - **Gesture fields.** `GestureEvent` carries optional `toolType` (`stylus`/`eraser`),
   `pressure` (min, max and mean, normalized when the axis range is known) and `buttons`.
   A pen gesture exports as a coordinate step carrying `pointer: { toolType: "stylus" }` (or
-  `"eraser"`): a tap or long press as `tapAt`, a swipe as `swipeAt`, never `tapOn` or `swipeOn`,
-  which cannot say "stylus". Constant pressure is carried by the pointer. A stylus drag
-  with a normalized pressure range of at least 0.05 becomes a `stroke`, exported as
+  `"eraser"`). A tap or long press exports as `tapAt` and a swipe as `swipeAt`, never `tapOn` or
+  `swipeOn`, which cannot say "stylus". The pointer carries constant pressure. A stylus drag
+  with a normalized pressure range of at least 0.05 becomes a `stroke`. It exports as
   `dragPath` with per-point pressure and the pointer's mean pressure fallback, tilt and held
   buttons; constant-pressure drags deliberately remain `swipeAt`.
-  Contact and hover paths retain at most 100 samples, halving older temporal samples at
-  the cap while preserving the first point, pressure extrema and the latest point.
-  Coordinates use the mapping at contact down or hover entry; distance is normalized against its discovered
-  axis range. Segment durations use node-local kernel timestamps, falling back to host arrival
-  deltas when timestamps are absent. Elapsed offsets are rounded once; samples within the same
-  millisecond are coalesced, and gaps over 5000 ms are split with linear position and pressure/distance
-  interpolation. If splitting exceeds 100 points, the shortest adjacent segments are merged while
-  retaining endpoints, pen extrema and elapsed time. A stroke or hover whose unrounded elapsed
-  time exceeds the 20 second replay limit is omitted with a dedicated stop-result warning.
-  A pen gesture with no known position or path is left out with a warning
-  on the stop result, which a salvaged stop keeps. An eraser gesture is exported with a warning
-  because only a root `adb shell` with the `uinput` tool can replay it. A stylus double tap is exported with a warning because
-  replay refuses it. A stylus tap and a finger tap never merge into one double tap. Finger
-  gestures export unchanged. Stroke and hover replay use pointer route selection, which
-  refuses unsupported pressure or hover before dispatch and never substitutes a finger.
-  Tilt and distance on exported `swipeAt` steps remain outside the recorder contract;
-  pre-recording axis/button state and cross-node kernel-time ordering are not synchronized.
+- **Path samples.** Contact and hover paths retain at most 100 samples, halving older temporal
+  samples at the cap while preserving the first point, pressure extrema and the latest point.
+  Coordinates use the mapping at contact down or hover entry; the recorder normalizes distance
+  against its discovered axis range. Segment durations use node-local kernel timestamps, falling
+  back to host arrival deltas when timestamps are absent. The recorder rounds elapsed offsets once
+  and coalesces samples within the same millisecond. It splits gaps over 5000 ms with linear
+  position and pressure/distance interpolation. If splitting exceeds 100 points, it merges the
+  shortest adjacent segments while retaining endpoints, pen extrema and elapsed time. It omits a
+  stroke or hover whose unrounded elapsed time exceeds the 20 second replay limit, with a
+  dedicated stop-result warning.
+- **Export warnings and replay.** The recorder leaves out a pen gesture with no known position or
+  path, with a warning on the stop result, which a salvaged stop keeps. An eraser gesture exports
+  with a warning because only a root `adb shell` with the `uinput` tool can replay it. A stylus
+  double tap exports with a warning because replay refuses it. A stylus tap and a finger tap never
+  merge into one double tap. Finger gestures export unchanged. Stroke and hover replay use pointer
+  route selection, which refuses unsupported pressure or hover before dispatch and never
+  substitutes a finger. Tilt and distance on exported `swipeAt` steps remain outside the recorder
+  contract. The recorder does not synchronize pre-recording axis/button state or cross-node
+  kernel-time ordering.
 
 ## iOS
 
@@ -167,7 +169,7 @@ reported as an availability gap, not a crash. Its own declaration of
 `XCPointerEventPath` (`ObjCExceptionCatcher.h`) exposes only touch initialization,
 `moveToPoint:atOffset:` and `liftUpAtOffset:`. The pressure and mouse selectors below
 come from the header of the WebDriverAgent fork of those private classes
-(`PrivateHeaders/XCTest/XCPointerEventPath.h`); CtrlProxy neither declares nor calls
+(`PrivateHeaders/XCTest/XCPointerEventPath.h`). CtrlProxy neither declares nor calls
 them, so they are only a _potential_ private API until the runner adds and exercises
 them. That header declares:
 
@@ -187,7 +189,7 @@ The simulator probe in #13083 establishes two limits:
 - **Pressure.** The private pressure selectors accept and range-check values, and
   raw `XCPointerEvent` pressure is delivered, but `UITouch.force` stays `0.000`.
   Pressure and Pencil injection are a no-go on the simulator: pressure has no
-  observable effect, and selector inventory exposes no pen, Pencil, tilt, azimuth,
+  observable effect. Selector inventory exposes no pen, Pencil, tilt, azimuth,
   altitude or tool-type selector on `XCPointerEvent`, `XCPointerEventPath` or
   `XCSynthesizedEventRecord`. `setDeviceID` values 0–3 still produce touch type 0.
   Public force press returns "Force press events are not supported for this device."
@@ -204,7 +206,7 @@ The simulator probe in #13083 establishes two limits:
 The runner on a physical device uses the same XCTest event synthesis. There is no
 public XCTest API for Pencil input, so a real Pencil's pressure, tilt and hover look
 **impossible without the accessory** and, with the private paths, unverified.
-`recordDeviceGestures` is Android-only (`deviceGestureRecordingManager.ts` rejects other
+The `recordDeviceGestures` tool is Android-only (`deviceGestureRecordingManager.ts` rejects other
 platforms), so there is no iOS recorder representation to extend.
 
 ## Capability matrix

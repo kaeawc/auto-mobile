@@ -38,8 +38,8 @@ wording is not recognized.
 | `keep-booted`      | Runs platform cleaning, then a health check, leaving the device booted                                                          | Not a claim all state was cleaned (see "What keep-booted does not clean") |
 | `minimal` (#14682) | Keeps the device booted; uninstalls session apps, resets keychain and privacy, restores appearance, content size and pasteboard | No erase fallback; no baseline diff (see "iOS minimal mode")              |
 
-In `keep-booted`, `maxUses` (default 10; 20 in `erase` mode, where it has no effect) forces every Nth release to erase instead;
-on success the same device returns to idle and later releases can use keep-booted
+In `keep-booted`, `maxUses` (default 10; 20 in `erase` mode, where it has no effect) forces every Nth release to erase instead.
+On success the same device returns to idle and later releases can use keep-booted
 again. It bounds drift rather than capping sessions or retiring the device.
 The only iOS fallback is `erase`.
 
@@ -75,10 +75,10 @@ steps on release, in order, each with its own time budget (`AUTOMOBILE_IOS_RESET
 5. empty the pasteboard.
 
 It runs no baseline diff and no health probe, and it never falls back to erase or a
-reboot. Any failed or timed-out step, an incomplete mutation recording, or the
-`maxUses`-th release (default 5; keep-booted uses 10) returns a `pending` reset
-outcome, so the broker destroys the simulator and the next acquisition creates a
-fresh one. A failure is recorded per session: a redrive repeats the destroy outcome
+reboot. Three things return a `pending` reset outcome: any failed or timed-out step, an
+incomplete mutation recording, or the `maxUses`-th release (default 5; keep-booted uses 10).
+The broker then destroys the simulator and the next acquisition creates a fresh one. The
+broker records a failure per session: a redrive repeats the destroy outcome
 instead of cleaning a half-cleaned simulator again. Lost ownership still aborts the
 release rather than destroying.
 
@@ -88,11 +88,17 @@ release rather than destroying.
 
 The only tunable is `maxUses`; `fallback` is rejected for this mode.
 
-**Not reverted** (the trade-off for speed): locale, language and calendar, simulated
-location, status-bar overrides, increase-contrast, reduce-motion and bold text,
-notifications, contacts, calendar and photo stores, trusted certificates and
-profiles, edits to preinstalled apps, app-group and shared-container contents of
-apps the session did not install, and anything the journal did not record.
+**Not reverted** (the trade-off for speed):
+
+- locale, language and calendar;
+- simulated location and status-bar overrides;
+- increase-contrast, reduce-motion and bold text;
+- notifications, contacts, calendar and photo stores;
+- trusted certificates and profiles;
+- edits to preinstalled apps;
+- app-group and shared-container contents of apps the session did not install;
+- anything the journal did not record.
+
 Choose `keep-booted` when those matter; choose `minimal` when sessions only install
 and use their own apps and the cheaper release is worth the weaker isolation.
 It is not device-verified (#14786 and #14787 cover the same simctl behaviours in
@@ -106,9 +112,9 @@ Separate opt-in, default off. `androidResetMode` requires
 - `snapshot`: saves a named baseline snapshot for each freshly created or replaced
   emulator; release loads it, waits for readiness and checks health. On failure it
   relaunches the same AVD with wipe-data (keeping reserved boot capacity) and
-  recaptures the baseline; otherwise the device is destroyed. `wipe-data` is the
-  strategy's internal fallback, not a selectable mode. Broker snapshots are hidden
-  from user snapshot tools; a session making opaque persistent changes (e.g. a user
+  recaptures the baseline; otherwise the broker destroys the device. `wipe-data` is the
+  strategy's internal fallback, not a selectable mode. User snapshot tools do not
+  show broker snapshots; a session making opaque persistent changes (e.g. a user
   snapshot capture) still forces the wipe-data fallback.
 - `keep-booted`: runs the cleaning operations below, then health. Every
   `androidKeepBootedMaxUses`-th (default 20) release goes to the fallback chosen by
@@ -155,28 +161,29 @@ Reuse is limited to an idle device compatible with the requested profile.
 - **Reset wait (iOS only)**: a request may wait for a compatible resetting device
   only when the same profile has reset p90 and create/boot p50 samples from the last
   24 h. The device qualifies when its positive p90 remaining-time estimate is no
-  greater than the shared cutoff (minimum create p50 + boot p50 across matching
-  resetting candidates with usable estimates). The wait equals that estimate, capped
-  by the preparation deadline; one waiter per resetting device; no matching samples
-  means no wait. If the estimate timer fires first, normal admission resumes; if the
-  deadline fires first, the request fails with retryable
-  `session_preparation_failed`. It is a bounded opportunity, not a guarantee.
-  Otherwise creation is subject to session, total-device and platform boot-gate
-  limits; a cap never makes a busy or incompatible device reusable.
+  greater than the shared cutoff. The cutoff is the minimum create p50 + boot p50 across
+  matching resetting candidates with usable estimates.
+- **Wait bound**: the wait equals that estimate, capped by the preparation deadline,
+  with one waiter per resetting device; no matching samples means no wait. If the
+  estimate timer fires first, normal admission resumes. If the deadline fires first,
+  the request fails with retryable `session_preparation_failed`. It is a bounded
+  opportunity, not a guarantee.
+- **Creation**: otherwise creation is subject to session, total-device and platform
+  boot-gate limits; a cap never makes a busy or incompatible device reusable.
 - **Reset boots**: an iOS erase reset reserves its boot slot before stopping and
   holds it through erase and boot. `limits.maxConcurrentResetBoots` queues excess
-  iOS reset boots in the broker cleanup queue (not the boot gate); omitted shares the
-  gate's host limit. Gate admissions are tagged `reset`/`create`/`restart` and
+  iOS reset boots in the broker cleanup queue (not the boot gate). Omitted, reset
+  boots share the gate's host limit. Gate admissions are tagged `reset`/`create`/`restart` and
   `listDevices` reports live iOS admissions by reason.
 - **Keep-booted release**: below `maxUses`, cleaning runs, then health; a passing
   health check returns the device to idle only while ownership is valid. Reaching
   `maxUses` skips cleaning straight to fallback (iOS erase; Android snapshot if
   configured, else destroy). On iOS, re-running a release that already recorded a
-  failure also skips cleaning; a journal-load failure or unsettled earlier native
-  step fails the release without the erase fallback (resource stays pending or is
-  destroyed); failures during cleaning or health reach the erase fallback. Ownership
-  loss prevents idle publication and cleanup/fallback stay ownership-fenced (pending
-  or destroy, never a reset under a stale fence). `off` destroys on release.
+  failure also skips cleaning. A journal-load failure or unsettled earlier native
+  step fails the release without the erase fallback, and the resource stays pending
+  or the broker destroys it. Failures during cleaning or health reach the erase
+  fallback. Ownership loss prevents idle publication. Cleanup and fallback stay
+  ownership-fenced (pending or destroy, never a reset under a stale fence). `off` destroys on release.
 
 ## When a device is not reused
 
@@ -192,28 +199,28 @@ Reuse is limited to an idle device compatible with the requested profile.
 No comparison of the result with the captured baseline; unsupported journal
 reversions may be skipped (no all-kinds gate).
 
-- **iOS**: replay supported journal reversions; remove non-baseline apps and their
-  removable app-group containers; reset keychain and all privacy grants; clear
-  location and status-bar overrides and pasteboard; restore
-  appearance/content-size/contrast and locale-related global preferences; then check
+- **iOS**: replay supported journal reversions. Remove non-baseline apps and their
+  removable app-group containers. Reset keychain and all privacy grants. Clear
+  location and status-bar overrides and pasteboard. Restore
+  appearance/content-size/contrast and locale-related global preferences. Then check
   the simulator's booted target and automation health endpoint. The baseline guides
   selected operations only.
-- **Android**: replay supported reversions; remove third-party packages absent from
-  the baseline; revoke newly granted runtime permissions for retained third-party
-  apps; restore settings; remove added files under supported shared-storage roots;
-  clear clipboard if supported; then check boot completion, package-manager
-  responsiveness and CtrlProxy health. Non-critical setting/revert errors are logged
-  and skipped; critical cleaning or health failures use fallback or destruction.
+- **Android**: replay supported reversions. Remove third-party packages absent from
+  the baseline. Revoke newly granted runtime permissions for retained third-party
+  apps. Restore settings, remove added files under supported shared-storage roots,
+  and clear clipboard if supported. Then check boot completion, package-manager
+  responsiveness and CtrlProxy health. The broker logs and skips non-critical
+  setting/revert errors; critical cleaning or health failures use fallback or destruction.
 - **Fallback**: iOS erase; Android snapshot reset (itself falling back to wipe-data)
   when configured, else destroy. Success makes the resource idle-eligible; failure
   leaves it unavailable or destroys it.
 
 **Timings** (phase names are implementation details): iOS records journal,
 preflight inventory, individual revert, sanitize (incl. `trust-store:verify`),
-health and health-probe phases; native commands bound at 10 s, the health HTTP probe
-at 5 s, reset steps default 30 s. Android keep-booted records journal, clean and health
+health and health-probe phases. Native commands bound at 10 s, the health HTTP probe
+at 5 s, and reset steps default to 30 s. Android keep-booted records journal, clean and health
 phases. Cleaning uses the remaining `androidResetTimeoutMs` budget (default 600 s), or
-one third of it when snapshot fallback is configured; fallback uses the remaining budget
+one third of it when snapshot fallback is configured. Fallback uses the remaining budget
 minus a bounded 2 s command-settlement reserve. Android reset adb attempts derive their
 timeouts from the remaining budget and retry transient timeouts with backoff; readback
 mismatches still fail closed. Android snapshot phases include identity, load, readiness, health, stop and wipe-data launch. A
@@ -225,14 +232,14 @@ to wipe-data.
 A successful run plus health check does not make the device equivalent to a freshly
 erased or wiped one.
 
-- **iOS**: Photos, Contacts and Calendar additions remain; baseline app data is not
-  reset and baseline app-group data can persist in retained shared containers; other
-  unsupported state may remain. A user-trusted root certificate is never left
-  behind: `simctl keychain reset` does not clear the trust store, so the reset
-  checks it and falls back to erase when any user trust setting exists (#14828).
-- **Android**: accounts remain; baseline apps' data is not reset (no default
-  `pm clear`); overwritten/deleted baseline files are not restored; added files are
-  removed only under the supported roots; other uninventoried state may remain.
+- **iOS**: Photos, Contacts and Calendar additions remain. Keep-booted does not reset
+  baseline app data, and baseline app-group data can persist in retained shared
+  containers. Other unsupported state may remain. Keep-booted never leaves a user-trusted
+  root certificate behind: `simctl keychain reset` does not clear the trust store, so the
+  reset checks it and falls back to erase when any user trust setting exists (#14828).
+- **Android**: accounts remain. Keep-booted does not reset baseline apps' data (no default
+  `pm clear`) and does not restore overwritten/deleted baseline files. It removes added
+  files only under the supported roots. Other uninventoried state may remain.
 
 Use iOS `erase` or Android `snapshot` when a full reset boundary is required, and
 `maxUses` to bound drift (iOS periodically erases and keeps the device; Android goes
@@ -246,8 +253,8 @@ to the snapshot fallback if configured, else destroys).
   destruction stays charged until absence is confirmed. One limit covers every
   kind: Android emulators of any form factor (phone, Wear OS, TV, Automotive),
   iPhone/iPad simulators (a CarPlay screen is a display of its iPhone, not a
-  device) and Apple Watch simulators (`watchos` bindings and running
-  `ambroker-` watches are charged). A watch binding is created, reused and
+  device) and Apple Watch simulators. The cap charges `watchos` bindings and running
+  `ambroker-` watches. A watch binding is created, reused and
   deleted like an iOS simulator binding and is ready once booted. A released
   watch follows `reuse.ios.mode`: erase is `simctl erase` plus a gated reboot,
   keep-booted runs its fallback, minimal destroys; see
@@ -259,7 +266,7 @@ to the snapshot fallback if configured, else destroys).
   that gate); distinct from device-count caps. A watch boot takes a slot in the
   simulator (iOS) gate, which already counts every booted simulator.
 - `limits.maxConcurrentResetBoots`: queues iOS erase resets and keep-booted's erase
-  fallback, Apple Watch erases included; does not limit Android keep-booted cleanup; unlimited when omitted. Keep
+  fallback, Apple Watch erases included. It does not limit Android keep-booted cleanup and is unlimited when omitted. Keep
   it at or below safe iOS boot concurrency.
 
 Starting relationship: `totalDeviceCap >= sessionCap + idlePoolCap` plus allowance
@@ -272,15 +279,16 @@ destroys every idle pooled device through the same durable destroy journal, with
 an acquisition; each device reports `destroyed` or `cleanup_pending`, and a replay
 drains only what is still idle.
 
-Idle expiry runs on the broker's recovery pass (every 5 s), so a device is destroyed
-between the TTL and the TTL plus one pass after it went idle. The idle clock is held in
-daemon memory per resource revision: reuse (which changes the revision) restarts it,
-and a daemon restart restarts every clock from the first pass, so an idle device can
-outlive one restart by up to one TTL. Expiry claims a device only while it is still idle
-at the revision the pass observed, in a write transaction serialized with admission; a device
-an acquisition reserved first, or one that is held, resetting or already destroying, is
-never expired. Claimed devices are destroyed through the drain's destroy journal and
-are joined on shutdown; iOS has no idle TTL.
+Idle expiry runs on the broker's recovery pass (every 5 s), so the broker destroys a device
+between the TTL and the TTL plus one pass after it went idle. Daemon memory holds the idle
+clock per resource revision: reuse (which changes the revision) restarts it. A daemon restart
+restarts every clock from the first pass, so an idle device can outlive one restart by up to
+one TTL.
+
+Expiry claims a device only while it is still idle at the revision the pass observed, in a
+write transaction serialized with admission. It never expires a device an acquisition reserved
+first, or one that is held, resetting or already destroying. The broker destroys claimed
+devices through the drain's destroy journal and joins them on shutdown; iOS has no idle TTL.
 
 No matched comparison shows reuse reduces end-to-end latency: an idle-pool hit moves boot work
 from acquisition to release. A worked sizing example with measured iOS erase reset times is in
@@ -298,9 +306,9 @@ Acquire, release and status replies expose `timing`; correlate with
 3. Raise `idlePoolCap` only when compatible demand regularly exceeds retained supply
    and the host has spare capacity.
 4. Compare concurrent reset demand with the boot gate and host pressure before
-   raising `maxConcurrentResetBoots` (queued resets are inactive and cannot be
-   waited on; a high wait p90 under saturated boot capacity is not fixed by the
-   total cap alone).
+   raising `maxConcurrentResetBoots`. Queued resets are inactive and cannot be
+   waited on, and the total cap alone does not fix a high wait p90 under saturated
+   boot capacity.
 5. Re-measure per strategy: iOS erase, iOS keep-booted, Android snapshot and Android
    keep-booted share no latency assumptions.
 
@@ -310,9 +318,9 @@ regressions.
 
 ## Ownership release hold
 
-A managed session released while binding ownership is unconfirmed holds device teardown for up to 1.9 s on the daemon's timer. That is two shared turns at their worst case (700 ms attempt bound + the registry's 250 ms busy timeout each), covering the turn in flight when the hold is created and the hold's own expedited attempt. Creating the hold expedites one waiting re-own attempt, still in turn with other attempts; an in-flight attempt continues and recovery admission stays unchanged.
+When the daemon releases a managed session before it confirms binding ownership, it holds device teardown for up to 1.9 s on the daemon's timer. That is two shared turns at their worst case (700 ms attempt bound + the registry's 250 ms busy timeout each). They cover the turn in flight when the daemon creates the hold and the hold's own expedited attempt. Creating the hold expedites one waiting re-own attempt, still in turn with other attempts; an in-flight attempt continues and recovery admission stays unchanged.
 
-Confirmation starts teardown early. Proven ownership loss skips device writes. At the cap, teardown skips device writes and one warning reports that saved device state was dropped because ownership could not be confirmed. A `device_cleanup_in_progress` hint includes the remaining hold plus the bounded teardown time, resetting when the hold settles.
+Confirmation starts teardown early. Proven ownership loss skips device writes. At the cap, teardown skips device writes. One warning then reports that the daemon dropped saved device state because it could not confirm ownership. A `device_cleanup_in_progress` hint includes the remaining hold plus the bounded teardown time, resetting when the hold settles.
 
 ## Background
 

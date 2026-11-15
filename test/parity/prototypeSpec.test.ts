@@ -66,6 +66,16 @@ function tags(value: unknown, found: Set<string>): void {
     tags(child, found);
   }
 }
+// The specification is split across prototype-ux*.md pages; read them as one document.
+function specificationPages(): string {
+  const dir = join(import.meta.dir, "../../docs/how-it-works/plat/android");
+  return readdirSync(dir)
+    .filter((name) => /^prototype-ux(-[\w-]+)?\.md$/.test(name))
+    .sort()
+    .map((name) => readFileSync(join(dir, name), "utf8"))
+    .join("\n");
+}
+
 function parseDocumentExamples(document: string): { id?: string }[] {
   return document
     .replace(/\r\n/g, "\n")
@@ -231,10 +241,7 @@ test("undefined object properties are rejected before JSON serialization can dro
   }
 });
 test("worked documentation examples match the shared fixture files", () => {
-  const document = readFileSync(
-    join(import.meta.dir, "../../docs/how-it-works/plat/android/prototype-ux.md"),
-    "utf8",
-  );
+  const document = specificationPages();
   const examples = parseDocumentExamples(document);
   expect(examples.length).toBe(5);
   for (let index = 0; index < examples.length; index++) {
@@ -247,10 +254,7 @@ test("worked documentation examples match the shared fixture files", () => {
   }
 });
 test("worked documentation examples parse identically with LF and CRLF line endings", () => {
-  const document = readFileSync(
-    join(import.meta.dir, "../../docs/how-it-works/plat/android/prototype-ux.md"),
-    "utf8",
-  ).replace(/\r\n/g, "\n");
+  const document = specificationPages().replace(/\r\n/g, "\n");
   const lfExamples = parseDocumentExamples(document);
   const crlfExamples = parseDocumentExamples(document.replace(/\n/g, "\r\n"));
   expect(lfExamples.length).toBe(5);

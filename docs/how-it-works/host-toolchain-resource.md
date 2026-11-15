@@ -21,9 +21,9 @@ Windows drive-letter); a bare command name such as `adb` is omitted.
 
 Every probe races the doctor check against `DOCTOR_EXEC_TIMEOUT_MS`. When the
 deadline wins, the entry reports the timeout and the resource aborts the losing
-check through the `DoctorProbeOptions` signal, so the commands it spawned (for
-example `emulator -list-avds` or an `adb` path probe) are killed rather than
-accumulating across repeated reads (#7008).
+check through the `DoctorProbeOptions` signal. That signal kills the commands the
+check spawned (for example `emulator -list-avds` or an `adb` path probe) instead
+of letting them accumulate across repeated reads (#7008).
 
 `version` and `location` are advisory information and must not gate automation.
 `available` for `adb`, and for at least one Apple developer-tooling entry, is

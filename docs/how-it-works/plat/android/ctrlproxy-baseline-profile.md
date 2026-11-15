@@ -38,7 +38,7 @@ release build needs a device. CI never runs the generator.
 ## Applying the profile on sideloaded installs
 
 The daemon installs CtrlProxy with `adb install`, which skips the Play Store's profile
-installation. `androidx.profileinstaller` (declared directly) writes the packaged profile for ART
+installation. The `androidx.profileinstaller` library (declared directly) writes the packaged profile for ART
 when the app process first starts, and ART compiles it during the next background dexopt.
 
 ## Release guard

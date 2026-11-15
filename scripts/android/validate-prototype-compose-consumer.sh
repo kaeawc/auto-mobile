@@ -13,7 +13,8 @@
 #   AC4  an Android app resolving the artifact from that repository (with no
 #        Compose BOM of its own) compiles a call to AutoMobilePrototype and the
 #        committed automobile:prototype/native sample (samples/prototype-embedding)
-#        into a minified (R8) release APK. Nothing runs the APK.
+#        and the committed automobile:prototype/eject scaffold (#16499) into a
+#        minified (R8) release APK. Nothing runs the APK.
 #
 # Usage:
 #   validate-prototype-compose-consumer.sh [--skip-publish] [--skip-consumer]
@@ -206,6 +207,10 @@ android {
 dependencies {
   implementation("${coordinate}")
   implementation("androidx.activity:activity-compose:${activity}")
+  // The ejected scaffold (#16499) calls foundation and Material 3 directly, as an app that
+  // ejects would; their versions come from the Compose BOM the published renderer exposes.
+  implementation("androidx.compose.foundation:foundation")
+  implementation("androidx.compose.material3:material3")
 }
 GRADLE_BUILD
 
@@ -266,7 +271,8 @@ class MainActivity : ComponentActivity() {
 }
 KOTLIN
 
-  # Compile the automobile:prototype/native sample (#13732) exactly as an app would add it.
+  # Compile the automobile:prototype/native sample (#13732) and the eject scaffold under
+  # java/prototypes/eject (#16499) exactly as an app would add them.
   local sample_root="${PROJECT_ROOT}/samples/prototype-embedding/android/app/src/main"
   [ -d "$sample_root" ] || usage_error "embedding sample missing: ${sample_root}"
   mkdir -p "${consumer_dir}/src/main/kotlin" "${consumer_dir}/src/main/assets"
@@ -289,7 +295,7 @@ run_validation() {
       --skip-publish) skip_publish=1; shift ;;
       --skip-consumer) skip_consumer=1; shift ;;
       --repo) repo="${2:-}"; [ -n "$repo" ] || usage_error "--repo needs a dir"; shift 2 ;;
-      -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       *) usage_error "unknown argument: $1" ;;
     esac
   done

@@ -38,6 +38,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
+import dev.jasonpearson.automobile.protocol.PrototypeLibraryProvenance
 import dev.jasonpearson.automobile.protocol.PrototypeWebView
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
@@ -137,6 +138,7 @@ class ViewerActivity : ComponentActivity() {
         { lifecycleScope.launch { relaunch(false) } },
         { confirmReset = true },
         { copyDiagnostics(diagnostics) },
+        content?.sensitiveModules.orEmpty(),
       )
       // Spec dialogs, menus, dropdowns, sheets and anchored overlays are all in-window renderer
       // layers. Clip that whole surface, including its scrims, below the app-owned provenance.
@@ -292,6 +294,7 @@ private class ViewerContent(
   client: PrototypeHttpClient,
 ) {
   val importError = viewerImportError(prototype.saved.specJson, networkAllowed = false)
+  val sensitiveModules = PrototypeLibraryProvenance.sensitiveModules(prototype.saved.specJson)
   val assets =
     PrototypeAssets(image = prototype.saved::assetBytes, font = prototype.saved::assetBytes)
   // The embedded renderer exposes a read-only request facade; the saved transport consumes
@@ -372,6 +375,7 @@ internal fun ViewerChrome(
   relaunch: () -> Unit,
   reset: () -> Unit,
   copyDiagnostics: () -> Unit,
+  sensitiveModules: List<String> = emptyList(),
 ) {
   FlowRow(Modifier.fillMaxWidth().testTag("viewer-actions")) {
     TextButton(onClick = relaunch, enabled = !restarting) {
@@ -386,6 +390,12 @@ internal fun ViewerChrome(
     Text(
       stringResource(R.string.network_provenance),
       modifier = Modifier.fillMaxWidth().testTag("network-provenance"),
+    )
+  // R6 (#15636): app-owned, outside the spec's drawable bounds, so a spec cannot cover it.
+  if (sensitiveModules.isNotEmpty())
+    Text(
+      stringResource(R.string.sensitive_module_provenance, sensitiveModules.joinToString(", ")),
+      modifier = Modifier.fillMaxWidth().testTag("sensitive-provenance"),
     )
   if (actionFailed) Text(stringResource(R.string.action_error))
 }

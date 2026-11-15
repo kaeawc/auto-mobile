@@ -147,6 +147,8 @@ public enum PrototypeSpecStrictValidator {
                 try PrototypeSensitiveSinkRules.validate(
                     fields, nodes: context.locatedNodes, actions: context.actions, repeats: repeats
                 )
+                // R2 sinks, then R1 modules: TypeScript's library order.
+                try PrototypeLibraryModuleRule.validate(fields)
             }
         } catch let error as PrototypeLoadError { throw error }
         catch let DecodingError.dataCorrupted(context) {

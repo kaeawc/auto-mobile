@@ -2305,8 +2305,9 @@ write, at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) a
 `requires.permissions`. No updates are delivered in the background. No production runtime advertises the module.
 The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
 only when the spec emits them or writes them into `/data`. `prototypeLocationEventSummary`
-(`prototypeLocationPrivacy.ts`) is the reference the runtimes copy, with shared cases in
-`test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
+(`prototypeLocationPrivacy.ts`) is the reference the runtimes copy; it and its Kotlin
+(`PrototypeLocationEventSummary.kt`, `android/protocol`) and Swift (`PrototypeLocationEventSummary.swift`) twins
+replay the shared cases in `test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
 the Android and iOS transports, reduces any decoded `location.updated` data to those two fields and logs the
 names (never the values) of anything it dropped. The host mirrors the last delivered `location.updated` as `platformStatus.location`
 in `prototype status` and `inspect`, like the status modules above, with `values` holding only `accuracyM` and
@@ -2339,8 +2340,8 @@ whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, ga
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
 `commerce.checkout` is not in the contract, and no production runtime advertises the module.
 
-The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin `PrototypePurchaseOutcome`
-copies it, and both replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
+The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin and Swift `PrototypePurchaseOutcome`
+copy it, and all three replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
 `gracePeriod` or `billingRetry`, and a consumable never holds one. `lastTransaction` is
 `{transactionId, productId, status}`, or null. Buying a product that is `active` or in `gracePeriod` fails
 with `alreadyOwned`, whatever outcome was queued; a product in `billingRetry` can be bought again. A product

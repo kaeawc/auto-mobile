@@ -229,6 +229,16 @@ export class CarAppTemplateReader {
     return projectedTemplates((await this.readBoundApps(device)).blocks);
   }
 
+  /**
+   * A fresh services dump for a head-unit action's before and after reads (#17842). It skips the
+   * one-second cache, so the read after the input never returns the dump taken before it.
+   */
+  async readProjectionServices(
+    device: BootedDevice,
+  ): Promise<AndroidAutoProjectionServices | undefined> {
+    return device.platform === "android" ? this.dumpProjection(device) : undefined;
+  }
+
   private async readBoundApps(device: BootedDevice): Promise<{
     services: AndroidAutoProjectionServices | undefined;
     apps: AndroidAutoProjectionServices["apps"];

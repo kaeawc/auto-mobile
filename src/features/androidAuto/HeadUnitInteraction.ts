@@ -1,5 +1,9 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { CarAppProjectedTemplates } from "../../models/CarAppTemplates";
+import type {
+  AndroidAutoProjectionServices,
+  ProjectedCarApp,
+} from "../observe/android/projectedCarApps";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
@@ -19,6 +23,29 @@ export const HEAD_UNIT_DISPLAY = "headUnit";
 /** The projected apps' template stacks, read now. */
 export interface HeadUnitTemplateSource {
   read(): Promise<CarAppProjectedTemplates | undefined>;
+}
+
+/**
+ * What Android Auto has bound on the phone: its Car App Library template hosts (one per app
+ * category) and the apps outside it. The head unit's `activeWindow`-level read: it moves when the
+ * head unit opens an app or a category it had not bound, including apps without the template route.
+ */
+export interface HeadUnitProjection {
+  templateHosts: string[];
+  apps: ProjectedCarApp[];
+}
+
+/** Android Auto's bindings, read now; undefined when the read failed. */
+export interface HeadUnitProjectionSource {
+  read(): Promise<HeadUnitProjection | undefined>;
+}
+
+/** The bindings a parsed services dump shows, without each app's bound components. */
+export function headUnitProjection(services: AndroidAutoProjectionServices): HeadUnitProjection {
+  return {
+    templateHosts: services.templateHosts,
+    apps: services.apps.map(({ packageName, userId }) => ({ packageName, userId })),
+  };
 }
 
 export interface HeadUnitIdleTiming {
@@ -53,6 +80,7 @@ export type HeadUnitEffectBasis =
   | "carAppTemplates unchanged"
   | "screenshot changed"
   | "screenshot unchanged"
+  | "projectedApps changed"
   | "no template data";
 
 /** What the before and after reads came from. */
@@ -78,6 +106,8 @@ export interface HeadUnitInteractionResult {
   idle: HeadUnitIdle;
   before?: HeadUnitScreen[];
   after?: HeadUnitScreen[];
+  /** Android Auto's bindings before and after, when they changed. */
+  projection?: { before: HeadUnitProjection; after: HeadUnitProjection };
 }
 
 /** pressButton buttons and the DHU console commands they map to. */
@@ -212,6 +242,35 @@ export function deriveHeadUnitEffect(
   return { screenChanged: changed, basis: `${source} ${changed ? "changed" : "unchanged"}` };
 }
 
+function projectionKey(projection: HeadUnitProjection): string {
+  return JSON.stringify([
+    projection.templateHosts,
+    projection.apps.map((app) => [app.packageName, app.userId]),
+  ]);
+}
+
+/** Android Auto bound or dropped an app or a template host between the two reads. */
+export function headUnitProjectionChanged(
+  before: HeadUnitProjection | undefined,
+  after: HeadUnitProjection | undefined,
+): boolean {
+  return (
+    before !== undefined && after !== undefined && projectionKey(before) !== projectionKey(after)
+  );
+}
+
+/**
+ * The screen read decides first. When it saw no change, or could not tell, a change in Android
+ * Auto's bindings still means the head unit moved, as a changed `activeWindow` does on a phone.
+ * Unchanged bindings prove nothing: every connected app stays bound while another is shown.
+ */
+function withProjection(effect: HeadUnitEffect, projectionChanged: boolean): HeadUnitEffect {
+  if (effect.screenChanged === true || !projectionChanged) {
+    return effect;
+  }
+  return { screenChanged: true, basis: "projectedApps changed" };
+}
+
 /** `package/carSessionId` of each projected session in a template read, sorted, for the fence. */
 function fenceApps(read: HeadUnitRead): string[] {
   return read.screens.map((screen) => `${screen.packageName}/${screen.carSessionId}`).sort();
@@ -247,6 +306,8 @@ export interface HeadUnitInteractionOptions {
   fence?: { deviceId: string; state: HeadUnitFence };
   /** Read when no projected app answers the template route. */
   screenshots?: HeadUnitScreenshotSource;
+  /** Android Auto's bindings, read once before the input and once after the wait. */
+  projection?: HeadUnitProjectionSource;
 }
 
 type HeadUnitReader = () => Promise<HeadUnitRead | undefined>;
@@ -271,19 +332,25 @@ export class HeadUnitInteraction {
       );
     }
     const { source, read, before } = await this.readBefore(signal);
+    const projectionBefore = await this.readProjection();
     signal?.throwIfAborted();
     this.assertFence(source, before);
     commands.forEach((command) => this.dhuConsole.sendCommand(command));
     const { idle, after } = await this.waitForIdle(before, read, source, signal);
     this.recordFence(source, after);
+    const projectionAfter = projectionBefore ? await this.readProjection() : undefined;
+    const projectionChanged = headUnitProjectionChanged(projectionBefore, projectionAfter);
     const screens = source === "carAppTemplates";
     return {
       display: HEAD_UNIT_DISPLAY,
       commands: [...commands],
-      effect: deriveHeadUnitEffect(before, after, source),
+      effect: withProjection(deriveHeadUnitEffect(before, after, source), projectionChanged),
       idle,
       ...(screens && before ? { before: before.screens } : {}),
       ...(screens && after ? { after: after.screens } : {}),
+      ...(projectionChanged && projectionBefore && projectionAfter
+        ? { projection: { before: projectionBefore, after: projectionAfter } }
+        : {}),
     };
   }
 
@@ -361,6 +428,19 @@ export class HeadUnitInteraction {
       idle: { basis: sawData ? source : "none", stable: false, waitedMs: elapsed() },
       after: previous,
     };
+  }
+
+  private async readProjection(): Promise<HeadUnitProjection | undefined> {
+    const projection = this.options.projection;
+    if (!projection) {
+      return undefined;
+    }
+    try {
+      return await projection.read();
+    } catch (error) {
+      logger.warn(`[AndroidAuto] Android Auto bindings read failed: ${errorMessage(error)}`, error);
+      return undefined;
+    }
   }
 
   private async readScreens(): Promise<HeadUnitRead | undefined> {

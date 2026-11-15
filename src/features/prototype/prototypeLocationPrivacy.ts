@@ -9,7 +9,8 @@ import { logger } from "../../utils/logger";
  * coordinates leave the device only when the spec emits them or writes them into `/data`.
  *
  * - {@link prototypeLocationEventSummary} is the reference the Android and iOS runtimes copy to build
- *   the delivered event's `data` from a fix; the shared cases live in
+ *   the delivered event's `data` from a fix. It and its twins (`PrototypeLocationEventSummary.kt` in
+ *   `android/protocol`, `PrototypeLocationEventSummary.swift`) replay
  *   `test/fixtures/prototype-location/event-summary.json`.
  * - {@link redactPrototypeLocationEvent} is the host's second layer: every decoded
  *   `prototype_platform_event` for `location.updated` keeps only the summary fields, whatever the

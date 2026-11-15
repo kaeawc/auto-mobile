@@ -32,10 +32,9 @@ Imported specs already lose privileged windows, host requests and AGSL shaders
 
 **R1: imported specs use no `sensitive` call.** `sensitive` in the contract's `platformModules`
 table marks calls and events that touch personal data (clipboard, share, contacts, location,
-camera and microphone output). The TypeScript and Kotlin strict validators refuse sensitive calls
-and handlers when `library: true`, with the call or handler's path; the shared fixtures are in
-`test/fixtures/prototype-spec/library-modules/`. The Swift validator does not apply this rule yet.
-Relaxing this is an owner decision
+camera and microphone output). The TypeScript, Kotlin and Swift strict validators refuse sensitive
+calls and handlers when `library: true`, with the call or handler's path; the shared fixtures are in
+`test/fixtures/prototype-spec/library-modules/`. Relaxing this is an owner decision
 ([#15636](https://github.com/kaeawc/auto-mobile/issues/15636)).
 
 **R2: sensitive results cannot reach a network or storage sink.** A `/data` path written by a
@@ -84,10 +83,11 @@ authenticated host connection, never from spec content, intents or links. Import
 accept them only while host attach is enabled, which is off by default. _Not yet enforced_
 ([#15638](https://github.com/kaeawc/auto-mobile/issues/15638)).
 
-**R6: provenance.** While a sensitive module is active in an imported prototype, ProtoViewer's
-app-reserved provenance region names it. The region sits outside the spec's drawable bounds, so a
-spec cannot cover it. _Not yet enforced_
-([#15636](https://github.com/kaeawc/auto-mobile/issues/15636)).
+**R6: provenance.** When an imported prototype uses a sensitive call or handler, ProtoViewer's
+app-reserved provenance region names its modules. The region sits outside the spec's drawable
+bounds, so a spec cannot cover it. Android (`PrototypeLibraryProvenance` in `:protocol`) and iOS
+(`PrototypeLibraryProvenance` in the agent core) derive the module list with the R1 walk. Under R1
+a validated import lists none, so the region stays hidden until R1 is relaxed.
 
 ## Out of scope
 

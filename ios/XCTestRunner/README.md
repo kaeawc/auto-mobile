@@ -101,8 +101,13 @@ sessions; recovery and its resumed plan retain the held session. The daemon rele
 when the plan completes. The observer tracks test objects and timestamps without consuming session ids.
 Independent concurrent runs need distinct transport clients to isolate transport session lifetimes.
 
-`XCTestCase.defaultTestSuite` is the sole synchronous fetch boundary. XCTest constructs the suite
-before async test bodies run, so loading lazily on first async use cannot order a cold-start suite.
+Timing ordering requires subclassing `AutoMobileTimingOrderedTestCase`. Its `defaultTestSuite`
+override breaks `swift test --filter` selection on this toolchain; use `AutoMobileTestCase` for
+filtered SwiftPM runs. Observer registration runs in class-level setup for both base classes.
+
+`AutoMobileTimingOrderedTestCase.defaultTestSuite` is the sole synchronous timing fetch boundary.
+XCTest constructs the suite before async test bodies run, so loading lazily on first async use cannot
+order a cold-start suite.
 The private `SynchronousTimingFetch` next to `TestTimingCache` waits for an async resource read on a
 synchronous XCTest thread, using the unchanged five-second default timeout and best-effort logging.
 Never call it from an async context or the cooperative pool. Its awaited path must stay free of

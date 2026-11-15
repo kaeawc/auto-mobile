@@ -21,8 +21,9 @@ concurrency. [STATUS.md](STATUS.md) has the build gate, concurrency archetypes a
 - The tvOS and visionOS runner targets compile an explicit file subset of `Sources/CtrlProxy`, so
   a listed file must not use a type from an unlisted one. Fast Validation's
   `ctrl-proxy-target-types` check (`scripts/ios/check-ctrl-proxy-target-types.ts`) reports any
-  top-level project type a target uses but does not compile; fix it by listing the defining file
-  in `project.yml` or moving the new type to a file the subset does not compile.
+  project type a target uses but does not compile, including a nested type declared only in an
+  extension the target does not compile; fix it by listing the defining file in `project.yml` or
+  moving the new type to a file the subset does not compile.
 
 ## IPA packaging
 

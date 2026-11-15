@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
-  FOCUS_NAVIGATE_STALL_PRESSES,
   FocusNavigate,
   type FocusKeyPresser,
   type FocusNavigateDirection,
@@ -46,6 +45,8 @@ class FakePlaygroundHome implements FocusObserver, FocusKeyPresser {
   readonly presses: InputKeyName[] = [];
   focus: NodeId = "slider";
   value = 50;
+  /** True: up/down change the slider's value too, as a Compose slider does on the TV image. */
+  verticalAdjusts = false;
   /** Arrow presses the slider took as value changes. */
   valuePresses = 0;
 
@@ -141,7 +142,14 @@ class FakePlaygroundHome implements FocusObserver, FocusKeyPresser {
       return { success: true };
     }
     const next = this.moves[this.focus][direction];
-    if (next) {
+    if (
+      this.verticalAdjusts &&
+      this.focus === "slider" &&
+      (direction === "up" || direction === "down")
+    ) {
+      this.valuePresses += 1;
+      this.value += direction === "up" ? 1 : -1;
+    } else if (next) {
       this.focus = next;
     } else if (
       this.adjustable &&
@@ -171,9 +179,15 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: true, status: "focused" });
     expect(result.steps).toBeLessThan(12);
     expect(home.presses).toContain("tab");
-    // Each horizontal arrow is pressed on the slider once, so its value ends where it started.
-    expect(home.valuePresses).toBe(2);
+    // Each arrow that changed the value was undone with the opposite one (#17209).
+    expect(home.valuePresses).toBe(4);
     expect(home.value).toBe(50);
+    // No path entry holds a changed value: the read of one is dropped when it is undone.
+    const sliderLabels = result.path
+      .filter((entry) => entry.resourceId === "slider_control")
+      .map((entry) => entry.descendantLabel);
+    expect(sliderLabels).toContain("Slider with value 50 percent");
+    expect(sliderLabels.every((label) => label === "Slider with value 50 percent")).toBe(true);
   });
 
   test("ends stuck, not max_steps, naming the slider and the directions it consumed", async () => {
@@ -184,10 +198,11 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: false, status: "stuck" });
     expect(result.steps).toBeLessThan(30);
     expect(home.presses.filter((key) => key === "tab")).toEqual(["tab"]);
-    expect(home.valuePresses).toBeLessThanOrEqual(4);
+    expect(home.value).toBe(50);
     expect(result.message).toContain(
       'the focused control "slider_control" consumed left and right',
     );
+    expect(result.message).toContain("each change was undone with the opposite arrow");
     expect(result.message).toContain("pressing tab did not move focus out of it either");
   });
 
@@ -201,8 +216,7 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: true, status: "focused" });
     expect(result.steps).toBeLessThan(20);
     expect(home.presses).toContain("tab");
-    expect(home.presses).toContain("arrow_up");
-    expect(home.valuePresses).toBeLessThanOrEqual(FOCUS_NAVIGATE_STALL_PRESSES * 2 + 1);
+    expect(home.value).toBe(50);
   });
 
   test("with no value readout and no way out, it ends stuck rather than at max_steps (#17209)", async () => {
@@ -213,6 +227,26 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     expect(result).toMatchObject({ success: false, status: "stuck" });
     expect(result.steps).toBeLessThan(30);
     expect(result.message).toContain('the focused control "slider_control" consumed');
+    expect(home.value).toBe(50);
+  });
+
+  test("a slider that takes up and down as value changes too is left with tab, its value restored (#17209)", async () => {
+    const home = new FakePlaygroundHome(true);
+    home.verticalAdjusts = true;
+    const result = await new FocusNavigate(home, home, timer).execute({
+      until: { text: "Settings" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    expect(home.presses).toContain("tab");
+    expect(home.value).toBe(50);
+    // Every arrow was pressed once on the slider and once more to undo it.
+    expect(home.valuePresses).toBe(8);
+    // No path entry holds a changed value: the read of one is dropped when it is undone.
+    const sliderLabels = result.path
+      .filter((entry) => entry.resourceId === "slider_control")
+      .map((entry) => entry.descendantLabel);
+    expect(sliderLabels).toContain("Slider with value 50 percent");
+    expect(sliderLabels.every((label) => label === "Slider with value 50 percent")).toBe(true);
   });
 
   test("a slider whose label never changes still ends stuck without tab", async () => {

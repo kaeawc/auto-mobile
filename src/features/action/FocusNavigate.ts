@@ -18,9 +18,16 @@ import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
 import { describeFocus, elementMatchesTarget, stringProp } from "./FocusNavigateMatching";
-import { createFocusIdentity, focusKey, type FocusIdentity } from "./FocusIdentity";
-import { FOCUS_NAVIGATE_DIRECTIONS, type FocusNavigateDirection } from "./FocusNavigateDirections";
-import { describeEntry, isViewTextField, trapMessage } from "./FocusTrapMessage";
+import { changedOwnRange, createFocusIdentity, focusKey } from "./FocusIdentity";
+import {
+  createFocusProgress,
+  rangeProbe,
+  stuckMessage,
+  type FocusProgress,
+  type RangeProbe,
+} from "./FocusProgress";
+import type { FocusNavigateDirection } from "./FocusNavigateDirections";
+import { isViewTextField, trapMessage } from "./FocusTrapMessage";
 import {
   findRowAnchor,
   isInRow,
@@ -39,12 +46,7 @@ export const FOCUS_NAVIGATE_DEFAULT_SETTLE_MS = 200;
 export const FOCUS_NAVIGATE_MAX_SETTLE_MS = 5000;
 /** Consecutive explicit-direction presses that leave focus unchanged before the loop gives up. */
 export const FOCUS_NAVIGATE_STUCK_PRESSES = 2;
-/**
- * Consecutive presses in one direction that move focus without bringing it closer to the target
- * (a long list scrolling under a fixed focus slot, a slider changing its value) before that
- * direction is tried last, until focus moves another way or closes distance.
- */
-export const FOCUS_NAVIGATE_STALL_PRESSES = 3;
+export { FOCUS_NAVIGATE_STALL_PRESSES } from "./FocusProgress";
 
 export const FOCUS_NAVIGATE_STATUSES = ["focused", "max_steps", "stuck"] as const;
 export type FocusNavigateStatus = (typeof FOCUS_NAVIGATE_STATUSES)[number];
@@ -425,161 +427,6 @@ function distanceToNearest(from: Element | null, matches: readonly Element[]): n
   );
 }
 
-/** Tracks whether presses move focus, and toward the target, across one navigation call. */
-interface FocusProgress {
-  readonly unchanged: number;
-  /** Directions that did not move focus off this element during this navigation call. */
-  readonly blocked: ReadonlySet<FocusNavigateDirection>;
-  /** Directions already pressed from this element; pressing one again leads where it led before. */
-  readonly tried: ReadonlySet<FocusNavigateDirection>;
-  /** Directions that kept moving focus without closing distance; tried after every other one. */
-  readonly stalled: ReadonlySet<FocusNavigateDirection>;
-  /** The direction of the press that moved focus onto the current element, if known. */
-  readonly arrivedBy: FocusNavigateDirection | undefined;
-  /** Directions the focused control consumed by changing its own value instead of moving focus. */
-  readonly adjusted: ReadonlySet<FocusNavigateDirection>;
-  /** Presses a stalled direction again because every escape from it failed; it stays undemoted. */
-  resume(direction: FocusNavigateDirection): void;
-  /**
-   * Records an observation and the focused element's distance to the target (undefined when
-   * either is missing). Container-only focus leaves the last control's progress intact.
-   */
-  observe(identity: FocusIdentity, distance: number | undefined, containsTarget: boolean): void;
-  pressed(direction: FocusNavigateDirection, containsTarget: boolean): void;
-}
-
-interface ElementMemory {
-  blocked: Set<FocusNavigateDirection>;
-  tried: Set<FocusNavigateDirection>;
-  adjusted: Set<FocusNavigateDirection>;
-}
-
-function emptyMemory(): ElementMemory {
-  return { blocked: new Set(), tried: new Set(), adjusted: new Set() };
-}
-
-/** Tracks presses in one direction that move focus without bringing it closer to the target. */
-function createStallTracker() {
-  const stalled = new Set<FocusNavigateDirection>();
-  /** Directions resumed after their escapes failed; demoting them again would only repeat that. */
-  const resumed = new Set<FocusNavigateDirection>();
-  let previous: number | undefined;
-  let run: { direction: FocusNavigateDirection; presses: number } | undefined;
-  return {
-    stalled,
-    resume(direction: FocusNavigateDirection) {
-      resumed.add(direction);
-      stalled.delete(direction);
-    },
-    /** `moved` is the direction of the press that moved focus, if the last press did. */
-    observe(distance: number | undefined, moved: FocusNavigateDirection | undefined) {
-      const before = previous;
-      previous = distance;
-      if (!moved || distance === undefined || before === undefined) {
-        run = undefined;
-        return;
-      }
-      if (!stalled.has(moved) || distance < before) {
-        // Focus left the stall another way, or the stalled direction got closer after all.
-        stalled.clear();
-      }
-      if (distance < before) {
-        run = undefined;
-        return;
-      }
-      const presses = run?.direction === moved ? run.presses + 1 : 1;
-      run = { direction: moved, presses };
-      if (presses >= FOCUS_NAVIGATE_STALL_PRESSES) {
-        if (!resumed.has(moved)) {
-          stalled.add(moved);
-        }
-      }
-    },
-  };
-}
-
-function createFocusProgress(): FocusProgress {
-  const memoryByElement = new Map<string, ElementMemory>();
-  const stall = createStallTracker();
-  let memory = emptyMemory();
-  let unchanged = 0;
-  let previousKey: string | undefined;
-  let lastDirection: FocusNavigateDirection | undefined;
-  let arrivedBy: FocusNavigateDirection | undefined;
-  return {
-    get arrivedBy() {
-      return arrivedBy;
-    },
-    get unchanged() {
-      return unchanged;
-    },
-    get blocked() {
-      return memory.blocked;
-    },
-    get tried() {
-      return memory.tried;
-    },
-    get adjusted() {
-      return memory.adjusted;
-    },
-    stalled: stall.stalled,
-    resume: (direction) => stall.resume(direction),
-    observe({ key, replaces, changedInPlace }, distance, containsTarget) {
-      // A container read cannot prove a refused arrow or movement away from the target.
-      if (containsTarget) {
-        return;
-      }
-      if (replaces !== undefined && replaces === previousKey) {
-        // The control changed its own value: carry what was learned there to its label-free key.
-        memoryByElement.set(key, memory);
-        previousKey = key;
-      }
-      const didNotMove = previousKey !== undefined && key === previousKey;
-      unchanged = didNotMove ? unchanged + 1 : 0;
-      if (!didNotMove) {
-        memory = memoryByElement.get(key) ?? emptyMemory();
-        memoryByElement.set(key, memory);
-      } else if (lastDirection) {
-        memory.blocked.add(lastDirection);
-        if (changedInPlace) {
-          memory.adjusted.add(lastDirection);
-        }
-      }
-      if (!didNotMove) {
-        // A refused press in between (down off a slider) does not end a run of presses that keep
-        // changing the control without getting closer (#17209).
-        stall.observe(distance, lastDirection);
-      }
-      arrivedBy = didNotMove ? arrivedBy : lastDirection;
-      previousKey = key;
-      lastDirection = undefined;
-    },
-    pressed(direction, containsTarget) {
-      if (containsTarget) {
-        return;
-      }
-      memory.tried.add(direction);
-      lastDirection = direction;
-    },
-  };
-}
-
-function stuckMessage(progress: FocusProgress, focusedElement?: FocusPathEntry): string {
-  const { unchanged, blocked, tried, adjusted } = progress;
-  const unmoved = Math.max(1, unchanged, blocked.size);
-  const presses = `${unmoved} ${unmoved === 1 ? "press" : "presses"}`;
-  const base =
-    blocked.size < tried.size
-      ? `Every D-pad direction from the focused element was tried; focus did not move after ${presses}`
-      : `Focus did not move after ${presses}`;
-  if (adjusted.size === 0) {
-    return base;
-  }
-  // Say why: the control took the arrows as value changes (a slider), and it was left changed.
-  const directions = FOCUS_NAVIGATE_DIRECTIONS.filter((direction) => adjusted.has(direction));
-  return `${base}; the focused control${describeEntry(focusedElement)} consumed ${directions.join(" and ")} by changing its own value instead of moving focus, so its value may have changed`;
-}
-
 const STOPPED_SUFFIX = "; the target was not focused. Observe before retrying.";
 
 /** A stopped result's message without its closing advice, to extend it. */
@@ -674,6 +521,7 @@ export class FocusNavigate {
     const planTarget = createTargetPlanner();
     const trap: ExitContext["trap"] = {};
     let lastDirection: FocusNavigateDirection | undefined;
+    let probe: RangeProbe | undefined;
     const walk: WalkSearch = { seen: false, sweep: createRowSearch(), planTarget };
 
     for (;;) {
@@ -683,6 +531,17 @@ export class FocusNavigate {
         path,
         maxSteps > 0,
       );
+      const undone = await this.undoAdjustment(probe, screen, signal);
+      probe = undefined;
+      if (undone) {
+        // The press changed the control's value: the read of the changed value is not a place
+        // the walk went, and the next read (value restored) counts as the press refused.
+        path.length = undone.pathLength;
+        progress.restoredAdjustment(undone.direction);
+        steps += 1;
+        await awaitWhileRequestIsLive(this.timer.sleep(settleMs), signal);
+        continue;
+      }
       const { focused } = screen;
       progress.observe(
         identify(focusedElement, screen, lastDirection),
@@ -722,6 +581,7 @@ export class FocusNavigate {
       if (!direction) {
         throw new ActionableError("focusNavigate has no direction to press");
       }
+      probe = rangeProbe(screen, direction, path.length);
       await this.press(direction, signal);
       progress.pressed(direction, containsTarget);
       lastDirection = direction;
@@ -868,6 +728,24 @@ export class FocusNavigate {
       return stalled;
     }
     return untried[0];
+  }
+
+  /**
+   * After an arrow pressed on a control that reports its own value (#17209): when the same control
+   * still holds focus with a different value, press the opposite arrow to put the value back and
+   * return the probe. A View SeekBar's up/down move focus, so they read as ordinary moves; a Compose
+   * slider on the TV image takes all four arrows, and each is undone once.
+   */
+  private async undoAdjustment(
+    probe: RangeProbe | undefined,
+    screen: FocusScreen,
+    signal: AbortSignal | undefined,
+  ): Promise<RangeProbe | undefined> {
+    if (!probe || !changedOwnRange(probe.before, screen)) {
+      return undefined;
+    }
+    await this.press(OPPOSITE[probe.direction], signal);
+    return probe;
   }
 
   /** How a walk that cannot continue ends: a trap escape to retry from, or the final result. */

@@ -60,10 +60,10 @@ function composeColor(hex: string): string {
 }
 
 function schemeLines(name: string, factory: string, colors: ReadonlyMap<string, string>): string[] {
-  const args = [...colors].map(([role, hex]) => `    ${role} = ${composeColor(hex)},`);
+  const args = [...colors].map(([role, hex]) => `        ${role} = ${composeColor(hex)},`);
   return args.length === 0
     ? [`private val ${name} = ${factory}()`]
-    : [`private val ${name} = ${factory}(`, ...args, ")"];
+    : [`private val ${name} =`, `    ${factory}(`, ...args, "    )"];
 }
 
 function composeDarkExpression(mode: EjectThemeColors["mode"]): string {
@@ -79,13 +79,17 @@ export function composeThemeLines(theme: EjectThemeColors, name: string): string
     "@Composable",
     `fun ${name}(content: @Composable () -> Unit) {`,
     `    val dark = ${composeDarkExpression(theme.mode)}`,
-    `    MaterialTheme(colorScheme = if (dark) ${name}Dark else ${name}Light, content = content)`,
+    "    MaterialTheme(",
+    `        colorScheme = if (dark) ${name}Dark else ${name}Light,`,
+    "        content = content,",
+    "    )",
     "}",
     "",
   ];
   return [
     ...head,
     ...schemeLines(`${name}Light`, "lightColorScheme", theme.light),
+    "",
     ...schemeLines(`${name}Dark`, "darkColorScheme", theme.dark),
   ];
 }

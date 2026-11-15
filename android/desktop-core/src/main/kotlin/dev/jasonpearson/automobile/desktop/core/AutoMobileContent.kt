@@ -1600,7 +1600,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
           is Result.Success -> {
             installedApps = result.data
             if (selectedAppId == null) {
-              selectedAppId = selectDefaultApp(result.data, null)
+              selectedAppId = selectDefaultApp(result.data, isIOS = false)
             }
           }
           else -> {}

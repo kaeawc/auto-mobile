@@ -8,32 +8,29 @@ import {
   simulatePrototypePush,
   type PrototypePushRoutes,
   type PrototypePushSimulateResult,
-  type PrototypePushTransport,
 } from "../features/prototype/prototypePushSimulate";
 import { prototypeTimersUnsupportedMessage } from "../features/prototype/prototypeTimers";
 import { toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import type { z } from "zod/v4";
+import type { prototypeSchema } from "./prototypeTools/schemas";
 export interface PrototypeSimulateTarget {
   android?: Pick<AndroidPrototypeTransport, "supportsCommand" | "advanceClock">;
   ios?: Pick<IosPrototypeTransport, "supportsCapability" | "advanceClock">;
   /** Push delivery routes; no runtime accepts a simulated push yet, so devices supply none. */
   push?: PrototypePushRoutes;
 }
-export interface PrototypeSimulateArgs {
-  id?: string;
-  advanceTimeMs?: number;
-  event?: string;
-  data?: unknown;
-  transport?: PrototypePushTransport;
-  timeoutMs?: number;
-}
+/** The simulate slice of the validated prototype input. */
+export type PrototypeSimulateInput = Pick<
+  z.output<typeof prototypeSchema>,
+  "id" | "advanceTimeMs" | "event" | "data" | "transport" | "timeoutMs"
+>;
 export type PrototypeSimulateOutput =
   | { success: boolean; error?: string; fired?: number }
   | PrototypePushSimulateResult;
 export async function performPrototypeSimulate(
   target: PrototypeSimulateTarget,
-  args: PrototypeSimulateArgs,
+  args: PrototypeSimulateInput,
 ): Promise<PrototypeSimulateOutput> {
   if (args.event !== undefined) {
     return simulatePrototypePush(target.push ?? {}, {
@@ -47,7 +44,7 @@ export async function performPrototypeSimulate(
 }
 async function advancePrototypeClock(
   target: PrototypeSimulateTarget,
-  args: PrototypeSimulateArgs,
+  args: PrototypeSimulateInput,
 ): Promise<{ success: boolean; error?: string; fired?: number }> {
   try {
     const supported = target.android

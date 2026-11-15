@@ -2339,8 +2339,8 @@ whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, ga
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
 `commerce.checkout` is not in the contract, and no production runtime advertises the module.
 
-The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin `PrototypePurchaseOutcome`
-copies it, and both replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
+The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin and Swift `PrototypePurchaseOutcome`
+copy it, and all three replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
 `gracePeriod` or `billingRetry`, and a consumable never holds one. `lastTransaction` is
 `{transactionId, productId, status}`, or null. Buying a product that is `active` or in `gracePeriod` fails
 with `alreadyOwned`, whatever outcome was queued; a product in `billingRetry` can be bought again. A product

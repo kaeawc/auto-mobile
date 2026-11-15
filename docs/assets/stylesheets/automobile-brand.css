@@ -86,6 +86,19 @@
   white-space: nowrap;
 }
 
+/* Tool tables (docs/tools.md and tool pages): the generated Requires cells carry
+   .tool-requires, so only those tables keep the emoji and tool name on one line;
+   Material's table scroll wrapper scrolls them sideways on narrow screens. */
+.md-typeset table:not([class]):has(.tool-requires) td:first-child,
+.md-typeset table:not([class]):has(.tool-requires) th:first-child,
+.md-typeset .tool-requires {
+  white-space: nowrap;
+}
+
+.md-typeset .tool-requires [title] {
+  cursor: help;
+}
+
 /* Live prompt search bar (see assets/javascripts/prompt-form.js). */
 .md-typeset .prompt-search {
   background: var(--md-default-bg-color);

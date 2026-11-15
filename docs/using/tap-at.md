@@ -1,8 +1,8 @@
 # `tapAt`
 
-| Tool                  | What it does                                                                                 | Requires              |
-| --------------------- | -------------------------------------------------------------------------------------------- | --------------------- |
-| 📍 <code>tapAt</code> | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units | Android, iOS, watchOS |
+| Tool                  | What it does                                                                                 | Requires                                                                                                                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📍 <code>tapAt</code> | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units | <span class="tool-requires"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span></span> |
 
 `tapAt` taps, long presses, or double taps at `x`, `y`. Absolute coordinates use
 platform-native units; `coordinateSpace: "normalized"` uses 0–1 and `"percent"`

@@ -214,6 +214,21 @@ describe("CarAppTemplateReader during Android Auto projection (#17826)", () => {
     expect(adb.commands).not.toContain(DUMP);
   });
 
+  test("readProjectionServices dumps fresh each time, past the one-second cache (#17842)", async () => {
+    const { adb, reader } = setup("none");
+    expect(await reader.readProjectionServices(phone)).toEqual({ templateHosts: [], apps: [] });
+    adb.dump = projectionServicesDump("one");
+    const after = await reader.readProjectionServices(phone);
+    expect(after?.templateHosts).toEqual([
+      `${ANDROID_AUTO_PACKAGE}/.apphost.TemplateNavigationService`,
+    ]);
+    expect(after?.apps.map((app) => app.packageName)).toContain(FIXTURE_APP);
+    expect(adb.commands).toEqual([DUMP, DUMP]);
+    adb.dump = new Error("device offline");
+    expect(await reader.readProjectionServices(phone)).toBeUndefined();
+    expect(await reader.readProjectionServices({ ...phone, platform: "ios" })).toBeUndefined();
+  });
+
   test("readProjected reads the bound apps for a head-unit action and keeps observe's snapshot", async () => {
     const { adb, reader } = setup("one");
     adb.routes.set(FIXTURE_APP, fixtureListBundle());

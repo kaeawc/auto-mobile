@@ -1,9 +1,18 @@
-import type { ViewHierarchyResult } from "../../models";
+import type {
+  Element,
+  ElementSelectionResult,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../models";
+import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import {
   isImeKeyEntry,
   SearchableHierarchy,
   type SearchableEntry,
 } from "../utility/SearchableNode";
+import { findTapTargetNode, type TapFocusFailure } from "./tapTargetSupport";
 
 /** An on-screen editable field, named the way observe's skeleton row names it. */
 export interface FocusInputCandidate {
@@ -82,21 +91,132 @@ export function onScreenInputCandidates(
     .map(describeEntry);
 }
 
+/** An on-screen element a focus selector matched that is not an editable field yet. */
+export interface NonInputMatch extends FocusInputCandidate {
+  affordances: string[];
+}
+
+/**
+ * The on-screen, non-input node `element` came from, named as observe's skeleton row names it.
+ * A Material time-picker chip is the usual case: it becomes editable only after a tap (#18351).
+ */
+export function onScreenNonInputMatch(
+  hierarchy: ViewHierarchyResult | undefined,
+  element: Element,
+  viewport?: { width: number; height: number },
+): NonInputMatch | undefined {
+  if (!hierarchy) {
+    return undefined;
+  }
+  const entry = findTapTargetNode(searchable.project(hierarchy), element);
+  if (!entry || entry.affordances.includes("input") || !onScreen(entry, viewport)) {
+    return undefined;
+  }
+  return { ...describeEntry(entry), affordances: [...entry.affordances] };
+}
+
 function quoteField(name: string, value: string | undefined): string | undefined {
   return value === undefined ? undefined : `${name} ${JSON.stringify(value)}`;
 }
 
+function describeCandidate(candidate: FocusInputCandidate): string {
+  return `{${[
+    quoteField("elementId", candidate.elementId),
+    quoteField("label", candidate.label),
+    quoteField("sublabel", candidate.sublabel),
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(", ")}}`;
+}
+
+/**
+ * The next step for a focus selector that matched a visible non-input: tap it, then type into
+ * whatever it focused, rather than reworking a selector that already found its element.
+ */
+export function describeNonInputMatch(selectorLabel: string, match: NonInputMatch): string {
+  const affordances = match.affordances.length ? match.affordances.join(", ") : "none";
+  const tapSelector =
+    match.elementId !== undefined
+      ? `{elementId: ${JSON.stringify(match.elementId)}}`
+      : match.label !== undefined
+        ? `{text: ${JSON.stringify(match.label)}}`
+        : "with the same selector";
+  return (
+    `${selectorLabel} matched an on-screen element that is not a text input yet: ` +
+    `${describeCandidate(match)} (affordances: ${affordances}). ` +
+    `Tap it first (tapOn ${tapSelector}), then call sendKeys without a selector.`
+  );
+}
+
 /** One sentence naming the candidates, for an error a client can act on without re-observing. */
 export function describeInputCandidates(candidates: readonly FocusInputCandidate[]): string {
-  const rows = candidates.map(
-    (candidate) =>
-      `{${[
-        quoteField("elementId", candidate.elementId),
-        quoteField("label", candidate.label),
-        quoteField("sublabel", candidate.sublabel),
-      ]
-        .filter((part): part is string => part !== undefined)
-        .join(", ")}}`,
-  );
+  const rows = candidates.map(describeCandidate);
   return `On-screen inputs: ${rows.join("; ")}. Select one by its elementId or label.`;
+}
+
+/** Resolves a selector in a hierarchy the way tapOn does. */
+export type SelectorLookup = (
+  options: TapOnElementOptions,
+  hierarchy: ViewHierarchyResult,
+) => { selection: Pick<ElementSelectionResult, "element"> };
+
+/**
+ * A focus miss whose selector does match a visible element that is not an input yet (a
+ * time-picker chip): name it and the tap-then-type step instead of calling it not found (#18351).
+ */
+export function focusNonInputMatchDetails(
+  options: TapOnElementOptions,
+  observeResult: Pick<ObserveResult, "viewHierarchy" | "screenSize"> | undefined,
+  lookup: SelectorLookup,
+): { baseError: string; reason: TapFocusFailure } | undefined {
+  const viewHierarchy = observeResult?.viewHierarchy;
+  if (options.action !== "focus" || !viewHierarchy) {
+    return undefined;
+  }
+  let element: Element | null;
+  try {
+    element = lookup({ ...options, action: "tap" }, viewHierarchy).selection.element;
+  } catch (error) {
+    // A selector that resolves no tappable element either keeps the plain not-found error.
+    logger.debug(`[TapOnElement] non-input focus match lookup failed: ${errorMessage(error)}`);
+    return undefined;
+  }
+  const match = element
+    ? onScreenNonInputMatch(viewHierarchy, element, observeResult.screenSize)
+    : undefined;
+  return match
+    ? {
+        baseError: describeNonInputMatch(
+          options.text !== undefined ? `'${options.text}'` : "The selector",
+          match,
+        ),
+        reason: "matched-non-input",
+      }
+    : undefined;
+}
+
+/**
+ * A focus miss names what is on screen: the element the selector matched when it is not an input
+ * yet (#18351), else the editable fields (#17463). Either way the miss is a naming problem rather
+ * than a scroll one, and the reason tells sendKeys not to suggest scrolling.
+ */
+export function focusMissDetails(
+  options: TapOnElementOptions,
+  observeResult: Pick<ObserveResult, "viewHierarchy" | "screenSize"> | undefined,
+  context: { notFoundError: string; lookup: SelectorLookup },
+): { baseError: string; reason: TapFocusFailure } {
+  const nonInput = focusNonInputMatchDetails(options, observeResult, context.lookup);
+  if (nonInput) {
+    return nonInput;
+  }
+  const inputs =
+    options.action === "focus" && observeResult
+      ? onScreenInputCandidates(observeResult.viewHierarchy, observeResult.screenSize)
+      : [];
+  return inputs.length > 0
+    ? {
+        baseError: `${context.notFoundError}. ${describeInputCandidates(inputs)}`,
+        reason: "not-found-inputs-listed",
+      }
+    : { baseError: context.notFoundError, reason: "not-found" };
 }

@@ -1,8 +1,8 @@
 # observe
 
-| Tool                    | What it does                                                                                                 | Requires                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
-| 👁️ <code>observe</code> | Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display | Android, iOS, watchOS, tvOS, visionOS |
+| Tool                    | What it does                                                                                                 | Requires                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 👁️ <code>observe</code> | Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display | <span class="tool-requires"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span> <span role="img" aria-label="tvOS" title="tvOS">📺</span> <span role="img" aria-label="visionOS" title="visionOS">🥽</span></span> |
 
 Call `observe` to read the current screen before choosing a target. The default
 `skeleton` and `context` rows describe controls and visible text; `project: "full"`

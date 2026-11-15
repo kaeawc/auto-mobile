@@ -4,6 +4,7 @@ import {
   HEAD_UNIT_DISPLAY,
   HeadUnitInteraction,
   headUnitButtonCommands,
+  headUnitProjection,
   headUnitTapCommand,
   type HeadUnitInteractionResult,
   type HeadUnitTemplateSource,
@@ -52,6 +53,12 @@ export const defaultHeadUnitInteractionFactory: HeadUnitInteractionFactory = (de
         ids: defaultIdGenerator,
         directories: headUnitScreenshotDirectories(os.tmpdir(), process.env),
       }),
+      projection: {
+        read: async () => {
+          const services = await carAppTemplateReader().readProjectionServices(device);
+          return services ? headUnitProjection(services) : undefined;
+        },
+      },
     },
   );
 };
@@ -76,6 +83,9 @@ function effectSummary(result: HeadUnitInteractionResult): string {
           prior.depth === screen.depth,
       ),
   );
+  if (result.effect.basis === "projectedApps changed") {
+    return "; screen changed (Android Auto bound or released an app)";
+  }
   if (result.effect.screenChanged === true) {
     return `; screen changed${top ? ` (${top.screenClass.split(".").at(-1)} on top)` : ""}`;
   }

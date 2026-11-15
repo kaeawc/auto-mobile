@@ -10,6 +10,9 @@
  * scripts/android/validate-prototype-compose-consumer.sh compiles them against the published
  * renderer). The SwiftUI host lands in the EmbedConsumer fixture that the iOS library build
  * compiles (scripts/ios/prototype-library-build.sh).
+ *
+ * The `automobile:prototype/eject` scaffold of a second fixture spec (#16499) is written next to
+ * them, so the same two builds compile the hand-owned Compose and SwiftUI output too.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
@@ -17,10 +20,13 @@ import {
   readNativePrototype,
   type NativePrototypeSources,
 } from "../../src/features/prototype/nativePrototype";
+import { readPrototypeEject } from "../../src/features/prototype/prototypeEject";
 import { prototypeSpecSchema } from "../../src/features/prototype/prototypeSpec";
+import type { MirroredSavedPrototype } from "../../src/features/prototype/savedPrototypeMirror";
 
 const REPO = path.join(import.meta.dir, "../..");
 export const SAMPLE_SPEC_PATH = "test/fixtures/prototype-embedding/sample.json";
+export const EJECT_SPEC_PATH = "test/fixtures/prototype-embedding/eject-sample.json";
 export const ANDROID_SAMPLE_ROOT = "samples/prototype-embedding/android";
 export const IOS_SAMPLE_ROOT = "samples/prototype-embedding/ios";
 export const IOS_FIXTURE_SOURCES =
@@ -30,9 +36,13 @@ export const SAMPLE_LIBRARY_VERSION = "0.0.0-sample";
 
 /**
  * The sample is served as a saved prototype whose image has a known type but no bytes, so the
- * generated host references `hero.png` and the resource notes that the app must supply it.
+ * generated host references `hero.png` and the resource notes that the app must supply it. The
+ * eject sample has no assets.
  */
-function sampleSources(spec: unknown): NativePrototypeSources {
+function sampleSources(
+  spec: unknown,
+  assets: MirroredSavedPrototype["assets"] = [{ id: "hero", mimeType: "image/png" }],
+): NativePrototypeSources {
   const parsed = prototypeSpecSchema.parse(spec);
   return {
     shownSpec: () => ({ kind: "unknown" }),
@@ -42,7 +52,7 @@ function sampleSources(spec: unknown): NativePrototypeSources {
         id: parsed.id,
         spec: parsed,
         label: "Embedding sample",
-        assets: [{ id: "hero", mimeType: "image/png" }],
+        assets,
       },
     ],
     platformOf: async () => undefined,
@@ -50,7 +60,24 @@ function sampleSources(spec: unknown): NativePrototypeSources {
   };
 }
 
-/** Repository-relative path to file content for every generated sample file. */
+/** Repository-relative path to content for the Compose and SwiftUI eject scaffolds. */
+export async function renderEjectSamples(spec: unknown): Promise<Map<string, string>> {
+  const sources = sampleSources(spec, []);
+  const id = prototypeSpecSchema.parse(spec).id;
+  const files = new Map<string, string>();
+  for (const [platform, root] of [
+    ["android", ANDROID_SAMPLE_ROOT],
+    ["ios", IOS_FIXTURE_SOURCES],
+  ] as const) {
+    const eject = await readPrototypeEject({ id, platform }, sources);
+    for (const file of eject.files) {
+      files.set(`${root}/${file.path}`, `${file.content.trimEnd()}\n`);
+    }
+  }
+  return files;
+}
+
+/** Repository-relative path to file content for every generated native-host sample file. */
 export async function renderEmbeddingSamples(spec: unknown): Promise<Map<string, string>> {
   const sources = sampleSources(spec);
   const id = prototypeSpecSchema.parse(spec).id;
@@ -70,13 +97,20 @@ export async function renderEmbeddingSamples(spec: unknown): Promise<Map<string,
   return files;
 }
 
-function readSampleSpec(): unknown {
-  return JSON.parse(readFileSync(path.join(REPO, SAMPLE_SPEC_PATH), "utf8"));
+function readSpec(relative: string): unknown {
+  return JSON.parse(readFileSync(path.join(REPO, relative), "utf8"));
+}
+
+async function renderAllSamples(): Promise<Map<string, string>> {
+  return new Map([
+    ...(await renderEmbeddingSamples(readSpec(SAMPLE_SPEC_PATH))),
+    ...(await renderEjectSamples(readSpec(EJECT_SPEC_PATH))),
+  ]);
 }
 
 /** Paths whose committed content differs from a fresh render. */
 export async function driftedEmbeddingSamples(): Promise<string[]> {
-  const files = await renderEmbeddingSamples(readSampleSpec());
+  const files = await renderAllSamples();
   return [...files]
     .filter(([relative, content]) => {
       const absolute = path.join(REPO, relative);
@@ -97,7 +131,7 @@ async function main(): Promise<void> {
     console.log("Embedding samples match the native resource output.");
     return;
   }
-  for (const [relative, content] of await renderEmbeddingSamples(readSampleSpec())) {
+  for (const [relative, content] of await renderAllSamples()) {
     const absolute = path.join(REPO, relative);
     mkdirSync(path.dirname(absolute), { recursive: true });
     writeFileSync(absolute, content);

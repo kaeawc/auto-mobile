@@ -156,6 +156,94 @@ describe("findMissingTypes", () => {
     ]);
   });
 
+  test("binds an associatedtype inherited through an intermediate protocol (#18347)", () => {
+    const sources = new Map([
+      ["Geometry.swift", "struct Geometry {}\n"],
+      [
+        "Use.swift",
+        [
+          "protocol P { associatedtype Geometry }",
+          "protocol Q: P {}",
+          "protocol R: Q { func f() -> Geometry }",
+          "struct Use { let g: Geometry }",
+          "",
+        ].join("\n"),
+      ],
+    ]);
+    const target = { name: "T", files: ["Use.swift"], packages: [] };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      { target: "T", file: "Use.swift", line: 4, type: "Geometry", definedIn: ["Geometry.swift"] },
+    ]);
+  });
+
+  test("binds the subjects of a where clause in its declaration only (#18347)", () => {
+    const sources = new Map([
+      ["Element.swift", "struct Element {}\n"],
+      [
+        "Use.swift",
+        [
+          "extension Array where Element: Equatable { func first() -> Element? { nil } }",
+          "protocol P { func f<T>(_ t: T) -> Element where Element: Equatable }",
+          "struct Use { let e: Element }",
+          "",
+        ].join("\n"),
+      ],
+    ]);
+    const target = { name: "T", files: ["Use.swift"], packages: [] };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      { target: "T", file: "Use.swift", line: 3, type: "Element", definedIn: ["Element.swift"] },
+    ]);
+  });
+
+  test("does not treat capitalized enum case names as types (#18347)", () => {
+    const sources = new Map([
+      ["Bar.swift", "struct Bar {}\nstruct Payload {}\n"],
+      [
+        "Use.swift",
+        [
+          "enum E {",
+          "  case Bar, Baz = 2",
+          "  indirect case Qux(Payload)",
+          "  func f() { switch self { case .Bar: break; default: break } }",
+          "}",
+          "",
+        ].join("\n"),
+      ],
+    ]);
+    const target = { name: "T", files: ["Use.swift"], packages: [] };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      { target: "T", file: "Use.swift", line: 3, type: "Payload", definedIn: ["Bar.swift"] },
+    ]);
+  });
+
+  test("binds nested types only from files the target compiles (#18347)", () => {
+    const sources = new Map([
+      ["Own.swift", "struct Own { let geometry: Geometry; let shape: Shape }\n"],
+      ["Extra.swift", "extension Own { struct Geometry {}; struct Shape {} }\n"],
+      ["Geometry.swift", "struct Geometry {}\n"],
+    ]);
+    const target = { name: "T", files: ["Own.swift"], packages: [] };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      {
+        target: "T",
+        file: "Own.swift",
+        line: 1,
+        type: "Geometry",
+        definedIn: ["Geometry.swift", "Extra.swift"],
+      },
+      { target: "T", file: "Own.swift", line: 1, type: "Shape", definedIn: ["Extra.swift"] },
+    ]);
+    const withExtra = { ...target, files: ["Own.swift", "Extra.swift"] };
+    expect(findMissingTypes([withExtra], sources, new Map())).toEqual([]);
+  });
+
+  test("throws when a target compiles a file with no source text (#18347)", () => {
+    const target = { name: "T", files: ["../outside/Use.swift"], packages: [] };
+    expect(() => findMissingTypes([target], SOURCES, PACKAGES)).toThrow(
+      "no source text for target files: T: ../outside/Use.swift",
+    );
+  });
+
   test("ignores references in comments, strings and import lines", () => {
     const sources = withResponse(
       '@testable import GestureCoordinateGeometry\n// GestureCoordinateGeometry\nlet s = "GestureCoordinateGeometry"\n',
@@ -210,6 +298,28 @@ describe("loadProject", () => {
     expect(packageFiles.get("Wire")).toEqual(["../wire/Sources/Wire/Envelope.swift"]);
     expect(sources.has("Tests/TV/SkipMe.swift")).toBe(true);
     expect(findMissingTypes(targets, sources, packageFiles).map((m) => m.type)).toEqual(["Helper"]);
+  });
+
+  test("reads and checks target sources outside the project directory (#18347)", () => {
+    const dir = join(root, "outside-project");
+    write(
+      "outside-project/project.yml",
+      "targets:\n  TV:\n    sources:\n      - ../shared/Use.swift\n",
+    );
+    write("outside-project/Sources/Helper.swift", "struct Helper {}\n");
+    write("shared/Use.swift", "struct Use { let h: Helper }\n");
+
+    const { targets, sources, packageFiles } = loadProject(dir);
+    expect(sources.get("../shared/Use.swift")).toBe("struct Use { let h: Helper }\n");
+    expect(findMissingTypes(targets, sources, packageFiles)).toEqual([
+      {
+        target: "TV",
+        file: "../shared/Use.swift",
+        line: 1,
+        type: "Helper",
+        definedIn: ["Sources/Helper.swift"],
+      },
+    ]);
   });
 
   test("normalizes ./-prefixed file entries to the keys of the project traversal", () => {

@@ -15,13 +15,20 @@
  *     source, unless a lexical scope around it binds the name: a generic parameter of the
  *     enclosing declaration (`struct Use<T>`, `func echo<T>(_: T) -> T`), or a type declared
  *     directly in an enclosing body, in another body of the same type (`extension Own`), or in
- *     a type named in the enclosing type's header (`class Sub: Base`);
+ *     a type named in the enclosing type's header (`class Sub: Base`), followed transitively
+ *     through the headers of those types (`protocol R: Q`, `protocol Q: P`), or the subject of a
+ *     `where` requirement on the enclosing declaration (`extension Foo where Element: Equatable`);
+ *   - only bodies in files the target compiles bind nested types; a nested type the target uses
+ *     whose only declaration is in an extension it does not compile is reported with that file;
+ *   - an enum case declaration (`case Bar`) names a case, not a type;
  *   - `Module.Type`, where `Module` is a local package and not a project type, is a missing
  *     source when the target does not depend on that package and the package declares `Type`.
  *
  * The check never reports a type defined only in Apple SDKs, and it never reports a name some
- * enclosing scope could bind. Nested types are matched by simple name across files, so a
- * same-named nested type in another type of the same name can hide a missing top-level type.
+ * enclosing scope could bind. Nested types are matched by their owner's simple name across the
+ * target's files, so a same-named nested type in another type of the same name can hide a missing
+ * top-level type. Target sources outside the project directory are read and checked like any
+ * other; a target file with no source text is an error, never an empty file.
  * Other `.`-qualified names resolve through their qualifier, which is scanned itself. `import`
  * lines are skipped, and code inside `#if` branches is scanned like any other code.
  *
@@ -62,12 +69,18 @@ const GENERIC_PARAM = /^\s*(?:each\s+)?([A-Za-z_][A-Za-z0-9_]*)/;
 // A `.`-qualified name (`Parent.Child`) resolves through its qualifier, which is scanned itself.
 const CAPITALIZED = /(?<![A-Za-z0-9_$`.])[A-Z][A-Za-z0-9_]*/g;
 const QUALIFIED_MEMBER = /\.([A-Z][A-Za-z0-9_]*)/y;
+const WHERE = /(?<![A-Za-z0-9_$.])where(?![A-Za-z0-9_$])/;
+const CASE_NAME = /\s*([A-Za-z_][A-Za-z0-9_]*)/y;
 const IMPORT = /^[ \t]*(?:@[A-Za-z_]+(?:\([^)\n]*\))?[ \t]+)*import[ \t][^\n]*/gm;
 
 /** A `{ ... }` region; `start` is the `{` index and `end` the matching `}` index. */
 export interface Body {
   readonly start: number;
   end: number;
+  /** The declaration keyword (`enum`, `func`, ...) whose body this is, if any. */
+  readonly kind?: string;
+  /** Parenthesis depth at the `{`, so declarations directly in the body can be told apart. */
+  readonly parenDepth: number;
   /** The type a `struct`/`class`/`enum`/`protocol`/`actor`/`extension` body belongs to. */
   readonly owner?: string;
   /** Generic parameters of the declaration that owns the body. */
@@ -82,7 +95,8 @@ export interface Body {
 export interface GenericHeader {
   readonly start: number;
   end: number;
-  readonly generics: readonly string[];
+  /** Generic parameters, then the subjects of its `where` requirements. */
+  readonly generics: string[];
 }
 
 export interface SwiftScopes {
@@ -90,12 +104,14 @@ export interface SwiftScopes {
   readonly topLevel: ReadonlySet<string>;
   readonly bodies: readonly Body[];
   readonly headers: readonly GenericHeader[];
+  /** Indexes of enum case names (`case Bar`), which are not type references. */
+  readonly caseNames: ReadonlySet<number>;
 }
 
 interface Pending {
+  readonly keyword: string;
   readonly owner?: string;
   readonly nameEnd: number;
-  readonly generics: readonly string[];
   readonly parenDepth: number;
   readonly braceDepth: number;
   readonly header: GenericHeader;
@@ -107,6 +123,7 @@ interface ScanState {
   readonly bodies: Body[];
   readonly headers: GenericHeader[];
   readonly open: Body[];
+  readonly caseNames: Set<number>;
   parenDepth: number;
   pending?: Pending;
 }
@@ -142,6 +159,69 @@ export function genericClause(
   return undefined;
 }
 
+/** Items of `text` split at commas outside `<>`, `()` and `[]`, up to an unmatched closer. */
+function topLevelItems(text: string): string[] {
+  const items: string[] = [];
+  let depth = 0;
+  let itemStart = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === "<" || c === "(" || c === "[") {
+      depth += 1;
+    } else if (c === ")" || c === "]" || (c === ">" && text[i - 1] !== "-")) {
+      depth -= 1;
+    }
+    if (depth < 0) {
+      items.push(text.slice(itemStart, i));
+      return items;
+    }
+    if (c === "," && depth === 0) {
+      items.push(text.slice(itemStart, i));
+      itemStart = i + 1;
+    }
+  }
+  items.push(text.slice(itemStart));
+  return items;
+}
+
+/** The leading name of each requirement in a header's `where` clause (`where Element: P`). */
+export function whereSubjects(header: string): string[] {
+  const where = WHERE.exec(header);
+  if (!where) {
+    return [];
+  }
+  return topLevelItems(header.slice(where.index + where[0].length)).flatMap(
+    (item) => GENERIC_PARAM.exec(item)?.[1] ?? [],
+  );
+}
+
+/** Records the index of each case name in the enum case declaration that starts at `from`. */
+function recordCaseNames(code: string, from: number, caseNames: Set<number>): void {
+  let i = from;
+  for (;;) {
+    CASE_NAME.lastIndex = i;
+    const named = CASE_NAME.exec(code);
+    if (!named) {
+      return;
+    }
+    i += named[0].length;
+    caseNames.add(i - (named[1]?.length ?? 0));
+    let depth = 0;
+    for (; i < code.length && !(depth === 0 && code[i] === ","); i += 1) {
+      const c = code[i];
+      if (c === "(" || c === "[") {
+        depth += 1;
+      } else if (c === ")" || c === "]") {
+        depth -= 1;
+      }
+      if (depth < 0 || (depth === 0 && (c === "\n" || c === ";" || c === "{" || c === "}"))) {
+        return;
+      }
+    }
+    i += 1;
+  }
+}
+
 function atPendingLevel(state: ScanState): boolean {
   const pending = state.pending;
   return (
@@ -154,7 +234,13 @@ function atPendingLevel(state: ScanState): boolean {
 function endPending(state: ScanState, at: number): Pending | undefined {
   const pending = state.pending;
   if (pending) {
-    pending.header.end = at;
+    const header = pending.header;
+    const wasEmpty = header.generics.length === 0;
+    header.generics.push(...whereSubjects(state.code.slice(pending.nameEnd, at)));
+    if (wasEmpty && header.generics.length > 0) {
+      state.headers.push(header);
+    }
+    header.end = at;
     state.pending = undefined;
   }
   return pending;
@@ -169,8 +255,10 @@ function openBody(state: ScanState, at: number): void {
   const body: Body = {
     start: at,
     end: state.code.length,
+    kind: owned?.keyword,
+    parenDepth: state.parenDepth,
     owner: owned?.owner,
-    generics: owned?.generics ?? [],
+    generics: owned?.header.generics ?? [],
     heritage: owned?.owner ? capitalizedIn(state.code.slice(owned.nameEnd, at)) : [],
     members: new Set(),
   };
@@ -211,6 +299,10 @@ function onKeyword(state: ScanState, keyword: string, at: number): void {
     if (atPendingLevel(state)) {
       endPending(state, at);
     }
+    const body = state.open.at(-1);
+    if (keyword === "case" && body?.kind === "enum" && body.parenDepth === state.parenDepth) {
+      recordCaseNames(state.code, at + keyword.length, state.caseNames);
+    }
     return;
   }
   const decl = readDeclaration(state.code, keyword, at + keyword.length);
@@ -226,9 +318,9 @@ function onKeyword(state: ScanState, keyword: string, at: number): void {
     state.headers.push(header);
   }
   state.pending = {
+    keyword,
     owner: TYPE_KEYWORDS.has(keyword) ? decl.name : undefined,
     nameEnd: decl.nameEnd,
-    generics: decl.generics,
     parenDepth: state.parenDepth,
     braceDepth: state.open.length,
     header,
@@ -246,6 +338,7 @@ export function swiftScopes(code: string): SwiftScopes {
     bodies: [],
     headers: [],
     open: [],
+    caseNames: new Set(),
     parenDepth: 0,
   };
   for (const match of code.matchAll(SCOPE_TOKEN)) {
@@ -263,7 +356,12 @@ export function swiftScopes(code: string): SwiftScopes {
     }
   }
   endPending(state, code.length);
-  return { topLevel: state.topLevel, bodies: state.bodies, headers: state.headers };
+  return {
+    topLevel: state.topLevel,
+    bodies: state.bodies,
+    headers: state.headers,
+    caseNames: state.caseNames,
+  };
 }
 
 export interface DeclaredTypes {
@@ -285,45 +383,119 @@ function referencingCode(source: string): string {
   return stripSwiftNonCode(source).replace(IMPORT, (line) => " ".repeat(line.length));
 }
 
-/** Nested type names declared in any body of each type, across every file. */
-function nestedTypesByOwner(scopes: Iterable<SwiftScopes>): Map<string, Set<string>> {
-  const nested = new Map<string, Set<string>>();
-  for (const body of [...scopes].flatMap((file) => file.bodies)) {
-    if (body.owner) {
-      nested.set(body.owner, new Set([...(nested.get(body.owner) ?? []), ...body.members]));
+/** A type's body in one file: the nested types it declares and the types in its header. */
+interface OwnerBody {
+  readonly file: string;
+  readonly members: ReadonlySet<string>;
+  readonly heritage: readonly string[];
+}
+
+/** Nested type names visible in a type's bodies, mapped to the files that declare them. */
+export type NestedLookup = (type: string) => ReadonlyMap<string, readonly string[]>;
+
+function ownerBodies(scopes: ReadonlyMap<string, SwiftScopes>): Map<string, OwnerBody[]> {
+  const owners = new Map<string, OwnerBody[]>();
+  for (const [file, fileScopes] of scopes) {
+    for (const body of fileScopes.bodies) {
+      if (body.owner) {
+        const entry = { file, members: body.members, heritage: body.heritage };
+        owners.set(body.owner, [...(owners.get(body.owner) ?? []), entry]);
+      }
     }
   }
-  return nested;
+  return owners;
+}
+
+/**
+ * Nested types of a type, its extensions, and every type named in their headers, followed
+ * transitively, so `protocol R: Q` sees an `associatedtype` that `Q` inherits from `P`.
+ * Only bodies in `files` count.
+ */
+export function nestedLookup(
+  owners: ReadonlyMap<string, readonly OwnerBody[]>,
+  files: ReadonlySet<string>,
+): NestedLookup {
+  const cache = new Map<string, Map<string, string[]>>();
+  const collect = (type: string, seen: Set<string>, into: Map<string, string[]>): void => {
+    if (seen.has(type)) {
+      return;
+    }
+    seen.add(type);
+    for (const body of (owners.get(type) ?? []).filter((entry) => files.has(entry.file))) {
+      for (const member of body.members) {
+        into.set(member, [...new Set([...(into.get(member) ?? []), body.file])]);
+      }
+      for (const parent of body.heritage) {
+        collect(parent, seen, into);
+      }
+    }
+  };
+  return (type) => {
+    const cached = cache.get(type);
+    if (cached) {
+      return cached;
+    }
+    const members = new Map<string, string[]>();
+    collect(type, new Set(), members);
+    cache.set(type, members);
+    return members;
+  };
+}
+
+/** Whether a generic parameter, `where` subject or body member around `index` binds `name`. */
+function isLocallyBoundAt(scopes: SwiftScopes, index: number, name: string): boolean {
+  return (
+    scopes.headers.some(
+      (header) => header.start <= index && index < header.end && header.generics.includes(name),
+    ) ||
+    scopes.bodies.some(
+      (body) =>
+        body.start < index &&
+        index < body.end &&
+        (body.members.has(name) || body.generics.includes(name)),
+    )
+  );
+}
+
+/** The owner and header types of every type body enclosing `index`. */
+function enclosingTypes(scopes: SwiftScopes, index: number): string[] {
+  return scopes.bodies
+    .filter((body) => body.owner && body.start < index && index < body.end)
+    .flatMap((body) => [body.owner ?? "", ...body.heritage]);
+}
+
+/** Files declaring `name` as a nested type of one of `types`, according to `lookup`. */
+function nestedDeclarers(lookup: NestedLookup, types: readonly string[], name: string): string[] {
+  return [...new Set(types.flatMap((type) => lookup(type).get(name) ?? []))];
 }
 
 /** Whether a scope enclosing `index` binds `name` (generic parameter or visible nested type). */
 export function isBoundAt(
   scopes: SwiftScopes,
-  nested: ReadonlyMap<string, ReadonlySet<string>>,
+  nested: NestedLookup,
   index: number,
   name: string,
 ): boolean {
-  const inHeader = scopes.headers.some(
-    (header) => header.start <= index && index < header.end && header.generics.includes(name),
-  );
   return (
-    inHeader ||
-    scopes.bodies.some(
-      (body) =>
-        body.start < index &&
-        index < body.end &&
-        (body.members.has(name) ||
-          body.generics.includes(name) ||
-          [body.owner, ...body.heritage].some((type) => type && nested.get(type)?.has(name))),
-    )
+    isLocallyBoundAt(scopes, index, name) ||
+    nestedDeclarers(nested, enclosingTypes(scopes, index), name).length > 0
   );
 }
 
 interface ProjectIndex {
   readonly scopes: ReadonlyMap<string, SwiftScopes>;
   readonly definers: ReadonlyMap<string, readonly string[]>;
-  readonly nested: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Nested types across every project file, including ones no target compiles. */
+  readonly allNested: NestedLookup;
   readonly packageFiles: ReadonlyMap<string, readonly string[]>;
+}
+
+interface TargetView {
+  readonly target: TargetSources;
+  /** Top-level types the target can name. */
+  readonly available: ReadonlySet<string>;
+  /** Nested types bound by bodies in files the target compiles. */
+  readonly nested: NestedLookup;
 }
 
 /** `Module.Type` naming a type the target cannot reach because it lacks the package. */
@@ -346,10 +518,43 @@ function moduleQualifiedMiss(
   return member && definedIn.length > 0 ? { type: `${module}.${member}`, definedIn } : undefined;
 }
 
+/**
+ * A capitalized name at `match` the target uses but cannot see: a project top-level type it does
+ * not compile, a nested type declared only in an extension it does not compile, or `Module.Type`.
+ */
+function missAt(
+  project: ProjectIndex,
+  view: TargetView,
+  scopes: SwiftScopes,
+  code: string,
+  match: RegExpMatchArray,
+): { type: string; definedIn: string[] } | undefined {
+  const name = match[0];
+  const index = match.index ?? 0;
+  if (scopes.caseNames.has(index) || isLocallyBoundAt(scopes, index, name)) {
+    return undefined;
+  }
+  const types = enclosingTypes(scopes, index);
+  if (nestedDeclarers(view.nested, types, name).length > 0) {
+    return undefined;
+  }
+  if (!view.available.has(name)) {
+    const definedIn = [
+      ...new Set([
+        ...(project.definers.get(name) ?? []),
+        ...nestedDeclarers(project.allNested, types, name),
+      ]),
+    ];
+    if (definedIn.length > 0) {
+      return { type: name, definedIn };
+    }
+  }
+  return moduleQualifiedMiss(project, view.target, code, match);
+}
+
 function missingInFile(
   project: ProjectIndex,
-  target: TargetSources,
-  available: ReadonlySet<string>,
+  view: TargetView,
   file: string,
   code: string,
 ): MissingType[] {
@@ -357,32 +562,34 @@ function missingInFile(
   const reported = new Set<string>();
   const missing: MissingType[] = [];
   for (const match of code.matchAll(CAPITALIZED)) {
-    const name = match[0];
-    const definedIn = project.definers.get(name);
-    const miss =
-      definedIn && !available.has(name)
-        ? { type: name, definedIn: [...definedIn] }
-        : moduleQualifiedMiss(project, target, code, match);
-    if (!miss || reported.has(miss.type) || isBoundAt(scopes, project.nested, match.index, name)) {
+    const miss = missAt(project, view, scopes, code, match);
+    if (!miss || reported.has(miss.type)) {
       continue;
     }
     reported.add(miss.type);
     const line = code.slice(0, match.index).split("\n").length;
-    missing.push({ target: target.name, file, line, ...miss });
+    missing.push({ target: view.target.name, file, line, ...miss });
   }
   return missing;
 }
 
 /**
  * Reports each type a target uses that is defined in the project but not in a file the target
- * compiles or a package it depends on. `sources` maps every project and package Swift file to
- * its text; `packageFiles` lists each local package's Swift files.
+ * compiles or a package it depends on. `sources` maps every project and package Swift file, and
+ * every file a target compiles, to its text; `packageFiles` lists each local package's Swift
+ * files. Throws when a target compiles a file `sources` does not contain.
  */
 export function findMissingTypes(
   targets: readonly TargetSources[],
   sources: ReadonlyMap<string, string>,
   packageFiles: ReadonlyMap<string, readonly string[]>,
 ): MissingType[] {
+  const unread = targets.flatMap((target) =>
+    target.files.filter((file) => !sources.has(file)).map((file) => `${target.name}: ${file}`),
+  );
+  if (unread.length > 0) {
+    throw new Error(`no source text for target files: ${unread.join(", ")}`);
+  }
   const code = new Map(Array.from(sources, ([file, text]) => [file, referencingCode(text)]));
   const scopes = new Map(Array.from(code, ([file, text]) => [file, swiftScopes(text)]));
   const definers = new Map<string, string[]>();
@@ -391,21 +598,24 @@ export function findMissingTypes(
       definers.set(type, [...(definers.get(type) ?? []), file]);
     }
   }
+  const owners = ownerBodies(scopes);
   const project: ProjectIndex = {
     scopes,
     definers,
-    nested: nestedTypesByOwner(scopes.values()),
+    allNested: nestedLookup(owners, new Set(scopes.keys())),
     packageFiles,
   };
   return targets.flatMap((target) => {
-    const visible = [
+    const visible = new Set([
       ...target.files,
       ...target.packages.flatMap((name) => packageFiles.get(name) ?? []),
-    ];
-    const available = new Set(visible.flatMap((file) => [...(scopes.get(file)?.topLevel ?? [])]));
-    return target.files.flatMap((file) =>
-      missingInFile(project, target, available, file, code.get(file) ?? ""),
-    );
+    ]);
+    const view: TargetView = {
+      target,
+      available: new Set([...visible].flatMap((file) => [...(scopes.get(file)?.topLevel ?? [])])),
+      nested: nestedLookup(owners, visible),
+    };
+    return target.files.flatMap((file) => missingInFile(project, view, file, code.get(file) ?? ""));
   });
 }
 
@@ -508,6 +718,8 @@ export function loadProject(projectDir: string): {
   const all = new Set([
     ...swiftFilesUnder(projectDir, ".", []).filter((file) => file !== "Package.swift"),
     ...[...packageFiles.values()].flat(),
+    // A target may list sources outside the project directory; read those too.
+    ...targets.flatMap((target) => target.files),
   ]);
   const sources = new Map(
     [...all].map((file) => [file, readFileSync(join(projectDir, file), "utf8")]),

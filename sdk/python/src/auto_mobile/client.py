@@ -7,12 +7,15 @@ import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 
 from .daemon import (
+    DEFAULT_DOCTOR_TIMEOUT_S,
     DEFAULT_EXECUTABLE,
+    DEFAULT_SHUTDOWN_TIMEOUT_S,
     DEFAULT_START_TIMEOUT_S,
     DEFAULT_STATUS_TIMEOUT_S,
     CommandRunner,
     DaemonManager,
     DaemonStatus,
+    DoctorReport,
     launch_environment,
 )
 from .errors import DaemonUnavailableError
@@ -22,7 +25,7 @@ from .token import FileTokenProvider, TokenProvider
 
 
 class AutoMobile:
-    """Entry point: daemon ``status`` / ``ensure_running`` and bound MCP sessions.
+    """Entry point: daemon lifecycle, ``doctor`` diagnostics and bound MCP sessions.
 
     ``env`` entries are layered over this process's environment and form the daemon
     launch environment: the same variables (``AUTOMOBILE_AUX_SOCKET_DIR``,
@@ -62,6 +65,24 @@ class AutoMobile:
     async def ensure_running(self, *, timeout: float = DEFAULT_START_TIMEOUT_S) -> DaemonStatus:
         """Start the daemon unless it is already running; return its status."""
         return await self._daemon.ensure_running(timeout=timeout)
+
+    async def restart(self, *, timeout: float = DEFAULT_START_TIMEOUT_S) -> DaemonStatus:
+        """Replace the daemon (starting one when none runs); return the new status."""
+        return await self._daemon.restart(timeout=timeout)
+
+    async def shutdown(self, *, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S) -> DaemonStatus:
+        """Stop the daemon; return the status read afterwards."""
+        return await self._daemon.shutdown(timeout=timeout)
+
+    async def doctor(
+        self,
+        *,
+        android: bool = False,
+        ios: bool = False,
+        timeout: float = DEFAULT_DOCTOR_TIMEOUT_S,
+    ) -> DoctorReport:
+        """Run the read-only ``doctor`` diagnostics and return the report."""
+        return await self._daemon.doctor(android=android, ios=ios, timeout=timeout)
 
     def session(self, *, session_id: str | None = None, device_id: str | None = None) -> McpSession:
         """A new MCP session bound to ``session_id`` (a fresh UUID by default).

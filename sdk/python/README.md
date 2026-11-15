@@ -1,8 +1,8 @@
 # AutoMobile Python SDK
 
-An async Python client for the AutoMobile daemon. This first slice covers:
+An async Python client for the AutoMobile daemon. It covers:
 
-- daemon `status` and `ensure_running`;
+- daemon `status`, `ensure_running`, `restart` and `shutdown`, and `doctor` diagnostics;
 - a bound MCP session with generic `list_tools`, `call_tool` and `read_resource`.
 
 It has no runtime dependencies beyond the Python standard library (Python 3.10+). It is

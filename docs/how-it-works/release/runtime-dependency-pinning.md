@@ -1,19 +1,19 @@
 # Runtime dependency-graph pinning
 
-AutoMobile publishes a **pinned runtime dependency graph** so that a clean
-`bun install -g @kaeawc/auto-mobile@<version>` resolves the same versions no
-matter what compatible releases appear in the registry afterward (#5421).
-`bun install -g` re-resolves the published `dependencies` from their ranges at
-install time, so a fixed release must publish a fixed graph.
+AutoMobile publishes a **pinned runtime dependency graph** (#5421). A clean
+`bun install -g @kaeawc/auto-mobile@<version>` then resolves the same versions no
+matter what compatible releases appear in the registry afterward.
+Because the published `dependencies` from their ranges at
+install time, a fixed release must publish a fixed graph.
 
 ## Why the graph is small
 
-`build.ts` bundles the server into `dist/src/index.js` plus code-split
-`dist/src/chunk-*.js` siblings, externalizing
-**only** the image backends it loads from `node_modules` at runtime — the `jimp`
+The build script `build.ts` bundles the server into `dist/src/index.js` plus code-split
+`dist/src/chunk-*.js` siblings. It externalizes
+**only** the image backends it loads from `node_modules` at runtime: the `jimp`
 family (`jimp`, `@jimp/core`) and the `sharp` family (`sharp` + the platform
-`@img/sharp-*` binaries). **`kysely`** is also a runtime root: it is bundled, and
-migrations are bundled through static imports, but an `AUTOMOBILE_MIGRATIONS_DIR`
+`@img/sharp-*` binaries). **`kysely`** is also a runtime root. The build bundles it,
+and bundles migrations through static imports. But an `AUTOMOBILE_MIGRATIONS_DIR`
 override loads raw migrations that import `kysely`'s `sql` tag and resolve it from
 their own location.
 
@@ -50,16 +50,16 @@ and ignores a published `npm-shrinkwrap.json`. The graph is flattened into exact
   platform-selected.
 
 The selected bundle adds about 17 MiB to the package. Source maps do not embed sources by default
-(opt out locally with `AUTOMOBILE_SOURCEMAP_STRIP_SOURCES=false bun run build`) and external source
-maps are excluded from the tarball (unused at runtime). The unpacked-size guard runs on the trimmed
-pack and is capped at 20,132,659 bytes (16 MiB + 20%; #9571, #12457); a pack with source maps restored
+(opt out locally with `AUTOMOBILE_SOURCEMAP_STRIP_SOURCES=false bun run build`), and the tarball
+leaves out external source maps (unused at runtime). The unpacked-size guard runs on the trimmed
+pack with a cap of 20,132,659 bytes (16 MiB + 20%; #9571, #12457). A pack with source maps restored
 (23,061,125 bytes) fails, and an untrimmed pack is larger still.
 
 Code splitting (#17683) lets startup parse only the chunks it loads; code behind a
 dynamic `import()` stays unparsed until first use. Chunks are hashed siblings of
 `index.js`, so `import.meta.url`-relative lookups still resolve from `dist/src`.
-The roots derivation scans each chunk the way it scans `index.js`. Because chunk
-names cannot be listed statically, the packed-asset guard (unpacked-size benchmark
+The roots derivation scans each chunk the way it scans `index.js`. No static list
+of chunk names exists. So the packed-asset guard (unpacked-size benchmark
 and artifact identity) walks every relative `import`/`import()`/`import.meta.require`
 from the packed entrypoints and fails on any target missing from the tarball. ESM
 evaluates a module's own body only after all of its static imports, so `build.ts`
@@ -67,11 +67,11 @@ also lists the Bun runtime guard and the launcher-pid capture (#11041) as
 entrypoints. That gives each one its own dependency-free chunk. The build then
 fails unless `index.js` imports those chunks first, in that order.
 
-Feature-gated modules stay off that startup path: the prototype tool's runtime and
-resource readers, the in-process MCP client, the Claude vision client (`@anthropic-ai/sdk`)
-and the WebRTC publisher (`werift`) are imported on first use through
-`src/utils/lazyFeatureModule.ts`, which logs each first load's latency. Their tools,
-resources and schemas are still registered at startup, so `tools/list` and
+Feature-gated modules stay off that startup path: the prototype
+tool's runtime and resource readers, the in-process MCP client, the Claude vision client
+(`@anthropic-ai/sdk`) and the WebRTC publisher (`werift`). The server imports each on first use
+through `src/utils/lazyFeatureModule.ts`, which logs each first load's latency. The server still registers their tools,
+resources and schemas at startup, so `tools/list` and
 `resources/list` are unchanged. A failed import is not memoized: the call that hit it
 gets an `ActionableError` and the next call imports again. Prototype resource-update
 notifications need only the revision store, never the readers, so a failed reader import
@@ -90,7 +90,7 @@ manifest) and enforced by:
 
 The prepack hook moves files out of the bundled production dependency closure
 only when they belong to a class in the `PRUNE_CLASSES` allowlist
-(`scripts/release/trim-bundled-deps.ts`): declarations, source maps, tests,
+(`scripts/release/trim-bundled-deps.ts`). The classes are declarations, source maps, tests,
 docs/markdown, TypeScript sources, `src/` beside a built `dist/`, browser-only
 builds (`browser` field and `browser` export-condition targets, `dist/browser/`,
 UMD) and CI/build tooling config. Bun and Node never resolve the `browser`
@@ -129,23 +129,23 @@ They use read-only permissions, bounded timeouts, and checkouts that disable LFS
 and persist no credentials. All actions are pinned to full commit SHAs.
 
 The **regenerate** job checks out the exact PR head SHA, installs, builds, runs
-`pin-runtime-deps.ts --write`, installs again, formats, and runs `--check` before uploading an
+`pin-runtime-deps.ts --write`, installs again, formats, and runs `--check`. It then uploads an
 artifact holding only `package.json`, `bun.lock` and `scripts/release/runtime-graph.json` (repo-relative
 paths; name includes PR number, run ID and attempt; one-day retention). It receives no secrets. A
 failed check fails the job, so no artifact is uploaded and the push job does not run.
 
-The jobs are split because lifecycle scripts and dependency code on the PR runner can rewrite the
-commit script, plant Git hooks, change Git config, shadow commands via `PATH`/`GITHUB_PATH`, or
-poison later steps via `GITHUB_ENV` (`BASH_ENV`, loader variables); a secret in that job would be
+Two separate jobs exist because of what lifecycle scripts and dependency code on the PR runner can do.
+They can rewrite the commit script, plant Git hooks, change Git config, shadow commands via `PATH`/`GITHUB_PATH`, or
+poison later steps via `GITHUB_ENV` (`BASH_ENV`, loader variables). A secret in that job would be
 exposed.
 
 The **push** job uses a fresh runner, never executes PR code, and restores no cache. It sparse-checks
 out the trusted commit script from the **default branch** and downloads only the named artifact. Only
 the final script step receives `AUTO_MOBILE_PR_TOKEN`. The script:
 
-- validates the artifact as data: exactly three regular files plus needed directories, no symlinks,
-  hardlinks, extra paths or dotfiles, a 20 MiB cap per file, and one JSON object each for the package
-  and graph manifests (parsed with `jq`);
+- validates the artifact as data: exactly three regular files plus needed directories, and no symlinks,
+  hardlinks, extra paths or dotfiles. Each file has a 20 MiB cap, and the package and graph manifests
+  must each hold one JSON object (parsed with `jq`);
 - builds a temporary repository with templates disabled, global/system config ignored, and hooks,
   filesystem monitors, external protocol helpers, credential helpers and signing disabled on every Git call;
 - fetches only the PR branch and verifies its head still equals the starting SHA;
@@ -173,7 +173,7 @@ part of the trusted boundary.
 secrets** store too, with branch push access (Dependabot `pull_request` runs receive Dependabot
 secrets, not Actions secrets). Missing configuration errors clearly even when the artifact has no
 changes. The trusted script must already be on the default branch. The default `GITHUB_TOKEN` is
-read-only here and its pushes would not retrigger CI; the PAT follow-up commit retriggers
+read-only here and its pushes would not retrigger CI. The PAT follow-up commit retriggers
 `pull_request` CI with fresh required checks, and its actor (the PAT owner) means the Dependabot-only
 guard prevents a loop. No skip-CI marker is used. A human/PAT push makes Dependabot stop auto-rebasing
 that PR; use `@dependabot recreate` to regenerate.
@@ -191,8 +191,8 @@ When a runtime dependency or a security override changes the resolved graph
 (e.g. a Dependabot bump to `jimp` or one of their transitives, or a manual
 `sharp` bump):
 
-> `sharp` and every `@img/*` entry are ignored in `.github/dependabot.yml` and
-> must be bumped by hand: Dependabot bumps only the entries eligible when it
+> `.github/dependabot.yml` ignores `sharp` and every `@img/*` entry, so you
+> bump them by hand. Dependabot bumps only the entries eligible when it
 > opens the PR, which splits sharp's 24-entry native matrix, and it cannot
 > regenerate `scripts/release/runtime-graph.json`. Bump `sharp` together with every
 > `@img/sharp-*` / `@img/sharp-libvips-*` pin, then follow the steps below;

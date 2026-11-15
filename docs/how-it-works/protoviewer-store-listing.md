@@ -1,7 +1,7 @@
 # ProtoViewer store listing as code
 
 The Play and App Store listing text, the app icon and the screenshot plan live in the repository
-(#14152), so a listing change is reviewable and diffable and a stale or over-length listing fails
+(#14152). A listing change is reviewable and diffable, and a stale or over-length listing fails
 Fast Validation instead of failing at upload.
 
 ## Layout
@@ -20,8 +20,8 @@ scripts/store-listing/
 ```
 
 The tree follows the fastlane `supply` (Play) and `deliver` (App Store) conventions, which F-Droid
-also reads; the Play pipeline uploads it with `supply` ([ProtoViewer](protoviewer.md) section 8.3). `en-US` is required; any other locale
-directory is validated by the same rules. Neither store has a repository-hosted source of truth
+also reads. The Play pipeline uploads it with `supply` ([ProtoViewer](protoviewer.md) section 8.3). The `en-US` locale is required,
+and the same rules validate any other locale directory. Neither store has a repository-hosted source of truth
 today: the stores keep whatever was last uploaded, and this tree is what gets uploaded.
 
 The text is provisional until the owner decision in #14143 (policy positioning, review notes) lands.
@@ -47,10 +47,15 @@ check. It reads files only. Lengths count Unicode code points, as the consoles d
 | App Review notes (`review_information`) | 4000       |
 | Privacy, support and marketing URLs     | `https://` |
 
-It also rejects missing required files, empty or whitespace-padded files, CRLF line endings,
-multi-line titles, keywords with spaces around commas, duplicate keywords, a keyword that repeats the
-app name, a subtitle equal to the name, unknown files in a locale directory, and a locale directory
-that is not a store locale code. The privacy and support URLs must be pages under the mkdocs
+It also rejects:
+
+- missing required files, empty or whitespace-padded files, and CRLF line endings;
+- multi-line titles, keywords with spaces around commas, duplicate keywords, and a keyword that
+  repeats the app name;
+- a subtitle equal to the name;
+- unknown files in a locale directory, and a locale directory that is not a store locale code.
+
+The privacy and support URLs must be pages under the mkdocs
 `site_url` whose Markdown source exists under `docs/`. The two icon layers must be well-formed SVG on the shared
 `0 0 108 108` canvas. The rules and limits live in `scripts/store-listing/storeListing.ts`.
 
@@ -82,12 +87,17 @@ column in the table; they are not drawn yet.
 
 ## Screenshot plan
 
-`scripts/store-listing/screenshotPlan.ts` is the plan as data: four screens (library, viewer, import,
-share), light and dark, on pinned devices (Android phone, 7 inch and 10 inch AVDs; one iPhone
-6.9 inch simulator; the iOS viewer is iPhone-only), 32 shots in all. Each shot acquires its pinned
-device, sets appearance, fixes the clock and bars with the `statusBar` tool (9:41, full battery),
-clears the app, seeds a fixed sample library from the shared valid prototype corpus, drives the
-screen with `tapOn` and `launchApp`, and captures with `observe` (`screenshot: "settled"`).
+The file `scripts/store-listing/screenshotPlan.ts` is the plan as data: four screens (library,
+viewer, import, share), light and dark, 32 shots in all. The devices are pinned: Android phone,
+7 inch and 10 inch AVDs, and one iPhone 6.9 inch simulator (the iOS viewer is iPhone-only).
+
+Each shot:
+
+1. acquires its pinned device and sets appearance;
+2. fixes the clock and bars with the `statusBar` tool (9:41, full battery);
+3. clears the app and seeds a fixed sample library from the shared valid prototype corpus;
+4. drives the screen with `tapOn` and `launchApp`;
+5. captures with `observe` (`screenshot: "settled"`).
 
 ```bash
 bun scripts/store-listing/capture-screenshots.ts --list

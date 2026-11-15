@@ -69,14 +69,14 @@ private in-memory database. Because the live path differs from the replay only b
 the daemon's polling, a live/replay difference isolates the transport. The CtrlProxy queue probe
 (`GET /sdk-events`) drains the queue, so it runs only after the live wait has expired.
 
-Records are joined across the payload, the replay and the live resource by SDK request id.
-`URLProtocol` records carry none, so they are joined by method and URL instead; the run's unique
+The harness joins records across the payload, the replay and the live resource by SDK request id.
+A `URLProtocol` record carries none, so the harness joins it by method and URL instead; the run's unique
 `/contract/<runId>/<case>` path keeps that key unique.
 
 ## Network slice
 
 The scenario registers each transport with the host registration API (no swizzling) and exchanges
-one message per transport with Playground's loopback listeners: a `GET` on a registered default
+one message per transport with Playground's loopback listeners. The exchanges are a `GET` on a registered default
 URLSession, which the SDK's `URLProtocol` records, a URLSessionWebSocketTask text echo (one sent and
 one received frame) and an NWConnection raw HTTP exchange. URLs carry `/contract/<runId>/`, which
 is how the manifest and the traffic query pick out this run. The URLSession request carries
@@ -90,9 +90,9 @@ host and launch time until every expected record appears.
 ## Capability slice
 
 Playground reads `AutoMobileNetwork.transportCapabilities()` with capture on, registers a default
-URLSession, a WebSocket and an NWConnection, and reads it again. `capabilitySlice.ts` holds the
-expected matrix: before registration every family is `DISABLED` with reason `HOST_OPT_IN` and the
-`other` family is `UNSUPPORTED` with `NO_ADAPTER`; afterwards the three registered families are
+URLSession, a WebSocket and an NWConnection, and reads it again. The `capabilitySlice.ts` file holds the
+expected matrix. Before registration every family is `DISABLED` with reason `HOST_OPT_IN` and the
+`other` family is `UNSUPPORTED` with `NO_ADAPTER`. Afterwards the three registered families are
 `SUPPORTED` and `ENFORCED` with their fault actions, and the unregistered background family is still
 `HOST_OPT_IN`. Each descriptor is also read back through the host's shared capability parser, which
 must keep its id, state and reason. These descriptors are not served over CtrlProxy, so the slice
@@ -103,7 +103,7 @@ has no live boundary.
 `faultSlice.ts` owns the rules and the expected outcomes. After launch, the harness sends one
 one-shot delay rule (400 ms) and one fail rule per transport with CtrlProxy's
 `set_network_fault_rules` command over CtrlProxy's WebSocket, retrying while CtrlProxy reports no
-SDK server; the daemon has no MCP tool that sends iOS fault rules. Once CtrlProxy confirms
+SDK server. The daemon has no MCP tool that sends iOS fault rules. Once CtrlProxy confirms
 delivery, the harness writes `<runId>.rules-ready` beside the manifest, which Playground waits for
 before running any case. Each case runs through the transport the registration API returns:
 
@@ -121,7 +121,7 @@ the network slice.
 ## Observation slice
 
 Playground registers a contract `AutoMobileObservationBridge` that declares `tap`, `insertText`
-and `clearText` and publishes synthetic nodes: `contract-save` (counts taps into
+and `clearText`. The bridge publishes synthetic nodes: `contract-save` (counts taps into
 `contract-tap-count`), `contract-email` (always focused, so `sendKeys` needs no XCTest focus tap),
 `contract-arm-stale` and `contract-hold` (placed over the status bar). The harness runs these steps
 with the MCP tools, in order, then writes `<runId>.actions-done`; Playground waits up to 180 s for
@@ -136,21 +136,25 @@ it before writing the manifest with the host's action log.
 | `arm-stale`              | `backend: sdk`                                         | `tap` on `contract-arm-stale`  |
 | `stale-tap`              | a failure with the bridge's `stale_observation` reason | no second `contract-save` tap  |
 
-Once the trap is armed, the host replaces every capture with a new one as soon as the bridge has
-committed it: it probes with an action naming an element no snapshot has, which the bridge rejects
+Once the harness arms the trap, the host replaces every capture with a new one as soon as the bridge has
+committed it. It probes with an action naming an element no snapshot has, which the bridge rejects
 before the executor (`unknown_element` once the capture is current, `stale_observation` before),
-then recaptures. The observation an action was resolved against is therefore stale when the action
-arrives. The host log is the ground truth: a tap it
-ran that the tool misreported is `mcp-surface`, an SDK tap the tool reported that the host never ran
-is `ctrlproxy-command`, an unanswered bridge is `sdk-endpoint`, an undeclared action reaching the
-bridge is `sdk-adapter`, and a node that was not routed, or a stale target that did not fail
-closed, is `ios-client`.
+then recaptures. The observation the daemon resolved an action against is therefore stale when the
+action arrives.
+
+The host log is the ground truth:
+
+- A tap it ran that the tool misreported is `mcp-surface`.
+- An SDK tap the tool reported that the host never ran is `ctrlproxy-command`.
+- An unanswered bridge is `sdk-endpoint`.
+- An undeclared action reaching the bridge is `sdk-adapter`.
+- A node that was not routed, or a stale target that did not fail closed, is `ios-client`.
 
 ## Storage slice
 
-`storage-default` applies the default storage configuration (nothing registered, Keychain deletion
-off). `storage` registers an uncoordinated and a host-coordinated app-group suite, an app-private
-and an app-group Core Data store, and Keychain deletion for one exact item, and writes a secret into
+The `storage-default` scenario applies the default storage configuration (nothing registered, Keychain deletion
+off). The `storage` scenario registers an uncoordinated and a host-coordinated app-group suite, an app-private
+and an app-group Core Data store, and Keychain deletion for one exact item. It also writes a secret into
 the first suite. With the app running, the harness reads
 `automobile:devices/{udid}/storage/capabilities?appId=<Playground>` and compares the Keychain
 capability and the `key_value` and `databases` store states with the registration
@@ -165,7 +169,7 @@ reachable SDK reporting the wrong state is `sdk-adapter`; `BRIDGE_UNAVAILABLE` w
 - No CtrlProxy reachable from the app: the SDK keeps events pending and the cases report
   `sdk-endpoint`.
 - The session's CtrlProxy client is not draining: events stay queued and report `ios-client`.
-- The scenario times out after 30 s, a case fails or a listener fails: `fixture-host` with the
+- The scenario times out after 30 s, a case fails or a listener fails: `fixture-host`. The report carries the
   case name, the error domain and code, and the loopback server's event log (accepted, request
   path, response sent, early close).
 - CtrlProxy never confirms the fault rules: `ctrlproxy-command`, and the harness skips the fault

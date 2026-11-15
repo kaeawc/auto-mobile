@@ -2,7 +2,7 @@
 
 `SdkNetworkRequestEvent` is the network wire payload for #5158. The SDK JSON-encodes it into `SdkEventEnvelope.payload` (base64), wraps envelopes in `SdkEventBatch`, and sends batches to CtrlProxy. CtrlProxy stores and returns the envelopes through `/sdk-events` without projecting the network fields. `decodeSdkEventBatches` is the production TypeScript retrieval decoder; `DefaultIosSdkEventIngestor` validates the version before recording anything as network traffic.
 
-Capture requires host registration through the [host-integration profile](host-integration-profile.md): register a URLSession configuration (the URLProtocol for default and custom sessions, delegate forwarding for background ones), or register and call the WebSocket/NWConnection adapters from the host's transport callbacks. Enabling capture does not instrument unregistered transports. Hosts must redact endpoint/query/metadata values before supplying them; no automatic URL or metadata sanitization is implied.
+Capture requires host registration through the [host-integration profile](host-integration-profile.md). The host registers a URLSession configuration (the URLProtocol for default and custom sessions, delegate forwarding for background ones). Alternatively it registers and calls the WebSocket/NWConnection adapters from the host's transport callbacks. Enabling capture does not instrument unregistered transports. Hosts must redact endpoint/query/metadata values before supplying them; no automatic URL or metadata sanitization is implied.
 
 ## Versions and diagnostics
 
@@ -10,7 +10,7 @@ The SDK's named constant is `SdkNetworkRequestEvent.currentSchemaVersion = 1`; n
 
 Absent versions and explicit v0 are accepted. v1 is current. Future versions (>1), negative numbers, fractional numbers, null, and non-numeric values are rejected before network persistence and network telemetry push. Legacy `protocol` remains a fallback when `protocolName` is absent. This is version validation, not a new validator for every historical optional field.
 
-Rejection creates a typed diagnostic with `code: "sdk_network_schema_unsupported"`, `receivedVersion`, `supportedVersion`, and `bundleId`. It is logged with `logger.warn` and recorded as a warning telemetry log (`level: 5`, `tag: "SdkNetworkWire"`, `filterName: "sdk_network_schema_unsupported"`), with the diagnostic JSON in `message`. This uses existing persisted log telemetry and the log category of the telemetry push/backfill channel, so consumers can observe it even when network capture is disabled. Ingestion never throws on a version mismatch. No network row is inserted. Version and event type are routing controls, not network data columns; no new migration is needed.
+Rejection creates a typed diagnostic with `code: "sdk_network_schema_unsupported"`, `receivedVersion`, `supportedVersion`, and `bundleId`. The ingestor logs it with `logger.warn` and records it as a warning telemetry log (`level: 5`, `tag: "SdkNetworkWire"`, `filterName: "sdk_network_schema_unsupported"`), with the diagnostic JSON in `message`. This uses existing persisted log telemetry and the log category of the telemetry push/backfill channel, so consumers can observe it even when network capture is disabled. Ingestion never throws on a version mismatch and inserts no network row. Version and event type are routing controls, not network data columns; no new migration is needed.
 
 ## Rate-limited rejection diagnostics
 

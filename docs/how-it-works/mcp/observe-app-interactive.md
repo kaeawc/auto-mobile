@@ -33,15 +33,16 @@ All from the MCP Apps spec (2026-01-26), the same version the read-only shell us
 ## Selector and payload
 
 The selector is the element's `resource-id` as `{ elementId }`, or else its text or content
-description as `{ text }` (the `text` selector matches both). An element with neither is drawn but
-cannot be picked. When the delivered result carries a `deviceId`, it goes into the arguments, so
-the tap goes to the device that was observed and not to whatever device is active at that moment.
-Likewise the observed panel key (`display.key`) goes in as `display`, so on a multi-display device
-the tap is routed to the panel the element was picked from and not to the default panel.
+description as `{ text }` (the `text` selector matches both). The panel draws an element with
+neither, but the user cannot pick it. When the delivered result carries a `deviceId`, the panel puts
+it into the arguments. The tap then goes to the device that was observed and not to whatever device
+is active at that moment. Likewise the observed panel key (`display.key`) goes in as `display`, so
+on a multi-display device the tap reaches the panel the element was picked from and not the
+default panel.
 
 A selector only names an element, not one occurrence of it. When two visible elements share a
 selector (for example, one Remove button per list row), the panel shows the selector but leaves the
-tap button disabled, because `tapOn` would act on the first match and not necessarily the one that
+tap button disabled. The tool `tapOn` would act on the first match and not necessarily the one that
 was picked. Every request also sends `selectionStrategy: "unique"`, so the server refuses instead of
 guessing if more matches exist than the delivered result showed.
 
@@ -72,10 +73,15 @@ tool contract.
 
 ## Containment
 
-The read-only shell's layers all still apply: a hashed-inline-only CSP with `connect-src 'none'`,
-empty `_meta.ui` CSP domains and permissions, `allow-scripts`-only sandboxing by the host, untrusted
-data checks, and DOM writes through `textContent`/`setAttribute` only. Compared with the read-only
-shell, the picker:
+The read-only shell's layers all still apply:
+
+- a hashed-inline-only CSP with `connect-src 'none'`;
+- empty `_meta.ui` CSP domains and permissions;
+- `allow-scripts`-only sandboxing by the host;
+- untrusted data checks;
+- DOM writes through `textContent`/`setAttribute` only.
+
+Compared with the read-only shell, the picker:
 
 - sends `tools/call` only after a click on its tap button, never because a result arrived;
 - can name only `tapOn` (a test checks the script for any other tool name);

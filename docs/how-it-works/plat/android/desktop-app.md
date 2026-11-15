@@ -39,15 +39,16 @@ fallback), instead of opening their own socket:
 
 - Telemetry for every observed device shares one socket and one reader thread.
   Each device gets its own `subscribe` naming its `deviceSessionUuid`, so the
-  daemon backfills that device's own history under its own `subscriptionId`; an
+  daemon backfills that device's own history under its own `subscriptionId`. An
   all-devices subscription would backfill only the newest rows across every
-  device. Pushes are routed by `subscriptionId`, and the hub also checks the
+  device. The hub routes pushes by `subscriptionId` and also checks the
   `deviceSessionUuid` stamped on each event, so a rebooted device that reuses
   its serial never receives the old epoch's events. A device subscribes with its
   first lease and unsubscribes with its last, and the socket closes when no
-  device remains. After a reconnect every live device subscribes again. A
+  device remains.
+- After a telemetry reconnect every live device subscribes again. A
   refused subscription, such as a device that is not live yet, retries on its
-  own backoff without affecting other devices; a refused desktop session fails
+  own backoff without affecting other devices. A refused desktop session fails
   them all, and a device subscribing while that session is still current gets
   the refusal at once. The refusal holds only for the refused session UUID: once
   a different session registers, a retry or a new subscription connects again
@@ -55,24 +56,25 @@ fallback), instead of opening their own socket:
   receives its device's recent events.
 - Observation (Layout, Performance, Navigation) uses one stream per device,
   shared by every facet on it, and every device's stream shares one socket and
-  one reader thread. Each device sends its own `subscribe` with its own cadence;
-  data frames are routed by `subscriptionId`, and replies to a device's
+  one reader thread. Each device sends its own `subscribe` with its own cadence.
+  The hub routes data frames by `subscriptionId`, and replies to a device's
   `request_navigation_graph` or `request_observation` by the request id (both
   requests name the device's `deviceSessionUuid`). A refused or daemon-ended
   subscription takes down only its own device. A refused desktop session takes
-  down every device until the last lease is released. The hub owns each device's
+  down every device until the last lease is released.
+- The hub owns each device's
   reconnects: when the socket drops, every device reports disconnected and its
   supervision reconnects it, reopening the shared socket once. A facet on a hub
   stream runs no reconnect loop of its own and only refreshes when its device
-  comes back. Cadence requests are merged per device by taking the fastest
-  interval any facet asked for, sent as `update_cadence` on that device's
-  subscription, and recomputed when a facet leaves. One device's slow collector
+  comes back. The hub merges cadence requests per device by taking the fastest
+  interval any facet asked for. It sends the result as `update_cadence` on that device's
+  subscription and recomputes it when a facet leaves. One device's slow collector
   never holds back another: the per-device flows keep the latest frame and drop
   the oldest buffered one. Layout, Performance, Navigation, Storage, the compare
   view and the device-control stream all lease this one stream.
 - The latest hierarchy and screenshot are the shared stream's replay, so a lease
-  never clears them while the stream is connected: a lease joining a live stream
-  makes no new daemon subscription and gets no initial frames, so it arms from
+  never clears them while the stream is connected. A lease joining a live stream
+  makes no new daemon subscription and gets no initial frames. It arms from
   that replay, or requests a fresh observation when there is none. A stream that
   is not connected, or that the hub reconnects, drops its pre-outage layout for
   every lease.
@@ -81,36 +83,38 @@ fallback), instead of opening their own socket:
   shared stream, and the last one to let go sends `unsubscribe_storage`. Updates,
   acknowledgements and reconciliation requests for a file reach only the leases
   holding it, without loss. The daemon pushes a device's storage updates to every
-  subscription for that device, including files only another client observes;
-  the stream drops those on arrival, so a device with no local Storage lease
-  retains none of them. A lease that joins a file the device already
-  observes on a connected stream is acknowledged at once, so it reconciles its
-  snapshot. A dropped connection, and every reconnect the hub makes (a
-  conflated connection state can hide the drop), forgets every confirmation;
-  an acknowledgement still queued from the old connection is dropped, and the
+  subscription for that device, including files only another client observes.
+  The stream drops those on arrival, so a device with no local Storage lease
+  retains none of them.
+- A lease that joins a file the device already observes on a connected stream
+  gets an acknowledgement at once, so it reconciles its snapshot. A dropped
+  connection, and every reconnect the hub makes (a conflated connection state
+  can hide the drop), forgets every confirmation. The stream drops an
+  acknowledgement still queued from the old connection, and the
   re-registration after the reconnect acknowledges the holders again. A file the
   daemon still holds (the device's subscription ended but the socket stayed
-  open) needs no command, so the stream acknowledges it again on resubscribe. A
-  storage command that cannot be written closes the socket, so every device
+  open) needs no command, so the stream acknowledges it again on resubscribe.
+- A storage command that cannot be written closes the socket, so every device
   reconnects and re-registers its files. The daemon owns an observer per
   socket, so a device that leaves a socket other devices keep open sends
-  `unsubscribe_storage` for its files, ordered on the wire with every other
-  storage command: one decided before it leaves is written first, one decided
-  after (another epoch of the serial subscribing the same file) is written
+  `unsubscribe_storage` for its files. The stream orders that command on the wire
+  with every other storage command: it writes one decided before it leaves first,
+  and one decided after (another epoch of the serial subscribing the same file)
   after.
 - One-shot captures (a saved screenshot, the foreground-app lookup) lease the
   device's shared stream and take the first frame captured after their request.
   A lease joined onto a live subscription replays the stream's latest frame,
-  which can be one cadence interval old, so the capture never accepts it: it
+  which can be one cadence interval old, so the capture never accepts it. It
   snapshots the replay when it subscribes, sends `request_observation`, and
   skips the replayed frames (by identity). A screenshot capture also skips
   anything stamped older than them: screenshots carry the daemon's clock, so the
   desktop clock is never compared with it. Hierarchies are not ordered by
   timestamp, because a hierarchy carries the device's capture time when it has
-  one and the daemon's otherwise. `request_observation` pushes a hierarchy but
-  no screenshot, so a screenshot capture also asks for the daemon's minimum screenshot interval
-  (250 ms) on its own lease; the hub's fastest-interval merge applies it while
-  the lease is held, and releasing the lease restores the others' cadence. The
+  one and the daemon's otherwise.
+- The `request_observation` message pushes a hierarchy but no screenshot. So a
+  screenshot capture also asks for the daemon's minimum screenshot interval
+  (250 ms) on its own lease. The hub's fastest-interval merge applies it while
+  the capture holds the lease, and releasing the lease restores the others' cadence. The
   foreground-app lookup is keyed by serial only, so it joins a key a pane
   already leases for that serial; with none it opens its own short-lived stream.
 - Leases are ref-counted per device and stream kind; `subscriptions` and
@@ -131,8 +135,8 @@ A pane is keyed on its device epoch. When the daemon ends that epoch with a
 successor, the pane re-keys onto the successor. When it ends with no successor
 (the device disconnected for good), the pane drops the epoch and shows "Device
 disconnected" in place of its stream and facets, which releases their leases.
-The pane is marked rather than closed so the user sees why the device went away;
-it stays until closed, and observing the device again or a fresh epoch for it
+The pane is marked rather than closed so the user sees why the device went away.
+It stays until closed. Observing the device again or a fresh epoch for it
 (including one reported after a daemon restart) restores the live pane as a new
 epoch, so nothing observed from the retired epoch carries over. A daemon
 restart that re-mints a live pane's epoch is not a new epoch: that pane keeps
@@ -142,7 +146,7 @@ The workspace hears these lifecycle frames itself, not through its panes: while
 a column observes a live epoch, the workspace holds one lifecycle-only
 observation subscription for that epoch (`lifecycleOnly: true` on `subscribe`).
 The daemon sends such a subscription only `device_session_started` and
-`device_session_ended` frames, and never counts it when deciding whether or how
+`device_session_ended` frames. It never counts it when deciding whether or how
 fast to poll a device or whether the device is in use, so an idle pane neither
 starts polling nor changes another client's cadence. Opening or closing one
 sends no cadence-change notification either, so it cannot reconnect a stopped

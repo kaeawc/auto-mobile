@@ -15,7 +15,8 @@
       "maxSentenceWords": 35,
       "maxParagraphWords": 150,
       "maxPageWords": 2500,
-      "passive": { "minSentences": 3, "maxRatio": 0.5 }
+      "passive": { "minSentences": 3, "maxRatio": 0.5 },
+      "enforced": true
     },
     {
       "name": "devlog",

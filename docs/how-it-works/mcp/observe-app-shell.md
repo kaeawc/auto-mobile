@@ -37,8 +37,8 @@ reads, so the daemon makes the same shell decision as the direct HTTP path.
    `ui/notifications/initialized` and `ui/notifications/size-changed`. It never sends `tools/call`,
    `resources/read`, `ui/message`, `ui/open-link` or `ui/update-model-context`, and it answers
    any other host request with `-32601`.
-5. **Untrusted data.** The script accepts messages only from its parent window, reads results
-   defensively (box, node, depth and image-size caps; base64 PNG/JPEG/WebP only, never SVG), and
+5. **Untrusted data.** The script accepts messages only from its parent window. It reads results
+   defensively (box, node, depth and image-size caps; base64 PNG/JPEG/WebP only, never SVG) and
    writes with `setAttribute`/`textContent` only: no `innerHTML`, `eval`, inline style or
    `document.write`.
 

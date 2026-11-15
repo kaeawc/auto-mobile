@@ -29,7 +29,7 @@ batches: `private-daemon.ts init|start|status|stop|env|wrappers|devices|shutdown
 `daemon-frame.ts send|session-info|heartbeat`, and `aux-socket.ts recording|video|webrtc` under
 `scripts/manual-test/`. Use those commands instead of hand-rolling a private
 environment, MCP stdio loop or socket client. For Python/anyio close and typing
-reproduction, use the [Python MCP SDK stdio clients](../../docs/how-it-works/manual-test-harness.md#python-mcp-sdk-stdio-clients).
+reproduction, use the [Python MCP SDK stdio clients](../../docs/how-it-works/manual-test-harness-broker.md#python-mcp-sdk-stdio-clients).
 
 Initialize with `private-daemon.ts init --broker-batch /absolute/broker-batch.json
 --count 1` and use one broker daemon per batch. `--max-devices` defaults to 2,
@@ -77,7 +77,7 @@ scenario. Fake entries use an in-memory broker/native fake without devices or
 daemons. Device entries require an already-running private single-daemon batch,
 zero pooling, strict preflight, no live client drivers, and verified prior cleanup.
 Only `daemon-restart-with-live-sessions --device` accepts `--crash`.
-The [scenario/evidence table](../../docs/how-it-works/manual-test-harness.md#broker-scenarios-and-acceptance)
+The [scenario/evidence table](../../docs/how-it-works/manual-test-harness-broker.md#broker-scenarios-and-acceptance)
 lists expected assertions. Summaries at `evidence/<scenario>/summary.json`
 include redacted requests, timings and ledger deltas. Destruction/handoff
 resource samples are `not-verifiable` until a product read-only diagnostic exists;

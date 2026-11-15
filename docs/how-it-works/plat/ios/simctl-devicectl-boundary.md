@@ -38,7 +38,7 @@ Capability claims come from #8347 (Xcode 27.1 beta, CoreDevice 651.13.4).
   absent, `visibilityClass: "simulators"`) and a simulator-shaped hardware UDID (see the captures in
   `test/fixtures/ios-devicectl/`). The same evidence is required before filtering a simulator as not
   booted or unreachable.
-- Watch/TV/Vision platforms are excluded. Unknown platforms or conflicting/missing kind evidence are
+- Discovery excludes Watch/TV/Vision platforms. Unknown platforms or conflicting/missing kind evidence are
   unidentified. Explicit physical reality with simulator visibility is contradictory (unidentified,
   checked before platform exclusion).
 - Top-level visibility beats `properties.state.visibilityClass`; no other visibility value is
@@ -46,7 +46,7 @@ Capability claims come from #8347 (Xcode 27.1 beta, CoreDevice 651.13.4).
 - Unidentifiable records (including non-objects) are skipped without making discovery incomplete,
   logged once per changed set at debug with fixed labels only.
 - Only an invocation failure, unreadable JSON or a non-success/failure envelope makes discovery
-  incomplete: it returns a typed error and replays the bounded last-good physical inventory, so the
+  incomplete. Discovery then returns a typed error and replays the bounded last-good physical inventory, so the
   idle-device reaper does not infer a disconnect.
 
 ## Ownership rules

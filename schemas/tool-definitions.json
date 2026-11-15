@@ -49429,6 +49429,12 @@
               "skipped": {
                 "type": "boolean"
               },
+              "normalized": {
+                "type": "boolean"
+              },
+              "observed": {
+                "type": "string"
+              },
               "notAttempted": {
                 "type": "boolean"
               },

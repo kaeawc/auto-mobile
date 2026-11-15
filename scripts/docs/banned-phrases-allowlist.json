@@ -7,7 +7,7 @@
       "reason": "Proper name of the persona robustness harness, not a filler adjective."
     },
     {
-      "file": "docs/how-it-works/prototype-web-renderer.md",
+      "file": "docs/how-it-works/prototype-web-renderer-frames.md",
       "rule": "seamless",
       "count": 1,
       "reason": "A seamless fold is a foldable display with no hinge gap, a device posture term."

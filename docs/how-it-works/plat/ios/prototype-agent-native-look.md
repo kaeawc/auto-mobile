@@ -64,9 +64,10 @@ timePicker use native controls.
 | videoPlayer     | material | material | —     |
 | webView         | neutral  | neutral  | —     |
 
-Before a node becomes `native`, simulator verification must establish the testability contract:
-its `testTag` and every `<testTag>.<part>` remain reachable by `observe` and `tapOn`, observed bounds
-match the control, motion-off settles in one frame, and active motion emits the motion-active signal.
+Before a node becomes `native`, simulator verification must establish the testability contract.
+Its `testTag` and every `<testTag>.<part>` remain reachable by `observe` and `tapOn`, and observed
+bounds match the control. Motion-off settles in one frame, and active motion emits the
+motion-active signal.
 The native controls expose no additional authored part suffixes. Segmented Picker, TabView and Menu
 cannot preserve per-item identifiers, so segmentedButton, tabBar, bottomNav, menu and select stay
 custom-drawn Material.
@@ -108,8 +109,8 @@ tokenizer/binder/data projection and resource guards. Failures throw
 returns no render model. The embedded/serverless loader runs it before its decoder/capability checks;
 the Viewer/file loader keeps its existing behavior.
 
-- The shared corpus runner has no exemptions: every valid spec is accepted and every invalid fixture
-  is rejected at the TS-captured path (message parity not required). `corpus.json` ratchets the file
+- The shared corpus runner has no exemptions. It accepts every valid spec and rejects every invalid
+  fixture at the TS-captured path (message parity not required). `corpus.json` ratchets the file
   inventory and TS-computed capabilities in TS, Kotlin and Swift. Regenerate with
   `bun scripts/capture-prototype-strict-fixtures.ts`. Invalid envelopes use `rawJson` or
   `rawBytesBase64` where a `spec` would erase duplicate keys or invalid encoding.
@@ -133,8 +134,8 @@ and none of these settings changes the system locale or the host app's language.
 ## Dead taps (window.deadTaps, prototype_dead_tap_v1)
 
 `window.deadTaps: true` enables ordinary `emit` events named `prototype_dead_tap` in the
-injected agent's passthrough window. The pure session allocates the normal sequence and snapshots;
-the payload contains only window-local `x`/`y` points rounded to one decimal and the deepest
+injected agent's passthrough window. The pure session allocates the normal sequence and snapshots.
+The payload contains only window-local `x`/`y` points rounded to one decimal and the deepest
 stack's id and top screen (ties use the lowest stack id). Both ids are null without stacks;
 host reports label that location `(root)`, otherwise `<stack>/<screen>`. No text is collected.
 This is an agent preflight capability, not a shared-corpus capability requirement.
@@ -192,33 +193,40 @@ observe pointer delivery.
 
 `listDetail` requires `list`, `detail`, and a declared string `selectionKey`. `navigationSuite` requires 1–8 unique `{value,label}` items, a declared string `stateKey` naming an item, and `content`. `supporting` requires `main`, `supporting`, and a declared boolean `openKey`. Slots are ordinary node subtrees. Android uses its expanded pane rule and compact/medium/expanded navigation classes; no shared breakpoint or `minWidth` exists, and show reports the difference in `platformNotes`.
 
-Sizing details (not device-verified): a `weight` takes exactly its share of a `row`/`column` main axis
-and beats that axis's size and bounds (ignored outside a row/column); `min` wins when it exceeds `max`;
-content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew
-(`wrapContentWidth()`/`wrapContentHeight()`), while explicit `width`/`height`/`fill` keeps alignment;
-weighted stacks mirror under RTL via SwiftUI Layout; sizes are fractional points. Rows reserve
-all children's minimum widths, including fills, nested rows' children and gaps, and allocate
-non-filling content least-flexible first (ideal minus minimum), with direct buttons prioritized.
-Fills, unsized horizontal dividers, spacers and controls expanding beyond their ideal width under an infinite proposal
-share the remainder with the flexible slots inserted for `space*` arrangements, retain their probed
-minimum widths and redistribute unused max-bounded width; fixed/wrap spacers remain content. Native
-arrangement spacers expand horizontally only. Rows report
-only the width used. Size wrappers preserve greedy probes unless a finite maximum or explicit size caps
-the axis. Nested rows and weighted stacks report infinity for an infinite main-axis probe when a child
-shares the remainder; nil proposals still measure ideal content. In weighted rows, unweighted greedy
-children are sized before weights, reserving all probed minimums; weights divide only what remains
-in proportion to their authored values. An unweighted greedy child may therefore leave weights zero.
-Row-filling components include sliders, text fields, radio groups, list items, segmented buttons,
-top app bars, snackbars and linear or indeterminate progress indicators. Unlike iOS's least-flexible-first
-allocation and equal sharing in unweighted rows, Android's ordinary Row measures in
-authored order: an early fill-width control can consume the remainder before later labels or controls.
-Overfull controls retain their minimums and overflow at the trailing end
-instead of overlapping. Weighted columns likewise preserve unweighted authored minimum heights,
-overflowing rather than collapsing a fixed-height child at a zero share; weights still take zero
-when no room remains.
-Zero-size probes preserve authored dp sizes and min bounds, deriving aspect-ratio dimensions from
-an explicit dp width or height. Nil-proposal rows retain their measured ideal widths during placement,
-including fill children, rather than redistributing them.
+Sizing details (not device-verified):
+
+- A `weight` takes exactly its share of a `row`/`column` main axis and beats that axis's size and
+  bounds (ignored outside a row/column).
+- A `min` wins when it exceeds `max`.
+- Content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew
+  (`wrapContentWidth()`/`wrapContentHeight()`), while explicit `width`/`height`/`fill` keeps
+  alignment.
+- Weighted stacks mirror under RTL via SwiftUI Layout; sizes are fractional points.
+- Rows reserve all children's minimum widths, including fills, nested rows' children and gaps. They
+  allocate non-filling content least-flexible first (ideal minus minimum), with direct buttons
+  prioritized.
+- Fills, unsized horizontal dividers, spacers and controls expanding beyond their ideal width under
+  an infinite proposal share the remainder with the flexible slots inserted for `space*`
+  arrangements. They retain their probed minimum widths and redistribute unused max-bounded width;
+  fixed/wrap spacers remain content. Native arrangement spacers expand horizontally only. Rows
+  report only the width used.
+- Size wrappers preserve greedy probes unless a finite maximum or explicit size caps the axis.
+  Nested rows and weighted stacks report infinity for an infinite main-axis probe when a child
+  shares the remainder; nil proposals still measure ideal content.
+- In weighted rows, the layout sizes unweighted greedy children before weights, reserving all
+  probed minimums. Weights divide only what remains in proportion to their authored values. An
+  unweighted greedy child may therefore leave weights zero.
+- Row-filling components include sliders, text fields, radio groups, list items, segmented buttons,
+  top app bars, snackbars and linear or indeterminate progress indicators.
+- Unlike iOS's least-flexible-first allocation and equal sharing in unweighted rows, Android's
+  ordinary Row measures in authored order: an early fill-width control can consume the remainder
+  before later labels or controls.
+- Overfull controls retain their minimums and overflow at the trailing end instead of overlapping.
+  Weighted columns likewise preserve unweighted authored minimum heights, overflowing rather than
+  collapsing a fixed-height child at a zero share; weights still take zero when no room remains.
+- Zero-size probes preserve authored dp sizes and min bounds, deriving aspect-ratio dimensions from
+  an explicit dp width or height. Nil-proposal rows retain their measured ideal widths during
+  placement, including fill children, rather than redistributing them.
 
 ## Style effects
 
@@ -241,14 +249,15 @@ effects renders on any iOS 17 simulator (Android's API-floor table does not appl
 
 - **Metal presets.** `ios/prototype-agent/Shaders/PrototypeEffects.metal` holds the shaders. SwiftPM
   does not compile `.metal`, and `ShaderLibrary` loads only precompiled libraries from a bundle or from
-  bytes, so `scripts/ios/prototype-effects-metallib.sh` compiles a metallib on every build and emits
-  `PrototypeEffectsMetallib.swift` (base64, never committed). `prototype-agent-build.sh`,
-  `prototype-viewer-build.sh` and `protoviewer-build.sh` compile it with the other sources and the
-  agent loads it with `ShaderLibrary(data:)`. The script installs the Metal Toolchain
+  bytes. The `scripts/ios/prototype-effects-metallib.sh` script therefore compiles a metallib on every
+  build and emits `PrototypeEffectsMetallib.swift` (base64, never committed). The
+  `prototype-agent-build.sh`, `prototype-viewer-build.sh` and `protoviewer-build.sh` scripts compile it
+  with the other sources, and the agent loads it with `ShaderLibrary(data:)`. The script installs the Metal Toolchain
   (`xcodebuild -downloadComponent metalToolchain`) when Xcode 26 lacks it.
-- **Layers.** As on Android: distortions wrap the node's background and content after its corner
-  clip, in authored order; `shimmer`, `glow`, `vignette` and `noise` paint over the content inside the
-  corner shape and are not distorted; `gradientMesh` sits between the background and the content.
+- **Layers.** As on Android, distortions wrap the node's background and content after its corner
+  clip, in authored order. The `shimmer`, `glow`, `vignette` and `noise` effects paint over the content
+  inside the corner shape and are not distorted; `gradientMesh` sits between the background and the
+  content.
   Effects never change layout, hit testing or accessibility.
 - **Shared decisions** (same defaults, colour resolution and `phase`/`animate` rules as Android; see
   its [Effects](../android/prototype-ux-effects.md#effects-15128-15129-prototype_effects_v1)
@@ -261,17 +270,18 @@ effects renders on any iOS 17 simulator (Android's API-floor table does not appl
   `degradedEffects` never carries reason `budget`.
 - **Platform views.** SwiftUI draws a placeholder instead of a platform-backed view inside a
   `layerEffect` or `distortionEffect`. The platform-backed node types are text fields, search bars,
-  sliders, selects, date and time pickers, scrolls, pagers, carousels, stacks and dialogs, and any
-  descendant with an `id` (the renderer reports its menu bounds through a UIKit marker view behind
-  it). The shader-sampled effects (`pixelate`, `chromaticAberration`,
-  `wave`, `ripple`) are omitted on a node that is or holds such a view, not on the whole spec; `blur`
-  and the over-the-content effects still draw. The show reply and `get_prototype_status` /
-  `inspect_prototypes` list each omitted effect in `degradedEffects` as `{path, type, reason:
-  "platform"}`. `path` is `<node position>.style.effects[<authored index>]` with the node's position in
-  the shown tree (`root`, `root.children[1]`, `root.child`, `root.screens["home"]`); `repeat` rows are
-  already expanded there, so a row has a plain `children[k]` path where Android's has
-  `repeat[<key>]`. Nodes whose `visibleWhen` fails and inactive stack screens are skipped, as on
-  Android. A `blur` or displacement is clipped to the node's bounds.
+  sliders, selects, date and time pickers, scrolls, pagers, carousels, stacks and dialogs. Any
+  descendant with an `id` also counts (the renderer reports its menu bounds through a UIKit marker
+  view behind it). The renderer omits the shader-sampled effects (`pixelate`, `chromaticAberration`,
+  `wave`, `ripple`) on a node that is or holds such a view, not on the whole spec; `blur` and the
+  over-the-content effects still draw.
+- **Degraded effects.** The show reply and `get_prototype_status` / `inspect_prototypes` list each
+  omitted effect in `degradedEffects` as `{path, type, reason: "platform"}`. Its `path` is
+  `<node position>.style.effects[<authored index>]` with the node's position in the shown tree
+  (`root`, `root.children[1]`, `root.child`, `root.screens["home"]`). The renderer has already
+  expanded `repeat` rows there, so a row has a plain `children[k]` path where Android's has
+  `repeat[<key>]`. As on Android, it skips nodes whose `visibleWhen` fails and inactive stack
+  screens. A `blur` or displacement is clipped to the node's bounds.
 
 ## Appearance actions and timers
 
@@ -285,7 +295,7 @@ existing action-depth bound and refuse a second execution of a handler within on
 
 Appearance-started timers use the shared timer ledger: pause while the prototype is hidden,
 cancel on dismissal, TTL expiry or replacing show, and survive hiding their originating node.
-`advance_prototype_clock` drives them without waiting; status/inspect include their
+The `advance_prototype_clock` tool drives them without waiting; status/inspect include their
 `{id,nextFireInMs,runs}` entries.
 
 ## Expiry
@@ -299,9 +309,9 @@ iOS prototypes expire like Android session prototypes
   Initial pager reports, `onAppear`, authored timer fires, a snackbar's own `durationMs` close, `hide_for_capture` and
   `get_prototype_status` do not. A hidden prototype still expires.
 - **Disconnect.** The prototype belongs to the host session, not a socket. `PrototypeClientTracker`
-  counts authenticated connections; when the last closes, the prototype is dismissed and uploaded
-  assets dropped (whether or not one was showing). A `show_prototype` handled after that edge is
-  dismissed the same way.
+  counts authenticated connections. When the last closes, the agent dismisses the prototype and drops
+  uploaded assets (whether or not one was showing). It dismisses a `show_prototype` handled after
+  that edge the same way.
 - **Events.** One `prototype_event` `kind: "dismissed"`, null `name`, `payload: {"reason": "ttl"}` or
   `{"reason": "disconnect"}`, sequenced from the per-id ledger. Reasons: `user`, `agent`, `ttl`,
   `disconnect`.

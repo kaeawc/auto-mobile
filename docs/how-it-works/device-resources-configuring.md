@@ -80,7 +80,7 @@ does not overlap, so enabling one resource cannot silently restore another.
 Every native command is argv-based and bounded by both the request deadline and
 `IOS_RESOURCE_COMMAND_TIMEOUT_MS` (30,000 ms). Idempotent inventory and
 `launchctl print-disabled` reads retry at most twice with a 100/400 ms backoff when
-the deadline allows; writes are never retried, because the post-write verification
+the deadline allows. Writes never retry, because the post-write verification
 re-reads state and a retry of the whole request reconciles any partial change.
 Resource operations hold the device's lifecycle lease, so they serialize per device
 with boot, shutdown, teardown and other configuration, and the device-aware tool
@@ -118,18 +118,19 @@ evidence intact.
 
 `provisionDevice.resources` is all-or-nothing on an iOS Simulator (owner decision
 2026-10-09, #6695). After the write and the independent re-read, every requested
-entry must be proven; an entry that is contradicted (`missingRequested`),
-`unsupported`, or has unknown or missing evidence (`commandFailure`) fails
-provisioning with the typed error code `resource_profile_unproven`. The error is
+entry must be proven. Provisioning fails with the typed error code
+`resource_profile_unproven` for an entry that is contradicted (`missingRequested`),
+`unsupported`, or has unknown or missing evidence (`commandFailure`). The error is
 non-retryable and its `resourceDrift` lists the unproven entries in the same shape
-as `reconcileDeviceResources` drift; the message names them too, so a replayed
-operation keeps them. Failure happens before CtrlProxy readiness and session
-binding, so no session is bound, a replayed session is released, the lifecycle
-lease is released, and a simulator created by this operation is rolled back by the
-normal failed-provision cleanup. On an adopted simulator the overrides that were
-already written are deliberately not reverted: they stay in effect and remain
-recorded as AutoMobile-owned, because a compensating write could itself fail and
-would hide which state the device is really in. Use `reconcileDeviceResources`
+as `reconcileDeviceResources` drift. The message names them too, so a replayed
+operation keeps them.
+
+Failure happens before CtrlProxy readiness and session binding. No session is bound,
+provisioning releases a replayed session and the lifecycle lease, and the normal
+failed-provision cleanup rolls back a simulator this operation created. On an adopted
+simulator provisioning deliberately does not revert the overrides it already wrote.
+They stay in effect and remain recorded as AutoMobile-owned, because a compensating
+write could itself fail and would hide which state the device is really in. Use `reconcileDeviceResources`
 (`repair`, optionally `releaseOwnedExtras`) or `setDeviceResources` to converge or
 undo them. On Android and physical iOS targets the result
 is returned under `resources`, the response is marked as an error, and the
@@ -176,13 +177,13 @@ fails closed when the profile cannot be proven (see above).
 
 ## Impact of disabling iOS Simulator services
 
-Disabling `calendarServices` (`com.apple.calaccessd`) on a booted simulator is refused with
-`unsafe_device_resource_combination` whenever the service is still loaded, because booting
-it out makes the Calendar app (MobileCal) retry its invalidated connection in a tight loop
-(about 100-130% of a core, plus 20-50% in diagnosticd) for the rest of the boot (#15218).
-The same label disabled before first boot, or one that is already unloaded, is safe, so
-request it when `provisionDevice` creates the simulator (applied by the preboot profile),
-or leave it enabled. `provisionDevice` adopting an existing simulator that boots first, and
+AutoMobile refuses to disable `calendarServices` (`com.apple.calaccessd`) on a booted
+simulator with `unsafe_device_resource_combination` whenever the service is still loaded.
+Booting it out makes the Calendar app (MobileCal) retry its invalidated connection in a
+tight loop for the rest of the boot (about 100-130% of a core, plus 20-50% in
+diagnosticd; #15218). The same label disabled before first boot, or one that is already
+unloaded, is safe. Request it when `provisionDevice` creates the simulator (applied by
+the preboot profile), or leave it enabled. `provisionDevice` adopting an existing simulator that boots first, and
 `setDeviceResources`, `reconcileDeviceResources` repair, take the refusal. A hazard is
 judged on the resources requested in the one call; members already disabled earlier are
 not counted. Disabled resource impacts expose `unsafeWith` (empty `withResources` for this

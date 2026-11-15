@@ -49,8 +49,8 @@ migration set (not the per-daemon database migrations).
 - Identity is `(sessionUuid, deviceId, incarnation)`. The incarnation must be a
   durable native resource generation that survives restarts and changes when the
   device is replaced; a process-local counter or reusable serial is insufficient.
-  Baselines are shared across sessions of one incarnation, never across
-  replacements.
+  Sessions of one incarnation share baselines; a replacement never shares
+  them.
 - `applyJournaledMutation` is a standalone helper with no production dispatch
   caller. First write per `(scope, kind, key)` wins. `appliedAt` stamps intent, not
   device acknowledgement. SQLite's sequence gives deterministic reverse order
@@ -120,11 +120,11 @@ capture like other admission work.
   `assertQuiesced` under the lifecycle fence, awaited before snapshotting and
   before every write. A conflicting reimport throws rather than keep stale metadata
   in a first-write-wins row. It is not a live write-through adapter or a gate.
-- Legacy-restorer import is not implemented: shared `device` keys hold incompatible
+- Legacy-restorer import is not implemented. Shared `device` keys hold incompatible
   values (tool clock priors `{ instant, automaticTime }` vs `ClockSessionState`
   `{ initialAutomaticTime, clockChangedByUs, rootedByUs }`; tool network priors
-  `values ?? observedValues ?? profile` vs `{ initialProfile, iosAppRule }`), which
-  would fail the deep-equality check, and a captured clock instant ages before
+  `values ?? observedValues ?? profile` vs `{ initialProfile, iosAppRule }`). Those
+  values would fail the deep-equality check, and a captured clock instant ages before
   restore.
 - `JournalDeviceSettingDefaultsPersistence` wraps the defaults store: broker writes
   first record setting originals and broker reads use the journal's first value; a
@@ -149,7 +149,7 @@ capture like other admission work.
 **Data stores**
 
 - Identities keep app, store, Android user selector and key; set/remove and
-  `name`/`fileName` aliases share a first-write identity. iOS key-value
+  `name`/`fileName` aliases share a first-write identity. On iOS, key-value
   standard-store aliases (empty name, case-insensitive `standard`, bundle ID) and
   UserDefaults standard-suite aliases (omitted suite, `Standard`) share one.
   Android omitted vs explicit `userId` are not merged (default user is resolved
@@ -180,9 +180,9 @@ capture like other admission work.
 **Other tools**
 
 - Journaled non-read calls with an empty adapter result record opaque
-  `unobservable` intent. `screenLock` can capture an unsecured baseline but not an
+  `unobservable` intent. The `screenLock` tool can capture an unsecured baseline but not an
   existing secure credential, so it records `unobservable` without storing secrets.
-  `power` records `unobservable` because its restore registry (`restoreReceipt`,
+  The `power` tool records `unobservable` because its restore registry (`restoreReceipt`,
   `powerRestore`) owns the priors. Prior reads are skipped when the scoped
   `(kind, key)` already exists (one journal list per call). Rotation and
   screen-reader keys use `device`, matching legacy adapters; iOS rotation records
@@ -213,7 +213,7 @@ capture like other admission work.
   When the base recorder resolves to a different device, the call needs no recording
   and no gap. Resolution must recover the base to learn its device, so failed base
   recovery still marks a gap on the base UUID even if the derived call lands on
-  another device; this is deliberate fail-closed over-escalation.
+  another device. This is deliberate fail-closed over-escalation.
 - `recoverSessionMutationRecorder` returning undefined for an active request with no
   live session is safe: the next call from the rehydrated session recovers again.
 

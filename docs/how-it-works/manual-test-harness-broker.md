@@ -4,10 +4,10 @@ Part of [the manual-test harness](manual-test-harness.md).
 
 ## Broker scenarios and acceptance
 
-`broker-scenario.ts list` reports the registry and class. `run NAME` selects an
-isolated in-memory broker with a fake native port unless the entry is device-only;
-device entries always require explicit `--device` (for names in both classes
-`--device` selects the device variant). Fake runs create no daemon or device and do
+`broker-scenario.ts list` reports the registry and class. The `run NAME` command
+selects an isolated in-memory broker with a fake native port unless the entry is
+device-only. Device entries always require explicit `--device` (for names in both
+classes `--device` selects the device variant). Fake runs create no daemon or device and do
 not prove native isolation. Device runs require an already-running private broker
 batch, strict preflight, capability probing, owned persistent proxies, caps and boot
 permits; the batch needs positive `totalDeviceCap <= --max-devices`, `sessionCap >=
@@ -100,9 +100,10 @@ result can still be fetched with its former owner's UUID. Get `sessionUuid` from
 `recordDeviceGestures`, with daemon flag `--tool-call-recording`.
 
 For broker video/WebRTC use `--session-uuid` for the granted session. In a separate
-plain batch, `--observer` provides a sessionless viewer: it mints a UUID, registers
-it on the control socket, heartbeats every 2000 ms by default (`--heartbeat-ms` must
-be below the returned heartbeat timeout), injects `sessionUuid`, and releases on exit.
+plain batch, `--observer` provides a sessionless viewer. It mints a UUID, registers
+it on the control socket and heartbeats every 2000 ms by default (`--heartbeat-ms`
+must be below the returned heartbeat timeout). It then injects `sessionUuid`, and
+releases on exit.
 `--observer-name` sets the client name; observer and explicit session UUID are
 mutually exclusive. Observers grant viewing admission, not device ownership; see
 [Streams](../using/device-ownership.md#streams-need-an-observer-registration-not-a-session)
@@ -127,8 +128,8 @@ bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
 ```
 
 Recording prints one full response line. Video prints its acknowledgement, then
-counts bytes after it for `--hold-ms` (default 5000) or until the server closes, and
-prints `{ack, bytesAfterAck, closedBy}` (binary newlines counted as bytes; the
+counts bytes after it for `--hold-ms` (default 5000) or until the server closes. It
+then prints `{ack, bytesAfterAck, closedBy}` (binary newlines counted as bytes; the
 product exports no packet decoder, so no packet counts are inferred). WebRTC prints
 the full response; `start` requires `whipEndpoint`; other actions are `stop`,
 `status`, `list`, `await`.
@@ -137,20 +138,20 @@ Exit codes. Frame and aux: 0 success, 1 typed refusal, 2 usage or
 private-environment/device-start guard, 3 timeout or connection failure.
 Private-daemon: 0 success/status; 1 typed non-success (daemon still alive, device not
 stopped, inventory errors, `preflight --strict` with warnings); 2 usage/guard/I/O or
-`boot-gate` wait deadline; `start` propagates the product launch exit code;
-`boot-gate -- COMMAND` exits with the command's. Proxy: 0 success/status, 1
+`boot-gate` wait deadline. Its `start` subcommand propagates the product launch
+exit code, and `boot-gate -- COMMAND` exits with the command's. Proxy: 0 success/status, 1
 failed/refused response, 2 usage/guard/wait deadline, 3 serve lost its transport, 4
 serve initialization failed. Inspect full evidence rather than treating exit 0 as
 device-side proof. All three client CLIs support `--help`, `-h`, `help` and
-`<subcommand> --help` on stdout (exit 0) listing flags, defaults, examples and exit
-codes; parse errors go to stderr with a `--help` pointer and exit 2.
+`<subcommand> --help` on stdout (exit 0). The help lists flags, defaults, examples
+and exit codes; parse errors go to stderr with a `--help` pointer and exit 2.
 
 ## Python MCP SDK stdio clients
 
 <!-- Language exception: the TypeScript-only rule applies to application code. This manual-test tooling uses Python because Python anyio/mcp context-close failures cannot be reproduced by a TypeScript client. -->
 
-Use a separate non-broker private batch: `startDevice` and inventory-resource calls
-are forbidden in a broker batch. `scripts/manual-test/python/` retains every request
+Use a separate non-broker private batch: a broker batch forbids `startDevice` and
+inventory-resource calls. The `scripts/manual-test/python/` client retains every request
 and full response while reproducing #11951 (stdio close) and #11950 (multiline
 typing). It uses the official Python `mcp` SDK, locked to 2.3.0: the TypeScript
 `proxy-session.ts` and `@modelcontextprotocol/client` cannot reproduce Python/anyio
@@ -183,11 +184,14 @@ printf '%s\n' "$PY"
 
 Single-client close modes all run the script first, except `mid-call`, which starts
 the last call/read without awaiting it and leaves the contexts after the delay.
-`normal` leaves the contexts; `after-server-exit` closes the captured child's stdin
-and waits for exit; `sigterm-server` and `kill-server` signal only that captured
-child, then wait; `--server-exit-wait-ms 0` races the signal with context close. A
-failed process capture refuses modes needing a process handle before any step (no pid
-is guessed). SDK contexts always close in their owning task; close deadlines kill
+
+- `normal` leaves the contexts.
+- `after-server-exit` closes the captured child's stdin and waits for exit.
+- `sigterm-server` and `kill-server` signal only that captured child, then wait.
+- `--server-exit-wait-ms 0` races the signal with context close.
+
+A failed process capture refuses modes needing a process handle before any step (no
+pid is guessed). SDK contexts always close in their owning task; close deadlines kill
 only the captured child and report `CLOSE_HANG`.
 
 ```bash
@@ -204,10 +208,14 @@ done
 ```
 
 For two emulators sharing one private daemon, each stdio server belongs to its own
-asyncio task and both initialize before traffic. `a-first`: A closes as soon as its
-steps finish while B continues and runs `afterPeerClosed` after A's close plus
-`--stagger-ms`; `b-first` mirrors it; `simultaneous` holds both at a barrier and
-offsets B by the stagger. Repeat five lifetimes to retain each close separately:
+asyncio task and both initialize before traffic.
+
+- `a-first`: A closes as soon as its steps finish while B continues and runs
+  `afterPeerClosed` after A's close plus `--stagger-ms`.
+- `b-first` mirrors it.
+- `simultaneous` holds both at a barrier and offsets B by the stagger.
+
+Repeat five lifetimes to retain each close separately:
 
 ```bash
 B=/absolute/private/batch
@@ -237,10 +245,10 @@ PY="$B/python-venv/bin/python"
   extra attempts, for exceptions or `isError`.
 
 For a dry run, replace the real launch flags with `--fake-server`; `--fake-env K=V`
-applies only to the bundled fake, which uses the installed SDK's server API (FastMCP
-in 1.x, MCPServer in 2.x), implements scripted tools and the `fake://status`
-resource, and bounds every fake to 60 s. `FAKE_ON_EOF` accepts `exit` (default),
-`write-then-exit:20` or `ignore`; `FAKE_IGNORE_SIGTERM=1` adds the force-kill case.
+applies only to the bundled fake. The fake uses the installed SDK's server API
+(FastMCP in 1.x, MCPServer in 2.x), implements scripted tools and the
+`fake://status` resource, and bounds every fake to 60 s. The `FAKE_ON_EOF` variable
+accepts `exit` (default), `write-then-exit:20` or `ignore`; `FAKE_IGNORE_SIGTERM=1` adds the force-kill case.
 
 ```bash
 B=/absolute/private/batch
@@ -255,28 +263,33 @@ PY="$B/python-venv/bin/python"
 
 ### Evidence
 
-The output directory is absolute, created mode 0700; reusing one containing any named
+The output directory is absolute, created mode 0700. Reusing one containing any named
 evidence file (or `lifetime-001` for two clients) is a usage error before guard
-checks or spawn. Files: `A.jsonl` (append-only, 0600, flush per record; fsync per
-record except notifications, which fsync every 100 and on close), `A.identity.json`
-(Python/platform/package versions, command/args, environment **keys only**, close
-mode, script path and SHA256) and `A.server.stderr.log`. JSONL records
-`spawn-request` and `initialize-request` before launch/initialization (retained even
-when spawn fails: `exception` with `phase: "spawn"`), spawn pid, initialization, the
-request before every attempt, the full `model_dump(mode="json", by_alias=True)`
-response or exception, notifications when the SDK offers a handler, `server-request`
-method/params, `transport-exception` details, server exit status/timing, and close.
+checks or spawn. Files:
+
+- `A.jsonl`: append-only, 0600, flush per record; fsync per record except
+  notifications, which fsync every 100 and on close.
+- `A.identity.json`: Python/platform/package versions, command/args, environment
+  **keys only**, close mode, script path and SHA256.
+- `A.server.stderr.log`.
+
+JSONL records `spawn-request` and `initialize-request` before launch/initialization
+(retained even when spawn fails: `exception` with `phase: "spawn"`). It then records
+spawn pid, initialization, the request before every attempt, and the full
+`model_dump(mode="json", by_alias=True)` response or exception. It also records
+notifications when the SDK offers a handler, `server-request` method/params,
+`transport-exception` details, server exit status/timing, and close.
 
 Step timeouts bound only the wait: a timed-out attempt records `timedOut: true` and
-`stillPending: true`, counts as failed, and may retry while its request continues;
-the eventual result is a `late-response`/`late-exception` with the same
+`stillPending: true`, counts as failed, and may retry while its request continues.
+The eventual result is a `late-response`/`late-exception` with the same
 index/attempt and `lateByMs`. After context exit pending requests get a bounded 3 s
-wait with `afterClose: true`; the rest are cancelled and recorded `abandoned`.
+wait with `afterClose: true`; the client cancels the rest and records them `abandoned`.
 Summaries count `lateResponses` and `abandonedRequests`; step stdout includes
 `timedOutAttempts`. Initialization has its own `--init-timeout-ms` (default 60000).
 Exceptions include flattened exception-group leaves and full tracebacks (close
-tracebacks also go to stderr); per-step stdout JSON is compact with error text
-truncated at 300 characters; application failures and close failures stay separate
+tracebacks also go to stderr). Per-step stdout JSON is compact with error text
+truncated at 300 characters. Application failures and close failures stay separate
 in the final summary. Two-client evidence uses `lifetime-001/{A,B}.*` and a plain
 summary table followed by JSON; monotonic absolute timestamps allow overlap and peer
 ordering checks.
@@ -293,10 +306,10 @@ application failure once, then close and write a summary (a cancelled run with
 `characterize_close.py` measures every ordering in a fresh child interpreter with a
 hard timeout (default 30 s). A hang is `CLOSE_HANG`; it terminates that interpreter
 by pid and kills only recorded spawn pids whose command line still contains the
-absolute bundled fake-server path (unverified pids are skipped). It prints identity
+absolute bundled fake-server path (it skips unverified pids). It prints identity
 plus a Markdown table, or machine JSON with `--json` (`--only` selects smoke
-scenarios), exits 0 regardless of outcomes, annotates expected outcomes from the
-same SDK-major table the tests use, and never rewrites measured outcomes to fit.
+scenarios), and exits 0 regardless of outcomes. It annotates expected outcomes from
+the same SDK-major table the tests use, and never rewrites measured outcomes to fit.
 Evidence is under `scratch/pyharness/characterize-*` unless `--out-dir` is given.
 
 The harness's own fake-server runs on Python 3.11.10, anyio 4.15.1 and pydantic
@@ -359,14 +372,14 @@ acquisition (#11173). `test/server/stdioClientGoneSilence.test.ts` pins these
 orderings with fake streams; they have **not yet been observed against a live daemon**.
 
 The remaining 1.x Python SDK race is a client closing while its **own request is
-still in flight**: that response can land in its close window and raise
+still in flight**. That response can land in its close window and raise
 `anyio.BrokenResourceError` (the `late-response-after-leave` row; answering a
 received request after EOF is intentional). A client closing idle gets `CLOSE_OK`;
 unsolicited post-EOF output is dropped.
 
 To confirm on devices, use the 1.30.0 venv (the line that raises) against a private
-daemon built from the commit under test, two clients on two emulators, ten lifetimes
-each, closing idle after their requests finish. Every `close` record must be
+daemon built from the commit under test. Run two clients on two emulators, ten
+lifetimes each, closing idle after their requests finish. Every `close` record must be
 `CLOSE_OK`, each client's session must be gone from the daemon within about 2 s of
 its close, and no stdio server process may remain:
 

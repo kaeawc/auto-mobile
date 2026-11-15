@@ -2,12 +2,15 @@
 
 Part of [the agent-authored prototype specification](prototype-ux.md).
 
-
 The platform vocabulary is the one shape every platform integration uses (notifications, media,
-location, share and so on): a `platform` action calls the platform from a tap, root `platform.on`
-handlers react to platform events, `{platform}` reads show live platform state, and a root
-`requires` block declares up front what the spec needs. It is modelled on the `request` action.
-This section is the contract and the host validation; running the calls is the device module
+location, share and so on):
+
+- a `platform` action calls the platform from a tap;
+- root `platform.on` handlers react to platform events;
+- `{platform}` reads show live platform state;
+- a root `requires` block declares up front what the spec needs.
+
+It is modelled on the `request` action. This section is the contract and the host validation; running the calls is the device module
 registries' job (#14295 on Android, #14296 on iOS), and no production runtime advertises it yet.
 
 ```json
@@ -39,27 +42,31 @@ registries' job (#14295 on Android, #14296 on iOS), and no production runtime ad
 ```
 
 **Modules.** The contract's top-level `platformModules` table is the single source for every call
-and event: each module names its capability, and each call its arguments (with the contract rule
+and event. Each module names its capability. Each call names its arguments (with the contract rule
 a literal `{value}` argument must satisfy), the permissions and background names it needs, and a
 `sensitive` flag for the threat model (#14293). The validators and the capability gates read the
-table, so a module is added by adding its entry. The placeholder module `test` (`test.echo`,
+table, so adding a module means adding its entry. The placeholder module `test` (`test.echo`,
 `test.protected`, the `test.tick` event, capability `prototype_platform_test_v1`) makes the
 vocabulary testable before any real module exists; no production runtime advertises it.
 
 **Per-call capabilities.** A `platformModules` call may name a `capability` it needs on top of its
 module's, named `prototype_platform_<module>_<op>_vN`. The host, Kotlin and Swift validators add it to
-a spec's required capabilities wherever the call appears, so a runtime can offer a module but refuse
-one of its operations (camera recording, system capture, media queues).
+a spec's required capabilities wherever the call appears. A runtime can therefore offer a module but
+refuse one of its operations (camera recording, system capture, media queues).
 
-**`requires`** is optional and strict. `platform` lists module names (1 to 32, unique, each in
-`platformModules`, else `Unknown platform module`). `permissions` lists `{name, purpose}` entries
-(1 to 16, names unique): `name` is one of the canonical permissions of #14297 (`camera`,
-`microphone`, `location`, `locationBackground`, `notifications`, `photos`, `photosAdd`, `contacts`,
-`calendar`, `bluetooth`, `nearbyWifi`, `motion`, `speech`) and `purpose`, a nonblank string of at
-most 512 characters, becomes the iOS usage string and the Android rationale. `background` lists
-the canonical background names of #14301 (`audio`, `location`, `call`, `connectedDevice`,
-`transfer`, `camera`, `microphone`, `remoteNotification`). The host reads `requires` before show
-for the gates below, and the disposable-app shell (#14184) derives its manifest and Info.plist from
+**`requires`** is optional and strict.
+
+- The `platform` field lists module names (1 to 32, unique, each in `platformModules`, else
+  `Unknown platform module`).
+- The `permissions` field lists `{name, purpose}` entries (1 to 16, names unique). Each `name` is
+  one of the canonical permissions of #14297 (`camera`, `microphone`, `location`,
+  `locationBackground`, `notifications`, `photos`, `photosAdd`, `contacts`, `calendar`,
+  `bluetooth`, `nearbyWifi`, `motion`, `speech`). Each `purpose`, a nonblank string of at most 512
+  characters, becomes the iOS usage string and the Android rationale.
+- The `background` field lists the canonical background names of #14301 (`audio`, `location`,
+  `call`, `connectedDevice`, `transfer`, `camera`, `microphone`, `remoteNotification`).
+
+The host reads `requires` before show for the gates below, and the disposable-app shell (#14184) derives its manifest and Info.plist from
 it.
 
 **Events.** `platform.on` maps `"<module>.<event>"` names (up to `MAX_PROTOTYPE_PLATFORM_HANDLERS`, 32) to action lists. An unknown event is refused at `platform.on["<name>"]`, and its module must be
@@ -98,8 +105,8 @@ is valid portable syntax even when loaded on iOS; it never matches an iOS snapsh
 
 **Capabilities.** `prototype_platform_v1` gates `requires`, `platform.on`, the `platform` action and
 `{platform}` reads; each module adds `prototype_platform_<module>_v1`, and a later op or event gets
-a `_v2` gate that checks the fields that version introduced. The gates are generated from
-`platformModules` and join `PROTOTYPE_SPEC_CAPABILITY_GATES`, so show, patch and `replaceNode`
+a `_v2` gate that checks the fields that version introduced. The contract generates the gates from
+`platformModules`, and they join `PROTOTYPE_SPEC_CAPABILITY_GATES`, so show, patch and `replaceNode`
 refuse uniformly. Because every module use must be declared in the root `requires`, which a patch
 cannot add, a patch never introduces a module the shown spec did not already require.
 

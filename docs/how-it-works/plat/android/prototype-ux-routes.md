@@ -16,14 +16,18 @@ word. `visibleWhen` alternatives and sheet or dialog opening by state are not re
 
 `getNavigationGraph` (debug-gated with the rest of that tool) diffs the map against the app's recorded
 graph when given `prototypeSpec` or `prototypeSpecPath`, and returns `prototypeDiff`. A prototype screen
-matches a real screen through, in order: an explicit `screenMapping` (or `screenMappingPath`) entry from
-prototype screen id to real screen name; its `testTag` equal to the real screen name; or its stack
-screen key (whole, slashes included), tab label or sheet/dialog id equal to the real name ignoring
-case and punctuation, with or without a trailing `Screen`, `Activity`, `Fragment`, `Page`, `View` or
-`Controller` on either side, so `Overview` still meets `OverviewActivity`. Letters of any script count;
-a name with none never matches. A mapped screen never falls
-back to the other rules, and a mapping to a name the graph lacks reports `mappedScreenMissing`. The root
-is a destination only when the mapping names it. The result lists `matched` screens,
+matches a real screen through, in order:
+
+1. An explicit `screenMapping` (or `screenMappingPath`) entry from prototype screen id to real
+   screen name.
+2. Its `testTag` equal to the real screen name.
+3. Its stack screen key (whole, slashes included), tab label or sheet/dialog id equal to the real
+   name ignoring case and punctuation. A trailing `Screen`, `Activity`, `Fragment`, `Page`, `View`
+   or `Controller` on either side is optional, so `Overview` still meets `OverviewActivity`.
+
+Letters of any script count; a name with none never matches. A mapped screen never falls back to the
+other rules, and a mapping to a name the graph lacks reports `mappedScreenMissing`. The root is a
+destination only when the mapping names it. The result lists `matched` screens,
 `unmatchedPrototypeScreens`, `unmatchedRealScreens`, `observedTransitions`, `unobservedTransitions`
 (`unmatchedScreen`, `dynamicTarget` for `back` and `next`/`prev`, or `notObserved`) and
 `ignoredMappings` (keys naming no prototype screen). The live cross-check against `screen_changed`
@@ -33,17 +37,17 @@ events from an explored prototype is not built.
 
 `prototype_routes_v1` gates stack `routes`, push/replace `params`, pop `force`, `setStack`,
 route placeholders and `stack:<id>` storage keys. CtrlProxy, the embedded renderer (saved
-prototypes, ProtoViewer, disposable apps) and the iOS prototype agent advertise it; the host refuses
-these fields against a device that does not, so an older runner fails closed. `screens` remains a
+prototypes, ProtoViewer, disposable apps) and the iOS prototype agent advertise it. The host refuses
+these fields against a device that does not, so an older runner fails closed. The `screens` field remains a
 map of bare nodes; the optional sibling `routes` map may contain only screen names of that stack.
 Each route has optional `params: {name: "string"|"number"|"boolean"}` (at most 16, path-key
 names), `onEnter` and `onBack` (1–32 actions each, with the existing action nesting budget). The
 start screen cannot declare params because initial display and popToRoot cannot supply them. Param
-names use the uncapped path-key identifier grammar; bound state keys are checked by the runtime.
+names use the uncapped path-key identifier grammar; the runtime checks bound state keys.
 
 Push and replace accept up to 16 scalar literals or existing state/data/item/index value bindings
-in `params`. All declared params are required; unknown names and incorrectly typed literals are
-rejected at the action. `setStack {stack, path:[{screen,params?}]}` validates each entry the same way
+in `params`. All declared params are required; the action rejects unknown names and incorrectly
+typed literals. `setStack {stack, path:[{screen,params?}]}` validates each entry the same way
 and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. A non-forced pop of the owning stack in
 its screen's onBack list, including nested timer and request follow-ups, is rejected; `force:true`
 bypasses that guard. Pops in dialog actions are independent. An onEnter list cannot push or replace
@@ -56,27 +60,27 @@ Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpe
 `PrototypeRouteRuntime` and its Swift twin):
 
 - Each path entry is `{screen, params}`. Push, replace and setStack resolve bindings when the action
-  runs (`{item}`/`{index}` were bound to the row when the repeat was instantiated) and must match
+  runs (`{item}`/`{index}` were bound to the row when the repeat was instantiated). They must match
   the route's declarations exactly after resolution; otherwise the action leaves the stack
   unchanged. Popping restores the entry below with its own params.
 - `{route.name}` binds each screen's subtree in the stack path to that screen's topmost entry's
-  params, and its onEnter/onBack lists to the entry's params when they run: text renders the value,
+  params, and its onEnter/onBack lists to the entry's params when they run. Text renders the value,
   a whole-placeholder operand keeps its type, and a whole data-pointer segment takes the value
-  escaped per RFC 6901. Binding happens before `/data` resolution; `{index}` is left for the repeat
-  that owns it. Screens outside the path are not bound.
+  escaped per RFC 6901. Binding happens before `/data` resolution; the runtime leaves `{index}` for
+  the repeat that owns it. Screens outside the path stay unbound.
 - `screen_changed` is emitted once per navigation when the top screen, depth or top params change,
   with `params` beside `screen` and `depth` only when the top entry has params. The new top screen's
   onEnter runs after that event. Each stack's first screen also enters once per show (not on a
   stack whose path a same-id show kept; a stack new to that show still enters). Lifecycle lists
   nest at most 8 deep, so cross-screen onEnter cycles end.
 - System Back, the iOS edge swipe and a non-forced authored `pop` run the top screen's `onBack`
-  instead of popping when the stack is above depth 1; `pop {force:true}` always pops, so a confirm
+  instead of popping when the stack is above depth 1. A `pop {force:true}` always pops, so a confirm
   that leaves must use it. A screen with onBack shows no predictive-back preview.
 - Status, inspect and events keep `stacks.<id>.path: string[]` and add `params: object[]` parallel to
   it when any entry has params.
 - A listed `stack:<id>` key stores the path as `[{screen, params?}]`. The storage restorer checks
-  its shape on Android; the runtime restores it when every screen exists and every entry's params
-  fit, and otherwise starts the stack at `start` and records that path over the stale one. On a fresh
+  its shape on Android. The runtime restores it when every screen exists and every entry's params
+  fit. Otherwise it starts the stack at `start` and records that path over the stale one. On a fresh
   iOS show, the restorer also checks screens and param types, drops a stale key as `mismatch`, and
   the coordinator removes it rather than recording the start path. A same-id show's
   kept paths win over storage. Restoring emits no `screen_changed`; the restored top's onEnter runs
@@ -103,6 +107,7 @@ The four named patterns and push/replace `source` require `prototype_stack_patte
 Zoom requires `source` on each push/replace using it, naming exactly one node's `sharedKey` or literal `shared.key`
 inside the target stack's screens. A key referenced as a zoom source is exempt from the two-node visibility-pair rule;
 repeat templates remain disallowed.
+
 With `prototype_zoom_transition_v1`, Android shares bounds from the outgoing source to the incoming
 root and iOS 18+ uses native navigation zoom. Older agents use fadeThrough on Android or platform
 push on iOS 17, reported in `platformNotes`. The rendering capability does not add an authoring
@@ -110,7 +115,10 @@ requirement: `prototype_stack_patterns_v1` still accepts zoom and source.
 Platform, slide and zoom support interactive iOS edge pop; only the composed sharedAxisX/Y and
 fadeThrough patterns pop non-interactively. Fallback notes are returned on both platforms.
 Android predictive back scrubs every pattern, including the zoom transform, and restores the current
-screen on cancellation. PopToRoot reverses the entry edge immediately above the returned screen, using that edge's zoom source rather than the topmost entry's source; without a zoom edge it uses the stack's declared pattern.
+screen on cancellation. PopToRoot reverses the entry edge immediately above the returned screen,
+using that edge's zoom source rather than the topmost entry's source. Without a zoom edge it uses
+the stack's declared pattern.
+
 Shared-axis pop reverses travel; only X also mirrors for RTL. iOS composes axis movement with
 opacity and fadeThrough removes the outgoing screen visually before revealing the scaled incoming
 screen. Fixed named timings are 300 ms for movement and 150 ms for fade effects (two sequential
@@ -137,9 +145,9 @@ uses the default visibility animation; wrap the stack in a box to give that a cu
 
 - **Animated style.** A node's `animate: {tempo?}` selects a contract spring (see Motion tokens), or
   `animate: {durationMs?, easing?}` selects timing (0–2000 ms, default 300;
-  `standard` (default), `emphasized`, `linear` or `spring`, which ignores the duration) makes
-  changes to its `alpha`, `offset`, `scale`, `rotation`, `background` and `color` animate, for
-  example a heart that grows and turns red when a `styleWhen` matches. Without `animate` those
+  `standard` (default), `emphasized`, `linear` or `spring`, which ignores the duration). Either form
+  makes changes to its `alpha`, `offset`, `scale`, `rotation`, `background` and `color` animate. An
+  example is a heart that grows and turns red when a `styleWhen` matches. Without `animate` those
   changes stay instant.
 - **Scale and rotation.** Style `scale` (0–4) and `rotation` (-360..360 degrees) are drawn about
   the node's centre without changing its layout slot, like `offset`; `styleWhen` can set them.
@@ -148,7 +156,7 @@ uses the default visibility animation; wrap the stack in a box to give that a cu
   direction, so drawers mirror in right-to-left locales.
 - **Zoomable images.** An `image` with `zoomable: {maxScale}` (1–8) pinches between 1 and
   `maxScale`, pans within its own bounds once zoomed, and toggles between 1x and 2x (or
-  `maxScale`) on a double tap; TalkBack gets "Zoom in" and "Zoom out" actions. The zoom is clipped
+  `maxScale`) on a double tap. TalkBack gets "Zoom in" and "Zoom out" actions. The zoom is clipped
   to the image's box and does not change its layout or reported bounds. `onTap` still runs; a
   zoomable image cannot also have `onDoubleTap` (rejected at `<path>.zoomable`).
 - **Reduced motion.** Under `motion: "none"` or animator duration scale 0, style changes and

@@ -45,7 +45,7 @@ without an extra interaction event. Header/footer do not contribute to row count
 
 `request.append:{from,to}` reads an array at the RFC 6901 `from` pointer in the JSON response,
 removes that object member from the remaining response, and extends the existing array at the
-`/data/...` target `to`. `from` must have an object parent, not an array parent. Optional `into`
+`/data/...` target `to`. The `from` pointer must have an object parent, not an array parent. Optional `into`
 receives the remaining response and must not overlap `to` in either direction. A literal `to`
 that already resolves to a non-array is invalid; whole `{index}` segments follow `into` rules
 inside repeats. Response validation, extend, `into` and metadata writes are atomic: a missing or
@@ -53,8 +53,8 @@ non-array source/target, unsupported parent or data-limit failure rolls everythi
 reports `invalid_response`. The result reports `appended`, the number of response rows added.
 
 `appendData`, `prependData` and request append use the smallest `maxItems` among lists whose exact data
-path matches the write target. The shared writer supports `append` (one value), `extend` (array values) and `prepend` (array values), with optional `maxItems`; append/extend trim from the start and prepend trims from the end before checking final
-array/byte/depth limits, and reports `trimmed` (0 when none). Without a cap, the ordinary
+path matches the write target. The shared writer supports `append` (one value), `extend` (array values) and `prepend` (array values), with optional `maxItems`. Append/extend trim from the start and prepend trims from the end before checking final
+array/byte/depth limits. The writer reports `trimmed` (0 when none). Without a cap, the ordinary
 `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` limit applies after concatenation. `extend` rejects a non-array value with
 `invalid_value`, a missing target with `not_found`, and a non-array target with `not_array`.
 
@@ -78,8 +78,8 @@ its list anchor (row key and offset) while covered by a push and restores it on 
 falls back to the nearest surviving index or top.
 
 A newer request cancels an in-flight one whose `into` or `append.to` equals, contains or sits inside
-the newer request's `into` or `append.to` (latest wins), so a refresh that replaces `/data/feed` and
-a page append to `/data/feed/items` cannot interleave. A failed page request does not re-arm the
+the newer request's `into` or `append.to` (latest wins). A refresh that replaces `/data/feed` and
+a page append to `/data/feed/items` therefore cannot interleave. A failed page request does not re-arm the
 trigger; the signature changes again only when the data does (a refresh, for example). A device data
 write that would leave a list's array with a non-object row, a missing, non-scalar or duplicate
 `repeat.key`, or more than `maxItems` rows is refused (`invalid_value`) and changes nothing.
@@ -203,7 +203,7 @@ and replacing show cancel timers; patch preserves them.
 
 The injected clock/scheduler drives real scheduling. `prototype {action:"simulate",id,advanceTimeMs}`
 advances 1..3600000 ms without waiting and returns optional `fired`, refusing before sending unless
-the capability is advertised. `advance_prototype_clock {id,advanceTimeMs}` fires due timers in
+the capability is advertised. The `advance_prototype_clock {id,advanceTimeMs}` tool fires due timers in
 chronological order, ties by start order, including newly started timers due in the window.
 Paused advancement fires zero times. Exactly 10000 due fires succeed; if an additional fire is
 still due, advancement stops at the last fire with an error and fired=10000, retaining pending timers

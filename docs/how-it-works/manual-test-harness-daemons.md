@@ -19,8 +19,8 @@ and optional `hardware` (archetype string or product hardware selector), `os`
 harness uses the product parsers; see [Session requirements](../how-it-works/session-requirements.md)
 and the [session broker operator/consumer contract](../how-it-works/session-broker-experiment.md).
 
-The batch also carries the product's catalog classification keys, validated by the
-host-config parser and copied into `broker/host-config.json`:
+The batch also carries the product's catalog classification keys. The host-config
+parser validates them and the harness copies them into `broker/host-config.json`:
 `androidProfileArchetypes` (AVD profile id to `phone`, `tablet`, or `foldable`, e.g.
 `{ "medium_phone": "phone" }`) and `iosClassifications` (simulator device type
 identifier to model type). Omit them and the first acquisition fails with
@@ -76,12 +76,12 @@ batch command uses `MT_BATCH` from its wrapper.
 `preflight --strict`, requires a live `session-broker/v1` socket, and holds a
 boot-gate permit through every proxy initialization. Planned ready clients finish
 before clients expected to get `capacity_exhausted` start (extra clients deliberately
-test refusals). `capacity_exhausted` reports `retryable: true` with
+test refusals). The `capacity_exhausted` refusal reports `retryable: true` with
 `retryRequires: "new_request_id"`: replaying the same request ID returns the
 identical stored refusal, so a retry needs a fresh ID. The acquisition deadline is
 26 minutes including the boot gate; a timeout signals no process. Inspect `status`,
-then `down` before another batch. `down` closes clients in reverse start order,
-waits for receipts and verifies native absence (240 s budget). `report` writes
+then `down` before another batch. The `down` command closes clients in reverse start order,
+waits for receipts and verifies native absence (240 s budget). The `report` command writes
 `evidence/broker-report.json` (outcomes, timings, ledger data).
 
 `--env K=V` is repeatable for all daemons; `--daemon-env N:K=V` overrides per
@@ -92,29 +92,29 @@ daemon; `--daemon-arg=--debug` also works). Restarts reuse recorded env and argv
 source builds find `ios/control-proxy`; `--env`/`--daemon-env` override it.
 
 `start` refuses a recorded live PID, then mirrors the daemon's JSON PID to
-`daemonN/pid.txt`. `stop` confirms identity through `ide/status` on the private
-control socket, sends SIGTERM to the recorded PID, and waits up to `--wait-ms`
-(default 30000), printing one JSON line with `outcome` (`stopped`, `still-alive`,
+`daemonN/pid.txt`. The `stop` command confirms identity through `ide/status` on the
+private control socket, sends SIGTERM to the recorded PID, and waits up to `--wait-ms`
+(default 30000). It prints one JSON line with `outcome` (`stopped`, `still-alive`,
 `gone-before-signal`) and `via` (`signal`, `product-cli`, `none`). When identity is
 not confirmed it delegates to the product CLI (`amN daemon stop` remains the product
 stop path). It never escalates to SIGKILL; exit 1 means `still-alive` and preserves
-`pid.txt`, success removes it. `stop --wait-ms 0` signals and reports `still-alive`
+`pid.txt`, success removes it. A `stop --wait-ms 0` signals and reports `still-alive`
 unless the daemon is already gone.
 
 For the explicit crash-recovery test only: `private-daemon.ts stop --batch-dir "$B"
---daemon 1 --crash` sends SIGKILL only to this batch's recorded daemon PID after
-confirming PID, socket and PID file through `ide/status`, matching
-`daemon-start.json`, and re-checking the recorded process start identity right
+--daemon 1 --crash` sends SIGKILL only to this batch's recorded daemon PID. It first
+confirms PID, socket and PID file through `ide/status`, matching
+`daemon-start.json`, and re-checks the recorded process start identity right
 before signalling. It never delegates, signals children or process groups, or kills
 by name; missing or mismatched identity refuses. Success reports `crashed`.
 
 `status` reports JSON/plain PID agreement (`pidTxt`: `ok`, `missing`, `stale`),
-liveness, socket response, port and env file. `status --devices` appends host
+liveness, socket response, port and env file. The `status --devices` form appends host
 inventories and the daemon's own view (`daemonDevicesMethod:
-"daemon/availableDevices"`); it is read-only apart from that method's inventory
+"daemon/availableDevices"`). It is read-only apart from that method's inventory
 ownership/discovery refresh and boots or claims no device. Android inventory reads
-`host:devices-l` over the local ADB server socket without launching `adb` (skipped
-when no server listens). Each diagnostic failure is returned as evidence.
+`host:devices-l` over the local ADB server socket without launching `adb` (it skips this
+when no server listens). Each diagnostic failure comes back as evidence.
 
 Restart means `stop` then `start`; wrappers refuse `daemon start*` and `daemon
 restart*` shorthands. `env --batch-dir "$B" --daemon 1` prints an env file path.
@@ -154,11 +154,11 @@ Legacy managed-slot configuration and `AUTO_MOBILE_*` values are stripped. `env.
 unsets opt-ins unless configured, so sourcing it cannot silently enable them.
 Clients validate opt-in paths only when supplied and discard inherited opt-ins;
 daemon manifest overrides are retained on launch.
-`scripts/manual-test/productPathEnv.ts` is the registry, checked exhaustively
+The registry is `scripts/manual-test/productPathEnv.ts`, checked exhaustively
 against product env reads with its sorted non-path list. Harness entry scripts
 preserve explicit `stderr` sinks. File logging before product imports requires an
 explicit absolute log directory outside both home defaults, checked lexically and
-through existing ancestors' realpaths; all other cases (invalid sink values,
+through existing ancestors' realpaths. All other cases (invalid sink values,
 data-dir-only environments) force the canonical stderr sink. Child environments
 restore every harness sink override so private daemons log to their private files.
 
@@ -175,16 +175,16 @@ libwebp writes to `~/.auto-mobile/libwebp`. Supply `AUTOMOBILE_CWEBP_PATH` and
 Daemons still share the host's adb server, AVD inventory and simulator set. By
 default the batch uses **one shared adb-server coordination directory**; the broker
 also has a private per-daemon coordination namespace for its host lock and registry.
-`init --split-adb-coordination` is only for scenarios whose daemons must not see
+The `init --split-adb-coordination` option is only for scenarios whose daemons must not see
 each other's coordination state (a split registry can report false capacity
 findings, #11905); it creates no separate adb servers.
 
 ## Host preflight and staggered boots
 
 `preflight --batch-dir "$B" [--strict]` reports platform, power source and charge,
-system-wide sleep assertions, lid state and clamshell sleep, low-power mode (from
-`lowpowermode` or `powermode`; absence of both is not a warning), the three load
-averages, CPU count and free/total memory bytes. macOS reads `pmset -g batt`,
+system-wide sleep assertions, lid state and clamshell sleep. It also reports low-power
+mode (from `lowpowermode` or `powermode`; absence of both is not a warning), the three
+load averages, CPU count and free/total memory bytes. On macOS it reads `pmset -g batt`,
 `pmset -g assertions`, `pmset -g` and `ioreg`; other platforms report those sections
 unsupported; failed readers carry `unavailable` reasons. It needs a private batch
 path but no `batch.json`, prints one JSON document and exits 0 (`--strict` exits 1

@@ -2,7 +2,6 @@
 
 Part of [ProtoViewer](protoviewer.md).
 
-
 Both platforms ship from GitHub releases. Android also has a Google Play pipeline (section 8.3);
 there is no App Store pipeline yet:
 
@@ -21,17 +20,25 @@ The hardening promises above are checked on the **built artifact**, not the sour
 `scripts/release/check-protoviewer-artifact-policy.ts` against the checked-in allowlists in
 `scripts/release/protoviewer-artifact-policy.json`:
 
-- **Android** (`aapt2 dump xmltree` of the APK's merged manifest): permissions equal the allowlist
-  (`INTERNET`, `ACCESS_LOCAL_NETWORK`) with no declared permissions; no `debuggable`;
-  `allowBackup=false` and `dataExtractionRules`; no cleartext (`usesCleartextTraffic` or a network
-  security config that permits it); the exported components equal the allowlist (the launcher,
-  `ImportActivity`, and the two `DUMP`-protected entries); `targetSdk` at the Play floor; no
-  `-SNAPSHOT` `versionName` (local and PR builds pass `--allow-snapshot`).
-- **iOS** (`plutil`, `codesign -d --entitlements`, `nm`): no ATS relaxation, no
-  `UIFileSharingEnabled`, `CFBundleSupportedPlatforms` matches `--platform`, entitlements within the
-  allowlist and never a `get-task-allow` that is not `false` (simulator builds keep entitlements in the
-  executable, so `codesign` reports none and these rules bite on the device `.ipa`), no `.dSYM` in the bundle and no debug map left in the
-  executable. The `PrivacyInfo.xcprivacy` check is enforced (#14151, #15387). The
+- **Android** (`aapt2 dump xmltree` of the APK's merged manifest):
+  - permissions equal the allowlist (`INTERNET`, `ACCESS_LOCAL_NETWORK`) with no declared
+    permissions;
+  - no `debuggable`;
+  - `allowBackup=false` and `dataExtractionRules`;
+  - no cleartext (`usesCleartextTraffic` or a network security config that permits it);
+  - the exported components equal the allowlist (the launcher, `ImportActivity`, and the two
+    `DUMP`-protected entries);
+  - `targetSdk` at the Play floor;
+  - no `-SNAPSHOT` `versionName` (local and PR builds pass `--allow-snapshot`).
+- **iOS** (`plutil`, `codesign -d --entitlements`, `nm`):
+  - no ATS relaxation and no `UIFileSharingEnabled`;
+  - `CFBundleSupportedPlatforms` matches `--platform`;
+  - entitlements within the allowlist and never a `get-task-allow` that is not `false`. Simulator
+    builds keep entitlements in the executable, so `codesign` reports none and these rules bite on
+    the device `.ipa`;
+  - no `.dSYM` in the bundle and no debug map left in the executable.
+
+  The `PrivacyInfo.xcprivacy` check is enforced (#14151, #15387). The
   forbidden-symbol check (`PrototypeServer`, `bootViewerHost`) is **advisory** (reported as a warning,
   table `advisory` in the policy file) until the App Store archive (#14150) lands; delete the table
   entry then to enforce it.
@@ -48,16 +55,17 @@ Release checks need a device and run from `scripts/release/protoviewer-release-s
 `scripts/release/protoviewer-release-smoke.ts`, fake-tested in `test/scripts/protoviewerReleaseSmoke.test.ts`):
 
 - **Upgrade in place** (`--mode upgrade`): install the previous release, import a prototype through
-  the MCP inbox, install the candidate over it (`adb install -r` / `simctl install`, never an
-  uninstall), then check the version moved, the app's data identity is unchanged (Android
-  `firstInstallTime`, iOS data container path) and the saved entry still opens under the same library id.
+  the MCP inbox, and install the candidate over it (`adb install -r` / `simctl install`, never an
+  uninstall). Then check the version moved and the app's data identity is unchanged (Android
+  `firstInstallTime`, iOS data container path). The saved entry must still open under the same
+  library id.
 - **Minified smoke** (`--mode smoke`): install the R8-minified APK (`--build` passes
-  `-Pautomobile.protoviewer.minifyRelease=true`) or the stripped iOS release, import and open two
+  `-Pautomobile.protoviewer.minifyRelease=true`) or the stripped iOS release. Import and open two
   validated asset-free specs, and on Android read the library screen's settings switch and open
   "Open-source licenses" through `uiautomator dump`.
 
 - **iPhone Duo** (`--duo`, iOS only): after the normal flows install the candidate, import and
-  open the smoke bundle in each posture. `--posture-command <executable>` receives `closed` or
+  open the smoke bundle in each posture. The `--posture-command <executable>` receives `closed` or
   `opened` directly (no shell); exit 0 means the posture is reached. The caller supplies daemon
   session wiring because simctl cannot change posture. Each screenshot explicitly selects the
   enumerated display name: `primary` for the closed cover and `primary-1` for the opened inner
@@ -67,19 +75,19 @@ Release checks need a device and run from `scripts/release/protoviewer-release-s
   including after a failed posture command.
 
 Not automated: settings persistence (the network switch needs a runtime permission grant), and the
-iOS Settings and licenses screens (no UI driver in the script); both are reported as `SKIPPED`.
-The previous APK must be signed with the candidate's key. `protoviewer-release-smoke.yml` is a
+iOS Settings and licenses screens (no UI driver in the script); the script reports both as `SKIPPED`.
+The candidate's key must sign the previous APK. `protoviewer-release-smoke.yml` is a
 manual, advisory Android lane that downloads the previous release's APK; it is not called from any
 release workflow. All of this is unverified on devices until someone runs it (label
 `needs-device-verify` on #15387). The iOS forbidden-symbol rule stays advisory until #14150 lands.
 
 ## 8.2 Android release signing and versioning (#14146)
 
-The GitHub release APK is signed with the shared release keystore, the same as CtrlProxy, through
+The shared release keystore signs the GitHub release APK, the same as CtrlProxy, through
 `PROTOVIEWER_*` inputs mapped from the shared `RELEASE_*` secrets. This key is permanent for the
 package's update path: moving to its own key or a Play upload key (#14146) requires uninstalling the
-existing app first. Its `versionCode` is derived from the release version as described below, so
-updates across releases need strictly increasing codes, which the derived scheme provides.
+existing app first. The build derives its `versionCode` from the release version as described below.
+Updates across releases need strictly increasing codes, which the derived scheme provides.
 
 ### Play-ready artifact configuration
 
@@ -107,8 +115,8 @@ Whether the key is the Play upload key or the app-signing key is decided at Play
 enrolment; record it next to the key.
 
 **Fail closed.** The release workflow sets `PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true`, so a release
-assemble without complete signing inputs fails instead of falling back to the debug key.
-`verifyProtoViewerReleaseInputs`
+assemble without complete signing inputs fails instead of falling back to the debug key. The
+`verifyProtoViewerReleaseInputs` task
 (a `preReleaseBuild` dependency, so it fails before compilation) rejects a missing signing input, a
 missing keystore file, a missing `PROTOVIEWER_RELEASE_VERSION`, or a `-SNAPSHOT`/suffixed version.
 Local and pull-request builds without `PROTOVIEWER_RELEASE_VERSION` stay debug-signed and keep
@@ -123,9 +131,9 @@ The APK build receives the release version's MAJOR.MINOR.PATCH core, so prerelea
 suffixes do not reach the convention and share the core's `versionCode`.
 
 **AAB, R8 and mapping.** `:protoviewer:bundleRelease` writes
-`build/outputs/bundle/release/protoviewer-release.aab` and is finalized by
+`build/outputs/bundle/release/protoviewer-release.aab`. Its finalizer is
 `verifyProtoViewerReleaseAab` (required entries, jar signature present and not the Android debug
-certificate when signing is required, R8 mapping present) and, when R8 is on,
+certificate when signing is required, R8 mapping present). When R8 is on, it is also finalized by
 `archiveProtoViewerReleaseMapping` (`build/outputs/release-archive/mapping-<versionCode>.txt`, to
 be kept as a release asset for as long as that version is supported). R8 is on for release (disable
 locally with `-Pautomobile.protoviewer.minifyRelease=false`); `verifyReleaseR8KeptClasses` asserts
@@ -183,7 +191,7 @@ only.
 - `halt` with the current `fraction`: stop the staged rollout. Users who already updated keep the
   build.
 
-Every dispatch needs a `google-play-release` approval. Runs are serialized per version only, so a halt never queues behind another version's pending approvals. A job waiting on an environment approval would hold an app-wide group. Play allows one open edit per user, so two versions' operations can still overlap and invalidate each other's edit. `supply` commits last, so the script retries a failed call after 30 s and again after 90 s. **Resume** a halted rollout in the Play
+Every dispatch needs a `google-play-release` approval. Runs are serialized per version only, so a halt never queues behind another version's pending approvals. A job waiting on an environment approval would hold an app-wide group. Play allows one open edit per user, so two versions' operations can still overlap and invalidate each other's edit. Because `supply` commits last, the script retries a failed call after 30 s and again after 90 s. **Resume** a halted rollout in the Play
 Console (Production → Releases → Resume rollout): `supply` only updates in-progress or draft
 releases. To roll back, ship a fix under a higher version. Play has no rollback to a lower
 versionCode.

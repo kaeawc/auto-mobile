@@ -245,6 +245,7 @@ internal class BroadcastGuardAdoptionTestSourceTest {
         "FailureReceivers.kt",
         "PackageScreenReceivers.kt",
         "CommandReceivers.kt",
+        "CtrlProxyReceivers.kt",
         "ScreenshotRequestHandler.kt",
         "FrameContextGate.kt",
       )

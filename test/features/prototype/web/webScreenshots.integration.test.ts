@@ -435,6 +435,55 @@ for (const engine of ENGINES) {
       CASE_TIMEOUT_MS,
     );
 
+    test(
+      "rotation lock keeps the portrait view inside the turned frame (#16587)",
+      async () => {
+        const entry = webScreenshotCases().find((each) => each.orientations.length > 1);
+        const { page, ...problems } = await openPage(browser, await webScreenshotPage(entry!));
+        const setLock = (on: boolean) =>
+          page.evaluate((lock) => {
+            if (lock) {
+              document.body.dataset.rotationLock = "on";
+            } else {
+              delete document.body.dataset.rotationLock;
+            }
+          }, on);
+        try {
+          await setLock(true);
+          await page.click('[data-control="rotate"]');
+          // The same portrait view turns with the frame: no second view, no cross-fade.
+          const turning = await midRotation(page);
+          expect(turning.animations).toBe(2);
+          expect(turning.shown).toEqual(["portrait"]);
+          // Partway along the eased quarter turn counterclockwise.
+          expect(turning.angles[0]).toBeLessThan(-1);
+          expect(turning.angles[0]).toBeGreaterThan(-89);
+          await finishAnimations(page);
+          const locked = await shownView(page);
+          expect(locked.orientation).toBe("portrait");
+          // Drawn sideways: the portrait view's box is wider than tall once turned.
+          expect(locked.width).toBeGreaterThan(locked.height);
+          expect((await midRotation(page)).angles.map(Math.round)).toEqual([-90]);
+
+          // Unlocking in the landscape frame shows the landscape view upright.
+          await setLock(false);
+          const relaying = await midRotation(page);
+          expect(relaying.shown.sort()).toEqual(["landscape", "portrait"]);
+          await finishAnimations(page);
+          const unlocked = await shownView(page);
+          expect(unlocked.orientation).toBe("landscape");
+          expect(unlocked.width).toBeGreaterThan(unlocked.height);
+          expect((await midRotation(page)).angles.map(Math.round)).toEqual([0]);
+          expect(problems.consoleErrors).toEqual([]);
+          expect(problems.pageErrors).toEqual([]);
+          expect(problems.requests).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      },
+      CASE_TIMEOUT_MS,
+    );
+
     test("a fitted map stretched in a narrow column keeps both pins inside the box (#16679)", async () => {
       const markers = {
         path: "/ends",

@@ -20,7 +20,8 @@ nothing at runtime drives a browser.
   orientation. The stage carries the runtime's fitted scale and the zoom label shows it. A watch,
   TV or car page has no rotate control. On other frames, halfway through rotate both views show
   and turn, and the finished turn shows only the landscape view, wider than tall. With reduced
-  motion, rotate starts no animation.
+  motion, rotate starts no animation. With rotation locked, rotate turns only the shown portrait view,
+  which ends sideways and wider than tall; unlocking then shows the landscape view upright.
 - **Screen select and 3D.** A page with a screen select shows exactly the picked screen's view. The
   3D toggle turns the shown view to the three-quarter pose, and an arrow key on the focused viewport
   orbits it. Toggling back restores the shown view's DOM byte for byte.

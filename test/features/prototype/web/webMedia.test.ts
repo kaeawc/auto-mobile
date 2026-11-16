@@ -90,7 +90,23 @@ describe("prototype web media nodes (#16539)", () => {
       { type: "videoPlayer", id: "clip", path: "root", reason: "assetNotInlined", asset: "p" },
     ]);
     expect(video.part("poster")).toEqual([]);
-    expect(video.imageDraws).toEqual([{ asset: "p", widthFill: true, scale: "fit" }]);
+    expect(video.imageDraws).toMatchObject([{ asset: "p", scale: "fit" }]);
+  });
+
+  test("a sized player encodes its poster at the player's size, not the screen's", () => {
+    const fixed = still({
+      type: "videoPlayer",
+      poster: "p",
+      style: { width: { dp: 80 }, height: { dp: 45 } },
+    });
+    expect(fixed.imageDraws).toMatchObject([
+      { asset: "p", widthDp: 80, heightDp: 45, scale: "fit" },
+    ]);
+    // A fixed width alone bounds the height by the player's 16:9.
+    const wide = still({ type: "videoPlayer", poster: "p", style: { width: { dp: 160 } } });
+    expect(wide.imageDraws).toMatchObject([
+      { asset: "p", widthDp: 160, heightDp: 90, scale: "fit" },
+    ]);
   });
 
   test("a poster with a slot fits the player over black once its rule is inlined (#16591)", () => {

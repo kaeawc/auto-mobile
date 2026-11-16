@@ -21,7 +21,7 @@ import {
   Z_INDEX,
 } from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
-import { webImageLayers, webImageVar } from "./webImages";
+import { webImageDraw, webImageLayers, webImageVar, type WebImageDraw } from "./webImages";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
 import { cssColor } from "./webStyle";
@@ -209,8 +209,20 @@ function centredPlay(): WebElement {
 }
 
 /**
+ * The box the poster is encoded for: the player's own sizing, as an `image` with its style would
+ * draw, fit inside it; a fixed width without a height bounds the height by the player's 16:9.
+ */
+function posterDraw(asset: string, node: Raw, scope: WebRenderScope): WebImageDraw {
+  const draw = webImageDraw(asset, { style: node.style }, scope.style.parentAxis);
+  if (draw.widthDp === undefined || draw.heightDp !== undefined) {
+    return draw;
+  }
+  return { ...draw, heightDp: (draw.widthDp * 9) / 16 };
+}
+
+/**
  * The poster over the first frame (#16591), as an `image` draws an asset: the draw is recorded so
- * the page encodes it at the player's width, and the entry stays listed (not inlined, else over
+ * the page encodes it at the player's size, and the entry stays listed (not inlined, else over
  * budget until the page inlines it and drops the entry). With a slot, the poster fits the player
  * over black, which shows only once the page's rule sets the slot's `-on` flag.
  */
@@ -232,7 +244,7 @@ function posterLayers(
     reason: slot === undefined ? "assetNotInlined" : "assetOverBudget",
     asset,
   });
-  scope.imageDraws?.push({ asset, widthFill: true, scale: "fit" });
+  scope.imageDraws?.push(posterDraw(asset, node, scope));
   if (slot === undefined) {
     return [];
   }

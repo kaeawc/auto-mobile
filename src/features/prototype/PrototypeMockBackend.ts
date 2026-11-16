@@ -86,9 +86,10 @@ export class PrototypeMockBackend {
       timer: deps.timer,
       record: (room, from, data) => this.append({ seq: 0, room, from, data }),
     });
-    this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, (write) =>
-      this.applyActorWrite(write),
-    );
+    this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, {
+      write: (write) => this.applyActorWrite(write),
+      publish: (room, frame) => this.rooms.publish(room, frame, "publish"),
+    });
     this.actors.start();
   }
 
@@ -158,7 +159,8 @@ export class PrototypeMockBackend {
     this.record(method, request, response);
     // Only a collection's own answer is a stored write; a fault or canned route stored nothing.
     if (written !== undefined) {
-      this.broadcastWrite(method, request, written);
+      const name = decodeURIComponentSafe(request.path.split("/")[1] ?? "");
+      this.broadcastWrite(name, method, request, written);
     }
     this.actors.onRequest(method, request.path, response.status, {
       query: request.query,
@@ -167,12 +169,13 @@ export class PrototypeMockBackend {
     return response;
   }
 
+  /** An actor's write answers and broadcasts like the equivalent HTTP request. */
   private applyActorWrite(write: MockActorWrite): number {
     const items = this.collections.get(write.collection);
     if (items === undefined) {
       return 404;
     }
-    return answerCollection(
+    const response = answerCollection(
       items,
       {
         method: write.method,
@@ -181,12 +184,18 @@ export class PrototypeMockBackend {
         body: write.body,
       },
       { ids: this.deps.ids, fits: (next) => this.fitsWith(items, next) },
-    ).status;
+    );
+    this.broadcastWrite(write.collection, write.method, { query: {}, body: write.body }, response);
+    return response.status;
   }
 
   /** A successful write to a collection with a broadcast sends its frame to the bound room. */
-  private broadcastWrite(method: string, request: MockRequest, response: MockResponse): void {
-    const name = decodeURIComponentSafe(request.path.split("/")[1] ?? "");
+  private broadcastWrite(
+    name: string,
+    method: string,
+    request: Pick<MockRequest, "query" | "body">,
+    response: MockResponse,
+  ): void {
     const broadcast = this.broadcastFor(name, method, response.status);
     if (broadcast === undefined) {
       return;

@@ -1,4 +1,7 @@
 import { isDeviceBindingTool } from "../daemon/deviceSessionResult";
+import { INTERNAL_NO_DIFF_PARAM } from "../daemon/wire/constants";
+import { reduceStatelessToolResponse } from "./finalizeToolResponse";
+import { isRecord } from "./pipeline/isRecord";
 import type { z, ZodType } from "zod/v4";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import {
@@ -309,8 +312,14 @@ export class ToolRegistryClass {
         const response = await handler(args, progress, signal);
         if (isDeviceBindingTool(name)) {
           // Ingress binds and heartbeats the session these results name after the handler
-          // returns (`runtime.session.sessionUuid`, `sessionUuid`), so they are never spilled.
-          return response;
+          // returns (`runtime.session.sessionUuid`, `sessionUuid`), so they are never spilled;
+          // the stateless reductions (an acquisition's `timing` tree) still apply (#18348).
+          return reduceStatelessToolResponse(response, {
+            name,
+            outputSchema: options.outputSchema,
+            internal: isRecord(args) && args[INTERNAL_NO_DIFF_PARAM] === true,
+            omitsAcquisitionTiming: options.omitsAcquisitionTiming,
+          });
         }
         return this.plainToolFinalizer.finalizePlain({
           name,
@@ -318,6 +327,7 @@ export class ToolRegistryClass {
           args,
           response,
           timer: this.timer,
+          omitsAcquisitionTiming: options.omitsAcquisitionTiming,
         });
       },
       defaultEnabled: options.defaultEnabled ?? true,
@@ -336,6 +346,7 @@ export class ToolRegistryClass {
       appUiResourceUri: options.appUiResourceUri,
       selectsActiveDevice: options.selectsActiveDevice,
       hostInventory: options.hostInventory,
+      omitsAcquisitionTiming: options.omitsAcquisitionTiming,
     });
   }
 

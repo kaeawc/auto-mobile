@@ -177,6 +177,8 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   selectsActiveDevice?: boolean;
   /** See {@link ToolTraits.hostInventory}. */
   hostInventory?: boolean;
+  /** See {@link ToolTraits.omitsAcquisitionTiming}. */
+  omitsAcquisitionTiming?: boolean;
 }
 
 /**
@@ -266,6 +268,12 @@ export interface ToolTraits {
    * not a serial (#17954).
    */
   advertisesDeviceId?: boolean;
+  /**
+   * Returns the booted-device description (`getAndroid`, `getApple`, `startDevice`), whose per-command
+   * `timing` tree the persisted `debug-perf` flag can attach: finalization drops it from every
+   * agent-facing success, and `readiness.elapsedMs` carries the total (#11636, #18348).
+   */
+  omitsAcquisitionTiming?: boolean;
 }
 
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
@@ -303,6 +311,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     changesHostSideState,
     changesOpaquePersistentState,
     advertisesDeviceId,
+    omitsAcquisitionTiming,
   } = options;
   return {
     stopsApp,
@@ -319,6 +328,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     changesHostSideState,
     changesOpaquePersistentState,
     advertisesDeviceId,
+    omitsAcquisitionTiming,
   };
 }
 

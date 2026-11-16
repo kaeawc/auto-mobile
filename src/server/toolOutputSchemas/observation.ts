@@ -274,10 +274,10 @@ export const observeDiffNodeChangeSchema = z
  * `isDiff: true`, which the full-object arm ({@link observationSummarySchema})
  * never carries.
  *
- * `skeleton` is ALWAYS present here (issue #6221 item 4.1) — the same
- * actionable-only rows `observe`/action tools emit on a full observation — so a
- * client always has a selector surface to act on, regardless of whether a
- * diff baseline happened to exist. Every entry's internal `key` is documented
+ * `skeleton` is present on every diff that changed something (issue #6221
+ * item 4.1) — the same actionable-only rows `observe`/action tools emit on a
+ * full observation. A diff that changed nothing carries `unchanged: true`
+ * instead (#18348): the previous response already delivered that skeleton. Every entry's internal `key` is documented
  * as non-selector so it is never mistaken for one (item 4.3): `added`/`removed`
  * entries already carry a real selector directly in their `attributes`
  * (resource-id/view-id/text/content-desc), and `changed` entries — which do NOT
@@ -306,9 +306,19 @@ export const observeDiffSchema = z
     ...observationScreenshotOutputFields,
     skeleton: z
       .array(skeletonElementSchema)
+      .optional()
       .describe(
-        "Always present alongside a diff (issue #6221 item 4.1): the same " +
-          "actionable-only selector surface a full observation's `skeleton` carries.",
+        "Present alongside every diff that changed something (issue #6221 item 4.1): the same " +
+          "actionable-only selector surface a full observation's `skeleton` carries. " +
+          "Absent when `unchanged` is true.",
+      ),
+    unchanged: z
+      .literal(true)
+      .optional()
+      .describe(
+        "Nothing changed since the previous response (#18348): no node, display or " +
+          "field change. `skeleton`, `context` and `keyboard` are left out because the " +
+          "previous response already carried them.",
       ),
     context: z
       .array(skeletonElementSchema)
@@ -410,8 +420,17 @@ export const observeDiffSchema = z
     importedPrototypeContent: importedPrototypeContentSchema.optional(),
     ...observationBackendFields,
   })
-  .passthrough();
-requireObservationJoinKeysOnTheWire(observeDiffSchema);
+  .passthrough()
+  // A diff with no `skeleton` is valid only as the explicit no-op (#18348), so a
+  // malformed diff still fails this arm and every arm of `observationOutputSchema`.
+  .refine((diff) => diff.skeleton !== undefined || diff.unchanged === true, {
+    message: "A diff carries `skeleton` unless it is `unchanged: true` (#6221 item 4.1, #18348)",
+    path: ["skeleton"],
+  });
+// The refinement does not export, so the advertised schema states it too (#18348).
+requireObservationJoinKeysOnTheWire(observeDiffSchema, (jsonSchema) => {
+  jsonSchema.anyOf = [{ required: ["skeleton"] }, { required: ["unchanged"] }];
+});
 
 /**
  * `observation`, as embedded on an action tool result (issue #6221 item 4): a
@@ -420,11 +439,12 @@ requireObservationJoinKeysOnTheWire(observeDiffSchema);
  * The discriminator is `isDiff`: present and `true` on the diff arm, absent on
  * the full arm — and REJECTED as `true` on the full arm (issue #6221 item 4,
  * PR #6242 review PRRT_kwDOP-GF5M6fq3iN), so a malformed diff (missing its
- * mandatory `skeleton`) cannot silently fall through and validate against the
+ * `skeleton` without `unchanged: true`) cannot silently fall through and validate against the
  * full arm's `.passthrough()` instead. A client should branch on
  * `"isDiff" in observation && observation.isDiff === true` and, in EITHER
  * branch, can read `observation.skeleton` for a usable selector surface — the
- * diff arm always carries one (item 4.1).
+ * diff arm carries one unless it is `unchanged: true` (item 4.1, #18348), when
+ * the previous response's skeleton still applies.
  */
 export const observationOutputSchema = z.union([
   observeDiffSchema,

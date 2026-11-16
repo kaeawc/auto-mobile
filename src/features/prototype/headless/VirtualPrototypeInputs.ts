@@ -4,8 +4,8 @@ import {
   findVirtualTapTarget,
   interactionOwnWrite,
   isInertInteraction,
-  isVirtualFieldFocusable,
   planVirtualInteraction,
+  virtualFocusableField,
   virtualInteractionRefusal,
   type VirtualPrototypeSnapshot,
   type VirtualTapSelector,
@@ -40,7 +40,6 @@ export type VirtualTextOperation = "insert" | "replace";
 interface Focus {
   id: string;
   key: string;
-  maxLength?: number;
 }
 
 /** The device surface the inputs need: what is shown, delivery of planned events, final state. */
@@ -99,7 +98,7 @@ export class VirtualPrototypeInputs {
       return { ...failure(refusal), prototypeId: id, target: node };
     }
     const own = interactionOwnWrite(interaction, snapshot.state);
-    const focus = interaction.type === "focus" ? focusOf(id, interaction.key, target) : undefined;
+    const focus = interaction.type === "focus" ? { id, key: interaction.key } : undefined;
     return {
       ...this.run(id, snapshot, { own, actions: interaction.actions, focus }),
       target: node,
@@ -133,7 +132,7 @@ export class VirtualPrototypeInputs {
         target: node,
       };
     }
-    this.focus = focusOf(id, interaction.key, target);
+    this.focus = { id, key: interaction.key };
     return {
       success: true,
       prototypeId: id,
@@ -192,15 +191,16 @@ export class VirtualPrototypeInputs {
   private writeFocused(next: (current: string) => string): VirtualPrototypeInputOutcome {
     const focus = this.focus;
     const shown = focus && this.device.snapshots().find((entry) => entry.id === focus.id);
-    if (!focus || !shown || !isVirtualFieldFocusable(shown.snapshot, focus.key)) {
+    const field = focus && shown ? virtualFocusableField(shown.snapshot, focus.key) : undefined;
+    if (!focus || !shown || !field) {
       // A field hidden, patched away or left on another screen can no longer take input.
       this.focus = undefined;
       return failure(NO_FOCUS);
     }
     const stored = shown.snapshot.state[focus.key];
-    const value = [...next(typeof stored === "string" ? stored : "")]
-      .slice(0, focus.maxLength)
-      .join("");
+    // The field as it is now: a patch since focus may have changed its limit.
+    const limit = typeof field.maxLength === "number" ? field.maxLength : undefined;
+    const value = clipUtf16(next(typeof stored === "string" ? stored : ""), limit);
     return this.run(focus.id, shown.snapshot, {
       own: { [focus.key]: value },
       actions: [],
@@ -220,7 +220,7 @@ export class VirtualPrototypeInputs {
     }
     const sequences = this.device.dispatchSteps(id, plan.steps);
     if (!plan.dismissed) {
-      this.device.settle(id, plan);
+      this.device.settle(id, plan, plan.unrecordedWrites);
     }
     this.focus = plan.dismissed || plan.blurred ? undefined : (focus ?? this.focus);
     return {
@@ -237,7 +237,15 @@ export class VirtualPrototypeInputs {
   }
 }
 
-function focusOf(id: string, key: string, target: VirtualTapTarget): Focus {
-  const maxLength = target.node.maxLength;
-  return { id, key, ...(typeof maxLength === "number" ? { maxLength } : {}) };
+/**
+ * `text` cut to `maxLength` UTF-16 code units, the length a field's limit counts on the device,
+ * dropping a high surrogate the cut would leave without its pair.
+ */
+export function clipUtf16(text: string, maxLength: number | undefined): string {
+  if (maxLength === undefined || text.length <= maxLength) {
+    return text;
+  }
+  const end = Math.max(maxLength, 0);
+  const last = text.charCodeAt(end - 1);
+  return text.slice(0, end > 0 && last >= 0xd800 && last <= 0xdbff ? end - 1 : end);
 }

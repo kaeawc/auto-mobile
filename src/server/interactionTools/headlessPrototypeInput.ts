@@ -38,6 +38,18 @@ const UNSUPPORTED_TAP_ON_OPTIONS = [
   "display",
 ] as const;
 
+/**
+ * `layer: "app"` excludes the prototype's nodes, as on a device. The virtual device shows only the
+ * prototype, with no app below it, so nothing can match.
+ */
+function refuseAppLayer(layer: string | undefined, tool: "tapOn" | "sendKeys"): void {
+  if (layer === "app") {
+    throw new ActionableError(
+      `No element matches ${tool} with layer "app" on the headless virtual device: it shows only the prototype, with no app below it. Omit layer or pass layer: "prototype".`,
+    );
+  }
+}
+
 function inputsOrThrow(deps: HeadlessPrototypeInputDependencies): HeadlessPrototypeInputs {
   const inputs = (deps.virtualPrototypeInputs ?? daemonVirtualPrototypeInputs)();
   if (!inputs) {
@@ -113,6 +125,7 @@ export async function headlessTapOnHandler(
       `The headless virtual device does not support ${refusal}; tap with a plain text, elementId or testTag selector, or run on a device.`,
     );
   }
+  refuseAppLayer(args.layer, "tapOn");
   const inputs = inputsOrThrow(deps);
   const outcome = withSelector(
     (selector) => inputs.tap(selector),
@@ -160,6 +173,10 @@ export async function headlessSendKeysHandler(
     throw new ActionableError(
       `The headless virtual device does not support sendKeys selectionStrategy ${args.selectionStrategy}; it focuses the first match. Pass a selector that names one field, or run on a device.`,
     );
+  }
+  // Only a selector names a field; without one, sendKeys types into the focused field.
+  if (args.selector !== undefined) {
+    refuseAppLayer(args.layer, "sendKeys");
   }
   const inputs = inputsOrThrow(deps);
   const outcomes: VirtualPrototypeInputOutcome[] = [];

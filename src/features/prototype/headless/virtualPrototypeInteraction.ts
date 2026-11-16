@@ -1,5 +1,5 @@
 import type { PrototypeEvent, PrototypeState } from "../../observe/android/ctrlProxyProtocol";
-import { resolvePrototypeDataPointer } from "../prototypeData";
+import { resolveEmitContext } from "../prototypeEmitContext";
 import { prototypeNodeChildren } from "../prototypeNodeChildren";
 import type { PrototypeJson } from "../prototypeSpec";
 import { record, renderScalar, type Raw } from "../prototypeTemplate";
@@ -41,6 +41,8 @@ export interface VirtualPrototypeStep {
   name: string | null;
   payload: PrototypeJson;
   context?: Record<string, PrototypeJson>;
+  /** The context was cut to the shared emit byte budget, as the device runtime cuts it. */
+  contextTruncated?: true;
   state: PrototypeState;
   pages: Record<string, number>;
   stacks: PrototypeStacks;
@@ -50,6 +52,8 @@ export interface VirtualPrototypeStep {
 export type VirtualInteraction =
   | { type: "tap"; actions: Raw[] }
   | { type: "toggle"; key: string; actions: Raw[] }
+  /** A tab or bottom-nav item with no pager: writes its index to the bar's `stateKey`. */
+  | { type: "select"; key: string; index: number; actions: Raw[] }
   | { type: "focus"; key: string; actions: Raw[] }
   | { type: "close"; condition: Raw; actions: Raw[] };
 
@@ -77,12 +81,23 @@ export interface VirtualInteractionPlan {
   state: PrototypeState;
   pages: Record<string, number>;
   stacks: PrototypeStacks;
+  /**
+   * Keys a write changed that no delivered event records, such as a key set and restored with no
+   * event in between: the device still stamps them with the input's revision.
+   */
+  unrecordedWrites: string[];
   /** Why the device runtime's validator rejects a write: nothing is applied or emitted. */
   rejection?: string;
 }
 
 const TEXT_FIELDS = ["text", "label", "headline", "title", "placeholder", "contentDescription"];
 const OPEN_WHEN_NODES = new Set(["dialog", "bottomSheet", "snackbar", "drawer", "tooltip", "menu"]);
+/**
+ * Open layers drawn over the whole tree that take every touch outside them: the device hoists
+ * these above the author tree, and only the topmost one, and layers above it, can be tapped.
+ * A snackbar and a tooltip pass touches through, so they never block the tree below.
+ */
+const BLOCKING_LAYERS = new Set(["dialog", "bottomSheet", "drawer", "menu"]);
 const TOGGLE_NODES = new Set(["switch", "checkbox", "chip"]);
 const FOCUS_NODES = new Set(["textField", "searchBar"]);
 const RUNNABLE_ACTIONS = new Set([
@@ -118,9 +133,23 @@ const isOpen = (node: Raw, state: PrototypeState): boolean => {
   return !condition || state[String(condition.key)] === condition.equals;
 };
 
+/** The boolean key a `listItem`'s trailing switch or checkbox binds; the row toggles it. */
+function listItemToggleKey(node: Raw): string | undefined {
+  const trailing = node.type === "listItem" ? record(node.trailing) : undefined;
+  return trailing &&
+    (trailing.type === "switch" || trailing.type === "checkbox") &&
+    typeof trailing.stateKey === "string"
+    ? trailing.stateKey
+    : undefined;
+}
+
 /** The interaction a node itself handles, if any. */
 function ownInteraction(node: Raw): VirtualInteraction | undefined {
   const actions = actionList(node.onTap);
+  const toggled = listItemToggleKey(node);
+  if (toggled !== undefined) {
+    return { type: "toggle", key: toggled, actions };
+  }
   const key = typeof node.stateKey === "string" ? node.stateKey : undefined;
   if (key !== undefined && FOCUS_NODES.has(String(node.type))) {
     return { type: "focus", key, actions };
@@ -282,16 +311,61 @@ function selectorMatches(
   return selector.text !== undefined && textMatches(node, selector.text, exact, state);
 }
 
-/** A dialog's confirm and dismiss buttons close it, then run their own actions. */
-function dialogButtonTargets(node: Raw): Raw[] {
-  if (node.type !== "dialog") {
+/**
+ * A dialog's confirm and dismiss buttons and a snackbar's action button close it, then run their
+ * own actions, as `CloseModal` does on the device.
+ */
+function closingButtonTargets(node: Raw): Raw[] {
+  const buttons =
+    node.type === "dialog"
+      ? [node.confirm, node.dismiss]
+      : node.type === "snackbar"
+        ? [node.action]
+        : [];
+  const condition = record(node.openWhen) ?? {};
+  const type = node.type === "dialog" ? "dialogButton" : "snackbarAction";
+  return records(buttons).map((button) => ({ ...button, type, closes: condition }) satisfies Raw);
+}
+
+const NAV_BARS = new Set(["tabBar", "bottomNav"]);
+
+/**
+ * A tab bar's or bottom nav's items, each a target selecting its index as `Select` does: with a
+ * pager, a `setPage` before the bar's `onTap`; otherwise a write of the index to its `stateKey`.
+ */
+function navItemTargets(node: Raw): Raw[] {
+  if (!NAV_BARS.has(String(node.type)) || !Array.isArray(node.items)) {
     return [];
   }
-  const condition = record(node.openWhen) ?? {};
-  return [node.confirm, node.dismiss].flatMap((value) => {
-    const button = record(value);
-    return button ? [{ ...button, type: "dialogButton", closes: condition } satisfies Raw] : [];
+  return node.items.flatMap((value, index) => {
+    const item = record(value);
+    return item
+      ? [
+          {
+            ...item,
+            type: `${String(node.type)}Item`,
+            selects: { bar: node, index },
+            ...(node.enabledWhen === undefined ? {} : { enabledWhen: node.enabledWhen }),
+          } satisfies Raw,
+        ]
+      : [];
   });
+}
+
+function selectInteraction(selects: Raw): VirtualInteraction | undefined {
+  const bar = record(selects.bar) ?? {};
+  const index = Number(selects.index);
+  const actions = actionList(bar.onTap);
+  if (typeof bar.pager === "string") {
+    return {
+      type: "tap",
+      actions: [{ type: "setPage", pager: bar.pager, page: index }, ...actions],
+    };
+  }
+  if (typeof bar.stateKey === "string") {
+    return { type: "select", key: bar.stateKey, index, actions };
+  }
+  return actions.length > 0 ? { type: "tap", actions } : undefined;
 }
 
 interface Visit {
@@ -299,12 +373,19 @@ interface Visit {
   handler?: { node: Raw; interaction: VirtualInteraction };
   /** The undecidable `visibleWhen` on the path to this node, if any. */
   undecidable?: string;
+  /** The preorder index of the innermost hoisted layer around this node; 0 is the author tree. */
+  layer: number;
 }
 
 function handlerFor(node: Raw, inherited: Visit["handler"]): Visit["handler"] {
-  if (node.type === "dialogButton") {
+  if (node.type === "dialogButton" || node.type === "snackbarAction") {
     const condition = record(node.closes) ?? {};
     return { node, interaction: { type: "close", condition, actions: actionList(node.onTap) } };
+  }
+  const selects = record(node.selects);
+  if (selects !== undefined) {
+    const interaction = selectInteraction(selects);
+    return interaction ? { node, interaction } : inherited;
   }
   const own = ownInteraction(node);
   return own ? { node, interaction: own } : inherited;
@@ -313,25 +394,40 @@ function handlerFor(node: Raw, inherited: Visit["handler"]): Visit["handler"] {
 const nodeName = (node: Raw): string =>
   typeof node.id === "string" ? `${String(node.type)} ${node.id}` : `a ${String(node.type)}`;
 
-/** Every tappable node in render order, each with the nearest ancestor-or-self that handles it. */
+/**
+ * Every tappable node in render order, each with the nearest ancestor-or-self that handles it.
+ * While a blocking layer is open, only nodes in the topmost one, or in a layer drawn above it,
+ * are reachable: the device hoists open layers above the tree in tree order.
+ */
 function visibleNodes(snapshot: VirtualPrototypeSnapshot): Visit[] {
   const root = record(snapshot.spec.root);
-  const pending: Visit[] = root ? [{ node: root }] : [];
+  const pending: Visit[] = root ? [{ node: root, layer: 0 }] : [];
   const visits: Visit[] = [];
+  let layers = 0;
+  let topBlocking = 0;
   while (pending.length > 0) {
-    const { node, handler: inherited, undecidable: above } = pending.shift()!;
+    const { node, handler: inherited, undecidable: above, layer: outer } = pending.shift()!;
     const shown = isShown(node, snapshot.state);
     if (shown === false) {
       continue;
     }
     const undecidable =
       above ?? (shown === undefined ? `visibleWhen on ${nodeName(node)}` : undefined);
+    const hoisted = OPEN_WHEN_NODES.has(String(node.type));
+    const layer = hoisted ? ++layers : outer;
+    if (hoisted && BLOCKING_LAYERS.has(String(node.type))) {
+      topBlocking = layer;
+    }
     const handler = handlerFor(node, inherited);
-    visits.push({ node, handler, ...(undecidable ? { undecidable } : {}) });
-    const children = [...dialogButtonTargets(node), ...visibleChildren(node, snapshot)];
-    pending.unshift(...children.map((child) => ({ node: child, handler, undecidable })));
+    visits.push({ node, handler, layer, ...(undecidable ? { undecidable } : {}) });
+    const children = [
+      ...closingButtonTargets(node),
+      ...navItemTargets(node),
+      ...visibleChildren(node, snapshot),
+    ];
+    pending.unshift(...children.map((child) => ({ node: child, handler, undecidable, layer })));
   }
-  return visits;
+  return visits.filter((visit) => visit.layer >= topBlocking);
 }
 
 /** The first visible node the selector names: an exact text match first, then a substring. */
@@ -364,18 +460,22 @@ function tapTarget(visit: Visit, state: PrototypeState): VirtualTapTarget {
 }
 
 /**
- * Whether a text field bound to `key` is still shown, decidably visible and enabled, so it can
- * take input: a field hidden, patched away or left behind on another stack screen cannot.
+ * The text field bound to `key` while it is still shown, reachable, decidably visible and enabled,
+ * so it can take input: a field hidden, patched away, covered by a modal or left behind on another
+ * stack screen cannot. Returned as it is now, so a patched `maxLength` applies.
  */
-export function isVirtualFieldFocusable(snapshot: VirtualPrototypeSnapshot, key: string): boolean {
-  return visibleNodes(snapshot).some((visit) => {
+export function virtualFocusableField(
+  snapshot: VirtualPrototypeSnapshot,
+  key: string,
+): Raw | undefined {
+  return visibleNodes(snapshot).find((visit) => {
     const handler = visit.handler;
     if (handler?.node !== visit.node || handler.interaction.type !== "focus") {
       return false;
     }
     const target = tapTarget(visit, snapshot.state);
     return handler.interaction.key === key && target.enabled && !target.undecidable;
-  });
+  })?.node;
 }
 
 function findNode(spec: Raw, type: string, id: string): Raw | undefined {
@@ -470,11 +570,21 @@ class Draft {
     snapshot: VirtualPrototypeSnapshot,
   ) {
     this.state = { ...snapshot.state };
+    this.recorded = { ...snapshot.state };
     this.pages = { ...snapshot.pages };
     this.stacks = structuredClone(snapshot.stacks);
   }
 
+  /** Keys a write changed since the last event that its state snapshot does not show changed. */
+  readonly unrecorded = new Set<string>();
+  private recorded: PrototypeState;
+
   event(kind: PrototypeEvent["kind"], name: string | null, payload: PrototypeJson): void {
+    // Delivery stamps a key only when its value differs from the last delivered state.
+    [...this.unrecorded]
+      .filter((key) => this.state[key] !== this.recorded[key])
+      .forEach((key) => this.unrecorded.delete(key));
+    this.recorded = { ...this.state };
     this.steps.push({
       kind,
       name,
@@ -504,6 +614,9 @@ class Draft {
       return [];
     }
     const moved = Object.keys(state).filter((key) => this.state[key] !== state[key]);
+    for (const key of moved) {
+      this.unrecorded.add(key);
+    }
     this.state = state;
     this.pages = boundPages(this.spec, state, this.pages);
     return moved;
@@ -516,26 +629,20 @@ class Draft {
   }
 }
 
-function contextValue(binding: Raw, draft: Draft): PrototypeJson {
-  if (typeof binding.state === "string") {
-    return draft.state[binding.state] ?? null;
-  }
-  if (typeof binding.page === "string") {
-    return draft.pages[binding.page] ?? null;
-  }
-  if (typeof binding.data === "string") {
-    return (resolvePrototypeDataPointer(draft.spec.data, binding.data) ?? null) as PrototypeJson;
-  }
-  return (binding.value ?? null) as PrototypeJson;
-}
+type EmitBindings = Parameters<typeof resolveEmitContext>[0];
 
+/** An emit, its context resolved and cut to the shared emit byte budget as on the device. */
 function runEmit(action: Raw, draft: Draft): void {
   const bindings = record(action.context);
   draft.event("emit", String(action.name), (action.payload ?? null) as PrototypeJson);
   if (bindings) {
-    draft.steps.at(-1)!.context = Object.fromEntries(
-      Object.entries(bindings).map(([name, value]) => [name, contextValue(record(value)!, draft)]),
-    );
+    // `unsupportedContext` admits only state, page, data and value bindings.
+    const resolved = resolveEmitContext(bindings as EmitBindings, {
+      state: draft.state,
+      pages: draft.pages,
+      data: draft.spec.data as PrototypeJson | undefined,
+    });
+    Object.assign(draft.steps.at(-1)!, resolved);
   }
 }
 
@@ -645,6 +752,7 @@ export function planVirtualInteraction(
       state: snapshot.state,
       pages: snapshot.pages,
       stacks: snapshot.stacks,
+      unrecordedWrites: [],
       rejection: draft.rejection,
     };
   }
@@ -661,6 +769,7 @@ export function planVirtualInteraction(
     state: draft.state,
     pages: draft.pages,
     stacks: draft.stacks,
+    unrecordedWrites: [...draft.unrecorded],
   };
 }
 
@@ -672,6 +781,9 @@ export function interactionOwnWrite(
   if (interaction.type === "toggle") {
     const stored = state[interaction.key];
     return typeof stored === "boolean" ? { [interaction.key]: !stored } : {};
+  }
+  if (interaction.type === "select") {
+    return { [interaction.key]: interaction.index };
   }
   if (interaction.type === "close") {
     const key = String(interaction.condition.key);

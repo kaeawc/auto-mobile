@@ -50,12 +50,16 @@ on a device.
 - `tapOn` takes a `text`, `textAny`, `elementId` or `testTag` selector (`elementId` and `testTag`
   match a node's `id` or `testTag`). It taps the first visible node that matches. Hidden nodes,
   closed dialogs and sheets, other pager pages and stack screens below the top cannot be tapped.
-  A tap on a node goes to the nearest enclosing node that handles taps. Switches, checkboxes and
-  chips toggle their state key, and a dialog's confirm and dismiss buttons close it.
+  While a dialog, bottom sheet, drawer or menu is open, only its own nodes can be tapped.
+- A tap on a node goes to the nearest enclosing node that handles taps. Switches, checkboxes and
+  chips toggle their state key. So does a list item with a trailing switch or checkbox.
+  A dialog's confirm and dismiss buttons and a snackbar's action close it.
+  Tab bar and bottom nav items select their tab.
 - Text selectors match what the device shows: `{key}` placeholders filled from state, and a text
   field's current value. A search bar's results can be tapped only while it is expanded.
 - `sendKeys` with `type` and `clear` commands writes to the `textField` or `searchBar` that a
-  `tapOn` focused, or that its `selector` names. `maxLength` is applied. A `selector` that names
+  `tapOn` focused, or that its `selector` names. The field's current `maxLength` is applied, as
+  on a device. A `selector` that names
   anything other than a text field fails without tapping it. Typing fails once the focused field
   is hidden or disabled; focus it again.
 - A tap whose state write the prototype would reject, such as a number into a text field's key,
@@ -65,7 +69,8 @@ on a device.
 
 These actions run on a tap: `emit` (context from `state`, `page`, `data` or `value`),
 `setState`, `toggle`, `increment`, `decrement`, `setPage`, `push`, `pop`, `popToRoot`, `replace`,
-`dismiss` and `hideKeyboard`. A tap whose actions include anything else fails with "cannot run",
+`dismiss` and `hideKeyboard`. An emit context over 4096 bytes is cut and flagged
+`contextTruncated`, as on a device. A tap whose actions include anything else fails with "cannot run",
 and nothing changes. That includes `request`, data actions, `platform`, timers, `emit` with
 `requireValid`, and stacks with `routes` or route params. Run those on a device.
 
@@ -75,6 +80,8 @@ Not supported in headless mode:
   non-default `selectionStrategy`, an `accessibilityLink` selector, or an `action` other than tap
   (a positive `duration` means `longPress`).
 - `sendKeys` with a non-default `selectionStrategy`.
+- `layer: "app"` on `tapOn` or a `sendKeys` selector: there is no app below the prototype. Omit
+  `layer` or pass `layer: "prototype"`.
 - `visibleWhen` or `enabledWhen` conditions on `data`, `platform` or `valid` around the target:
   the input fails with "cannot decide". Run it on a device.
 - `sendKeys` `key` commands.

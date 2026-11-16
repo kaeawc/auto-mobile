@@ -251,6 +251,16 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     if (!store) {
       return this.undecided(deviceId);
     }
+    return this.acquireRetryingBusy(store, deviceId, owner, isLiveForeignOwner);
+  }
+
+  /** Judge-then-write, retried on a busy or locked registry a bounded number of times. */
+  private async acquireRetryingBusy(
+    store: DeviceClaims,
+    deviceId: string,
+    owner: MirrorOwner,
+    isLiveForeignOwner: (row: DeviceClaim) => Promise<boolean>,
+  ): Promise<DeviceClaimAcquisition> {
     for (let busyAttempt = 1; ; busyAttempt++) {
       try {
         return await this.acquireRacing(store, deviceId, owner, isLiveForeignOwner);

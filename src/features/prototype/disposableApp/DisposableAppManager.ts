@@ -64,13 +64,10 @@ export interface DisposableAppInstallation {
 }
 
 export interface DisposableAppInstaller {
-  /** Installs `appId` from `artifactPath`, updating in place; `reset` clears app storage. */
-  install(
-    deviceId: string,
-    appId: string,
-    artifactPath: string,
-    options: { reset: boolean },
-  ): Promise<void>;
+  /** Installs `appId` from `artifactPath`, updating in place and keeping app storage. */
+  install(deviceId: string, appId: string, artifactPath: string): Promise<void>;
+  /** Clears the installed app's storage. */
+  resetStorage(deviceId: string, appId: string): Promise<void>;
   applyPermissions(
     deviceId: string,
     appId: string,
@@ -203,11 +200,9 @@ export class DisposableAppManager {
       template,
       declarations,
     });
-    await installer.install(input.deviceId, appId, stamped.artifactPath, {
-      reset: input.app.reset === true,
-    });
-    // Record the app as soon as it is on the device, so a permission failure below cannot leave
-    // it untracked or keep a previous install's expiry for the sweep to act on (#16506).
+    await installer.install(input.deviceId, appId, stamped.artifactPath);
+    // Record the app as soon as it is on the device, so a reset or permission failure below cannot
+    // leave it untracked or keep a previous install's expiry for the sweep to act on (#16506).
     const installedAt = this.deps.timer.now();
     const expiresAt = lifetime === null ? null : installedAt + lifetime;
     await this.deps.registry.put(input.deviceId, {
@@ -221,6 +216,16 @@ export class DisposableAppManager {
       installedAt,
       expiresAt,
     });
+    if (input.app.reset === true) {
+      try {
+        await installer.resetStorage(input.deviceId, appId);
+      } catch (error) {
+        throw new ActionableError(
+          `${appId} is installed on ${input.deviceId} (expires ${isoOrNull(expiresAt) ?? "never"}), but its storage was not cleared: ${errorMessage(error)}. Reinstall it with installApp and reset to retry, or uninstall it with uninstallApp.`,
+          { cause: error },
+        );
+      }
+    }
     try {
       await installer.applyPermissions(input.deviceId, appId, grants);
     } catch (error) {

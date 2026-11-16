@@ -85,21 +85,11 @@ beforeEach(() => {
 });
 
 describe("AndroidDisposableAppInstaller.install", () => {
-  test("installs in place and keeps storage unless reset", async () => {
+  test("installs in place and keeps storage", async () => {
     adb.setCommandResponse("install -r", result("Performing Streamed Install\nSuccess"));
-    await installer.install(DEVICE, APP, "/cache/feedly.apk", { reset: false });
+    await installer.install(DEVICE, APP, "/cache/feedly.apk");
     expect(adb.getExecutedArgv()).toEqual([["install", "-r", "/cache/feedly.apk"]]);
     expect(devices).toEqual([DEVICE]);
-  });
-
-  test("reset clears storage after the update lands", async () => {
-    adb.setCommandResponse("install -r", result("Success"));
-    adb.setCommandResponse("pm clear", result("Success"));
-    await installer.install(DEVICE, APP, "/cache/feedly.apk", { reset: true });
-    expect(adb.getExecutedArgv()).toEqual([
-      ["install", "-r", "/cache/feedly.apk"],
-      ["shell", "pm", "clear", APP],
-    ]);
   });
 
   test("a Failure line fails the install with adb's message", async () => {
@@ -107,16 +97,37 @@ describe("AndroidDisposableAppInstaller.install", () => {
       "install -r",
       result("", "adb: failed to install: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]"),
     );
-    await expect(
-      installer.install(DEVICE, APP, "/cache/feedly.apk", { reset: true }),
-    ).rejects.toThrow(/INSTALL_FAILED_UPDATE_INCOMPATIBLE/);
-    expect(adb.wasCommandExecuted("pm clear")).toBe(false);
+    await expect(installer.install(DEVICE, APP, "/cache/feedly.apk")).rejects.toThrow(
+      /INSTALL_FAILED_UPDATE_INCOMPATIBLE/,
+    );
   });
 
   test("refuses an id outside the reserved prefix before any command", async () => {
-    await expect(
-      installer.install(DEVICE, "com.example.real", "/cache/x.apk", { reset: false }),
-    ).rejects.toThrow(/reserved prefix|dev\.jasonpearson\.automobile\.app\./);
+    await expect(installer.install(DEVICE, "com.example.real", "/cache/x.apk")).rejects.toThrow(
+      /reserved prefix|dev\.jasonpearson\.automobile\.app\./,
+    );
+    expect(adb.getExecutedArgv()).toEqual([]);
+  });
+});
+
+describe("AndroidDisposableAppInstaller.resetStorage", () => {
+  test("clears the app's storage with pm clear", async () => {
+    adb.setCommandResponse("pm clear", result("Success"));
+    await installer.resetStorage(DEVICE, APP);
+    expect(adb.getExecutedArgv()).toEqual([["shell", "pm", "clear", APP]]);
+  });
+
+  test("a failed clear throws with adb's message", async () => {
+    adb.setCommandResponse("pm clear", result("Failed"));
+    await expect(installer.resetStorage(DEVICE, APP)).rejects.toThrow(
+      /Clearing the storage of .* failed: Failed/,
+    );
+  });
+
+  test("refuses an id outside the reserved prefix before any command", async () => {
+    await expect(installer.resetStorage(DEVICE, "com.example.real")).rejects.toThrow(
+      /reserved prefix|dev\.jasonpearson\.automobile\.app\./,
+    );
     expect(adb.getExecutedArgv()).toEqual([]);
   });
 });

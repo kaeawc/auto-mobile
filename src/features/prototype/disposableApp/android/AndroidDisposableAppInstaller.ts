@@ -101,23 +101,21 @@ function rejectSharedManifestConflicts(grants: DisposableAppPermissionGrants): v
 export class AndroidDisposableAppInstaller implements DisposableAppInstaller {
   constructor(private readonly deviceFor: (deviceId: string) => AndroidDisposableAppDevice) {}
 
-  async install(
-    deviceId: string,
-    appId: string,
-    artifactPath: string,
-    options: { reset: boolean },
-  ): Promise<void> {
+  async install(deviceId: string, appId: string, artifactPath: string): Promise<void> {
     assertDisposableAppId(appId);
     const { adb } = this.deviceFor(deviceId);
-    // -r updates in place and keeps app storage; reset clears it once the new APK is in place.
+    // -r updates in place and keeps app storage; resetStorage clears it separately.
     const installed = await adb.execute(["install", "-r", artifactPath], {
       timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
     });
     requireSuccess(installed, `Installing ${appId} on ${deviceId}`);
-    if (options.reset) {
-      const cleared = await adb.execute(["shell", "pm", "clear", appId], { noRetry: true });
-      requireSuccess(cleared, `Clearing the storage of ${appId} on ${deviceId}`);
-    }
+  }
+
+  async resetStorage(deviceId: string, appId: string): Promise<void> {
+    assertDisposableAppId(appId);
+    const { adb } = this.deviceFor(deviceId);
+    const cleared = await adb.execute(["shell", "pm", "clear", appId], { noRetry: true });
+    requireSuccess(cleared, `Clearing the storage of ${appId} on ${deviceId}`);
   }
 
   async applyPermissions(

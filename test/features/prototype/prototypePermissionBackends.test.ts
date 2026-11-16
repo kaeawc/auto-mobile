@@ -3,10 +3,8 @@ import type { ExecResult } from "../../../src/models";
 import type { IosPrivacyOperation } from "../../../src/utils/ios-cmdline-tools/IosPermissionsBackend";
 import type { TccPermissionRow } from "../../../src/utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { createExecResult } from "../../../src/utils/execResult";
-import {
-  AndroidPrototypePermissionBackend,
-  IosSimulatorPrototypePermissionBackend,
-} from "../../../src/features/prototype/prototypePermissionBackends";
+import { AndroidPrototypePermissionBackend } from "../../../src/features/prototype/prototypeAndroidPermissionBackend";
+import { IosSimulatorPrototypePermissionBackend } from "../../../src/features/prototype/prototypeIosSimulatorPermissionBackend";
 import { applyPrototypePermissions } from "../../../src/features/prototype/prototypePermissionGrants";
 import { PROTOTYPE_PERMISSION_MAP } from "../../../src/features/prototype/prototypePermissionMap";
 

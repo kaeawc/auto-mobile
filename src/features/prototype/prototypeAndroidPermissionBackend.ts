@@ -3,11 +3,6 @@ import type { ExecResult } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
-import type { IosPermissionsBackend } from "../../utils/ios-cmdline-tools/IosPermissionsBackend";
-import type {
-  TccPermissionReader,
-  TccPermissionRow,
-} from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { shellQuote } from "../../utils/shellQuote";
 import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 import { parseNotificationAppOpMode } from "../action/SetAndroidNotificationsEnabled";
@@ -152,73 +147,5 @@ export class AndroidPrototypePermissionBackend implements PrototypePermissionBac
     });
     throwOnShellFailure(command, result);
     return result.stdout;
-  }
-}
-
-/** TCC `auth_value` (0 denied, 2 allowed, 3 limited), falling back to the legacy `allowed` column. */
-function iosStateFromRow(row: TccPermissionRow | undefined): PrototypePermissionState {
-  const value = row?.auth_value ?? (row?.allowed === 1 ? 2 : row?.allowed);
-  if (value === 2) {
-    return "granted";
-  }
-  if (value === 3) {
-    return "limited";
-  }
-  return value === 0 ? "denied" : "notDetermined";
-}
-
-/**
- * iOS simulator half of #14297: `simctl privacy grant|revoke` and a TCC read. The planner never
- * writes a notGrantableOnSimulator name; its read reports `notDetermined` because the host has
- * no TCC row for it, and the planner marks the result unverified.
- */
-export class IosSimulatorPrototypePermissionBackend implements PrototypePermissionBackend {
-  readonly target = "iosSimulator";
-
-  constructor(
-    private readonly privacy: Pick<IosPermissionsBackend, "setPrivacy">,
-    private readonly tcc: TccPermissionReader,
-    private readonly options: { deviceId: string; bundleId: string },
-  ) {}
-
-  grant(name: PrototypePermissionName, mapping: PrototypePermissionMapping): Promise<void> {
-    return this.setPrivacy("grant", name, mapping);
-  }
-
-  deny(name: PrototypePermissionName, mapping: PrototypePermissionMapping): Promise<void> {
-    return this.setPrivacy("revoke", name, mapping);
-  }
-
-  async read(
-    _name: PrototypePermissionName,
-    mapping: PrototypePermissionMapping,
-  ): Promise<PrototypePermissionState> {
-    const service = mapping.ios.simctlService;
-    if (service === null) {
-      return "notDetermined";
-    }
-    const rows = await this.tcc.readPermissions(this.options.deviceId, this.options.bundleId, [
-      service,
-    ]);
-    return iosStateFromRow(rows[0]);
-  }
-
-  private async setPrivacy(
-    action: "grant" | "revoke",
-    name: PrototypePermissionName,
-    mapping: PrototypePermissionMapping,
-  ): Promise<void> {
-    const service = mapping.ios.simctlService;
-    if (service === null) {
-      throw new ActionableError(
-        `Permission ${name} has no simctl privacy service, so a simulator cannot ${action} it`,
-      );
-    }
-    const result = await this.privacy.setPrivacy({
-      action,
-      permission: service,
-      appId: this.options.bundleId,
-    });
-    throwOnShellFailure(`simctl privacy ${action} ${service}`, result);
   }
 }

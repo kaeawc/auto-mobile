@@ -73,7 +73,8 @@ export interface ForeignDeviceOwnership {
   /**
    * Publish this daemon's allocation claim on a device it just assigned, so other daemons see it
    * before any CtrlProxy forward exists. False when another live daemon's claim on the device is
-   * still in use: the caller must give the device back.
+   * still in use, or when the host-wide table must decide but cannot be used right now (#11811):
+   * the caller must give the device back and may retry.
    */
   claim(deviceId: string): Promise<boolean>;
   /**
@@ -561,8 +562,10 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
    * The host-wide table decides the claim (#11811 step d), and for one more release the winner also
    * writes its claim file, so a daemon that cannot use the table and falls back to the files still
    * sees it (owner decision 2026-11-02, option A2). A claim file a live foreign daemon holds
-   * refuses the claim. Undefined when no table can decide (watch and TV have none; no
-   * registry; a failed write): the claim files decide, as before.
+   * refuses the claim. Once a registry must decide (after socket bind), a table that cannot be used
+   * refuses the claim retryably rather than falling back to the files (owner decision 2026-11-07,
+   * E1). Undefined when no table can decide yet (watch and TV have none; no registry before
+   * bind; a skipped one): the claim files decide, as before.
    */
   private async claimInTable(
     deviceId: string,
@@ -578,6 +581,10 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     const decision = await acquire(deviceId, owner, (row) => this.isLiveTableOwner(deviceId, row));
     if (decision.outcome === "unavailable") {
       return undefined;
+    }
+    if (decision.outcome === "unusable") {
+      // Fail closed: a file fallback could not see a peer that claimed in the table alone.
+      return false;
     }
     if (decision.outcome === "refused") {
       // Recovery's rollback must name the live owner the table holds.

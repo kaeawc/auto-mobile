@@ -89,7 +89,7 @@ export interface DaemonSessionsHost {
     | "passiveWorkPolicy"
     | "idGenerator"
   >;
-  identity: Pick<DaemonIdentityState, "daemonSessionId">;
+  identity: Pick<DaemonIdentityState, "daemonSessionId" | "socketBindCommitted">;
   lifecycle: Pick<
     DaemonLifecycleState,
     | "socketServer"
@@ -138,6 +138,8 @@ export class DaemonSessions {
           whenOpen: async () => (await this.host.bindingRegistry())?.deviceClaims(),
           registryFileExists: bindingRegistryFileExists,
           openRegistry: () => this.host.startBackgroundRegistryUpgrade(),
+          // Bound daemons always create the registry, so from then on the table must decide.
+          registryExpected: () => this.host.identity.socketBindCommitted(),
           timer: this.host.services.timer(),
           daemonSessionId: this.host.identity.daemonSessionId(),
         }),

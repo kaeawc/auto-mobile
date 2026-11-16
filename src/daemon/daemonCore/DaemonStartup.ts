@@ -500,7 +500,9 @@ export class DaemonStartup {
       }),
       startupStage("background registry upgrade", () => {
         logger.info("Unix socket server started");
-        if (!this.host.lifecycle.sessionBrokerConfigPath() && bindingRegistryFileExists()) {
+        // Every local daemon creates and migrates the host registry once bound, so the
+        // device_claims table can decide claims on every host (#11811, owner decision E1).
+        if (!this.host.lifecycle.sessionBrokerConfigPath()) {
           this.host.startBackgroundRegistryUpgrade();
         }
       }),

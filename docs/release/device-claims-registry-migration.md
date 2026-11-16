@@ -45,11 +45,12 @@ Live multi-daemon acceptance on a shared adb server is tracked in #15542 (`needs
   Upgrade the daemons sharing managed devices to a release that includes these migrations.
   The mirror remains skipped until restart.
 
-- A local daemon never creates the registry. If it starts without one, claim and release writes
-  probe for it on their retry ladder (1 s, 5 s, 30 s, 2 min, 5 min). Once the file appears, a
-  post-bind background open backfills held claims with their original claim time and owed releases.
-  A file created after the last step (about 7.6 minutes after the last write) is picked up by the next
-  claim or release, or at the next daemon start.
+- Every local daemon creates and migrates the registry after its control socket binds, so each
+  host gets a registry file. From then on an Android or iOS claim the table cannot decide (the
+  open still pending, a write still busy after four attempts, a failed open) is refused
+  retryably rather than decided by the claim files alone. The refusal reads as
+  `device_owned_by_other_daemon` with no owner PID; retry once the registry is usable. Claims made
+  before bind, during startup recovery, still fall back to the claim files.
 - A row without a recorded control socket (written by an early build or while no socket was bound) is
   judged by its owner's PID alone, so a live owner whose release write was lost keeps the device
   refused until it exits.

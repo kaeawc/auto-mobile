@@ -37,7 +37,11 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceClaims } from "../fakes/FakeDeviceClaims";
 import { SeededRandom } from "../fakes/SeededRandom";
-import { StoreDeviceClaimMirror, type DeviceClaim } from "../../src/daemon/deviceClaims";
+import {
+  DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS,
+  StoreDeviceClaimMirror,
+  type DeviceClaim,
+} from "../../src/daemon/deviceClaims";
 import { ConnectionOwnership } from "../../src/daemon/connectionOwnership";
 import { createExecResult } from "../../src/utils/execResult";
 
@@ -782,7 +786,12 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     files: FakeOwnershipFiles,
     store: FakeDeviceClaims,
     pid: number,
-  ): { ownership: ForwardLeaseForeignDeviceOwnership; mirror: StoreDeviceClaimMirror } {
+    registryExpected = false,
+  ): {
+    ownership: ForwardLeaseForeignDeviceOwnership;
+    mirror: StoreDeviceClaimMirror;
+    timer: FakeTimer;
+  } {
     const timer = new FakeTimer();
     // No control socket is recorded, so a live PID alone decides ownership.
     const ownership = new ForwardLeaseForeignDeviceOwnership(pid, files, new FakeOwnerProbe(), {
@@ -794,9 +803,10 @@ describe("the host-wide claims mirror (#11811 b)", () => {
       store: () => store,
       timer,
       generationOf: () => undefined,
+      registryExpected: () => registryExpected,
     });
     ownership.attachClaimMirror(mirror);
-    return { ownership, mirror };
+    return { ownership, mirror, timer };
   }
 
   const fileOwner = (files: FakeOwnershipFiles) => {
@@ -1033,12 +1043,43 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     try {
       const files = new FakeOwnershipFiles();
       const store = new FakeDeviceClaims();
-      store.failWrites = 2;
-      const { ownership, mirror } = mirroredDaemon(files, store, SELF_PID);
-      expect(await ownership.claim(DEVICE)).toBe(true);
+      // Busier than the bounded busy retries, and the file's own mirror write.
+      store.failWrites = DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS + 1;
+      const { ownership, mirror, timer } = mirroredDaemon(files, store, SELF_PID);
+      expect(await timer.resolvePromise(ownership.claim(DEVICE))).toBe(true);
       await mirror.idle();
       expect(fileOwner(files)).toStartWith(`${SELF_PID}/`);
       // The next claim by the same daemon finds the table writable again.
+      expect(await ownership.claim(DEVICE)).toBe(true);
+      expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a briefly busy table still decides the claim after bounded retries (#11811, E1)", async () => {
+    const files = new FakeOwnershipFiles();
+    const store = new FakeDeviceClaims();
+    store.failWrites = DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS - 1;
+    const { ownership, timer } = mirroredDaemon(files, store, SELF_PID, true);
+    expect(await timer.resolvePromise(ownership.claim(DEVICE))).toBe(true);
+    expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+    expect(fileOwner(files)).toStartWith(`${SELF_PID}/`);
+  });
+
+  test("once a registry must decide, an unusable table refuses the claim instead of the files deciding (#11811, E1)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const files = new FakeOwnershipFiles();
+      const store = new FakeDeviceClaims();
+      store.failWrites = DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS;
+      const { ownership, timer } = mirroredDaemon(files, store, SELF_PID, true);
+      expect(await timer.resolvePromise(ownership.claim(DEVICE))).toBe(false);
+      // Nothing was published, so a peer deciding by the table alone is never shadowed.
+      expect(fileOwner(files)).toBe("none");
+      expect(store.rows.size).toBe(0);
+      expect(ownership.foreignOwnerPid(DEVICE)).toBeUndefined();
+      // The refusal is retryable: the table decides once it can be written again.
       expect(await ownership.claim(DEVICE)).toBe(true);
       expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
     } finally {
@@ -1139,7 +1180,7 @@ describe("reading the host-wide claims table (#11811 c)", () => {
       await ownership.refresh([DEVICE]);
       return ownership.foreignOwnerPid(DEVICE);
     };
-    return { files, store, probe, ownership, mirror, row, ownerOf };
+    return { files, store, probe, ownership, mirror, row, ownerOf, timer };
   }
 
   test("a live foreign owner only the table names is the device's owner", async () => {
@@ -1269,7 +1310,9 @@ describe("reading the host-wide claims table (#11811 c)", () => {
       expect(await d.ownerOf()).toBe(FOREIGN_PID);
       d.files.files.clear();
       expect(await d.ownerOf()).toBeUndefined();
-      expect(await d.ownership.claim(DEVICE)).toBe(true);
+      // Before a registry must decide, a table still busy after the bounded retries leaves the
+      // claim to the files.
+      expect(await d.timer.resolvePromise(d.ownership.claim(DEVICE))).toBe(true);
     } finally {
       warn.mockRestore();
     }

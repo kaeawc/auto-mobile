@@ -6,9 +6,54 @@ Compose library and the `AutoMobilePrototype` Swift package
 ([Native prototype embedding](prototype-embedding.md)). [Prototype web renderer](prototype-web-renderer.md)
 describes the renderer itself.
 
-No library package is published yet: there is no `packages/prototype-web/`, `mount`,
-`<automobile-prototype>` element or interactive runtime. What exists today is the groundwork below.
-The planned package, API, options and release are in the devlog entry under Background.
+`packages/prototype-web/` (`@kaeawc/auto-mobile-prototype-web`) is not published yet, and there is
+no `<automobile-prototype>` element or interactive runtime. The planned element and release are in
+the devlog entries under Background.
+
+## Package
+
+- `packages/prototype-web/` holds only `package.json` (no dependencies), the entry
+  `src/index.ts`, the hand-written public types `index.d.ts` and `build.ts`. It is not a Bun
+  workspace, so the root `bun.lock` and the pinned runtime graph do not change.
+- `bun run build` in that directory bundles the entry with `bun build --target=browser` into
+  `dist/index.js` (gitignored). The library source is `src/features/prototype/web/embed/`.
+- `test/features/prototype/web/prototypeWebPackage.typecheck.ts` assigns each export and public type
+  both ways between `index.d.ts` and the implementation, so the typecheck fails when they drift.
+- `prototypeWebLibraryBundle.test.ts` is the boundary check: the entry's browser bundle reaches no
+  Node builtin and no input outside `src/features/prototype/`, the CtrlProxy protocol constants and
+  the root `package.json` (whose `version` is the library version), and stays within the export
+  budget below.
+- `webLibrary.integration.test.ts`, run by `Prototype Web Screenshots`, mounts the library build in
+  Chromium and compares its pixels with the still's `toHtml` output drawn the same way.
+
+## API
+
+- `renderPrototype(spec | envelope, options)` is pure: it returns the still's element tree, the
+  frame and orientation drawn, `unsupportedNodes` and the outermost stack's screens (start first).
+  It throws `PrototypeWebRefusal` carrying `{code, message, missing, libraryVersion}`.
+- `mount(element, options)` attaches an open shadow root and builds the DOM with `createElement`,
+  `setAttribute` and `style.setProperty`, never `innerHTML`. Its shell stylesheet is a constructable
+  stylesheet. It returns `{update, destroy, state}`; `update` merges options, keeping zoom,
+  orientation and screen, and an unknown screen draws the stack's start.
+- Options: `spec`, `frame` (an id, or `false` for the default frame's screen alone), `orientation`,
+  `zoom` (`fit`, or 0.5 to 4), `mode` (`light`, `dark`, or `system` following
+  `prefers-color-scheme`), `screen`, `controls` (`false` or any of `rotate`, `zoom`, `screen`),
+  `locale` and `textSize`. A frame object is not accepted yet.
+- Callbacks: `onRender` (`unsupportedNodes`), `onScreenChange`, `onOrientationChange`,
+  `onZoomChange` and `onError`.
+- The host element is 640 px tall unless the page sets its height; `fit` scales the frame into
+  the viewport below the controls and refits on resize.
+
+## Refusal
+
+- An envelope with a `version` other than 1, or whose `requires` names a capability outside
+  `PROTOTYPE_WEB_CAPABILITIES`, draws an error view (`role="alert"`) and calls `onError`.
+- `PROTOTYPE_WEB_CAPABILITIES` is generated from `knownPrototypeCapabilities()` by
+  `scripts/prototype/generate-prototype-web-capabilities.ts`; a unit test fails when it is stale.
+- A bare spec is drawn without a capability check. An unknown frame, an orientation the frame lacks
+  or an invalid locale is refused with `invalidOption`.
+- Envelope glyphs are parsed with the browser's `DOMParser` into allow-listed SVG shapes; without
+  one (in a worker) icons draw the placeholder.
 
 ## Browser-safe still renderer
 
@@ -54,3 +99,4 @@ fails the run, so the list only shrinks.
 ## Background
 
 - [Embeddable web prototype library plan](../devlog/2026-11-03-prototype-web-library-plan.md)
+- [Web library advertises the host's known capabilities](../devlog/2026-11-16-prototype-web-library-capabilities.md)

@@ -125,12 +125,13 @@ describe("#18348 bounds-only moves of unchanged controls", () => {
   });
 
   test("moves with different offsets omit dy", () => {
-    let flip = false;
+    let moved = 0;
     const out = actionAfter((copy) =>
       eachNode(copy.viewHierarchy, (node) => {
         const bounds = node.bounds;
         if (Array.isArray(bounds) && bounds.length === 4 && bounds[1] !== 0) {
-          const dy = (flip = !flip) ? 10 : 20;
+          moved += 1;
+          const dy = moved % 2 === 0 ? 20 : 10;
           node.bounds = [bounds[0], bounds[1] + dy, bounds[2], bounds[3] + dy];
         }
       }),

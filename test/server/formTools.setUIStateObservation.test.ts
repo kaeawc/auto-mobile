@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import androidCapture from "../fixtures/observe/android-home.json";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { registerFormTools, createSetUIStateHandler } from "../../src/server/formTools";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { getStructuredPayload } from "../../src/utils/toolUtils";
@@ -14,7 +14,7 @@ isolateToolRegistry();
 // dropped it from the tool response, unlike tapOn/sendKeys.
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const observation: ObserveResult = {
-  ...androidCapture,
+  ...loadAndroidHomeObserve().observe,
   observationId: "capture",
   deviceId: device.deviceId,
 };
@@ -32,7 +32,7 @@ function handlerReturning(result: SetUIStateResult) {
   return createSetUIStateHandler({ setUIStateFactory: () => ({ execute: async () => result }) });
 }
 
-test.each([
+const cases: Array<{ name: string; fields: SetUIStateResult["fields"]; success: boolean }> = [
   {
     name: "success",
     fields: [{ selector: { text: "Phone" }, success: true, attempts: 1 }],
@@ -46,7 +46,9 @@ test.each([
     ],
     success: false,
   },
-])("setUIState returns its observation on $name", async ({ fields, success }) => {
+];
+
+test.each(cases)("setUIState returns its observation on $name", async ({ fields, success }) => {
   const response = await handlerReturning({
     success,
     fields,

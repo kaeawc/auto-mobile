@@ -28,6 +28,29 @@ The text is provisional until the owner decision in #14143 (policy positioning, 
 The name is ProtoViewer on both stores, and the privacy and support URLs are docs-site pages
 (`docs/protoviewer/privacy.md`, `docs/protoviewer/support.md`), per #14144.
 
+## Review position
+
+The App Review notes (`fastlane/metadata/ios/review_information/notes.txt`) and the Play declarations below use one
+position: ProtoViewer is a viewer for design prototypes the user authors, not a mini-app platform.
+
+- A prototype is validated, declarative JSON. The renderer's features are fixed in the binary, so a
+  prototype adds no code (App Store 2.5.2, Play Device and Network Abuse).
+- `request` actions run only while the imported-prototype network switch is on. Their responses fill
+  the prototype's data model and cannot add components or behaviour.
+- The Local Network prompt appears only after that switch is turned on and confirmed.
+- Received prototypes have Report (a mail draft to the published contact) and Hide on both apps.
+  Android also blocks a link host (App Store 1.2, Play User Generated Content).
+- The library is empty on first launch. There is no bundled sample gallery, and the listing must not
+  claim one (decision in the [ProtoViewer design record](../devlog/2026-10-20-protoviewer-design.md)).
+
+Play Console declarations:
+
+| Declaration               | Answer                                                                   |
+| ------------------------- | ------------------------------------------------------------------------ |
+| User-generated content    | Yes: users receive prototypes others made; in-app Report, Hide and Block |
+| Downloads executable code | No: prototypes are declarative JSON read by a fixed renderer             |
+| Data safety               | See the [privacy page](../protoviewer/privacy.md)                        |
+
 ## Validation
 
 `bun scripts/store-listing/validate-store-listing.ts` runs in Fast Validation as the `store-listing`

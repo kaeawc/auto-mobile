@@ -44,6 +44,31 @@ describe("prototype topAppBar top inset lint (#18394)", () => {
     expect(lintPrototypeTopAppBarInsets(spec(root))).toEqual(["root.children[0]"]);
   });
 
+  test("top padding by the ime inset alone does not clear the bar (#18422)", () => {
+    const root = {
+      type: "column",
+      safeAreaPadding: { edges: ["top"], types: ["ime"] },
+      children: [bar({ safeAreaPadding: { edges: ["top"], types: ["cutout", "ime"] } })],
+    };
+    expect(lintPrototypeTopAppBarInsets(spec(root))).toEqual(["root.children[0]"]);
+  });
+
+  test("top padding with default or system-bars types clears the bar (#18422)", () => {
+    expect(
+      lintPrototypeTopAppBarInsets(
+        spec({ type: "column", children: [bar({ safeAreaPadding: { edges: ["top"] } })] }),
+      ),
+    ).toEqual([]);
+    expect(
+      lintPrototypeTopAppBarInsets(
+        spec({
+          type: "column",
+          children: [bar({ safeAreaPadding: { edges: ["top"], types: ["ime", "systemBars"] } })],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
   test("sheet and floating placements, and an explicit host dismiss bar, are exempt", () => {
     const root = { type: "column", children: [bar()] };
     expect(

@@ -30,7 +30,7 @@ The name is ProtoViewer on both stores, and the privacy and support URLs are doc
 
 ## Review position
 
-The App Review notes (`ios/review_information/notes.txt`) and the Play declarations below use one
+The App Review notes (`fastlane/metadata/ios/review_information/notes.txt`) and the Play declarations below use one
 position: ProtoViewer is a viewer for design prototypes the user authors, not a mini-app platform.
 
 - A prototype is validated, declarative JSON. The renderer's features are fixed in the binary, so a

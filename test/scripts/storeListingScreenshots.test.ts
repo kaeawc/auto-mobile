@@ -73,7 +73,7 @@ describe("screenshot plan", () => {
       expect(last).toEqual({
         kind: "mcp",
         tool: "observe",
-        args: { screenshot: "settled", settled: true },
+        args: { screenshot: "settled" },
       });
     });
   });
@@ -103,14 +103,57 @@ describe("screenshot plan", () => {
   test("the plan is deterministic", () => {
     expect(buildScreenshotPlan(pins)).toEqual(plan);
   });
+
+  test("app ID pins reach Android launch and iOS launch, termination, and file target", () => {
+    const pinnedPlan = buildScreenshotPlan({
+      ...pins,
+      androidAppId: "dev.example.debug",
+      iosAppId: "dev.example.iosdebug",
+    });
+    const android = pinnedPlan.find((shot) => shot.id === "android-phone-light-library")!;
+    const ios = pinnedPlan.find((shot) => shot.id === "ios-iphone-69-light-library")!;
+    const appStepIds = (steps: typeof android.steps) =>
+      steps.flatMap((step) =>
+        step.kind === "mcp" && (step.tool === "launchApp" || step.tool === "terminateApp")
+          ? [step.args.appId]
+          : [],
+      );
+    expect(appStepIds(android.steps)).toEqual([
+      "dev.example.debug",
+      "dev.example.debug",
+      "dev.example.debug",
+    ]);
+    expect(appStepIds(ios.steps)).toEqual([
+      "dev.example.iosdebug",
+      "dev.example.iosdebug",
+      "dev.example.iosdebug",
+    ]);
+    const putAppFile = ios.steps.find((step) => step.kind === "mcp" && step.tool === "putAppFile");
+    expect(putAppFile?.kind === "mcp" ? putAppFile.args : undefined).toMatchObject({
+      target: { appId: "dev.example.iosdebug" },
+    });
+  });
 });
 
 describe("capture-screenshots", () => {
   test("parses flags", () => {
-    expect(parseArgs(["--emit", "out", "--android-serial", "a", "--ios-udid", "u"])).toEqual({
+    expect(
+      parseArgs([
+        "--emit",
+        "out",
+        "--android-serial",
+        "a",
+        "--ios-udid",
+        "u",
+        "--android-app-id",
+        "a.debug",
+        "--ios-app-id",
+        "i.debug",
+      ]),
+    ).toEqual({
       list: false,
       emit: "out",
-      pins: { androidSerial: "a", iosUdid: "u" },
+      pins: { androidSerial: "a", iosUdid: "u", androidAppId: "a.debug", iosAppId: "i.debug" },
     });
     expect(parseArgs(["--list"]).list).toBe(true);
   });
@@ -125,4 +168,30 @@ describe("capture-screenshots", () => {
     });
     expect(manifest[0]?.hostSteps).toHaveLength(1);
   });
+});
+
+test("capture flags select a shot and reject incomplete values", () => {
+  expect(
+    parseArgs([
+      "--run",
+      "--out",
+      "out",
+      "--android-serial",
+      "serial",
+      "--profile",
+      "android-phone",
+      "--shot",
+      "android-phone-light-library",
+    ]),
+  ).toMatchObject({
+    run: true,
+    out: "out",
+    profile: "android-phone",
+    shot: "android-phone-light-library",
+    pins: { androidSerial: "serial" },
+  });
+  expect(parseArgs(["--verify-identical", "a", "b"]).verifyIdentical).toEqual(["a", "b"]);
+  expect(() => parseArgs(["--out", "--run"])).toThrow("Missing value");
+  expect(() => parseArgs(["--verify-identical", "a"])).toThrow("two directories");
+  expect(() => parseArgs(["--typo", "a"])).toThrow("Unknown flag");
 });

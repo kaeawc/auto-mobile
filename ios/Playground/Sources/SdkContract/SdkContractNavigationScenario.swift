@@ -15,8 +15,8 @@ struct NavigationHostLog: Encodable {
 final class SdkContractNavigationScenario: NSObject, UINavigationControllerDelegate, WKNavigationDelegate {
     let bridge: AutoMobileWebViewBridge
 
-    init(bridge: AutoMobileWebViewBridge = AutoMobileWebViewBridge(webViewId: "contract-navigation")) {
-        self.bridge = bridge
+    init(bridge: AutoMobileWebViewBridge? = nil) {
+        self.bridge = bridge ?? AutoMobileWebViewBridge(webViewId: "contract-navigation")
         super.init()
     }
 

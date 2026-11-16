@@ -402,4 +402,39 @@ describe("prototype simulate and timer reports", () => {
     expect(result).toMatchObject({ success: false, code: "invalid_args" });
     expect(result.error).toContain("4096 bytes");
   });
+
+  test("simulate accepts media events and keeps transport for notifications.push", () => {
+    const error = { player: "main", status: "error", code: "network", advanceMs: 5000 };
+    expect(
+      prototypeSchema.safeParse({
+        action: "simulate",
+        id: "feed",
+        event: "media.statusChanged",
+        data: error,
+      }).success,
+    ).toBe(true);
+    for (const input of [
+      { action: "simulate", id: "feed", event: "media.ended" },
+      { action: "simulate", id: "feed", event: "media.ended", data: error, transport: "auto" },
+      { action: "simulate", id: "feed", event: "media.itemChanged", data: error },
+    ]) {
+      expect({ input, ok: prototypeSchema.safeParse(input).success }).toEqual({ input, ok: false });
+    }
+  });
+
+  test("simulate media is unavailable on a device with no media engine route", async () => {
+    const input = {
+      action: "simulate",
+      id: "feed",
+      event: "media.statusChanged",
+      data: { player: "main", status: "ready" },
+    };
+    for (const device of [android, ios]) {
+      expect(await call(device, input)).toMatchObject({ success: false, code: "unavailable" });
+    }
+    expect(
+      await call(android, { ...input, data: { player: "main", status: "paused" } }),
+    ).toMatchObject({ success: false, code: "invalid_args" });
+    expect(proxy.advanceClockRequests).toEqual([]);
+  });
 });

@@ -29,6 +29,7 @@ extension SdkWebActionResponse: WebSocketResponsePayload {}
 extension AccessibilityAuditResponse: WebSocketResponsePayload {}
 extension SdkTriggerResponse: WebSocketResponsePayload {}
 extension VoiceOverStateResponse: WebSocketResponsePayload {}
+extension StoreKitResultResponse: WebSocketResponsePayload {}
 extension VoiceOverSetResponse: WebSocketResponsePayload {}
 extension StorageFilesResponse: WebSocketResponsePayload {}
 extension StorageEntriesResponse: WebSocketResponsePayload {}

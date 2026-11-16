@@ -980,8 +980,11 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 62 rawValues", () => {
-    expect(rawValues.length).toBe(62);
+  // Runner-first command; its TS awaiter/decoder is owned by #18399.
+  const RUNNER_ONLY_RESPONSE_TYPES = ["storekit_result"];
+
+  test("Swift ResponseType declares exactly 63 rawValues", () => {
+    expect(rawValues.length).toBe(63);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -1000,10 +1003,17 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
-  test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
+  test("runner-only response mirrors are known", () => {
+    for (const type of RUNNER_ONLY_RESPONSE_TYPES) {
+      expect(rawValues).toContain(type);
+    }
+  });
+
+  test("the only unhandled ResponseType (excluding fire-and-forget and runner-only) is shake_result", () => {
     const unhandled = rawValues
       .filter((rawValue) => !isExplicitlyDecoded(rawValue))
       .filter((rawValue) => !FIRE_AND_FORGET_EXCUSES.includes(rawValue))
+      .filter((rawValue) => !RUNNER_ONLY_RESPONSE_TYPES.includes(rawValue))
       .sort();
     expect(unhandled).toEqual(["shake_result"]);
   });

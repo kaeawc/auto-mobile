@@ -11,7 +11,7 @@ configFiles:
 
 settings:
   base:
-    SWIFT_VERSION: "5"
+    SWIFT_VERSION: "6"
 
 packages:
   AutoMobileHighlightCore:

@@ -189,7 +189,12 @@ the action was never gated.
 
 In diff mode (`--actions-diff-observe`) `settled`, `settleMs` and `settlePolls`
 ride on the diff alongside `activeWindow` and `freshness`, so one accessor works
-in both modes.
+in both modes. A diff with no node, display or field change, projected or not,
+whose `skeleton`, `context` and `keyboard` equal the ones the baseline's response
+delivered, carries `unchanged: true` and leaves those three out; every other diff
+carries them. A baseline whose response carried no skeleton never yields
+`unchanged: true`. The advertised diff arm
+requires `skeleton` or `unchanged`.
 
 A requested post-action screenshot is published under the same `observationId`
 as the hierarchy it should match. Only a settle-gated action can replace its
@@ -233,53 +238,11 @@ waiting and no reply, later reads on that client probe for at most 2000 ms. That
 lasts until a read succeeds or the 60,000 ms cooldown expires; shorter caller
 budgets stay (#18151).
 
-## Default compact action metadata
+The default compact action metadata section is on its own page:
 
-Compact action metadata defaults on. Opt out with
-`AUTOMOBILE_ACTIONS_COMPACT_METADATA=0`, `--no-actions-compact-metadata`, or
-feature-flag key `actions-compact-metadata` set to false. The existing
-`--actions-compact-metadata` or exact env `1` explicitly enables it. Negative CLI
-wins over positive CLI, then exact env `0`/`1`, then persisted state, then on.
-An explicit CLI/env choice is connection-scoped: the proxy relays it on its
-connection profile, never restarts the shared daemon for it, and never persists it.
-Without an explicit choice (unset or other env values), proxies relay no preference
-and use the shared daemon's effective setting.
-
-With an external action call's `sessionUuid` and session store,
-compaction omits each unchanged `observation` block independently: `insets`,
-`systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`, `deviceLockUnknown`,
-`accessibilityState`, and `freshness`. Raw observations' `viewHierarchy.insets`
-and `viewHierarchy.systemInsets` copies follow the same rule independently.
-Together, `deviceLock` and `deviceLockUnknown` form one mutually exclusive block:
-a delivered variant replaces the sibling in the server snapshot and the client's state.
-A variant transition always sends the new field in full; omission of both means
-unchanged. Values must be deeply equal except `backStack.capturedAt`. Stale
-freshness (`isFresh !== true`), unstable gfx metrics (`isStable === false`) and
-partial back stacks remain inline even if unchanged.
-The first action response, a new session and any device switch send available
-blocks in full; a change resends the changed block. The `screenSize`, `display`,
-and observation/device join keys remain present. A top-level `element` is omitted only when deeply equal to
-`selectedElement.matchedElement` and its output schema allows omission.
-
-Compaction follows projection and diff emission. With `--actions-diff-observe`,
-only metadata the diff emits can be compacted (including its
-`freshness` passthrough); the hierarchy diff baseline is unchanged. With
-`--actions-no-observe`, no observation blocks exist to compact or remember,
-but duplicate element removal still applies. An empty snapshot on a device
-switch invalidates the previous device's metadata without claiming delivery.
-
-The record of sent blocks holds only blocks that survive artifact and
-oversized-residue spills **inline**. Artifacts always come from the uncompacted
-payload; an artifact pointer does not count as delivery. Any non-internal
-session-scoped response that carries a block inline (including `observe` and
-error responses, which never omit blocks themselves) updates the record for
-exactly those blocks. Internal
-tool-to-tool calls neither omit nor record, and calls without a session/store
-emit the full response. The record lives in the session cache, and
-session release/rebind clears it. The server writes it while finalizing the
-response, before the transport sends it. A response dropped after that point
-leaves the client without the omitted block until it changes.
+- [Default compact action metadata](interaction-loop-compaction.md)
 
 ## Background
 
 - [Post-action screenshot timing](../../devlog/2026-11-10-interaction-loop-screenshot-timing.md)
+- [Stateless success reductions in the response envelope](../../devlog/2026-11-15-stateless-envelope-reductions.md)

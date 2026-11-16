@@ -82,6 +82,8 @@ import { runWithToolSelectionContext } from "../../src/features/toolSelection/to
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import * as os from "os";
 import { toolJson } from "../helpers/toolResponse";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/wire/constants";
+import { DefaultFeatureFlagApplier } from "../../src/features/featureFlags/FeatureFlagApplier";
 import { withWireConnection } from "../helpers/mcpConnection";
 
 import type { AndroidAutoProjectionApplier } from "../../src/features/androidAuto/AndroidAutoProjectionService";
@@ -1089,19 +1091,61 @@ describe("startDevice handler", () => {
     expect("timing" in result).toBe(false);
   });
 
-  it("keeps the timing tree on a success response behind debug-perf (#11636)", async () => {
+  it("the handler builds the timing tree behind debug-perf for internal callers (#11636, #18348)", async () => {
     setDebugPerfEnabled(true);
     try {
       fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
       fakeMatcher.setBootedResult(androidDevice);
 
-      const result = await callStartDevice({ platform: "android" });
+      // Agent-facing deliveries drop it; in-process callers still read it.
+      const result = await callStartDevice({ platform: "android", [INTERNAL_NO_DIFF_PARAM]: true });
 
       expect(result.timing).toBeDefined();
     } finally {
       setDebugPerfEnabled(false);
     }
   });
+
+  it("only the booted-device acquisition tools declare omitsAcquisitionTiming (#18348)", () => {
+    const declaring = ToolRegistry.getEveryRegisteredTool()
+      .filter((tool) => tool.omitsAcquisitionTiming === true)
+      .map((tool) => tool.name)
+      .sort();
+    expect(declaring).toEqual(["getAndroid", "getApple", "startDevice"]);
+  });
+
+  it.each(["getAndroid", "startDevice"] as const)(
+    "%s: a persisted debug-perf flag keeps the timing tree out of the delivered envelope (#18348)",
+    async (toolName) => {
+      // The flag is persisted: one earlier --debug-perf run turns it back on at every startup.
+      new DefaultFeatureFlagApplier().apply("debug-perf", true);
+      try {
+        fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+        fakeMatcher.setBootedResult(androidDevice);
+        const args =
+          toolName === "getAndroid" ? { avdName: androidDevice.name } : { platform: "android" };
+        // The registry handler is the delivery path: ingress finalizes nothing further.
+        const delivered = await withWireConnection(args, (wireArgs) =>
+          ToolRegistry.getTool(toolName)!.handler(wireArgs),
+        );
+        expect("timing" in toolJson(delivered)).toBe(false);
+        const payload = startResultSchema.parse(toolJson(delivered));
+        expect(payload.readiness).toBeDefined();
+        expect(payload.runtime.session.sessionUuid).toBeDefined();
+        // Never spilled: ingress reads the session from the inline envelope.
+        expect(JSON.stringify(delivered)).not.toContain("resource_link");
+
+        // An internal caller still receives the tree the handler attached.
+        const internal = await withWireConnection(
+          { ...args, [INTERNAL_NO_DIFF_PARAM]: true },
+          (wireArgs) => ToolRegistry.getTool(toolName)!.handler(wireArgs),
+        );
+        expect(toolJson(internal).timing).toBeDefined();
+      } finally {
+        setDebugPerfEnabled(false);
+      }
+    },
+  );
 
   it("falls through to image when no booted device matches", async () => {
     fakeDeviceUtils.setBootedDevices("android", []);

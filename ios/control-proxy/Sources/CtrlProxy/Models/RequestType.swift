@@ -63,6 +63,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case sdkWebSnapshot = "request_sdk_web_snapshot"
     case sdkWebAction = "request_sdk_web_action"
     case getVoiceOverState = "get_voiceover_state"
+    case requestStoreKit = "request_storekit"
     case setVoiceOverState = "set_voiceover_state"
     case requestAccessibilityAudit = "request_accessibility_audit"
 
@@ -143,6 +144,7 @@ extension RequestType {
         case .sdkWebSnapshot: return .sdkWebSnapshotResult
         case .sdkWebAction: return .sdkWebActionResult
         case .getVoiceOverState: return .voiceOverStateResult
+        case .requestStoreKit: return .storeKitResult
         case .setVoiceOverState: return .voiceOverSetResult
         case .listPreferenceFiles: return .preferenceFiles
         case .getPreferences: return .preferences

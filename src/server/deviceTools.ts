@@ -123,6 +123,7 @@ export function registerDeviceTools() {
       handler: (args, progress, signal) =>
         acquireUndoneIfUndelivered(signal, () => getAndroidHandler(args, progress, signal)),
       defaultEnabled: true,
+      omitsAcquisitionTiming: true,
       supportsProgress: true,
       transportRecovery: "connect",
     },
@@ -136,6 +137,7 @@ export function registerDeviceTools() {
       handler: (args, progress, signal) =>
         acquireUndoneIfUndelivered(signal, () => getAppleHandler(args, progress, signal)),
       defaultEnabled: true,
+      omitsAcquisitionTiming: true,
       supportsProgress: true,
       transportRecovery: "connect",
     },
@@ -146,6 +148,7 @@ export function registerDeviceTools() {
       acquireUndoneIfUndelivered(signal, () => startDeviceHandler(args, progress, signal)),
     outputSchema: startDeviceOutputSchema,
     defaultEnabled: true,
+    omitsAcquisitionTiming: true,
     supportsProgress: true,
     hidden: true,
     transportRecovery: "connect",

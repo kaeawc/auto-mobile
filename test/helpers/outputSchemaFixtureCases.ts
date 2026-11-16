@@ -85,9 +85,8 @@ export function invalidSchemaFixtures(
     observation.isDiff === true
   ) {
     mutants.push({ ...payload, observation: { ...observation, added: "invalid" } });
-    const { skeleton: _skeleton, ...withoutSkeleton } = observation as Record<string, unknown>;
-    void _skeleton;
-    mutants.push({ ...payload, observation: withoutSkeleton });
+    // An unchanged diff legitimately omits `skeleton` (#18348), so mutate its type instead.
+    mutants.push({ ...payload, observation: { ...observation, skeleton: "invalid" } });
   }
   return mutants;
 }

@@ -104,6 +104,35 @@ playhead, clock ticks and queue edits, and map the state onto their engine:
   Removing the current item moves to the next surviving one, or with none left wraps under `all`
   or stops on the last item. `skipTo` an unknown id fails with `item_not_found`.
 
+**Fake media engine and simulate (#14257).** `PrototypeFakeMediaEngine` (TypeScript, Kotlin in
+`android/protocol`, Swift in the prototype agent core) is a deterministic player that decodes
+nothing. All three replay the event scripts and expected `/platform/media` state in
+`test/fixtures/prototype-media-sim`:
+
+- Time is virtual and moves only when the runtime's injected clock calls `advance`. A playing,
+  ready, non-buffering player advances, then ends at `durationMs`, or wraps when it loops. A
+  `durationMs` of `-1` never ends.
+- `media.statusChanged` and `media.error` are reported only on a status or `playing` change, and
+  `media.ended` and `media.error` once per transition. `buffering` stalls the playhead without an
+  event.
+- An errored player ignores `play` and `seek` until an event sets it `ready`. Seeking back from
+  `ended` returns to `ready`.
+
+The host delivers an event with `prototype {action: "simulate", id, event, data}`. The `event` is
+`media.statusChanged` (`data` `{player, status, code?}` with `status` `buffering`, `ready`, `ended`
+or `error`), `media.ended` (`{player}`) or `media.error` (`{player, code}`). `code` is one of the
+state's error codes and is required exactly when the status is `error`. An optional `advanceMs`
+(1-3600000) advances the fake engine's clock first. The host validates `data` before it asks the
+device (`invalid_args`). It refuses `advanceMs` on a native engine (`unsupported`) and reports the
+engine as `mediaEngine`. No runtime exposes its media module to simulate yet, so every device
+answers `unavailable`. Selecting the fake engine (`platformMode`) and the `Media3` adapter belong to
+the platform simulation runtime (#14300).
+
+The fake engine proves spec logic, not playback. Real playback is confirmed separately. On Android
+the `mediaSession` tool reads the session's playback state and position (#14117), and `captureAudio`
+checks that the output is not silent on hosts where emulator or Simulator audio capture works
+(#13629). Generated test clips come from `scripts/media/generate-prototype-test-media.sh`.
+
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
 `maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes

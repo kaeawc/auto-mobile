@@ -7,6 +7,7 @@ import {
   prototypeRolePalette,
   resolvePrototypeColor,
 } from "../../src/features/prototype/prototypeContrast";
+import { prototypePlaceholderOutput } from "../../src/features/prototype/prototypePlaceholderLint";
 import { prototypePlatformNotes } from "../../src/features/prototype/prototypePlatformNotes";
 import { record } from "../../src/features/prototype/prototypeTemplate";
 import {
@@ -37,6 +38,7 @@ interface Concept {
   requiredCapabilities?: string[];
   untagged?: string[];
   lintFindings?: unknown[];
+  placeholderFindings?: unknown[];
   unmappedIcons?: unknown[];
 }
 
@@ -69,6 +71,8 @@ describe("prototype concept slices", () => {
       concept.requiredCapabilities = requiredPrototypeCapabilities(concept.spec);
       concept.untagged = untaggedInteractiveNodes(concept.spec);
       concept.lintFindings = lintPrototypeAccessibility(concept.spec).findings;
+      concept.placeholderFindings =
+        prototypePlaceholderOutput(concept.spec).placeholderFindings ?? [];
       // The SF Symbols path checks every contract iconName slot against the schema's mapped table.
       concept.unmappedIcons = prototypePlatformNotes(
         result.data,
@@ -137,6 +141,10 @@ describe("prototype concept slices", () => {
 
       test("has no static accessibility lint findings", () => {
         expect(concept.lintFindings).toEqual([]);
+      });
+
+      test("draws no placeholder literally (#18390)", () => {
+        expect(concept.placeholderFindings).toEqual([]);
       });
     });
   }

@@ -5,6 +5,7 @@ import {
   BuildApp,
   type BuildAppResult,
 } from "../features/build/BuildApp";
+import { MAX_BUILD_TIMEOUT_MS } from "../features/build/buildAppTimeout";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { definePlainTool } from "./defineTool";
 
@@ -48,8 +49,9 @@ const buildAppInput = z.object({
     .number()
     .int()
     .positive()
+    .max(MAX_BUILD_TIMEOUT_MS)
     .optional()
-    .describe("Stop the build after this many milliseconds (default 30 minutes)"),
+    .describe("Stop the build after this many milliseconds (default 20 minutes, at most 28)"),
 });
 
 export const buildAppResultSchema = z.object({

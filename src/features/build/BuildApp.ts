@@ -7,6 +7,10 @@ import {
 import { errorMessage } from "../../utils/describeUnknownError";
 import { sortedReaddir } from "../../utils/io";
 import { logger } from "../../utils/logger";
+import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
+import { ActionableError } from "../../models/ActionableError";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
+import { DEFAULT_BUILD_TIMEOUT_MS } from "./buildAppTimeout";
 
 export const BUILD_PLATFORMS = ["ios", "tvos", "watchos", "visionos", "android"] as const;
 export type BuildPlatform = (typeof BUILD_PLATFORMS)[number];
@@ -67,16 +71,21 @@ export interface BuildFileSystem {
 }
 
 export interface BuildAppDependencies {
+  /** Runs the Gradle wrapper. */
   readonly executor: HostCommandExecutor;
+  /** Runs xcodebuild; production code reaches xcodebuild only through XcodebuildClient. */
+  readonly xcodebuild: Pick<Xcodebuild, "executeCommand">;
   readonly fs: BuildFileSystem;
   readonly hostPlatform: NodeJS.Platform;
+  /** Resolves a caller-relative path to an absolute one; defaults to the daemon launch directory. */
+  readonly resolvePath?: (path: string) => string;
 }
 
-export const DEFAULT_BUILD_TIMEOUT_MS = 30 * 60_000;
 const BUILD_MAX_BUFFER = 256 * 1024 * 1024;
 const EXCERPT_MAX_LINES = 40;
 const EXCERPT_MAX_LINE_CHARS = 500;
 const APK_SEARCH_DEPTH = 3;
+const BUILD_SETTINGS_TIMEOUT_MS = 120_000;
 
 const APPLE_SDK: Record<ApplePlatform, { sdk: string; destination: string }> = {
   ios: { sdk: "iphonesimulator", destination: "iOS Simulator" },
@@ -145,11 +154,51 @@ function capitalize(value: string): string {
   return value.length === 0 ? value : value[0].toUpperCase() + value.slice(1);
 }
 
+/** XcodebuildClient refuses with this ActionableError when Xcode is not installed. */
+function isXcodebuildUnavailable(error: unknown): boolean {
+  return error instanceof ActionableError && error.message.includes("xcodebuild is not available");
+}
+
+/** XcodebuildClient's own timeout error, raised after it aborts the command. */
+function isClientTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("Command timed out after");
+}
+
+interface BuildSettingsEntry {
+  readonly buildSettings?: {
+    readonly TARGET_BUILD_DIR?: unknown;
+    readonly FULL_PRODUCT_NAME?: unknown;
+  };
+}
+
+/** `.app` product paths from `xcodebuild -showBuildSettings -json` output; [] when unparsable. */
+export function appProductPaths(settingsJson: string): string[] {
+  let entries: unknown;
+  try {
+    entries = JSON.parse(settingsJson);
+  } catch (error) {
+    logger.warn(`buildApp build settings are not JSON: ${errorMessage(error)}`);
+    return [];
+  }
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  const paths = (entries as BuildSettingsEntry[]).flatMap((entry) => {
+    const dir = entry?.buildSettings?.TARGET_BUILD_DIR;
+    const name = entry?.buildSettings?.FULL_PRODUCT_NAME;
+    return typeof dir === "string" && typeof name === "string" && name.endsWith(".app")
+      ? [join(dir, name)]
+      : [];
+  });
+  return [...new Set(paths)];
+}
+
 interface PlannedBuild {
+  readonly tool: "xcodebuild" | "gradle";
   readonly file: string;
   readonly args: string[];
   readonly cwd: string;
-  readonly findArtifacts: () => Promise<string[]>;
+  readonly findArtifacts: (signal?: AbortSignal) => Promise<string[]>;
   readonly artifactDescription: string;
 }
 
@@ -157,12 +206,14 @@ export class BuildApp {
   constructor(
     private readonly dependencies: BuildAppDependencies = {
       executor: new DefaultHostCommandExecutor(),
+      xcodebuild: new XcodebuildClient(),
       fs: nodeBuildFileSystem,
       hostPlatform: process.platform,
     },
   ) {}
 
-  async build(request: BuildAppRequest, signal?: AbortSignal): Promise<BuildAppResult> {
+  async build(raw: BuildAppRequest, signal?: AbortSignal): Promise<BuildAppResult> {
+    const request = this.absolutePaths(raw);
     const plan =
       request.platform === "android"
         ? await this.planAndroid(request)
@@ -180,7 +231,7 @@ export class BuildApp {
     if (failure) {
       return { ...failure, platform: request.platform, command };
     }
-    const artifactPaths = await plan.findArtifacts();
+    const artifactPaths = await plan.findArtifacts(signal);
     if (artifactPaths.length === 0) {
       return {
         success: false,
@@ -199,6 +250,15 @@ export class BuildApp {
     };
   }
 
+  private absolutePaths(request: BuildAppRequest): BuildAppRequest {
+    const resolve = this.dependencies.resolvePath ?? resolvePathFromDaemonLaunchWorkingDirectory;
+    return {
+      ...request,
+      projectPath: resolve(request.projectPath),
+      ...(request.derivedDataPath ? { derivedDataPath: resolve(request.derivedDataPath) } : {}),
+    };
+  }
+
   private async run(
     plan: PlannedBuild,
     request: BuildAppRequest,
@@ -210,12 +270,17 @@ export class BuildApp {
     logExcerpt?: string;
   } | null> {
     try {
-      await this.dependencies.executor.executeCommand(plan.file, plan.args, {
-        cwd: plan.cwd,
+      const options = {
         signal,
         timeoutMs: request.timeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
         maxBuffer: BUILD_MAX_BUFFER,
-      });
+      };
+      await (plan.tool === "xcodebuild"
+        ? this.dependencies.xcodebuild.executeCommand(plan.args, options)
+        : this.dependencies.executor.executeCommand(plan.file, plan.args, {
+            ...options,
+            cwd: plan.cwd,
+          }));
       return null;
     } catch (error) {
       if (signal?.aborted) {
@@ -231,7 +296,7 @@ export class BuildApp {
     error: unknown,
   ): { success: false; errorCode: BuildAppErrorCode; error: string; logExcerpt?: string } {
     const raw = rawFailure(error);
-    if (raw.code === "ENOENT") {
+    if (raw.code === "ENOENT" || isXcodebuildUnavailable(error)) {
       return {
         success: false,
         errorCode: "build_tool_not_found",
@@ -239,7 +304,7 @@ export class BuildApp {
       };
     }
     const logExcerpt = buildLogExcerpt(`${text(raw.stdout)}\n${text(raw.stderr)}`);
-    if (raw.killed === true && typeof raw.code !== "number") {
+    if ((raw.killed === true && typeof raw.code !== "number") || isClientTimeout(error)) {
       return {
         success: false,
         errorCode: "build_timed_out",
@@ -274,32 +339,55 @@ export class BuildApp {
     const { sdk, destination } = APPLE_SDK[platform];
     const derivedDataPath =
       request.derivedDataPath ?? join(dirname(project), "build", "AutoMobileDerivedData");
-    const productsDir = join(derivedDataPath, "Build", "Products", `${configuration}-${sdk}`);
+    const buildArgs = [
+      project.endsWith(".xcworkspace") ? "-workspace" : "-project",
+      project,
+      "-scheme",
+      request.scheme,
+      "-configuration",
+      configuration,
+      "-sdk",
+      sdk,
+      "-destination",
+      request.simulatorUdid
+        ? `platform=${destination},id=${request.simulatorUdid}`
+        : `generic/platform=${destination}`,
+      "-derivedDataPath",
+      derivedDataPath,
+      "CODE_SIGNING_ALLOWED=NO",
+    ];
     return {
+      tool: "xcodebuild",
       file: "xcodebuild",
-      args: [
-        project.endsWith(".xcworkspace") ? "-workspace" : "-project",
-        project,
-        "-scheme",
-        request.scheme,
-        "-configuration",
-        configuration,
-        "-sdk",
-        sdk,
-        "-destination",
-        request.simulatorUdid
-          ? `platform=${destination},id=${request.simulatorUdid}`
-          : `generic/platform=${destination}`,
-        "-derivedDataPath",
-        derivedDataPath,
-        "CODE_SIGNING_ALLOWED=NO",
-        "build",
-      ],
+      args: [...buildArgs, "build"],
       cwd: dirname(project),
-      findArtifacts: async () =>
-        await this.newestFirst(await this.childrenEndingWith(productsDir, ".app")),
-      artifactDescription: `.app under ${productsDir}`,
+      findArtifacts: async (signal) =>
+        await this.schemeApps([...buildArgs, "-showBuildSettings", "-json"], signal),
+      artifactDescription: `.app product for scheme ${request.scheme} in its build settings`,
     };
+  }
+
+  /** The scheme's own .app products, read from `xcodebuild -showBuildSettings -json`. */
+  private async schemeApps(args: string[], signal?: AbortSignal): Promise<string[]> {
+    let stdout: string;
+    try {
+      ({ stdout } = await this.dependencies.xcodebuild.executeCommand(args, {
+        signal,
+        timeoutMs: BUILD_SETTINGS_TIMEOUT_MS,
+        maxBuffer: BUILD_MAX_BUFFER,
+      }));
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(`buildApp could not read build settings: ${errorMessage(error)}`);
+      return [];
+    }
+    const apps = appProductPaths(stdout);
+    const present = await Promise.all(
+      apps.map(async (path) => ((await this.dependencies.fs.stat(path)) ? path : null)),
+    );
+    return present.filter((path): path is string => path !== null);
   }
 
   private async resolveXcodeProject(projectPath: string): Promise<string | Refusal> {
@@ -344,20 +432,13 @@ export class BuildApp {
     const variant = request.variant ?? "debug";
     const apkRoot = join(request.projectPath, ...module.split(":"), "build", "outputs", "apk");
     return {
+      tool: "gradle",
       file: gradlew,
       args: [`:${module}:assemble${capitalize(variant)}`, "--console=plain"],
       cwd: request.projectPath,
       findArtifacts: async () => await this.newestFirst(await this.variantApks(apkRoot, variant)),
       artifactDescription: `${variant} .apk under ${apkRoot}`,
     };
-  }
-
-  private async childrenEndingWith(dir: string, suffix: string): Promise<string[]> {
-    if (!(await this.dependencies.fs.stat(dir))) {
-      return [];
-    }
-    const entries = await this.dependencies.fs.readdir(dir);
-    return entries.filter((entry) => entry.endsWith(suffix)).map((entry) => join(dir, entry));
   }
 
   /** APKs whose directory under `outputs/apk` spells the variant, e.g. free/debug for freeDebug. */

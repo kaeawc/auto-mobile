@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { basename, dirname, join, normalize } from "node:path";
 import {
+  appProductPaths,
   BuildApp,
   buildLogExcerpt,
   type BuildFileSystem,
@@ -11,6 +12,7 @@ import type {
   HostCommandOptions,
 } from "../../../src/utils/HostCommandExecutor";
 import type { ExecResult } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 interface Call {
   file: string;
@@ -21,7 +23,8 @@ interface Call {
 class FakeExecutor implements HostCommandExecutor {
   readonly calls: Call[] = [];
   constructor(
-    private readonly outcome: (call: Call) => void = () => {},
+    /** Throws to fail the call, or returns the call's stdout. */
+    private readonly outcome: (call: Call) => string | void = () => {},
     private readonly onRun: () => void = () => {},
   ) {}
 
@@ -32,10 +35,10 @@ class FakeExecutor implements HostCommandExecutor {
   ): Promise<ExecResult> {
     const call = { file, args, options };
     this.calls.push(call);
-    this.outcome(call);
+    const stdout = this.outcome(call) ?? "";
     this.onRun();
     return {
-      stdout: "",
+      stdout,
       stderr: "",
       toString: () => "",
       trim: () => "",
@@ -64,6 +67,19 @@ class FakeFileSystem implements BuildFileSystem {
   }
 }
 
+/** BuildApp dependencies whose xcodebuild client records into the same fake executor. */
+function deps(executor: FakeExecutor, fs: BuildFileSystem, hostPlatform: NodeJS.Platform) {
+  return {
+    executor,
+    fs,
+    hostPlatform,
+    xcodebuild: {
+      executeCommand: (args: string[], options?: HostCommandOptions) =>
+        executor.executeCommand("xcodebuild", args, options),
+    },
+  };
+}
+
 /** Platform-native spelling of a POSIX-style fixture path, so the suite passes on Windows. */
 const p = (path: string): string => normalize(path);
 
@@ -77,13 +93,28 @@ const TV_PRODUCTS = p(
 );
 
 describe("BuildApp apple", () => {
-  test("builds a tvOS scheme for a simulator UDID and returns the .app", async () => {
+  test("builds a tvOS scheme for a simulator UDID and returns that scheme's .app", async () => {
     const fs = new FakeFileSystem().add(TV_PROJECT, true);
+    const settings = JSON.stringify([
+      {
+        target: "TvApp",
+        buildSettings: { TARGET_BUILD_DIR: TV_PRODUCTS, FULL_PRODUCT_NAME: "TvApp.app" },
+      },
+      {
+        target: "TvAppTests",
+        buildSettings: { TARGET_BUILD_DIR: TV_PRODUCTS, FULL_PRODUCT_NAME: "TvAppTests.xctest" },
+      },
+    ]);
     const executor = new FakeExecutor(
-      () => {},
-      () => fs.add(TV_PRODUCTS, true).add(join(TV_PRODUCTS, "TvApp.app"), true, 5),
+      (call) => (call.args.includes("-showBuildSettings") ? settings : undefined),
+      // Another scheme's newer app in the same products directory must not be returned.
+      () =>
+        fs
+          .add(TV_PRODUCTS, true)
+          .add(join(TV_PRODUCTS, "TvApp.app"), true, 5)
+          .add(join(TV_PRODUCTS, "OtherApp.app"), true, 9),
     );
-    const result = await new BuildApp({ executor, fs, hostPlatform: "darwin" }).build({
+    const result = await new BuildApp(deps(executor, fs, "darwin")).build({
       platform: "tvos",
       projectPath: TV_PROJECT,
       scheme: "TvApp",
@@ -108,6 +139,19 @@ describe("BuildApp apple", () => {
       "CODE_SIGNING_ALLOWED=NO",
       "build",
     ]);
+    expect(executor.calls[1].args.slice(-2)).toEqual(["-showBuildSettings", "-json"]);
+    expect(result.success ? result.artifactPaths : []).toEqual([join(TV_PRODUCTS, "TvApp.app")]);
+  });
+
+  test("resolves a relative project path before planning the command", async () => {
+    const fs = new FakeFileSystem().add(TV_PROJECT, true);
+    const executor = new FakeExecutor();
+    await new BuildApp({
+      ...deps(executor, fs, "darwin"),
+      resolvePath: (path) => join(p("/work/TvApp"), path),
+    }).build({ platform: "tvos", projectPath: "TvApp.xcodeproj", scheme: "TvApp" });
+
+    expect(executor.calls[0].args[1]).toBe(TV_PROJECT);
   });
 
   test("prefers the single workspace in a directory and uses the generic destination", async () => {
@@ -116,7 +160,7 @@ describe("BuildApp apple", () => {
       .add(p("/work/App/App.xcodeproj"), true)
       .add(p("/work/App/App.xcworkspace"), true);
     const executor = new FakeExecutor();
-    const result = await new BuildApp({ executor, fs, hostPlatform: "darwin" }).build({
+    const result = await new BuildApp(deps(executor, fs, "darwin")).build({
       platform: "visionos",
       projectPath: p("/work/App"),
       scheme: "App",
@@ -135,12 +179,12 @@ describe("BuildApp apple", () => {
   test("refuses Apple builds off macOS and without a scheme, without running anything", async () => {
     const fs = new FakeFileSystem().add(TV_PROJECT, true);
     const executor = new FakeExecutor();
-    const linux = await new BuildApp({ executor, fs, hostPlatform: "linux" }).build({
+    const linux = await new BuildApp(deps(executor, fs, "linux")).build({
       platform: "ios",
       projectPath: TV_PROJECT,
       scheme: "TvApp",
     });
-    const noScheme = await new BuildApp({ executor, fs, hostPlatform: "darwin" }).build({
+    const noScheme = await new BuildApp(deps(executor, fs, "darwin")).build({
       platform: "ios",
       projectPath: TV_PROJECT,
     });
@@ -151,11 +195,9 @@ describe("BuildApp apple", () => {
   });
 
   test("reports a missing project", async () => {
-    const result = await new BuildApp({
-      executor: new FakeExecutor(),
-      fs: new FakeFileSystem(),
-      hostPlatform: "darwin",
-    }).build({ platform: "tvos", projectPath: TV_PROJECT, scheme: "TvApp" });
+    const result = await new BuildApp(
+      deps(new FakeExecutor(), new FakeFileSystem(), "darwin"),
+    ).build({ platform: "tvos", projectPath: TV_PROJECT, scheme: "TvApp" });
 
     expect(result).toMatchObject({ success: false, errorCode: "project_not_found" });
   });
@@ -169,7 +211,7 @@ describe("BuildApp apple", () => {
           "CompileSwift normal\n/work/TvApp/App.swift:3:5: error: cannot find 'Foo' in scope\n** BUILD FAILED **\n",
       });
     });
-    const result = await new BuildApp({ executor, fs, hostPlatform: "darwin" }).build({
+    const result = await new BuildApp(deps(executor, fs, "darwin")).build({
       platform: "tvos",
       projectPath: TV_PROJECT,
       scheme: "TvApp",
@@ -182,19 +224,25 @@ describe("BuildApp apple", () => {
     expect(result.success ? "" : result.error).toContain("exit code 65");
   });
 
-  test("distinguishes a missing build tool and a timeout", async () => {
+  test("classifies XcodebuildClient's missing-Xcode refusal and its timeout", async () => {
     const fs = new FakeFileSystem().add(TV_PROJECT, true);
-    const run = (raw: Record<string, unknown>) =>
-      new BuildApp({
-        executor: new FakeExecutor(() => {
-          throw execFailure(raw);
-        }),
-        fs,
-        hostPlatform: "darwin",
-      }).build({ platform: "tvos", projectPath: TV_PROJECT, scheme: "TvApp", timeoutMs: 5 });
+    const run = (error: Error) =>
+      new BuildApp(
+        deps(
+          new FakeExecutor(() => {
+            throw error;
+          }),
+          fs,
+          "darwin",
+        ),
+      ).build({ platform: "tvos", projectPath: TV_PROJECT, scheme: "TvApp", timeoutMs: 5 });
 
-    expect(await run({ code: "ENOENT" })).toMatchObject({ errorCode: "build_tool_not_found" });
-    expect(await run({ killed: true, signal: "SIGTERM", code: null })).toMatchObject({
+    expect(
+      await run(
+        new ActionableError("xcodebuild is not available. Please install Xcode to continue."),
+      ),
+    ).toMatchObject({ errorCode: "build_tool_not_found" });
+    expect(await run(new Error("Command timed out after 5ms: xcodebuild -project"))).toMatchObject({
       errorCode: "build_timed_out",
     });
   });
@@ -203,14 +251,16 @@ describe("BuildApp apple", () => {
     const fs = new FakeFileSystem().add(TV_PROJECT, true);
     const controller = new AbortController();
     const abortError = new Error("aborted");
-    const builder = new BuildApp({
-      executor: new FakeExecutor(() => {
-        controller.abort();
-        throw abortError;
-      }),
-      fs,
-      hostPlatform: "darwin",
-    });
+    const builder = new BuildApp(
+      deps(
+        new FakeExecutor(() => {
+          controller.abort();
+          throw abortError;
+        }),
+        fs,
+        "darwin",
+      ),
+    );
 
     await expect(
       builder.build(
@@ -235,7 +285,7 @@ describe("BuildApp android", () => {
       .add(p(`${apkRoot}/paid/debug`), true)
       .add(p(`${apkRoot}/paid/debug/app-paid-debug.apk`), false, 10);
     const executor = new FakeExecutor();
-    const result = await new BuildApp({ executor, fs, hostPlatform: "linux" }).build({
+    const result = await new BuildApp(deps(executor, fs, "linux")).build({
       platform: "android",
       projectPath: p("/work/droid"),
       variant: "freeDebug",
@@ -255,7 +305,7 @@ describe("BuildApp android", () => {
   test("uses gradlew.bat on Windows and a nested module path", async () => {
     const fs = new FakeFileSystem().add(join(p("/work/droid"), "gradlew.bat"), false);
     const executor = new FakeExecutor();
-    await new BuildApp({ executor, fs, hostPlatform: "win32" }).build({
+    await new BuildApp(deps(executor, fs, "win32")).build({
       platform: "android",
       projectPath: p("/work/droid"),
       module: ":apps:tv",
@@ -265,14 +315,59 @@ describe("BuildApp android", () => {
     expect(executor.calls[0].args[0]).toBe(":apps:tv:assembleDebug");
   });
 
+  test("a relative project path runs the wrapper by its absolute path", async () => {
+    const fs = new FakeFileSystem().add(p("/work/droid/gradlew"), false);
+    const executor = new FakeExecutor();
+    await new BuildApp({
+      ...deps(executor, fs, "linux"),
+      resolvePath: (path) => join(p("/work"), path),
+    }).build({ platform: "android", projectPath: "droid" });
+
+    expect(executor.calls[0]).toMatchObject({
+      file: p("/work/droid/gradlew"),
+      options: { cwd: p("/work/droid") },
+    });
+  });
+
+  test("distinguishes a missing wrapper binary and a killed build", async () => {
+    const fs = new FakeFileSystem().add(p("/work/droid/gradlew"), false);
+    const run = (raw: Record<string, unknown>) =>
+      new BuildApp(
+        deps(
+          new FakeExecutor(() => {
+            throw execFailure(raw);
+          }),
+          fs,
+          "linux",
+        ),
+      ).build({ platform: "android", projectPath: p("/work/droid"), timeoutMs: 5 });
+
+    expect(await run({ code: "ENOENT" })).toMatchObject({ errorCode: "build_tool_not_found" });
+    expect(await run({ killed: true, signal: "SIGTERM", code: null })).toMatchObject({
+      errorCode: "build_timed_out",
+    });
+  });
+
   test("a project without the wrapper is project_not_found", async () => {
-    const result = await new BuildApp({
-      executor: new FakeExecutor(),
-      fs: new FakeFileSystem(),
-      hostPlatform: "linux",
-    }).build({ platform: "android", projectPath: p("/work/droid") });
+    const result = await new BuildApp(
+      deps(new FakeExecutor(), new FakeFileSystem(), "linux"),
+    ).build({ platform: "android", projectPath: p("/work/droid") });
 
     expect(result).toMatchObject({ success: false, errorCode: "project_not_found" });
+  });
+});
+
+describe("appProductPaths", () => {
+  test("keeps .app products and ignores malformed output", () => {
+    const json = JSON.stringify([
+      { buildSettings: { TARGET_BUILD_DIR: p("/d"), FULL_PRODUCT_NAME: "A.app" } },
+      { buildSettings: { TARGET_BUILD_DIR: p("/d"), FULL_PRODUCT_NAME: "A.app" } },
+      { buildSettings: { TARGET_BUILD_DIR: p("/d"), FULL_PRODUCT_NAME: "Lib.framework" } },
+      { buildSettings: {} },
+    ]);
+    expect(appProductPaths(json)).toEqual([join(p("/d"), "A.app")]);
+    expect(appProductPaths("not json")).toEqual([]);
+    expect(appProductPaths("{}")).toEqual([]);
   });
 });
 

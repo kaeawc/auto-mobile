@@ -241,3 +241,68 @@ test("a foreign window whose activity lives in another task does not verify by t
   expect(result.verifiedBy).toBeUndefined();
   expect(result.error).toContain("did not reach the screen within 400 ms");
 });
+
+test("a stale helper row in the target's task does not vouch for another helper activity", async () => {
+  const { observeScreen, launchObservation } = setup();
+  const otherActivity = `${helper}.OtherActivity`;
+  const backStack: BackStackInfo = {
+    depth: 2,
+    activities: [
+      { name: helperActivity, taskId: 8, userId: 0 },
+      { name: `${settings}.Settings`, taskId: 8, userId: 0, isTaskRoot: true },
+      { name: otherActivity, taskId: 31, userId: 0, isTaskRoot: true },
+    ],
+    currentTaskId: 8,
+    tasks: [
+      { id: 8, userId: 0, packageName: settings, rootActivity: `${settings}/.Settings` },
+      { id: 31, userId: 0, packageName: helper, rootActivity: `${helper}/.OtherActivity` },
+    ],
+  };
+  const otherShown = {
+    ...helperObservation(backStack),
+    activeWindow: { appId: helper, activityName: otherActivity, layoutSeqSum: 1 },
+  };
+  observeScreen.setObserveResult(otherShown);
+
+  const result = await launchObservation.ensureLaunchObservationMatchesPackage(
+    { success: true, packageName: settings, observation: otherShown },
+    settings,
+    { timeoutMs: 400, pollIntervalMs: 200, expectedUserId: 0 },
+  );
+
+  expect(result.success).toBe(false);
+  expect(result.verifiedBy).toBeUndefined();
+  expect(result.error).toContain("did not reach the screen within 400 ms");
+});
+
+test("a helper window without an activity name falls back to the package in the target's task", async () => {
+  const { timer, observeScreen, launchObservation } = setup();
+  const backStack: BackStackInfo = {
+    depth: 2,
+    activities: [
+      { name: helperActivity, taskId: 8, userId: 0 },
+      { name: `${settings}.Settings`, taskId: 8, userId: 0, isTaskRoot: true },
+      { name: helperActivity, taskId: 31, userId: 10, isTaskRoot: true },
+    ],
+    currentTaskId: 8,
+    tasks: [
+      { id: 8, userId: 0, packageName: settings, rootActivity: `${settings}/.Settings` },
+      { id: 31, userId: 10, packageName: helper, rootActivity: `${helper}/.SearchActivity` },
+    ],
+  };
+  const unnamed = {
+    ...helperObservation(backStack),
+    activeWindow: { appId: helper, activityName: "", layoutSeqSum: 1 },
+  };
+
+  const result = await launchObservation.ensureLaunchObservationMatchesPackage(
+    { success: true, packageName: settings, observation: unnamed },
+    settings,
+    { timeoutMs: 5000, pollIntervalMs: 200, expectedUserId: 0 },
+  );
+
+  expect(result.success).toBe(true);
+  expect(result.verifiedBy).toBe("task-root");
+  expect(timer.getSleepHistory()).toEqual([]);
+  expect(observeScreen.getCallCount("execute")).toBe(0);
+});

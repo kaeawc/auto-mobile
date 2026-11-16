@@ -310,7 +310,8 @@ test/fixtures/ios-messages-compose/*.json text eol=lf
 # Generated prototype embedding samples are compared byte-for-byte with the
 # native resource output (#13732), so a Windows CRLF checkout must not rewrite them.
 samples/prototype-embedding/** text eol=lf
-samples/prototype-embedding/**/*.png -text
+# Generated sample PNGs are tiny (under 100KB) and byte-compared in unit tests, and CI checks out with lfs: false.
+samples/prototype-embedding/**/*.png -filter -diff -merge -text
 ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSamplePrototype.swift text eol=lf
 ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EjectSamplePrototype.swift text eol=lf
 

@@ -3,6 +3,8 @@ import { join } from "node:path";
 import {
   AAOS_SETTINGS_APP_ID,
   assertAutomotiveDevice,
+  assertClusterObservation,
+  assertDrivingRestrictions,
   assertLandscapeObservation,
   assertMotionApplied,
   buildAaosSmokePlan,
@@ -31,6 +33,24 @@ function envelope(payload: Payload, isError = false): unknown {
 const LANDSCAPE = {
   skeleton: [{ elementId: "e1", label: "Settings", bounds: {}, affordances: ["tap"] }],
   screenSize: { width: 1024, height: 768 },
+};
+
+/** `observe.automotive` for a driving state, with whether distraction optimization is required. */
+function automotive(drivingState: string, requiresDistractionOptimization: boolean): Payload {
+  return {
+    ...LANDSCAPE,
+    automotive: {
+      drivingState,
+      uxRestrictions: { requiresDistractionOptimization, activeRestrictions: 0 },
+    },
+  };
+}
+
+const CLUSTER: Payload = {
+  skeleton: LANDSCAPE.skeleton,
+  display: { key: "4619827551948147201", role: "cluster" },
+  screenSize: { width: 400, height: 600 },
+  activeWindow: { appId: "com.android.car.cluster.osdouble" },
 };
 
 function motion(status: string): Payload {
@@ -75,7 +95,9 @@ function happyClient(overrides: Record<string, unknown> = {}): FakeClient {
       { ...LANDSCAPE, activeWindow: { appId: "com.android.car.carlauncher" } },
       { ...LANDSCAPE, activeWindow: { appId: AAOS_SETTINGS_APP_ID }, screenshotPath: "/tmp/a.png" },
       { ...LANDSCAPE, activeWindow: { appId: "com.android.car.carlauncher" } },
-      LANDSCAPE,
+      CLUSTER,
+      automotive("moving", true),
+      automotive("parked", false),
     ],
   );
 }
@@ -139,6 +161,24 @@ describe("buildAaosSmokePlan", () => {
     expect(motions).toEqual([{ motion: "driving" }, { motion: "parked" }]);
   });
 
+  test("observes the cluster, then each vehicle state's restrictions after it is set (#16746)", () => {
+    const plan = buildAaosSmokePlan();
+    const ids = plan.map((step) => step.id);
+    expect(ids.slice(ids.indexOf("observe-home"))).toEqual([
+      "observe-home",
+      "observe-cluster",
+      "driving",
+      "observe-driving",
+      "parked",
+      "observe-parked",
+      "reset",
+    ]);
+    expect(plan.find((step) => step.id === "observe-cluster")?.args).toMatchObject({
+      display: "cluster",
+      screenshot: "settled",
+    });
+  });
+
   test("only the reset step runs after a failure", () => {
     expect(
       buildAaosSmokePlan()
@@ -177,6 +217,32 @@ describe("assertions", () => {
     );
     expect(notSettings(LANDSCAPE)).toContain("observed no foreground app");
     expect(notSettings({ activeWindow: {} })).toContain("observed no foreground app");
+  });
+
+  test("driving and parked restrictions come from observe.automotive (#16746)", () => {
+    const driving = assertDrivingRestrictions("driving");
+    const parked = assertDrivingRestrictions("parked");
+    expect(driving(automotive("moving", true))).toBeUndefined();
+    expect(parked(automotive("parked", false))).toBeUndefined();
+    expect(parked(automotive("idling", false))).toBeUndefined();
+    expect(driving(automotive("parked", false))).toContain("drivingState moving while driving");
+    expect(driving(automotive("moving", false))).toContain(
+      "requiresDistractionOptimization true while driving, got false",
+    );
+    expect(parked(automotive("parked", true))).toContain("false while parked, got true");
+    expect(driving(LANDSCAPE)).toContain("got none");
+    expect(
+      driving({ ...automotive("moving", true), screenSize: { width: 1, height: 2 } }),
+    ).toContain("landscape");
+  });
+
+  test("the cluster observe must land on a cluster display with a hierarchy (#16746)", () => {
+    expect(assertClusterObservation(CLUSTER)).toBeUndefined();
+    expect(assertClusterObservation({ ...CLUSTER, display: { role: "unknown" } })).toContain(
+      "role unknown",
+    );
+    expect(assertClusterObservation(LANDSCAPE)).toContain("role none");
+    expect(assertClusterObservation({ ...CLUSTER, skeleton: [] })).toContain("empty skeleton");
   });
 
   test("motion must be applied, not unsupported", () => {

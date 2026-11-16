@@ -3,8 +3,9 @@
  * Advisory nightly Android Automotive OS emulator smoke (#16746).
  *
  * Drives one persistent MCP session through a fixed plan: create and boot an automotive AVD
- * with startDevice `createIfMissing`, then observe, launch, tap, scroll, back, home and the
- * driving/parked vehicle states. The plan runs on the shared emulator smoke runner
+ * with startDevice `createIfMissing`, then observe, launch, tap, scroll, back, home, the
+ * instrument cluster display, and the driving/parked vehicle states with the driving state and
+ * UX restrictions `observe.automotive` reports for each. The plan runs on the shared emulator smoke runner
  * (`scripts/ci/emulator-smoke/smokeRunner.ts`), which records each payload and screenshot and
  * renders the Markdown summary.
  */
@@ -91,11 +92,58 @@ export function assertMotionApplied(motion: "driving" | "parked") {
   };
 }
 
-function observeStep(id: string, expectation: string, assert: AaosSmokeStep["assert"]) {
+/** The driving states `observe.automotive.drivingState` reports for each vehicle motion. */
+const DRIVING_STATES: Readonly<Record<"driving" | "parked", readonly string[]>> = {
+  driving: ["moving"],
+  parked: ["parked", "idling"],
+};
+
+/**
+ * `observe.automotive` must report the driving state the motion set, and whether the car
+ * requires distraction optimization: moving requires it, parked and idling do not.
+ */
+export function assertDrivingRestrictions(motion: "driving" | "parked") {
+  return (payload: Payload): string | undefined => {
+    const landscape = assertLandscapeObservation(payload);
+    if (landscape) {
+      return landscape;
+    }
+    const automotive = readObject(payload.automotive);
+    const state = automotive?.drivingState;
+    if (typeof state !== "string" || !DRIVING_STATES[motion].includes(state)) {
+      return `expected automotive.drivingState ${DRIVING_STATES[motion].join(" or ")} while ${motion}, got ${String(state ?? "none")}`;
+    }
+    const required = readObject(automotive?.uxRestrictions)?.requiresDistractionOptimization;
+    const expected = motion === "driving";
+    return required === expected
+      ? undefined
+      : `expected automotive.uxRestrictions.requiresDistractionOptimization ${String(expected)} while ${motion}, got ${String(required ?? "none")}`;
+  };
+}
+
+/** An observe of the instrument cluster must land on a `cluster` display with a hierarchy. */
+export function assertClusterObservation(payload: Payload): string | undefined {
+  const role = readObject(payload.display)?.role;
+  if (role !== "cluster") {
+    return `expected the cluster display, observe reported role ${String(role ?? "none")}`;
+  }
+  return assertHasHierarchy(payload);
+}
+
+function observeStep(
+  id: string,
+  expectation: string,
+  assert: AaosSmokeStep["assert"],
+  display?: string,
+) {
   return {
     id,
     tool: "observe",
-    args: { platform: "android", screenshot: "settled" },
+    args: {
+      platform: "android",
+      screenshot: "settled",
+      ...(display === undefined ? {} : { display }),
+    },
     expectation,
     assert,
   } satisfies AaosSmokeStep;
@@ -165,6 +213,12 @@ export function buildAaosSmokePlan(options: AaosSmokePlanOptions = {}): AaosSmok
       `${AAOS_SETTINGS_APP_ID} left the foreground`,
       expectNotForeground(AAOS_SETTINGS_APP_ID),
     ),
+    observeStep(
+      "observe-cluster",
+      "the instrument cluster display is observable",
+      assertClusterObservation,
+      "cluster",
+    ),
     {
       id: "driving",
       tool: "setDeviceState",
@@ -172,7 +226,11 @@ export function buildAaosSmokePlan(options: AaosSmokePlanOptions = {}): AaosSmok
       expectation: "vehicle.motion=driving is applied and verified MOVING",
       assert: assertMotionApplied("driving"),
     },
-    observeStep("observe-driving", "observable while driving", assertLandscapeObservation),
+    observeStep(
+      "observe-driving",
+      "drivingState moving and distraction optimization required",
+      assertDrivingRestrictions("driving"),
+    ),
     {
       id: "parked",
       tool: "setDeviceState",
@@ -180,6 +238,11 @@ export function buildAaosSmokePlan(options: AaosSmokePlanOptions = {}): AaosSmok
       expectation: "vehicle.motion=parked is applied and verified",
       assert: assertMotionApplied("parked"),
     },
+    observeStep(
+      "observe-parked",
+      "drivingState parked or idling and no distraction optimization required",
+      assertDrivingRestrictions("parked"),
+    ),
     {
       id: "reset",
       tool: "setDeviceState",

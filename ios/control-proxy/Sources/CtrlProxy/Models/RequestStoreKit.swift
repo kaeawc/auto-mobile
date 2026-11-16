@@ -19,6 +19,10 @@ import Foundation
 /// app-initiated purchases the SDK override lasts until clear or reload.
 /// Load resets defaults, clears transactions, then disables dialogs. Other actions
 /// require load first. Clear resets, clears, returns the final list, and drops the session.
+/// Device finding: StoreKitTest attributes session state to the runner's UI-test target app
+/// (`dev.jasonpearson.automobile.ctrlproxy` today), not to `bundleId`, which only keys the
+/// in-runner session slot. An app sees the state only when it runs under that target bundle id
+/// or the runner is launched with that app as its xctestrun UITargetAppPath.
 /// Response `storekit_result`: requestId?, success, action, bundleId, error?, totalTimeMs,
 /// transactions? [{identifier: Int, productId: String, state: purchased|purchasing|failed|
 /// restored|deferred|unknown, originalIdentifier: Int?}]. List/buy/refund/expire/clear

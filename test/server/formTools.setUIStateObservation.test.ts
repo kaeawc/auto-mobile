@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import androidCapture from "../fixtures/observe/android-home.json";
 import { registerFormTools, createSetUIStateHandler } from "../../src/server/formTools";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+import { getStructuredPayload } from "../../src/utils/toolUtils";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import type { SetUIStateResult } from "../../src/models/SetUIStateResult";
@@ -52,11 +53,11 @@ test.each([
     totalAttempts: fields.length,
     observation,
   })(device, args);
-  expect(response.structuredContent.observation).toEqual(observation);
+  expect(getStructuredPayload(response)?.observation).toEqual(observation);
 
   const finalized = finalizeToolResponse(response, { name: "setUIState", args });
   const schema = ToolRegistry.getRegisteredTool("setUIState")?.outputSchema;
-  const parsed = schema!.parse(finalized.structuredContent) as Record<string, unknown>;
+  const parsed = schema!.parse(getStructuredPayload(finalized)) as Record<string, unknown>;
   expect(parsed.observation).toBeDefined();
 });
 
@@ -67,5 +68,5 @@ test("setUIState omits observation when none was captured", async () => {
     totalAttempts: 0,
     error: "deadline",
   })(device, args);
-  expect("observation" in response.structuredContent).toBe(false);
+  expect(getStructuredPayload(response)).not.toHaveProperty("observation");
 });

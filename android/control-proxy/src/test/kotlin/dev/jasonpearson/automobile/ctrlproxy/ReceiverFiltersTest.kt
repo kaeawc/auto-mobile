@@ -80,7 +80,7 @@ class ReceiverFiltersTest {
     val service = Robolectric.buildService(CtrlProxy::class.java).get()
     val receiver = Probe()
 
-    service.registerExportedReceiver(receiver, ReceiverFilters.crash())
+    service.receivers.registerExported(receiver, ReceiverFilters.crash())
 
     assertEquals(
       Context.RECEIVER_EXPORTED,
@@ -94,7 +94,7 @@ class ReceiverFiltersTest {
     val service = Robolectric.buildService(CtrlProxy::class.java).get()
     val receiver = Probe()
 
-    service.registerExportedReceiver(receiver, ReceiverFilters.crash())
+    service.receivers.registerExported(receiver, ReceiverFilters.crash())
 
     assertEquals(0, registeredFlags(receiver))
   }

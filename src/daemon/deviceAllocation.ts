@@ -84,7 +84,10 @@ export interface DeviceAllocationPort extends Pick<
     "get" | "set"
   >;
   readonly runtimeIdentity: Pick<DeviceRuntimeIdentity, "isPooledDeviceIdentityAssignable">;
-  readonly sessionManager: Pick<SessionManager, "getSession" | "createSession">;
+  readonly sessionManager: Pick<
+    SessionManager,
+    "getSession" | "createSession" | "restoreDeferredRecoveryClaim"
+  >;
   readonly lastReleasedDeviceId: string | null;
   recoveryNow(): number;
   recoveryAssignmentError(

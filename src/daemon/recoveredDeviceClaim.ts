@@ -5,6 +5,7 @@ import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
 import {
   SessionRecoveryIdentityLossError,
   type Session,
+  type SessionManager,
   type SessionRecoveryTarget,
 } from "./sessionManager";
 
@@ -20,6 +21,7 @@ export interface RecoveredDeviceClaimPort {
   publishDeviceClaim(deviceId: string): Promise<boolean>;
   assertNotClaimedByForeignDaemon(deviceId: string, platform: Platform): Promise<void>;
   rollbackAssignments(assignments: ReadonlyMap<string, RollbackAssignment>): Promise<void>;
+  readonly sessionManager: Pick<SessionManager, "restoreDeferredRecoveryClaim">;
 }
 
 /**
@@ -45,7 +47,8 @@ export async function claimRecoveredAssignment<
 /**
  * Publish this daemon's claim on the device recovery just rebound. When another live daemon's
  * claim won the race, give the device back and terminalize the session (#11076). When the table
- * only could not decide yet (#11811), give the device back and report `deferred`.
+ * only could not decide yet (#11811), give the device back, restore the persisted row's claimed
+ * release so the retry can write over it, and report `deferred`.
  */
 async function claimRecoveredDevice(
   port: RecoveredDeviceClaimPort,
@@ -64,6 +67,8 @@ async function claimRecoveredDevice(
       `[DevicePool] The device claims registry cannot decide ${deviceId} yet; releasing it from recovering session ${recoveringSessionId} to retry`,
     );
     await port.rollbackAssignments(rollback);
+    // The rollback released the row as `allocation-rollback`; give the retry its claim back.
+    await port.sessionManager.restoreDeferredRecoveryClaim(session);
     return "deferred";
   }
   logger.warn(

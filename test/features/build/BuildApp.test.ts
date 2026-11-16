@@ -311,8 +311,10 @@ describe("BuildApp android", () => {
       module: ":apps:tv",
     });
 
-    expect(executor.calls[0].file).toBe(join(p("/work/droid"), "gradlew.bat"));
-    expect(executor.calls[0].args[0]).toBe(":apps:tv:assembleDebug");
+    // Node cannot execFile a .bat, so the wrapper runs through the command processor.
+    expect(executor.calls[0].args.slice(0, 4)).toEqual(["/d", "/v:off", "/s", "/c"]);
+    expect(executor.calls[0].args[4]).toContain("gradlew.bat");
+    expect(executor.calls[0].args[4]).toContain(":apps:tv:assembleDebug");
   });
 
   test("a relative project path runs the wrapper by its absolute path", async () => {

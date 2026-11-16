@@ -9,6 +9,7 @@ import { sortedReaddir } from "../../utils/io";
 import { logger } from "../../utils/logger";
 import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { ActionableError } from "../../models/ActionableError";
+import { windowsBatchInvocation } from "../../utils/android-cmdline-tools/SdkManagerClient";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { DEFAULT_BUILD_TIMEOUT_MS } from "./buildAppTimeout";
 
@@ -277,10 +278,7 @@ export class BuildApp {
       };
       await (plan.tool === "xcodebuild"
         ? this.dependencies.xcodebuild.executeCommand(plan.args, options)
-        : this.dependencies.executor.executeCommand(plan.file, plan.args, {
-            ...options,
-            cwd: plan.cwd,
-          }));
+        : this.runGradle(plan, options));
       return null;
     } catch (error) {
       if (signal?.aborted) {
@@ -289,6 +287,18 @@ export class BuildApp {
       logger.warn(`buildApp ${plan.file} failed: ${errorMessage(error)}`);
       return this.describeFailure(plan, error);
     }
+  }
+
+  /** Node cannot execFile a .bat, so gradlew.bat runs through the command processor. */
+  private async runGradle(
+    plan: PlannedBuild,
+    options: { signal?: AbortSignal; timeoutMs: number; maxBuffer: number },
+  ): Promise<unknown> {
+    const invocation = windowsBatchInvocation(plan.file, plan.args);
+    return await this.dependencies.executor.executeCommand(invocation.command, invocation.args, {
+      ...options,
+      cwd: plan.cwd,
+    });
   }
 
   private describeFailure(

@@ -64,8 +64,13 @@ export interface DisposableAppInstallation {
 }
 
 export interface DisposableAppInstaller {
-  /** Installs or updates in place; `reset` clears app storage first. */
-  install(deviceId: string, artifactPath: string, options: { reset: boolean }): Promise<void>;
+  /** Installs `appId` from `artifactPath`, updating in place; `reset` clears app storage. */
+  install(
+    deviceId: string,
+    appId: string,
+    artifactPath: string,
+    options: { reset: boolean },
+  ): Promise<void>;
   applyPermissions(
     deviceId: string,
     appId: string,
@@ -198,7 +203,7 @@ export class DisposableAppManager {
       template,
       declarations,
     });
-    await installer.install(input.deviceId, stamped.artifactPath, {
+    await installer.install(input.deviceId, appId, stamped.artifactPath, {
       reset: input.app.reset === true,
     });
     // Record the app as soon as it is on the device, so a permission failure below cannot leave

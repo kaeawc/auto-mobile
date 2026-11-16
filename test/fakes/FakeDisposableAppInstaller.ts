@@ -25,9 +25,13 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
     this.packages.set(`${deviceId}/${appId}`, signer);
   }
 
-  async install(deviceId: string, artifactPath: string, options: { reset: boolean }) {
+  async install(
+    deviceId: string,
+    appId: string,
+    artifactPath: string,
+    options: { reset: boolean },
+  ) {
     this.installs.push({ deviceId, artifactPath, reset: options.reset });
-    const appId = artifactPath.replace(/^\/stamped\//, "").replace(/\.apk$/, "");
     this.packages.set(`${deviceId}/${appId}`, this.signer);
   }
 

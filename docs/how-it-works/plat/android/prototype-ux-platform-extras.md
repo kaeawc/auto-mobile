@@ -213,6 +213,13 @@ and `uninstallApp` actions remain separate from this artifact pipeline.
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
   removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
   is already gone from the device still has its registry record cleared.
+- **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
+  `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
+  per denied one, so a denial reads as blocked with no dialog. It refuses a grant and a deny that
+  share a manifest permission (`microphone` and `speech`) before any write. `adb install` and
+  `adb uninstall` must print `Success`. The installed signer comes from the package signing
+  inspection; a signer set that cannot be read never matches the host key, and an unknown
+  presence fails the removal instead of guessing.
 
 ### Template packaging and stamping
 

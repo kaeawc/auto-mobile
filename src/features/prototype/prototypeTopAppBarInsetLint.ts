@@ -16,6 +16,12 @@ function padsTop(node: Record<string, unknown>): boolean {
   return Array.isArray(edges) && edges.includes("top");
 }
 
+/** True when the window is fullscreen and has no host dismiss bar clearing the status bar. */
+function lintsWindow(window: Record<string, unknown> | undefined): boolean {
+  const chrome = window?.chrome ?? (window?.persistence === "device" ? "bar" : "none");
+  return record(window?.placement)?.type === "fullscreen" && chrome !== "bar";
+}
+
 /**
  * The spec paths of every `topAppBar` in a fullscreen window with no top `safeAreaPadding` on
  * itself or any ancestor. A sheet or floating window, or one with the host dismiss bar (`chrome:
@@ -24,13 +30,8 @@ function padsTop(node: Record<string, unknown>): boolean {
  */
 export function lintPrototypeTopAppBarInsets(spec: unknown): string[] {
   const data = record(spec);
-  const window = record(data?.window);
-  const chrome = window?.chrome ?? (window?.persistence === "device" ? "bar" : "none");
-  if (record(window?.placement)?.type !== "fullscreen" || chrome === "bar") {
-    return [];
-  }
   const root = record(data?.root);
-  if (!root) {
+  if (!root || !lintsWindow(record(data?.window))) {
     return [];
   }
   const paths: string[] = [];

@@ -50,7 +50,7 @@ CtrlProxy, so it was a rename plus three seams.
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | iOS distribution           | Dev-signed builds on the owner's iPhones in the first release, alongside Android.                                               |
 | Network for imported specs | One global switch, default off; per-host consent in Phase 2; MCP-direct `show` keeps today's behaviour.                         |
-| Stores                     | GitHub releases only.                                                                                                           |
+| Stores                     | GitHub releases only for the first release; Play and App Store listings follow (#14142).                                        |
 | LAN egress                 | RFC1918 LAN is allowed; loopback, link-local, `10.0.2.2` and the daemon ports stay blocked.                                     |
 | iOS egress transport       | Network.framework (NWConnection) pinned transport (owner, 2026-10-21, #14540).                                                  |
 | Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                                        |
@@ -60,6 +60,8 @@ CtrlProxy, so it was a rename plus three seams.
 | Store identity             | `dev.jasonpearson.automobile.protoviewer` on both stores, `.dev` for dev builds, title ProtoViewer (owner, 2026-10-31, #14144). |
 | Store accounts             | Personal enrollment on both stores; Play needs a 14-day closed test with 12 testers first (owner, 2026-10-31, #14144).          |
 | Store support and privacy  | Hosted on the docs site: `protoviewer/support.md` and `protoviewer/privacy.md` (owner, 2026-10-31, #14144).                     |
+| Sharing in store builds    | Ships; report, block and a published contact come first (owner, 2026-10-31, #14143).                                            |
+| First-run content          | No bundled sample gallery; the listing does not claim one (owner, 2026-11-12, #14143).                                          |
 | Version skew               | Host capability handshake before `save`, signer trust, store link, last 3 releases.                                             |
 | Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                                           |
 | Rollout gates              | Halt above 1.09% crash or 0.47% ANR (Android), 1.09% crash (iOS) (owner, 2026-11-03, #16516).                                   |

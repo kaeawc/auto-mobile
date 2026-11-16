@@ -28,6 +28,7 @@ import {
   findNotificationMatches,
   resolveNotificationSwipeElement,
 } from "./matching";
+import { refreshNotificationDumpsys } from "./notificationAttribution";
 import { TransientPreSwipeError } from "../TransientPreSwipeError";
 import { retryTransientPreSwipe } from "./transientRetry";
 import {
@@ -277,6 +278,7 @@ export const verifyNotificationDismissed = async (
 ): Promise<NotificationDismissVerification> => {
   const detector = getDetector(device, signal);
   let verified = observation;
+  await refreshNotificationDumpsys(device, verified.viewHierarchy, criteria, signal);
   let outcome = classifyNotificationDismissal(detector, swiped, criteria, {
     appMatchTexts,
     candidate: verified,
@@ -293,6 +295,7 @@ export const verifyNotificationDismissed = async (
       }),
       signal,
     );
+    await refreshNotificationDumpsys(device, verified.viewHierarchy, criteria, signal);
     outcome = classifyNotificationDismissal(detector, swiped, criteria, {
       appMatchTexts,
       candidate: verified,
@@ -409,6 +412,7 @@ const waitForClearAllDismissal = async (
     while (timer.now() < deadlineMs) {
       observation = await read();
       throwIfAborted(signal);
+      await refreshNotificationDumpsys(device, observation.viewHierarchy, criteria, signal);
       const outcome = isReadableNotificationShade(detector, observation)
         ? classifyNotificationDismissal(detector, swiped, criteria, {
             appMatchTexts,
@@ -505,6 +509,7 @@ const readClearAllShadeOnce = async (
   while (true) {
     throwIfAborted(signal);
     const readable = isReadableNotificationShade(detector, observation);
+    await refreshNotificationDumpsys(device, observation.viewHierarchy, criteria, signal);
     const match =
       readable &&
       observation.viewHierarchy &&

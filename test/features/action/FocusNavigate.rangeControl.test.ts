@@ -45,6 +45,10 @@ class FakeSettingsColumn implements FocusObserver, FocusKeyPresser {
     return this.valueOf(this.focus);
   }
 
+  setValue(id: string, value: number): void {
+    this.values.set(id, value);
+  }
+
   valueOf(id: string): number {
     return this.values.get(id) ?? 50;
   }
@@ -283,6 +287,36 @@ describe("FocusNavigate around range controls (#17209)", () => {
     expect(result).toMatchObject({ success: true, status: "focused" });
     expect(home.presses.slice(0, 2)).toEqual(["arrow_right", "arrow_left"]);
     expect(home.valueOf("volume")).toBe(50);
+  });
+
+  test("a slider whose labelled value crosses zero is still undone (#18393)", async () => {
+    const home: FakeSettingsColumn = new FakeSettingsColumn("balance", {
+      balance: {
+        element: () => ({
+          "resource-id": "balance",
+          class: "android.widget.SeekBar",
+          "content-desc": `Balance ${home.valueOf("balance")}`,
+          focusable: true,
+          "range-info": `current:${home.valueOf("balance")}.0,min:-5.0,max:5.0`,
+          bounds: { left: 0, top: 100, right: 1000, bottom: 200 },
+        }),
+        moves: { down: "done" },
+        adjusts: ["left", "right"],
+      },
+      done: {
+        element: () => ({
+          text: "Done",
+          focusable: true,
+          bounds: { left: 1500, top: 120, right: 1700, bottom: 180 },
+        }),
+        moves: { up: "balance" },
+      },
+    });
+    home.setValue("balance", -1);
+    const result = await new FocusNavigate(home, home, timer).execute({ until: { text: "Done" } });
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    expect(home.presses.slice(0, 2)).toEqual(["arrow_right", "arrow_left"]);
+    expect(home.valueOf("balance")).toBe(-1);
   });
 
   test("a focused scrollable container with a range child walks toward its contained target (#18393)", async () => {

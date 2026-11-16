@@ -1,5 +1,6 @@
 import { prototypeDegradedEffectsOutput } from "../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
+import { prototypeTopAppBarInsetWarnings } from "../features/prototype/prototypeTopAppBarInsetLint";
 import { prototypeSettingsPagePlatformError } from "../features/prototype/prototypeSettings";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -199,7 +200,12 @@ async function finishPatch(
   deps.retire(result);
   const output = successfulPatchOutput(fields.revision, committed, args.id);
   const degraded = prototypeDegradedEffectsOutput(result.degradedEffects);
-  const warning = [output.warning, degraded.warning, ...prototypeTimerWarnings(applied.spec)]
+  const warning = [
+    output.warning,
+    degraded.warning,
+    ...prototypeTimerWarnings(applied.spec),
+    ...prototypeTopAppBarInsetWarnings(applied.spec),
+  ]
     .filter(Boolean)
     .join(" ");
   return {

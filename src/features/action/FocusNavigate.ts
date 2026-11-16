@@ -475,8 +475,12 @@ interface ExitContext {
   focusedElement: FocusPathEntry | undefined;
   /** Whether the focused control consumed a direction by changing its own value (#17739). */
   adjusted: boolean;
-  /** Escapes already pressed, in order; each key is pressed at most once per call. */
-  trap: { escapes?: FocusTrapEscape[] };
+  /**
+   * Escapes already pressed, in order; each keyboard-trap key is pressed at most once per call.
+   * `tabbedFrom` keys each range control tab already left (#18393), so a walk through two sliders
+   * gets one tab per slider rather than one per call.
+   */
+  trap: { escapes?: FocusTrapEscape[]; tabbedFrom?: Set<string> };
   /** Arrows refused from the focused element since the walk last escaped a trap. */
   refused: ReadonlySet<FocusNavigateDirection>;
   select: boolean;
@@ -531,7 +535,7 @@ export class FocusNavigate {
         path,
         maxSteps > 0,
       );
-      const undone = await this.undoAdjustment(probe, screen, signal);
+      const undone = await this.undoAdjustment(probe, { screen, matches }, signal);
       probe = undefined;
       if (undone) {
         // The press changed the control's value: the read of the changed value is not a place
@@ -738,10 +742,11 @@ export class FocusNavigate {
    */
   private async undoAdjustment(
     probe: RangeProbe | undefined,
-    screen: FocusScreen,
+    { screen, matches }: { screen: FocusScreen; matches: boolean },
     signal: AbortSignal | undefined,
   ): Promise<RangeProbe | undefined> {
-    if (!probe || !changedOwnRange(probe.before, screen)) {
+    // A read that reached the target is never undone, whatever its range reads (#18393).
+    if (!probe || matches || !changedOwnRange(probe.before, screen)) {
       return undefined;
     }
     await this.press(OPPOSITE[probe.direction], signal);
@@ -787,8 +792,9 @@ export class FocusNavigate {
 
   /**
    * For a stuck exit on a control that took every arrow it did not refuse as a value change (a
-   * slider, #17739): press tab once, which moves focus out of it, and retry from there. After that
-   * tab, the stuck result says it was tried. Undefined when nothing applies.
+   * slider, #17739): press tab once per control, which moves focus out of it, and retry from there.
+   * When the same control is stuck again after its tab, the stuck result says it was tried.
+   * Undefined when nothing applies.
    */
   private async adjustableOutcome(
     done: FocusNavigateResult,
@@ -798,7 +804,9 @@ export class FocusNavigate {
       return undefined;
     }
     const escapes = trap.escapes ?? [];
-    if (escapes.includes("tab")) {
+    const control = focusKey(focusedElement);
+    const tabbedFrom = trap.tabbedFrom ?? new Set<string>();
+    if (tabbedFrom.has(control)) {
       return this.stopped("stuck", done.steps, done.path, {
         focusedElement,
         message: `${stripRetryAdvice(done.message)}; pressing tab did not move focus out of it either`,
@@ -810,6 +818,7 @@ export class FocusNavigate {
       throw new ActionableError(pressed.error ?? "Failed to press tab");
     }
     trap.escapes = [...escapes, "tab"];
+    trap.tabbedFrom = tabbedFrom.add(control);
     return "escaped";
   }
 

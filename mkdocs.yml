@@ -483,7 +483,9 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-16: Communication-style notifications for prototypes": devlog/2026-11-16-prototype-communication-notifications.md
       - "2026-11-15: Move to Zod 4 and override Jimp's Zod 3 range": devlog/2026-11-15-zod-4-jimp-override.md
+      - "2026-11-15: Headless taps run on the host, not in a browser": devlog/2026-11-15-prototype-headless-input.md
       - "2026-11-15: Stateless success reductions in the response envelope": devlog/2026-11-15-stateless-envelope-reductions.md
       - "2026-11-15: Windows MSI signing with Azure Trusted Signing": devlog/2026-11-15-windows-msi-trusted-signing.md
       - "2026-11-15: Split over-length how-it-works pages and enforce their readability budget": devlog/2026-11-15-how-it-works-readability-enforced.md

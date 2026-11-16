@@ -276,7 +276,8 @@ function tapOnElementLabel(result: TapOnElementResult, selectorLabel: string | u
   );
 }
 
-function resolveTapOnAction(
+/** The gesture a tapOn asks for: a positive `duration` without `action` means longPress. */
+export function resolveTapOnAction(
   args: Pick<TapOnArgs, "action" | "duration">,
 ): NonNullable<TapOnArgs["action"]> {
   const hasDuration = (args.duration ?? 0) > 0;

@@ -27,6 +27,7 @@ import type { PendingImeRestoreRegistry } from "../../features/action/sendkeys/P
 import type { KeyboardProfileRestoreRegistry } from "../../features/utility/KeyboardProfileRestore";
 import type { SessionKeyboardProfileHost } from "../sessionKeyboardProfile";
 import type { ProgressCallback } from "../toolRegistry";
+import type { HeadlessPrototypeInputDependencies } from "./headlessPrototypeInput";
 import type { HeadUnitInteractionFactory, HeadUnitTemplateSourceFactory } from "./headUnitHandlers";
 
 export interface SendKeysRunnerCommandSource {
@@ -57,6 +58,8 @@ export interface OpenLinkExecutor {
 }
 
 export interface InteractionToolDependencies {
+  /** tapOn and sendKeys on the headless prototype virtual device (#18360). */
+  headlessPrototypeInput?: HeadlessPrototypeInputDependencies;
   sendKeysFactory?: (device: BootedDevice) => SendKeysLike;
   swipeOnFactory?: (device: BootedDevice) => SwipeOnLike;
   pinchOnFactory?: (device: BootedDevice) => PinchOnLike;

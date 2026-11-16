@@ -46,6 +46,12 @@ describe("prototype placeholder lint (#15444)", () => {
     ).toEqual([]);
   });
 
+  test("listItem headline and supporting bind repeat placeholders, so they are not reported (#18390)", () => {
+    expect(
+      found(spec(repeating({ type: "listItem", headline: "{item.name}", supporting: "#{index}" }))),
+    ).toEqual([]);
+  });
+
   test("a state placeholder in textField.placeholder is found, in topAppBar.title it is not", () => {
     const state = { chName: "general", draft: "" };
     expect(

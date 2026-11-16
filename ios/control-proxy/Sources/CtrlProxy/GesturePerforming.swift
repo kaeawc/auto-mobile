@@ -28,6 +28,10 @@ public protocol GesturePerforming: Sendable {
     func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics
 
     func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws
+
+    /// Reports delivery without opting into diagnostic sampling. Older conformers may return nil.
+    func tapReportingRoute(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws -> TapDiagnostics?
+    func doubleTapReportingRoute(x: Double, y: Double) throws -> TapDiagnostics?
     func tapWithDiagnostics(x: Double, y: Double, durationMs: Int, strategy: String?) throws -> TapDiagnostics
 
     // MARK: - Swipe Gestures
@@ -253,6 +257,20 @@ extension GesturePerforming {
 
     public func tap(x: Double, y: Double, duration: TimeInterval, strategy _: String?) throws {
         try tap(x: x, y: y, duration: duration)
+    }
+
+    public func tapReportingRoute(
+        x: Double, y: Double, duration: TimeInterval, strategy: String?
+    )
+        throws -> TapDiagnostics?
+    {
+        try tap(x: x, y: y, duration: duration, strategy: strategy)
+        return nil
+    }
+
+    public func doubleTapReportingRoute(x: Double, y: Double) throws -> TapDiagnostics? {
+        try doubleTap(x: x, y: y)
+        return nil
     }
 
     public func tapWithDiagnostics(

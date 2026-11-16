@@ -128,15 +128,19 @@ with a warning containing the swipe error.
 ## Opt-in tap diagnostics
 
 A private daemon running with `--debug` adds `diagnostics: true` to
-`request_tap_coordinates`. A rebuilt/re-cut runner returns optional
-`tapDiagnostics` and always emits one `tap_diagnostics requested=... base=...
+`request_tap_coordinates`. The runner returns sampled
+`tapDiagnostics` for this opt-in path and always emits one `tap_diagnostics requested=... base=...
 resolved=... appFrame=... screenBounds=... native=... scale=...
 deviceOrientation=... interfaceOrientation=... sampleErrors=...` line, including
 fast taps, under the same `dev.jasonpearson.automobile` / `GesturePerformer`
 subsystem/category. The daemon logs compact JSON with `[CTRLPROXY_TAP_DIAG]`;
 its existing 1,000-character line limit can truncate unusually long errors.
-Diagnostics stay out of tool/observe output. Debug off omits both request fields;
-folded/single-panel taps perform no new platform reads. On a multi-panel mismatch,
+Sampled diagnostics stay out of tool/observe output. Without the diagnostics flag,
+taps and native double taps still return the requested point/duration and delivery
+route in `tapDiagnostics`, without diagnostic sampling or extra platform reads.
+The unpinned foreground synthesis path omits the route because it has no matching
+wire route value. The host exposes reported routes as `dispatchRoute`.
+On a multi-panel mismatch,
 taps and single-finger swipes inventory displays and prefer an explicitly targeted
 event record; missing private synthesis symbols fall back to the prior coordinate path.
 The `soleNonMainScreen` fallback applies only to phone-idiom devices; other idioms

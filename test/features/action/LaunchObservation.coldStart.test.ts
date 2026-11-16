@@ -168,3 +168,76 @@ test("a helper activity on top of the target's own task still verifies at once",
   expect(timer.getSleepHistory()).toEqual([]);
   expect(observeScreen.getCallCount("execute")).toBe(0);
 });
+
+// Production `dumpsys` task headers carry no top activity, so activity rows decide (#18387).
+const helper = "com.google.android.settings.intelligence";
+const helperActivity = `${helper}.SearchActivity`;
+
+function helperObservation(backStack: BackStackInfo): ObserveResult {
+  const base = observation(helper, backStack);
+  return {
+    ...base,
+    activeWindow: { appId: helper, activityName: helperActivity, layoutSeqSum: 1 },
+  };
+}
+
+test("a helper in the target's task verifies although another task is rooted at the helper", async () => {
+  const { timer, observeScreen, launchObservation } = setup();
+  const backStack: BackStackInfo = {
+    depth: 2,
+    activities: [
+      { name: helperActivity, taskId: 8, userId: 0 },
+      { name: `${settings}.Settings`, taskId: 8, userId: 0, isTaskRoot: true },
+      { name: helperActivity, taskId: 31, userId: 10, isTaskRoot: true },
+    ],
+    currentTaskId: 8,
+    tasks: [
+      { id: 8, userId: 0, packageName: settings, rootActivity: `${settings}/.Settings` },
+      { id: 31, userId: 10, packageName: helper, rootActivity: `${helper}/.SearchActivity` },
+    ],
+  };
+  const helperShown = helperObservation(backStack);
+
+  const result = await launchObservation.ensureLaunchObservationMatchesPackage(
+    { success: true, packageName: settings, observation: helperShown },
+    settings,
+    { timeoutMs: 5000, pollIntervalMs: 200, expectedUserId: 0 },
+  );
+
+  expect(result.success).toBe(true);
+  expect(result.verifiedBy).toBe("task-root");
+  expect(result.foregroundActivityPackage).toBe(helper);
+  expect(timer.getSleepHistory()).toEqual([]);
+  expect(observeScreen.getCallCount("execute")).toBe(0);
+});
+
+test("a foreign window whose activity lives in another task does not verify by task root", async () => {
+  const { observeScreen, launchObservation } = setup();
+  const backStack: BackStackInfo = {
+    depth: 1,
+    activities: [
+      { name: `${contacts}.PeopleActivity`, taskId: 20, userId: 0, isTaskRoot: true },
+      { name: `${settings}.Settings`, taskId: 12, userId: 0, isTaskRoot: true },
+    ],
+    currentTaskId: 20,
+    tasks: [
+      { id: 20, userId: 0, packageName: contacts, rootActivity: `${contacts}/.PeopleActivity` },
+      { id: 12, userId: 0, packageName: settings, rootActivity: `${settings}/.Settings` },
+    ],
+  };
+  const stale = {
+    ...observation(settings, backStack),
+    activeWindow: { appId: settings, activityName: `${settings}.Settings`, layoutSeqSum: 1 },
+  };
+  observeScreen.setObserveResult(stale);
+
+  const result = await launchObservation.ensureLaunchObservationMatchesPackage(
+    { success: true, packageName: contacts, observation: stale },
+    contacts,
+    { timeoutMs: 400, pollIntervalMs: 200, expectedUserId: 0 },
+  );
+
+  expect(result.success).toBe(false);
+  expect(result.verifiedBy).toBeUndefined();
+  expect(result.error).toContain("did not reach the screen within 400 ms");
+});

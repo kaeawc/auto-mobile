@@ -58,7 +58,9 @@ export class AndroidPrototypePermissionBackend implements PrototypePermissionBac
 
   async grant(_name: PrototypePermissionName, mapping: PrototypePermissionMapping): Promise<void> {
     if (this.usesNotificationAppOp(mapping)) {
-      await this.shell(`cmd appops set ${this.quotedPackage} POST_NOTIFICATION allow`);
+      await this.shell(
+        `cmd appops set --user ${this.options.userId} ${this.quotedPackage} POST_NOTIFICATION allow`,
+      );
       return;
     }
     for (const permission of mapping.android.manifest) {
@@ -69,7 +71,9 @@ export class AndroidPrototypePermissionBackend implements PrototypePermissionBac
 
   async deny(_name: PrototypePermissionName, mapping: PrototypePermissionMapping): Promise<void> {
     if (this.usesNotificationAppOp(mapping)) {
-      await this.shell(`cmd appops set ${this.quotedPackage} POST_NOTIFICATION deny`);
+      await this.shell(
+        `cmd appops set --user ${this.options.userId} ${this.quotedPackage} POST_NOTIFICATION deny`,
+      );
       return;
     }
     for (const permission of mapping.android.manifest) {
@@ -88,7 +92,9 @@ export class AndroidPrototypePermissionBackend implements PrototypePermissionBac
     }
     if (this.usesNotificationAppOp(mapping)) {
       const mode = parseNotificationAppOpMode(
-        await this.shell(`cmd appops get ${this.quotedPackage} POST_NOTIFICATION`),
+        await this.shell(
+          `cmd appops get --user ${this.options.userId} ${this.quotedPackage} POST_NOTIFICATION`,
+        ),
       );
       // Before API 33 notifications are on until the user turns them off.
       return mode === "deny" || mode === "ignore" ? "blocked" : "granted";

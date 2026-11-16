@@ -129,7 +129,9 @@ describe("AndroidPrototypePermissionBackend", () => {
   test("notifications use the appop before API 33", async () => {
     const pm = new FakePm([]);
     await androidBackend(pm, 32).deny("notifications", PROTOTYPE_PERMISSION_MAP.notifications);
-    expect(pm.commands).toEqual([`shell cmd appops set '${PACKAGE}' POST_NOTIFICATION deny`]);
+    expect(pm.commands).toEqual([
+      `shell cmd appops set --user 0 '${PACKAGE}' POST_NOTIFICATION deny`,
+    ]);
   });
 
   test("a shell failure throws so the show does not launch half-applied", async () => {

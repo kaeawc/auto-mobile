@@ -50,7 +50,10 @@ test("real peer write locks leave the event loop responsive", async () => {
   for (const row of cases) {
     expect(row.maxLoopStallMs).toBeLessThan(1000);
     if (row.path.startsWith("app-db-")) {
-      expect(row.peerReleasedMs).toBeGreaterThanOrEqual(HOLD_MS);
+      // The hold is measured on the peer's clock (LOCKED to RELEASED): the parent may
+      // start its operation late, so peerReleasedMs alone has no lower bound.
+      expect(row.peerHeldMs).toBeGreaterThanOrEqual(HOLD_MS);
+      expect(row.peerReleasedMs).toEqual(expect.any(Number));
       // A peer whose COMMIT itself lands after the budget (a stalled Windows
       // runner) makes BUSY the correct outcome; only an in-budget release must
       // succeed. The whole row names the path and timings when it does not.

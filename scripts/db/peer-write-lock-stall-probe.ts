@@ -170,7 +170,7 @@ try {
             let holderOutput = "";
             await raceWithDeadline(
               (async () => {
-                while (!holderOutput.includes("LOCKED\n")) {
+                while (!/LOCKED \d+\n/.test(holderOutput)) {
                   const chunk = await reader.read();
                   if (chunk.done) {
                     throw new Error("Holder exited before LOCKED");
@@ -243,8 +243,23 @@ try {
             const peerReleasedMs = Number.isFinite(releasedEpochMs)
               ? releasedEpochMs - startEpochMs
               : null;
+            // How long the peer actually held its lock, on the peer's own clock; unlike
+            // peerReleasedMs it does not shrink when the parent starts its operation late.
+            const lockedEpochMs = Number(/LOCKED (\d+)/.exec(holderOutput)?.[1]);
+            const peerHeldMs =
+              Number.isFinite(lockedEpochMs) && Number.isFinite(releasedEpochMs)
+                ? releasedEpochMs - lockedEpochMs
+                : null;
             console.log(
-              JSON.stringify({ path, holdMs, totalMs, maxLoopStallMs, peerReleasedMs, outcome }),
+              JSON.stringify({
+                path,
+                holdMs,
+                totalMs,
+                maxLoopStallMs,
+                peerHeldMs,
+                peerReleasedMs,
+                outcome,
+              }),
             );
             if (maxLoopStallMs > maxStallMs) {
               process.exitCode = 1;

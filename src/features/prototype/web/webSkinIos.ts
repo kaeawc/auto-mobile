@@ -87,7 +87,7 @@ export function iosSwitchTrack(on: boolean, scope: WebRenderScope): WebElement {
 
 /**
  * The SF Symbol `checkmark.square.fill` or `square` the iOS renderer draws for a checkbox, in the
- * content colour: a filled or outlined 17 px rounded square (glyphs follow #16526).
+ * content colour: a filled or outlined 17 px rounded square.
  */
 export function iosCheckSquare(on: boolean): WebElement {
   return el("span", {

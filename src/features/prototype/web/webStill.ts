@@ -86,9 +86,8 @@ export interface PrototypeStillOptions {
   /** Asset ids the page can inline, to their CSS slots; any other asset draws a placeholder. */
   readonly imageSlots?: ReadonlyMap<string, number>;
   /**
-   * Where icons find their glyphs (the server passes the Material Icons Android draws). Used only
-   * for an Android frame: an iOS frame keeps the placeholder until its glyph set is decided
-   * (#16526). Without one every icon draws the placeholder.
+   * Where icons find their glyphs (the server passes the Material Icons Android draws). Both
+   * skins draw them (#16526). Without one every icon draws the placeholder.
    */
   readonly glyphs?: PrototypeIconGlyphSource;
   /**
@@ -266,13 +265,6 @@ function placedWindow(
   return el("div", { attrs: { [DATA_WINDOW]: "fullscreen" }, style: LAYER }, children);
 }
 
-function glyphScope(
-  options: PrototypeStillOptions,
-  frame: DeviceFrame,
-): { glyphs?: PrototypeIconGlyphSource } {
-  return options.glyphs && frame.platform === "android" ? { glyphs: options.glyphs } : {};
-}
-
 /** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */
 function stillFormat(options: PrototypeStillOptions, locale: string): WebRenderScope["format"] {
   return {
@@ -337,7 +329,7 @@ function stillScope(
     inBox: false,
     unsupported: [],
     skin,
-    ...glyphScope(options, frame),
+    ...(options.glyphs ? { glyphs: options.glyphs } : {}),
     screenWidth: size.width,
     screenHeight: size.height,
     // A chromeless screen sets every --safe-* variable to 0px, so its height pass takes none.

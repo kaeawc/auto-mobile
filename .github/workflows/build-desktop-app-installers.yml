@@ -15,6 +15,10 @@ name: "Build Desktop App Installers"
 # Developer ID cert is imported into a temporary keychain, Compose signs the .app
 # during packaging (MACOS_SIGN=true), then this workflow notarizes and staples the
 # DMG with notarytool using the App Store Connect API key.
+#
+# Windows signing (#4725): the .msi is Authenticode-signed with Azure Trusted
+# Signing via jsign (scripts/ci/sign-windows-msi.sh). Its secrets are optional:
+# when none are set the MSI ships unsigned with a warning; a partial set fails.
 on:
   workflow_call:
     inputs:
@@ -54,6 +58,18 @@ on:
         required: true
       APPLE_NOTARY_PRIVATE_KEY_BASE64:
         required: true
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_CLIENT_SECRET:
+        required: false
+      TRUSTED_SIGNING_ENDPOINT:
+        required: false
+      TRUSTED_SIGNING_ACCOUNT:
+        required: false
+      TRUSTED_SIGNING_PROFILE:
+        required: false
 
 permissions:
   contents: read
@@ -149,6 +165,44 @@ jobs:
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           malloc-replacement: ${{ runner.os == 'Linux' && 'jemalloc' || 'none' }}
+
+      # Sign the MSI in place before it is staged, so the uploaded release
+      # candidate is the signed file. Skips (signed=false) when no Trusted
+      # Signing secrets are configured; fails on a partial set.
+      - name: "Sign Windows MSI"
+        id: sign-msi
+        if: matrix.platform == 'windows'
+        shell: bash
+        working-directory: android
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+        run: |
+          set -euo pipefail
+          MSI=$(find desktop-app/build/compose/binaries/main/msi -maxdepth 1 -type f -name '*.msi' | head -n 1)
+          if [ -z "$MSI" ]; then
+            echo "No .msi was produced under desktop-app/build/compose/binaries/main/msi" >&2
+            exit 1
+          fi
+          "${GITHUB_WORKSPACE}/scripts/ci/sign-windows-msi.sh" "$MSI"
+
+      - name: "Verify Windows MSI signature"
+        if: matrix.platform == 'windows' && steps.sign-msi.outputs.signed == 'true'
+        shell: pwsh
+        working-directory: android
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Get-ChildItem -Path desktop-app/build/compose/binaries/main/msi -Filter *.msi | Select-Object -First 1
+          if (-not $msi) { throw 'No .msi was produced under desktop-app/build/compose/binaries/main/msi' }
+          $sig = Get-AuthenticodeSignature -FilePath $msi.FullName
+          Write-Host "Signer: $($sig.SignerCertificate.Subject)"
+          Write-Host "Timestamp: $($sig.TimeStamperCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "MSI signature status is $($sig.Status): $($sig.StatusMessage)" }
+          if (-not $sig.TimeStamperCertificate) { throw 'MSI signature carries no RFC 3161 timestamp' }
 
       # `GitHubReleaseSource` is created during desktop-app startup and requires this module.
       # Compose's jlink image is minimized, so assert the actual app image includes it before

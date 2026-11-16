@@ -75,7 +75,7 @@ describe.each(devices)("cast module gate on $platform (#14239)", (device) => {
   const shown = () =>
     device.platform === "android"
       ? proxy.getPrototypeHistory().length
-      : agent.requests.filter((request) => request.type === "show").length;
+      : agent.requests.filter((request) => request.type === "show_prototype").length;
 
   beforeAll(async () => {
     // Warm the registered show/patch schema path before measuring the scenarios.
@@ -109,6 +109,7 @@ describe.each(devices)("cast module gate on $platform (#14239)", (device) => {
 
   test("show and replaceNode succeed with the capability advertised", async () => {
     expect((await call({ action: "show", spec })).success).toBe(true);
+    expect(shown()).toBe(1);
     const ops = [
       { op: "replaceNode", id: "cast", node: { ...castButton, protocols: ["airplay"] } },
     ];

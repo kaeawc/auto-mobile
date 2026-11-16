@@ -441,6 +441,27 @@ describe("VirtualPrototypeDevice (#17974)", () => {
     expect(virtual.shownIds()).toEqual(["three"]);
   });
 
+  test("showing an already-shown id again brings it to the front (#18401)", async () => {
+    const virtual = device();
+    const keep = { replaceOthers: false };
+    await virtual.requestShowPrototype(spec("one"), undefined, undefined, keep);
+    await virtual.requestShowPrototype(spec("two"), undefined, undefined, keep);
+    await virtual.requestShowPrototype(spec("one"), undefined, undefined, keep);
+    expect(virtual.shownIds()).toEqual(["two", "one"]);
+    expect(virtual.snapshots().map((entry) => entry.id)).toEqual(["one", "two"]);
+  });
+
+  test("dispatch carries contextTruncated onto the event only when set", async () => {
+    const virtual = device();
+    await virtual.requestShowPrototype(spec("one"));
+    const events: PrototypeEvent[] = [];
+    virtual.onPrototypeEvent((event) => events.push(event));
+    virtual.dispatch({ id: "one", kind: "emit", name: "a", context: {}, contextTruncated: true });
+    virtual.dispatch({ id: "one", kind: "emit", name: "b", context: {} });
+    expect(events[0]?.contextTruncated).toBe(true);
+    expect(events[1]).not.toHaveProperty("contextTruncated");
+  });
+
   test("dispatch pushes a prototype_event with merged state and rising sequences", async () => {
     const virtual = device();
     await virtual.requestShowPrototype(spec("one"));

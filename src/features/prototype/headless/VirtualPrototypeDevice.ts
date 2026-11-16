@@ -55,6 +55,7 @@ export interface VirtualPrototypeInput {
   /** Stack navigation the input left, replacing each named stack's snapshot. */
   stacks?: NonNullable<PrototypeEvent["stacks"]>;
   context?: Record<string, PrototypeJson>;
+  contextTruncated?: true;
 }
 
 const SAVED_REFUSAL: PrototypeResult = {
@@ -267,6 +268,8 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
     const ledger = this.ledgers.get(spec.id) ?? { revision: 0, lastSequence: 0 };
     const revision = ++ledger.revision;
     this.ledgers.set(spec.id, ledger);
+    // Showing an id again brings it to the front: the newest show is the first a tap targets.
+    this.shown.delete(spec.id);
     this.shown.set(spec.id, {
       spec: copy,
       state,
@@ -442,6 +445,7 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
       name: input.name,
       payload: input.payload ?? null,
       ...(input.context === undefined ? {} : { context: structuredClone(input.context) }),
+      ...(input.contextTruncated === true ? { contextTruncated: true as const } : {}),
       state: { ...entry.state },
       pages: { ...entry.pages },
       ...(Object.keys(entry.stacks).length ? { stacks: structuredClone(entry.stacks) } : {}),
@@ -486,6 +490,7 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
         pages: step.pages,
         stacks: step.stacks,
         ...(step.context === undefined ? {} : { context: step.context }),
+        ...(step.contextTruncated === true ? { contextTruncated: true as const } : {}),
       });
       return delivered ? [entry!.ledger.lastSequence] : [];
     });
@@ -494,16 +499,26 @@ export class VirtualPrototypeDevice implements AndroidPrototypeClient {
   /**
    * Leaves an input's final state, pages and stacks on a shown prototype without an event: an
    * action list that restores a key after an intermediate `emit` raises no trailing `change`,
-   * yet the device ends with the restored value, as `PrototypeRuntime.run` leaves it.
+   * yet the device ends with the restored value, as `PrototypeRuntime.run` leaves it. Keys in
+   * `unrecordedWrites` were written with no event recording it (a key set and restored), so they
+   * are stamped with this revision too: a `/state` patch from before the input conflicts on them.
    */
-  settle(id: string, final: Pick<VirtualPrototypeSnapshot, "state" | "pages" | "stacks">): void {
+  settle(
+    id: string,
+    final: Pick<VirtualPrototypeSnapshot, "state" | "pages" | "stacks">,
+    unrecordedWrites: readonly string[] = [],
+  ): void {
     const entry = this.shown.get(id);
     if (!entry) {
       return;
     }
-    if (Object.keys(final.state).some((key) => entry.state[key] !== final.state[key])) {
+    const changed = Object.keys(final.state).some((key) => entry.state[key] !== final.state[key]);
+    if (changed || unrecordedWrites.length > 0) {
       entry.ledger.revision += 1;
       stampChangedKeys(entry.stateRevisions, entry.state, final.state, entry.ledger.revision);
+      for (const key of unrecordedWrites) {
+        entry.stateRevisions.set(key, entry.ledger.revision);
+      }
       entry.state = { ...final.state };
     }
     entry.pages = { ...final.pages };

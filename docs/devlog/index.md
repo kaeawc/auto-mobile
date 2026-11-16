@@ -13,6 +13,7 @@ To add one, copy the [template](template.md).
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-15 | decision | [Headless taps run on the host, not in a browser](2026-11-15-prototype-headless-input.md)                                          |
+| 2026-11-15 | decision | [Stateless success reductions in the response envelope](2026-11-15-stateless-envelope-reductions.md)                               |
 | 2026-11-15 | decision | [Windows MSI signing with Azure Trusted Signing](2026-11-15-windows-msi-trusted-signing.md)                                        |
 | 2026-11-15 | decision | [Split over-length how-it-works pages and enforce their readability budget](2026-11-15-how-it-works-readability-enforced.md)       |
 | 2026-11-15 | decision | [Xcode 27.2 advisory lane as its own workflow](2026-11-15-xcode-27-2-advisory-workflow.md)                                         |

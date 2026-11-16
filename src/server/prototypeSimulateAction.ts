@@ -9,6 +9,12 @@ import {
   type PrototypePushRoutes,
   type PrototypePushSimulateResult,
 } from "../features/prototype/prototypePushSimulate";
+import {
+  isPrototypeMediaSimEvent,
+  simulatePrototypeMedia,
+  type PrototypeMediaSimRoute,
+  type PrototypeMediaSimulateResult,
+} from "../features/prototype/prototypeMediaSimulate";
 import { prototypeTimersUnsupportedMessage } from "../features/prototype/prototypeTimers";
 import { toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -19,6 +25,8 @@ export interface PrototypeSimulateTarget {
   ios?: Pick<IosPrototypeTransport, "supportsCapability" | "advanceClock">;
   /** Push delivery routes; no runtime accepts a simulated push yet, so devices supply none. */
   push?: PrototypePushRoutes;
+  /** The shown prototype's media module; no runtime exposes one to simulate yet. */
+  media?: PrototypeMediaSimRoute;
 }
 /** The simulate slice of the validated prototype input. */
 export type PrototypeSimulateInput = Pick<
@@ -27,11 +35,20 @@ export type PrototypeSimulateInput = Pick<
 >;
 export type PrototypeSimulateOutput =
   | { success: boolean; error?: string; fired?: number }
-  | PrototypePushSimulateResult;
+  | PrototypePushSimulateResult
+  | PrototypeMediaSimulateResult;
 export async function performPrototypeSimulate(
   target: PrototypeSimulateTarget,
   args: PrototypeSimulateInput,
 ): Promise<PrototypeSimulateOutput> {
+  if (args.event !== undefined && isPrototypeMediaSimEvent(args.event)) {
+    return simulatePrototypeMedia(target.media, {
+      id: args.id!,
+      event: args.event,
+      data: args.data,
+      timeoutMs: args.timeoutMs,
+    });
+  }
   if (args.event !== undefined) {
     return simulatePrototypePush(target.push ?? {}, {
       id: args.id!,
@@ -104,7 +121,14 @@ function simulateInputIssue(value: {
     return ["advanceTimeMs", "simulate requires exactly one of advanceTimeMs or event"];
   }
   if (value.event !== undefined && value.data === undefined) {
-    return ["data", "simulate event requires data (the push payload)"];
+    return ["data", "simulate event requires data (the event payload)"];
+  }
+  if (
+    value.transport !== undefined &&
+    value.event !== undefined &&
+    isPrototypeMediaSimEvent(value.event)
+  ) {
+    return ["transport", "transport is only for notifications.push"];
   }
   if (value.event === undefined && (value.data !== undefined || value.transport !== undefined)) {
     return [value.data === undefined ? "transport" : "data", "data and transport need event"];

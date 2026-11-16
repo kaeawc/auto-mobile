@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
@@ -11,7 +10,6 @@ import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
@@ -75,7 +73,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.GlobalActionResult
-import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
@@ -360,7 +357,6 @@ class CtrlProxy : AccessibilityService() {
       resultBroadcaster = resultBroadcaster,
     )
   private val recompositionStore = RecompositionStore()
-  private val frameMetricsStore = FrameMetricsStore()
   internal val workStats = CtrlProxyWorkStats()
   internal val viewHierarchyExtractor: ViewHierarchyExtractor by lazy {
     createViewHierarchyExtractor()
@@ -402,8 +398,6 @@ class CtrlProxy : AccessibilityService() {
     prettyPrint = false
     encodeDefaults = true
   }
-  private val jsonLenient = Json { ignoreUnknownKeys = true }
-
   internal val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
   internal lateinit var webSocketServer: WebSocketServer
@@ -1264,109 +1258,44 @@ class CtrlProxy : AccessibilityService() {
   internal var logcatReader: LogcatReader? = null
   internal var logEventBuffer: BoundedLogBuffer? = null
 
-  private val commandReceiver =
-    CommandReceiver(
-      serviceScope,
-      object : CommandHost {
-        override suspend fun handleCommand(intent: Intent) = this@CtrlProxy.handleCommand(intent)
-
-        override fun sendFailure(error: String?) = sendResult(success = false, error = error)
-      },
-    )
-
-  private val navigationEventReceiver =
-    NavigationEventReceiver(
-      sdkEventBatchProcessor = { sdkEventBatchProcessor },
-      timeProvider = timeProvider,
-    )
-
-  private val recompositionReceiver =
-    RecompositionSnapshotReceiver(
-      jsonLenient = jsonLenient,
-      recompositionStore = recompositionStore,
-    )
-
-  private val frameMetricsReceiver =
-    FrameMetricsSnapshotReceiver(
-      jsonLenient = jsonLenient,
-      frameMetricsStore = frameMetricsStore,
+  internal val receivers =
+    CtrlProxyReceivers(
+      context = this,
       scope = serviceScope,
-      isRunning = { isWebSocketRunning() },
-      broadcast = { response -> webSocketServer.broadcast(response) },
-    )
+      timeProvider = timeProvider,
+      recompositionStore = recompositionStore,
+      host =
+        object : CtrlProxyReceivers.Host {
+          override suspend fun handleCommand(intent: Intent) = this@CtrlProxy.handleCommand(intent)
 
-  private val packageReceiver =
-    PackageEventReceiver(
-      serviceScope,
-      object : PackageEventHost {
-        override fun isSystemApp(packageName: String) =
-          packageManager.systemAppFlag(packageName) {
-            Log.w(TAG, "Failed to resolve system flag for $packageName", it)
-          }
+          override fun sendFailure(error: String?) = sendResult(success = false, error = error)
 
-        override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
-          deviceEvents.packageEvent(event)
-      },
-    )
+          override fun isSystemApp(packageName: String) =
+            packageManager.systemAppFlag(packageName) {
+              Log.w(TAG, "Failed to resolve system flag for $packageName", it)
+            }
 
-  private val failureReportHost =
-    object : FailureReportHost {
-      override suspend fun onHandledException(report: HandledExceptionReport) =
-        deviceEvents.handledException(report)
+          override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
+            deviceEvents.packageEvent(event)
 
-      override suspend fun onCrash(report: CrashReport) = deviceEvents.crash(report)
-    }
+          override suspend fun onHandledException(report: HandledExceptionReport) =
+            deviceEvents.handledException(report)
 
-  private val handledExceptionReceiver = HandledExceptionReceiver(serviceScope, failureReportHost)
+          override suspend fun onCrash(report: CrashReport) = deviceEvents.crash(report)
 
-  private val crashReceiver = CrashReceiver(serviceScope, failureReportHost)
+          override fun refreshPrototypeWindow() = this@CtrlProxy.refreshPrototypeWindow()
 
-  private val screenStateReceiver =
-    ScreenStateReceiver(
-      object : ScreenStateHost {
-        override fun refreshPrototypeWindow() = this@CtrlProxy.refreshPrototypeWindow()
+          override fun extractHierarchyNow() = hierarchyController.extractNow()
 
-        override fun extractHierarchyNow() = hierarchyController.extractNow()
-      },
-    )
+          override fun sdkEventBatchProcessor() = this@CtrlProxy.sdkEventBatchProcessor
 
-  private val anrBroadcastHandler =
-    SdkAnrBroadcastHandler(
-      enqueue = { event ->
-        sdkEventBatchProcessor.enqueue(
-          SdkEventBatch(timestamp = event.timestamp, events = listOf(event)),
-        )
-      },
-      log =
-        object : SdkEventBatchBroadcastHandler.LogSink {
-          override fun debug(message: String) {
-            Log.d(TAG, message)
-          }
+          override fun isServerRunning() = isWebSocketRunning()
 
-          override fun warn(message: String) {
-            Log.w(TAG, message)
+          override suspend fun broadcast(response: WebSocketResponse) {
+            webSocketServer.broadcast(response)
           }
         },
     )
-
-  private val anrReceiver = AnrReceiver(anrBroadcastHandler)
-
-  private val eventBatchBroadcastHandler =
-    SdkEventBatchBroadcastHandler(
-      enqueue = { batch -> sdkEventBatchProcessor.enqueue(batch) },
-      log =
-        object : SdkEventBatchBroadcastHandler.LogSink {
-          override fun debug(message: String) {
-            Log.d(TAG, message)
-          }
-
-          override fun warn(message: String) {
-            Log.w(TAG, message)
-          }
-        },
-    )
-
-  private val eventBatchReceiver = EventBatchReceiver(eventBatchBroadcastHandler)
 
   internal val displayTransitions =
     DisplayTransitionRelay(
@@ -1434,7 +1363,7 @@ class CtrlProxy : AccessibilityService() {
       }
       overlayManager.setPrototypeAttached(prototypeController.isShowing)
 
-      registerReceivers()
+      receivers.register()
 
       hierarchyController.start()
 
@@ -1453,66 +1382,6 @@ class CtrlProxy : AccessibilityService() {
     }
   }
 
-  /**
-   * The receivers for broadcasts from other processes, in registration order: commands first, then
-   * the SDK event receivers, before the slower service initialization. The SDK sender cannot detect
-   * an absent dynamic receiver, while SdkEventBatchProcessor retains accepted events until the
-   * WebSocket starts. Registration and teardown both read this list, so each one is released.
-   */
-  private fun exportedReceivers(): List<Triple<String, BroadcastReceiver, () -> IntentFilter>> =
-    listOf(
-      Triple("command", commandReceiver, ReceiverFilters::command),
-      Triple("navigation event", navigationEventReceiver, ReceiverFilters::navigation),
-      Triple("event batch", eventBatchReceiver, ReceiverFilters::eventBatch),
-      Triple("recomposition", recompositionReceiver, ReceiverFilters::recomposition),
-      Triple("frame metrics", frameMetricsReceiver, ReceiverFilters::frameMetrics),
-      Triple("package", packageReceiver, ReceiverFilters::packages),
-      Triple("handled exception", handledExceptionReceiver, ReceiverFilters::handledException),
-      Triple("crash", crashReceiver, ReceiverFilters::crash),
-      Triple("ANR", anrReceiver, ReceiverFilters::anr),
-    )
-
-  /** Registers every broadcast receiver; [unregisterReceivers] releases the same set. */
-  internal fun registerReceivers() {
-    for ((name, receiver, filter) in exportedReceivers()) {
-      registerExportedReceiver(receiver, filter())
-      Log.d(TAG, "${name.replaceFirstChar(Char::uppercaseChar)} receiver registered")
-    }
-
-    // Screen on/off and unlock are protected system broadcasts, so this one is not exported. The
-    // filter stays inline so lint can see that and accept the flagless registration.
-    val screenStateFilter =
-      IntentFilter().apply {
-        addAction(Intent.ACTION_SCREEN_ON)
-        addAction(Intent.ACTION_SCREEN_OFF)
-        addAction(Intent.ACTION_USER_PRESENT)
-      }
-    registerReceiver(screenStateReceiver, screenStateFilter)
-    Log.d(TAG, "Screen state receiver registered")
-  }
-
-  /** Releases every receiver [registerReceivers] registered, continuing past a failed one. */
-  internal fun unregisterReceivers() {
-    releaseEach(
-      exportedReceivers().map { (name, receiver) -> name to receiver } +
-        ("screen state" to screenStateReceiver),
-      release = { unregisterReceiver(it) },
-      onFailure = { name, e -> Log.e(TAG, "Error unregistering $name receiver", e) },
-    )
-  }
-
-  /**
-   * Registers a receiver for broadcasts sent from other processes (the SDK in an app under test,
-   * the daemon's ADB broadcasts, the package manager), exported as Android 13+ requires.
-   */
-  internal fun registerExportedReceiver(receiver: BroadcastReceiver, filter: IntentFilter) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      registerReceiver(receiver, filter, RECEIVER_EXPORTED)
-    } else {
-      @SuppressLint("UnspecifiedRegisterReceiverFlag") registerReceiver(receiver, filter)
-    }
-  }
-
   override fun onUnbind(intent: Intent?): Boolean {
     // Android can reconnect this service in the same process before onDestroy runs.
     webSocketLifecycle.stop()
@@ -1527,7 +1396,7 @@ class CtrlProxy : AccessibilityService() {
   override fun onDestroy() {
     super.onDestroy()
 
-    unregisterReceivers()
+    receivers.unregister()
 
     stopDisplayTracking()
 

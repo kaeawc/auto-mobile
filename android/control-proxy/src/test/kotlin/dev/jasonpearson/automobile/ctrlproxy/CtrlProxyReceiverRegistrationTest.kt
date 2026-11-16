@@ -26,13 +26,13 @@ class CtrlProxyReceiverRegistrationTest {
   fun `registration adds ten distinct receivers and teardown removes all of them`() {
     val before = registered()
 
-    service.registerReceivers()
+    service.receivers.register()
     val added = registered() - before.toSet()
 
     assertEquals("ten receivers, each registered once", 10, added.size)
     assertEquals(added.size, added.toSet().size)
 
-    service.unregisterReceivers()
+    service.receivers.unregister()
 
     assertTrue("teardown leaves none behind", registered().none { it in added })
     assertEquals(before, registered())
@@ -44,7 +44,7 @@ class CtrlProxyReceiverRegistrationTest {
   fun `each receiver is registered with its own filter`() {
     val before = registered().toSet()
 
-    service.registerReceivers()
+    service.receivers.register()
     val actionsByReceiver =
       shadowOf(app)
         .registeredReceivers
@@ -77,6 +77,6 @@ class CtrlProxyReceiverRegistrationTest {
       listOf("package"),
       (0 until packageFilter.countDataSchemes()).map { packageFilter.getDataScheme(it) },
     )
-    service.unregisterReceivers()
+    service.receivers.unregister()
   }
 }

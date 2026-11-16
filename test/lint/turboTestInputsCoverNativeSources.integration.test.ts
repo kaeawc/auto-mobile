@@ -53,6 +53,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/build-logic/src/main/kotlin/dev/jasonpearson/automobile/buildlogic/apisignature/ApiSignatureTasks.kt",
     // nativePrototype.test.ts pins the renderer library version to VERSION_NAME (#13729).
     "android/gradle.properties",
+    // storeListingAndroidIcon.test.ts keeps the adaptive icon drawables in sync with the SVG source.
+    "android/protoviewer/src/main/AndroidManifest.xml",
+    "android/protoviewer/src/main/res/**",
     // androidModulesCiUnitTests.test.ts parses the module list out of it.
     "android/settings.gradle.kts",
     // nativePrototypeSamples.test.ts compares the committed embedding samples with the

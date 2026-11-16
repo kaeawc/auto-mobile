@@ -172,9 +172,16 @@ it inlined per variant.
   by the screen's short side (the portrait width). The page then keeps the longest prefix of images,
   in budget order, at their long-side encodes that still inlines as many images as all-compact
   encodes would.
+- **Natural size.** An `image` that wraps both axes, with no weight or authored `aspectRatio`, draws
+  at its natural size in points: the source's oriented pixel size, before any downscale, on every
+  frame and density (as iOS draws `UIImage(data:)`). Its height follows the aspect ratio, and
+  authored minimums and maximums still bound it.
 - **Image fallbacks.** The build skips a missing, non-image
   or undecodable asset (logged). It reports one whose data URI alone exceeds the page as
-  `assetOverBudget`; the page budget decides which of the rest fit. An image draws more markup than a placeholder. When the
+  `assetOverBudget`. The encoded data URIs are capped cumulatively, in budget order, at
+  `maxImageBytes` (default: the page budget): the first image past the cap and every later one
+  stay placeholders reported `assetOverBudget`, and the later ones are never encoded. The page
+  budget decides which of the rest fit. An image draws more markup than a placeholder. When the
   second build's always-kept views no longer fit, the first build stands, its images reported
   `assetOverBudget`. The resource reads assets from the host asset cache of each device currently
   showing one of the variants (Android and iOS cache their uploads); without one, images stay placeholders.
@@ -183,7 +190,8 @@ it inlined per variant.
   It snapshots the shown variant's revisions before encoding, so a revision landing meanwhile does
   not change the page's `_meta`.
 - **Image budget.** Each image is one `:root` rule in the head defining `--pa-<slot>` (its
-  `data:image/webp` URI), `-bg` (transparent), `-ar` (its aspect ratio) and `-on` (1). Views only
+  `data:image/webp` URI), `-bg` (transparent), `-ar` (its aspect ratio), `-w` (its natural width)
+  and `-on` (1). Views only
   reference the slot, so view bytes do not depend on which images fit and every orientation and
   revision shares one copy. A rule is charged once, in this order: the images of the shown
   revision's start screen, then of the other pinned start screens, then each screen's images right

@@ -88,6 +88,8 @@ export interface PrototypeWebPageInput {
   readonly textSize?: StillTextSize;
   /** Total page budget; defaults to MAX_PROTOTYPE_WEB_PAGE_BYTES. */
   readonly maxBytes?: number;
+  /** Cumulative cap on the encoded images' data URIs, in budget order; defaults to maxBytes. */
+  readonly maxImageBytes?: number;
   /** Encoded assets the page inlines while the budget allows; the first entry per id counts. */
   readonly images?: readonly PrototypeWebImage[];
 }

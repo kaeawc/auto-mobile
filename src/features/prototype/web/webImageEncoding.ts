@@ -29,7 +29,19 @@ export interface PrototypeWebImageEncoder {
     bytes: Uint8Array,
     boxes: readonly WebImageBox[],
     options: PrototypeWebImageEncodeOptions,
-  ): Promise<{ readonly bytes: Uint8Array; readonly width: number; readonly height: number }>;
+  ): Promise<EncodedPrototypeWebImage>;
+}
+
+/**
+ * One encode: the WebP bytes and their pixel size, and the source's oriented pixel size, the
+ * image's natural size in points (the encoded size when absent).
+ */
+export interface EncodedPrototypeWebImage {
+  readonly bytes: Uint8Array;
+  readonly width: number;
+  readonly height: number;
+  readonly naturalWidth?: number;
+  readonly naturalHeight?: number;
 }
 
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -64,7 +76,13 @@ export class SharpPrototypeWebImageEncoder implements PrototypeWebImageEncoder {
       })
       .webp({ quality: PROTOTYPE_WEB_IMAGE_WEBP_QUALITY })
       .toBuffer({ resolveWithObject: true });
-    return { bytes: new Uint8Array(data), width: info.width, height: info.height };
+    return {
+      bytes: new Uint8Array(data),
+      width: info.width,
+      height: info.height,
+      naturalWidth: width,
+      naturalHeight: height,
+    };
   }
 }
 
@@ -75,9 +93,12 @@ export interface EncodedPrototypeWebImages {
 }
 
 /**
- * Encodes the requested assets in order, skipping one the host has no image bytes for or cannot
- * read or decode, and setting aside one whose data URI alone exceeds the page, since the page could never
- * inline it. The rest are all kept: the page's budget, not the encoded total, decides which fit.
+ * Encodes the requested assets in order (budget order), skipping one the host has no image bytes
+ * for or cannot read or decode. The kept data URIs are capped cumulatively at `maxInlineBytes`
+ * (default `maxBytes`, since the page could never inline more): the first image that would pass
+ * the cap is set aside, and every later one is set aside without being encoded, so a long history
+ * costs no encoding work or retained bytes past the cap (#18418). Set-aside images draw their
+ * placeholder, reported `assetOverBudget`. Within the cap, the page's budget decides which fit.
  */
 export async function encodePrototypeWebImages(
   requests: readonly PrototypeWebImageRequest[],
@@ -85,22 +106,41 @@ export async function encodePrototypeWebImages(
   encoder: PrototypeWebImageEncoder,
   {
     maxBytes = MAX_PROTOTYPE_WEB_PAGE_BYTES,
+    maxInlineBytes = maxBytes,
     applyExifOrientation = false,
-  }: { readonly maxBytes?: number; readonly applyExifOrientation?: boolean } = {},
+  }: {
+    readonly maxBytes?: number;
+    readonly maxInlineBytes?: number;
+    readonly applyExifOrientation?: boolean;
+  } = {},
 ): Promise<EncodedPrototypeWebImages> {
   const images: PrototypeWebImage[] = [];
   const overBudget = new Set<string>();
+  let inlineBytes = 0;
   for (const request of requests) {
     try {
       const asset = await source.get(request.id);
       if (!asset || !IMAGE_MIME_TYPES.has(asset.mimeType)) {
         continue;
       }
-      const encoded = await encoder.encode(asset.bytes, request.boxes, { applyExifOrientation });
-      if (base64Bytes(encoded.bytes.byteLength) <= maxBytes) {
-        images.push({ id: request.id, ...encoded });
-      } else {
+      if (inlineBytes > maxInlineBytes) {
         overBudget.add(request.id);
+        continue;
+      }
+      const encoded = await encoder.encode(asset.bytes, request.boxes, { applyExifOrientation });
+      const uriBytes = base64Bytes(encoded.bytes.byteLength);
+      if (uriBytes > maxBytes) {
+        overBudget.add(request.id);
+      } else if (inlineBytes + uriBytes > maxInlineBytes) {
+        // Past the cap: this and every later asset fall back to their placeholders.
+        inlineBytes = Infinity;
+        overBudget.add(request.id);
+        logger.info(
+          `[PROTOTYPE] Web page images reached the ${maxInlineBytes}-byte inline cap at asset ${request.id}; it and later assets stay placeholders.`,
+        );
+      } else {
+        inlineBytes += uriBytes;
+        images.push({ id: request.id, ...encoded });
       }
     } catch (error) {
       // The page still renders: this asset keeps its placeholder with reason `assetNotInlined`.
@@ -244,6 +284,7 @@ export async function buildPrototypeWebPageWithImages(
   }
   const options: EncodeOptions = {
     ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
+    ...(input.maxImageBytes === undefined ? {} : { maxInlineBytes: input.maxImageBytes }),
     applyExifOrientation: deviceFrameOrThrow(first.frame).platform === "ios",
   };
   const large = await encodePrototypeWebImages(first.imageRequests, source, encoder, options);

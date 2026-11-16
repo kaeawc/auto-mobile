@@ -212,9 +212,55 @@ describe("encodePrototypeWebImages", () => {
     expect(images.map((image) => image.id)).toEqual(["small"]);
     expect([...overBudget]).toEqual(["big"]);
   });
+
+  test("caps the cumulative inlined bytes: exactly at the cap fits, past it falls back (#18418)", async () => {
+    // Each 30-byte encode is a 40-byte data URI.
+    const ids = ["a", "b", "c", "d"];
+    const encode = async (maxInlineBytes: number) => {
+      const counting = encoder(30);
+      const result = await encodePrototypeWebImages(
+        ids.map((id) => ({ id, boxes: [] })),
+        source(ids),
+        counting,
+        { maxInlineBytes },
+      );
+      return {
+        kept: result.images.map((image) => image.id),
+        overBudget: [...result.overBudget],
+        encodes: counting.boxes.length,
+      };
+    };
+    expect(await encode(80)).toEqual({ kept: ["a", "b"], overBudget: ["c", "d"], encodes: 3 });
+    // One byte short: the second image is the first past the cap; later ones are never encoded.
+    expect(await encode(79)).toEqual({ kept: ["a"], overBudget: ["b", "c", "d"], encodes: 2 });
+    expect(await encode(160)).toEqual({ kept: ids, overBudget: [], encodes: 4 });
+  });
+
+  test("an asset without bytes past the cap stays not inlined, not over budget (#18418)", async () => {
+    const { overBudget } = await encodePrototypeWebImages(
+      ["a", "missing", "b"].map((id) => ({ id, boxes: [] })),
+      source(["a", "b"]),
+      encoder(30),
+      { maxInlineBytes: 10 },
+    );
+    expect([...overBudget]).toEqual(["a", "b"]);
+  });
 });
 
 describe("buildPrototypeWebPageWithImages", () => {
+  test("reports images past the cumulative inline cap assetOverBudget (#18418)", async () => {
+    const input = page([feed("a", "b", "c")], { maxImageBytes: 80 });
+    const built = await buildPrototypeWebPageWithImages(
+      input,
+      source(["a", "b", "c"]),
+      encoder(30),
+    );
+    expect(built.inlinedImages).toEqual(["a", "b"]);
+    expect(built.unsupportedNodes.map((node) => [node.asset, node.reason])).toEqual([
+      ["c", "assetOverBudget"],
+    ]);
+  });
+
   test("encodes drawn assets at the boxes the frame draws them and inlines them", async () => {
     const encode = encoder(30);
     const built = await buildPrototypeWebPageWithImages(

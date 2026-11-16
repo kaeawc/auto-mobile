@@ -51,7 +51,7 @@ const buildAppInput = z.object({
     .positive()
     .max(MAX_BUILD_TIMEOUT_MS)
     .optional()
-    .describe("Stop the build after this many milliseconds (default 20 minutes, at most 28)"),
+    .describe("Stop the build after this many milliseconds (default 20 minutes, at most 27)"),
 });
 
 export const buildAppResultSchema = z.object({

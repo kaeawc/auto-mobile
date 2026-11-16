@@ -8,7 +8,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { sortedReaddir } from "../../utils/io";
 import { logger } from "../../utils/logger";
 import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { windowsBatchInvocation } from "../../utils/android-cmdline-tools/SdkManagerClient";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { DEFAULT_BUILD_TIMEOUT_MS } from "./buildAppTimeout";
@@ -113,6 +113,10 @@ export const nodeBuildFileSystem: BuildFileSystem = {
       const info = await stat(path);
       return { isDirectory: info.isDirectory(), mtimeMs: info.mtimeMs };
     } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") {
+        throw toActionableError(error, `buildApp could not read ${path}`);
+      }
       // A missing path is an answer here, not a failure: callers branch on null.
       logger.debug(`buildApp stat ${path} failed: ${errorMessage(error)}`);
       return null;
@@ -447,17 +451,24 @@ export class BuildApp {
       args: [`:${module}:assemble${capitalize(variant)}`, "--console=plain"],
       cwd: request.projectPath,
       findArtifacts: async () => await this.newestFirst(await this.variantApks(apkRoot, variant)),
-      artifactDescription: `${variant} .apk under ${apkRoot}`,
+      artifactDescription: `signed ${variant} .apk under ${apkRoot} (an *-unsigned.apk needs a signingConfig for that build type before installApp can install it)`,
     };
   }
 
-  /** APKs whose directory under `outputs/apk` spells the variant, e.g. free/debug for freeDebug. */
+  /**
+   * Signed APKs for the variant under `outputs/apk`. The directory spells the variant
+   * (free/debug for freeDebug); a bare build type such as debug also matches every
+   * flavor's output, since assembleDebug builds them all.
+   */
   private async variantApks(apkRoot: string, variant: string): Promise<string[]> {
     const apks = await this.walkFiles(apkRoot, ".apk", APK_SEARCH_DEPTH);
     const wanted = variant.toLowerCase();
-    return apks.filter(
-      (apk) => relative(apkRoot, dirname(apk)).split(sep).join("").toLowerCase() === wanted,
-    );
+    return apks.filter((apk) => {
+      const dirs = relative(apkRoot, dirname(apk)).split(sep);
+      const matches =
+        dirs.join("").toLowerCase() === wanted || dirs.at(-1)?.toLowerCase() === wanted;
+      return matches && !basename(apk).endsWith("-unsigned.apk");
+    });
   }
 
   private async walkFiles(dir: string, suffix: string, depth: number): Promise<string[]> {

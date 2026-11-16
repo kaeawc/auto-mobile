@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, normalize } from "node:path";
 import {
   appProductPaths,
   BuildApp,
+  nodeBuildFileSystem,
   buildLogExcerpt,
   type BuildFileSystem,
   type BuildPathInfo,
@@ -317,6 +319,32 @@ describe("BuildApp android", () => {
     expect(executor.calls[0].args[4]).toContain(":apps:tv:assembleDebug");
   });
 
+  test("a default build type matches every flavor's output and skips unsigned APKs", async () => {
+    const fs = new FakeFileSystem()
+      .add(p("/work/droid/gradlew"), false)
+      .add(apkRoot, true)
+      .add(p(`${apkRoot}/base`), true)
+      .add(p(`${apkRoot}/base/debug`), true)
+      .add(p(`${apkRoot}/base/debug/app-base-debug.apk`), false, 3)
+      .add(p(`${apkRoot}/release`), true)
+      .add(p(`${apkRoot}/release/app-release-unsigned.apk`), false, 4);
+    const builder = new BuildApp(deps(new FakeExecutor(), fs, "linux"));
+
+    expect(
+      await builder.build({ platform: "android", projectPath: p("/work/droid") }),
+    ).toMatchObject({
+      success: true,
+      artifactPaths: [p(`${apkRoot}/base/debug/app-base-debug.apk`)],
+    });
+    const release = await builder.build({
+      platform: "android",
+      projectPath: p("/work/droid"),
+      variant: "release",
+    });
+    expect(release).toMatchObject({ success: false, errorCode: "artifact_not_found" });
+    expect(release.success ? "" : release.error).toContain("signingConfig");
+  });
+
   test("a relative project path runs the wrapper by its absolute path", async () => {
     const fs = new FakeFileSystem().add(p("/work/droid/gradlew"), false);
     const executor = new FakeExecutor();
@@ -356,6 +384,13 @@ describe("BuildApp android", () => {
     ).build({ platform: "android", projectPath: p("/work/droid") });
 
     expect(result).toMatchObject({ success: false, errorCode: "project_not_found" });
+  });
+});
+
+describe("nodeBuildFileSystem", () => {
+  test("a missing path is null, not an error", async () => {
+    const missing = join(tmpdir(), "auto-mobile-build-app-missing", "nope");
+    expect(await nodeBuildFileSystem.stat(missing)).toBeNull();
   });
 });
 

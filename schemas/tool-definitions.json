@@ -1827,10 +1827,10 @@
           "minLength": 1
         },
         "timeoutMs": {
-          "description": "Stop the build after this many milliseconds (default 20 minutes, at most 28)",
+          "description": "Stop the build after this many milliseconds (default 20 minutes, at most 27)",
           "type": "integer",
           "exclusiveMinimum": 0,
-          "maximum": 1680000
+          "maximum": 1620000
         }
       },
       "required": ["platform", "projectPath"],

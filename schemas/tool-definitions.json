@@ -32737,12 +32737,12 @@
           "maximum": 3600000
         },
         "event": {
-          "description": "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push",
+          "description": "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player",
           "type": "string",
-          "enum": ["notifications.push"]
+          "enum": ["notifications.push", "media.statusChanged", "media.ended", "media.error"]
         },
         "data": {
-          "description": "simulate event only: the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON",
+          "description": "simulate event only: notifications.push takes the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON; media.* takes {player, status? (buffering|ready|ended|error), code? (for error), advanceMs? (fake engine only: advance its clock first)}",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -32750,7 +32750,7 @@
           "additionalProperties": {}
         },
         "transport": {
-          "description": "simulate event only: connection (the live runtime), system (the platform push path, reaches an app that is not running) or auto (default: connection when connected, else system)",
+          "description": "simulate notifications.push only: connection (the live runtime), system (the platform push path, reaches an app that is not running) or auto (default: connection when connected, else system)",
           "type": "string",
           "enum": ["auto", "connection", "system"]
         },
@@ -33450,9 +33450,14 @@
           "enum": ["foreground", "background", "notification"]
         },
         "code": {
-          "description": "simulate event only: invalid_args (payload refused), unavailable (no route) or platform_error",
+          "description": "simulate event only: invalid_args (payload refused), unavailable (no route), unsupported (media advanceMs on a native engine) or platform_error",
           "type": "string",
-          "enum": ["invalid_args", "unavailable", "platform_error"]
+          "enum": ["invalid_args", "unavailable", "platform_error", "unsupported"]
+        },
+        "mediaEngine": {
+          "description": "simulate media event only: the engine the player runs on, fake or native",
+          "type": "string",
+          "enum": ["fake", "native"]
         },
         "success": {
           "type": "boolean"

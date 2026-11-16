@@ -215,7 +215,7 @@
     "js-tiktoken": "^1.0.21",
     "js-yaml": "^5.1.0",
     "knip": "^6.0.0",
-    "kysely": "0.29.8",
+    "kysely": "0.29.9",
     "mdast-util-from-markdown": "^2.1.0",
     "mdast-util-gfm-strikethrough": "^2.0.1",
     "mdast-util-gfm-table": "^2.0.1",

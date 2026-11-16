@@ -115,14 +115,23 @@ const faultSchema = z
   });
 
 const ACTOR_ROUTE = new RegExp(`^(?:${METHODS.join("|")}) (?:${ROUTE_PATH_BODY})$`);
-/** Steps the issue names that need a piece mock backends do not have yet (rooms, maps, push). */
+/** Steps the issue names that need a piece mock backends do not have yet (maps, push). */
 const UNSUPPORTED_STEPS = {
-  publish: "mock backends have no realtime channels yet",
   advance: "mock backends have no routes along a polyline yet",
   notify: "mock backends cannot deliver simulated push yet",
 } as const;
 
 const actorDelay = z.number().int().min(0).max(MAX_MOCK_ACTOR_DELAY_MS);
+
+const frameSchema = jsonValue.refine(
+  (frame) => depthOf(frame) <= MAX_DEPTH,
+  `a frame may nest at most ${MAX_DEPTH} levels`,
+);
+
+/** An actor's frame to a room path; both bind the triggering request's placeholders. */
+const actorPublishSchema = z
+  .object({ room: z.string().startsWith("/").max(256), frame: frameSchema })
+  .strict();
 
 const actorStepSchema = z
   .object({
@@ -132,7 +141,7 @@ const actorStepSchema = z
     remove: z.string().regex(COLLECTION_NAME).optional(),
     id: z.union([z.string().min(1).max(256), z.number().finite()]).optional(),
     value: z.record(jsonValue).optional(),
-    publish: z.unknown().optional(),
+    publish: actorPublishSchema.optional(),
     advance: z.unknown().optional(),
     notify: z.unknown().optional(),
   })
@@ -147,18 +156,18 @@ const actorStepSchema = z
         });
       }
     }
-    const kinds = (["append", "update", "remove"] as const).filter(
+    const kinds = (["append", "update", "remove", "publish"] as const).filter(
       (kind) => step[kind] !== undefined,
     );
     if (kinds.length > 1) {
       context.addIssue({
         code: "custom",
-        message: "a step takes at most one of append, update or remove",
+        message: "a step takes at most one of append, update, remove or publish",
       });
     } else if (kinds.length === 0 && step.afterMs === undefined) {
       context.addIssue({
         code: "custom",
-        message: "a step needs append, update, remove or afterMs",
+        message: "a step needs append, update, remove, publish or afterMs",
       });
     }
     const kind = kinds.length === 1 ? kinds[0] : undefined;
@@ -207,11 +216,6 @@ const latencySchema = z
   })
   .strict()
   .refine((latency) => latency.min <= latency.max, "latencyMs.min cannot exceed max");
-
-const frameSchema = jsonValue.refine(
-  (frame) => depthOf(frame) <= MAX_DEPTH,
-  `a frame may nest at most ${MAX_DEPTH} levels`,
-);
 
 const roomSchema = z
   .object({
@@ -269,7 +273,7 @@ export const mockBackendDefinitionSchema = z
     latencyMs: latencySchema.optional(),
     /** Seed of the random stream behind latency and `rate` faults. */
     seed: z.number().int().min(0).max(0xffff_ffff).optional(),
-    /** Timed and route-triggered writes to the collections (#14211). */
+    /** Timed and route-triggered collection writes and room frames (#14211). */
     actors: z.array(actorSchema).max(MAX_MOCK_ACTORS).optional(),
   })
   .strict()
@@ -324,3 +328,4 @@ export type MockRoom = z.infer<typeof roomSchema>;
 export type MockBroadcast = z.infer<typeof broadcastSchema>;
 export type MockActor = z.infer<typeof actorSchema>;
 export type MockActorStep = z.infer<typeof actorStepSchema>;
+export type MockActorPublish = z.infer<typeof actorPublishSchema>;

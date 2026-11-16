@@ -102,6 +102,17 @@ describe("prototype web media nodes (#16539)", () => {
     expect(fixed.imageDraws).toMatchObject([
       { asset: "p", widthDp: 80, heightDp: 45, scale: "fit" },
     ]);
+    // The overlay fills the padding box, so padding does not shrink the encode.
+    const padded = still({
+      type: "videoPlayer",
+      poster: "p",
+      style: {
+        width: { dp: 80 },
+        height: { dp: 45 },
+        padding: { start: 16, end: 16, top: 16, bottom: 16 },
+      },
+    });
+    expect(padded.imageDraws).toMatchObject([{ asset: "p", widthDp: 80, heightDp: 45 }]);
     // A fixed width alone bounds the height by the player's 16:9.
     const wide = still({ type: "videoPlayer", poster: "p", style: { width: { dp: 160 } } });
     expect(wide.imageDraws).toMatchObject([

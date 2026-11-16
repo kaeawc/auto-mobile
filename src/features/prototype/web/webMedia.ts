@@ -210,10 +210,12 @@ function centredPlay(): WebElement {
 
 /**
  * The box the poster is encoded for: the player's own sizing, as an `image` with its style would
- * draw, fit inside it; a fixed width without a height bounds the height by the player's 16:9.
+ * draw, fit inside it; a fixed width without a height bounds the height by the player's 16:9. The
+ * poster overlay fills the padding box, so the player's padding is not taken out.
  */
 function posterDraw(asset: string, node: Raw, scope: WebRenderScope): WebImageDraw {
-  const draw = webImageDraw(asset, { style: node.style }, scope.style.parentAxis);
+  const style = { ...record(node.style), padding: undefined };
+  const draw = webImageDraw(asset, { style }, scope.style.parentAxis);
   if (draw.widthDp === undefined || draw.heightDp !== undefined) {
     return draw;
   }

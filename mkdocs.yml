@@ -428,6 +428,7 @@ nav:
       - "Prototype web 3D device view": how-it-works/prototype-web-3d.md
       - "Prototype live preview server": how-it-works/prototype-web-preview-server.md
       - "Runtime dependency pinning": how-it-works/release/runtime-dependency-pinning.md
+      - "Windows MSI signing": how-it-works/release/windows-msi-signing.md
       - "Unit lane scaling": how-it-works/ci/unit-lane-scaling.md
       - "Workflow de-duplication": how-it-works/ci/workflow-deduplication.md
       - "CI attestation shadow promotion": how-it-works/ci/attestation-shadow-promotion.md
@@ -483,6 +484,7 @@ nav:
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
       - "2026-11-15: Stateless success reductions in the response envelope": devlog/2026-11-15-stateless-envelope-reductions.md
+      - "2026-11-15: Windows MSI signing with Azure Trusted Signing": devlog/2026-11-15-windows-msi-trusted-signing.md
       - "2026-11-15: Split over-length how-it-works pages and enforce their readability budget": devlog/2026-11-15-how-it-works-readability-enforced.md
       - "2026-11-15: Xcode 27.2 advisory lane as its own workflow": devlog/2026-11-15-xcode-27-2-advisory-workflow.md
       - "2026-11-14: Observation screenshots stay readable for a bounded window": devlog/2026-11-14-observation-screenshot-retention-window.md

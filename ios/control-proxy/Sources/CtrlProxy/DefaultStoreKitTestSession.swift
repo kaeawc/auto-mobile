@@ -49,7 +49,7 @@ enum DefaultStoreKitTestSession {
 
             func buy(productId: String) async throws {
                 do {
-                    try session.buyProduct(productIdentifier: productId)
+                    _ = try await session.buyProduct(identifier: productId)
                 } catch {
                     try await clearPurchaseError()
                     throw error

@@ -99,6 +99,10 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        # StoreKitTest.h declares SKPaymentTransactionState, deprecated since iOS 18, and the
+        # strict pedantic base flags turn that SDK-header warning into an error while the
+        # clang module is built. Demote only deprecation diagnostics from clang modules.
+        OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -Wno-error=deprecated-declarations"
 
   AutoMobileTVTest:
     type: application

@@ -574,20 +574,28 @@ function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
 }
 
 /**
+ * A list item's row text binds repeat and component placeholders (Kotlin `PrototypeRepeat.kt`,
+ * Swift `PrototypeRepeat.swift`, #18390). Route scans skip it: every platform's route validator
+ * still reads it as literal text (`routes-literal-list-item.json`).
+ */
+function mapListItemText(node: Raw, path: string, visit: FieldVisitor): void {
+  mapField(node, "headline", path, { kind: "text", visit });
+  mapField(node, "supporting", path, { kind: "text", visit });
+}
+
+/**
  * Visits one node's own bindable fields (not its children) in a fixed order: `text`, component
  * fields, `visibleWhen`, `styleWhen`, `onTap`, `onLongPress`, `onDoubleTap`, then state-key fields. Returns a copy with each
- * visited value replaced by the visitor's result.
+ * visited value replaced by the visitor's result. A route scan also visits route pointers.
  */
 export function mapBindableFields(
   node: Raw,
   path: string,
   visitor: FieldVisitor,
-  includeRoutePointers = false,
+  routeScan = false,
 ): Raw {
   const visit: FieldVisitor = (value, at, kind, dataCondition) =>
-    kind === "routePointer" && !includeRoutePointers
-      ? value
-      : visitor(value, at, kind, dataCondition);
+    kind === "routePointer" && !routeScan ? value : visitor(value, at, kind, dataCondition);
   const copy = { ...node };
   mapObject(copy, "semantics", path, (entry, entryPath) => {
     mapField(entry, "label", entryPath, { kind: "text", visit });
@@ -612,6 +620,9 @@ export function mapBindableFields(
   }
   const component = typeof copy.type === "string" ? COMPONENT_FIELDS[copy.type] : undefined;
   component?.(copy, path, visit);
+  if (copy.type === "listItem" && !routeScan) {
+    mapListItemText(copy, path, visit);
+  }
   mapField(copy, "errorText", path, { kind: "text", visit });
   mapObject(copy, "errorWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   mapObject(copy, "enabledWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));

@@ -1,10 +1,15 @@
 import { toActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
+import { PROTOTYPE_MEDIA_SIM_EVENTS } from "./prototypeFakeMediaEngine";
 import { validatePrototypePushPayload, type PrototypePushPayload } from "./prototypePush";
 
-/** The one platform event `prototype simulate` can deliver (#14285). */
+/** The push event `prototype simulate` delivers (#14285). */
 export const PROTOTYPE_PUSH_EVENT = "notifications.push";
-export const PROTOTYPE_SIMULATE_EVENTS = [PROTOTYPE_PUSH_EVENT] as const;
+/** Every platform event `prototype simulate` can deliver: the push and the media events (#14257). */
+export const PROTOTYPE_SIMULATE_EVENTS = [
+  PROTOTYPE_PUSH_EVENT,
+  ...PROTOTYPE_MEDIA_SIM_EVENTS,
+] as const;
 
 /** `auto` prefers the live connection and falls back to the system path. */
 export const PROTOTYPE_PUSH_TRANSPORTS = ["auto", "connection", "system"] as const;

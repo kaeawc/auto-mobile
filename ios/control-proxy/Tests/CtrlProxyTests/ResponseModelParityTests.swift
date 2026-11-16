@@ -20,7 +20,7 @@ final class ResponseModelParityTests: XCTestCase {
         // load-bearing wire identifier (#5787).
         XCTAssertEqual(
             object["supportedFeatures"] as? [String],
-            ["display_cutout_info", "double_tap_v1", "path_gesture_v1"]
+            ["display_cutout_info", "double_tap_v1", "path_gesture_v1", "storekit_v1"]
         )
     }
 

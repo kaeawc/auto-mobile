@@ -28,6 +28,29 @@ The text is provisional until the owner decision in #14143 (policy positioning, 
 The name is ProtoViewer on both stores, and the privacy and support URLs are docs-site pages
 (`docs/protoviewer/privacy.md`, `docs/protoviewer/support.md`), per #14144.
 
+## Review position
+
+The App Review notes (`fastlane/metadata/ios/review_information/notes.txt`) and the Play declarations below use one
+position: ProtoViewer is a viewer for design prototypes the user authors, not a mini-app platform.
+
+- A prototype is validated, declarative JSON. The renderer's features are fixed in the binary, so a
+  prototype adds no code (App Store 2.5.2, Play Device and Network Abuse).
+- `request` actions run only while the imported-prototype network switch is on. Their responses fill
+  the prototype's data model and cannot add components or behaviour.
+- The Local Network prompt appears only after that switch is turned on and confirmed.
+- Received prototypes have Report (a mail draft to the published contact) and Hide on both apps.
+  Android also blocks a link host (App Store 1.2, Play User Generated Content).
+- The library is empty on first launch. There is no bundled sample gallery, and the listing must not
+  claim one (decision in the [ProtoViewer design record](../devlog/2026-10-20-protoviewer-design.md)).
+
+Play Console declarations:
+
+| Declaration               | Answer                                                                   |
+| ------------------------- | ------------------------------------------------------------------------ |
+| User-generated content    | Yes: users receive prototypes others made; in-app Report, Hide and Block |
+| Downloads executable code | No: prototypes are declarative JSON read by a fixed renderer             |
+| Data safety               | See the [privacy page](../protoviewer/privacy.md)                        |
+
 ## Validation
 
 `bun scripts/store-listing/validate-store-listing.ts` runs in Fast Validation as the `store-listing`
@@ -80,6 +103,11 @@ is no new package. The table in `scripts/store-listing/iconTargets.ts` produces:
 - iOS: an `AppIcon.appiconset` with the 1024 px icon in light, dark and tinted appearances (opaque,
   no alpha) and its `Contents.json`.
 
+The Android app references `@mipmap/ic_launcher`, an adaptive icon with foreground, background
+and monochrome vector drawables matching these SVG sources. The foreground and monochrome paths
+retain the evenodd holes. ProtoViewer requires API 26, so no legacy fallback is needed. The same
+adaptive resource supports round launcher masks.
+
 Two runs over the same sources write byte-identical files. The PNGs are build output and are
 git-ignored: this repository routes `*.png` through Git LFS, and generated art does not belong in
 history. Distinct dev and beta icons (as in #14152's proposal) are a second layer pair plus a channel
@@ -93,8 +121,8 @@ viewer, import, share), light and dark, 32 shots in all. The devices are pinned:
 
 Each shot:
 
-1. acquires its pinned device and sets appearance;
-2. fixes the clock and bars with the `statusBar` tool (9:41, full battery);
+1. sets appearance on its already booted, pinned device through a host command;
+2. acquires the device and fixes the clock and bars with `statusBar` (9:41, full battery);
 3. clears the app and seeds a fixed sample library from the shared valid prototype corpus;
 4. drives the screen with `tapOn` and `launchApp`;
 5. captures with `observe` (`screenshot: "settled"`).
@@ -102,9 +130,29 @@ Each shot:
 ```bash
 bun scripts/store-listing/capture-screenshots.ts --list
 bun scripts/store-listing/capture-screenshots.ts --emit <dir> --android-serial <serial> --ios-udid <udid>
+bun scripts/store-listing/capture-screenshots.ts --run --out <dir> --android-serial <serial> [--ios-udid <udid>] [--profile <id>] [--shot <id>]
+bun scripts/store-listing/capture-screenshots.ts --verify-identical <dirA> <dirB>
 ```
 
 `--emit` writes one `<shot>.plan.json` for `bun scripts/mcp-drive.ts --private --plan <file>` and a
 `manifest.json` with each shot's host steps (night mode through `adb` or `simctl ui`), expected
 pixel size and destination under `fastlane/metadata`. Use a dedicated capture emulator and simulator,
 never a shared development device. Element labels come from the app's string resources.
+
+Store screenshots must come from the store build; `--android-app-id` and `--ios-app-id` allow verification against a debug build.
+
+`--run` requires the private daemon environment used by `mcp-drive --private`, a built server,
+and already booted, dedicated devices with ProtoViewer installed. It runs each shot's host
+appearance commands before its MCP plan, then reads `screenshotPath` from the final `observe`
+JSON envelope. It accepts only a PNG whose header dimensions match the profile, and copies it to
+`<out>/<destination>` relative to `fastlane/metadata`. Temporary plan files are removed on exit.
+A failed command or invalid screenshot stops the run; earlier successful captures remain.
+
+Without `--ios-udid`, the default selection contains only Android shots. `--profile` and `--shot`
+filter that selection; an explicit iOS selection requires `--ios-udid`. Each profile needs its
+pinned device dimensions. Run profiles separately when changing the Android device serial.
+
+Capture into two separate output directories, then use `--verify-identical` to check determinism.
+It hashes every regular file recursively with SHA-256 and exits non-zero listing changed or missing
+paths. Missing directories and non-regular files are errors. Capture outputs are generated PNGs;
+keep them outside version control.

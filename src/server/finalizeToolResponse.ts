@@ -19,6 +19,7 @@ import {
   compactRenderedPayload,
   commitDeliveredActionMetadata,
 } from "./finalizeToolResponse/actionMetadata";
+import { reduceAgentFacingEnvelope } from "./finalizeToolResponse/envelopeReductions";
 
 export type {
   ObservationBaselineStore,
@@ -82,6 +83,13 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   // Artifacts retain complete metadata. Compact only the residue delivered inline,
   // and preserve the original envelope when compaction has nothing to remove.
   sanitizedPayload = compactRenderedPayload(ctx, payload, envelopeView.envelope, sanitizedPayload);
+  // Stateless success reductions hold whatever the output flags are (#18348).
+  sanitizedPayload = reduceAgentFacingEnvelope(
+    ctx,
+    payload,
+    envelopeView.envelope,
+    sanitizedPayload,
+  );
 
   // Only rebuild when the cached complete and stripped renderings differ. This
   // also covers non-observation payloads that otherwise take the early exit.
@@ -138,7 +146,8 @@ function withSerializedArtifactWriter(
 /**
  * Plain-tool finalization (#13942): bound the response at the inline ceiling, or
  * spill it on a `resourceLink` opt-in, and leave every other byte as the handler
- * produced it. `structuredContent` keeps its `extras` here, so it is measured too.
+ * produced it, apart from the stateless success reductions (#18348).
+ * `structuredContent` keeps its `extras` here, so it is measured too.
  */
 function finalizePlainToolResponse<T>(
   response: T,
@@ -146,10 +155,15 @@ function finalizePlainToolResponse<T>(
   ctx: FinalizeToolResponseContext,
   serialization: ToolResponseSerialization,
 ): T {
-  const bounded = boundRenderedPayload(ctx, envelopeView.payload, undefined, {
-    hasStructured: envelopeView.hasStructured,
-    serialization,
-  });
+  const bounded = reduceAgentFacingEnvelope(
+    ctx,
+    envelopeView.payload,
+    envelopeView.envelope,
+    boundRenderedPayload(ctx, envelopeView.payload, undefined, {
+      hasStructured: envelopeView.hasStructured,
+      serialization,
+    }),
+  );
   if (!bounded) {
     return response;
   }
@@ -159,6 +173,35 @@ function finalizePlainToolResponse<T>(
     envelopeView.textPart ? serialization.text(bounded) : undefined,
   );
   appendArtifactResourceLinks(envelopeView.envelope, bounded, ctx.internal === true);
+  return response;
+}
+
+/**
+ * Only the stateless success reductions (#18348), with no bounding or spill: the
+ * delivery path for device-binding results, which ingress reads after the handler
+ * returns and which must therefore never become a `resourceLink`.
+ */
+export function reduceStatelessToolResponse<T>(response: T, ctx: FinalizeToolResponseContext): T {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+  const envelopeView = readToolEnvelopePayload(response);
+  if (!envelopeView) {
+    return response;
+  }
+  const reduced = reduceAgentFacingEnvelope(
+    ctx,
+    envelopeView.payload,
+    envelopeView.envelope,
+    undefined,
+  );
+  if (reduced) {
+    writeToolEnvelopePayload(
+      envelopeView,
+      reduced,
+      envelopeView.textPart ? new ToolResponseSerialization().text(reduced) : undefined,
+    );
+  }
   return response;
 }
 

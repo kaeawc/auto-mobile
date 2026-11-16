@@ -57,6 +57,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case sdkWebAction(RequestSdkWebAction)
     case getVoiceOverState(RequestEnvelope)
     case accessibilityAudit(RequestAccessibilityAudit)
+    case storeKit(RequestStoreKit)
     case setVoiceOverState(RequestSetVoiceOverState)
 
     case listPreferenceFiles(RequestEnvelope)
@@ -99,6 +100,8 @@ public enum WebSocketRequest: Decodable, Sendable {
 
     private static func decode(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
         switch requestType {
+        case .requestStoreKit:
+            return try .storeKit(RequestStoreKit(from: decoder))
         case .requestHierarchy, .requestHierarchyIfStale, .setHierarchyPollInterval, .requestScreenshot,
              .refreshGeometry:
             return try decodeHierarchy(requestType, from: decoder)
@@ -370,6 +373,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .sdkWebSnapshot: return .sdkWebSnapshot
         case .sdkWebAction: return .sdkWebAction
         case .getVoiceOverState: return .getVoiceOverState
+        case .storeKit: return .requestStoreKit
         case .setVoiceOverState: return .setVoiceOverState
         case .accessibilityAudit: return .requestAccessibilityAudit
         case .listPreferenceFiles: return .listPreferenceFiles
@@ -418,6 +422,7 @@ public enum WebSocketRequest: Decodable, Sendable {
              let .getSdkCapabilities(payload):
             return payload
         case let .refreshGeometry(payload): return payload
+        case let .storeKit(payload): return payload
         case let .setVoiceOverState(payload): return payload
         case let .accessibilityAudit(payload): return payload
         case let .accessibilityFocus(payload): return payload

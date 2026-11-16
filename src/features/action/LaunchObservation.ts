@@ -585,6 +585,25 @@ export class LaunchObservation {
     if (currentTask?.topActivity) {
       return currentTask.topActivity.split("/")[0] === foregroundPackage;
     }
+    // `dumpsys` task headers carry no top activity, but its activity rows carry their task id:
+    // when the current task lists activities, membership decides, so another task rooted at the
+    // helper's package (another profile's, say) cannot reject a helper hosted here (#18387).
+    const currentTaskActivities =
+      backStack?.activities.filter((activity) => activity.taskId === backStack.currentTaskId) ?? [];
+    // A window that names its activity must be that activity: a stale row of the helper's
+    // package in this task cannot vouch for another helper activity drawn from its own task. The
+    // package prefix stands in only when the window carries no activity name.
+    if (currentTaskActivities.length > 0) {
+      const windowActivity = observation.activeWindow?.activityName ?? "";
+      const qualified = windowActivity.startsWith(".")
+        ? `${foregroundPackage}${windowActivity}`
+        : windowActivity;
+      return currentTaskActivities.some((activity) =>
+        qualified !== ""
+          ? activity.name === qualified
+          : activity.name.startsWith(`${foregroundPackage}.`),
+      );
+    }
     return !backStack?.tasks.some(
       (task) =>
         task.id !== backStack.currentTaskId &&

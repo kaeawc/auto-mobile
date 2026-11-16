@@ -101,10 +101,8 @@ targets:
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         # StoreKitTest.h declares SKPaymentTransactionState, deprecated since iOS 18, and the
         # strict pedantic base flags turn that SDK-header warning into an error while the
-        # clang module is built; the runner also calls the synchronous SKTestSession.buyProduct,
-        # deprecated in iOS 17 (the async form fails without an app context). Demote only
-        # deprecation diagnostics, in clang modules and in Swift.
-        OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -Wno-error=deprecated-declarations -Wwarning DeprecatedDeclaration"
+        # clang module is built. Demote only deprecation diagnostics from clang modules.
+        OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -Wno-error=deprecated-declarations"
 
   AutoMobileTVTest:
     type: application

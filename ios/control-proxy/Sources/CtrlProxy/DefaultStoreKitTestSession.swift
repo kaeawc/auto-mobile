@@ -49,15 +49,33 @@ enum DefaultStoreKitTestSession {
 
             func buy(productId: String) async throws {
                 do {
-                    // The async buyProduct(identifier:) fails with "Unable to Complete Request" in a runner
-                    // process with no app context even though it records the transaction, so use the
-                    // synchronous form the spike verified.
-                    try session.buyProduct(productIdentifier: productId)
+                    try buySynchronously(productId: productId)
                 } catch {
                     try await clearPurchaseError()
                     throw error
                 }
                 try await clearPurchaseError()
+            }
+
+            /// The async `buyProduct(identifier:)` reports "Unable to Complete Request" in a runner
+            /// process with no app context even though it records the transaction, and the
+            /// synchronous form the spike verified is deprecated (an error under the strict warning
+            /// flags), so reach it through its ObjC selector `buyProductWithIdentifier:error:`.
+            private func buySynchronously(productId: String) throws {
+                typealias Buy = @convention(c) (
+                    AnyObject, Selector, NSString, UnsafeMutablePointer<Unmanaged<NSError>?>?
+                ) -> Bool
+                let selector = NSSelectorFromString("buyProductWithIdentifier:error:")
+                guard let imp = session.method(for: selector) else {
+                    throw VerbatimLocalizedError(message: "unsupported: SKTestSession buyProduct is unavailable")
+                }
+                var failure: Unmanaged<NSError>?
+                let bought = unsafeBitCast(imp, to: Buy.self)(session, selector, productId as NSString, &failure)
+                if !bought {
+                    let reason: any Error = failure?.takeUnretainedValue()
+                        ?? VerbatimLocalizedError(message: "SKTestSession buyProduct failed")
+                    throw reason
+                }
             }
 
             private func clearPurchaseError() async throws {

@@ -113,11 +113,14 @@ describe("prototype web media nodes (#16539)", () => {
       },
     });
     expect(padded.imageDraws).toMatchObject([{ asset: "p", widthDp: 80, heightDp: 45 }]);
-    // A fixed width alone bounds the height by the player's 16:9.
-    const wide = still({ type: "videoPlayer", poster: "p", style: { width: { dp: 160 } } });
-    expect(wide.imageDraws).toMatchObject([
-      { asset: "p", widthDp: 160, heightDp: 90, scale: "fit" },
-    ]);
+    // A height the style does not fix stays screen-bounded, so a taller box is never short.
+    const wide = still({
+      type: "videoPlayer",
+      poster: "p",
+      style: { width: { dp: 160 }, minHeight: 320 },
+    });
+    expect(wide.imageDraws).toMatchObject([{ asset: "p", widthDp: 160 }]);
+    expect(wide.imageDraws[0]!.heightDp).toBeUndefined();
   });
 
   test("a poster with a slot fits the player over black once its rule is inlined (#16591)", () => {

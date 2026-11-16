@@ -96,8 +96,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     return differences.length ? 1 : 0;
   }
   if (args.run) {
-    if (!args.out || !args.pins.androidSerial) {
-      throw new Error("--run requires --out and --android-serial");
+    if (!args.out) {
+      throw new Error("--run requires --out");
     }
     const shots = selectShots(args.pins, args.profile, args.shot);
     const problem = privateEnvError(process.env);

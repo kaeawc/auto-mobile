@@ -50,6 +50,15 @@ test("filters shots and rejects typos and missing platform pins", () => {
   expect(selectShots({ androidSerial: "serial" }, undefined, shots[0]!.id)).toHaveLength(1);
   expect(() => selectShots({ androidSerial: "serial" }, "typo")).toThrow();
   expect(() => selectShots({ androidSerial: "serial" }, "ios-iphone-69")).toThrow("ios-udid");
+  expect(() => selectShots({ iosUdid: "udid" }, "android-phone")).toThrow("android-serial");
+});
+
+test("pins only the platform of the selected shots", () => {
+  const ios = selectShots({ iosUdid: "udid" }, "ios-iphone-69");
+  expect(ios.length).toBeGreaterThan(0);
+  expect(ios.every((shot) => shot.profile.platform === "ios")).toBe(true);
+  const android = selectShots({ androidSerial: "serial" }, "android-phone");
+  expect(android.every((shot) => shot.profile.platform === "android")).toBe(true);
 });
 
 test("runs pinned host steps then a private drive plan and writes only correctly sized PNGs", async () => {

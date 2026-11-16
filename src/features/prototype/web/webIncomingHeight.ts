@@ -1,6 +1,5 @@
 import { record, type Raw } from "../prototypeTemplate";
-import { isWebLayerType } from "./webLayerTypes";
-import { ownHeight, verticalPadding, type PrepareChild } from "./webRowAspect";
+import { inFlow, ownHeight, verticalPadding, type PrepareChild } from "./webRowAspect";
 import { INCOMING_ALLOCATED_KEY, INCOMING_HEIGHT_KEY } from "./webStyle";
 
 const weightOf = (node: Raw | undefined): number | undefined => {
@@ -131,18 +130,6 @@ export function exactWeightShares(children: readonly (Raw | undefined)[]): boole
 }
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
-
-/**
- * A child as it takes part in a column's flow: as `prepare` resolves it, but undefined when it is
- * hoisted into a window layer (see isWebLayerType), open or closed, which leaves nothing in the
- * column, so it takes none of its height and no spacing gap, and is handed none.
- */
-const inFlow =
-  (prepare: PrepareChild): PrepareChild =>
-  (entry, path) => {
-    const node = prepare(entry, path);
-    return node && isWebLayerType(node.type) ? undefined : node;
-  };
 
 /**
  * `entry` with `height` as its incoming height, marked as an allocation (INCOMING_ALLOCATED_KEY)

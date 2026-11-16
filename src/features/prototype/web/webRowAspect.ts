@@ -1,4 +1,5 @@
 import { record, type Raw } from "../prototypeTemplate";
+import { isWebLayerType } from "./webLayerTypes";
 import {
   boundsOwnWidth,
   INCOMING_ALLOCATED_KEY,
@@ -54,6 +55,18 @@ export function aspectRatioCap(node: Raw | undefined, rowHeight = Infinity): num
 
 /** A child as rendering will see it (bound, `styleWhen` merged), or undefined when it is hidden. */
 export type PrepareChild = (entry: unknown, path: string) => Raw | undefined;
+
+/**
+ * A child as it takes part in a row's or column's flow: as `prepare` resolves it, but undefined
+ * when it is hoisted into a window layer (see isWebLayerType), open or closed, which leaves nothing
+ * in its parent: it takes no width or height and no spacing gap, and is handed none.
+ */
+export const inFlow =
+  (prepare: PrepareChild): PrepareChild =>
+  (entry, path) => {
+    const node = prepare(entry, path);
+    return node && isWebLayerType(node.type) ? undefined : node;
+  };
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
@@ -167,7 +180,7 @@ export function rowFillAxes(
     Array.isArray(node.children) &&
     node.children.some((entry, index) =>
       isUnsizedAspectRatio(
-        prepare(entry, childPath(path, index)),
+        inFlow(prepare)(entry, childPath(path, index)),
         rowContentHeight(record(node.style), inherited),
       ),
     );
@@ -190,7 +203,10 @@ export function rowMeasured(
     return node;
   }
   const { height: inherited = Infinity, unboundedWidth } = rowBounds(bounds);
-  const styled = node.children.map((entry, index) => prepare(entry, childPath(path, index)));
+  // A layer child (a sheet, dialog or snackbar) draws in the window, so the row measures without it.
+  const styled = node.children.map((entry, index) =>
+    inFlow(prepare)(entry, childPath(path, index)),
+  );
   const height = rowContentHeight(record(node.style), inherited);
   const children = rowSequentialChildren(
     node.children,
@@ -253,7 +269,8 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  * zeroed.
  *
  * `prepared` resolves an entry as rendering will (bound, visible, `styleWhen` merged), or
- * undefined when it is hidden. A repeat's children are one template, so they are left as authored.
+ * undefined when it is hidden or draws in a window layer (see inFlow). A repeat's children are one
+ * template, so they are left as authored.
  */
 export function rowSequentialChildren(
   entries: readonly unknown[],

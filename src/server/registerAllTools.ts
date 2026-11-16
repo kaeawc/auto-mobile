@@ -6,6 +6,7 @@ import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
+import { registerBuildAppTools } from "./buildAppTools";
 import { registerSendBroadcastTools } from "./sendBroadcastTools";
 import { registerBackgroundWorkTools } from "./backgroundWorkTools";
 import { registerGetLogsTools } from "./getLogsTools";
@@ -98,6 +99,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSwipeAtTools();
   registerMultiTouchTools();
   registerAppTools({ keystoreReset: options.keystoreReset });
+  registerBuildAppTools();
   registerUtilityTools({ iosRunnerLocation: options.iosRunnerLocation });
   registerDeviceTools();
   registerDeepLinkTools();

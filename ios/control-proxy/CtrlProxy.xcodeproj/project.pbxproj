@@ -2047,7 +2047,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -Wno-error=deprecated-declarations";
+				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -Wno-error=deprecated-declarations -Wwarning DeprecatedDeclaration";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.ctrlproxy.uitests;
 				SDKROOT = iphoneos;
 				SWIFT_STRICT_CONCURRENCY = complete;
@@ -2324,7 +2324,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -Wno-error=deprecated-declarations";
+				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -Wno-error=deprecated-declarations -Wwarning DeprecatedDeclaration";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.ctrlproxy.uitests;
 				SDKROOT = iphoneos;
 				SWIFT_STRICT_CONCURRENCY = complete;

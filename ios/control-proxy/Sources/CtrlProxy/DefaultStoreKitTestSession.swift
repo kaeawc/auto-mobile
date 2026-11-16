@@ -49,7 +49,10 @@ enum DefaultStoreKitTestSession {
 
             func buy(productId: String) async throws {
                 do {
-                    _ = try await session.buyProduct(identifier: productId)
+                    // The async buyProduct(identifier:) fails with "Unable to Complete Request" in a runner
+                    // process with no app context even though it records the transaction, so use the
+                    // synchronous form the spike verified.
+                    try session.buyProduct(productIdentifier: productId)
                 } catch {
                     try await clearPurchaseError()
                     throw error

@@ -166,21 +166,20 @@ try {
           );
           try {
             const reader = holder.stdout.getReader();
+            const decoder = new TextDecoder();
+            let holderOutput = "";
             await raceWithDeadline(
               (async () => {
-                let output = "";
-                const decoder = new TextDecoder();
-                while (!output.includes("LOCKED\n")) {
+                while (!holderOutput.includes("LOCKED\n")) {
                   const chunk = await reader.read();
                   if (chunk.done) {
                     throw new Error("Holder exited before LOCKED");
                   }
-                  output += decoder.decode(chunk.value, { stream: true });
+                  holderOutput += decoder.decode(chunk.value, { stream: true });
                 }
               })(),
               { timer: defaultTimer, timeoutMs: 10_000, label: "peer lock acquisition" },
             );
-            reader.releaseLock();
             let histogram: ReturnType<typeof monitorEventLoopDelay> | undefined;
             try {
               histogram = monitorEventLoopDelay({ resolution: 5 });
@@ -199,6 +198,7 @@ try {
             };
             const sampler = defaultTimer.setInterval(sample, 5);
             const start = performance.now();
+            const startEpochMs = Date.now();
             let totalMs: number;
             let outcome = "ok";
             try {
@@ -226,10 +226,6 @@ try {
               histogram?.disable();
               maxLoopStallMs = Math.max(maxLoopStallMs, (histogram?.max ?? 0) / 1_000_000);
             }
-            console.log(JSON.stringify({ path, holdMs, totalMs, maxLoopStallMs, outcome }));
-            if (maxLoopStallMs > maxStallMs) {
-              process.exitCode = 1;
-            }
             const exitCode = await raceWithDeadline(holder.exited, {
               timer: defaultTimer,
               timeoutMs: holdMs + 10_000,
@@ -237,6 +233,21 @@ try {
             });
             if (exitCode !== 0) {
               throw new Error(`Holder exited ${exitCode}`);
+            }
+            for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+              holderOutput += decoder.decode(chunk.value, { stream: true });
+            }
+            reader.releaseLock();
+            // When the peer's COMMIT actually landed, measured from the operation's start.
+            const releasedEpochMs = Number(/RELEASED (\d+)/.exec(holderOutput)?.[1]);
+            const peerReleasedMs = Number.isFinite(releasedEpochMs)
+              ? releasedEpochMs - startEpochMs
+              : null;
+            console.log(
+              JSON.stringify({ path, holdMs, totalMs, maxLoopStallMs, peerReleasedMs, outcome }),
+            );
+            if (maxLoopStallMs > maxStallMs) {
+              process.exitCode = 1;
             }
           } finally {
             if (holder.exitCode === null) {

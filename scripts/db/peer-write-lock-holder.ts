@@ -14,7 +14,8 @@ try {
   process.stdout.write("LOCKED\n");
   await Bun.sleep(holdMs);
   db.exec("COMMIT;");
-  process.stdout.write("RELEASED\n");
+  // Wall-clock release time, so the probe can tell a late peer from a stuck app write.
+  process.stdout.write(`RELEASED ${Date.now()}\n`);
 } finally {
   db.close();
 }

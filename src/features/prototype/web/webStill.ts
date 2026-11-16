@@ -6,6 +6,7 @@ import {
   DATA_WINDOW,
   FLEX,
   FLEX_DIRECTION,
+  FONT_FAMILY,
   JUSTIFY_CONTENT,
   RELATIVE,
   STRETCH,
@@ -246,6 +247,18 @@ function placed(
 }
 
 /**
+ * The theme's `typography.fontFamily` on the app window, so every label inherits it, not only nodes
+ * with a `textStyle` role: Android replaces the family in every Material type role, which control
+ * labels (buttons, checkboxes, switches) draw with, and iOS applies the theme design wherever a
+ * node names no family. A node's own `fontFamily` still overrides it; the status bar, outside the
+ * window, keeps the system font.
+ */
+function themedFamily(window: WebElement, style: WebStyleContext): WebElement {
+  const family = style.typography?.fontFamily;
+  return family ? { ...window, style: { ...window.style, [FONT_FAMILY]: family } } : window;
+}
+
+/**
  * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
  * a floating window sits at its `gravity`, moved by its `offset`. The window region holds the
  * content, then its layers; a floating window's transform anchors them.
@@ -456,7 +469,7 @@ export function renderPrototypeStill(
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const placedContent = placed(expanded, root, scope.layers, locale);
+  const placedContent = themedFamily(placed(expanded, root, scope.layers, locale), scope.style);
   // A d-pad device always has a focused item, so a TV still shows where focus starts.
   const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
   const paint = {

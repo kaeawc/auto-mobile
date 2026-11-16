@@ -64,7 +64,8 @@ enum DefaultStoreKitTestSession {
             private func buySynchronously(productId: String) throws {
                 typealias Buy = @convention(c) (
                     AnyObject, Selector, NSString, UnsafeMutablePointer<Unmanaged<NSError>?>?
-                ) -> Bool
+                )
+                    -> Bool
                 let selector = NSSelectorFromString("buyProductWithIdentifier:error:")
                 guard let imp = session.method(for: selector) else {
                     throw VerbatimLocalizedError(message: "unsupported: SKTestSession buyProduct is unavailable")

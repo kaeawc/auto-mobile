@@ -315,25 +315,29 @@ export function rowSequentialChildren(
     if (capped < 0 || index < capped || weighted) {
       return entry;
     }
-    return index === capped && heightBoundOnly
-      ? measured(entry, filledCap(node))
-      : cappedSibling(entry, aspectRatioCap(node, rowHeight), index === capped);
+    const cap = aspectRatioCap(node, rowHeight);
+    return heightBoundOnly && cap !== undefined
+      ? measured(entry, filledCap(node, index === capped))
+      : cappedSibling(entry, cap, index === capped);
   });
 }
 
 /**
  * The measure for a capped aspect ratio in a row whose height is only an upper bound: it takes
  * the row's laid-out height, held under its own `maxHeight` and `maxWidth / ratio`, and its width
- * from the ratio, keeping the capped shrink tier.
+ * from the ratio. The first capped ratio keeps the capped shrink tier, and a later one keeps the
+ * later siblings' tier, as cappedSibling gives them.
  */
-function filledCap(node: Raw): RowMeasure {
+function filledCap(node: Raw, first: boolean): RowMeasure {
   const style = record(node.style);
   const ratio = freeAspectRatio(node) ?? 1;
   const capHeight = Math.min(
     typeof style?.maxHeight === "number" ? style.maxHeight : Infinity,
     typeof style?.maxWidth === "number" ? style.maxWidth / ratio : Infinity,
   );
-  const tier = { shrink: CAPPED_SHRINK, fillHeight: true } as const;
+  const tier: RowMeasure = first
+    ? { shrink: CAPPED_SHRINK, fillHeight: true }
+    : { shrink: LATER_SHRINK, later: true, fillHeight: true };
   return capHeight === Infinity ? tier : { ...tier, capHeight };
 }
 

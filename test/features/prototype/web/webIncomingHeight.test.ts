@@ -8,6 +8,7 @@ import {
 } from "../../../../src/features/prototype/web/webIncomingHeight";
 import {
   CAPPED_SHRINK,
+  LATER_SHRINK,
   rowContentHeight,
   rowMeasured,
   rowMeasureHeight,
@@ -346,8 +347,18 @@ test("a weighted row beside a wrap sibling sizes its capped aspect ratio from it
   const css = nodeCss(ratios[0], { ...light, parentAxis: "row" });
   expect(css).toMatchObject({ height: "100%", "flex-basis": "auto", "flex-grow": "0" });
   expect(css.width).toBeUndefined();
-  // A later capped sibling keeps its shrink tier; the first one alone takes the fill.
-  expect(record(ratios[1]?.[ROW_MEASURE_KEY])?.fillHeight).toBeUndefined();
+  // A later capped ratio sizes from the row's height too, keeping the later siblings' tier, so it
+  // never takes the share's upper bound as a basis.
+  expect(ratios[1]?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: LATER_SHRINK,
+    later: true,
+    fillHeight: true,
+    capHeight: 15,
+  });
+  expect(nodeCss(ratios[1], { ...light, parentAxis: "row" })).not.toHaveProperty(
+    "flex-basis",
+    "200px",
+  );
   // Its own caps hold the height, maxWidth through the ratio.
   const capped = rowMeasured(
     {

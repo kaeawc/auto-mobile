@@ -29,7 +29,7 @@ enum SdkContractRunner {
         var manifest = SdkContractManifest(runId: launch.runId, scenario: launch.scenario)
         let belongsToRun: @Sendable (SdkEventEnvelope) -> Bool
         if launch.scenario == "navigation" {
-            belongsToRun = navigationEvent
+            belongsToRun = { navigationEvent($0) }
         } else {
             belongsToRun = SdkContractBatchTap.networkEvents(forRun: launch.runId)
         }

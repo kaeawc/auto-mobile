@@ -53,6 +53,9 @@ export interface PlanPins {
   androidSerial: string;
   /** UDID of the dedicated capture simulator. */
   iosUdid: string;
+  /** Installed app IDs; default to the store build IDs. */
+  androidAppId?: string;
+  iosAppId?: string;
 }
 
 export const APP_IDS = {
@@ -147,12 +150,15 @@ function appearanceStep(profile: DeviceProfile, appearance: Appearance, pins: Pl
 }
 
 /** Clean slate, then the fixed sample files; the app is relaunched by each screen's own steps. */
-function seedSteps(profile: DeviceProfile): McpStep[] {
+function seedSteps(profile: DeviceProfile, pins: PlanPins): McpStep[] {
   const files = SAMPLE_LIBRARY.map((entry) => ({
     sourcePath: entry.file,
     destinationPath: `${entry.label}.automobile-proto`,
   }));
-  const appId = APP_IDS[profile.platform];
+  const appId =
+    profile.platform === "android"
+      ? (pins.androidAppId ?? APP_IDS.android)
+      : (pins.iosAppId ?? APP_IDS.ios);
   return [
     { kind: "mcp", tool: "launchApp", args: { appId, clearAppData: true } },
     { kind: "mcp", tool: "terminateApp", args: { appId } },
@@ -163,15 +169,22 @@ function seedSteps(profile: DeviceProfile): McpStep[] {
         profile.platform === "android"
           ? { target: { domain: "user_files", namespace: "protoviewer-shots", reset: true }, files }
           : {
-              target: { domain: "app_containers", appId: APP_IDS.ios, container: "documents" },
+              target: {
+                domain: "app_containers",
+                appId: pins.iosAppId ?? APP_IDS.ios,
+                container: "documents",
+              },
               files,
             },
     },
   ];
 }
 
-function screenSteps(profile: DeviceProfile, screen: ScreenId): McpStep[] {
-  const appId = APP_IDS[profile.platform];
+function screenSteps(profile: DeviceProfile, screen: ScreenId, pins: PlanPins): McpStep[] {
+  const appId =
+    profile.platform === "android"
+      ? (pins.androidAppId ?? APP_IDS.android)
+      : (pins.iosAppId ?? APP_IDS.ios);
   const launch: McpStep = { kind: "mcp", tool: "launchApp", args: { appId, coldBoot: true } };
   const open: McpStep = {
     kind: "mcp",
@@ -181,7 +194,7 @@ function screenSteps(profile: DeviceProfile, screen: ScreenId): McpStep[] {
   const capture: McpStep = {
     kind: "mcp",
     tool: "observe",
-    args: { screenshot: "settled", settled: true },
+    args: { screenshot: "settled" },
   };
   switch (screen) {
     case "library":
@@ -245,8 +258,8 @@ export function buildScreenshotPlan(pins: PlanPins): ScreenshotShot[] {
             tool: "statusBar",
             args: { ...STATUS_BAR, platform: profile.platform },
           },
-          ...seedSteps(profile),
-          ...screenSteps(profile, screen),
+          ...seedSteps(profile, pins),
+          ...screenSteps(profile, screen, pins),
         ],
       })),
     ),

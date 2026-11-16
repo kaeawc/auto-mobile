@@ -59,7 +59,10 @@ final class ShareSinkViewController: UIViewController {
             )
             return
         }
-        provider.loadItem(forTypeIdentifier: type.identifier, options: nil) { [weak self] item, error in
+        let continueLoading: @MainActor @Sendable (ShareSinkAttachment) -> Void = { [weak self] attachment in
+            self?.load(providers, index: index + 1, attachments: attachments + [attachment])
+        }
+        provider.loadItem(forTypeIdentifier: type.identifier, options: nil) { item, error in
             let attachment: ShareSinkAttachment
             if error != nil || item == nil {
                 attachment = ShareSinkAttachment(kind: kind, loaded: false)
@@ -73,7 +76,7 @@ final class ShareSinkViewController: UIViewController {
                 attachment = ShareSinkAttachment(kind: kind, loaded: kind == .image)
             }
             DispatchQueue.main.async {
-                self?.load(providers, index: index + 1, attachments: attachments + [attachment])
+                continueLoading(attachment)
             }
         }
     }

@@ -61,6 +61,7 @@ test("runs pinned host steps then a private drive plan and writes only correctly
       writes.set(path, data);
     },
   });
+  const planPath = join("/plans", "android-phone-light-library.plan.json");
   expect(runner.calls[0]).toEqual(["adb", "-s", "serial", "shell", "cmd", "uimode", "night", "no"]);
   expect(runner.calls[1]).toEqual([
     "bun",
@@ -68,9 +69,9 @@ test("runs pinned host steps then a private drive plan and writes only correctly
     "--private",
     "--json",
     "--plan",
-    "/plans/android-phone-light-library.plan.json",
+    planPath,
   ]);
-  const plan = JSON.parse(String(writes.get("/plans/android-phone-light-library.plan.json")));
+  const plan = JSON.parse(String(writes.get(planPath)));
   expect(plan.at(-1).tool).toBe("observe");
   expect(writes.get(join("/out", shots[0]!.destination))).toEqual(png(1080, 2400));
 });

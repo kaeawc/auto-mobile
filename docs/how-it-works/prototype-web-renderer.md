@@ -150,11 +150,11 @@ it inlined per variant.
   landscape view. A second rotate finishes the running turn first. The `prefers-reduced-motion:
   reduce` setting skips the animation.
 - **Rotation lock.** `data-rotation-lock="on"` on `body` locks rotation. While locked the app
-  keeps the frame's natural orientation: rotate still turns the frame, but the same portrait view
-  turns with it and ends sideways in the landscape frame, and the fitted scale uses its turned
-  size. Changing the lock re-lays out in place: the frame does not move, and the outgoing and
-  incoming views cross-fade at their own angles with the platform's turn timing. Reduced motion
-  skips both animations. Nothing in the page sets the attribute yet; the quick settings tile will.
+  keeps the frame's natural orientation. Rotate still turns the frame, but the same portrait view
+  turns with it and ends sideways in the landscape frame. The fitted scale uses its turned size.
+  Changing the lock re-lays out in place: the frame does not move, and the outgoing and incoming
+  views cross-fade at their own angles with the platform's turn timing. Reduced motion skips both
+  animations. Nothing in the page sets the attribute yet; the quick settings tile will.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL, and declares an
   empty `data:` icon so no browser requests `/favicon.ico` against that CSP.

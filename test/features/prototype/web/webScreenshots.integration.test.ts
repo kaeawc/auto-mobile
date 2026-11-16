@@ -469,6 +469,8 @@ for (const engine of ENGINES) {
           await setLock(false);
           const relaying = await midRotation(page);
           expect(relaying.shown.sort()).toEqual(["landscape", "portrait"]);
+          // Each layout fades at its own angle: the portrait view stays sideways as it goes.
+          expect(relaying.angles.map(Math.round).sort((a, b) => a - b)).toEqual([-90, 0]);
           await finishAnimations(page);
           const unlocked = await shownView(page);
           expect(unlocked.orientation).toBe("landscape");

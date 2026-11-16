@@ -352,6 +352,8 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     orientation: bodyData("orientation") as "portrait" | "landscape",
     // The way the frame is held; the layout differs from it only while rotation is locked.
     frame: bodyData("orientation") as "portrait" | "landscape",
+    // The shown view's angle as drawn, kept so a lock change starts from it, not from the new lock.
+    degrees: 0,
     posture: bodyData("posture"),
     // The first apply sets the shown view's screen.
     screen: "",
@@ -397,7 +399,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const apply = () => {
     const shown = current();
     syncScreens(shown);
-    const { degrees } = held();
+    const degrees = (state.degrees = held().degrees);
     views.forEach((view) => {
       view.hidden = view !== shown;
       view.style.transform =
@@ -431,7 +433,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   // Re-lays out for the frame's hold and the lock, then animates from the view shown before.
   const relayOut = (frameTurns: boolean) => {
     turning.forEach((animation) => animation.finish());
-    const [from, stageFrom, before] = [current(), stage.style.transform, held().degrees];
+    const [from, stageFrom, before] = [current(), stage.style.transform, state.degrees];
     if (frameTurns) {
       state.frame = state.frame === "portrait" ? "landscape" : "portrait";
     }

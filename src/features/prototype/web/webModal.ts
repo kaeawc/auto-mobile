@@ -25,6 +25,7 @@ import {
   WHITE_SPACE,
 } from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
+import { webDrawerLayers } from "./webDrawer";
 import { el, type WebElement } from "./webNodes";
 import type { WebRenderKit, WebRenderScope } from "./webRender";
 import { hoistedScope, LAYER_CSS, openLayer, roleColor, type WebLayerRenderer } from "./webSheet";
@@ -263,5 +264,6 @@ export function webModalLayers(kit: WebRenderKit): Readonly<Record<string, WebLa
   return {
     dialog: openLayer((node, scope, path) => dialogLayer(node, scope, path, kit)),
     snackbar: openLayer((node, scope, path) => snackbarLayer(node, scope, path, kit)),
+    ...webDrawerLayers(kit),
   };
 }

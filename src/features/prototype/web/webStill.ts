@@ -227,9 +227,8 @@ function windowDirection(spec: unknown, locale: string): "ltr" | "rtl" | undefin
 function placed(
   spec: unknown,
   content: WebElement | undefined,
-  layers: readonly WebElement[],
+  { layers, style }: Pick<WebRenderScope, "layers" | "style">,
   locale: string,
-  style: WebStyleContext,
 ): WebElement {
   const window = placedWindow(spec, content, layers, style);
   const direction = windowDirection(spec, locale);
@@ -468,7 +467,7 @@ export function renderPrototypeStill(
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const placedContent = placed(expanded, root, scope.layers, locale, scope.style);
+  const placedContent = placed(expanded, root, scope, locale);
   // A d-pad device always has a focused item, so a TV still shows where focus starts.
   const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
   const paint = {

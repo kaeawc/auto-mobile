@@ -47,11 +47,12 @@ sent, replacing backends of the same id, and a saved prototype does not carry th
 - **Actors** play the other side (at most 16, each up to 64 steps). An actor fires on a matching
   successful request (\`on: {route: "POST /messages/:id"}\`) or every N ms (\`every\` with \`maxRuns\`),
   after an optional \`afterMs\` lead, and runs \`do\` in order: \`{append: collection, value}\`,
-  \`{update: collection, id, value}\` (merge), \`{remove: collection, id}\`, each with an optional
-  \`afterMs\` after the previous step. \`value\` and \`id\` bind \`{params.x}\`, \`{query.x}\` and
-  \`{body:/pointer}\` from the triggering request. A failed step is skipped and the run goes on;
+  \`{update: collection, id, value}\` (merge), \`{remove: collection, id}\`, \`{publish: {room, frame}}\`
+  (a frame to a room path, e.g. "typing"), each with an optional \`afterMs\` after the previous step.
+  An actor write broadcasts like a request's. \`value\`, \`id\`, \`room\` and \`frame\` bind
+  \`{params.x}\`, \`{query.x}\` and \`{body:/pointer}\` from the triggering request. A failed step is skipped and the run goes on;
   redefining or clearing the backend cancels pending steps. Poll the collection to see the result.
-  \`publish\`, \`advance\` and \`notify\` steps are not supported yet.
+  \`advance\` and \`notify\` steps are not supported yet.
 - A request's \`timeoutMs\` applies to the mock too, and a response over the 262144-byte cap fails
   with \`too_large\`.
 - **Rooms** serve realtime channels with \`via: "host"\`: a WebSocket to

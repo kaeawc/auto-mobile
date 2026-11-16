@@ -229,7 +229,9 @@ label.
   FAB's `label`, else the icon name.
 - `topAppBar`: title text resolves state placeholders; navigation icon and actions are icon `Button`s
   labelled by `label`, tagged `<testTag>.navigation` and `<testTag>.actions.<index>`, each running its own
-  `onTap`. It draws no system-bar inset; add `safeAreaPadding`.
+  `onTap`. Neither renderer draws a system-bar inset; add top `safeAreaPadding` to the bar or an ancestor.
+  In a fullscreen window without the host dismiss bar, `show` and `patch` warn with the path of a bar that has
+  neither.
 - `divider` has no node unless tagged. `badge` reads as its `text`. `progress`: bound is determinate
   (`value / max` as a range over 0..1), unbound is indeterminate.
 - `dialog` and `snackbar` open while `openWhen` holds (an existing key must be boolean) and draw above the

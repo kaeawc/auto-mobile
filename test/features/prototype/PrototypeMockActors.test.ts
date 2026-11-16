@@ -16,6 +16,8 @@ interface TimelineStep {
   status?: number;
   advanceMs?: number;
   expect?: Record<string, unknown>;
+  join?: string;
+  frames?: Record<string, unknown[]>;
 }
 
 function engine(definition: unknown) {
@@ -34,7 +36,18 @@ describe("PrototypeMockActors fixtures", () => {
     "%s",
     async (_name, entry) => {
       const { timer, backend } = engine(entry.definition);
+      const received = new Map<string, unknown[]>();
       for (const [at, step] of (entry.steps as TimelineStep[]).entries()) {
+        if (step.join !== undefined) {
+          const frames: unknown[] = [];
+          received.set(step.join, frames);
+          const joined = backend.join(
+            step.join,
+            {},
+            { deliver: (data) => frames.push(JSON.parse(data)), close: () => {} },
+          );
+          expect({ at, ok: joined.ok }).toEqual({ at, ok: true });
+        }
         if (step.request !== undefined) {
           const response = await backend.answer({
             ...step.request,
@@ -51,6 +64,9 @@ describe("PrototypeMockActors fixtures", () => {
           for (const [name, items] of Object.entries(step.expect)) {
             expect({ at, name, items: snapshot[name] }).toEqual({ at, name, items });
           }
+        }
+        for (const [room, frames] of Object.entries(step.frames ?? {})) {
+          expect({ at, room, frames: received.get(room) }).toEqual({ at, room, frames });
         }
       }
       backend.dispose();
@@ -126,9 +142,28 @@ describe("mock actor definitions", () => {
 
   test.each([
     [
-      "publish is refused until mock channels exist",
-      { actors: [{ every: 100, maxRuns: 1, do: [{ publish: { channel: "room:1" } }] }] },
-      "publish is not supported",
+      "advance is refused until mock polylines exist",
+      { actors: [{ every: 100, maxRuns: 1, do: [{ advance: { route: "driverPath" } }] }] },
+      "advance is not supported",
+    ],
+    [
+      "publish to a room that is not a path",
+      { actors: [{ every: 100, maxRuns: 1, do: [{ publish: { room: "room:1", frame: {} } }] }] },
+      "Invalid input",
+    ],
+    [
+      "publish with a write in one step",
+      {
+        collections: { a: [] },
+        actors: [
+          {
+            every: 100,
+            maxRuns: 1,
+            do: [{ append: "a", value: {}, publish: { room: "/r", frame: {} } }],
+          },
+        ],
+      },
+      "at most one of append, update, remove or publish",
     ],
     [
       "an unknown collection",
@@ -166,7 +201,7 @@ describe("mock actor definitions", () => {
         collections: { a: [] },
         actors: [{ every: 100, maxRuns: 1, do: [{ append: "a", remove: "a", id: 1, value: {} }] }],
       },
-      "at most one of append, update or remove",
+      "at most one of append, update, remove or publish",
     ],
   ])("%s", (_name, definition, message) => {
     expect(issueOf(definition)).toContain(message);
@@ -179,5 +214,33 @@ describe("mock actor definitions", () => {
     expect(
       issueOf({ actors: [{ ...actor, do: Array.from({ length: 65 }, () => ({ afterMs: 1 })) }] }),
     ).toBeDefined();
+  });
+});
+
+describe("mock actor publish", () => {
+  test("a publish step frames the bound room, is logged as publish, and the run goes on", async () => {
+    const { timer, backend } = engine({
+      collections: { log: [] },
+      rooms: [{ path: "/rooms/:id" }],
+      actors: [
+        {
+          on: { route: "POST /log" },
+          do: [
+            { publish: { room: "/rooms/{body:/room}", frame: "hi" } },
+            { afterMs: 10, append: "log", value: { done: true } },
+          ],
+        },
+      ],
+    });
+    const frames: string[] = [];
+    backend.join("/rooms/a", {}, { deliver: (data) => frames.push(data), close: () => {} });
+    await backend.answer({ method: "POST", path: "/log", query: {}, body: { room: "a" } });
+    timer.advanceTime(10);
+    expect(frames).toEqual(["hi"]);
+    expect(backend.requestLog().filter((entry) => "room" in entry)).toMatchObject([
+      { room: "/rooms/a", from: "publish", data: "hi" },
+    ]);
+    expect(backend.snapshot().log).toHaveLength(2);
+    backend.dispose();
   });
 });

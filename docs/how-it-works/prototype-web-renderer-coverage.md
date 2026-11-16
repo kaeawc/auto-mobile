@@ -129,7 +129,7 @@ here are the Android skin's.
 
 ## Icons
 
-- **Android glyphs.** In an Android frame an icon draws its Material Icons glyph as inline SVG in a
+- **Glyphs.** An icon in either skin (#16526) draws its Material Icons glyph as inline SVG in a
   24 px box. The glyphs are the contract's curated subset of Compose's `material-icons-extended`,
   read from the Apache-2.0 `@material-design-icons/svg` package. The icon uses its `variant`'s
   style, else `filled` as Android falls back, tinted by `currentColor` or its style `color`.
@@ -140,7 +140,5 @@ here are the Android skin's.
 - **Missing glyphs.** The still treats a glyph that would need `<defs>`/`<use>` ids as absent, since
   ids collide when a page draws it twice. A name with no glyph draws a tinted rounded outline
   around its first letter, titled with the name, with reason `iconMissing`.
-- **iOS icons.** An iOS frame draws that outline for every icon, unreported, until its glyph set is
-  decided (#16526).
 - **SVG attributes.** Glyphs are inline SVG. The serializer allows only `viewBox` and
   `preserveAspectRatio` as mixed-case attributes.

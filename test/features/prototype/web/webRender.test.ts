@@ -2120,7 +2120,7 @@ describe("prototype web still parity (#16382)", () => {
   });
 
   test("an icon placeholder shows its name's initial", () => {
-    // An iOS frame has no glyph set yet (#16526), so every icon draws the placeholder.
+    // A still given no glyph source draws every icon as the placeholder.
     const iconOf = (name?: string) =>
       byTag(
         renderPrototypeStill(

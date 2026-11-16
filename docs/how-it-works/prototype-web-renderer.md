@@ -53,7 +53,7 @@ The renderer is described across these pages:
   `iconName` slot: filter chip and segment checks, the select arrow, the date picker's month arrows. Every iconName-valid string
   in `state` or `data` adds a key in `filled` and in each variant an icon node uses, because a state change can hand that name
   to any icon. A
-  value is the allow-listed shapes as SVG markup. iOS-skin glyphs are not included.
+  value is the allow-listed shapes as SVG markup. Both skins draw these Material glyphs (#16526).
 - **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision,mcpSessionId}` (`text/x-kotlin`)
   and `automobile:prototype/{id}/swiftui{?frame,revision,mcpSessionId}` (`text/x-swift`) are read by
   `readPrototypeSourceResource` in `src/features/prototype/prototypeSourceResource.ts`. They render

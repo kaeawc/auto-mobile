@@ -34,6 +34,14 @@ describe("claimRefusalError (#11811)", () => {
     expect(error.message).toContain("Stop it there.");
   });
 
+  test("a deferred claim whose owner another signal revealed names that owner", () => {
+    const error = claimRefusalError(ownership(true, 5150), "emulator-5554");
+
+    expect(error.ownerPid).toBe(5150);
+    expect(error.message).toContain("is claimed by another AutoMobile daemon (PID 5150)");
+    expect(error.message).not.toContain("device claims registry");
+  });
+
   test("ownership without claimDeferred and no ownership both fall back to the foreign-owner wording", () => {
     const withoutDeferred = claimRefusalError({ foreignOwnerPid: () => 7 }, "d1");
     const none = claimRefusalError(undefined, "d2");

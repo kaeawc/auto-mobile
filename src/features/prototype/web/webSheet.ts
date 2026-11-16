@@ -49,7 +49,7 @@ export function roleColor(role: string, style: WebStyleContext): Rgba {
  * side of a pair) at the default scrim opacity, any other role or hex exactly. A value the still
  * cannot resolve draws the default scrim, as Android falls back to it.
  */
-function scrimCss(value: unknown, style: WebStyleContext): string {
+export function scrimCss(value: unknown, style: WebStyleContext): string {
   const token = record(value)?.[style.mode] ?? value ?? "scrim";
   const dim = rgbaCss({ ...roleColor("scrim", style), a: SCRIM_ROLE_ALPHA });
   return token === "scrim" ? dim : (cssColor(token, style) ?? dim);

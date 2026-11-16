@@ -2,6 +2,7 @@ import {
   ABSOLUTE,
   ALIGN_ITEMS,
   ALIGN_SELF,
+  BACKGROUND_COLOR,
   COLUMN,
   DATA_WINDOW,
   FLEX,
@@ -39,6 +40,7 @@ import {
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
+import { scrimCss } from "./webSheet";
 import type { WebSkinId } from "./webSkin";
 import { resolveWebStillAppearance, webAuthoredBackground } from "./webStillAppearance";
 import type { WebStackScreens } from "./webStack";
@@ -227,8 +229,9 @@ function placed(
   content: WebElement | undefined,
   layers: readonly WebElement[],
   locale: string,
+  style: WebStyleContext,
 ): WebElement {
-  const window = placedWindow(spec, content, layers);
+  const window = placedWindow(spec, content, layers, style);
   const direction = windowDirection(spec, locale);
   if (direction === undefined) {
     return window;
@@ -246,14 +249,16 @@ function placed(
 }
 
 /**
- * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
- * a floating window sits at its `gravity`, moved by its `offset`. The window region holds the
- * content, then its layers; a floating window's transform anchors them.
+ * Window placement inside the screen: fullscreen fills it, over its `scrim` when one is set; a
+ * sheet is `height` dp at its `edge`; a floating window sits at its `gravity`, moved by its
+ * `offset`. The window region holds the content, then its layers; a floating window's transform
+ * anchors them.
  */
 function placedWindow(
   spec: unknown,
   content: WebElement | undefined,
   layers: readonly WebElement[],
+  style: WebStyleContext,
 ): WebElement {
   const placement = record(record(record(spec)?.window)?.placement) ?? {};
   const children = [...(content ? [content] : []), ...layers];
@@ -263,7 +268,14 @@ function placedWindow(
   if (placement.type === "floating") {
     return floatingWindow(placement, children);
   }
-  return el("div", { attrs: { [DATA_WINDOW]: "fullscreen" }, style: LAYER }, children);
+  // Android paints a set scrim behind the fullscreen content, resolved like a sheet's scrim slot.
+  const scrim: Record<string, string> =
+    placement.scrim === undefined ? {} : { [BACKGROUND_COLOR]: scrimCss(placement.scrim, style) };
+  return el(
+    "div",
+    { attrs: { [DATA_WINDOW]: "fullscreen" }, style: { ...LAYER, ...scrim } },
+    children,
+  );
 }
 
 function glyphScope(
@@ -456,7 +468,7 @@ export function renderPrototypeStill(
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const placedContent = placed(expanded, root, scope.layers, locale);
+  const placedContent = placed(expanded, root, scope.layers, locale, scope.style);
   // A d-pad device always has a focused item, so a TV still shows where focus starts.
   const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
   const paint = {

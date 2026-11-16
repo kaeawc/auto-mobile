@@ -15,7 +15,7 @@ The still supports these nodes:
   `tabBar`, `iconButton`, `chip`, `slider`, `radioGroup`, `select`, `segmentedButton` and
   `searchBar`.
 - **Pickers, indicators and overlays.** `datePicker`, `timePicker`, `pasteButton`, `badge`,
-  `progress`, `fab`, `chart`, `adaptive`, `bottomSheet`, `dialog` and `snackbar`.
+  `progress`, `fab`, `chart`, `adaptive`, `bottomSheet`, `dialog`, `snackbar` and `drawer`.
 - **Media.** `videoPlayer`, `map`, `cameraPreview` and `castButton`.
 
 It also supports a `row` or `listItem`'s `swipeActions`.

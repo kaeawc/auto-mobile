@@ -57,6 +57,7 @@ import { webIndicatorRenderers, withSwipeActions } from "./webIndicators";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webDrawerLayers } from "./webDrawer";
 import { webModalLayers } from "./webModal";
 import { webRepeatLimit, webRepeatRows } from "./webRepeat";
 import { searchBarFillAxes, webSelectionRenderers } from "./webSelection";
@@ -944,7 +945,11 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   ...webIndicatorRenderers(KIT),
 };
 
-const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
+const WEB_LAYER_RENDERERS = {
+  ...webSheetLayers(KIT),
+  ...webModalLayers(KIT),
+  ...webDrawerLayers(KIT),
+};
 export const WEB_LAYER_RENDERED_TYPES: readonly string[] = Object.keys(WEB_LAYER_RENDERERS);
 
 const WEB_SKINS = webSkins(KIT);

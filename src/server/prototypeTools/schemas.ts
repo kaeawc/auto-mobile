@@ -378,19 +378,19 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .enum(PROTOTYPE_SIMULATE_EVENTS)
         .optional()
         .describe(
-          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push",
+          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player",
         ),
       data: z
         .record(z.string(), z.unknown())
         .optional()
         .describe(
-          "simulate event only: the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON",
+          "simulate event only: notifications.push takes the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON; media.* takes {player, status? (buffering|ready|ended|error), code? (for error), advanceMs? (fake engine only: advance its clock first)}",
         ),
       transport: z
         .enum(PROTOTYPE_PUSH_TRANSPORTS)
         .optional()
         .describe(
-          "simulate event only: connection (the live runtime), system (the platform push path, reaches an app that is not running) or auto (default: connection when connected, else system)",
+          "simulate notifications.push only: connection (the live runtime), system (the platform push path, reaches an app that is not running) or auto (default: connection when connected, else system)",
         ),
       id: z
         .string()

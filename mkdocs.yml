@@ -439,7 +439,9 @@ nav:
       - "macOS CI capacity plan": how-it-works/ci/macos-capacity-plan.md
       - "macOS-only iOS tests": how-it-works/ci/macos-only-tests.md
       - "Pre-push vs CI misses": how-it-works/ci/prepush-ci-misses.md
-      - "Interaction loop": how-it-works/mcp/interaction-loop.md
+      - "Interaction loop":
+          - "Overview": how-it-works/mcp/interaction-loop.md
+          - "Default compact action metadata": how-it-works/mcp/interaction-loop-compaction.md
       - "Stylus, pressure and hover injection": how-it-works/mcp/stylus-pressure-hover-injection.md
       - "Daemon": how-it-works/mcp/daemon.md
       - "Push-stream backpressure": push-stream-backpressure.md
@@ -482,6 +484,7 @@ nav:
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
       - "2026-11-15: Move to Zod 4 and override Jimp's Zod 3 range": devlog/2026-11-15-zod-4-jimp-override.md
+      - "2026-11-15: Stateless success reductions in the response envelope": devlog/2026-11-15-stateless-envelope-reductions.md
       - "2026-11-15: Windows MSI signing with Azure Trusted Signing": devlog/2026-11-15-windows-msi-trusted-signing.md
       - "2026-11-15: Split over-length how-it-works pages and enforce their readability budget": devlog/2026-11-15-how-it-works-readability-enforced.md
       - "2026-11-15: Xcode 27.2 advisory lane as its own workflow": devlog/2026-11-15-xcode-27-2-advisory-workflow.md

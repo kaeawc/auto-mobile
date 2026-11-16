@@ -100,7 +100,10 @@ const isRowContent = (parentIsContent: boolean, id: string): boolean =>
 // fallback. A group header must not inherit fields from its sibling child rows.
 export const readTrayNotificationFields = (
   root: ViewHierarchyNode,
-  context: TrayNotificationListContext,
+  context: Pick<
+    TrayNotificationListContext,
+    "collectNotificationCandidates" | "createSubHierarchy" | "extractNodeTextCandidates"
+  >,
 ) => {
   const { collectNotificationCandidates, createSubHierarchy, extractNodeTextCandidates } = context;
   const childRows = new Set(
@@ -362,7 +365,7 @@ const readDumpsysNotificationOutput = async (
   }
 };
 
-const readDumpsysNotificationRecords = async (
+export const readDumpsysNotificationRecords = async (
   adb: SystemTrayAdb,
   signal?: AbortSignal,
 ): Promise<DumpsysNotificationRecord[] | undefined> => {

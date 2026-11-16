@@ -13,8 +13,9 @@ export const IOS_RUNNER_COMMAND_APPLICABILITY = {
   set_network_mock_rules: "both",
   set_hinge_angle: "simulator",
   set_voiceover_state: "physical",
+  request_storekit: "simulator",
 } as const satisfies Record<
-  (typeof IOS_RUNNER_FEATURE_COMMANDS)[number] | "set_voiceover_state",
+  (typeof IOS_RUNNER_FEATURE_COMMANDS)[number] | "set_voiceover_state" | "request_storekit",
   Applicability
 >;
 

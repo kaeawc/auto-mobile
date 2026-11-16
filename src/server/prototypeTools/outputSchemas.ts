@@ -1,9 +1,10 @@
 import { prototypeDegradedEffectSchema } from "../../features/prototype/prototypeDegradedEffects";
 import { z } from "zod/v4";
+import { PROTOTYPE_PUSH_DELIVERIES } from "../../features/prototype/prototypePushSimulate";
 import {
-  PROTOTYPE_PUSH_DELIVERIES,
-  PROTOTYPE_PUSH_ERROR_CODES,
-} from "../../features/prototype/prototypePushSimulate";
+  PROTOTYPE_MEDIA_ENGINES,
+  PROTOTYPE_MEDIA_SIMULATE_ERROR_CODES,
+} from "../../features/prototype/prototypeMediaSimulate";
 import { MAX_PROTOTYPE_FEEDBACK_LOG_ENTRIES } from "../../features/prototype/prototypeFeedbackLog";
 import {
   PROTOTYPE_EVENT_KINDS,
@@ -449,11 +450,15 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe("simulate event only: foreground, background or notification"),
   code: z
-    .enum(PROTOTYPE_PUSH_ERROR_CODES)
+    .enum(PROTOTYPE_MEDIA_SIMULATE_ERROR_CODES)
     .optional()
     .describe(
-      "simulate event only: invalid_args (payload refused), unavailable (no route) or platform_error",
+      "simulate event only: invalid_args (payload refused), unavailable (no route), unsupported (media advanceMs on a native engine) or platform_error",
     ),
+  mediaEngine: z
+    .enum(PROTOTYPE_MEDIA_ENGINES)
+    .optional()
+    .describe("simulate media event only: the engine the player runs on, fake or native"),
   success: z.boolean(),
   error: z.string().optional(),
   prototypes: z

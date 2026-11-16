@@ -1,0 +1,689 @@
+[
+  {
+    "name": "a playing player reaches its end on the virtual clock",
+    "steps": [
+      {
+        "op": "load",
+        "player": "main",
+        "durationMs": 3000
+      },
+      {
+        "op": "play",
+        "player": "main"
+      },
+      {
+        "op": "advance",
+        "ms": 1000
+      },
+      {
+        "op": "advance",
+        "ms": 2500
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ended",
+            "playing": false,
+            "positionMs": 3000
+          }
+        },
+        {
+          "name": "media.ended",
+          "payload": {
+            "player": "main"
+          }
+        }
+      ],
+      "state": {
+        "players": {
+          "main": {
+            "playing": false,
+            "positionMs": 3000,
+            "durationMs": 3000,
+            "buffering": false,
+            "status": "ended"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "an error-state spec is driven to error and back to ready",
+    "steps": [
+      {
+        "op": "load",
+        "player": "main",
+        "durationMs": 10000
+      },
+      {
+        "op": "play",
+        "player": "main"
+      },
+      {
+        "op": "simulate",
+        "event": "media.statusChanged",
+        "data": {
+          "player": "main",
+          "status": "error",
+          "code": "network",
+          "advanceMs": 5000
+        }
+      },
+      {
+        "op": "simulate",
+        "event": "media.statusChanged",
+        "data": {
+          "player": "main",
+          "status": "ready"
+        }
+      },
+      {
+        "op": "play",
+        "player": "main"
+      },
+      {
+        "op": "advance",
+        "ms": 1000
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "error",
+            "playing": false,
+            "positionMs": 5000
+          }
+        },
+        {
+          "name": "media.error",
+          "payload": {
+            "player": "main",
+            "code": "network"
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 5000
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 5000
+          }
+        }
+      ],
+      "state": {
+        "players": {
+          "main": {
+            "playing": true,
+            "positionMs": 6000,
+            "durationMs": 10000,
+            "buffering": false,
+            "status": "ready"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "buffering stalls the playhead without an event",
+    "steps": [
+      {
+        "op": "load",
+        "player": "main",
+        "durationMs": 8000
+      },
+      {
+        "op": "play",
+        "player": "main"
+      },
+      {
+        "op": "advance",
+        "ms": 1000
+      },
+      {
+        "op": "simulate",
+        "event": "media.statusChanged",
+        "data": {
+          "player": "main",
+          "status": "buffering"
+        }
+      },
+      {
+        "op": "advance",
+        "ms": 2000
+      },
+      {
+        "op": "simulate",
+        "event": "media.statusChanged",
+        "data": {
+          "player": "main",
+          "status": "ready",
+          "advanceMs": 500
+        }
+      },
+      {
+        "op": "advance",
+        "ms": 1000
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "main",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 0
+          }
+        }
+      ],
+      "state": {
+        "players": {
+          "main": {
+            "playing": true,
+            "positionMs": 2000,
+            "durationMs": 8000,
+            "buffering": false,
+            "status": "ready"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "media.ended and media.error apply once and an errored player ignores play and seek",
+    "steps": [
+      {
+        "op": "load",
+        "player": "a",
+        "durationMs": 4000
+      },
+      {
+        "op": "play",
+        "player": "a"
+      },
+      {
+        "op": "simulate",
+        "event": "media.ended",
+        "data": {
+          "player": "a"
+        }
+      },
+      {
+        "op": "simulate",
+        "event": "media.ended",
+        "data": {
+          "player": "a"
+        }
+      },
+      {
+        "op": "play",
+        "player": "a"
+      },
+      {
+        "op": "simulate",
+        "event": "media.error",
+        "data": {
+          "player": "a",
+          "code": "decode"
+        }
+      },
+      {
+        "op": "simulate",
+        "event": "media.error",
+        "data": {
+          "player": "a",
+          "code": "decode"
+        }
+      },
+      {
+        "op": "play",
+        "player": "a"
+      },
+      {
+        "op": "seek",
+        "player": "a",
+        "positionMs": 100
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "a",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "a",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "a",
+            "status": "ended",
+            "playing": false,
+            "positionMs": 4000
+          }
+        },
+        {
+          "name": "media.ended",
+          "payload": {
+            "player": "a"
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "a",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "a",
+            "status": "error",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.error",
+          "payload": {
+            "player": "a",
+            "code": "decode"
+          }
+        }
+      ],
+      "state": {
+        "players": {
+          "a": {
+            "playing": false,
+            "positionMs": 0,
+            "durationMs": 4000,
+            "buffering": false,
+            "status": "error",
+            "error": "decode"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "a looping player wraps instead of ending",
+    "steps": [
+      {
+        "op": "load",
+        "player": "bg",
+        "durationMs": 3000,
+        "loop": true
+      },
+      {
+        "op": "play",
+        "player": "bg"
+      },
+      {
+        "op": "advance",
+        "ms": 7500
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "bg",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "bg",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 0
+          }
+        }
+      ],
+      "state": {
+        "players": {
+          "bg": {
+            "playing": true,
+            "positionMs": 1500,
+            "durationMs": 3000,
+            "buffering": false,
+            "status": "ready"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "a source with unknown duration never ends",
+    "steps": [
+      {
+        "op": "load",
+        "player": "live",
+        "durationMs": -1
+      },
+      {
+        "op": "play",
+        "player": "live"
+      },
+      {
+        "op": "advance",
+        "ms": 60000
+      },
+      {
+        "op": "pause",
+        "player": "live"
+      },
+      {
+        "op": "seek",
+        "player": "live",
+        "positionMs": 5000
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "live",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "live",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "live",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 60000
+          }
+        }
+      ],
+      "state": {
+        "players": {
+          "live": {
+            "playing": false,
+            "positionMs": 5000,
+            "durationMs": -1,
+            "buffering": false,
+            "status": "ready"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "seeking back from the end resumes ready",
+    "steps": [
+      {
+        "op": "load",
+        "player": "s",
+        "durationMs": 2000
+      },
+      {
+        "op": "play",
+        "player": "s"
+      },
+      {
+        "op": "advance",
+        "ms": 2000
+      },
+      {
+        "op": "seek",
+        "player": "s",
+        "positionMs": 500
+      },
+      {
+        "op": "play",
+        "player": "s"
+      },
+      {
+        "op": "seek",
+        "player": "s",
+        "positionMs": 99999
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "s",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "s",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "s",
+            "status": "ended",
+            "playing": false,
+            "positionMs": 2000
+          }
+        },
+        {
+          "name": "media.ended",
+          "payload": {
+            "player": "s"
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "s",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 500
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "s",
+            "status": "ready",
+            "playing": true,
+            "positionMs": 500
+          }
+        }
+      ],
+      "state": {
+        "players": {
+          "s": {
+            "playing": true,
+            "positionMs": 2000,
+            "durationMs": 2000,
+            "buffering": false,
+            "status": "ready"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "released and unknown players and invalid events are refused without a change",
+    "steps": [
+      {
+        "op": "load",
+        "player": "a",
+        "durationMs": 1000
+      },
+      {
+        "op": "release",
+        "player": "a"
+      },
+      {
+        "op": "simulate",
+        "event": "media.statusChanged",
+        "data": {
+          "player": "a",
+          "status": "ready"
+        },
+        "error": "unknown_player"
+      },
+      {
+        "op": "release",
+        "player": "a",
+        "error": "unknown_player"
+      },
+      {
+        "op": "load",
+        "player": "b",
+        "durationMs": 1000
+      },
+      {
+        "op": "simulate",
+        "event": "media.statusChanged",
+        "data": {
+          "player": "b",
+          "status": "error"
+        },
+        "error": "invalid_args"
+      },
+      {
+        "op": "simulate",
+        "event": "media.error",
+        "data": {
+          "player": "b",
+          "code": "bogus"
+        },
+        "error": "invalid_args"
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "a",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        },
+        {
+          "name": "media.statusChanged",
+          "payload": {
+            "player": "b",
+            "status": "ready",
+            "playing": false,
+            "positionMs": 0
+          }
+        }
+      ],
+      "state": {
+        "players": {
+          "b": {
+            "playing": false,
+            "positionMs": 0,
+            "durationMs": 1000,
+            "buffering": false,
+            "status": "ready"
+          }
+        }
+      }
+    }
+  }
+]

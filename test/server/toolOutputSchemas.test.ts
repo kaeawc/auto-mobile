@@ -15,6 +15,7 @@ import {
   setDeviceStateResultSchema,
 } from "../../src/server/toolOutputSchemas";
 import { describe, expect, test } from "bun:test";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { toJSONSchema, type z } from "zod/v4";
 import {
   elementBoundsSchema,
@@ -493,18 +494,51 @@ describe("observationOutputSchema: discriminated union of full observation vs di
     expect((viaUnion as { isDiff?: true }).isDiff).toBe(true);
   });
 
-  test("rejects a diff with no `skeleton` at all (item 4.1: it must ALWAYS be present)", () => {
+  test("rejects a diff with no `skeleton` unless it is the `unchanged: true` no-op (item 4.1, #18348)", () => {
     const diffMissingSkeleton = { isDiff: true, added: [], removed: [], changed: [] };
     expect(() => observeDiffSchema.parse(diffMissingSkeleton)).toThrow();
+    expect(() => observeDiffSchema.parse({ ...diffMissingSkeleton, unchanged: false })).toThrow();
+    const noOp = observeDiffSchema.parse({ isDiff: true, unchanged: true, changed: [] });
+    expect(noOp.unchanged).toBe(true);
+    expect(noOp.skeleton).toBeUndefined();
+  });
+
+  test("the advertised diff arm states the skeleton-or-unchanged rule too (#18348)", () => {
+    const tapOn = generatedDefinitions.find((definition) => definition.name === "tapOn")!;
+    const outputSchema = tapOn.outputSchema as {
+      $defs?: object;
+      properties: { observation: { anyOf: object[] } };
+    };
+    // Only the diff arm (with the shared `$defs` it references): the full arm
+    // would accept the object on its own terms.
+    const validate = compileAjv2020({
+      ...outputSchema.properties.observation.anyOf[0],
+      $defs: outputSchema.$defs,
+    });
+    const identity = {
+      isDiff: true,
+      observationId: "o1",
+      deviceId: "emulator-5554",
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      changed: [],
+    };
+    expect(validate(identity)).toBe(false);
+    expect(validate({ ...identity, unchanged: true })).toBe(true);
+    expect(validate({ ...identity, skeleton: [] })).toBe(true);
   });
 
   test("the FULL union rejects a malformed diff — it cannot silently fall through to the permissive full-observation arm (PR #6242 review PRRT_kwDOP-GF5M6fq3iN)", () => {
-    // Before the fix, this object failed `observeDiffSchema` (missing the
-    // mandatory `skeleton`) but then matched `observationSummarySchema` anyway,
-    // since every field there was optional and `.passthrough()` let `isDiff`
-    // and the rest ride through unchecked.
+    // Before the fix, this object failed `observeDiffSchema` (no `skeleton` and
+    // not the `unchanged: true` no-op) but then matched `observationSummarySchema`
+    // anyway, since every field there was optional and `.passthrough()` let
+    // `isDiff` and the rest ride through unchecked.
     const malformedDiff = { isDiff: true, added: [], removed: [], changed: [] };
     expect(() => observationOutputSchema.parse(malformedDiff)).toThrow();
+    // A diff missing its required `changed` array is malformed even when unchanged.
+    expect(() => observationOutputSchema.parse({ isDiff: true, unchanged: true })).toThrow();
+    // The explicit no-op is the one skeleton-less diff the union accepts.
+    const noOp = observationOutputSchema.parse({ isDiff: true, unchanged: true, changed: [] });
+    expect((noOp as { unchanged?: true }).unchanged).toBe(true);
   });
 
   test("observationSummarySchema itself rejects `isDiff: true` — it is a genuinely-typed member, not just permissively passed through", () => {

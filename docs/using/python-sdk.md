@@ -1,8 +1,8 @@
 # Python SDK
 
-The Python SDK is an async client for the AutoMobile daemon. It can check and start
-the daemon, and open an MCP session that lists tools, calls any tool by name, and
-reads resources. It needs Python 3.10 or newer and has no third-party dependencies.
+The Python SDK is an async client for the AutoMobile daemon. It can check, start,
+restart and stop the daemon, run `doctor` diagnostics, and open an MCP session that
+lists tools, calls any tool by name, and reads resources. It needs Python 3.10 or newer and has no third-party dependencies.
 
 It is not on PyPI yet. Install it from a checkout of the repository:
 
@@ -51,6 +51,25 @@ asyncio.run(main())
 - `await client.ensure_running(timeout=90)` returns the status of a running daemon,
   starting one first when none is running. The whole call, including start-up, is
   bounded by `timeout` seconds.
+- `await client.restart(timeout=90)` replaces the running daemon, or starts one when
+  none is running, and returns the new daemon's status. `timeout` bounds the whole
+  call. The new daemon restores sessions as [device ownership](device-ownership.md)
+  describes.
+- `await client.shutdown(timeout=30)` stops the daemon and returns the status read
+  afterwards. Stopping a daemon that is not running succeeds. It raises
+  `DaemonUnavailableError` if the daemon still reports running.
+- `await client.doctor(android=False, ios=False, timeout=120)` runs the read-only
+  `doctor` checks and returns a `DoctorReport`. Pass `android=True` or `ios=True` to
+  run only that platform's checks. Failed checks do not raise an error: `ok` is false
+  when any check failed. The report has `sections` (a mapping from section name to
+  `DoctorCheck` items), `checks` (all of them), `passed`, `warnings`, `failed`,
+  `skipped`, `recommendations`, `version`, `platform`, `arch`, and the full object as
+  `raw`. Each `DoctorCheck` has `name`, `status` (`pass`, `warn`, `fail` or `skip`),
+  `message`, `value`, `detail` and `recommendation`.
+
+If a lifecycle call is cancelled or times out, the `auto-mobile` command it ran is
+killed. A restart or stop that was already under way may still finish, so call
+`status()` to see the result.
 
 ## Sessions
 
@@ -86,7 +105,7 @@ token.
 
 | Error                       | When                                                                                                                                                                                                                             | What to do                                                                                                                                                                           |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `DaemonCommandError`        | An `auto-mobile --daemon` command failed, timed out, or the executable was not found.                                                                                                                                            | Read `exit_code` and `stderr_tail`; check `executable`.                                                                                                                              |
+| `DaemonCommandError`        | An `auto-mobile` command failed, timed out, or the executable was not found.                                                                                                                                                     | Read `exit_code` and `stderr_tail`; check `executable`.                                                                                                                              |
 | `DaemonUnavailableError`    | The daemon is not running, cannot be reached, is shutting down, or is still starting past the deadline.                                                                                                                          | Call `ensure_running()`, or retry with a longer timeout.                                                                                                                             |
 | `DaemonAuthenticationError` | No access token is published, the token file cannot be read or is unsafe (`UnsafeTokenFileError`: a symlink, not a regular file, another owner, or a mode other than `0600`), or the daemon refused the token after one re-read. | Make sure `env` names the same daemon the token belongs to (`AUTOMOBILE_AUX_SOCKET_DIR`); for `UnsafeTokenFileError`, replace the path with a regular file you own with mode `0600`. |
 | `McpError`                  | The daemon returned a JSON-RPC error, for example an unknown tool. `code`, `data` are set.                                                                                                                                       | Fix the request.                                                                                                                                                                     |

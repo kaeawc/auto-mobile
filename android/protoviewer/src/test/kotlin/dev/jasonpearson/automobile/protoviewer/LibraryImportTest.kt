@@ -1,10 +1,23 @@
 package dev.jasonpearson.automobile.protoviewer
 
 import dev.jasonpearson.automobile.protocol.PrototypeBundle
+import dev.jasonpearson.automobile.protocol.PrototypeBundleExport
+import dev.jasonpearson.automobile.protocol.PrototypeBundleExportInput
+import dev.jasonpearson.automobile.protocol.PrototypeBundleExportResult
 import dev.jasonpearson.automobile.protocol.PrototypeBundleLimits
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.util.zip.CRC32
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
 import org.junit.BeforeClass
 import org.junit.Test
@@ -83,7 +96,11 @@ class LibraryImportTest {
         LibraryImportCommit { _, _, _, _ -> error("Must not commit") },
       )
     assertEquals(
-      LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON),
+      LibraryImportResult.Rejected(
+        "spec.json",
+        UNSUPPORTED_PROTOTYPE_REASON,
+        listOf("prototype_window_chrome_v1"),
+      ),
       unsupported.import(LibraryImportRequest(ImportAction.View, "content://external/document")),
     )
   }
@@ -93,6 +110,7 @@ class LibraryImportTest {
     bytes = ImportBundleFixtures.hostile
     val result = import() as LibraryImportResult.Rejected
     assertEquals("../spec.json", result.path)
+    assertNull(result.missingCapabilities)
     assertNull(committed)
   }
 
@@ -189,6 +207,42 @@ class LibraryImportTest {
   }
 
   @Test
+  fun unknownBundleRequirementsAreNamedInSortedOrder() {
+    bytes =
+      withRequirements(
+        ImportBundleFixtures.chromelessWindowChrome,
+        listOf("future_a", "future_z", "prototype_window_chrome_v1"),
+      )
+    val result = import() as LibraryImportResult.Rejected
+    assertEquals(UNSUPPORTED_PROTOTYPE_REASON, result.reason)
+    assertEquals(listOf("future_a", "future_z"), result.missingCapabilities)
+    assertNull(committed)
+  }
+
+  @Test
+  fun specOnlyCapabilityFailureHasAnEmptyMissingList() {
+    val spec = SPEC.replace("\"root\":", "\"data\":{},\"root\":").toByteArray()
+    val bundle =
+      PrototypeBundleExport.export(PrototypeBundleExportInput(spec, { null }, { null }))
+        as PrototypeBundleExportResult.Success
+    val old =
+      ValidatedLibraryImporter(
+        emptySet(),
+        ImportContent { withRequirements(bundle.bytes, emptyList()).inputStream() },
+        AutoMobilePrototype.capabilities - "prototype_data_model_v1",
+        ImportAssetCheck { null },
+        LibraryImportCommit { _, _, _, _ -> error("Must not commit") },
+      )
+    val result =
+      old.import(LibraryImportRequest(ImportAction.View, "content://external/spec"))
+        as LibraryImportResult.Rejected
+    assertEquals(
+      LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON, emptyList()),
+      result,
+    )
+  }
+
+  @Test
   fun pixelFailureNamesAssetAndDoesNotCommit() {
     invalidAsset = "image"
     assertEquals(LibraryImportResult.Rejected("image", "Invalid image dimensions"), import())
@@ -217,6 +271,39 @@ class LibraryImportTest {
     bytes = SPEC.replace("\"id\":\"same-spec-id\"", "\"id\":\"a\",\"id\":\"b\"").toByteArray()
     assertTrue(import() is LibraryImportResult.Rejected)
     assertNull(committed)
+  }
+
+  private fun withRequirements(fixture: ByteArray, requires: List<String>): ByteArray {
+    val output = ByteArrayOutputStream()
+    ZipOutputStream(output).use { zip ->
+      ZipInputStream(fixture.inputStream()).use { input ->
+        var entry = input.nextEntry
+        while (entry != null) {
+          val original = input.readBytes()
+          val content =
+            if (entry.name == "bundle.json") {
+              val manifest = Json.parseToJsonElement(original.decodeToString()).jsonObject
+              JsonObject(
+                  manifest + ("requires" to JsonArray(requires.map(::JsonPrimitive))),
+                )
+                .toString()
+                .toByteArray()
+            } else original
+          // The bundle reader requires sizes and CRC in the header, without a data descriptor.
+          zip.putNextEntry(
+            ZipEntry(entry.name).apply {
+              method = ZipEntry.STORED
+              size = content.size.toLong()
+              crc = CRC32().apply { update(content) }.value
+            },
+          )
+          zip.write(content)
+          zip.closeEntry()
+          entry = input.nextEntry
+        }
+      }
+    }
+    return output.toByteArray()
   }
 
   private fun rejectFixture(fixture: ByteArray, path: String) {

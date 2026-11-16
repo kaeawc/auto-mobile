@@ -37,6 +37,10 @@ tasks.withType<Test>().configureEach {
     .dir(layout.projectDirectory.dir("../../test/fixtures/android-contract"))
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("androidWireContractFixtures")
+  inputs
+    .dir(layout.projectDirectory.dir("../../test/fixtures/prototype-notifications"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeNotificationsReportFixtures")
   val fixtureOutput = providers.environmentVariable("AUTOMOBILE_FIXTURE_OUT_DIR")
   inputs.property("wireContractOutputDirectory", fixtureOutput.orElse(""))
   if (fixtureOutput.isPresent) {

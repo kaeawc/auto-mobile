@@ -69,7 +69,8 @@ default.
 
 ## Event dispatch
 
-`VirtualPrototypeDevice.dispatch({id, kind, name, payload?, state?, pages?, stacks?, context?})`
+`VirtualPrototypeDevice.dispatch({id, kind, name, payload?, state?, pages?, stacks?, context?,
+contextTruncated?})`
 is the single entry for user input. It merges state, pages and stacks, allocates the next
 sequence and pushes a `prototype_event` to the transport's listeners, so the event coordinator
 buffers it and awaitEvent returns it as from hardware. The keys an input changes are stamped with
@@ -83,26 +84,34 @@ host's `VirtualPrototypeInputs`, which the prototype runtime publishes through
 `setDaemonVirtualPrototypeInputsReader`. Before the first prototype call there is none, and both
 tools fail with "call prototype show first".
 
-`VirtualPrototypeInputs` reads `snapshots()` (newest prototype first) and plans with
-`virtualPrototypeInteraction.ts`:
+`VirtualPrototypeInputs` reads `snapshots()` (newest show first, so showing an id again brings it
+to the front) and plans with `virtualPrototypeInteraction.ts`:
 
 - **Target.** A depth-first walk of what a device would draw: nodes whose `visibleWhen` holds,
   open `openWhen` overlays, an expanded search bar's results (`activeKey` true), the current
   pager page and the top stack screen. Repeat templates are skipped. A dialog's `confirm` and
-  `dismiss` buttons are targets too. `decideVirtualCondition` evaluates `visibleWhen` and
-  `enabledWhen` as `PrototypeCondition.holds` does, string operators included. A `data`,
-  `platform` or `valid` condition on the path to the match refuses the input. An exact,
-  case-insensitive match on the rendered text wins over a substring match: `text` and `title`
-  with `{key}` state tokens interpolated, `label`, `headline`, `placeholder`,
-  `contentDescription`, and a `textField`'s or `searchBar`'s current value.
-  `elementId`/`testTag` match `id` or `testTag`. The handler is the nearest ancestor-or-self with
-  an interaction. A disabled handler (`enabledWhen`), a toggle on a non-boolean key, or no handler
-  at all is `handled: false` and raises nothing.
+  `dismiss` buttons, a snackbar's `action` and each `tabBar` or `bottomNav` item are targets too.
+- **Modals.** While a `dialog`, `bottomSheet`, `drawer` or `menu` is open, only nodes in the
+  topmost one, or in an overlay later in tree order, are reachable. A snackbar or tooltip never
+  blocks.
+- **Conditions.** `decideVirtualCondition` evaluates `visibleWhen` and `enabledWhen` as
+  `PrototypeCondition.holds` does, string operators included. A `data`, `platform` or `valid`
+  condition on the path to the match refuses the input.
+- **Match.** An exact, case-insensitive match on the rendered text wins over a substring match.
+  Rendered text is `text` and `title` with `{key}` state tokens interpolated, `label`,
+  `headline`, `placeholder`, `contentDescription`, and a `textField`'s or `searchBar`'s current
+  value. `elementId`/`testTag` match `id` or `testTag`. The handler is the nearest
+  ancestor-or-self with an interaction. A disabled handler (`enabledWhen`), a toggle on a
+  non-boolean key, or no handler at all is `handled: false` and raises nothing.
 - **Interaction.** `textField`/`searchBar` with a `stateKey` take focus. `switch`, `checkbox` and
-  `chip` with a `stateKey` toggle it. A dialog button closes its `openWhen`. Any node with
-  `onTap` runs it.
+  `chip` with a `stateKey` toggle it, as does a `listItem` with a trailing `switch` or `checkbox`.
+  A dialog button or snackbar action closes its `openWhen`. A bar item selects its index: with a
+  `pager`, a `setPage` before the bar's `onTap`; otherwise a write to the bar's `stateKey`. Any
+  node with `onTap` runs it.
 - **Order.** This follows `PrototypeRuntime.control` and `run`. The control's own write and its
-  `change` come first, then the actions in order. `emit` carries the state at that point. One trailing
+  `change` come first, then the actions in order. `emit` carries the state at that point.
+  Its context goes through `resolveEmitContext`, so the 4096-byte cut and `contextTruncated`
+  match the device. One trailing
   `change` names every key the list changed. `setPage` raises `page_changed`, then its `stateKey`
   `change`. Stack actions raise `screen_changed`. `dismiss` stops the list and raises
   `dismissed {reason: "user"}` with no trailing change.
@@ -110,16 +119,18 @@ tools fail with "call prototype show first".
   while the interaction is planned. A rejected write fails the input before any event or state
   lands. Pager-bound keys are clamped and their pagers rebound to the written page. After the
   events, `settle` leaves the final state, pages and stacks on the device even when no trailing
-  `change` carries them.
+  `change` carries them. It also stamps keys written and restored with no event between, so a
+  stale `/state` patch still conflicts on them.
 - **Refusal.** `virtualInteractionRefusal` checks the whole list before anything runs. It refuses
   actions outside the runnable set, `emit.requireValid`, emit context other than
   `state`/`page`/`data`/`value`, non-scalar `setState` values, and stack actions with `params` or on
   a stack with `routes`.
 - **Text.** `typeText` and `clearText` write the focused key as one control write (one `change`),
-  truncated to the field's `maxLength`. They fail when the focused field is no longer shown and
+  cut to the field's current `maxLength` in UTF-16 code units, never splitting a surrogate pair.
+  They fail when the focused field is no longer shown and
   enabled. `hideKeyboard` and dismissal clear focus. A `sendKeys` selector goes through `focusOn`,
   which focuses a matched `textField` or `searchBar` without running any tap handler and refuses
-  any other match.
+  any other match. `layer: "app"` fails, since the virtual device has no app below the prototype.
 
 Timers and `simulate` (`prototype_timers_v1`) are unsupported. There is no screenshot, `tapAt` or
 node bounds, because nothing lays the page out without a browser, and there is no project export.

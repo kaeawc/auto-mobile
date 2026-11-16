@@ -1,5 +1,5 @@
 {
-  "description": "Mock actor timelines (#14211) under a fake clock: each step sends a request, advances the clock, or expects collection contents.",
+  "description": "Mock actor timelines (#14211) under a fake clock: each step sends a request, joins a room, advances the clock, or expects collection contents or the frames a room received.",
   "cases": [
     {
       "name": "a posted message gets a typed reply after its delays",
@@ -45,6 +45,112 @@
             ]
           }
         }
+      ]
+    },
+    {
+      "name": "a posted message shows typing in its room, then the reply broadcasts there",
+      "definition": {
+        "collections": { "messages": [] },
+        "rooms": [{ "path": "/rooms/:roomId" }],
+        "broadcasts": {
+          "messages": {
+            "room": "/rooms/{item:/roomId}",
+            "frame": { "type": "message", "item": "{item}" }
+          }
+        },
+        "actors": [
+          {
+            "on": { "route": "POST /messages" },
+            "afterMs": 800,
+            "do": [
+              {
+                "publish": {
+                  "room": "/rooms/{body:/roomId}",
+                  "frame": { "type": "typing", "user": "bo" }
+                }
+              },
+              {
+                "afterMs": 1500,
+                "append": "messages",
+                "value": { "user": "bo", "text": "On it!", "roomId": "{body:/roomId}" }
+              }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        { "join": "/rooms/general" },
+        { "join": "/rooms/other" },
+        {
+          "request": {
+            "method": "POST",
+            "path": "/messages",
+            "body": { "id": 1, "user": "me", "text": "ship it?", "roomId": "general" }
+          },
+          "status": 201
+        },
+        {
+          "frames": {
+            "/rooms/general": [
+              {
+                "type": "message",
+                "item": { "id": 1, "user": "me", "text": "ship it?", "roomId": "general" }
+              }
+            ],
+            "/rooms/other": []
+          }
+        },
+        { "advanceMs": 800 },
+        {
+          "frames": {
+            "/rooms/general": [
+              {
+                "type": "message",
+                "item": { "id": 1, "user": "me", "text": "ship it?", "roomId": "general" }
+              },
+              { "type": "typing", "user": "bo" }
+            ]
+          }
+        },
+        { "advanceMs": 1500 },
+        {
+          "frames": {
+            "/rooms/general": [
+              {
+                "type": "message",
+                "item": { "id": 1, "user": "me", "text": "ship it?", "roomId": "general" }
+              },
+              { "type": "typing", "user": "bo" },
+              {
+                "type": "message",
+                "item": { "user": "bo", "text": "On it!", "roomId": "general", "id": "fake-1" }
+              }
+            ],
+            "/rooms/other": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "an every actor publishes on its schedule",
+      "definition": {
+        "rooms": [{ "path": "/driver" }],
+        "actors": [
+          {
+            "every": 1000,
+            "maxRuns": 2,
+            "do": [{ "publish": { "room": "/driver", "frame": { "type": "tick" } } }]
+          }
+        ]
+      },
+      "steps": [
+        { "join": "/driver" },
+        { "advanceMs": 999 },
+        { "frames": { "/driver": [] } },
+        { "advanceMs": 1 },
+        { "frames": { "/driver": [{ "type": "tick" }] } },
+        { "advanceMs": 5000 },
+        { "frames": { "/driver": [{ "type": "tick" }, { "type": "tick" }] } }
       ]
     },
     {

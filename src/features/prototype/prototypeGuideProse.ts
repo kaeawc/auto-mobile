@@ -537,11 +537,10 @@ Grammar:
   A state key cannot hold a list.
 - Placeholders are bound in a template child's \`text\`, the label/title/text fields of components
   (button, fab, segmentedButton options, topAppBar, dialog, menu item labels/trailingText, select labels/options, snackbar), state condition operands
-  (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
+  (\`equals\`/\`notEquals\`/\`contains\`/\`startsWith\` strings, including inside \`errorWhen\`), \`textField.errorText\`,
+  \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
   Anything else, including a \`{key}\` state placeholder and other braces, is left untouched. A show or patch lists a placeholder
   in such a field as \`placeholderFindings\` (for example \`chip.label\` or \`badge.text\`).
-  (\`equals\`/\`notEquals\`/\`contains\`/\`startsWith\` strings, including inside \`errorWhen\`) and \`textField.errorText\`, \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
-  Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
 - State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
   \`openWhen.key\`, condition \`key\`s and the \`key\` of \`setState\`, \`toggle\`, \`increment\` and
   \`decrement\`, so \`"key": "liked_{item.id}"\` gives each row its own state. Every bound key must
@@ -764,7 +763,8 @@ are rejected; a missing text path renders empty.
 - \`{data:/pointer}\` binds only the text-kind fields repeat already binds: text, button/FAB labels,
   segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
   menu item labels/trailing text, select labels/option labels, and snackbar text/action label. Missing, object or array values become empty text. Other braces
-  stay literal. A data string is inserted as plain text before repeat and state binding, so
+  stay literal. As with repeat, an authored repeat or state placeholder in a field outside this list
+  is drawn literally and listed in \`placeholderFindings\` of the show or patch. A data string is inserted as plain text before repeat and state binding, so
   \`{item.x}\`, \`{index}\` or \`{key}\` inside it bind afterwards exactly like authored text.
   Data values cannot be escaped; inserted strings are never scanned again for data placeholders.
   Pointers are untouched by component props.

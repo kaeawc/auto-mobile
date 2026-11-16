@@ -151,9 +151,9 @@ export class DaemonBroker {
   constructor(private readonly host: DaemonBrokerHost) {}
 
   /**
-   * Wire the broker execution drain and managed-session release listener (#11177). The host-wide
-   * binding registry opens lazily, on the first managed execution's release, so daemons that never
-   * serve a broker binding never touch it.
+   * Wire the broker execution drain and managed-session release listener (#11177). The drain
+   * reads the host-wide binding registry lazily, on the first managed execution's release; the
+   * registry itself is created after socket bind (#11811).
    */
   installManagedExecutionRelease(): void {
     const release = new BrokerExecutionRelease({
@@ -308,7 +308,10 @@ export class DaemonBroker {
     // Broker startup awaits registry retirement; local startup upgrades after exposing its socket.
   }
 
-  /** The caller has observed an existing registry; local daemons never create one here. */
+  /**
+   * Start the post-bind open that creates and migrates the host registry (#11811, owner decision
+   * E1). Startup calls it once the socket is bound; claim mirrors call it when they find a file.
+   */
   startBackgroundRegistryUpgrade(): boolean {
     if (this.registryClosing || this.host.lifecycle.shutdownInProgress()) {
       return false;

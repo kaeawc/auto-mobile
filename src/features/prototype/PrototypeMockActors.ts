@@ -1,13 +1,14 @@
 /**
- * Scripted mock actors (#14211): timed and route-triggered writes to a mock backend's collections,
- * so a demo has "the other side" (a reply arrives, an order moves to "out for delivery") without
- * the agent patching `/data`. Every delay waits on the injected `Timer`, so a fake clock replays a
+ * Scripted mock actors (#14211): timed and route-triggered writes to a mock backend's collections
+ * and frames to its rooms, so a demo has "the other side" (someone is typing, a reply arrives, an
+ * order moves to "out for delivery") without the agent patching `/data`. Every delay waits on the injected `Timer`, so a fake clock replays a
  * timeline exactly. A run's steps execute in order; each step's `afterMs` is relative to the step
  * before it, and a step with no delay applies immediately.
  */
 import { errorMessage } from "../../models/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
+import { MAX_PROTOTYPE_CHANNEL_FRAME_BYTES } from "./prototypeChannelLimits";
 import { bindMockValue, matchMockPath, type MockBindingContext } from "./prototypeMockBinding";
 import type { MockActor, MockActorStep } from "./prototypeMockSchema";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
@@ -22,8 +23,17 @@ export interface MockActorWrite {
   body?: PrototypeRequestJson;
 }
 
-/** Applies a write and returns its HTTP status. */
-export type MockActorApply = (write: MockActorWrite) => number;
+/** What a step does to the backend. */
+export interface MockActorEffects {
+  /** Applies a write and returns its HTTP status. */
+  write(write: MockActorWrite): number;
+  /** Sends `frame` to every member of the room path `room`. */
+  publish(room: string, frame: PrototypeRequestJson): void;
+}
+
+type MockActorEffect =
+  | { kind: "write"; write: MockActorWrite }
+  | { kind: "publish"; room: string; frame: PrototypeRequestJson };
 
 /**
  * Scheduled steps across all runs of a backend; a step past this is dropped and logged. The next
@@ -41,7 +51,7 @@ export class PrototypeMockActors {
   constructor(
     private readonly actors: readonly MockActor[],
     private readonly timer: MockActorTimer,
-    private readonly apply: MockActorApply,
+    private readonly effects: MockActorEffects,
   ) {}
 
   /** Starts every `every` actor; its run k begins at `afterMs + k * every`. */
@@ -152,11 +162,16 @@ export class PrototypeMockActors {
   }
 
   private applyStep(step: MockActorStep, context: MockBindingContext): void {
-    const write = toWrite(step, context);
-    if (write === undefined) {
+    const effect = toEffect(step, context);
+    if (effect === undefined) {
       return;
     }
-    const status = this.apply(write);
+    if (effect.kind === "publish") {
+      this.effects.publish(effect.room, effect.frame);
+      return;
+    }
+    const write = effect.write;
+    const status = this.effects.write(write);
     if (status >= 400) {
       // The run goes on: a later step may not depend on this one, as a real server's would not.
       logger.warn(
@@ -166,24 +181,46 @@ export class PrototypeMockActors {
   }
 }
 
-function toWrite(step: MockActorStep, context: MockBindingContext): MockActorWrite | undefined {
+function toEffect(step: MockActorStep, context: MockBindingContext): MockActorEffect | undefined {
   try {
-    const body = step.value === undefined ? undefined : bindMockValue(step.value, context);
-    const id = step.id === undefined ? undefined : bindMockValue(step.id, context);
-    const idText = id === undefined || id === null ? undefined : String(id);
-    if (step.append !== undefined) {
-      return { method: "POST", collection: step.append, body };
+    if (step.publish !== undefined) {
+      return toPublish(step.publish.room, step.publish.frame, context);
     }
-    if (step.update !== undefined) {
-      return { method: "PATCH", collection: step.update, id: idText, body };
-    }
-    if (step.remove !== undefined) {
-      return { method: "DELETE", collection: step.remove, id: idText };
-    }
-    return undefined;
+    const write = toWrite(step, context);
+    return write === undefined ? undefined : { kind: "write", write };
   } catch (error) {
     // A binding past the size cap skips this step only; the backend keeps answering requests.
     logger.warn(`[PrototypeMock] actor step skipped: ${errorMessage(error)}`, error);
     return undefined;
   }
+}
+
+function toPublish(
+  roomPattern: string,
+  framePattern: PrototypeRequestJson,
+  context: MockBindingContext,
+): MockActorEffect | undefined {
+  const room = bindMockValue(roomPattern, context);
+  if (typeof room !== "string" || !room.startsWith("/")) {
+    logger.warn(`[PrototypeMock] actor publish skipped: room is not a path`);
+    return undefined;
+  }
+  const frame = bindMockValue(framePattern, context, MAX_PROTOTYPE_CHANNEL_FRAME_BYTES);
+  return { kind: "publish", room, frame };
+}
+
+function toWrite(step: MockActorStep, context: MockBindingContext): MockActorWrite | undefined {
+  const body = step.value === undefined ? undefined : bindMockValue(step.value, context);
+  const id = step.id === undefined ? undefined : bindMockValue(step.id, context);
+  const idText = id === undefined || id === null ? undefined : String(id);
+  if (step.append !== undefined) {
+    return { method: "POST", collection: step.append, body };
+  }
+  if (step.update !== undefined) {
+    return { method: "PATCH", collection: step.update, id: idText, body };
+  }
+  if (step.remove !== undefined) {
+    return { method: "DELETE", collection: step.remove, id: idText };
+  }
+  return undefined;
 }

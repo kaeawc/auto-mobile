@@ -161,17 +161,19 @@ broadcasts).
   bindings bind the stored item, so a message one device posts reaches every device in its room.
 - Every answered request, client send, `publish` and broadcast is logged (latest 200, with one
   sequence number) for assertions; a frame entry is `{seq, room, from, data}`.
-- **Actors** (at most 16, each with 1–64 steps) write to collections on the backend's injected
-  timer. An actor with `on.route` (`"POST /path/:id"`) fires after a successful (status below 400)
+- **Actors** (at most 16, each with 1–64 steps) write to collections and publish to rooms on the
+  backend's injected timer. An actor with `on.route` (`"POST /path/:id"`) fires after a successful (status below 400)
   request matching it. Otherwise it runs `maxRuns` times every `every` ms (100 ms or more; run k
   starts at `afterMs + k * every`). Its steps run in order: `append`, `update` and `remove` go
   through the same collection code as `POST`, `PATCH` and `DELETE` (ids, 409, 413 and the size
-  budget apply). Each step's `afterMs` is relative to the previous step, and `value` and `id` bind
-  the triggering request's placeholders.
+  budget apply), and an actor write triggers its collection's broadcast like a request would. A
+  `publish {room, frame}` step sends a frame to a room path, logged with `from: "publish"`. Each
+  step's `afterMs` is relative to the previous step, and `value`, `id`, `room` and `frame` bind the
+  triggering request's placeholders.
 - Actor limits: the backend logs and skips a failing step. A backend holds at most 256 scheduled
   steps; a trigger past that is dropped and logged. Redefining, clearing or ending the session
-  cancels every pending step. Definition refuses `publish`, `advance` and `notify` until mock
-  channels, polylines and simulated push exist. Actors follow the daemon's timer, not the device
+  cancels every pending step. Definition refuses `advance` and `notify` until mock polylines and
+  simulated push exist. Actors follow the daemon's timer, not the device
   clock that `prototype simulate` advances.
 
 The `prototype` tool drives it with host-local actions that make no device request:

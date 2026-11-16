@@ -7,10 +7,13 @@ import type { DisposableAppPermissionGrants } from "../../src/features/prototype
 /** A device's installed packages keyed by `deviceId/appId`, with each one's signer. */
 export class FakeDisposableAppInstaller implements DisposableAppInstaller {
   readonly packages = new Map<string, string | undefined>();
-  readonly installs: { deviceId: string; artifactPath: string; reset: boolean }[] = [];
+  readonly installs: { deviceId: string; artifactPath: string }[] = [];
+  readonly resets: string[] = [];
   readonly grants: { appId: string; grants: DisposableAppPermissionGrants }[] = [];
   readonly uninstalls: string[] = [];
 
+  /** When set, `resetStorage` rejects with it after recording the reset. */
+  resetFailure: Error | undefined;
   /** When set, `applyPermissions` rejects with it after recording the grants. */
   permissionFailure: Error | undefined;
   /** When set, `inspect` waits for it, so a test can interleave another operation. */
@@ -25,10 +28,16 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
     this.packages.set(`${deviceId}/${appId}`, signer);
   }
 
-  async install(deviceId: string, artifactPath: string, options: { reset: boolean }) {
-    this.installs.push({ deviceId, artifactPath, reset: options.reset });
-    const appId = artifactPath.replace(/^\/stamped\//, "").replace(/\.apk$/, "");
+  async install(deviceId: string, appId: string, artifactPath: string) {
+    this.installs.push({ deviceId, artifactPath });
     this.packages.set(`${deviceId}/${appId}`, this.signer);
+  }
+
+  async resetStorage(_deviceId: string, appId: string) {
+    this.resets.push(appId);
+    if (this.resetFailure) {
+      throw this.resetFailure;
+    }
   }
 
   async applyPermissions(_deviceId: string, appId: string, grants: DisposableAppPermissionGrants) {

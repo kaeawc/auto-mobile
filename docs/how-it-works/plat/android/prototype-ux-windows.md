@@ -46,7 +46,10 @@ the host refuses them for an older device instead of sending them.
 Optional `chrome` (#12064) is `none` (default) or `bar`, fullscreen placement only,
 on a device advertising `prototype_window_chrome_v1`. A spec with `persistence: "device"`
 defaults to `bar`. The `none` value fills the window including under the status bar. Use
-`safeAreaPadding` on the top edge of a `topAppBar` or top content. Relative sheet
+`safeAreaPadding` on the top edge of a `topAppBar` or top content; a fullscreen
+`topAppBar` with no top `safeAreaPadding` on itself or an ancestor gets a `show` and `patch` warning
+(padding whose `types` omit `systemBars`, such as `ime` alone, does not count)
+naming its path, unless the window uses `bar`. Relative sheet
 detents use the full window height.
 
 CtrlProxy intercepts a stationary two-finger

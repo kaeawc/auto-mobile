@@ -152,4 +152,23 @@ describe("headless tapOn and sendKeys (#18360)", () => {
     );
     expect(events).toEqual([]);
   });
+
+  test("layer app matches nothing on the virtual device; layer prototype taps (#18421)", async () => {
+    const { deps, events } = await harness();
+    await expect(
+      headlessTapOnHandler(tapOn({ text: "Send" }, { layer: "app" }), deps),
+    ).rejects.toThrow('layer "app"');
+    const sendKeys = {
+      selector: { elementId: "email" },
+      layer: "app",
+      commands: [{ action: "type", text: "a@b.c", operation: "insert", mode: "auto" }],
+    } as SendKeysArgs;
+    await expect(headlessSendKeysHandler(sendKeys, deps)).rejects.toThrow('layer "app"');
+    expect(events).toEqual([]);
+    const tapped = await headlessTapOnHandler(
+      tapOn({ text: "Send" }, { layer: "prototype" }),
+      deps,
+    );
+    expect(tapped.structuredContent).toMatchObject({ success: true });
+  });
 });

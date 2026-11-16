@@ -11,6 +11,8 @@ import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { createDefaultBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import { SharedHostRegistry } from "../../src/daemon/sessionBroker/provisioning/sharedHostRegistry";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
@@ -76,6 +78,10 @@ async function makeDaemon(
     processBirthTime: () => 0,
     processGenerationToken: () => "memory-generation",
     incumbentOwnerGuard: guard,
+    // Startup opens the host registry after bind; a per-daemon cache keeps its handle out of
+    // the process-wide one later files share.
+    bindingExclusionFactory: (exclusionTimer) =>
+      createDefaultBindingExclusion(exclusionTimer, { hostRegistry: new SharedHostRegistry() }),
   });
   return { daemon, internals: daemon, timer, tokenStore };
 }
@@ -720,10 +726,12 @@ describe("Daemon.start() tool-call-end wiring", () => {
         expect(events).toEqual(["open-before-bind"]);
       } else {
         await internals.testHooks.startThroughSocketBind();
+        // Without a registry file nothing opens before bind; after bind every local daemon
+        // creates and migrates the registry (#11811, owner decision E1).
         expect(events).toEqual(
           exists
             ? ["open-before-bind", "ingress", "pool", "rehydration", "bind", "retirement"]
-            : ["ingress", "pool", "rehydration", "bind"],
+            : ["ingress", "pool", "rehydration", "bind", "retirement"],
         );
         if (openFails) {
           expect(warn).toHaveBeenCalledWith(
@@ -731,21 +739,16 @@ describe("Daemon.start() tool-call-end wiring", () => {
             expect.objectContaining({ message: "schema upgrade pending" }),
           );
         }
-        expect(startUpgrade).toHaveBeenCalledTimes(exists ? 1 : 0);
-        if (exists) {
-          const upgrade = internals.testHooks.runtime.backgroundRegistryUpgrade;
-          expect(internals.testHooks.startBackgroundRegistryUpgrade()).toBe(true);
-          expect(internals.testHooks.runtime.backgroundRegistryUpgrade).toBe(upgrade);
-          expect(startUpgrade).toHaveBeenCalledTimes(1);
-        } else {
-          // No open means startup cannot create a registry for a host without one.
-          expect(internals.testHooks.runtime.backgroundRegistryUpgrade).toBeUndefined();
-          expect(internals.testHooks.runtime.bindingRegistry).toBeUndefined();
-        }
+        expect(startUpgrade).toHaveBeenCalledTimes(1);
+        const upgrade = internals.testHooks.runtime.backgroundRegistryUpgrade;
+        expect(upgrade).toBeDefined();
+        expect(internals.testHooks.startBackgroundRegistryUpgrade()).toBe(true);
+        expect(internals.testHooks.runtime.backgroundRegistryUpgrade).toBe(upgrade);
+        expect(startUpgrade).toHaveBeenCalledTimes(1);
         expect(tokenStore.read()).not.toBe("incumbent-token");
         expect(stopped).toBe(false);
         await internals.testHooks.closeManagedExecutionRelease();
-        expect(stopped).toBe(exists);
+        expect(stopped).toBe(true);
         expect(timer.now()).toBe(0);
       }
     } finally {

@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { PrototypeEvent } from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { VirtualPrototypeDevice } from "../../../../src/features/prototype/headless/VirtualPrototypeDevice";
-import { VirtualPrototypeInputs } from "../../../../src/features/prototype/headless/VirtualPrototypeInputs";
+import {
+  clipUtf16,
+  VirtualPrototypeInputs,
+} from "../../../../src/features/prototype/headless/VirtualPrototypeInputs";
 import { PrototypeEventCoordinator } from "../../../../src/features/prototype/PrototypeEventCoordinator";
 import { InMemoryPrototypeStatusStore } from "../../../../src/features/prototype/PrototypeStatusStore";
 import {
@@ -461,5 +464,288 @@ describe("VirtualPrototypeInputs (#18360)", () => {
       error: expect.stringContaining("matched a button, not a textField"),
     });
     expect(events).toEqual([]);
+  });
+
+  test("maxLength counts UTF-16 code units and never splits a surrogate pair (#18401)", async () => {
+    const { inputs, events } = await shown(
+      column({ type: "textField", id: "name", label: "Name", stateKey: "name", maxLength: 3 }),
+      { state: { name: "" } },
+    );
+    inputs.tap({ testTag: "name" });
+    inputs.typeText("a\u{1F600}b", "insert");
+    inputs.typeText("ab\u{1F600}", "replace");
+    expect(events.map((event) => event.payload)).toEqual([
+      { key: "name", value: "a\u{1F600}" },
+      { key: "name", value: "ab" },
+    ]);
+  });
+
+  test("clipUtf16 keeps short text and cuts at a pair boundary", () => {
+    expect(clipUtf16("abc", undefined)).toBe("abc");
+    expect(clipUtf16("abc", 5)).toBe("abc");
+    expect(clipUtf16("\u{1F600}", 1)).toBe("");
+    expect(clipUtf16("\u{1F600}x", 2)).toBe("\u{1F600}");
+    expect(clipUtf16("abc", 0)).toBe("");
+  });
+
+  test("typing reads the field's maxLength as patched since focus (#18421)", async () => {
+    const { inputs, events, device } = await shown(
+      column({ type: "textField", id: "name", label: "Name", stateKey: "name", maxLength: 2 }),
+      { state: { name: "" } },
+    );
+    inputs.tap({ testTag: "name" });
+    const patched = await device.requestPatchPrototype({
+      id: "demo",
+      ops: [
+        {
+          op: "replaceNode",
+          id: "name",
+          node: { type: "textField", id: "name", label: "Name", stateKey: "name", maxLength: 4 },
+        },
+      ],
+    });
+    expect(patched.success).toBe(true);
+    inputs.typeText("abcdef", "insert");
+    expect(events.map((event) => event.payload)).toEqual([{ key: "name", value: "abcd" }]);
+  });
+
+  test("a large emit context is cut to the shared byte budget and flagged (#18401)", async () => {
+    const { inputs, events } = await shown(
+      column({
+        type: "button",
+        label: "Send",
+        onTap: [
+          {
+            type: "emit",
+            name: "sent",
+            context: { a: { state: "small" }, b: { state: "big" }, c: { value: 1 } },
+          },
+        ],
+      }),
+      { state: { small: "ok", big: "x".repeat(5000) } },
+    );
+    inputs.tap({ text: "Send" });
+    expect(events[0]).toMatchObject({ name: "sent", context: { a: "ok" }, contextTruncated: true });
+    expect(events[0]?.context).toEqual({ a: "ok" });
+  });
+
+  test("an emit context within budget carries no truncation flag", async () => {
+    const { inputs, events } = await shown(
+      column({
+        type: "button",
+        label: "Send",
+        onTap: [{ type: "emit", name: "sent", context: { a: { state: "small" } } }],
+      }),
+      { state: { small: "ok" } },
+    );
+    inputs.tap({ text: "Send" });
+    expect(events[0]?.context).toEqual({ a: "ok" });
+    expect(events[0]).not.toHaveProperty("contextTruncated");
+  });
+
+  test("an open dialog scopes taps to itself; background nodes are not matched (#18421)", async () => {
+    const { inputs, events } = await shown(
+      column(
+        { type: "button", label: "Behind", onTap: [{ type: "emit", name: "behind" }] },
+        {
+          type: "dialog",
+          openWhen: { key: "open", equals: true },
+          title: "Sure?",
+          confirm: { label: "Yes", onTap: [{ type: "emit", name: "yes" }] },
+        },
+      ),
+      { state: { open: true } },
+    );
+    expect(inputs.tap({ text: "Behind" })).toMatchObject({
+      success: false,
+      error: expect.stringContaining("No visible prototype node matches"),
+    });
+    expect(events).toEqual([]);
+    inputs.tap({ text: "Yes" });
+    expect(inputs.tap({ text: "Behind" })).toMatchObject({ success: true, handled: true });
+    expect(events.map((event) => event.name)).toEqual(["change", "yes", "behind"]);
+  });
+
+  test("the topmost of nested sheets takes taps, and a snackbar above stays tappable", async () => {
+    const { inputs } = await shown(
+      column(
+        {
+          type: "bottomSheet",
+          openWhen: { key: "sheet", equals: true },
+          detents: ["half"],
+          child: column(
+            { type: "button", label: "In sheet", onTap: [{ type: "emit", name: "sheet" }] },
+            {
+              type: "dialog",
+              openWhen: { key: "dialog", equals: true },
+              title: "Top",
+              confirm: { label: "OK" },
+            },
+          ),
+        },
+        {
+          type: "snackbar",
+          openWhen: { key: "toast", equals: true },
+          text: "Saved",
+          action: { label: "Undo", onTap: [{ type: "emit", name: "undo" }] },
+        },
+      ),
+      { state: { sheet: true, dialog: true, toast: true } },
+    );
+    expect(inputs.tap({ text: "In sheet" }).success).toBe(false);
+    expect(inputs.tap({ text: "Undo" })).toMatchObject({ success: true, handled: true });
+    expect(inputs.tap({ text: "OK" })).toMatchObject({ success: true, handled: true });
+    expect(inputs.tap({ text: "In sheet" })).toMatchObject({ success: true, handled: true });
+  });
+
+  test("a field covered by an open dialog cannot take typing", async () => {
+    const { inputs } = await shown(
+      column(
+        { type: "textField", id: "name", label: "Name", stateKey: "name" },
+        {
+          type: "button",
+          label: "Ask",
+          onTap: [{ type: "setState", key: "open", value: true }],
+        },
+        {
+          type: "dialog",
+          openWhen: { key: "open", equals: true },
+          title: "Wait",
+          confirm: { label: "OK" },
+        },
+      ),
+      { state: { name: "", open: false } },
+    );
+    inputs.tap({ testTag: "name" });
+    inputs.tap({ text: "Ask" });
+    expect(inputs.typeText("A", "insert").success).toBe(false);
+  });
+
+  test("a snackbar's action button closes it, then runs its actions (#18421)", async () => {
+    const { inputs, events } = await shown(
+      column(
+        { type: "text", text: "Body" },
+        {
+          type: "snackbar",
+          openWhen: { key: "toast", equals: true },
+          text: "Deleted",
+          action: { label: "Undo", onTap: [{ type: "emit", name: "undo" }] },
+        },
+      ),
+      { state: { toast: true } },
+    );
+    expect(inputs.tap({ text: "Undo" })).toMatchObject({
+      success: true,
+      target: { type: "snackbarAction" },
+    });
+    expect(events.map((event) => [event.name, event.payload])).toEqual([
+      ["change", { key: "toast", value: false }],
+      ["undo", null],
+    ]);
+    expect(inputs.tap({ text: "Undo" }).success).toBe(false);
+  });
+
+  test("a listItem with a trailing switch toggles it before its actions (#18421)", async () => {
+    const { inputs, events } = await shown(
+      column({
+        type: "listItem",
+        headline: "Wi-Fi",
+        trailing: { type: "switch", stateKey: "wifi" },
+        onTap: [{ type: "emit", name: "wifiTapped", context: { on: { state: "wifi" } } }],
+      }),
+      { state: { wifi: false } },
+    );
+    inputs.tap({ text: "Wi-Fi" });
+    expect(events.map((event) => [event.name, event.payload])).toEqual([
+      ["change", { key: "wifi", value: true }],
+      ["wifiTapped", null],
+    ]);
+    expect(events[1]?.context).toEqual({ on: true });
+  });
+
+  test("a tab bar item bound to a pager moves it before the bar's actions (#18421)", async () => {
+    const { inputs, events } = await shown(
+      column(
+        {
+          type: "tabBar",
+          pager: "tabs",
+          items: [{ label: "Home" }, { label: "Profile" }],
+          onTap: [{ type: "emit", name: "tab" }],
+        },
+        {
+          type: "pager",
+          id: "tabs",
+          children: [
+            { type: "text", text: "Home page" },
+            { type: "text", text: "Profile page" },
+          ],
+        },
+      ),
+    );
+    expect(inputs.tap({ text: "Profile" })).toMatchObject({
+      success: true,
+      target: { type: "tabBarItem" },
+    });
+    expect(events.map((event) => [event.kind, event.name, event.payload])).toEqual([
+      ["page_changed", "tabs", 1],
+      ["emit", "tab", null],
+    ]);
+  });
+
+  test("a bottom nav item without a pager writes its index to the stateKey", async () => {
+    const { inputs, events } = await shown(
+      column({
+        type: "bottomNav",
+        stateKey: "section",
+        items: [
+          { label: "Feed", icon: "home" },
+          { label: "Search", icon: "search" },
+        ],
+      }),
+      { state: { section: 0 } },
+    );
+    inputs.tap({ text: "Search" });
+    expect(events.map((event) => event.payload)).toEqual([{ key: "section", value: 1 }]);
+  });
+
+  test("a key set and restored with no event still conflicts a stale patch (#18421)", async () => {
+    const { inputs, events, device } = await shown(
+      column({
+        type: "button",
+        label: "Blink",
+        onTap: [
+          { type: "setState", key: "n", value: 1 },
+          { type: "setState", key: "n", value: 0 },
+        ],
+      }),
+      { state: { n: 0 } },
+    );
+    inputs.tap({ text: "Blink" });
+    expect(events).toEqual([]);
+    const stale = await device.requestPatchPrototype({
+      id: "demo",
+      baseRevision: 1,
+      ops: [{ op: "replace", path: "/state/n", value: 5 }],
+    });
+    expect(stale).toMatchObject({ success: false, error: "conflict", revision: 2 });
+  });
+
+  test("a later prototype shown again is the first a tap targets (#18401)", async () => {
+    const timer = new FakeTimer();
+    const device = new VirtualPrototypeDevice(timer);
+    const names: string[] = [];
+    device.onPrototypeEvent((event) => names.push(`${event.id}:${String(event.name)}`));
+    const button = (id: string) =>
+      prototypeSpecSchema.parse({
+        id,
+        window: { placement: { type: "fullscreen" } },
+        root: column({ type: "button", label: "Go", onTap: [{ type: "emit", name: "go" }] }),
+      });
+    const keep = { replaceOthers: false };
+    await device.requestShowPrototype(button("one"), undefined, undefined, keep);
+    await device.requestShowPrototype(button("two"), undefined, undefined, keep);
+    await device.requestShowPrototype(button("one"), undefined, undefined, keep);
+    expect(new VirtualPrototypeInputs(device).tap({ text: "Go" }).prototypeId).toBe("one");
+    expect(names).toEqual(["one:go"]);
   });
 });

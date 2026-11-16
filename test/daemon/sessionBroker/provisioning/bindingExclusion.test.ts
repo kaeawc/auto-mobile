@@ -1,12 +1,13 @@
 import { logger } from "../../../../src/utils/logger";
 import { BindingRegistryUpgradePendingError } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   currentBindingReconciler,
   refreshAllocationBindingExclusion,
   bindingRefusal,
   RegistryBindingExclusion,
   createDefaultBindingExclusion,
+  resetSharedHostRegistryForTesting,
   runAsBindingReconciler,
 } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
@@ -34,6 +35,12 @@ describe("RegistryBindingExclusion", () => {
     timer.setCurrentTime(1_000);
     registry = new FakeBindingRegistry(timer);
     opens = 0;
+    // Another test file in this process may have cached the shared host registry.
+    resetSharedHostRegistryForTesting();
+  });
+
+  afterEach(() => {
+    resetSharedHostRegistryForTesting();
   });
 
   const openFake = async (): Promise<BindingRegistry> => {

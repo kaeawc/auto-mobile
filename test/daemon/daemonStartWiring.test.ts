@@ -11,6 +11,7 @@ import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { resetSharedHostRegistryForTesting } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
@@ -143,6 +144,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
     for (const restore of restores.splice(0).reverse()) {
       restore();
     }
+    // Startup now opens the host registry after bind; don't leak its handle to later files.
+    resetSharedHostRegistryForTesting();
     if (savedLaunchCwd === undefined) {
       delete process.env[DAEMON_LAUNCH_CWD_ENV];
     } else {

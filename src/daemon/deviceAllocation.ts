@@ -32,6 +32,7 @@ import {
   type BindingExclusion,
 } from "./sessionBroker/provisioning/exclusion";
 import type { SessionReleaseReason } from "./releaseReasons";
+import { claimRecoveredAssignment } from "./recoveredDeviceClaim";
 import {
   SessionRecoveryIdentityLossError,
   type Session,
@@ -483,13 +484,13 @@ export class DeviceAllocation {
         signal,
       },
     );
-    if (ownership && result.success && result.deviceId !== undefined && result.session) {
-      await this.claimRecoveredDevice(sessionId, recoveryTarget, ownership, {
-        deviceId: result.deviceId,
-        session: result.session,
-      });
-    }
-    return result;
+    return ownership
+      ? await claimRecoveredAssignment(
+          this.port,
+          { sessionId, target: recoveryTarget, ownership },
+          result,
+        )
+      : result;
   }
 
   /**
@@ -506,31 +507,6 @@ export class DeviceAllocation {
       // Use the explicit-bind judgement: files first, then the table, with a fresh read.
       await this.port.assertNotClaimedByForeignDaemon(deviceId, target.platform);
     }
-  }
-
-  /**
-   * Publish this daemon's claim on the device recovery just rebound. When another live daemon's
-   * claim won the race, give the device back and terminalize the session (#11076).
-   */
-  private async claimRecoveredDevice(
-    sessionId: string,
-    target: SessionRecoveryTarget,
-    ownership: ForeignDeviceOwnership,
-    { deviceId, session }: { deviceId: string; session: Session },
-  ): Promise<void> {
-    if (await this.port.publishDeviceClaim(deviceId)) {
-      return;
-    }
-    logger.warn(
-      `[DevicePool] Another AutoMobile process (PID ${ownership.foreignOwnerPid(deviceId)}) claims ${deviceId}; rolling back recovery of session ${sessionId}`,
-    );
-    await this.port.rollbackAssignments(new Map([[sessionId, { deviceId, session }]]));
-    // Rollback cleared the local holder, so the fresh explicit-bind refusal can name the winner.
-    await this.port.assertNotClaimedByForeignDaemon(deviceId, target.platform);
-    throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
-      deviceId,
-      ownerPid: ownership.foreignOwnerPid(deviceId),
-    });
   }
 
   /**

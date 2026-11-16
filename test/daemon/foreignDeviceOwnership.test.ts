@@ -1079,8 +1079,11 @@ describe("the host-wide claims mirror (#11811 b)", () => {
       expect(fileOwner(files)).toBe("none");
       expect(store.rows.size).toBe(0);
       expect(ownership.foreignOwnerPid(DEVICE)).toBeUndefined();
+      // Recovery reads this to wait and retry rather than fence the session as ownership loss.
+      expect(ownership.claimDeferred(DEVICE)).toBe(true);
       // The refusal is retryable: the table decides once it can be written again.
       expect(await ownership.claim(DEVICE)).toBe(true);
+      expect(ownership.claimDeferred(DEVICE)).toBe(false);
       expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
     } finally {
       warn.mockRestore();
@@ -1099,6 +1102,8 @@ describe("the host-wide claims mirror (#11811 b)", () => {
 
     expect(await self.ownership.claim(DEVICE)).toBe(false);
     expect(store.rows.size).toBe(0);
+    // A live owner's refusal is ownership loss, never a deferred claim.
+    expect(self.ownership.claimDeferred(DEVICE)).toBe(false);
   });
 
   // The table decides: after any interleaving of claims, releases and crashes by two daemons, at

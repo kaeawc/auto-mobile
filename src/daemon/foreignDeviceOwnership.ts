@@ -78,6 +78,12 @@ export interface ForeignDeviceOwnership {
    */
   claim(deviceId: string): Promise<boolean>;
   /**
+   * Whether the latest {@link claim} of `deviceId` was refused only because the host-wide table
+   * must decide but could not be used (#11811): no other daemon was seen holding the device, so
+   * the caller should wait and retry rather than treat the refusal as ownership loss.
+   */
+  claimDeferred?(deviceId: string): boolean;
+  /**
    * Withdraw this daemon's allocation claim on a device it no longer assigns to a session. A
    * claim another daemon took over is left alone.
    */
@@ -401,6 +407,8 @@ export interface ForeignOwnershipOptions {
  */
 export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnership {
   private readonly owners = new Map<string, number>();
+  /** Devices whose latest claim the table refused only because it could not decide (#11811). */
+  private readonly deferredClaims = new Set<string>();
   private readonly unreadable = new Set<string>();
   /** Device -> control socket of an idle holder whose lease was its only foreign ownership. */
   private readonly idleLeaseHolders = new Map<string, string>();
@@ -540,7 +548,12 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     return this.owners.get(deviceId);
   }
 
+  claimDeferred(deviceId: string): boolean {
+    return this.deferredClaims.has(deviceId);
+  }
+
   async claim(deviceId: string): Promise<boolean> {
+    this.deferredClaims.delete(deviceId);
     const owner = this.claimOwner();
     const decided = await this.claimInTable(deviceId, owner);
     if (decided !== undefined) {
@@ -584,6 +597,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
     if (decision.outcome === "unusable") {
       // Fail closed: a file fallback could not see a peer that claimed in the table alone.
+      this.deferredClaims.add(deviceId);
       return false;
     }
     if (decision.outcome === "refused") {

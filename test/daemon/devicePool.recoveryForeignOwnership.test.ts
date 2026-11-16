@@ -144,7 +144,7 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
       foreignDeviceOwnership: ownership,
     });
     await pool.initializeWithDevices(initiallyEmpty ? [] : [device]);
-    return { sessions, pool, persisted, releaseReasons, devices, upserts };
+    return { sessions, pool, persisted, releaseReasons, devices, upserts, timer };
   };
 
   const resume = async (a: Awaited<ReturnType<typeof restartedDaemonA>>) =>
@@ -304,6 +304,41 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
     expect(a.sessions.getSession(SESSION)).toBeNull();
     expect(a.releaseReasons.at(-1)).toBe("identity-recovery-owned-by-other-daemon");
     expect(store.claims.get(DEVICE_ID)).toBe(DAEMON_B_PID);
+  });
+
+  test("a claim the registry cannot decide yet waits and retries instead of terminalizing (#11811)", async () => {
+    const store = new SharedClaimStore();
+    const own = store.forDaemon(DAEMON_A_PID);
+    let deferred = false;
+    let refusals = 1;
+    // The registry is unusable for the first claim only: no foreign owner, just no decision yet.
+    const unusableOnce: ForeignDeviceOwnership = {
+      refresh: (ids) => own.refresh(ids),
+      foreignOwnerPid: (id) => own.foreignOwnerPid(id),
+      claim: async (id) => {
+        deferred = refusals-- > 0;
+        return deferred ? false : await own.claim(id);
+      },
+      claimDeferred: () => deferred,
+      release: (id) => own.release(id),
+    };
+    const a = await restartedDaemonA(unusableOnce);
+
+    let settled = false;
+    const resumed = resume(a).finally(() => {
+      settled = true;
+    });
+    for (let tick = 0; tick < 50 && !settled; tick++) {
+      await new Promise((resolve) => setImmediate(resolve));
+      a.timer.advanceTime(1_000);
+    }
+
+    expect(await resumed).toBeUndefined();
+    expect(refusals).toBe(-1);
+    expect(a.pool.getDevice(DEVICE_ID)?.sessionId).toBe(SESSION);
+    expect(a.releaseReasons).not.toContain("identity-recovery-owned-by-other-daemon");
+    expect(store.claims.get(DEVICE_ID)).toBe(DAEMON_A_PID);
+    a.pool.releaseDeviceClaimsForShutdown();
   });
 
   test.each([undefined, DAEMON_A_PID])(

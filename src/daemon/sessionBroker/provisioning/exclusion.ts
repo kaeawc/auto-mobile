@@ -445,6 +445,14 @@ interface HostRegistryCache {
 let sharedHostRegistry: HostRegistryCache | undefined;
 
 /**
+ * Forget the process-wide registry handle without closing it, so a test's injected `openRegistry`
+ * is used again rather than a handle an earlier test in the same process cached.
+ */
+export function resetSharedHostRegistryForTesting(): void {
+  sharedHostRegistry = undefined;
+}
+
+/**
  * The daemon's default: the host-wide SQLite registry, opened lazily on first use and shared by
  * every pool in this process. A failed open is retried on the next refresh.
  */

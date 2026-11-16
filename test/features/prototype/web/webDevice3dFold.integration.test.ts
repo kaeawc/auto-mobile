@@ -25,6 +25,8 @@ const PAGE_URL = "http://prototype-web.test/";
 const VIEWPORT = { width: 1280, height: 1000 };
 const CASE_TIMEOUT_MS = 30_000;
 const LAUNCH_TIMEOUT_MS = 30_000;
+/** The stills' 9:41, as the page check pins it. */
+const STILL_TIME = "2026-01-01T09:41:00Z";
 
 const spec = JSON.parse(
   readFileSync(
@@ -45,7 +47,13 @@ const POSTURES = [
 ] as const;
 
 async function open(browser: Browser, html: string): Promise<{ page: Page; errors: string[] }> {
-  const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 1 });
+  const page = await browser.newPage({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 1,
+    timezoneId: "UTC",
+  });
+  // The status bar clock is live; fixed, it cannot tick between the before and after DOM reads.
+  await page.clock.setFixedTime(STILL_TIME);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {

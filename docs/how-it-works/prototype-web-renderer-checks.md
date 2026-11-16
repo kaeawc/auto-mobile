@@ -24,6 +24,11 @@ nothing at runtime drives a browser.
 - **Screen select and 3D.** A page with a screen select shows exactly the picked screen's view. The
   3D toggle turns the shown view to the three-quarter pose, and an arrow key on the focused viewport
   orbits it. Toggling back restores the shown view's DOM byte for byte.
+- **Fold postures.** `webDevice3dFold.integration.test.ts` (Chromium) opens `reference-checkout` on
+  `pixel-fold` (book) and `flip-foldable` (flip), enters 3D and picks `opened`, `half_opened` and
+  `closed` in turn. Each must draw the leaf transform `prototypeWebPose` gives for the posture's hinge
+  angle and the matching status line. Leaving 3D must restore the shown view's DOM. Its screenshots
+  go to `device-3d/` under the output directory; they are not compared with goldens.
 - **Clock and scroll.** The check fixes the browser clock at 9:41 UTC, so the live status bar clock
   matches the stills. A separate case installs a running clock and checks the clock advances each
   minute. Another checks that only an overflowing scroll fades, or, in an engine without

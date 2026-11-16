@@ -14,6 +14,7 @@ name: "Prototype Web Screenshots (Advisory)"
 # diffs are under android-parity/ in the same artifact. The iOS-skinned still is
 # compared with cropped iPhone 16 viewer goldens (#16535), under ios-parity/.
 # Un-padded inlined image boxes are compared with their layout golden (#17716).
+# The 3D view folds each foldable frame through its postures (#16458).
 on:
   pull_request:
     paths:
@@ -23,6 +24,7 @@ on:
       - "test/features/prototype/web/webAndroidParity*"
       - "test/features/prototype/web/webIosParity*"
       - "test/features/prototype/web/webImageLayout*"
+      - "test/features/prototype/web/webDevice3dFold*"
       - "ios/prototype-agent/Goldens/**"
       - "scripts/prototype/ios-golden-specs.ts"
       - "scripts/ios/prototype-record-goldens.sh"

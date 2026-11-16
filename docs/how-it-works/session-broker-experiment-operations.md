@@ -232,7 +232,11 @@ write only if the row, including its `updated_at_ms`, is unchanged. For one more
 winner also writes its allocation claim file, so a daemon that cannot use the table and falls
 back to the files still sees it. A winner whose claim file a files-deciding daemon took meanwhile
 gives the row back. The same compare-and-set records a claim the files decided, and it never
-replaces a row a live foreign owner holds. The claim files decide Watch and TV, and any claim no table can decide.
+replaces a row a live foreign owner holds. Every local daemon creates and migrates the registry
+after its control socket binds. From then on a claim the table cannot decide (no registry open
+yet, or a write still busy after four attempts 50, 100 and 200 ms apart) is refused retryably
+instead of falling back to the files (#11811, owner decision E1). The claim files decide before
+bind (startup recovery), for watch and TV, and in files-only mode.
 
 The device-claims mirror skips
 reads, writes, opens and retries until daemon restart. Writers and ownership readers

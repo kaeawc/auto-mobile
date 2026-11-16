@@ -231,6 +231,9 @@ export function mount(host: HTMLElement, initial: PrototypeMountOptions): Protot
   let state: PrototypeViewState | undefined;
   let orientations: readonly WebOrientation[] = [];
   let destroyed = false;
+  // A zoom the controls chose: kept as stepped (a fitted scale below 50% may stay there) until an
+  // update sets the zoom option again.
+  let chosenZoom: PrototypeViewState["zoom"] | undefined;
 
   const applyScale = (zoom: PrototypeViewState["zoom"]) => {
     const scale = zoom === "fit" ? fitScale(shell) : zoom;
@@ -241,7 +244,7 @@ export function mount(host: HTMLElement, initial: PrototypeMountOptions): Protot
   const draw = () => {
     const before = state;
     const mode = colorMode(options, dark);
-    const zoom = prototypeWebZoomOption(options.zoom);
+    const zoom = chosenZoom ?? prototypeWebZoomOption(options.zoom);
     try {
       const rendered = renderPrototype(options.spec, renderOptions(options, mode, parseGlyph));
       shell.stage.replaceChildren(buildPrototypeDom(document, rendered.element) as Node);
@@ -265,7 +268,7 @@ export function mount(host: HTMLElement, initial: PrototypeMountOptions): Protot
     if (!state || state.error) {
       return;
     }
-    options = { ...options, zoom };
+    chosenZoom = zoom;
     const before = state;
     const scale = applyScale(zoom);
     state = { ...state, zoom, scale };
@@ -278,6 +281,9 @@ export function mount(host: HTMLElement, initial: PrototypeMountOptions): Protot
   const update = (next: Partial<PrototypeMountOptions>) => {
     if (destroyed) {
       return;
+    }
+    if (next.zoom !== undefined) {
+      chosenZoom = undefined;
     }
     options = mergePrototypeMountOptions(options, next);
     draw();

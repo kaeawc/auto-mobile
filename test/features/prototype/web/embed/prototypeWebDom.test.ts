@@ -69,6 +69,24 @@ describe("buildPrototypeDom (#16453)", () => {
     expect(svg.attributes).toEqual({ viewBox: "0 0 24 24" });
   });
 
+  test("restores the SVG case the HTML parser restores, only inside an svg", () => {
+    const built = buildPrototypeDom(
+      fakeDocument,
+      el("div", { attrs: { viewbox: "kept" } }, [
+        el("svg", { attrs: { viewbox: "0 0 1 1", preserveaspectratio: "none" } }, [
+          el("circle", { attrs: { pathlength: "100" } }),
+          el("filter", {}, [el("fecolormatrix")]),
+        ]),
+      ]),
+    ) as FakeElement;
+    const svg = built.children[0] as FakeElement;
+    const [circle, filter] = svg.children as FakeElement[];
+    expect(built.attributes).toEqual({ viewbox: "kept" });
+    expect(svg.attributes).toEqual({ viewBox: "0 0 1 1", preserveAspectRatio: "none" });
+    expect(circle!.attributes).toEqual({ pathLength: "100" });
+    expect((filter!.children[0] as FakeElement).tag).toBe("feColorMatrix");
+  });
+
   test("refuses event handler attributes and invalid names, as toHtml does", () => {
     expect(() => buildPrototypeDom(fakeDocument, el("div", { attrs: { onclick: "x" } }))).toThrow(
       "Event handler attributes are not allowed: onclick",

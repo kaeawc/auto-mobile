@@ -2,6 +2,115 @@ import { checkWebAttributeName, checkWebTagName, type WebChild } from "../webNod
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
+/** Keys each camelCase name by its lowercase form. */
+const byLowercase = (names: readonly string[]): ReadonlyMap<string, string> =>
+  new Map(names.map((name) => [name.toLowerCase(), name]));
+
+/**
+ * The HTML parser's SVG case adjustments (HTML spec, "adjust SVG attributes" and the SVG tag name
+ * table). Builders write these names lowercase and `toHtml` relies on the parser to restore them;
+ * `createElementNS` does no such thing, so the DOM builder restores them itself.
+ */
+const SVG_ATTRIBUTE_CASE = byLowercase([
+  "attributeName",
+  "attributeType",
+  "baseFrequency",
+  "baseProfile",
+  "calcMode",
+  "clipPathUnits",
+  "diffuseConstant",
+  "edgeMode",
+  "filterUnits",
+  "glyphRef",
+  "gradientTransform",
+  "gradientUnits",
+  "kernelMatrix",
+  "kernelUnitLength",
+  "keyPoints",
+  "keySplines",
+  "keyTimes",
+  "lengthAdjust",
+  "limitingConeAngle",
+  "markerHeight",
+  "markerUnits",
+  "markerWidth",
+  "maskContentUnits",
+  "maskUnits",
+  "numOctaves",
+  "pathLength",
+  "patternContentUnits",
+  "patternTransform",
+  "patternUnits",
+  "pointsAtX",
+  "pointsAtY",
+  "pointsAtZ",
+  "preserveAlpha",
+  "preserveAspectRatio",
+  "primitiveUnits",
+  "refX",
+  "refY",
+  "repeatCount",
+  "repeatDur",
+  "requiredExtensions",
+  "requiredFeatures",
+  "specularConstant",
+  "specularExponent",
+  "spreadMethod",
+  "startOffset",
+  "stdDeviation",
+  "stitchTiles",
+  "surfaceScale",
+  "systemLanguage",
+  "tableValues",
+  "targetX",
+  "targetY",
+  "textLength",
+  "viewBox",
+  "viewTarget",
+  "xChannelSelector",
+  "yChannelSelector",
+  "zoomAndPan",
+]);
+const SVG_TAG_CASE = byLowercase([
+  "altGlyph",
+  "altGlyphDef",
+  "altGlyphItem",
+  "animateColor",
+  "animateMotion",
+  "animateTransform",
+  "clipPath",
+  "feBlend",
+  "feColorMatrix",
+  "feComponentTransfer",
+  "feComposite",
+  "feConvolveMatrix",
+  "feDiffuseLighting",
+  "feDisplacementMap",
+  "feDistantLight",
+  "feDropShadow",
+  "feFlood",
+  "feFuncA",
+  "feFuncB",
+  "feFuncG",
+  "feFuncR",
+  "feGaussianBlur",
+  "feImage",
+  "feMerge",
+  "feMergeNode",
+  "feMorphology",
+  "feOffset",
+  "fePointLight",
+  "feSpecularLighting",
+  "feSpotLight",
+  "feTile",
+  "feTurbulence",
+  "foreignObject",
+  "glyphRef",
+  "linearGradient",
+  "radialGradient",
+  "textPath",
+]);
+
 /** The DOM a built element needs: what an HTML or SVG `Element` exposes, narrowed. */
 export interface PrototypeDomElement {
   setAttribute(name: string, value: string): void;
@@ -33,11 +142,11 @@ export function buildPrototypeDom(
   checkWebTagName(node.tag);
   const svg = inSvg || node.tag === "svg";
   const element = svg
-    ? document.createElementNS(SVG_NAMESPACE, node.tag)
+    ? document.createElementNS(SVG_NAMESPACE, SVG_TAG_CASE.get(node.tag) ?? node.tag)
     : document.createElement(node.tag);
   for (const [name, value] of Object.entries(node.attrs)) {
     checkWebAttributeName(name);
-    element.setAttribute(name, value);
+    element.setAttribute(svg ? (SVG_ATTRIBUTE_CASE.get(name) ?? name) : name, value);
   }
   for (const [property, value] of Object.entries(node.style)) {
     element.style.setProperty(property, value);

@@ -19,10 +19,10 @@ the devlog entries under Background.
   `dist/index.js` (gitignored). The library source is `src/features/prototype/web/embed/`.
 - `test/features/prototype/web/prototypeWebPackage.typecheck.ts` assigns each export and public type
   both ways between `index.d.ts` and the implementation, so the typecheck fails when they drift.
-- `prototypeWebLibraryBundle.test.ts` is the boundary check: the entry's browser bundle reaches no
-  Node builtin and no input outside `src/features/prototype/`, the CtrlProxy protocol constants and
-  the root `package.json` (whose `version` is the library version), and stays within the export
-  budget below.
+- `prototypeWebLibraryBundle.test.ts` is the boundary check. The entry's browser bundle reaches no
+  Node builtin and stays within the export budget below. Its only inputs are
+  `src/features/prototype/`, the CtrlProxy protocol constants and the root `package.json`, whose
+  `version` is the library version.
 - `webLibrary.integration.test.ts`, run by `Prototype Web Screenshots`, mounts the library build in
   Chromium and compares its pixels with the still's `toHtml` output drawn the same way.
 
@@ -35,10 +35,13 @@ the devlog entries under Background.
   `setAttribute` and `style.setProperty`, never `innerHTML`. Its shell stylesheet is a constructable
   stylesheet. It returns `{update, destroy, state}`; `update` merges options, keeping zoom,
   orientation and screen, and an unknown screen draws the stack's start.
-- Options: `spec`, `frame` (an id, or `false` for the default frame's screen alone), `orientation`,
-  `zoom` (`fit`, or 0.5 to 4), `mode` (`light`, `dark`, or `system` following
-  `prefers-color-scheme`), `screen`, `controls` (`false` or any of `rotate`, `zoom`, `screen`),
-  `locale` and `textSize`. A frame object is not accepted yet.
+- Options: `spec`, `frame`, `orientation`, `zoom`, `mode`, `screen`, `controls`, `locale` and
+  `textSize`.
+  - The frame is an id, or `false` for the default frame's screen alone. A frame object is not
+    accepted yet.
+  - Zoom is `fit` or a scale from 0.5 to 4.
+  - Mode is `light`, `dark`, or `system`, which follows `prefers-color-scheme`.
+  - Controls are `false`, or any of `rotate`, `zoom` and `screen`.
 - Callbacks: `onRender` (`unsupportedNodes`), `onScreenChange`, `onOrientationChange`,
   `onZoomChange` and `onError`.
 - The host element is 640 px tall unless the page sets its height; `fit` scales the frame into

@@ -23,6 +23,11 @@ import {
 } from "./interactionToolHandlers";
 import type { InteractionToolDependencies } from "./interactionTools/dependencies";
 import {
+  headlessSendKeysHandler,
+  headlessTapOnHandler,
+  isHeadlessInput,
+} from "./interactionTools/headlessPrototypeInput";
+import {
   headUnitPressButtonHandler,
   headUnitTapAtHandler,
   headUnitTapOnHandler,
@@ -301,6 +306,24 @@ function registerGestureTools(deps: InteractionToolDependencies): void {
   });
 }
 
+/** Headless prototype mode (#18360) taps the virtual device's prototype; no device resolves. */
+function headlessTapOnRouting(deps: InteractionToolDependencies) {
+  const headless = deps.headlessPrototypeInput ?? {};
+  return {
+    shouldEnsureDevice: () => !isHeadlessInput(headless),
+    nonDeviceHandler: (args: TapOnArgs) => headlessTapOnHandler(args, headless),
+  };
+}
+
+/** Headless prototype mode (#18360) types into the virtual device's focused text field. */
+function headlessSendKeysRouting(deps: InteractionToolDependencies) {
+  const headless = deps.headlessPrototypeInput ?? {};
+  return {
+    shouldEnsureDevice: () => !isHeadlessInput(headless),
+    nonDeviceHandler: (args: SendKeysArgs) => headlessSendKeysHandler(args, headless),
+  };
+}
+
 export function registerInteractionTools(deps: InteractionToolDependencies = {}) {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -361,6 +384,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     sendKeysSchema,
     {
       handler: createSendKeysHandler(deps),
+      ...headlessSendKeysRouting(deps),
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: sendKeysResultSchema,
@@ -391,6 +415,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
         args.display === HEAD_UNIT_DISPLAY
           ? headUnitTapOnHandler(device, args, deps.headUnitTemplateSourceFactory)
           : tapOnHandler(device, args, { progress, signal, deps }),
+      ...headlessTapOnRouting(deps),
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: tapOnResultSchema,

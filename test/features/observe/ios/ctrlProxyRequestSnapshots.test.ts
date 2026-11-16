@@ -142,6 +142,7 @@ interface SnapshotSpec {
 // These runner commands are declared by the host but have no production TS builder.
 // Remove an entry when its builder lands: the disjointness test prevents stale exemptions.
 const HOST_NEVER_SENDS = new Set([
+  "request_storekit", // Runner-first contract; TS builder follows in #18399.
   "get_current_focus",
   "get_traversal_order",
   "request_two_finger_swipe",

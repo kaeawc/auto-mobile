@@ -47,6 +47,7 @@ public enum ResponseType: String, CaseIterable, Sendable {
     case sdkWebActionResult = "sdk_web_action_result"
     case voiceOverStateResult = "voiceover_state_result"
     case voiceOverSetResult = "voiceover_set_result"
+    case storeKitResult = "storekit_result"
     case connected
 
     // Storage inspection

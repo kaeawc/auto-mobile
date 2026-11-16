@@ -83,6 +83,7 @@ targets:
       # "Library not loaded: @rpath/ObjCExceptionCatcher.framework".
       - target: ObjCExceptionCatcher
         embed: true
+      - sdk: Developer/Library/Frameworks/StoreKitTest.framework
       - package: AutoMobileSdkWire
     settings:
       base:

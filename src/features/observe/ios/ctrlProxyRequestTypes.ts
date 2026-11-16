@@ -81,6 +81,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "request_sdk_web_action",
   "get_voiceover_state",
   "set_voiceover_state",
+  "request_storekit",
   "request_accessibility_audit",
 
   // Storage inspection

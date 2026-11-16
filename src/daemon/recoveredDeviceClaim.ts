@@ -49,27 +49,30 @@ export async function claimRecoveredAssignment<
  */
 async function claimRecoveredDevice(
   port: RecoveredDeviceClaimPort,
-  { sessionId, target, ownership }: RecoveredClaimContext,
+  context: RecoveredClaimContext,
   { deviceId, session }: { deviceId: string; session: Session },
 ): Promise<"claimed" | "deferred"> {
+  // The recovering session's id, not a device binding field.
+  const recoveringSessionId = context.sessionId;
+  const { target, ownership } = context;
   if (await port.publishDeviceClaim(deviceId)) {
     return "claimed";
   }
-  const rollback = new Map([[sessionId, { deviceId, session }]]);
+  const rollback = new Map([[recoveringSessionId, { deviceId, session }]]);
   if (ownership.claimDeferred?.(deviceId) === true) {
     logger.info(
-      `[DevicePool] The device claims registry cannot decide ${deviceId} yet; releasing it from recovering session ${sessionId} to retry`,
+      `[DevicePool] The device claims registry cannot decide ${deviceId} yet; releasing it from recovering session ${recoveringSessionId} to retry`,
     );
     await port.rollbackAssignments(rollback);
     return "deferred";
   }
   logger.warn(
-    `[DevicePool] Another AutoMobile process (PID ${ownership.foreignOwnerPid(deviceId)}) claims ${deviceId}; rolling back recovery of session ${sessionId}`,
+    `[DevicePool] Another AutoMobile process (PID ${ownership.foreignOwnerPid(deviceId)}) claims ${deviceId}; rolling back recovery of session ${recoveringSessionId}`,
   );
   await port.rollbackAssignments(rollback);
   // Rollback cleared the local holder, so the fresh explicit-bind refusal can name the winner.
   await port.assertNotClaimedByForeignDaemon(deviceId, target.platform);
-  throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
+  throw new SessionRecoveryIdentityLossError(recoveringSessionId, target, "owned-by-other-daemon", {
     deviceId,
     ownerPid: ownership.foreignOwnerPid(deviceId),
   });

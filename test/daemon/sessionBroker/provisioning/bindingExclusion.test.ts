@@ -1,15 +1,15 @@
 import { logger } from "../../../../src/utils/logger";
 import { BindingRegistryUpgradePendingError } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   currentBindingReconciler,
   refreshAllocationBindingExclusion,
   bindingRefusal,
   RegistryBindingExclusion,
   createDefaultBindingExclusion,
-  resetSharedHostRegistryForTesting,
   runAsBindingReconciler,
 } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
+import { SharedHostRegistry } from "../../../../src/daemon/sessionBroker/provisioning/sharedHostRegistry";
 import {
   DEVICE_ASSIGNED_TO_BINDING_CODE,
   DeviceAssignedToBindingError,
@@ -35,12 +35,6 @@ describe("RegistryBindingExclusion", () => {
     timer.setCurrentTime(1_000);
     registry = new FakeBindingRegistry(timer);
     opens = 0;
-    // Another test file in this process may have cached the shared host registry.
-    resetSharedHostRegistryForTesting();
-  });
-
-  afterEach(() => {
-    resetSharedHostRegistryForTesting();
   });
 
   const openFake = async (): Promise<BindingRegistry> => {
@@ -121,6 +115,8 @@ describe("RegistryBindingExclusion", () => {
         return registry;
       },
       registryExists: () => true,
+      // A private cache, so a handle another test cached in this process is never reused.
+      hostRegistry: new SharedHostRegistry(),
     };
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const close = spyOn(registry, "close");

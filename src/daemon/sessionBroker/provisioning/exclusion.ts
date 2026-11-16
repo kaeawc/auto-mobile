@@ -7,6 +7,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 import type { Platform } from "../../../models/Platform";
 import { DeviceAssignedToBindingError, BindingDiscoveryIncompleteError } from "./refusal";
 import type { ManagedDeviceEntry, BindingKey, BindingRegistry } from "../registry/bindingRegistry";
+import { SharedHostRegistry } from "./sharedHostRegistry";
 import {
   openSqliteBindingRegistry,
   bindingRegistryFileExists,
@@ -213,6 +214,8 @@ export class RegistryBindingExclusion implements BindingExclusion {
      * and the registry is not opened (opening would create it). Defaults to always existing.
      */
     private readonly registryExists: () => boolean = () => true,
+    /** Releases a shared handle this view found unsupported, so later views reopen the registry. */
+    private readonly forgetSharedRegistry: (registry: BindingRegistry) => void = () => {},
   ) {}
 
   async refresh(options: BindingRefreshOptions = {}): Promise<void> {
@@ -421,9 +424,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
     if (!registry) {
       return;
     }
-    if (sharedHostRegistry?.handle === registry) {
-      sharedHostRegistry = undefined;
-    }
+    this.forgetSharedRegistry(registry);
     if (unsupportedRegistries.has(registry)) {
       return;
     }
@@ -437,20 +438,8 @@ export class RegistryBindingExclusion implements BindingExclusion {
   }
 }
 
-interface HostRegistryCache {
-  promise: Promise<BindingRegistry>;
-  handle?: BindingRegistry;
-}
-
-let sharedHostRegistry: HostRegistryCache | undefined;
-
-/**
- * Forget the process-wide registry handle without closing it, so a test's injected `openRegistry`
- * is used again rather than a handle an earlier test in the same process cached.
- */
-export function resetSharedHostRegistryForTesting(): void {
-  sharedHostRegistry = undefined;
-}
+/** The daemon process's host registry, shared by every pool in this process. */
+const processHostRegistry = new SharedHostRegistry();
 
 /**
  * The daemon's default: the host-wide SQLite registry, opened lazily on first use and shared by
@@ -461,31 +450,16 @@ export function createDefaultBindingExclusion(
   sources: {
     openRegistry?: () => Promise<BindingRegistry>;
     registryExists?: () => boolean;
+    /** The handle cache the views share; defaults to the process-wide one. */
+    hostRegistry?: SharedHostRegistry;
   } = {},
 ): BindingExclusion {
+  const shared = sources.hostRegistry ?? processHostRegistry;
   return new RegistryBindingExclusion(
-    () => {
-      if (!sharedHostRegistry) {
-        const cached: HostRegistryCache = {
-          promise: (sources.openRegistry?.() ?? openSqliteBindingRegistry({ migrate: false })).then(
-            (registry) => {
-              cached.handle = registry;
-              return registry;
-            },
-            (error: unknown) => {
-              if (sharedHostRegistry === cached) {
-                sharedHostRegistry = undefined;
-              }
-              throw error;
-            },
-          ),
-        };
-        sharedHostRegistry = cached;
-      }
-      return sharedHostRegistry.promise;
-    },
-    timer,
     () =>
-      sharedHostRegistry !== undefined || (sources.registryExists ?? bindingRegistryFileExists)(),
+      shared.open(() => sources.openRegistry?.() ?? openSqliteBindingRegistry({ migrate: false })),
+    timer,
+    () => shared.isOpen() || (sources.registryExists ?? bindingRegistryFileExists)(),
+    (registry) => shared.forget(registry),
   );
 }

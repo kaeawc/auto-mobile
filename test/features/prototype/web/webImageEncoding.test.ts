@@ -89,6 +89,20 @@ describe("buildPrototypeWebPage with images", () => {
     expect(built.html.split("var(--pa-0)").length).toBe(3);
   });
 
+  test("inlines a video poster and drops its entry (#16591)", async () => {
+    const spec = {
+      id: "watch",
+      window: { placement: { type: "fullscreen" } },
+      root: { type: "videoPlayer", id: "clip", poster: "cover" },
+    };
+    const images = encoder(30);
+    const built = await buildPrototypeWebPageWithImages(page([spec]), source(["cover"]), images);
+    expect(built.inlinedImages).toEqual(["cover"]);
+    expect(built.unsupportedNodes).toEqual([]);
+    expect(built.html).toContain('data-part="poster"');
+    expect(images.boxes[0]![0]!.cover).toBe(false);
+  });
+
   test("an asset that does not fit keeps its placeholder with reason assetOverBudget", () => {
     const images = [
       { id: "a", bytes: new Uint8Array(300), width: 4, height: 3 },

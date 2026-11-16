@@ -78,7 +78,8 @@ describe("DisposableAppManager.install", () => {
     await manager.install(input());
     const again = await manager.install(input({ label: "Feedly 2", reset: true }));
     expect(again.updated).toBe(true);
-    expect(installer.installs.map((entry) => entry.reset)).toEqual([false, true]);
+    expect(installer.installs).toHaveLength(2);
+    expect(installer.resets).toEqual([disposableAppId("android", "feedly")]);
     expect((await registry.list(DEVICE)).map((entry) => entry.label)).toEqual(["Feedly 2"]);
   });
 
@@ -107,6 +108,22 @@ describe("DisposableAppManager.install", () => {
     expect(await registry.list(DEVICE)).toEqual([
       expect.objectContaining({ appId, installedAt: HOUR, expiresAt: null }),
     ]);
+    expect(await manager.sweepExpired(DEVICE, "android")).toEqual({ removed: [], skipped: [] });
+    expect(installer.uninstalls).toEqual([]);
+  });
+
+  test("a reinstall whose storage reset fails still records the new expiry", async () => {
+    await manager.install(input({ ttlHours: 1 }));
+    timer.advanceTime(HOUR);
+    installer.resetFailure = new Error("pm clear failed");
+    const appId = disposableAppId("android", "feedly");
+    await expect(manager.install(input({ ttlHours: 0, reset: true }))).rejects.toThrow(
+      `${appId} is installed on ${DEVICE} (expires never), but its storage was not cleared: pm clear failed.`,
+    );
+    expect(await registry.list(DEVICE)).toEqual([
+      expect.objectContaining({ appId, installedAt: HOUR, expiresAt: null }),
+    ]);
+    expect(installer.grants).toHaveLength(1);
     expect(await manager.sweepExpired(DEVICE, "android")).toEqual({ removed: [], skipped: [] });
     expect(installer.uninstalls).toEqual([]);
   });

@@ -16,6 +16,7 @@ import {
 import { getHierarchyRoots } from "../../../src/features/systemTray/notificationHints";
 import { parseDumpsysNotificationRecords } from "../../../src/features/systemTray/notificationDumpsys";
 import { waitForNotificationMatch } from "../../../src/features/systemTray/helpers/runtime";
+import { clearMatchingSystemTrayNotifications } from "../../../src/features/systemTray/helpers/dismissal";
 import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
@@ -24,6 +25,8 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { createExecResult } from "../../../src/utils/execResult";
+import type { ExecResult } from "../../../src/models";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
 import { buildObserveResult, observeResultFromJsonText } from "../../helpers/observeFixture";
 
@@ -366,5 +369,137 @@ describe("systemTray polling dumpsys attribution", () => {
         .match,
     ).not.toBeNull();
     expect(adb.getExecutedCommands()).not.toContain(dumpCommand);
+  });
+});
+
+// A Shell group whose header renders no app name: each child row is attributed
+// only by the notification-manager record that posted it.
+const headerlessGroupShade = (): ViewHierarchyResult =>
+  androidShade([['"text":"Shell"', '"text":""']]);
+const groupChildRecords = (deltaPkg: string) => [
+  { pkg: deltaPkg, titles: ["Delta"], bodies: ["delta body"], hasCustomLayout: false },
+  { pkg: SHELL[1], titles: ["Gamma"], bodies: ["gamma body"], hasCustomLayout: false },
+];
+
+describe("systemTray header-less group children", () => {
+  test("the shade fixture's group header carries no app attribution", () => {
+    const shade = headerlessGroupShade();
+    expect(getHierarchyRoots(shade).flatMap(collectNotificationAttributions)).toEqual([]);
+  });
+
+  test("attributes each child to its own posting package", () => {
+    const match = findBestNotificationMatch(
+      headerlessGroupShade(),
+      { title: "Delta", appId: GMAIL[1], dumpsysRecords: () => groupChildRecords(GMAIL[1]) },
+      GMAIL,
+    );
+    expect(match?.match.matches).toEqual({
+      title: { text: "Delta", matchType: "exact" },
+      app: { text: GMAIL[0], matchType: "exact" },
+    });
+    expect(
+      findBestNotificationMatch(
+        headerlessGroupShade(),
+        { body: "gamma body", appId: SHELL[1], dumpsysRecords: () => groupChildRecords(GMAIL[1]) },
+        SHELL,
+      )?.match.matches.app,
+    ).toEqual({ text: SHELL[0], matchType: "exact" });
+  });
+
+  test("never takes a sibling child's or the group's package", () => {
+    for (const [title, records] of [
+      ["Delta", groupChildRecords(GMAIL[1])],
+      ["Delta", groupChildRecords(GMAIL[1]).slice(1)],
+      ["Delta", []],
+    ] as const) {
+      expect(
+        findBestNotificationMatch(
+          headerlessGroupShade(),
+          { title, appId: SHELL[1], dumpsysRecords: () => records },
+          SHELL,
+        ),
+      ).toBeNull();
+    }
+  });
+});
+
+class HangingDumpsysAdb extends FakeAdbExecutor {
+  readonly hungSignals: (AbortSignal | undefined)[] = [];
+  private dumpsysReads = 0;
+
+  constructor(private readonly answeredReads: number) {
+    super();
+  }
+
+  override executeCommand(command: string, options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    if (command !== dumpCommand || this.dumpsysReads++ < this.answeredReads) {
+      return super.executeCommand(command, options);
+    }
+    this.hungSignals.push(options.signal);
+    return new Promise((_resolve, reject) =>
+      options.signal?.addEventListener("abort", () => reject(new Error("dumpsys aborted")), {
+        once: true,
+      }),
+    );
+  }
+}
+
+describe("systemTray clearAll notification-record reads", () => {
+  afterEach(() => resetSystemTrayDependencies());
+  const device: BootedDevice = {
+    name: "fake",
+    deviceId: "fake",
+    platform: "android",
+    source: "local",
+  };
+  const setup = (answeredReads: number) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new HangingDumpsysAdb(answeredReads);
+    adb.setDeviceTimestampMs(0);
+    adb.setCommandResponse(dumpCommand, createExecResult(silentDump, ""));
+    const observer = new FakeObserveScreen();
+    observer.setObserveResult(
+      buildObserveResult({
+        viewHierarchy: silentShade,
+        screenSize: { width: 1080, height: 2400 },
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      }),
+    );
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      observeScreenFactory: () => observer,
+    });
+    return { timer, adb };
+  };
+
+  test("a hung readiness read times out within each attempt's budget", async () => {
+    const { adb, timer } = setup(0);
+    await expect(
+      clearMatchingSystemTrayNotifications(device, { appId: POSTER[1] }, POSTER, {
+        awaitTimeoutMs: 500,
+      }),
+    ).rejects.toThrow("read timed out");
+    expect(adb.hungSignals.length).toBeGreaterThan(0);
+    expect(adb.hungSignals.every((signal) => signal?.aborted)).toBe(true);
+    expect(timer.now()).toBe(3 * 500 + 250 + 500);
+  });
+
+  test("a hung post-swipe read returns partial counts at the verification deadline", async () => {
+    const { adb, timer } = setup(1);
+    const result = await clearMatchingSystemTrayNotifications(
+      device,
+      { appId: POSTER[1] },
+      POSTER,
+      {
+        awaitTimeoutMs: 500,
+      },
+    );
+    expect(result).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(adb.hungSignals).toHaveLength(1);
+    expect(adb.hungSignals[0]?.aborted).toBe(true);
+    expect(timer.now()).toBeLessThanOrEqual(1000);
   });
 });

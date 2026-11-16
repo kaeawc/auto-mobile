@@ -412,7 +412,11 @@ const waitForClearAllDismissal = async (
     while (timer.now() < deadlineMs) {
       observation = await read();
       throwIfAborted(signal);
-      await refreshNotificationDumpsys(device, observation.viewHierarchy, criteria, signal);
+      const { viewHierarchy } = observation;
+      await raceWithDeadline(
+        () => refreshNotificationDumpsys(device, viewHierarchy, criteria, signal),
+        raceOptions(),
+      );
       const outcome = isReadableNotificationShade(detector, observation)
         ? classifyNotificationDismissal(detector, swiped, criteria, {
             appMatchTexts,
@@ -509,7 +513,11 @@ const readClearAllShadeOnce = async (
   while (true) {
     throwIfAborted(signal);
     const readable = isReadableNotificationShade(detector, observation);
-    await refreshNotificationDumpsys(device, observation.viewHierarchy, criteria, signal);
+    const { viewHierarchy } = observation;
+    await raceWithDeadline(
+      () => refreshNotificationDumpsys(device, viewHierarchy, criteria, signal),
+      raceOptions(),
+    );
     const match =
       readable &&
       observation.viewHierarchy &&

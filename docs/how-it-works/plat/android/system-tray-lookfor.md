@@ -158,13 +158,16 @@ app. The filter attributes it only when `postNotification` posted its exact
 title and body for that app, and no other app, on that device in this server
 process. The title and body are the alert iOS displays, after any raw `aps` override. Otherwise the
 not-found error says the banner cannot be attributed. Each row's own evidence
-attributes it, never another row's. An Android row that
-renders no attribution element (for example a header-less Silent row) uses the
-posting package resolved from notification-manager records and its rendered
-content, using the correlation rules above. The dump is read once per observation
-only when an app filter needs header-less row evidence. Unavailable or ambiguous
-evidence fails the app filter; title, body and action filters still work without
-`appId`. Mentions of app names in the row's text never establish ownership.
+attributes it, never another row's.
+
+An Android row that renders no attribution element (for example a header-less
+Silent row, or a child of a group whose header has none) uses the posting package
+resolved from notification-manager records and its own rendered content, using
+the correlation rules above. The dump is read once per observation only when an
+app filter needs header-less row evidence; in `clearAll` the read counts against
+the phase's `awaitTimeout`. Unavailable or ambiguous evidence fails the app filter;
+title, body and action filters still work without `appId`. Mentions of app names
+in the row's text never establish ownership.
 
 ### Collapsed notification group handling
 

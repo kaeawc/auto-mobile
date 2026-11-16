@@ -1767,6 +1767,28 @@ describe("prototype web still (#16346)", () => {
     });
   });
 
+  test("theme typography's family reaches control labels through the window", () => {
+    const still = renderPrototypeStill({
+      ...reference,
+      theme: { ...(reference.theme as object), typography: { fontFamily: "serif" } },
+      root: { type: "button", testTag: "b", label: "Go" },
+    });
+    const window = find(still.element, (element) => element.attrs["data-window"] !== undefined)[0]!;
+    expect(window.style["font-family"]).toBe("serif");
+    // The screen, which also holds the status bar, keeps the system font.
+    const screen = find(still.element, (element) => element.attrs["data-chrome"] === "screen")[0]!;
+    expect(screen.style["font-family"]).toBe("system-ui, -apple-system, Roboto, sans-serif");
+  });
+
+  test("no theme family leaves the window on the system font", () => {
+    const still = renderPrototypeStill({
+      ...reference,
+      root: { type: "button", testTag: "b", label: "Go" },
+    });
+    const window = find(still.element, (element) => element.attrs["data-window"] !== undefined)[0]!;
+    expect(window.style).not.toHaveProperty("font-family");
+  });
+
   test("a horizontal divider stretches across a box", () => {
     const line = byTag(
       renderPrototypeStill({

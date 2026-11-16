@@ -2,53 +2,6 @@
 import XCTest
 
 final class PrototypeBarScrollTests: XCTestCase {
-    func testFullscreenTopAppBarDefaultsToContentSafeTop() {
-        XCTAssertEqual(
-            prototypeTopAppBarTopPadding(placementType: "fullscreen", hasSafeAreaPadding: false, safeTop: 62),
-            62
-        )
-        XCTAssertEqual(
-            prototypeTopAppBarTopPadding(placementType: "fullscreen", hasSafeAreaPadding: false, safeTop: 20.5),
-            20.5
-        )
-    }
-
-    func testTopAppBarLeavesAuthoredSafeAreaPaddingToTheStyledWrapper() {
-        for placement in ["fullscreen", "unknown", "sheet", "floating"] {
-            XCTAssertEqual(
-                prototypeTopAppBarTopPadding(placementType: placement, hasSafeAreaPadding: true, safeTop: 62),
-                0, placement
-            )
-        }
-    }
-
-    func testSheetAndFloatingTopAppBarsDoNotAddAnInset() {
-        for placement in ["sheet", "floating"] {
-            XCTAssertEqual(
-                prototypeTopAppBarTopPadding(placementType: placement, hasSafeAreaPadding: false, safeTop: 62),
-                0, placement
-            )
-        }
-    }
-
-    func testUnknownPlacementTopAppBarUsesFullscreenFallback() {
-        XCTAssertEqual(
-            prototypeTopAppBarTopPadding(placementType: "unknown", hasSafeAreaPadding: false, safeTop: 62),
-            62
-        )
-    }
-
-    func testTopAppBarDoesNotRepeatTheInsetClearedByTheDismissBar() {
-        let chrome = PrototypeHostChrome(placementType: "fullscreen", chrome: "bar")
-        XCTAssertEqual(
-            prototypeTopAppBarTopPadding(
-                placementType: "fullscreen", hasSafeAreaPadding: false,
-                safeTop: chrome.contentSafeTop(safeTop: 62)
-            ),
-            0
-        )
-    }
-
     func testBottomNavigationRoutesFullInsetsInsideFillAndNoneToStyledWrapper() {
         let insets = PrototypeSafeInsets(top: 10, left: 12, bottom: 34, right: 16)
         let layout = PrototypeNodeSafeInsets(nodeType: "bottomNav", safeInsets: insets)

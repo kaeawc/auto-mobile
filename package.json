@@ -224,7 +224,7 @@
     "oxc-parser": "0.158.0",
     "oxfmt": "0.78.0",
     "oxlint": "1.93.0",
-    "oxlint-tsgolint": "7.0.2006",
+    "oxlint-tsgolint": "7.0.2007",
     "pixelmatch": "^8.0.0",
     "playwright-core": "1.65.0",
     "pngjs": "^7.0.0",

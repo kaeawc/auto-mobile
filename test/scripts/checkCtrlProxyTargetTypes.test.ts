@@ -226,6 +226,26 @@ describe("findMissingTypes", () => {
     ]);
   });
 
+  test("binds a same-type subject inherited from an extended SDK type (#18525)", () => {
+    const sources = new Map([
+      ["Element.swift", "struct Element {}\n"],
+      ["Geometry.swift", "struct Geometry {}\n"],
+      [
+        "Use.swift",
+        [
+          "protocol P { associatedtype X }",
+          "extension Array { func f<T: P>(_ t: T) where Element == T.X {} }",
+          "func g<T: P>(_ t: T) where Geometry == T.X {}",
+          "",
+        ].join("\n"),
+      ],
+    ]);
+    const target = { name: "T", files: ["Use.swift"], packages: [] };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      { target: "T", file: "Use.swift", line: 3, type: "Geometry", definedIn: ["Geometry.swift"] },
+    ]);
+  });
+
   test("does not treat capitalized enum case names as types (#18347)", () => {
     const sources = new Map([
       ["Bar.swift", "struct Bar {}\nstruct Payload {}\n"],

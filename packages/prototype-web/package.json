@@ -11,15 +11,22 @@
   "files": [
     "dist",
     "index.d.ts",
+    "element.d.ts",
     "README.md"
   ],
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/element.js"
+  ],
   "types": "./index.d.ts",
   "exports": {
     ".": {
       "types": "./index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./element": {
+      "types": "./element.d.ts",
+      "import": "./dist/element.js"
     }
   },
   "scripts": {

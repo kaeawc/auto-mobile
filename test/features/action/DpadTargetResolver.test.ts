@@ -5,13 +5,18 @@ import {
 } from "../../../src/features/action/DpadTargetResolver";
 import type { FocusScreen } from "../../../src/features/action/FocusNavigate";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
-import type { Element, ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
+import type {
+  Element,
+  ElementBounds,
+  ElementSelectionResult,
+  ViewHierarchyResult,
+} from "../../../src/models";
 import type { ElementQuery } from "../../../src/models/ElementQuery";
 import type {
   ElementSelectionOptions,
   ElementSelector,
 } from "../../../src/utils/interfaces/ElementSelector";
-import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { createFlatNodeForTest, type FlatHierarchyNode } from "../observe/flatHierarchyBuilders";
 
 const FIELD_BOUNDS = { left: 0, top: 0, right: 100, bottom: 50 };
 
@@ -43,6 +48,34 @@ class FakeSelector implements Pick<ElementSelector, "select"> {
     return this.result;
   }
 }
+
+type TestNode = FlatHierarchyNode & { bounds: ElementBounds };
+
+/** A flat node whose bounds stay typed, so assertions can read them back. */
+const node = (attributes: TestNode): TestNode => createFlatNodeForTest(attributes) as TestNode;
+
+const root = (children: FlatHierarchyNode[]): FlatHierarchyNode =>
+  createFlatNodeForTest({ bounds: { left: 0, top: 0, right: 1080, bottom: 2400 }, node: children });
+
+const capture = (...children: FlatHierarchyNode[]): ViewHierarchyResult => ({
+  hierarchy: { node: root(children) },
+});
+
+/** Two windows: `lower` under `upper`, the overlay that ranks first. */
+const windowed = (lower: FlatHierarchyNode[], upper: FlatHierarchyNode[]): ViewHierarchyResult => ({
+  hierarchy: {},
+  windows: [
+    { windowLayer: 1, hierarchy: { node: root(lower) } },
+    { windowLayer: 5, hierarchy: { node: root(upper) } },
+  ],
+});
+
+const selected = (element: TestNode): ElementSelectionResult => ({
+  element: element as Element,
+  totalMatches: 1,
+  indexInMatches: 0,
+  strategy: "first",
+});
 
 const miss: ElementSelectionResult = {
   element: null,
@@ -82,35 +115,33 @@ describe("SelectorDpadTargetResolver", () => {
   });
 
   test("keeps a neighbour label pin when only a non-focusable node matches", () => {
-    const neighbour: Element = { bounds: FIELD_BOUNDS, text: "Neighbour", focusable: "false" };
-    const selector = new FakeSelector({ ...miss, element: neighbour, totalMatches: 1 });
-    const read = { ...screen(searchField), elements: [neighbour] };
-    expect(new SelectorDpadTargetResolver(selector).resolve(read, { label: "Neighbour" })).toEqual(
-      FIELD_BOUNDS,
-    );
+    const neighbour = node({ bounds: FIELD_BOUNDS, text: "Neighbour", focusable: "false" });
+    const selector = new FakeSelector(selected(neighbour));
+    expect(
+      new SelectorDpadTargetResolver(selector).resolve(screen(capture(neighbour)), {
+        label: "Neighbour",
+      }),
+    ).toEqual(FIELD_BOUNDS);
   });
 
   test.each([false, "false", undefined])(
     "prefers focusable label matches by area then hierarchy order (selected focusable: %s)",
     (focusable) => {
-      const title: Element = { bounds: FIELD_BOUNDS, text: "Ring volume", focusable };
-      const large: Element = {
+      const title = node({ bounds: FIELD_BOUNDS, text: "Ring volume", focusable });
+      const large = node({
         bounds: { left: 0, top: 100, right: 200, bottom: 200 },
-        "content-desc": "RING VOLUME slider",
+        "content-desc": "RING VOLUME",
         focusable: true,
-      };
-      const small: Element = {
-        ...large,
+      });
+      const small = node({
         bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+        "content-desc": "Ring volume",
         focusable: "true",
-      };
-      const tied: Element = {
-        ...small,
-        bounds: { left: 0, top: 250, right: 100, bottom: 300 },
-      };
-      const unrelated: Element = { ...small, bounds: FIELD_BOUNDS, "content-desc": "Media volume" };
-      const selector = new FakeSelector({ ...miss, element: title, totalMatches: 1 });
-      const read = { ...screen(searchField), elements: [title, unrelated, large, small, tied] };
+      });
+      const tied = node({ ...small, bounds: { left: 0, top: 250, right: 100, bottom: 300 } });
+      const unrelated = node({ ...small, bounds: FIELD_BOUNDS, "content-desc": "Media volume" });
+      const selector = new FakeSelector(selected(title));
+      const read = screen(capture(title, unrelated, large, small, tied));
       expect(
         new SelectorDpadTargetResolver(selector).resolve(read, { label: "ring volume" }),
       ).toEqual(small.bounds);
@@ -118,18 +149,119 @@ describe("SelectorDpadTargetResolver", () => {
   );
 
   test("keeps a focusable tap selection even when another label match is smaller", () => {
-    const selected: Element = { bounds: FIELD_BOUNDS, text: "Play", focusable: "true" };
-    const smaller: Element = {
-      ...selected,
-      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
-    };
-    const selector = new FakeSelector({ ...miss, element: selected, totalMatches: 2 });
+    const chosen = node({ bounds: FIELD_BOUNDS, text: "Play", focusable: "true" });
+    const smaller = node({ ...chosen, bounds: { left: 0, top: 0, right: 10, bottom: 10 } });
+    const selector = new FakeSelector(selected(chosen));
     expect(
-      new SelectorDpadTargetResolver(selector).resolve(
-        { ...screen(searchField), elements: [smaller, selected] },
-        { label: "Play" },
-      ),
-    ).toEqual(selected.bounds);
+      new SelectorDpadTargetResolver(selector).resolve(screen(capture(smaller, chosen)), {
+        label: "Play",
+      }),
+    ).toEqual(chosen.bounds);
+  });
+
+  // A focused row owns the exact "Movies" label; the separate "Movies Plus" control only
+  // contains it, so the row's exact label keeps the pin even though the other is focusable.
+  const moviesLabel = node({ bounds: { left: 10, top: 10, right: 200, bottom: 90 }, text: "Movies" });
+  const moviesRow = node({
+    bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+    focusable: "true",
+    focused: "true",
+    node: [moviesLabel],
+  });
+  const moviesPlus = node({
+    bounds: { left: 600, top: 0, right: 700, bottom: 50 },
+    text: "Movies Plus",
+    focusable: "true",
+  });
+
+  test("pins an exact non-focusable label to its focusable row, not a contains match", () => {
+    const selector = new FakeSelector(selected(moviesLabel));
+    expect(
+      new SelectorDpadTargetResolver(selector).resolve(screen(capture(moviesRow, moviesPlus)), {
+        label: "Movies",
+      }),
+    ).toEqual(moviesRow.bounds);
+  });
+
+  test("the real selector does not trade the exact Movies row for Movies Plus", () => {
+    const resolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
+    const read = screen(capture(moviesRow, moviesPlus));
+    expect(resolver.resolve(read, { label: "Movies" })).not.toEqual(
+      expect.objectContaining(moviesPlus.bounds),
+    );
+    expect(resolver.resolve(read, { label: "Movies Plus" })).toEqual(
+      expect.objectContaining(moviesPlus.bounds),
+    );
+  });
+
+  test("an exact label without a focusable owner keeps tapOn's pin over a contains match", () => {
+    const play = node({ bounds: FIELD_BOUNDS, text: "Play" });
+    const playAll = node({
+      bounds: { left: 0, top: 60, right: 20, bottom: 70 },
+      text: "Play all",
+      focusable: "true",
+    });
+    const selector = new FakeSelector(selected(play));
+    expect(
+      new SelectorDpadTargetResolver(selector).resolve(screen(capture(play, playAll)), {
+        label: "Play",
+      }),
+    ).toEqual(FIELD_BOUNDS);
+  });
+
+  test("an exact focusable match beats a smaller focusable contains match", () => {
+    const title = node({ bounds: FIELD_BOUNDS, text: "Play" });
+    const play = node({
+      bounds: { left: 0, top: 100, right: 300, bottom: 200 },
+      "content-desc": "Play",
+      focusable: "true",
+    });
+    const playAll = node({
+      bounds: { left: 0, top: 60, right: 20, bottom: 70 },
+      text: "Play all",
+      focusable: "true",
+    });
+    const selector = new FakeSelector(selected(title));
+    expect(
+      new SelectorDpadTargetResolver(selector).resolve(screen(capture(title, playAll, play)), {
+        label: "play",
+      }),
+    ).toEqual(play.bounds);
+  });
+
+  test("ranks focusable label matches by their real window before area", () => {
+    const base = node({
+      bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+      text: "Movies",
+      focusable: "true",
+    });
+    const overlay = node({
+      bounds: { left: 0, top: 500, right: 1000, bottom: 900 },
+      text: "Movies",
+      focusable: "true",
+    });
+    const title = node({ bounds: FIELD_BOUNDS, text: "Movies" });
+    const read = screen(windowed([title, base], [overlay]));
+    expect(
+      new SelectorDpadTargetResolver(new FakeSelector(selected(title))).resolve(read, {
+        label: "Movies",
+      }),
+    ).toEqual(overlay.bounds);
+  });
+
+  test("an overlay's focusable contains match outranks an exact label in a lower window", () => {
+    const base = node({ bounds: FIELD_BOUNDS, text: "Movies" });
+    const overlay = node({
+      bounds: { left: 0, top: 500, right: 1000, bottom: 900 },
+      text: "Movies Plus",
+      focusable: "true",
+    });
+    const read = screen(windowed([base], [overlay]));
+    expect(
+      new SelectorDpadTargetResolver(new FakeSelector(selected(base))).resolve(read, {
+        label: "Movies",
+      }),
+    ).toEqual(overlay.bounds);
   });
 
   test("resolves elementId exactly", () => {

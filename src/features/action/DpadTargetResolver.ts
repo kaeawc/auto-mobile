@@ -1,9 +1,11 @@
 import type { FocusNavigateOptions, FocusNavigateTarget, FocusScreen } from "./FocusNavigate";
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
+import type { Element } from "../../models/Element";
 import { boundsArea } from "../../utils/bounds";
 import { isTruthyFlag } from "../utility/elementProperties";
-import { compareSelectionRank } from "../utility/selectionRank";
+import { type SearchableEntry, SearchableHierarchy } from "../utility/SearchableNode";
+import { compareSelectionRank, type SelectionRank } from "../utility/selectionRank";
 import { elementMatchesTarget } from "./FocusNavigateMatching";
 
 /**
@@ -17,10 +19,14 @@ export interface DpadTargetResolver {
 /**
  * Resolve with tapOn's own selector and the options its touch path uses for a plain text or
  * elementId tap, so hint-text fallback, ranking, actionable-ancestor promotion and synthetic ids
- * agree between touch and D-pad. A non-focusable label yields to a matching focusable control.
+ * agree between touch and D-pad. A non-focusable label yields to a matching focusable control
+ * unless that would trade an exact label for a contains match; see {@link focusableLabelFallback}.
  */
 export class SelectorDpadTargetResolver implements DpadTargetResolver {
-  constructor(private readonly selector: Pick<ElementSelector, "select">) {}
+  constructor(
+    private readonly selector: Pick<ElementSelector, "select">,
+    private readonly searchable: Pick<SearchableHierarchy, "project"> = new SearchableHierarchy(),
+  ) {}
 
   resolve(screen: FocusScreen, target: FocusNavigateTarget): ElementBounds | null | undefined {
     if (!screen.hierarchy) {
@@ -40,22 +46,9 @@ export class SelectorDpadTargetResolver implements DpadTargetResolver {
         },
       );
       if (!isTruthyFlag(selection.element?.focusable)) {
-        const [focusable] = screen.elements
-          .filter(
-            (element) =>
-              isTruthyFlag(element.focusable) &&
-              elementMatchesTarget(element, { label: target.label }),
-          )
-          .map((element, order) => ({
-            element,
-            windowRank: 0,
-            area: boundsArea(element.bounds),
-            order,
-            interactive: false,
-          }))
-          .sort((a, b) => compareSelectionRank(a, b));
-        if (focusable) {
-          return focusable.element.bounds;
+        const fallback = focusableLabelFallback(this.searchable.project(screen.hierarchy), target.label);
+        if (fallback) {
+          return fallback;
         }
       }
       return selection.element?.bounds ?? null;
@@ -70,6 +63,82 @@ export class SelectorDpadTargetResolver implements DpadTargetResolver {
     }
     return undefined;
   }
+}
+
+interface LabelCandidate extends SelectionRank {
+  entry: SearchableEntry;
+  element: Element;
+  exact: boolean;
+}
+
+/** Topmost window first, then exact before contains, then tapOn's smallest-area, hierarchy order. */
+function compareLabelCandidates(a: LabelCandidate, b: LabelCandidate): number {
+  return (
+    a.windowRank - b.windowRank ||
+    Number(b.exact) - Number(a.exact) ||
+    compareSelectionRank(a, b)
+  );
+}
+
+function labelCandidates(entries: readonly SearchableEntry[], label: string): LabelCandidate[] {
+  return entries
+    .flatMap((entry) => {
+      const element = entry.element;
+      if (!element || !elementMatchesTarget(element, { label })) {
+        return [];
+      }
+      const exact = elementMatchesTarget(element, { label, labelExact: true });
+      return [
+        {
+          entry,
+          element,
+          exact,
+          windowRank: entry.windowRank,
+          area: boundsArea(element.bounds),
+          order: entry.index,
+          interactive: false,
+        },
+      ];
+    })
+    .sort(compareLabelCandidates);
+}
+
+/** The nearest focusable, non-scrolling ancestor that owns focus for a non-focusable label. */
+function focusableAncestor(
+  entries: readonly SearchableEntry[],
+  entry: SearchableEntry,
+): Element | undefined {
+  for (let index = entry.parentIndex; index !== undefined; index = entries[index]?.parentIndex) {
+    const element = entries[index]?.element;
+    if (element && isTruthyFlag(element.scrollable)) {
+      return undefined;
+    }
+    if (element && isTruthyFlag(element.focusable)) {
+      return element;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Bounds to pin when tapOn's label target cannot take focus: the best focusable label match, unless
+ * a non-focusable exact match ranks at least as high (same or higher window) and the focusable one
+ * only contains the label; then the exact match's focusable ancestor, or undefined to keep tapOn's.
+ */
+export function focusableLabelFallback(
+  entries: readonly SearchableEntry[],
+  label: string,
+): Element["bounds"] | undefined {
+  const candidates = labelCandidates(entries, label);
+  const focusable = candidates.find((candidate) => isTruthyFlag(candidate.element.focusable));
+  if (!focusable) {
+    return undefined;
+  }
+  const exact = candidates.find((candidate) => candidate.exact);
+  if (!focusable.exact && exact && exact.windowRank <= focusable.windowRank) {
+    return focusableAncestor(entries, exact.entry)?.bounds;
+  }
+  return focusable.element.bounds;
 }
 
 /** Whether `until` is only a `label` or only an `elementId`, the targets tapOn's resolver reads. */

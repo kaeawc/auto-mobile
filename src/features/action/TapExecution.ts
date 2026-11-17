@@ -61,6 +61,13 @@ import { appendNoChangeWarning, heldMismatch } from "./tapActivationTargetWarnin
 import { type TapOnFocusOutcome } from "./TapSemanticLinks";
 import { recordXrNodeClick, settleXrNodeClick, type XrClickRecord } from "./xrPanelNodeClick";
 
+function dispatchRouteFields(route: string | undefined): { dispatchRoute?: string } {
+  if (route === undefined) {
+    return {};
+  }
+  return { dispatchRoute: route };
+}
+
 function appendDisabledElementWarning(
   strategy: TapStrategy,
   element: Element,
@@ -284,8 +291,7 @@ export class TapExecution {
     state.completedDisplayGesture = this.host.didCompleteDisplayGesture(result, options.display);
     if (options.display !== undefined && result.staleDisplay) {
       heldMismatch.release(result, state, false);
-      // Legacy/iOS display gestures must not finalize optional post-state
-      // metadata or confirm focus/checked state from an invalidated capture.
+      // Legacy/iOS display gestures cannot finalize metadata or verify focus/checked state from invalidated captures.
       return this.host.unverifiableDisplayPostState(result, options);
     }
 
@@ -299,8 +305,7 @@ export class TapExecution {
         { settlePostTapEffect: state.settlePostTapEffect },
       );
       result.effect = postTap.effect;
-      // The observation that established the effect must be returned and become
-      // the caller's diff baseline, rather than the earlier source capture.
+      // Return the effect-establishing observation as the caller's diff baseline, replacing the source capture.
       result.observation = postTap.observation;
       await this.host.applyEnsureCheckedResult(result, options, signal);
       await this.host.captureTerminalObservationScreenshot(result.observation, perf, signal);
@@ -330,8 +335,7 @@ export class TapExecution {
       preTapHierarchy: state.preTapHierarchy,
       signal,
     });
-    // A focus request's intended effect is focus: once verified, an unchanged screen is no sign
-    // the activation failed (#17693).
+    // Verified focus is the intended effect; an unchanged screen does not indicate activation failure (#17693).
     if (effectDerived && (requestedAction !== "focus" || result.focusVerified !== true)) {
       appendNoChangeWarning(result, state.screenReaderActivation);
     }
@@ -432,9 +436,7 @@ export class TapExecution {
   ): Promise<void> {
     const { signal } = state;
     const { observeResult } = hierarchy;
-    // Resolve TalkBack selectors from a capture for this call, just as the
-    // existing search/stability refreshes do. Cache age cannot detect an
-    // external same-app BACK (#9785).
+    // Resolve TalkBack selectors from this call's capture like search/stability; cache age misses external same-app BACK (#9785).
 
     hierarchy.isAccessibilityServiceEnabled = this.host.detectsAccessibilityBeforeSearch()
       ? await this.host
@@ -489,8 +491,7 @@ export class TapExecution {
     let searchOutcome = await perf.track("findElement", () =>
       this.host.searchForElement(options, observeResult, signal),
     );
-    // Search polling, ensureChecked, and opt-in stability already acquire a
-    // current tree. Only a visible cache hit still needs revalidation.
+    // Search polling, ensureChecked, and opt-in stability acquire current trees; only visible cache hits need revalidation.
     if (await this.shouldRevalidateCachedTarget(state, hierarchy, searchOutcome)) {
       const freshHierarchy = await freshTapHierarchy(
         this.host.requiresFreshExtractionForCachedTarget()
@@ -511,8 +512,7 @@ export class TapExecution {
         },
       );
       this.host.replaceObservationHierarchy(observeResult, freshHierarchy, true);
-      // Discard cached coordinates and use the ordinary search-until loop
-      // when the current screen is still transitioning.
+      // Discard cached coordinates and use the ordinary search-until loop while the screen is transitioning.
       searchOutcome = await this.host.searchForElement(options, observeResult, signal);
     }
     state.searchUntilStats = searchOutcome.stats;
@@ -697,11 +697,9 @@ export class TapExecution {
         perf.end();
         return { success: false, error: stable.error };
       }
-      // The pre-tap stability resolver always returns a hierarchy it just
-      // re-captured live from the device, so its freshness is realigned.
+      // The pre-tap stability resolver returns a live recapture, so realign its freshness.
       this.host.replaceObservationHierarchy(observeResult, stable.viewHierarchy, true);
-      // This observation now describes the refreshed capture used for the
-      // tap, rather than the earlier hierarchy used to start resolution.
+      // This observation describes the refreshed capture used for the tap, replacing the initial resolution hierarchy.
       if (stable.selection.captureId) {
         observeResult.observationId = stable.selection.captureId;
       }
@@ -710,10 +708,8 @@ export class TapExecution {
       target.tapElement = stable.tapElement;
       target.finalSelection = stable.selection;
       target.usedParent = stable.usedParent;
-      // Rebuild from the refreshed selection so the reported selectedElement
-      // (bounds/indexInMatches/totalMatches) describes the node actually
-      // tapped after re-resolution, not the stale pre-refresh match (#5888).
-      // The decision lives in a pure seam so it can be unit-tested (#5897).
+      // Rebuild selectedElement bounds/indexInMatches/totalMatches from the refreshed node actually tapped (#5888).
+      // Keep this decision in a pure seam for unit tests (#5897).
       target.selectedElementMetadata = this.host.rebuildSelectedElementMetadataAfterStability(
         target.selectedElementMetadata,
         stable.selection,
@@ -795,8 +791,7 @@ export class TapExecution {
       ? this.host.hashViewHierarchy(target.viewHierarchy)
       : null;
 
-    // Platform-specific tap execution. Everything that waits for the target (search,
-    // pre-tap refresh) is behind us: the navigation graph measures from here (#10196).
+    // Search and pre-tap refresh are complete; navigation graph timing starts at platform-specific execution (#10196).
     await perf.track("executeTap", () => this.dispatchPlatform(state, target, tapPoint, fence));
     if (options.ensureChecked !== undefined) {
       state.ensureCheckedTapTimestamp = this.host.timer().now();
@@ -830,7 +825,7 @@ export class TapExecution {
         element: target.tapElement,
         selectedElement: target.selectedElementMetadata,
         ...iosBackendFields(target.iosBackend),
-        ...(target.dispatchRoute !== undefined ? { dispatchRoute: target.dispatchRoute } : {}),
+        ...dispatchRouteFields(target.dispatchRoute),
         searchUntil: target.searchOutcome.stats,
         ...(target.screenReaderNavigation
           ? { screenReaderNavigation: target.screenReaderNavigation }

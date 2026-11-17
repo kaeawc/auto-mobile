@@ -12,6 +12,7 @@ import type {
   ToolCall,
 } from "../../../src/server/toolCallDispatch";
 import type { BootedDevice } from "../../../src/models";
+import type { TaskPolicy } from "../../../src/server/tasks/runAsTask";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -91,7 +92,15 @@ class FieldByFieldForm {
   };
 }
 
-function arrange(declared: boolean) {
+/** The transport-deadline args the daemon forwards with a call (#6222). */
+const FORWARDED_DEADLINE = {
+  __mcpRequestDeadlineMs: 30_000,
+  __mcpRequestTimeoutMs: 30_000,
+  __mcpLiveDeadlineKey: "live-key",
+};
+
+function arrange(declared: boolean, extraArgs: Record<string, unknown> = {}) {
+  const received: Array<Record<string, unknown>> = [];
   const manager = new FakeTaskManager({ timer: new FakeTimer() });
   const form = new FieldByFieldForm();
   const handler = createSetUIStateHandler({ setUIStateFactory: () => form.executor });
@@ -99,19 +108,20 @@ function arrange(declared: boolean) {
     taskManager: manager,
     ownerKey: OWNER,
     eligibleTools: TASK_ELIGIBILITY,
-    execute: async (received): Promise<McpToolCallResult> => {
+    execute: async (taskCall): Promise<McpToolCallResult> => {
+      received.push(taskCall.args);
       const response = await handler(
         device,
-        received.args as SetUIStateArgs,
+        taskCall.args as SetUIStateArgs,
         undefined,
-        received.extra.signal,
+        taskCall.extra.signal,
       );
       return { content: response.content, ...("isError" in response && { isError: true }) };
     },
   });
   const call: ToolCall<McpToolCallExtra> = {
     name: "setUIState",
-    args: { ...ARGS },
+    args: { ...ARGS, ...extraArgs },
     progress: undefined,
     progressToken: undefined,
     extra: {
@@ -122,7 +132,7 @@ function arrange(declared: boolean) {
       sendNotification: async () => {},
     },
   };
-  return { manager, form, execute, call };
+  return { manager, form, execute, call, received };
 }
 
 async function settled(manager: FakeTaskManager, taskId: string) {
@@ -153,12 +163,11 @@ describe("setUIState as an MCP task (#18531)", () => {
   });
 
   test("every setUIState call is task-eligible under abort, whatever its field count", () => {
-    expect(TASK_ELIGIBILITY({ name: "setUIState", args: { fields: [ARGS.fields[0]] } })).toEqual({
-      onCancel: "abort",
-    });
-    expect(TASK_ELIGIBILITY({ name: "setUIState", args: { ...ARGS } })).toEqual({
-      onCancel: "abort",
-    });
+    const policy: TaskPolicy = { onCancel: "abort", outlivesRequestDeadline: true };
+    expect(TASK_ELIGIBILITY({ name: "setUIState", args: { fields: [ARGS.fields[0]] } })).toEqual(
+      policy,
+    );
+    expect(TASK_ELIGIBILITY({ name: "setUIState", args: { ...ARGS } })).toEqual(policy);
     expect(TASK_ELIGIBILITY({ name: "tapOn", args: {} })).toBeUndefined();
   });
 
@@ -180,6 +189,17 @@ describe("setUIState as an MCP task (#18531)", () => {
     expect(done.status).toBe("completed");
     expect(done.result).toEqual(JSON.parse(JSON.stringify(syncResult)));
     expect(form.applied).toEqual(["first", "last", "agree"]);
+  });
+
+  test("task work drops the forwarded request deadline; a synchronous call keeps it", async () => {
+    const sync = arrange(false, FORWARDED_DEADLINE);
+    await sync.execute(sync.call);
+    expect(sync.received[0]).toMatchObject(FORWARDED_DEADLINE);
+
+    const { manager, execute, call, received } = arrange(true, FORWARDED_DEADLINE);
+    await settled(manager, taskIdOf(await execute(call)));
+    expect(received).toHaveLength(1);
+    expect(Object.keys(received[0]).sort()).toEqual(["fields"]);
   });
 
   test("tasks/cancel aborts the work signal and no further field is applied", async () => {

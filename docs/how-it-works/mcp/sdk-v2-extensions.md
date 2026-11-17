@@ -63,7 +63,8 @@ extension undefined on `2025-11-25`. It is not gated on the legacy client's `pro
   from `createStatelessMcpServer`; direct stdio holds nothing.
 - `TASK_ELIGIBILITY`: per-call eligibility and cancellation policy. `startDevice`,
   `executePlan`, `installApp` and `setUIState` use cooperative `abort` (`setUIState` stops
-  before its next field; #18531); `videoRecording` with `action: "stop"`
+  before its next field, and as a task drops the request's forwarded transport deadline for its
+  own whole-call budget; #18531); `videoRecording` with `action: "stop"`
   uses `detach` (#13090). Recording start and other actions stay synchronous, and calls from
   non-declaring clients still block. `taskEligibleByName` adapts name allowlists to the `abort` policy.
 - Stop task cancellation: cancelling a stop task promptly reports `cancelled` with

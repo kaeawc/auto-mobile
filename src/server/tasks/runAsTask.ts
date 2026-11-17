@@ -59,6 +59,11 @@ export function holdSessionForCurrentTask(sessionUuid: string | undefined): void
 
 export interface TaskPolicy {
   readonly onCancel: "abort" | "detach";
+  /**
+   * The task's work drops the request's forwarded transport deadline, which no longer bounds it
+   * once the `CreateTaskResult` is sent, and runs under the tool's own budget instead (#18531).
+   */
+  readonly outlivesRequestDeadline?: true;
 }
 
 export interface TaskRunOptions {

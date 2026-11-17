@@ -171,7 +171,8 @@ public final class AutoMobileWebViewPolicy: Sendable {
                 )
             },
             viewport: snapshot.viewport,
-            documentId: snapshot.documentId
+            documentId: snapshot.documentId,
+            contentInset: snapshot.contentInset
         )
         lock.withLock { latestSnapshots in
             latestSnapshots[bounded.snapshotId] = bounded
@@ -483,12 +484,24 @@ extension AutoMobileWebAction {
                             inputType: element["inputType"] as? String
                         )
                     }
+                #if canImport(UIKit)
+                    let contentInset = webView.map { view in
+                        let inset = view.scrollView.adjustedContentInset
+                        return AutoMobileWebContentInset(
+                            top: Double(inset.top), left: Double(inset.left),
+                            bottom: Double(inset.bottom), right: Double(inset.right)
+                        )
+                    }
+                #else
+                    let contentInset: AutoMobileWebContentInset? = nil
+                #endif
                 _ = policy.accept(AutoMobileWebSnapshot(
                     snapshotId: body["snapshotId"] as? String ?? UUID().uuidString,
                     url: url?.absoluteString,
                     elements: decoded,
                     viewport: Self.viewport(body["viewport"]),
-                    documentId: body["documentId"] as? String
+                    documentId: body["documentId"] as? String,
+                    contentInset: contentInset
                 ))
             }
             emit(name: name, url: url, frameId: body["frameId"] as? String, requestId: requestId, metadata: metadata)

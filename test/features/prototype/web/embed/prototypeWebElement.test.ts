@@ -32,7 +32,10 @@ function harness(
   onDispatch: (type: PrototypeElementEvent) => void = () => {},
 ) {
   const attrs = new Map(Object.entries(attributes));
-  const host: { script: string | null; watcher?: () => void } = { script };
+  const host: { script: string | null; watcher?: () => void; parsing: boolean } = {
+    script,
+    parsing: true,
+  };
   const log: string[] = [];
   const mounts: PrototypeMountOptions[] = [];
   const updates: Partial<PrototypeMountOptions>[] = [];
@@ -41,6 +44,7 @@ function harness(
     {
       getAttribute: (name) => attrs.get(name) ?? null,
       childSpecText: () => host.script,
+      parsing: () => host.parsing,
       watchChildren: (changed) => {
         host.watcher = changed;
         log.push("watch");
@@ -289,5 +293,27 @@ describe("<automobile-prototype> spec and lifecycle (#16454)", () => {
     controller.spec = undefined;
     expect(log).toEqual(["mount", "destroy", "mount"]);
     expect(mounts.map((options) => options.spec)).toEqual([spec, undefined]);
+  });
+
+  test("a late script that never parses draws the error view once parsing ends", () => {
+    const { controller, host, mounts } = harness();
+    controller.connect();
+    host.script = "{not json";
+    host.watcher?.();
+    expect(mounts).toEqual([]);
+    // The document finished parsing: the script is complete, and still not JSON.
+    host.parsing = false;
+    host.watcher?.();
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]?.spec).toBeUndefined();
+  });
+
+  test("a script appended after parsing ended is reported at once, even if invalid", () => {
+    const { controller, host, mounts } = harness();
+    host.parsing = false;
+    controller.connect();
+    host.script = "{not json";
+    host.watcher?.();
+    expect(mounts).toHaveLength(1);
   });
 });

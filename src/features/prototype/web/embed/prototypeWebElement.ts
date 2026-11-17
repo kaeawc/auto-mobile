@@ -40,10 +40,13 @@ export interface PrototypeElementHost {
   /** The text of the first child `<script type="application/json">`, if there is one. */
   childSpecText(): string | null;
   /**
-   * Calls `changed` when the element's children change, until the returned stop is called. The
-   * parser may connect the element before its JSON script child arrives.
+   * Calls `changed` when the element's children change, and once more when the document finishes
+   * parsing, until the returned stop is called. The parser may connect the element before its JSON
+   * script child arrives.
    */
   watchChildren(changed: () => void): () => void;
+  /** Whether the HTML parser may still be streaming the element's children in. */
+  parsing(): boolean;
 }
 
 export interface PrototypeElementDeps {
@@ -167,11 +170,11 @@ export class PrototypeElementController {
   connect(): void {
     this.connected = true;
     this.draw();
-    // Connected with no spec yet: draw once a child JSON script arrives and parses, since the
-    // parser may still be streaming its text in.
+    // Connected with no spec yet: draw once a child JSON script arrives. While the parser may still
+    // be streaming its text in, wait until it parses; after that, invalid JSON draws the error view.
     if (this.connected && !this.handle && !this.stopWatching) {
       this.stopWatching = this.host.watchChildren(() => {
-        if (this.scriptSpec()?.value !== undefined) {
+        if (!this.host.parsing() || this.scriptSpec()?.value !== undefined) {
           this.draw();
         }
       });

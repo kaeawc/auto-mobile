@@ -317,4 +317,35 @@ globalThis.__late = { events, before: before ?? null, state: host.state };
     },
     CASE_TIMEOUT_MS,
   );
+
+  test(
+    "<automobile-prototype> reports an invalid JSON script appended after it connected",
+    async () => {
+      const source = Buffer.from(element).toString("base64");
+      const html = `<!doctype html><meta charset="utf-8">
+<script type="module">
+await import("data:text/javascript;base64,${source}");
+const host = document.createElement("automobile-prototype");
+const events = [];
+host.addEventListener("error", (event) => events.push(event.detail.code));
+document.body.append(host);
+const script = document.createElement("script");
+script.type = "application/json";
+script.textContent = "{not json";
+host.append(script);
+await new Promise((resolve) => setTimeout(resolve, 0));
+globalThis.__invalid = { events };
+</script>`;
+      const { page, errors } = await open(browser, html);
+      try {
+        await page.waitForFunction(() => Reflect.get(globalThis, "__invalid") !== undefined);
+        const invalid = await page.evaluate(() => Reflect.get(globalThis, "__invalid"));
+        expect(invalid.events).toEqual(["invalidInput"]);
+        expect(errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 });

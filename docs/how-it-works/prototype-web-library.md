@@ -65,7 +65,8 @@ holds its logic; the class in `packages/prototype-web/src/element.ts` only forwa
   view. A `spec` set before the module defined the element is replayed through the setter on
   upgrade.
 - It mounts when connected with a spec and destroys the mount when disconnected. Connected without
-  one, it watches its children and mounts once a JSON script arrives whose text parses. A changed
+  one, it watches its children and mounts once a JSON script arrives. While the page is still
+  parsing, it waits for the script's text to parse; after that, invalid JSON draws the error view. A changed
   attribute or spec updates the mount; a removed attribute mounts afresh, because `update` keeps
   an option it is not given.
 - Events are `CustomEvent`s carrying the `mount` callback's detail: `render`, `screenchange`,

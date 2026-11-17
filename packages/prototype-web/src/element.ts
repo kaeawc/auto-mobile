@@ -33,8 +33,15 @@ export class AutomobilePrototypeElement extends Base {
         // characterData catches a script whose text the parser is still streaming in.
         const observer = new MutationObserver(changed);
         observer.observe(this, { childList: true, subtree: true, characterData: true });
-        return () => observer.disconnect();
+        // Once parsing ends, a script that never parsed is reported rather than awaited.
+        const doc = this.ownerDocument;
+        doc.addEventListener("DOMContentLoaded", changed, { once: true });
+        return () => {
+          observer.disconnect();
+          doc.removeEventListener("DOMContentLoaded", changed);
+        };
       },
+      parsing: () => this.ownerDocument.readyState === "loading",
     },
     {
       mount: (options) => mount(this, options),

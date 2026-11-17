@@ -44,29 +44,25 @@ if ! xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
   exit 0
 fi
 
-build_app() {
+# Each app's build script under scripts/ios; it writes to scratch/<app>-ci.
+build_script() {
   case "$1" in
     # The agent's UIKit sources are not a SwiftPM target (a macOS host build cannot import UIKit),
     # so compile the injectable simulator dylib; its core is tested by swift-test.sh.
-    prototype-agent)
-      "${SCRIPT_DIR}/prototype-agent-build.sh" "${PROJECT_ROOT}/scratch/prototype-agent-ci"
-      ;;
+    prototype-agent) echo "prototype-agent-build.sh" ;;
     # The standalone viewer links the same renderer into its own simulator app content.
-    prototype-viewer)
-      "${SCRIPT_DIR}/prototype-viewer-build.sh" "${PROJECT_ROOT}/scratch/prototype-viewer-ci"
-      ;;
+    prototype-viewer) echo "prototype-viewer-build.sh" ;;
     # The library app shares the renderer but owns its offline library and storage namespaces.
-    protoviewer)
-      "${SCRIPT_DIR}/protoviewer-build.sh" "${PROJECT_ROOT}/scratch/protoviewer-ci"
-      ;;
+    protoviewer) echo "protoviewer-build.sh" ;;
   esac
 }
 
 failed=()
 for app in "${apps[@]}"; do
   echo -e "${BLUE}Building iOS simulator ${app}...${NC}"
+  script="$(build_script "${app}")"
   SECONDS=0
-  if build_app "${app}" 2>&1; then
+  if "${SCRIPT_DIR}/${script}" "${PROJECT_ROOT}/scratch/${app}-ci" 2>&1; then
     echo -e "  ${GREEN}✓${NC} ${app} built successfully (${SECONDS}s)"
   else
     echo -e "  ${RED}✗${NC} ${app} build failed (${SECONDS}s)"

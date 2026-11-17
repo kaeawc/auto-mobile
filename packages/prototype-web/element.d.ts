@@ -40,7 +40,7 @@ export declare class AutomobilePrototypeElement extends HTMLElement {
   get state(): PrototypeViewState | undefined;
   connectedCallback(): void;
   disconnectedCallback(): void;
-  attributeChangedCallback(): void;
+  attributeChangedCallback(name: string): void;
 }
 
 export interface PrototypeElementEventMap {

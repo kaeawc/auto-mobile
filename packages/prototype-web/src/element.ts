@@ -82,8 +82,8 @@ export class AutomobilePrototypeElement extends Base {
     this.#controller.disconnect();
   }
 
-  attributeChangedCallback(): void {
-    this.#controller.attributeChanged();
+  attributeChangedCallback(name: string): void {
+    this.#controller.attributeChanged(name);
   }
 }
 

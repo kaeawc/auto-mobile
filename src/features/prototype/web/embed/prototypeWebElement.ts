@@ -193,7 +193,11 @@ export class PrototypeElementController {
     this.stopWatching = undefined;
   }
 
-  attributeChanged(): void {
+  /**
+   * Applies the one attribute that changed. Only its option is passed on, so `mount` keeps the
+   * orientation and zoom the toolbar chose when an unrelated attribute changes.
+   */
+  attributeChanged(name: string): void {
     if (!this.handle) {
       return;
     }
@@ -205,7 +209,10 @@ export class PrototypeElementController {
       return;
     }
     this.attributeKeys = keys;
-    this.handle.update(options);
+    const attribute = PROTOTYPE_ELEMENT_ATTRIBUTES.find((known) => known === name);
+    if (attribute && options[attribute] !== undefined) {
+      this.handle.update({ [attribute]: options[attribute] });
+    }
   }
 
   private scriptSpec(): { readonly value: unknown } | undefined {

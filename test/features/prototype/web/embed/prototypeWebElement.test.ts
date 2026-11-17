@@ -194,16 +194,33 @@ describe("<automobile-prototype> spec and lifecycle (#16454)", () => {
     controller.spec = spec;
     controller.connect();
     attrs.set("orientation", "landscape");
-    controller.attributeChanged();
-    expect(updates).toEqual([{ zoom: 2, orientation: "landscape" }]);
+    controller.attributeChanged("orientation");
+    expect(updates).toEqual([{ orientation: "landscape" }]);
     attrs.delete("zoom");
-    controller.attributeChanged();
+    controller.attributeChanged("zoom");
     expect(log).toEqual(["mount", "update", "destroy", "mount"]);
+  });
+
+  test("passes on only the changed attribute, keeping the toolbar's orientation and zoom", () => {
+    const { controller, attrs, updates } = harness({ orientation: "portrait", zoom: "1" });
+    controller.spec = spec;
+    controller.connect();
+    attrs.set("mode", "dark");
+    controller.attributeChanged("mode");
+    expect(updates).toEqual([{ mode: "dark" }]);
+  });
+
+  test("ignores an attribute it does not observe", () => {
+    const { controller, updates } = harness({ zoom: "2" });
+    controller.spec = spec;
+    controller.connect();
+    controller.attributeChanged("class");
+    expect(updates).toEqual([]);
   });
 
   test("ignores an attribute change before it has mounted", () => {
     const { controller, log } = harness();
-    controller.attributeChanged();
+    controller.attributeChanged("zoom");
     expect(log).toEqual([]);
   });
 

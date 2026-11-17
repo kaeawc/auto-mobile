@@ -6,6 +6,7 @@ import {
   DATA_WINDOW,
   FLEX,
   FLEX_DIRECTION,
+  FONT_FAMILY,
   JUSTIFY_CONTENT,
   RELATIVE,
   STRETCH,
@@ -86,9 +87,8 @@ export interface PrototypeStillOptions {
   /** Asset ids the page can inline, to their CSS slots; any other asset draws a placeholder. */
   readonly imageSlots?: ReadonlyMap<string, number>;
   /**
-   * Where icons find their glyphs (the server passes the Material Icons Android draws). Used only
-   * for an Android frame: an iOS frame keeps the placeholder until its glyph set is decided
-   * (#16526). Without one every icon draws the placeholder.
+   * Where icons find their glyphs (the server passes the Material Icons Android draws). Both
+   * skins draw them (#16526). Without one every icon draws the placeholder.
    */
   readonly glyphs?: PrototypeIconGlyphSource;
   /**
@@ -246,6 +246,18 @@ function placed(
 }
 
 /**
+ * The theme's `typography.fontFamily` on the app window, so every label inherits it, not only nodes
+ * with a `textStyle` role: Android replaces the family in every Material type role, which control
+ * labels (buttons, checkboxes, switches) draw with, and iOS applies the theme design wherever a
+ * node names no family. A node's own `fontFamily` still overrides it; the status bar, outside the
+ * window, keeps the system font.
+ */
+function themedFamily(window: WebElement, style: WebStyleContext): WebElement {
+  const family = style.typography?.fontFamily;
+  return family ? { ...window, style: { ...window.style, [FONT_FAMILY]: family } } : window;
+}
+
+/**
  * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
  * a floating window sits at its `gravity`, moved by its `offset`. The window region holds the
  * content, then its layers; a floating window's transform anchors them.
@@ -264,13 +276,6 @@ function placedWindow(
     return floatingWindow(placement, children);
   }
   return el("div", { attrs: { [DATA_WINDOW]: "fullscreen" }, style: LAYER }, children);
-}
-
-function glyphScope(
-  options: PrototypeStillOptions,
-  frame: DeviceFrame,
-): { glyphs?: PrototypeIconGlyphSource } {
-  return options.glyphs && frame.platform === "android" ? { glyphs: options.glyphs } : {};
 }
 
 /** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */
@@ -337,7 +342,7 @@ function stillScope(
     inBox: false,
     unsupported: [],
     skin,
-    ...glyphScope(options, frame),
+    ...(options.glyphs ? { glyphs: options.glyphs } : {}),
     screenWidth: size.width,
     screenHeight: size.height,
     // A chromeless screen sets every --safe-* variable to 0px, so its height pass takes none.
@@ -456,7 +461,7 @@ export function renderPrototypeStill(
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const placedContent = placed(expanded, root, scope.layers, locale);
+  const placedContent = themedFamily(placed(expanded, root, scope.layers, locale), scope.style);
   // A d-pad device always has a focused item, so a TV still shows where focus starts.
   const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
   const paint = {

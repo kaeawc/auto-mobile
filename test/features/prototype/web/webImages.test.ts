@@ -240,8 +240,20 @@ describe("webImageDraw and webImageRule", () => {
       height: 3,
     });
     expect(rule).toBe(
-      ":root{--pa-2:url(data:image/webp;base64,AQID);--pa-2-bg:transparent;--pa-2-ar:4/3;--pa-2-on:1}",
+      ":root{--pa-2:url(data:image/webp;base64,AQID);--pa-2-bg:transparent;--pa-2-ar:4/3;--pa-2-w:4px;--pa-2-on:1}",
     );
+  });
+
+  test("the rule's natural width is the source's size in points, not the downscaled encode (#18418)", () => {
+    const rule = webImageRule(1, {
+      id: "a",
+      bytes: new Uint8Array([1, 2, 3]),
+      width: 60,
+      height: 40,
+      naturalWidth: 120,
+      naturalHeight: 80,
+    });
+    expect(rule).toContain("--pa-1-ar:60/40;--pa-1-w:120px;");
   });
 });
 
@@ -420,6 +432,49 @@ describe("an image with an inlinable asset", () => {
     )[0]!.style;
     // Explicitly zero: an omitted minimum would be the flex item's automatic, ratio-raised one.
     expect(weighted["min-width"]).toBe("0");
+  });
+
+  test("an image wrapping both axes draws at its natural size in points on every density (#18418)", () => {
+    // A 120x80 px asset is 120x80 points on a 1x, 2x and 3x frame alike, as iOS draws it.
+    for (const frame of ["car-1024p-landscape", "small-phone", "iphone-16"]) {
+      const node = (style: Record<string, unknown>) =>
+        find(
+          renderPrototypeStill(
+            {
+              id: "img",
+              window: { placement: { type: "fullscreen" } },
+              root: { type: "column", children: [{ type: "image", asset: "photo", style }] },
+            },
+            { frame, imageSlots: new Map([["photo", 3]]) },
+          ).element,
+          (e) => e.attrs["data-node"] === "image",
+        )[0]!;
+      const bare = node({});
+      expect([bare.style.width, bare.style["aspect-ratio"]]).toEqual([
+        "var(--pa-3-w, auto)",
+        "var(--pa-3-ar, auto)",
+      ]);
+      // Padded: the content box inside the padding takes the natural width.
+      const padded = node({ padding: { start: 8, end: 8 } });
+      expect((padded.children[0] as WebElement).style.width).toBe("var(--pa-3-w, auto)");
+      expect(padded.style.width).toBeUndefined();
+      // One fixed or filled axis, a weight or an authored ratio keeps the existing sizing.
+      for (const style of [
+        { width: "fill" },
+        { height: { dp: 40 } },
+        { weight: 1 },
+        { aspectRatio: 2 },
+      ]) {
+        expect(node(style).style.width).not.toBe("var(--pa-3-w, auto)");
+      }
+    }
+    const rule = webImageRule(3, {
+      id: "photo",
+      bytes: new Uint8Array([1]),
+      width: 120,
+      height: 80,
+    });
+    expect(rule).toContain("--pa-3-ar:120/80;--pa-3-w:120px;");
   });
 
   test("an un-padded image keeps its ratio on the node and its layers at inset 0 (#17716)", () => {

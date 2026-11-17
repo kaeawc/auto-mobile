@@ -1,5 +1,5 @@
 import { holderOf } from "../deviceBinding";
-import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
+import { claimRefusalError } from "../claimRefusalError";
 import { logger } from "../../utils/logger";
 import { BootedDevice, Platform } from "../../models";
 import { devicePreparedForOtherRequestError } from "../inputDeviceOwnership";
@@ -252,7 +252,7 @@ export class DevicePoolReservations {
       return reservation;
     }
     await reservation.release();
-    throw new DeviceOwnedByOtherDaemonError(device.id, ownerPid, foreignClaim.remedy);
+    throw claimRefusalError(ownership, device.id, foreignClaim.remedy);
   }
 
   /**

@@ -45,7 +45,7 @@ export function judgeMultiScene(
       continue;
     }
     const failed = outcome.error !== undefined || outcome.result?.success === false;
-    const message = outcome.error ?? String(outcome.result?.error ?? "");
+    const message = outcome.fullError ?? outcome.error ?? String(outcome.result?.error ?? "");
     const documented = message.match(
       /The app has (\d+) connected scenes \([^)]+\)\. SDK observation needs one scene; XCTest does not stand in for this result\./,
     );

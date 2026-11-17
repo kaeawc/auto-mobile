@@ -44,6 +44,7 @@ test("failed CLI calls prefer structured tool diagnostics over the command line"
         });
         expect(outcome.result).toEqual(result);
         expect(outcome.error).toBe(longDetail.slice(0, 240));
+        expect(outcome.fullError).toBe(longDetail.trim());
         expect(outcome.error).not.toContain("Command failed:");
       }
     }
@@ -62,6 +63,7 @@ test("failed CLI calls fall back to a bounded stderr tail, then the exception", 
         throw Object.assign(new Error("Command failed: bun long-argv"), { stdout, stderr });
       });
       expect(outcome.error).toBe(stderr.slice(-240));
+      expect(outcome.fullError).toBe(stderr);
     }
     for (const error of [new Error("failure ".repeat(100)), "plain failure", null]) {
       const outcome = await invokeTool("tapOn", {}, "session", async () => {

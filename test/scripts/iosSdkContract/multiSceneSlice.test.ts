@@ -6,6 +6,7 @@ import {
   judgeMultiScene,
 } from "../../../scripts/ios/sdk-contract/multiSceneSlice";
 import type { ToolOutcome } from "../../../scripts/ios/sdk-contract/observationSlice";
+import { invokeTool } from "../../../scripts/ios/sdk-contract/run";
 
 function manifest(): SdkContractManifest {
   return {
@@ -140,4 +141,24 @@ test("reports a not-found tapOn as an ios-client finding", () => {
   ]);
   mixed.set("observe", notFound);
   expect(judgeMultiScene(manifest(), mixed)).toHaveLength(2);
+});
+
+test("judges the untruncated message when four UUID scenes overflow the diagnostic bound", async () => {
+  const scenes = [
+    "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+    "6BA7B810-9DAD-11D1-80B4-00C04FD430C8",
+    "6BA7B811-9DAD-11D1-80B4-00C04FD430C8",
+    "6BA7B812-9DAD-11D1-80B4-00C04FD430C8",
+  ];
+  const full = `The app has 4 connected scenes (${scenes.join(", ")}). SDK observation needs one scene; XCTest does not stand in for this result.`;
+  expect(full.length).toBeGreaterThan(240);
+  const outcome = await invokeTool("observe", {}, "session", async () => ({
+    success: false,
+    error: full,
+  }));
+  expect(outcome.error).toBe(full.slice(0, 240));
+  expect(outcome.fullError).toBe(full);
+  expect(judgeMultiScene(manifest(), outcomes(outcome))).toEqual([]);
+  // The truncated diagnostic alone lacks the closing sentence and would be rejected.
+  expect(judgeMultiScene(manifest(), outcomes({ error: outcome.error }))).toHaveLength(2);
 });

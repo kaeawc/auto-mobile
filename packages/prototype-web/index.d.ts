@@ -66,9 +66,89 @@ export declare class PrototypeWebRefusal extends Error {
   constructor(code: PrototypeWebErrorCode, message: string, missing?: readonly string[]);
 }
 
+export interface PrototypeFrameInsets {
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+}
+
+export type PrototypeFrameCutout =
+  | { readonly type: "none" }
+  | {
+      readonly type: "punchHole";
+      readonly centerXDp: number;
+      readonly centerYDp: number;
+      readonly radiusDp: number;
+    }
+  | {
+      readonly type: "notch" | "island";
+      readonly centerXDp: number;
+      readonly centerYDp: number;
+      readonly widthDp: number;
+      readonly heightDp: number;
+    };
+
+export interface PrototypeFramePanelFields {
+  readonly screen: {
+    readonly widthDp: number;
+    readonly heightDp: number;
+    readonly density: number;
+  };
+  readonly cornerRadiusDp: number;
+  readonly cutout: PrototypeFrameCutout;
+  readonly statusBarDp: number;
+  readonly navBar:
+    | { readonly type: "none" }
+    | { readonly type: "gesture" | "buttons"; readonly heightDp: number };
+  readonly safeArea: {
+    readonly portrait: PrototypeFrameInsets;
+    readonly landscape: PrototypeFrameInsets;
+  };
+}
+
+export type PrototypeFramePanelRole = "inner" | "cover" | "rear" | "external";
+export type PrototypeFramePosture =
+  | "closed"
+  | "half_opened"
+  | "opened"
+  | "rear_display"
+  | "flipped"
+  | "tent";
+
+/**
+ * A custom device frame: an entry as the renderer's `deviceFrames.json` writes one. It is checked
+ * as strictly as the registry, and an invalid one is refused with `invalidOption` naming its path.
+ */
+export interface PrototypeWebFrame extends PrototypeFramePanelFields {
+  readonly id: string;
+  readonly platform: "android" | "ios";
+  readonly label: string;
+  readonly formFactor?: "phone" | "tablet" | "foldable" | "tv" | "watch" | "automotive";
+  /** The panels besides the `inner` one the top-level fields describe. */
+  readonly panels?: readonly ({
+    readonly role: Exclude<PrototypeFramePanelRole, "inner">;
+  } & PrototypeFramePanelFields)[];
+  readonly hinge?: {
+    readonly axis: "vertical" | "horizontal";
+    readonly panel?: PrototypeFramePanelRole;
+    readonly positionDp: number;
+    readonly widthDp: number;
+    readonly occluding: boolean;
+  };
+  readonly postures?: readonly {
+    readonly posture: PrototypeFramePosture;
+    readonly panel: PrototypeFramePanelRole;
+    readonly hingeDegrees: number;
+  }[];
+  readonly mask?: "rect" | "round";
+  readonly input?: "touch" | "dpad" | "rotary";
+  readonly frame: { readonly bezelDp: number; readonly color: string };
+}
+
 export interface PrototypeRenderOptions {
-  /** A device frame id (default `pixel-9`), or `false` for the screen alone. */
-  readonly frame?: string | false;
+  /** A device frame id (default `pixel-9`), a frame object, or `false` for the screen alone. */
+  readonly frame?: string | PrototypeWebFrame | false;
   readonly orientation?: PrototypeOrientation;
   readonly mode?: "light" | "dark";
   readonly screen?: string;
@@ -130,7 +210,7 @@ export interface PrototypeMountEvents {
 export interface PrototypeMountOptions extends PrototypeMountEvents {
   /** A prototype spec, or an `automobile-prototype-embed` envelope. */
   readonly spec: unknown;
-  readonly frame?: string | false;
+  readonly frame?: string | PrototypeWebFrame | false;
   readonly orientation?: PrototypeOrientation;
   readonly zoom?: PrototypeWebZoom;
   readonly mode?: "light" | "dark" | "system";

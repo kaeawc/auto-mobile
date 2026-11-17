@@ -8,6 +8,12 @@ import {
   type WebElement,
 } from "../../../../../src/features/prototype/web/webNodes";
 import { renderPrototypeStill } from "../../../../../src/features/prototype/web/webStill";
+import rawRegistry from "../../../../../src/features/prototype/web/deviceFrames.json";
+import type { PrototypeWebFrame } from "../../../../../src/features/prototype/web/embed/prototypeWebRender";
+
+/** A frame option as a page would pass it: JSON the type system cannot vouch for. */
+const frameOption = (value: unknown) => value as PrototypeWebFrame;
+const pixelEntry = frameOption(rawRegistry.frames[0]);
 
 const twoScreens = {
   id: "two",
@@ -91,6 +97,48 @@ describe("renderPrototype (#16453)", () => {
         }),
       ),
     ).toBe("unknownVersion");
+  });
+
+  test("draws a frame object as the registry frame it copies", () => {
+    const rendered = renderPrototype(twoScreens, {
+      frame: structuredClone(pixelEntry),
+      mode: "light",
+    });
+    const still = renderPrototypeStill(twoScreens, { frame: "pixel-9", mode: "light" });
+    expect(rendered.orientations).toEqual(["portrait", "landscape"]);
+    expect(toHtml(rendered.element)).toBe(toHtml(still.element));
+  });
+
+  test("names a frame object by its own id and label", () => {
+    const custom = { ...pixelEntry, id: "my-phone", label: "My phone" };
+    const rendered = renderPrototype(twoScreens, { frame: custom });
+    expect(rendered.frame).toBe("my-phone");
+    expect(rendered.element.attrs["aria-label"]).toBe("My phone (portrait)");
+  });
+
+  test("draws a narrower frame object at its own width", () => {
+    const narrow = {
+      ...pixelEntry,
+      id: "narrow",
+      screen: { ...pixelEntry.screen, widthDp: 360 },
+      cutout: { type: "none" as const },
+    };
+    const rendered = renderPrototype(twoScreens, { frame: narrow });
+    expect(toHtml(rendered.element)).toContain("360px");
+  });
+
+  test("refuses an invalid frame object with its path", () => {
+    const invalid = frameOption({ ...pixelEntry, mask: "oval" });
+    expect(refusalCode(() => renderPrototype(twoScreens, { frame: invalid }))).toBe(
+      "invalidOption",
+    );
+    expect(() => renderPrototype(twoScreens, { frame: invalid })).toThrow("frame.mask");
+  });
+
+  test("refuses a null frame from a page script as an invalid frame object", () => {
+    expect(refusalCode(() => renderPrototype(twoScreens, { frame: frameOption(null) }))).toBe(
+      "invalidOption",
+    );
   });
 
   test("draws an envelope's glyph through the given parser", () => {

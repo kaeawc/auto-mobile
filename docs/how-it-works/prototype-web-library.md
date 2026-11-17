@@ -62,7 +62,8 @@ holds its logic; the class in `packages/prototype-web/src/element.ts` only forwa
   - The `zoom` attribute is `fit` or a number. An unknown `orientation` or `mode` is ignored.
 - The spec comes from the `spec` property, else the first child `<script type="application/json">`.
   It is never read from an attribute or fetched. Unparseable JSON draws the `invalidInput` error
-  view.
+  view. A `spec` set before the module defined the element is replayed through the setter on
+  upgrade.
 - It mounts when connected with a spec and destroys the mount when disconnected. A changed
   attribute or spec updates the mount; a removed attribute mounts afresh, because `update` keeps
   an option it is not given.

@@ -36,6 +36,17 @@ export class AutomobilePrototypeElement extends Base {
     },
   );
 
+  constructor() {
+    super();
+    // A page may set `spec` before this module defines the element; that left an own property
+    // shadowing the accessor below, so it is replayed through the setter on upgrade.
+    const early = Object.getOwnPropertyDescriptor(this, "spec");
+    if (early) {
+      Reflect.deleteProperty(this, "spec");
+      this.spec = early.value;
+    }
+  }
+
   /** A prototype spec or embed envelope; set it here or in a child JSON script, never an attribute. */
   get spec(): unknown {
     return this.#controller.spec;

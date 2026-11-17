@@ -254,4 +254,32 @@ describeBrowser("prototype-web library build in headless Chromium (#16453)", () 
     },
     CASE_TIMEOUT_MS,
   );
+
+  test(
+    "<automobile-prototype> draws a spec set before the element module loaded",
+    async () => {
+      const source = Buffer.from(element).toString("base64");
+      const html = `<!doctype html><meta charset="utf-8"><automobile-prototype id="host" controls="none"></automobile-prototype>
+<script type="module">
+const host = document.getElementById("host");
+const events = [];
+host.addEventListener("render", () => events.push("render"));
+host.spec = ${JSON.stringify(spec)};
+await import("data:text/javascript;base64,${source}");
+globalThis.__early = { events, state: host.state, own: Object.prototype.hasOwnProperty.call(host, "spec") };
+</script>`;
+      const { page, errors } = await open(browser, html);
+      try {
+        await page.waitForFunction(() => Reflect.get(globalThis, "__early") !== undefined);
+        const early = await page.evaluate(() => Reflect.get(globalThis, "__early"));
+        expect(early.events).toEqual(["render"]);
+        expect(early.own).toBe(false);
+        expect(early.state).toMatchObject({ frame: "pixel-9", orientation: "portrait" });
+        expect(errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 });

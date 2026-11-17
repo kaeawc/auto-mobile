@@ -16,7 +16,7 @@ import java.io.File
  */
 object RobolectricAndroidAll {
   /** The Robolectric release [versions] was read from; a catalog bump must refresh the table. */
-  const val ROBOLECTRIC_VERSION = "4.17"
+  const val ROBOLECTRIC_VERSION = "4.18"
 
   const val GROUP = "org.robolectric"
   const val ARTIFACT = "android-all-instrumented"
@@ -25,7 +25,6 @@ object RobolectricAndroidAll {
 
   private val androidVersions =
     sortedMapOf(
-      23 to ("6.0.1_r3" to "r1"),
       24 to ("7.0.0_r1" to "r1"),
       25 to ("7.1.0_r7" to "r1"),
       26 to ("8.0.0_r4" to "r1"),
@@ -37,9 +36,9 @@ object RobolectricAndroidAll {
       32 to ("12.1" to "8229987"),
       33 to ("13" to "9030017"),
       34 to ("14" to "10818077"),
-      35 to ("15" to "13954326"),
-      36 to ("16" to "13921718"),
-      37 to ("17" to "15733970"),
+      35 to ("15" to "14663667-2"),
+      36 to ("16" to "13921718-2"),
+      37 to ("17" to "16653203"),
     )
 
   /** Robolectric's oldest SDK: `Config.OLDEST_SDK`, and the default when nothing pins one. */

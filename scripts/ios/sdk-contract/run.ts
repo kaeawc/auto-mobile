@@ -158,6 +158,20 @@ async function callTool(
   return parseToolOutput(stdout);
 }
 
+const DIAGNOSTIC_LIMIT = 240;
+
+/** Bounds the diagnostic, keeping the full text when the bound cut it so slices judge all of it. */
+function boundedError(
+  text: string,
+  keep: "head" | "tail",
+): Pick<ToolOutcome, "error" | "fullError"> {
+  if (text.length <= DIAGNOSTIC_LIMIT) {
+    return { error: text };
+  }
+  const error = keep === "head" ? text.slice(0, DIAGNOSTIC_LIMIT) : text.slice(-DIAGNOSTIC_LIMIT);
+  return { error, fullError: text };
+}
+
 /** A tool call that may fail: contract slices judge failures as well as results. */
 export async function invokeTool(
   tool: string,
@@ -170,7 +184,7 @@ export async function invokeTool(
     return result.success === false
       ? {
           result,
-          error: (toolFailureMessage(result) ?? "tool reported success: false").slice(0, 240),
+          ...boundedError(toolFailureMessage(result) ?? "tool reported success: false", "head"),
         }
       : { result };
   } catch (error) {
@@ -190,12 +204,14 @@ export async function invokeTool(
         );
       }
     }
-    const message =
-      toolFailureMessage(result)?.trim().slice(0, 240) ||
-      stderr.trim().slice(-240) ||
-      (error instanceof Error ? error.message : String(error)).slice(0, 240);
-    console.warn(`warning: ${tool} failed: ${message}`);
-    return { result, error: message };
+    const toolMessage = toolFailureMessage(result)?.trim();
+    const outcome = toolMessage
+      ? boundedError(toolMessage, "head")
+      : stderr.trim()
+        ? boundedError(stderr.trim(), "tail")
+        : boundedError(error instanceof Error ? error.message : String(error), "head");
+    console.warn(`warning: ${tool} failed: ${outcome.error}`);
+    return { result, ...outcome };
   }
 }
 

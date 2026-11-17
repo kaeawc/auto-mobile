@@ -161,7 +161,10 @@ describe("SelectorDpadTargetResolver", () => {
 
   // A focused row owns the exact "Movies" label; the separate "Movies Plus" control only
   // contains it, so the row's exact label keeps the pin even though the other is focusable.
-  const moviesLabel = node({ bounds: { left: 10, top: 10, right: 200, bottom: 90 }, text: "Movies" });
+  const moviesLabel = node({
+    bounds: { left: 10, top: 10, right: 200, bottom: 90 },
+    text: "Movies",
+  });
   const moviesRow = node({
     bounds: { left: 0, top: 0, right: 500, bottom: 100 },
     focusable: "true",

@@ -46,7 +46,10 @@ export class SelectorDpadTargetResolver implements DpadTargetResolver {
         },
       );
       if (!isTruthyFlag(selection.element?.focusable)) {
-        const fallback = focusableLabelFallback(this.searchable.project(screen.hierarchy), target.label);
+        const fallback = focusableLabelFallback(
+          this.searchable.project(screen.hierarchy),
+          target.label,
+        );
         if (fallback) {
           return fallback;
         }
@@ -74,9 +77,7 @@ interface LabelCandidate extends SelectionRank {
 /** Topmost window first, then exact before contains, then tapOn's smallest-area, hierarchy order. */
 function compareLabelCandidates(a: LabelCandidate, b: LabelCandidate): number {
   return (
-    a.windowRank - b.windowRank ||
-    Number(b.exact) - Number(a.exact) ||
-    compareSelectionRank(a, b)
+    a.windowRank - b.windowRank || Number(b.exact) - Number(a.exact) || compareSelectionRank(a, b)
   );
 }
 

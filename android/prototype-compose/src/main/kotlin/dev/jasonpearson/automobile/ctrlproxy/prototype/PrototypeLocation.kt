@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.prototype.*
 import kotlin.math.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.selects.select
 import kotlinx.serialization.json.*
 
 /** A platform reading. Optional measurements stay absent when the provider did not report them. */
@@ -154,6 +155,9 @@ class PrototypeLocationModule(
   private var updatesJob: Job? = null
   private var closed = false
   private var config: PrototypeLocationConfig? = null
+  // The grant the live subscription was set up under; a later grant re-registers updates.
+  private var subscribedGrant: PrototypeLocationGrant? = null
+  private val resubscribes = MutableStateFlow(0)
   override val events = mutableEvents.asSharedFlow()
   override val state: StateFlow<JsonObject>
     get() {
@@ -177,14 +181,17 @@ class PrototypeLocationModule(
     if (source.grant == PrototypeLocationGrant.NONE) return denied()
     if (!source.servicesEnabled.value) return disabled()
     val accuracy = effectiveAccuracy(PrototypeLocationConfig.accuracy(call.args["accuracy"]))
-    val fix =
+    // A successful permission check proves a grant the update subscription may have missed.
+    resubscribeOnGrantChange()
+    val reading =
       try {
-        source.current(accuracy, call.args["maxAgeMs"]?.jsonPrimitive?.longOrNull ?: 0)
+        currentUnlessDisabled(accuracy, call.args["maxAgeMs"]?.jsonPrimitive?.longOrNull ?: 0)
       } catch (error: SecurityException) {
         warn("Location permission denied: ${error.javaClass.simpleName}")
         return denied()
       }
-    if (!source.servicesEnabled.value) return disabled()
+    if (reading !is Reading.Fix || !source.servicesEnabled.value) return disabled()
+    val fix = reading.fix
     if (source.grant == PrototypeLocationGrant.NONE) return denied()
     if (fix == null) return failure(PlatformErrorCode.TIMEOUT, "No current location fix")
     if (!fix.valid()) return failure(PlatformErrorCode.PLATFORM_ERROR, "Invalid location fix")
@@ -193,20 +200,55 @@ class PrototypeLocationModule(
     return PlatformCallResult.Success(value)
   }
 
+  /** Pending reads end with `disabled` as soon as services turn off, not at the call timeout. */
+  private suspend fun currentUnlessDisabled(
+    accuracy: PrototypeLocationAccuracy,
+    maxAgeMs: Long,
+  ): Reading = coroutineScope {
+    val read = async(start = CoroutineStart.UNDISPATCHED) { source.current(accuracy, maxAgeMs) }
+    val off = async(start = CoroutineStart.UNDISPATCHED) { source.servicesEnabled.first { !it } }
+    try {
+      select {
+        read.onAwait { Reading.Fix(it) }
+        off.onAwait { Reading.Disabled }
+      }
+    } finally {
+      read.cancel()
+      off.cancel()
+    }
+  }
+
+  private sealed interface Reading {
+    data class Fix(val fix: LocationFix?) : Reading
+
+    data object Disabled : Reading
+  }
+
   fun startUpdates(config: PrototypeLocationConfig) {
-    if (this.config == config && updatesJob?.isActive == true) return
+    if (this.config == config && updatesJob?.isActive == true) {
+      // Same surface config: keep the subscription unless the grant changed since it started.
+      resubscribeOnGrantChange()
+      return
+    }
     stopUpdates()
     this.config = config
     if (closed) return
     updatesJob =
       moduleScope.launch(start = CoroutineStart.UNDISPATCHED) {
-        // Restart on service toggle, releasing the provider while location services are disabled.
-        source.servicesEnabled.collectLatest { enabled ->
-          publishServices(enabled)
-          if (!enabled || source.grant == PrototypeLocationGrant.NONE) return@collectLatest
-          collectUpdates(config)
-        }
+        // Restart on service toggle, releasing the provider while location services are disabled,
+        // and on a grant change, registering the provider once permission arrives.
+        combine(source.servicesEnabled, resubscribes) { enabled, _ -> enabled }
+          .collectLatest { enabled ->
+            publishServices(enabled)
+            subscribedGrant = source.grant
+            if (!enabled || subscribedGrant == PrototypeLocationGrant.NONE) return@collectLatest
+            collectUpdates(config)
+          }
       }
+  }
+
+  private fun resubscribeOnGrantChange() {
+    if (updatesJob?.isActive == true && source.grant != subscribedGrant) resubscribes.value++
   }
 
   private suspend fun collectUpdates(config: PrototypeLocationConfig) {
@@ -247,6 +289,7 @@ class PrototypeLocationModule(
     updatesJob?.cancel()
     updatesJob = null
     config = null
+    subscribedGrant = null
   }
 
   /** Each shown surface owns its own filters, state and subscription, sharing only the source. */

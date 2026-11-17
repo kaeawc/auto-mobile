@@ -14,6 +14,7 @@ internal fun prototypeRuntimePlatform(
   PrototypePlatform(
     prototypeFeedbackModules(context) +
       listOfNotNull(TestPlatformModule(), clipboard?.let { PrototypeClipboardModule(it) }) +
+      PrototypeLocationModule(AndroidLocationSource(context)) +
       PrototypeConnectivityModule(AndroidConnectivitySource(context)) +
       PrototypeLinksModule(AndroidUrlOpener(SystemLinkGateway(context))) +
       PrototypeSettingsModule(AndroidSettingsOpener(SystemSettingsGateway(context))),

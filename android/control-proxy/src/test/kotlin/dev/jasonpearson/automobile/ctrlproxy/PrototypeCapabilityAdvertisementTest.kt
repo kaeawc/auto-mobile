@@ -65,6 +65,7 @@ class PrototypeCapabilityAdvertisementTest {
     val overlay = prototypeRuntimePlatform(android.content.ContextWrapper(null))
     assertEquals(
       setOf(
+        "prototype_platform_location_v1",
         "prototype_platform_connectivity_v1",
         "prototype_platform_haptics_v1",
         "prototype_platform_links_v1",
@@ -74,6 +75,8 @@ class PrototypeCapabilityAdvertisementTest {
       ),
       overlay.registry.capabilities,
     )
+    assertTrue("prototype_platform_location_v1" in commands(overlay))
+    assertFalse("prototype_platform_location_v1" in commands(PrototypePlatform.None))
     assertTrue(
       overlay.registry.modules.all {
         it.availability() == PlatformAvailability.Ready

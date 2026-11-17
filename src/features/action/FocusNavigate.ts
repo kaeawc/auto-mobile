@@ -257,22 +257,39 @@ function rankFirst(elements: readonly Element[]): Element[] {
     .map(({ element }) => element);
 }
 
-/** Whether a focusable, non-scrolling element encloses `element` (it owns focus for that label). */
-function hasFocusableOwner(elements: readonly Element[], element: Element): boolean {
-  return elements.some((owner) => {
-    if (owner === element || !isTruthyFlag(owner.focusable) || isTruthyFlag(owner.scrollable)) {
-      return false;
-    }
-    const overlap = intersectBounds(owner.bounds, element.bounds);
-    return overlap !== null && boundsEqual(overlap, element.bounds);
-  });
+function isActionableElement(element: Element): boolean {
+  return isTruthyFlag(element.focusable) || isTruthyFlag(element.clickable);
+}
+
+/**
+ * The nearest element enclosing `element` that is clickable, focusable or scrollable (the flat
+ * read's stand-in for its nearest actionable ancestor): the smallest such enclosure, the first one
+ * a walk up from `element` would reach.
+ */
+function nearestActionableOwner(
+  elements: readonly Element[],
+  element: Element,
+): Element | undefined {
+  const [nearest] = elements
+    .filter((owner) => {
+      if (owner === element || !(isActionableElement(owner) || isTruthyFlag(owner.scrollable))) {
+        return false;
+      }
+      const overlap = intersectBounds(owner.bounds, element.bounds);
+      return overlap !== null && boundsEqual(overlap, element.bounds);
+    })
+    .sort((a, b) => boundsArea(a.bounds) - boundsArea(b.bounds));
+  return nearest;
 }
 
 /**
  * Pin `target` to the first match as tapOn's `first` selection ranks it: exact labels first
- * ({@link exactFirstTarget}), then smallest area, then hierarchy order (the same {@link compareSelectionRank} ordering tvOS tapOn uses). A first match
- * that cannot take focus keeps the pin when a focusable owner encloses it (focus on that owner
- * matches the label); otherwise the pin moves to the best focusable match, exact before contains.
+ * ({@link exactFirstTarget}), then smallest area, then hierarchy order (the same
+ * {@link compareSelectionRank} ordering tvOS tapOn uses). A focusable or clickable first match is
+ * its own control and keeps the pin, so a focused row never stands in for a clickable child. A
+ * pure label keeps the pin when its nearest actionable owner is focusable (focus on that owner
+ * matches the label) or only clickable (that control owns it); a label with no actionable owner
+ * moves the pin to the best focusable match, exact before contains.
  */
 export function firstMatchTarget(
   screen: FocusScreen,
@@ -286,16 +303,17 @@ export function firstMatchTarget(
   if (!first) {
     return target;
   }
-  if (isTruthyFlag(first.focusable) || hasFocusableOwner(screen.elements, first)) {
+  const owner = nearestActionableOwner(screen.elements, first);
+  if (isActionableElement(first) || (owner && !isTruthyFlag(owner.scrollable))) {
     return { ...target, atBounds: first.bounds };
   }
   const exact = target.label ? { ...target, labelExact: true } : target;
   const focusable = matches.filter((element) => isTruthyFlag(element.focusable));
-  const [owner] = [
+  const [fallback] = [
     ...focusable.filter((element) => elementMatchesTarget(element, exact)),
     ...focusable,
   ];
-  return { ...target, atBounds: (owner ?? first).bounds };
+  return { ...target, atBounds: (fallback ?? first).bounds };
 }
 
 /** Whether the closed intervals [aStart, aEnd] and [bStart, bEnd] share any length. */

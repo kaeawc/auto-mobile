@@ -67,8 +67,15 @@ function isFocusable(element: Element | undefined): element is Element {
   return element !== undefined && isTruthyFlag(element.focusable);
 }
 
-/** The nearest focusable, non-scrolling ancestor that owns focus for a non-focusable node. */
-function focusableAncestor(
+function isClickable(element: Element | undefined): element is Element {
+  return element !== undefined && isTruthyFlag(element.clickable);
+}
+
+/**
+ * The nearest clickable or focusable ancestor of `entry`: the walk stops at the first one, and a
+ * scrolling container ends it with no owner.
+ */
+function nearestActionableAncestor(
   nodes: readonly SearchableEntry[],
   entry: SearchableEntry,
 ): Element | undefined {
@@ -77,7 +84,7 @@ function focusableAncestor(
     if (element && isTruthyFlag(element.scrollable)) {
       return undefined;
     }
-    if (isFocusable(element)) {
+    if (isFocusable(element) || isClickable(element)) {
       return element;
     }
   }
@@ -85,10 +92,14 @@ function focusableAncestor(
 }
 
 /**
- * Bounds of the control that takes focus for tapOn's chosen label target: the chosen element when
- * it is focusable, else its nearest focusable ancestor, else the best focusable candidate from the
- * same resolution (so the same visibility filtering applies) in the chosen element's window, exact
- * before contains, then smallest area and hierarchy order. Undefined keeps tapOn's own bounds.
+ * Bounds of the control that takes focus for tapOn's chosen label target. A focusable choice is
+ * its own owner. A clickable, non-focusable choice is an independent control: it keeps its own
+ * bounds, so a focused row around it never stands in for it. A pure label (neither focusable nor
+ * clickable) is promoted to its nearest focusable ancestor; when the nearest actionable ancestor
+ * is only clickable the label keeps its own bounds. A label with no actionable ancestor falls back to the
+ * best focusable candidate from the same resolution (so the same visibility filtering applies) in
+ * the chosen element's window, exact before contains, then smallest area and hierarchy order.
+ * Undefined keeps tapOn's own bounds.
  */
 export function focusOwnerBounds(
   resolution: Pick<ElementResolution, "chosen" | "candidates" | "snapshotNodes">,
@@ -101,9 +112,12 @@ export function focusOwnerBounds(
   if (isFocusable(chosen.element)) {
     return chosen.element.bounds;
   }
-  const ancestor = focusableAncestor(resolution.snapshotNodes ?? [], chosen);
+  if (isClickable(chosen.element)) {
+    return chosen.element.bounds;
+  }
+  const ancestor = nearestActionableAncestor(resolution.snapshotNodes ?? [], chosen);
   if (ancestor) {
-    return ancestor.bounds;
+    return isFocusable(ancestor) ? ancestor.bounds : chosen.element.bounds;
   }
   const [best] = resolution.candidates
     .flatMap((entry) =>

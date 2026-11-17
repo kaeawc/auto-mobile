@@ -118,3 +118,38 @@ test("firstMatchTarget keeps an ownerless label when nothing focusable matches",
   const title = element({ bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Play" });
   expect(firstMatchTarget(flat(title), { label: "Play" }).atBounds).toEqual(title.bounds);
 });
+
+test("firstMatchTarget keeps a clickable, non-focusable child's bounds inside a focusable row", () => {
+  const row = element({ bounds: { left: 0, top: 0, right: 1000, bottom: 100 }, focusable: true });
+  const remove = element({
+    bounds: { left: 800, top: 20, right: 980, bottom: 80 },
+    text: "Delete",
+    clickable: true,
+    focusable: false,
+  });
+  const other = element({
+    bounds: { left: 0, top: 300, right: 300, bottom: 400 },
+    "content-desc": "Delete",
+    focusable: true,
+  });
+  expect(firstMatchTarget(flat(row, remove, other), { label: "Delete" }).atBounds).toEqual(
+    remove.bounds,
+  );
+});
+
+test("firstMatchTarget keeps a label whose nearest actionable owner is only clickable", () => {
+  const row = element({ bounds: { left: 0, top: 0, right: 1000, bottom: 100 }, focusable: true });
+  const button = element({
+    bounds: { left: 800, top: 20, right: 980, bottom: 80 },
+    clickable: true,
+  });
+  const title = element({ bounds: { left: 810, top: 30, right: 970, bottom: 70 }, text: "Remove" });
+  const other = element({
+    bounds: { left: 0, top: 300, right: 300, bottom: 400 },
+    "content-desc": "Remove",
+    focusable: true,
+  });
+  expect(firstMatchTarget(flat(row, button, title, other), { label: "Remove" }).atBounds).toEqual(
+    title.bounds,
+  );
+});

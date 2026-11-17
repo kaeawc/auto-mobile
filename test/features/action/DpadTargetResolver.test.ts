@@ -172,6 +172,47 @@ describe("SelectorDpadTargetResolver", () => {
     expect(real().resolve(screen(capture(row, knob)), { label: "Volume" })).toEqual(row.bounds);
   });
 
+  test("a clickable, non-focusable button keeps its bounds inside a focused row", () => {
+    // The row takes focus but the button is its own control: focus on the row is not the button.
+    const remove = node({
+      bounds: { left: 800, top: 20, right: 980, bottom: 80 },
+      text: "Delete",
+      clickable: "true",
+      focusable: "false",
+    });
+    const row = node({
+      bounds: { left: 0, top: 0, right: 1000, bottom: 100 },
+      focusable: "true",
+      focused: "true",
+      node: [remove],
+    });
+    const other = node({
+      bounds: { left: 0, top: 300, right: 300, bottom: 400 },
+      "content-desc": "Delete",
+      focusable: "true",
+    });
+    expect(real().resolve(screen(capture(row, other)), { label: "Delete" })).toEqual(remove.bounds);
+  });
+
+  test("a label under a clickable intermediate is not promoted past it to a focused row", () => {
+    const title = node({ bounds: { left: 810, top: 30, right: 970, bottom: 70 }, text: "Remove" });
+    const button = node({
+      bounds: { left: 800, top: 20, right: 980, bottom: 80 },
+      clickable: "true",
+      focusable: "false",
+      node: [title],
+    });
+    const row = node({
+      bounds: { left: 0, top: 0, right: 1000, bottom: 100 },
+      focusable: "true",
+      focused: "true",
+      node: [button],
+    });
+    const resolved = real().resolve(screen(capture(row)), { label: "Remove" });
+    expect(resolved).not.toEqual(row.bounds);
+    expect([title.bounds, button.bounds]).toContainEqual(resolved);
+  });
+
   test("a focused row in the upper window beats a focusable control in a lower window", () => {
     const lower = node({
       bounds: { left: 0, top: 500, right: 100, bottom: 550 },

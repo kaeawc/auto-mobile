@@ -129,6 +129,9 @@ export class PrototypeElementController {
   private propertySpec: { readonly value: unknown } | undefined;
   private connected = false;
   private attributeKeys: readonly string[] = [];
+  // Events `mount` fires while it draws, before its handle is stored: delivered once it is, so a
+  // listener that sets the spec or removes the element acts on the mounted view.
+  private queued: [PrototypeElementEvent, unknown][] | undefined;
 
   constructor(
     private readonly host: PrototypeElementHost,
@@ -201,10 +204,25 @@ export class PrototypeElementController {
     }
     const options = this.attributeOptions();
     this.attributeKeys = Object.keys(options);
-    this.handle = this.deps.mount({
-      spec: source.value,
-      ...options,
-      ...eventCallbacks(this.deps.dispatch),
-    });
+    const queued: [PrototypeElementEvent, unknown][] = [];
+    this.queued = queued;
+    try {
+      this.handle = this.deps.mount({
+        spec: source.value,
+        ...options,
+        ...eventCallbacks((type, detail) => this.dispatch(type, detail)),
+      });
+    } finally {
+      this.queued = undefined;
+    }
+    queued.forEach(([type, detail]) => this.deps.dispatch(type, detail));
+  }
+
+  private dispatch(type: PrototypeElementEvent, detail: unknown): void {
+    if (this.queued) {
+      this.queued.push([type, detail]);
+    } else {
+      this.deps.dispatch(type, detail);
+    }
   }
 }

@@ -26,7 +26,11 @@ const VIEW: PrototypeViewState = {
 };
 
 /** A fake element and mount: records mounts, updates, destroys and dispatched events. */
-function harness(attributes: Record<string, string> = {}, script: string | null = null) {
+function harness(
+  attributes: Record<string, string> = {},
+  script: string | null = null,
+  onDispatch: (type: PrototypeElementEvent) => void = () => {},
+) {
   const attrs = new Map(Object.entries(attributes));
   const host = { script };
   const log: string[] = [];
@@ -39,6 +43,8 @@ function harness(attributes: Record<string, string> = {}, script: string | null 
       mount: (options): PrototypeMountHandle => {
         mounts.push(options);
         log.push("mount");
+        // As mount does, the first draw reports synchronously, before the handle is returned.
+        options.onRender?.({ unsupportedNodes: [] });
         return {
           update: (next) => {
             updates.push(next);
@@ -48,7 +54,10 @@ function harness(attributes: Record<string, string> = {}, script: string | null 
           state: VIEW,
         };
       },
-      dispatch: (type, detail) => events.push([type, detail]),
+      dispatch: (type, detail) => {
+        events.push([type, detail]);
+        onDispatch(type);
+      },
     },
   );
   return { controller, attrs, host, log, mounts, updates, events };
@@ -201,10 +210,41 @@ describe("<automobile-prototype> spec and lifecycle (#16454)", () => {
     options.onError?.(error);
     expect(events).toEqual([
       ["render", { unsupportedNodes: [] }],
+      ["render", { unsupportedNodes: [] }],
       ["screenchange", { screen: "detail" }],
       ["orientationchange", { orientation: "landscape" }],
       ["zoomchange", { zoom: 2, scale: 2 }],
       ["error", error],
     ]);
+  });
+
+  test("a render listener that sets the spec updates the first mount, not a second", () => {
+    const listener: { controller?: PrototypeElementController } = {};
+    const fixture = harness({}, null, (type) => {
+      if (type === "render" && listener.controller?.spec === spec) {
+        listener.controller.spec = { ...spec, id: "replaced" };
+      }
+    });
+    const { controller } = fixture;
+    listener.controller = controller;
+    controller.spec = spec;
+    controller.connect();
+    expect(fixture.log).toEqual(["mount", "update"]);
+    expect(fixture.updates).toEqual([{ spec: { ...spec, id: "replaced" } }]);
+  });
+
+  test("a render listener that removes the element destroys the first mount", () => {
+    const listener: { controller?: PrototypeElementController } = {};
+    const fixture = harness({}, null, (type) => {
+      if (type === "render") {
+        listener.controller?.disconnect();
+      }
+    });
+    const { controller } = fixture;
+    listener.controller = controller;
+    controller.spec = spec;
+    controller.connect();
+    expect(fixture.log).toEqual(["mount", "destroy"]);
+    expect(controller.state).toBeUndefined();
   });
 });

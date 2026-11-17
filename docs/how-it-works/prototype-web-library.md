@@ -57,8 +57,9 @@ only where `customElements` exists. `PrototypeElementController` (`embed/prototy
 holds its logic; the class in `packages/prototype-web/src/element.ts` only forwards its lifecycle.
 
 - Attributes `frame`, `orientation`, `zoom`, `mode`, `screen` and `controls` set the scalar options.
-  `frame` and `controls` take `false` or `none` to turn them off. `controls` lists names separated
-  by spaces or commas. `zoom` is `fit` or a number; an unknown `orientation` or `mode` is ignored.
+  - The `frame` and `controls` attributes take `false` or `none` to turn them off.
+  - The `controls` attribute lists names separated by spaces or commas.
+  - The `zoom` attribute is `fit` or a number. An unknown `orientation` or `mode` is ignored.
 - The spec comes from the `spec` property, else the first child `<script type="application/json">`.
   It is never read from an attribute or fetched. Unparseable JSON draws the `invalidInput` error
   view.
@@ -66,7 +67,8 @@ holds its logic; the class in `packages/prototype-web/src/element.ts` only forwa
   attribute or spec updates the mount; a removed attribute mounts afresh, because `update` keeps
   an option it is not given.
 - Events are `CustomEvent`s carrying the `mount` callback's detail: `render`, `screenchange`,
-  `orientationchange`, `zoomchange` and `error`.
+  `orientationchange`, `zoomchange` and `error`. Events fired while the first mount draws are
+  dispatched once it returns, so a listener can set the spec or remove the element.
 
 ## Refusal
 

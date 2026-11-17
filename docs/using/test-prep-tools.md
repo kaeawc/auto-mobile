@@ -93,6 +93,11 @@ iOS URIs have no user query.
 On iOS the app under test must embed the AutoMobile iOS SDK; without it `sendSms`
 and `phoneCall` `call`, `cancel` and `busy` fail with an error asking for the SDK.
 
+If the app's notification permission is undecided, the first iOS `sendSms` returns
+`notification_permission_pending` and shows the system alert. Tap Allow, then call
+`sendSms` again. `notification_permission_denied` means enable notifications in
+Settings or reinstall/reset the app before retrying.
+
 The iOS Simulator cannot answer or hold a CallKit call: its call service ends the
 call instead. On a simulator, `phoneCall` with `accept` or `hold` sends nothing to
 the app. It returns this result without an error, with or without the SDK or a

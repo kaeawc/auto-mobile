@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
+import { bundleForBrowser, type BrowserBundle } from "./browserBundle";
 
 /** Budget from docs/how-it-works/prototype-web-library.md for the core entry. */
 // Owner set one 0.5 MB budget for the export's HTML, JS and CSS counted together, minified, in
@@ -20,54 +20,10 @@ const FORBIDDEN_INPUTS = [
 const entry = fileURLToPath(
   new URL("../../../fixtures/prototype-web-bundle/stillEntry.ts", import.meta.url),
 );
-const builtins = new Set(builtinModules);
-
-interface Bundle {
-  code: string;
-  /** Minified bytes of every build output (HTML, JS and CSS), summed. */
-  totalBytes: number;
-  builtins: string[];
-  inputs: string[];
-}
-
-async function bundleStill(): Promise<Bundle> {
-  const reached = new Set<string>();
-  const result = await Bun.build({
-    entrypoints: [entry],
-    target: "browser",
-    minify: true,
-    metafile: true,
-    plugins: [
-      {
-        name: "record-node-builtins",
-        setup(build) {
-          build.onResolve({ filter: /.*/ }, (args) => {
-            const name = args.path.replace(/^node:/, "");
-            if (args.path.startsWith("node:") || builtins.has(name.split("/")[0] ?? name)) {
-              reached.add(`${args.path} (from ${args.importer})`);
-              return { path: args.path, external: true };
-            }
-            return undefined;
-          });
-        },
-      },
-    ],
-  });
-  if (!result.success) {
-    throw new AggregateError(result.logs, "still renderer browser build failed");
-  }
-  return {
-    code: await result.outputs[0].text(),
-    totalBytes: result.outputs.reduce((sum, output) => sum + output.size, 0),
-    builtins: [...reached],
-    inputs: Object.keys(result.metafile?.inputs ?? {}),
-  };
-}
-
 describe("still renderer browser bundle (#16451)", () => {
-  let bundle: Bundle;
+  let bundle: BrowserBundle;
   beforeAll(async () => {
-    bundle = await bundleStill();
+    bundle = await bundleForBrowser(entry);
   });
 
   test("reaches no Node builtin", () => {

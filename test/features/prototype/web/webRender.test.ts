@@ -1792,6 +1792,23 @@ describe("prototype web still (#16346)", () => {
     expect(button.style).not.toHaveProperty("padding");
   });
 
+  test("a bottom sheet with an aspect ratio in a row leaves the text after it its width (#16711)", () => {
+    const text = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          children: [
+            { type: "bottomSheet", style: { aspectRatio: 1 }, child: { type: "text", text: "s" } },
+            { type: "text", testTag: "t", text: "after" },
+          ],
+        },
+      }),
+      "t",
+    )[0]!;
+    expect(text.style).not.toHaveProperty("max-width");
+  });
+
   test("theme typography scales and sets the family of every type-scale role", () => {
     const text = byTag(
       renderPrototypeStill({
@@ -1819,6 +1836,34 @@ describe("prototype web still (#16346)", () => {
     // The screen, which also holds the status bar, keeps the system font.
     const screen = find(still.element, (element) => element.attrs["data-chrome"] === "screen")[0]!;
     expect(screen.style["font-family"]).toBe("system-ui, -apple-system, Roboto, sans-serif");
+  });
+
+  test("an explicit default family wins over the themed window's family (#18451)", () => {
+    for (const family of ["serif", "mono"]) {
+      const still = renderPrototypeStill({
+        ...reference,
+        theme: { ...(reference.theme as object), typography: { fontFamily: family } },
+        root: {
+          type: "column",
+          children: [
+            { type: "text", testTag: "d", text: "x", style: { fontFamily: "default" } },
+            {
+              type: "text",
+              testTag: "r",
+              text: "x",
+              style: { textStyle: "bodyLarge", fontFamily: "default" },
+            },
+            { type: "text", testTag: "t", text: "x" },
+          ],
+        },
+      });
+      const system = "system-ui, -apple-system, Roboto, sans-serif";
+      // As Android's FontFamily.Default: an explicit default draws the system font, role or not.
+      expect(byTag(still, "d")[0]!.style["font-family"]).toBe(system);
+      expect(byTag(still, "r")[0]!.style["font-family"]).toBe(system);
+      // A node naming no family inherits the window's themed one.
+      expect(byTag(still, "t")[0]!.style).not.toHaveProperty("font-family");
+    }
   });
 
   test("no theme family leaves the window on the system font", () => {

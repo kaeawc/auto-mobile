@@ -31,6 +31,16 @@ export function parseToolOutput(stdout: string): JsonRecord {
   return parsed;
 }
 
+/** Prefer the tool's actual failure, including sendKeys' failed command, over summary text. */
+export function toolFailureMessage(result: JsonRecord | undefined): string | undefined {
+  const command = Array.isArray(result?.commands)
+    ? result.commands.map(asRecord).find((entry) => entry?.success === false)
+    : undefined;
+  return [result?.error, command?.error, command?.message, result?.message].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+}
+
 export interface DeviceAcquisition {
   sessionUuid: string;
   ctrlProxyPort: number;

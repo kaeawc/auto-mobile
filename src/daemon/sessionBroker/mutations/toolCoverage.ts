@@ -233,6 +233,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
+    ["buildApp"],
+    "Runs xcodebuild or Gradle on the host and writes only host build outputs; it has no device handler and touches no device (#18021).",
+    "notJournaled",
+  ),
+  ...tools(
     ["exportPrototypeWeb"],
     "Writes a host file from the host's prototype revision history; it has no device handler and touches no device (#17720).",
     "notJournaled",

@@ -9,6 +9,7 @@ enum SdkContractRunner {
     static let faultScenario = "faults"
     static let capabilityScenario = "capabilities"
     static let observationScenario = "observe"
+    static let multiSceneScenario = "multi-scene"
     static let scenarioTimeoutSeconds: UInt64 = 30
     /// How long the fault scenario waits for the harness to install its rules through CtrlProxy.
     static let rulesReadyWaitSeconds: Double = 60
@@ -104,6 +105,8 @@ enum SdkContractRunner {
             manifest.navigation = navigation
         case capabilityScenario:
             manifest.capabilities = SdkContractCapabilityScenario.run()
+        case multiSceneScenario:
+            manifest.multiScene = try await SdkContractMultiSceneScenario.run(runId: runId)
         case observationScenario:
             let host = SdkContractObservationScenario.register()
             try await waitForMarker(
@@ -113,6 +116,8 @@ enum SdkContractRunner {
                 orThrow: .harnessNotFinished(seconds: actionsDoneWaitSeconds)
             )
             manifest.observation = host.log()
+        case SdkContractWebViewScenario.scenario:
+            manifest.webView = try await runWebView(runId: runId, server: server)
         case SdkContractStorageScenario.registeredScenario, SdkContractStorageScenario.defaultScenario:
             manifest.storage = try SdkContractStorageScenario.run(scenario: launch.scenario, runId: runId)
         case faultScenario:
@@ -131,17 +136,70 @@ enum SdkContractRunner {
         }
     }
 
+    @MainActor
+    private static func runWebView(runId: String, server: SdkContractLoopbackServer) async throws -> WebViewHostLog {
+        let ports = try await server.start()
+        let otherServer = SdkContractLoopbackServer()
+        defer { otherServer.stop() }
+        let otherPorts = try await otherServer.start()
+        let origin = "http://127.0.0.1:\(ports.http)"
+        let disallowedOrigin = "http://127.0.0.1:\(otherPorts.http)"
+        let base = "/contract/\(runId)/web"
+        let framePath = "\(base)/allowed"
+        let disallowedURL = "\(disallowedOrigin)\(base)/disallowed"
+        server.serveHTML([
+            "\(base)/initial": SdkContractWebViewScenario.page(framePath: framePath, disallowedFrameURL: disallowedURL),
+            "\(base)/next": SdkContractWebViewScenario.page(
+                framePath: framePath, disallowedFrameURL: disallowedURL
+            ),
+            framePath: SdkContractWebViewScenario.frame(allowed: true),
+        ])
+        otherServer.serveHTML(["\(base)/disallowed": SdkContractWebViewScenario.frame(allowed: false)])
+        guard let initial = URL(string: "\(origin)\(base)/initial"),
+              let next = URL(string: "\(origin)\(base)/next")
+        else {
+            throw SdkContractError.unexpectedResponse("invalid loopback fixture URL")
+        }
+        let host = SdkContractWebViewScenario(origin: origin, disallowedOrigin: disallowedOrigin)
+        defer { host.stop() }
+        try await host.start(url: initial)
+        try writeMarker(runId: runId, suffix: "web-ready")
+        let marker = try await waitForMarker(
+            runId: runId, suffix: "web-navigate", seconds: actionsDoneWaitSeconds,
+            orThrow: .harnessNotFinished(seconds: actionsDoneWaitSeconds), alternativeSuffix: "actions-done"
+        )
+        if marker == "actions-done" { return host.log() }
+        try await host.navigate(url: next)
+        try writeMarker(runId: runId, suffix: "web-navigated")
+        try await waitForMarker(
+            runId: runId, suffix: "actions-done", seconds: actionsDoneWaitSeconds,
+            orThrow: .harnessNotFinished(seconds: actionsDoneWaitSeconds)
+        )
+        return host.log()
+    }
+
+    private static func writeMarker(runId: String, suffix: String) throws {
+        let documents = try FileManager.default.url(
+            for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )
+        let directory = documents.appendingPathComponent(SdkContractManifestWriter.directoryName, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("ready\n".utf8).write(to: directory.appendingPathComponent("\(runId).\(suffix)"), options: .atomic)
+    }
+
     /// The harness writes `<runId>.<suffix>` next to the manifest when the scenario may go on:
     /// `rules-ready` once CtrlProxy has delivered the fault rules to the SDK, so no case runs before
     /// its rule exists, and `actions-done` once it has finished acting on the observation bridge.
-    private static func waitForMarker(
+    @discardableResult
+    static func waitForMarker(
         runId: String,
         suffix: String,
         seconds: Double,
         orThrow timeout: SdkContractError,
+        alternativeSuffix: String? = nil,
         fileManager: FileManager = .default
     )
-        async throws
+        async throws -> String
     {
         let documents = try fileManager.url(
             for: .documentDirectory,
@@ -149,14 +207,17 @@ enum SdkContractRunner {
             appropriateFor: nil,
             create: true
         )
-        let marker = documents
-            .appendingPathComponent(SdkContractManifestWriter.directoryName, isDirectory: true)
-            .appendingPathComponent("\(runId).\(suffix)")
+        let directory = documents.appendingPathComponent(SdkContractManifestWriter.directoryName, isDirectory: true)
+        let marker = directory.appendingPathComponent("\(runId).\(suffix)")
         let deadline = Date().addingTimeInterval(seconds)
         while !fileManager.fileExists(atPath: marker.path) {
+            if let alternativeSuffix,
+               fileManager.fileExists(atPath: directory.appendingPathComponent("\(runId).\(alternativeSuffix)").path)
+            { return alternativeSuffix }
             guard Date() < deadline else { throw timeout }
             try await Task.sleep(nanoseconds: capturePollNanoseconds)
         }
+        return suffix
     }
 
     private static func waitForCapture(

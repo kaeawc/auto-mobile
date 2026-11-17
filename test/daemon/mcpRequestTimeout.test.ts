@@ -29,6 +29,11 @@ import {
 import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../../src/daemon/observationResourceUris";
 import { describe, expect, test } from "bun:test";
 import {
+  BUILD_APP_MCP_TIMEOUT_HEADROOM_MS,
+  DEFAULT_BUILD_TIMEOUT_MS,
+  MAX_BUILD_TIMEOUT_MS,
+} from "../../src/features/build/buildAppTimeout";
+import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
   DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
   DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
@@ -149,6 +154,23 @@ describe("resolveExplicitToolTimeoutOverrideMs", () => {
 });
 
 describe("resolveMcpRequestTimeoutMs", () => {
+  test("buildApp waits for the default or requested build plus headroom, under the caller cap", () => {
+    const build = (args: Record<string, unknown>): DaemonRequest => ({
+      id: "b",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "buildApp", arguments: { platform: "android", projectPath: "/p", ...args } },
+    });
+    expect(resolveMcpRequestTimeoutMs(build({}))).toBe(
+      DEFAULT_BUILD_TIMEOUT_MS + BUILD_APP_MCP_TIMEOUT_HEADROOM_MS,
+    );
+    expect(resolveMcpRequestTimeoutMs(build({ timeoutMs: 600_000 }))).toBe(
+      600_000 + BUILD_APP_MCP_TIMEOUT_HEADROOM_MS,
+    );
+    expect(MAX_BUILD_TIMEOUT_MS + BUILD_APP_MCP_TIMEOUT_HEADROOM_MS).toBeLessThanOrEqual(
+      MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    );
+  });
   test("installApp floor covers the downgrade transfer chain plus headroom", () => {
     expect(MIN_INSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThanOrEqual(
       ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,

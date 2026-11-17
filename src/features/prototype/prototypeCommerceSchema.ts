@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 
 /** One catalog product (#14314): a store-free id, a title, a kind and a price; no payment fields. */

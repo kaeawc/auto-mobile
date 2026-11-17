@@ -133,11 +133,20 @@ final class SdkTelephonyTriggerModulesTests: XCTestCase {
 
     private final class FakeNotificationService: Sendable {
         let settingsReturn: Bool
+        let authorization: SdkNotificationAuthorization
+        let postResult: Bool?
+        let authorizationRequests = OSAllocatedUnfairLock(initialState: 0)
         let posts = OSAllocatedUnfairLock(initialState: 0)
         let deadlines = OSAllocatedUnfairLock<[UInt64]>(initialState: [])
 
-        init(settingsReturn: Bool) {
+        init(
+            settingsReturn: Bool = true,
+            authorization: SdkNotificationAuthorization = .allowed,
+            postResult: Bool? = nil
+        ) {
             self.settingsReturn = settingsReturn
+            self.authorization = authorization
+            self.postResult = postResult
         }
 
         func module() -> SdkMessagesTriggerModule {
@@ -146,9 +155,13 @@ final class SdkTelephonyTriggerModulesTests: XCTestCase {
                     title: title,
                     body: body,
                     settingsProbe: { done in
-                        if self.settingsReturn { done() }
+                        if self.settingsReturn { done(self.authorization) }
                     },
-                    post: { _, _, _ in self.posts.withLock { $0 += 1 } },
+                    requestAuthorization: { self.authorizationRequests.withLock { $0 += 1 } },
+                    post: { _, _, done in
+                        self.posts.withLock { $0 += 1 }
+                        if let result = self.postResult { done(result) }
+                    },
                     wait: { semaphore, deadline in
                         self.deadlines.withLock { $0.append(deadline.uptimeNanoseconds) }
                         // Consume completed callbacks or expire immediately, without sleeping.
@@ -157,6 +170,52 @@ final class SdkTelephonyTriggerModulesTests: XCTestCase {
                 )
             }
         }
+    }
+
+    func testSmsRequestsUndecidedPermissionOnceWithoutWaitingOrPosting() {
+        let notifications = FakeNotificationService(authorization: .notDetermined)
+
+        XCTAssertEqual(
+            notifications.module().handle(trigger: "sms", payload: ["phoneNumber": "555", "message": "hi"]),
+            .failed("notification_permission_pending")
+        )
+        XCTAssertEqual(notifications.authorizationRequests.withLock { $0 }, 1)
+        XCTAssertEqual(notifications.posts.withLock { $0 }, 0)
+        // Only the settings probe is awaited; the permission decision is still pending.
+        XCTAssertEqual(notifications.deadlines.withLock { $0.count }, 1)
+    }
+
+    func testSmsRejectsDeniedPermissionWithoutRequestingOrPosting() {
+        let notifications = FakeNotificationService(authorization: .denied)
+
+        XCTAssertEqual(
+            notifications.module().handle(trigger: "sms", payload: ["phoneNumber": "555", "message": "hi"]),
+            .failed("notification_permission_denied")
+        )
+        XCTAssertEqual(notifications.authorizationRequests.withLock { $0 }, 0)
+        XCTAssertEqual(notifications.posts.withLock { $0 }, 0)
+        XCTAssertEqual(notifications.deadlines.withLock { $0.count }, 1)
+    }
+
+    func testSmsPostsWhenPermissionIsAllowed() {
+        let notifications = FakeNotificationService(postResult: true)
+
+        XCTAssertEqual(
+            notifications.module().handle(trigger: "sms", payload: ["phoneNumber": "555", "message": "hi"]),
+            .handled
+        )
+        XCTAssertEqual(notifications.authorizationRequests.withLock { $0 }, 0)
+        XCTAssertEqual(notifications.posts.withLock { $0 }, 1)
+    }
+
+    func testSmsReportsSchedulingFailureAfterPermissionIsAllowed() {
+        let notifications = FakeNotificationService(postResult: false)
+
+        XCTAssertEqual(
+            notifications.module().handle(trigger: "sms", payload: ["phoneNumber": "555", "message": "hi"]),
+            .failed("notification_not_scheduled")
+        )
+        XCTAssertEqual(notifications.posts.withLock { $0 }, 1)
     }
 
     func testSmsFailsWhenNotificationSettingsNeverReturn() {

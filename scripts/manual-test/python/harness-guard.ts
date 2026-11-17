@@ -7,7 +7,7 @@ import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { defaultIdGenerator } from "../../../src/utils/IdGenerator";
 import { readFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   privateClientEnvironment,
   canonicalizeHostPath,

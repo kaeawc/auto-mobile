@@ -7,6 +7,7 @@ import {
   planVirtualInteraction,
   virtualFocusableField,
   virtualInteractionRefusal,
+  type VirtualInteractionPlan,
   type VirtualPrototypeSnapshot,
   type VirtualTapSelector,
   type VirtualTapTarget,
@@ -218,10 +219,7 @@ export class VirtualPrototypeInputs {
     if (plan.rejection !== undefined) {
       return { ...failure(plan.rejection), prototypeId: id };
     }
-    const sequences = this.device.dispatchSteps(id, plan.steps);
-    if (!plan.dismissed) {
-      this.device.settle(id, plan, plan.unrecordedWrites);
-    }
+    const sequences = this.deliver(id, plan);
     this.focus = plan.dismissed || plan.blurred ? undefined : (focus ?? this.focus);
     return {
       success: true,
@@ -234,6 +232,28 @@ export class VirtualPrototypeInputs {
         name: step.name,
       })),
     };
+  }
+
+  /**
+   * Delivers a plan's events and leaves its final state on the device (see settle). A dismissed
+   * plan ends with its `dismissed` event, which removes the prototype, so it settles just before
+   * that event: writes no event recorded (a key set and restored) are still stamped, and the
+   * revision they take outlives the dismissal on the id's ledger. Returns each delivered event's
+   * sequence.
+   */
+  private deliver(id: string, plan: VirtualInteractionPlan): number[] {
+    if (!plan.dismissed) {
+      const sequences = this.device.dispatchSteps(id, plan.steps);
+      this.device.settle(id, plan, plan.unrecordedWrites);
+      return sequences;
+    }
+    const before = plan.steps.slice(0, -1);
+    const sequences = this.device.dispatchSteps(id, before);
+    if (sequences.length < before.length) {
+      return sequences;
+    }
+    this.device.settle(id, plan, plan.unrecordedWrites);
+    return [...sequences, ...this.device.dispatchSteps(id, plan.steps.slice(-1))];
   }
 }
 

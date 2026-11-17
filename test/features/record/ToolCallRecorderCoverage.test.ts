@@ -89,6 +89,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   identifyInteractions: READ_ONLY,
   snapshotOf: READ_ONLY,
   listApps: READ_ONLY,
+  buildApp: HOST_LOCAL,
   getAppPermissions: READ_ONLY,
   inspectPackageSigning: READ_ONLY,
   getDeepLinks: READ_ONLY,

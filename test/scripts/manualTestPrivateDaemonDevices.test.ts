@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { join, resolve } from "node:path";
 import { fixture, options as baseOptions, parsed } from "./manualTestPrivateDaemonFixture";
 import { BrokerDeviceInfoRefusedError } from "../../scripts/manual-test/brokerDeviceLedger";

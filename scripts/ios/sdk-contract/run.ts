@@ -8,8 +8,12 @@
  * resource for the default and a registered storage configuration). Every failure names the
  * boundary that disagreed. `navigation` checks host registration, ordered navigation and
  * WKWebView lifecycle forwarding, including an iPad multi-scene transition.
+ * `web-view` checks merged DOM handles, bounded click/replace, frame exclusion, selector re-resolution
+ * across documents and an SDK-level stale probe against the host's page and bridge logs (phase E).
  *
- * Usage: bun scripts/ios/sdk-contract/run.ts --device <udid> --app <Playground.app> [--report <file>]
+ * Usage: bun scripts/ios/sdk-contract/run.ts --device <udid> --app <Playground.app>
+ *   [--report <file>] [--only <scenario[,scenario]>]
+ * Use --only web-view to rerun just the WKWebView slice; unknown scenario names are usage errors.
  * Prefer scripts/ios/sdk-contract-integration.sh, which builds Playground first.
  */
 import { execFile } from "node:child_process";
@@ -29,6 +33,7 @@ import { NetworkState } from "../../../src/utils/NetworkState";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { formatFindings, type ContractBoundary, type ContractFinding } from "./boundaries";
 import { NAVIGATION_SLICE, judgeNavigation } from "./navigationSlice";
+import { MULTI_SCENE_SLICE, MULTI_SCENE_STEPS, judgeMultiScene } from "./multiSceneSlice";
 import { CAPABILITY_SLICE, judgeCapabilities } from "./capabilitySlice";
 import { setFaultRulesThroughCtrlProxy } from "./ctrlProxyFaultRules";
 import {
@@ -58,6 +63,7 @@ import {
   type ToolOutcome,
 } from "./observationSlice";
 import { createReferenceDatabase, replayNetworkBatch } from "./referencePipeline";
+import { WEB_VIEW_SLICE, driveWebViewSteps, judgeWebViewCases } from "./webViewSlice";
 import {
   STORAGE_DEFAULT_SLICE,
   STORAGE_SLICE,
@@ -68,6 +74,7 @@ import {
 import {
   parseResourceJson,
   parseToolOutput,
+  toolFailureMessage,
   queuedRecordKeys,
   readAcquisition,
   trafficIdsByKey,
@@ -97,6 +104,7 @@ interface Options {
   deviceId: string;
   appPath: string;
   reportPath: string | undefined;
+  only: string[] | undefined;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -110,10 +118,13 @@ export function parseOptions(argv: readonly string[]): Options {
   const appPath = value("--app");
   if (!deviceId || !appPath) {
     throw new Error(
-      "Usage: run.ts --device <simulator-udid> --app <Playground.app> [--report <file>]",
+      "Usage: run.ts --device <simulator-udid> --app <Playground.app> [--report <file>] [--only <scenario[,scenario]>]",
     );
   }
-  return { deviceId, appPath, reportPath: value("--report") };
+  const onlyValue = value("--only");
+  const only = argv.includes("--only") ? (onlyValue ?? "").split(",") : undefined;
+  selectScenarios(only);
+  return { deviceId, appPath, reportPath: value("--report"), only };
 }
 
 /** Resolve this checkout's built CLI and preserve the caller's argument order. */
@@ -147,20 +158,44 @@ async function callTool(
   return parseToolOutput(stdout);
 }
 
-/** A tool call that may fail: the observation slice judges failures as well as results. */
-async function invokeTool(
+/** A tool call that may fail: contract slices judge failures as well as results. */
+export async function invokeTool(
   tool: string,
   args: Record<string, string | boolean>,
   sessionUuid: string,
+  invoke: typeof callTool = callTool,
 ): Promise<ToolOutcome> {
   try {
-    const result = await callTool(tool, args, sessionUuid);
+    const result = await invoke(tool, args, sessionUuid);
     return result.success === false
-      ? { result, error: String(result.error ?? "tool reported success: false") }
+      ? {
+          result,
+          error: (toolFailureMessage(result) ?? "tool reported success: false").slice(0, 240),
+        }
       : { result };
   } catch (error) {
-    const output = error as { stdout?: unknown; stderr?: unknown };
-    return { error: [String(error), output.stdout, output.stderr].filter(Boolean).join("\n") };
+    const output = typeof error === "object" && error !== null ? error : undefined;
+    const stdout =
+      output && "stdout" in output && typeof output.stdout === "string" ? output.stdout : "";
+    const stderr =
+      output && "stderr" in output && typeof output.stderr === "string" ? output.stderr : "";
+    let result: JsonRecord | undefined;
+    if (stdout.trim()) {
+      try {
+        result = parseToolOutput(stdout);
+      } catch (parseError) {
+        console.warn(
+          "warning: failed tool stdout is not structured JSON",
+          String(parseError).slice(0, 240),
+        );
+      }
+    }
+    const message =
+      toolFailureMessage(result)?.trim().slice(0, 240) ||
+      stderr.trim().slice(-240) ||
+      (error instanceof Error ? error.message : String(error)).slice(0, 240);
+    console.warn(`warning: ${tool} failed: ${message}`);
+    return { result, error: message };
   }
 }
 
@@ -349,15 +384,28 @@ interface ScenarioContext {
 const SCENARIOS = [
   NETWORK_SLICE,
   NAVIGATION_SLICE,
+  MULTI_SCENE_SLICE,
   CAPABILITY_SLICE,
   FAULT_SLICE,
   OBSERVATION_SLICE,
+  WEB_VIEW_SLICE,
   STORAGE_DEFAULT_SLICE,
   STORAGE_SLICE,
 ] as const;
 /** How long observe may take to report the contract bridge after launch. */
 const BRIDGE_READY_WAIT_MS = 30_000;
 type Scenario = (typeof SCENARIOS)[number];
+
+/** Retain the suite's ordering and run each selected scenario once. */
+export function selectScenarios(only?: readonly string[]): Scenario[] {
+  const unknown = only?.filter((name) => !SCENARIOS.some((scenario) => scenario === name));
+  if (unknown?.length) {
+    throw new Error(
+      `Usage: --only <scenario[,scenario]>; unknown scenario: ${unknown.join(", ")}. Choose from: ${SCENARIOS.join(", ")}`,
+    );
+  }
+  return SCENARIOS.filter((scenario) => !only || only.includes(scenario));
+}
 
 function contractDirectory(container: string): string {
   return join(container, "Documents", "sdk-contract");
@@ -416,6 +464,64 @@ async function driveObservationSteps(
   return outcomes;
 }
 
+/** Waits for the host's actual scene activation before issuing either tool call. */
+async function driveMultiSceneSteps(
+  context: ScenarioContext,
+  runId: string,
+): Promise<Map<string, ToolOutcome>> {
+  const directory = contractDirectory(context.container);
+  const ready = await waitForManifest(join(directory, `${runId}.scenes-ready`));
+  if (ready === undefined) {
+    throw new ScenarioError("fixture-host", "no scenes-ready marker before multi-scene steps");
+  }
+  const outcomes = new Map<string, ToolOutcome>();
+  if (ready !== "not-applicable") {
+    // Like the observation slice, wait out a cached "bridge unavailable" capability: a rejection
+    // (an error) or an SDK-backed result ends the wait.
+    const deadline = defaultTimer.now() + BRIDGE_READY_WAIT_MS;
+    for (const step of MULTI_SCENE_STEPS) {
+      let outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
+      while (
+        step.tool === "observe" &&
+        outcome.error === undefined &&
+        outcome.result?.backend !== "sdk" &&
+        defaultTimer.now() < deadline
+      ) {
+        await defaultTimer.sleep(POLL_INTERVAL_MS);
+        outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
+      }
+      outcomes.set(step.caseName, outcome);
+    }
+  }
+  await writeFile(join(directory, `${runId}.actions-done`), "done\n");
+  return outcomes;
+}
+
+async function driveWebView(
+  context: ScenarioContext,
+  runId: string,
+): Promise<Map<string, ToolOutcome>> {
+  const directory = contractDirectory(context.container);
+  const waitForHost = async (suffix: string): Promise<void> => {
+    if ((await waitForManifest(join(directory, `${runId}.${suffix}`))) === undefined) {
+      throw new ScenarioError("fixture-host", `web fixture did not write ${suffix}`);
+    }
+  };
+  return driveWebViewSteps({
+    timer: defaultTimer,
+    invoke: (tool, args) => invokeTool(tool, args, context.sessionUuid),
+    ready: () => waitForHost("web-ready"),
+    navigate: async () => {
+      await writeFile(join(directory, `${runId}.web-navigate`), "navigate\n");
+      await waitForHost("web-navigated");
+    },
+    release: async () => {
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, `${runId}.actions-done`), "done\n");
+    },
+  });
+}
+
 /** The storage capability resource for Playground, as an MCP client reads it. */
 export async function readStorageCapabilities(
   deviceId: string,
@@ -472,6 +578,7 @@ async function judgeScenario(
   live: Omit<LiveContext, "readResource"> & {
     ctrlProxyPort: number;
     observationOutcomes?: ReadonlyMap<string, ToolOutcome>;
+    webViewOutcomes?: ReadonlyMap<string, ToolOutcome>;
   },
 ): Promise<ContractFinding[]> {
   if (scenario === NAVIGATION_SLICE) {
@@ -480,8 +587,14 @@ async function judgeScenario(
   if (scenario === CAPABILITY_SLICE) {
     return judgeCapabilities(manifest);
   }
+  if (scenario === MULTI_SCENE_SLICE) {
+    return judgeMultiScene(manifest, live.observationOutcomes ?? new Map());
+  }
   if (scenario === OBSERVATION_SLICE) {
     return judgeObservationCases(manifest, live.observationOutcomes ?? new Map());
+  }
+  if (scenario === WEB_VIEW_SLICE) {
+    return judgeWebViewCases(manifest, live.webViewOutcomes ?? new Map());
   }
   if (scenario === STORAGE_SLICE || scenario === STORAGE_DEFAULT_SLICE) {
     return judgeStorage(manifest, live.deviceId, live.sessionUuid);
@@ -532,7 +645,12 @@ async function runScenario(
     // Binds this session's CtrlProxy client so it drains the SDK events into this daemon, and
     // makes Playground CtrlProxy's tracked foreground app for the fault-rule command.
     boundary = "ios-client";
-    await callTool("observe", { platform: "ios" }, context.sessionUuid);
+    if (scenario === MULTI_SCENE_SLICE) {
+      // The second scene may already be connected, so this bind call may fail with multi_scene.
+      await invokeTool("observe", { platform: "ios" }, context.sessionUuid);
+    } else {
+      await callTool("observe", { platform: "ios" }, context.sessionUuid);
+    }
     boundary = "fixture-host";
     if (scenario === FAULT_SLICE) {
       const failure = await installFaultRules(context, runId);
@@ -541,7 +659,13 @@ async function runScenario(
       }
     }
     const observationOutcomes =
-      scenario === OBSERVATION_SLICE ? await driveObservationSteps(context, runId) : undefined;
+      scenario === OBSERVATION_SLICE
+        ? await driveObservationSteps(context, runId)
+        : scenario === MULTI_SCENE_SLICE
+          ? await driveMultiSceneSteps(context, runId)
+          : undefined;
+    const webViewOutcomes =
+      scenario === WEB_VIEW_SLICE ? await driveWebView(context, runId) : undefined;
     const manifestText = await waitForManifest(
       join(contractDirectory(context.container), `${runId}.json`),
     );
@@ -565,6 +689,7 @@ async function runScenario(
       ctrlProxyPort: context.ctrlProxyPort,
       sinceMs: launchedAt - CLOCK_SKEW_MS,
       observationOutcomes,
+      webViewOutcomes,
     });
     return [...manifestFindings, ...caseFindings];
   } catch (error) {
@@ -593,7 +718,9 @@ async function runScenarios(
     )
   ).stdout.trim();
   const context: ScenarioContext = { options, sessionUuid, ctrlProxyPort, container };
-  return collectScenarioFindings(SCENARIOS, (scenario) => runScenario(context, scenario));
+  return collectScenarioFindings(selectScenarios(options.only), (scenario) =>
+    runScenario(context, scenario),
+  );
 }
 
 /**
@@ -618,6 +745,58 @@ async function connectMcpClient(): Promise<Client> {
   return client;
 }
 
+/**
+ * The ports the SDK probes for this simulator's CtrlProxy (`CtrlProxyEndpointResolver`):
+ * 8765..8796, skipping the SDK hierarchy server at 8766.
+ */
+export const SDK_CTRL_PROXY_DISCOVERY = { first: 8765, last: 8796, reserved: 8766 } as const;
+/** Slices whose SDK events must reach CtrlProxy through the SDK's own discovery. */
+const SDK_DISCOVERY_SLICES: readonly string[] = [NETWORK_SLICE, FAULT_SLICE];
+
+/** The daemon's configured runner port range, as its environment names it. */
+export function daemonPortRangeLabel(env: Readonly<Record<string, string | undefined>>): string {
+  const read = (name: string) => env[`AUTOMOBILE_${name}`] ?? env[`AUTO_MOBILE_${name}`];
+  const start = read("PORT_RANGE_START");
+  if (start === undefined) {
+    return "the daemon's default range";
+  }
+  const end = read("PORT_RANGE_END");
+  const size = read("PORT_RANGE_SIZE");
+  if (end !== undefined) {
+    return `AUTOMOBILE_PORT_RANGE_START=${start} AUTOMOBILE_PORT_RANGE_END=${end}`;
+  }
+  return size === undefined
+    ? `AUTOMOBILE_PORT_RANGE_START=${start}`
+    : `AUTOMOBILE_PORT_RANGE_START=${start} AUTOMOBILE_PORT_RANGE_SIZE=${size}`;
+}
+
+/**
+ * A runner the SDK never probes leaves the network and faults events pending, which the slices
+ * would otherwise report as `sdk-endpoint` findings after their live wait. Fail before running.
+ */
+export function sdkDiscoveryWindowFindings(
+  scenarios: readonly string[],
+  ctrlProxyPort: number,
+  env: Readonly<Record<string, string | undefined>>,
+): ContractFinding[] {
+  const { first, last, reserved } = SDK_CTRL_PROXY_DISCOVERY;
+  if (ctrlProxyPort >= first && ctrlProxyPort <= last && ctrlProxyPort !== reserved) {
+    return [];
+  }
+  return scenarios
+    .filter((scenario) => SDK_DISCOVERY_SLICES.includes(scenario))
+    .map((slice) => ({
+      slice,
+      caseName: "run",
+      boundary: "sdk-endpoint" as const,
+      message:
+        `the session's CtrlProxy runner is on port ${ctrlProxyPort} (${daemonPortRangeLabel(env)}), ` +
+        `outside the SDK's CtrlProxy discovery window ${first}..${last} (excluding ${reserved}); ` +
+        `SDK events would never reach CtrlProxy. Start the daemon with a runner port range inside ` +
+        `${first}..${last}, e.g. AUTOMOBILE_PORT_RANGE_START=8780 AUTOMOBILE_PORT_RANGE_SIZE=16.`,
+    }));
+}
+
 function fixtureFailure(slice: string, message: string): ContractFinding {
   return { slice, caseName: "run", boundary: "fixture-host", message };
 }
@@ -628,6 +807,8 @@ interface HarnessRuntime {
   cleanup: (deviceId: string, sessionUuid: string) => Promise<void>;
   writeReport: (path: string, contents: string) => Promise<void>;
   output: (text: string) => void;
+  /** The daemon's environment, for naming its runner port range; defaults to this process's. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 const defaultRuntime: HarnessRuntime = {
@@ -651,9 +832,15 @@ export async function main(
 ): Promise<number> {
   const options = parseOptions(argv);
   const { sessionUuid, ctrlProxyPort } = await runtime.acquire(options.deviceId);
-  let findings: ContractFinding[];
+  let findings: ContractFinding[] = sdkDiscoveryWindowFindings(
+    selectScenarios(options.only),
+    ctrlProxyPort,
+    runtime.env ?? process.env,
+  );
   try {
-    findings = await runtime.run(options, sessionUuid, ctrlProxyPort);
+    if (findings.length === 0) {
+      findings = await runtime.run(options, sessionUuid, ctrlProxyPort);
+    }
   } catch (error) {
     findings = [
       {

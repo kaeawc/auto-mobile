@@ -32,6 +32,9 @@ import {
   prototypeWebAnimateTurn,
   prototypeWebBrowserClock,
   prototypeWebClockDelay,
+  prototypeWebHeldView,
+  prototypeWebRelayout,
+  prototypeWebViewportGestures,
   prototypeWebClockText,
   prototypeWebFitScale,
   prototypeWebPageRuntime,
@@ -122,7 +125,7 @@ export interface PrototypeWebPage {
   readonly inlinedImages: readonly string[];
 }
 
-const RUNTIME_2D = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, viewMatches: ${prototypeWebViewMatches.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()} });`;
+const RUNTIME_2D = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, viewMatches: ${prototypeWebViewMatches.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()}, heldView: ${prototypeWebHeldView.toString()}, relayout: ${prototypeWebRelayout.toString()}, viewportGestures: ${prototypeWebViewportGestures.toString()} });`;
 /** The opt-in 3D view (#16458) runs after the 2D runtime, so its pan handler is already bound. */
 const RUNTIME_3D = `(${prototypeWeb3dRuntime.toString()})({ pose: ${prototypeWebPose.toString()}, orbit: ${prototypeWebOrbit.toString()}, hingeLine: ${prototypeWebHingeLine.toString()}, postureAt: ${prototypeWebPostureAt.toString()}, wrap: ${prototypeWeb3dWrap.toString()}, unwrap: ${prototypeWeb3dUnwrap.toString()}, bodyHinge: ${prototypeWeb3dBodyHinge.toString()}, orbitKey: ${prototypeWebOrbitKey.toString()}, dragOrbit: ${prototypeWeb3dDragOrbit.toString()}, leaves: ${prototypeWebLeaves.toString()}, flat: ${JSON.stringify(PROTOTYPE_WEB_FLAT_ORBIT)}, start: ${JSON.stringify(PROTOTYPE_WEB_START_ORBIT)} });`;
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */

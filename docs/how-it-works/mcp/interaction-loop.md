@@ -190,11 +190,17 @@ the action was never gated.
 In diff mode (`--actions-diff-observe`) `settled`, `settleMs` and `settlePolls`
 ride on the diff alongside `activeWindow` and `freshness`, so one accessor works
 in both modes. A diff with no node, display or field change, projected or not,
-whose `skeleton`, `context` and `keyboard` equal the ones the baseline's response
-delivered, carries `unchanged: true` and leaves those three out; every other diff
-carries them. A baseline whose response carried no skeleton never yields
+carries `unchanged: true` when its `skeleton`, `context` and `keyboard` equal the
+ones the baseline's response delivered. It then leaves those three out; every
+other diff carries them. A baseline whose response carried no skeleton never yields
 `unchanged: true`. The advertised diff arm
 requires `skeleton` or `unchanged`.
+
+A skeleton-projected diff leaves bounds-only changes (moves, resizes or both) out of
+`changed`, because the `skeleton` already has the new bounds. The diff drops them for
+nodes with no affordance. It counts them for actionable nodes in
+`relayout: {count, dx?, dy?}`. `dx` and `dy` appear only when every counted change
+shares the same non-zero left or top offset. A resize in place adds neither.
 
 A requested post-action screenshot is published under the same `observationId`
 as the hierarchy it should match. Only a settle-gated action can replace its

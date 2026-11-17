@@ -171,6 +171,40 @@ describe("FocusNavigate past a Playground slider that changes value on left/righ
     timer.enableAutoAdvance();
   });
 
+  test("undoes a slider adjustment across a one-pixel settle shift (#17209)", async () => {
+    const home = new FakePlaygroundHome(true);
+    home.verticalAdjusts = true;
+    let firstRead = true;
+    const observer: FocusObserver = {
+      read: async () => {
+        const screen = await home.read();
+        if (firstRead && screen.focused) {
+          const bounds = screen.focused.bounds;
+          screen.focused = {
+            ...screen.focused,
+            bounds: { ...bounds, top: bounds.top + 1, bottom: bounds.bottom + 1 },
+          };
+          const shifted = screen.focused;
+          screen.elements = screen.elements.map((element) =>
+            element["resource-id"] === "slider_control" ? shifted : element,
+          );
+        }
+        firstRead = false;
+        return screen;
+      },
+    };
+    const result = await new FocusNavigate(observer, home, timer).execute({
+      until: { text: "Settings" },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    expect(home.presses.slice(0, 2)).toEqual(["arrow_down", "arrow_up"]);
+    expect(home.value).toBe(50);
+    const sliderLabels = result.path
+      .filter((entry) => entry.resourceId === "slider_control")
+      .map((entry) => entry.descendantLabel);
+    expect(sliderLabels.every((label) => label === "Slider with value 50 percent")).toBe(true);
+  });
+
   test("treats the value change as no focus movement and leaves the slider with tab", async () => {
     const home = new FakePlaygroundHome(true);
     const result = await new FocusNavigate(home, home, timer).execute({

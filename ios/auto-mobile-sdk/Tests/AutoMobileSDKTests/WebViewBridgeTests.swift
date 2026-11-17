@@ -15,6 +15,29 @@ final class WebViewBridgeTests: XCTestCase {
         XCTAssertFalse(policy.validates(.click(snapshotId: snapshot.snapshotId, elementId: "second")))
     }
 
+    func testPolicyPreservesContentInset() {
+        let inset = AutoMobileWebContentInset(top: 62, left: 3, bottom: 34, right: 5)
+        let policy = AutoMobileWebViewPolicy()
+        let snapshot = policy.accept(AutoMobileWebSnapshot(contentInset: inset))
+        XCTAssertEqual(snapshot.contentInset, inset)
+        XCTAssertEqual(policy.latestSnapshot?.contentInset, inset)
+    }
+
+    func testSnapshotContentInsetRoundTripsThroughCodable() throws {
+        let inset = AutoMobileWebContentInset(top: 62, left: 3, bottom: 34, right: 5)
+        let snapshot = AutoMobileWebSnapshot(snapshotId: "s", contentInset: inset)
+        let decoded = try JSONDecoder().decode(AutoMobileWebSnapshot.self, from: JSONEncoder().encode(snapshot))
+        XCTAssertEqual(decoded, snapshot)
+        XCTAssertEqual(decoded.contentInset, inset)
+        XCTAssertEqual(AutoMobileWebContentInset(), AutoMobileWebContentInset(top: 0, left: 0, bottom: 0, right: 0))
+    }
+
+    func testOlderSnapshotDecodesWithoutContentInset() throws {
+        let data = Data(#"{"snapshotId":"old","elements":[]}"#.utf8)
+        let decoded = try JSONDecoder().decode(AutoMobileWebSnapshot.self, from: data)
+        XCTAssertNil(decoded.contentInset)
+    }
+
     func testActionsRejectUnknownAndStaleSnapshots() {
         let policy = AutoMobileWebViewPolicy()
         let snapshot = policy.accept(AutoMobileWebSnapshot(elements: [

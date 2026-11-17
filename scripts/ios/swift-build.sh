@@ -117,50 +117,16 @@ for package in "${IOS_MACOS_PACKAGES[@]}"; do
 done
 echo ""
 
-# The prototype agent's UIKit sources are not a SwiftPM target (a macOS host build cannot import
-# UIKit), so compile the injectable simulator dylib here; its core is tested by swift-test.sh.
-echo -e "${BLUE}Building iOS simulator prototype agent...${NC}"
-if xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
-    PROTOTYPE_AGENT_OUT="${PROJECT_ROOT}/scratch/prototype-agent-ci"
-    if "${SCRIPT_DIR}/prototype-agent-build.sh" "${PROTOTYPE_AGENT_OUT}" 2>&1; then
-        print_status 0 "prototype-agent dylib built successfully"
-    else
-        print_status 1 "prototype-agent dylib build failed"
-        FAILED_PACKAGES+=("prototype-agent dylib")
-    fi
-else
-    print_info "Skipping prototype-agent dylib (no iphonesimulator SDK)"
+# The iOS simulator prototype apps (agent dylib, viewer, ProtoViewer) are not SwiftPM targets; see
+# swift-build-prototype-apps.sh. SWIFT_BUILD_PROTOTYPE_APPS=skip leaves them out for a CI job that
+# builds them in a separate matrix job (#18429); every other value builds them here.
+if [[ "${SWIFT_BUILD_PROTOTYPE_APPS:-all}" == "skip" ]]; then
+    print_info "Skipping iOS simulator prototype apps (SWIFT_BUILD_PROTOTYPE_APPS=skip)"
+    echo ""
+elif ! "${SCRIPT_DIR}/swift-build-prototype-apps.sh" all; then
+    print_status 1 "prototype app build failed"
+    FAILED_PACKAGES+=("prototype apps")
 fi
-echo ""
-
-# The standalone viewer links the same renderer into its own simulator app content.
-echo -e "${BLUE}Building iOS simulator prototype viewer...${NC}"
-if xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
-    PROTOTYPE_VIEWER_OUT="${PROJECT_ROOT}/scratch/prototype-viewer-ci"
-    if "${SCRIPT_DIR}/prototype-viewer-build.sh" "${PROTOTYPE_VIEWER_OUT}" 2>&1; then
-        print_status 0 "prototype-viewer app built successfully"
-    else
-        print_status 1 "prototype-viewer app build failed"
-        FAILED_PACKAGES+=("prototype-viewer app")
-    fi
-else
-    print_info "Skipping prototype-viewer app (no iphonesimulator SDK)"
-fi
-echo ""
-
-# The library app shares the renderer but owns its offline library and storage namespaces.
-echo -e "${BLUE}Building iOS simulator ProtoViewer...${NC}"
-if xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
-    if "${SCRIPT_DIR}/protoviewer-build.sh" "${PROJECT_ROOT}/scratch/protoviewer-ci" 2>&1; then
-        print_status 0 "ProtoViewer app built successfully"
-    else
-        print_status 1 "ProtoViewer app build failed"
-        FAILED_PACKAGES+=("ProtoViewer app")
-    fi
-else
-    print_info "Skipping ProtoViewer app (no iphonesimulator SDK)"
-fi
-echo ""
 
 # The CarPlay projection probe targets the iOS 27.0 simulator; build it whenever that SDK exists so
 # probe.m cannot rot unseen. Its JSON keys are checked against the TypeScript schema by unit tests.

@@ -5,7 +5,7 @@ import { readGuardFile, guardTextMayMatch, GuardVisitor as Visitor } from "./ast
 import { workingTreeFiles } from "../helpers/workingTreeFiles";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const EXTENSIONS = [".ts", ".tsx", ".js", ".json"];
+const EXTENSIONS = [".ts", ".tsx", ".d.ts", ".js", ".json"];
 const SCAN_TIMEOUT_MS = 60_000;
 
 function relativeSpecifiers(file: string, source: string): string[] {

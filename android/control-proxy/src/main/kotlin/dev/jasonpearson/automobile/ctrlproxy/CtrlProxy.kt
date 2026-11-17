@@ -2,10 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.accessibilityservice.GestureDescription
-import android.app.Activity
 import android.app.admin.DevicePolicyManager
-import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
@@ -13,7 +10,6 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
-import android.os.Handler
 import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
@@ -23,11 +19,6 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
-import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
-import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
-import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
-import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
@@ -73,7 +64,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.GlobalActionResult
-import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.File
@@ -750,7 +740,7 @@ class CtrlProxy : AccessibilityService() {
   }
   // Kept as a Lazy so teardown releases cached window contexts only if XR reads created any.
   private val logicalSizeReaderDelegate = lazy { createDisplayLogicalSizeReader(this) }
-  private val displayController by lazy {
+  internal val displayController by lazy {
     DisplayController(
       host =
         object : DisplayController.Host {
@@ -987,34 +977,7 @@ class CtrlProxy : AccessibilityService() {
    */
   internal val textInputController =
     TextInputController(
-      host =
-        object : TextInputController.Host {
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
-
-          override fun screenDimensions(displayId: Int) =
-            displayController.getScreenDimensions(displayId)
-
-          override fun hideSoftKeyboard() {
-            softKeyboardController.setShowMode(AccessibilityService.SHOW_MODE_HIDDEN)
-          }
-
-          override suspend fun performImeNavigationAction(actionId: Int) =
-            CtrlProxyIme.current()?.performNavigationAction(actionId)
-
-          override fun sendKeycodeEnter() =
-            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
-
-          override suspend fun publishSettledHierarchy() {
-            hierarchyController.publishSettledHierarchy()
-          }
-        },
+      host = CtrlProxyTextInputHost(this),
       serviceScope = serviceScope,
       perfProvider = perfProvider,
       timeProvider = timeProvider,
@@ -1027,33 +990,7 @@ class CtrlProxy : AccessibilityService() {
   /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
   internal val imeController by lazy {
     ImeController(
-      host =
-        object : ImeController.Host {
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override fun currentIme(): ImeController.ImeTarget? =
-            CtrlProxyIme.current()?.let { ime ->
-              object : ImeController.ImeTarget {
-                override fun commitText(
-                  request: ImeCommitRequest,
-                  onResult: (ImeCommitResult) -> Unit,
-                ) = ime.commitText(request, onResult)
-              }
-            }
-
-          override fun setActiveProfile(id: String, onComplete: (Boolean) -> Unit) =
-            CtrlProxyIme.setActiveProfile(id, onComplete)
-
-          override fun keyboardProfileStore(): KeyboardProfileStore =
-            SharedPreferencesKeyboardProfileStore(this@CtrlProxy)
-
-          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
-        },
+      host = CtrlProxyImeHost(this),
       timeProvider = timeProvider,
       jsonCompact = jsonCompact,
       resultSender = resultSender,
@@ -1062,27 +999,7 @@ class CtrlProxy : AccessibilityService() {
   /** Recomposition tracking, network mock rules and error simulation broadcasts to the app. */
   internal val sdkControlController by lazy {
     SdkControlController(
-      host =
-        object : SdkControlController.Host {
-          override fun sendBroadcast(intent: Intent) = this@CtrlProxy.sendBroadcast(intent)
-
-          override fun sendOrderedBroadcast(intent: Intent, resultReceiver: BroadcastReceiver) =
-            this@CtrlProxy.sendOrderedBroadcast(
-              intent,
-              null,
-              resultReceiver,
-              null,
-              Activity.RESULT_OK,
-              null,
-              null,
-            )
-
-          override fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
-            if (isWebSocketRunning()) {
-              serviceScope.launch { webSocketServer.broadcast(result) }
-            }
-          }
-        },
+      host = CtrlProxySdkControlHost(this),
       recompositionStore = recompositionStore,
     )
   }
@@ -1092,31 +1009,7 @@ class CtrlProxy : AccessibilityService() {
    */
   internal val gestureController =
     GestureController(
-      host =
-        object : GestureController.Host {
-          override fun dispatchGesture(
-            gesture: GestureDescription,
-            callback: GestureResultCallback,
-            handler: Handler,
-          ) = this@CtrlProxy.dispatchGesture(gesture, callback, handler)
-
-          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
-
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
-
-          override suspend fun settledHierarchy(displayId: Int?) =
-            hierarchyController.settledHierarchy(displayId)
-
-          override suspend fun publishHierarchy(hierarchy: ViewHierarchy) =
-            hierarchyController.broadcastHierarchyUpdate(hierarchy, sync = true)
-        },
+      host = CtrlProxyGestureHost(this),
       scope = { serviceScope },
       reporting =
         GestureReportingDependencies(
@@ -1230,7 +1123,7 @@ class CtrlProxy : AccessibilityService() {
 
   internal val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
 
-  private fun currentFrameContext(): String = frameContextGate.current()
+  internal fun currentFrameContext(): String = frameContextGate.current()
 
   internal val accessibilityFlags =
     AccessibilityFlagsController(

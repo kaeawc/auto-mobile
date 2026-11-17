@@ -20,7 +20,8 @@ import { prototypeStringsSchema } from "./prototypeStringsSchema";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
-import { z } from "zod";
+import { z } from "zod/v3";
+import { prototypeOwnKeyRecordV3 } from "./prototypeOwnKeyRecord";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
@@ -697,7 +698,7 @@ const stackBaseSchema = z
     type: z.enum(["stack"]),
     id: z.string().min(1),
     start: z.string().min(1),
-    routes: z.record(routeSchema).and(z.unknown()).optional(),
+    routes: prototypeOwnKeyRecordV3(z.string(), routeSchema).optional(),
   })
   .strict();
 const adaptiveBaseSchema = buildAdaptiveSchema(commonNodeShape);

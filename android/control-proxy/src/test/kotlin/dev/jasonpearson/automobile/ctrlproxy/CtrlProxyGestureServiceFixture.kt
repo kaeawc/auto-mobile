@@ -68,8 +68,7 @@ internal class CtrlProxyGestureServiceFixture {
     ReflectionHelpers.setField(gestureController, "perfProvider", perf)
   }
 
-  fun freshFrameContext(): String =
-    ReflectionHelpers.callInstanceMethod(service, "currentFrameContext")
+  fun freshFrameContext(): String = service.currentFrameContext()
 
   fun seedCaret(): Any {
     // The field's erased type is Pair. These gesture paths only clear it, never read its contents;

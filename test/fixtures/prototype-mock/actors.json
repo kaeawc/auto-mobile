@@ -1,5 +1,5 @@
 {
-  "description": "Mock actor timelines (#14211) under a fake clock: each step sends a request, joins a room, advances the clock, or expects collection contents or the frames a room received.",
+  "description": "Mock actor timelines (#14211) under a fake clock: each step sends a request, joins a room, advances the clock (advanceMs on the timer; simulateMs through simulate advanceTimeMs, expecting the actor steps it applied as applied), or expects collection contents or the frames a room received.",
   "cases": [
     {
       "name": "a posted message gets a typed reply after its delays",
@@ -246,6 +246,80 @@
         ]
       },
       "steps": [{ "advanceMs": 100 }, { "expect": { "items": [{ "id": "a" }] } }]
+    },
+    {
+      "name": "simulate advanceTimeMs lands typing and the reply without waiting",
+      "definition": {
+        "collections": { "messages": [], "typing": [] },
+        "actors": [
+          {
+            "on": { "route": "POST /messages" },
+            "afterMs": 800,
+            "do": [
+              { "append": "typing", "value": { "id": "bo" } },
+              { "afterMs": 1500, "remove": "typing", "id": "bo" },
+              { "append": "messages", "value": { "id": "r1", "user": "bo", "text": "On it!" } }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "request": {
+            "method": "POST",
+            "path": "/messages",
+            "body": { "id": 1, "user": "me", "text": "ship it?" }
+          },
+          "status": 201
+        },
+        { "simulateMs": 1000, "applied": 1 },
+        { "expect": { "typing": [{ "id": "bo" }] } },
+        { "simulateMs": 2000, "applied": 2 },
+        {
+          "expect": {
+            "typing": [],
+            "messages": [
+              { "id": 1, "user": "me", "text": "ship it?" },
+              { "id": "r1", "user": "bo", "text": "On it!" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "simulate and the timer share one clock for an every actor",
+      "definition": {
+        "collections": { "ticks": [] },
+        "actors": [
+          { "every": 1000, "maxRuns": 3, "do": [{ "append": "ticks", "value": { "at": "tick" } }] }
+        ]
+      },
+      "steps": [
+        { "advanceMs": 400 },
+        { "simulateMs": 1100, "applied": 1 },
+        { "expect": { "ticks": [{ "at": "tick", "id": "fake-1" }] } },
+        { "advanceMs": 499 },
+        { "expect": { "ticks": [{ "at": "tick", "id": "fake-1" }] } },
+        { "advanceMs": 1 },
+        {
+          "expect": {
+            "ticks": [
+              { "at": "tick", "id": "fake-1" },
+              { "at": "tick", "id": "fake-2" }
+            ]
+          }
+        },
+        { "simulateMs": 5000, "applied": 1 },
+        {
+          "expect": {
+            "ticks": [
+              { "at": "tick", "id": "fake-1" },
+              { "at": "tick", "id": "fake-2" },
+              { "at": "tick", "id": "fake-3" }
+            ]
+          }
+        }
+      ]
     }
   ]
 }

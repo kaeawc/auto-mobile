@@ -29,3 +29,20 @@ export type HandleMatch = Assert<
   Same<Declared.PrototypeMountHandle, Implemented.PrototypeMountHandle>
 >;
 export type FrameMatch = Assert<Same<Declared.PrototypeWebFrame, Implemented.PrototypeWebFrame>>;
+
+// The element entry (#16454).
+import type * as DeclaredElement from "../../../../packages/prototype-web/element";
+import * as ImplementedElement from "../../../../packages/prototype-web/src/element";
+
+export const declaredElement: typeof DeclaredElement.AutomobilePrototypeElement =
+  ImplementedElement.AutomobilePrototypeElement;
+export const declaredTag: typeof DeclaredElement.PROTOTYPE_ELEMENT_TAG =
+  ImplementedElement.PROTOTYPE_ELEMENT_TAG;
+export const declaredAttributes: typeof DeclaredElement.PROTOTYPE_ELEMENT_ATTRIBUTES =
+  ImplementedElement.PROTOTYPE_ELEMENT_ATTRIBUTES;
+export type ElementEventMatch = Assert<
+  Same<DeclaredElement.PrototypeElementEvent, ImplementedElement.PrototypeElementEvent>
+>;
+export type ElementEventMapMatch = Assert<
+  Same<keyof DeclaredElement.PrototypeElementEventMap, ImplementedElement.PrototypeElementEvent>
+>;

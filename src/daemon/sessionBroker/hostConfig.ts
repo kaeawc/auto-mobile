@@ -1,7 +1,7 @@
 import { ENV as ENV_SPECS } from "../../config/env";
 import { readFile } from "node:fs/promises";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../../utils/SystemTimer";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { MIN_AVD_RAM_MB } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";

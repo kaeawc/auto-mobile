@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 type ObjectOutputSchema = {
-  shape: Record<string, { isOptional(): boolean }>;
+  shape: Record<string, { _zod: { optin?: string } }>;
 };
 
 type ZodFieldSchema = {
@@ -56,8 +56,9 @@ function requiredTopLevelKeys(schema: unknown): string[] {
   if (!shape || typeof shape !== "object") {
     return [];
   }
+  // Zod 4.6 requires a `z.unknown()` key although its value accepts undefined.
   return Object.entries(shape)
-    .filter(([, field]) => !field.isOptional())
+    .filter(([, field]) => field._zod.optin === undefined)
     .map(([key]) => key);
 }
 

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { PrototypeStackSnapshot } from "./ctrlProxyProtocol/prototypeMessages";
 
 /** Optional navigation snapshots from newer devices; malformed entries are ignored. */

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 const exportedComponent = z.object({
   kind: z.enum(["activity", "activity-alias", "service", "receiver", "provider"]),

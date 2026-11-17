@@ -5,7 +5,7 @@ import type {
 } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { parseBooleanFlagValue, readValueOperand, splitFlagToken } from "../../utils/flagTokens";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   DAEMON_ABANDON_SESSION_REQUEST_METHOD,
   DAEMON_RELEASE_BROKER_SESSION_METHOD,

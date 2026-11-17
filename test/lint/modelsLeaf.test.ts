@@ -92,7 +92,7 @@ describe("src/models is a leaf", () => {
 
   test("classifies specifiers", () => {
     const source = `import a from "./A"; import type { B } from "../utils/B"; export * from "../constants/c";
-      export { d } from "../server/d"; import z from "zod"; const e = await import("../daemon/e"); type T = import("../features/t").T;`;
+      export { d } from "../server/d"; import z from "zod/v3"; const e = await import("../daemon/e"); type T = import("../features/t").T;`;
     const targets = moduleSpecifiers("src/models/x.ts", source).map((specifier) =>
       escapingTarget("src/models/x.ts", specifier),
     );

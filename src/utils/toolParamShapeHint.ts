@@ -137,8 +137,10 @@ export function allowedKeysAt(schema: unknown, path: ReadonlyArray<PropertyKey>)
   return [...new Set(keys)];
 }
 
+// Zod 4.6 marks a key with a default as "defaulted" rather than "optional"; a caller may omit both.
 function isOptional(schema: unknown): boolean {
-  return asNode(schema)?._zod?.optin === "optional";
+  const optin = asNode(schema)?._zod?.optin;
+  return optin === "optional" || optin === "defaulted";
 }
 
 function parses(schema: unknown, value: unknown): boolean {

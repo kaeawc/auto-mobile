@@ -423,6 +423,7 @@
             // content's (the outline hugged the content before).
             .frame(
                 maxWidth: PrototypeCardLayout.outlineSpansWidth(style?.width) ? .infinity : nil,
+                maxHeight: PrototypeCardLayout.outlineSpansHeight(style?.height) ? .infinity : nil,
                 alignment: .topLeading
             )
             // An authored gradient is painted behind the card, over the authored background, by the

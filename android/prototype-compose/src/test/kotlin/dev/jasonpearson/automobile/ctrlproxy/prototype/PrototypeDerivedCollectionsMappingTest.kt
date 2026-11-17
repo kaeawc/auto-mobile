@@ -1,8 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.BeforeClass
 import org.junit.Test

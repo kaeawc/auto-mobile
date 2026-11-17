@@ -299,11 +299,16 @@ export const prototypeOutputSchema = z.object({
           from: z.enum(["client", "publish", "broadcast"]),
           data: z.string(),
         }),
+        z.object({
+          seq: z.number().int().positive(),
+          room: z.string(),
+          event: z.enum(["join", "leave"]),
+        }),
       ]),
     )
     .optional()
     .describe(
-      "backendLog: requests answered and room frames seen ({room, from, data}), oldest first (latest 200 kept)",
+      "backendLog: requests answered, room frames seen ({room, from, data}) and connections joining or leaving a room ({room, event: join|leave}), oldest first (latest 200 kept)",
     ),
   report: z.json().optional(),
   markdown: z.string().optional(),

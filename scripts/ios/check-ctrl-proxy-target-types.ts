@@ -17,7 +17,9 @@
  *     directly in an enclosing body, in another body of the same type (`extension Own`), or in
  *     a type named in the enclosing type's header (`class Sub: Base`), followed transitively
  *     through the headers of those types (`protocol R: Q`, `protocol Q: P`), or the subject of a
- *     `where` requirement on the enclosing declaration (`extension Foo where Element: Equatable`);
+ *     `where` requirement on the enclosing declaration (`extension Foo where Element: Equatable`),
+ *     but not the concrete side of a same-type requirement on its own generic parameter
+ *     (`func f<T: P>(_: T) where Geometry == T.X`);
  *   - only bodies in files the target compiles bind nested types; a nested type the target uses
  *     whose only declaration is in an extension it does not compile is reported with that file;
  *   - an enum case declaration (`case Bar`) names a case, not a type;
@@ -184,15 +186,36 @@ function topLevelItems(text: string): string[] {
   return items;
 }
 
-/** The leading name of each requirement in a header's `where` clause (`where Element: P`). */
-export function whereSubjects(header: string): string[] {
+/** The leading name of `text`, a type path such as `T.X` or `Element`. */
+function leadingName(text: string): string | undefined {
+  return GENERIC_PARAM.exec(text)?.[1];
+}
+
+/**
+ * The leading name of each requirement in a header's `where` clause (`where Element: P`) that
+ * can name a generic parameter or associated type. A `where` clause declares no names: in a
+ * same-type requirement whose other side is rooted in one of the declaration's own generic
+ * parameters (`where Geometry == T.X`), the subject is a concrete type and binds nothing (#18382).
+ */
+export function whereSubjects(header: string, generics: readonly string[] = []): string[] {
   const where = WHERE.exec(header);
   if (!where) {
     return [];
   }
-  return topLevelItems(header.slice(where.index + where[0].length)).flatMap(
-    (item) => GENERIC_PARAM.exec(item)?.[1] ?? [],
-  );
+  return topLevelItems(header.slice(where.index + where[0].length)).flatMap((item) => {
+    const subject = leadingName(item);
+    if (subject === undefined) {
+      return [];
+    }
+    const sameType = item.indexOf("==");
+    if (sameType >= 0 && !generics.includes(subject)) {
+      const other = leadingName(item.slice(sameType + 2));
+      if (other !== undefined && generics.includes(other)) {
+        return [];
+      }
+    }
+    return [subject];
+  });
 }
 
 /** Records the index of each case name in the enum case declaration that starts at `from`. */
@@ -236,7 +259,7 @@ function endPending(state: ScanState, at: number): Pending | undefined {
   if (pending) {
     const header = pending.header;
     const wasEmpty = header.generics.length === 0;
-    header.generics.push(...whereSubjects(state.code.slice(pending.nameEnd, at)));
+    header.generics.push(...whereSubjects(state.code.slice(pending.nameEnd, at), header.generics));
     if (wasEmpty && header.generics.length > 0) {
       state.headers.push(header);
     }

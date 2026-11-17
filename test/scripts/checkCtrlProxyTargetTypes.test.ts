@@ -195,6 +195,37 @@ describe("findMissingTypes", () => {
     ]);
   });
 
+  test("does not bind the concrete side of a same-type where requirement (#18382)", () => {
+    const sources = new Map([
+      ["Geometry.swift", "struct Geometry {}\n"],
+      ["Element.swift", "struct Element {}\n"],
+      [
+        "Left.swift",
+        "protocol P { associatedtype X }\nfunc f<T: P>(_ value: T) where Geometry == T.X {}\n",
+      ],
+      ["Right.swift", "func g<T: P>(_ value: T) where T.X == Geometry {}\n"],
+      [
+        "Extension.swift",
+        "extension Array where Element == Int { func e() -> Element? { nil } }\n",
+      ],
+    ]);
+    const target = {
+      name: "T",
+      files: ["Left.swift", "Right.swift", "Extension.swift"],
+      packages: [],
+    };
+    expect(findMissingTypes([target], sources, new Map())).toEqual([
+      { target: "T", file: "Left.swift", line: 2, type: "Geometry", definedIn: ["Geometry.swift"] },
+      {
+        target: "T",
+        file: "Right.swift",
+        line: 1,
+        type: "Geometry",
+        definedIn: ["Geometry.swift"],
+      },
+    ]);
+  });
+
   test("does not treat capitalized enum case names as types (#18347)", () => {
     const sources = new Map([
       ["Bar.swift", "struct Bar {}\nstruct Payload {}\n"],

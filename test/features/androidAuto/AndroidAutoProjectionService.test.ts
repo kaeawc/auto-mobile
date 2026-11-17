@@ -45,7 +45,6 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       deviceId: "emulator-5554",
-      acceptAndroidAutoTerms: false,
     });
     expect(requests[0]?.androidAutoApks).toHaveLength(2);
   });
@@ -110,7 +109,6 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
       );
       const report = await applier.startHeadUnit(device, {
         headUnit: { dhuConfig: "/configs/hu.ini" },
-        acceptAndroidAutoTerms: true,
       });
       expect(requests).toHaveLength(1);
       // The caller's absolute path is kept as given (a drive-relative one too, on Windows).
@@ -120,7 +118,6 @@ describe("DefaultAndroidAutoProjectionApplier", () => {
       expect(requests[0]).toMatchObject({
         deviceId: "emulator-5554",
         androidAutoApks: [],
-        acceptAndroidAutoTerms: true,
         dhu: {
           binaryPath: path.join("/sdk", "extras", "google", "auto", "desktop-head-unit"),
         },

@@ -27,6 +27,12 @@ export interface SmokeStep {
   assert(payload: Payload): string | undefined;
   /** Run even after an earlier step failed (cleanup). */
   always?: boolean;
+  /**
+   * Call again while the step fails, up to `attempts` calls in all with `delayMs` between them, for
+   * a state the device reaches on its own (a first-boot setup screen clearing). Only the last
+   * attempt's payload, screenshot and verdict are kept.
+   */
+  retry?: { attempts: number; delayMs: number };
 }
 
 export type SmokeStepStatus = "passed" | "failed" | "skipped";
@@ -106,6 +112,8 @@ export interface SmokeDeps {
   copyFile(from: string, to: string): boolean;
   now(): number;
   log(message: string): void;
+  /** Waits between a retried step's attempts; without it, attempts follow one another at once. */
+  sleep?(ms: number): Promise<void>;
 }
 
 function stepFileName(index: number, step: SmokeStep, suffix: string): string {
@@ -174,6 +182,29 @@ function describeStep(step: SmokeStep): Pick<SmokeStepResult, "id" | "tool" | "e
   return { id: step.id, tool: step.tool, expectation: step.expectation };
 }
 
+/** Calls a step, again while it fails and its retry allows; returns the last attempt. */
+async function attemptStep(
+  step: SmokeStep,
+  session: string | undefined,
+  deps: SmokeDeps,
+): Promise<{ envelope?: unknown; verdict?: string }> {
+  const attempts = Math.max(1, step.retry?.attempts ?? 1);
+  let last: { envelope?: unknown; verdict?: string } = {};
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (attempt > 1) {
+      deps.log(`### ${step.id}: attempt ${attempt} of ${attempts} after: ${last.verdict}`);
+      await deps.sleep?.(step.retry?.delayMs ?? 0);
+    }
+    const { envelope, error } = await callStep(step, session, deps);
+    const verdict = error !== undefined ? `call threw: ${error}` : judgeEnvelope(step, envelope);
+    last = { envelope, verdict };
+    if (verdict === undefined) {
+      break;
+    }
+  }
+  return last;
+}
+
 /** Run the plan over one session, recording payloads, screenshots and a verdict per step. */
 export async function runSmoke(plan: readonly SmokeStep[], deps: SmokeDeps): Promise<SmokeResult> {
   const steps: SmokeStepResult[] = [];
@@ -186,14 +217,13 @@ export async function runSmoke(plan: readonly SmokeStep[], deps: SmokeDeps): Pro
         continue;
       }
       const started = deps.now();
-      const { envelope, error } = await callStep(step, session, deps);
+      const { envelope, verdict } = await attemptStep(step, session, deps);
       let writeError: string | undefined;
       if (envelope !== undefined) {
         writeError = saveStepPayload(index, step, envelope, deps);
         saveScreenshot(index, step, envelope, deps);
         session ??= getDeviceSessionIdFromResult(envelope);
       }
-      const verdict = error !== undefined ? `call threw: ${error}` : judgeEnvelope(step, envelope);
       const status: SmokeStepStatus = verdict === undefined ? "passed" : "failed";
       failed ||= status === "failed";
       // The artifact error is a detail, not a verdict: the tool call itself met its expectation.
@@ -308,6 +338,7 @@ export async function runSmokeMain(options: {
   const { copyFileSync, mkdirSync, writeFileSync, appendFileSync } = await import("node:fs");
   const { dirname } = await import("node:path");
   const { createSdkClient, defaultServerPath, resolveTimeoutMs } = await import("../../mcp-drive");
+  const { defaultTimer } = await import("../../../src/utils/SystemTimer");
   const client = await createSdkClient(
     defaultServerPath(),
     resolveTimeoutMs(undefined, process.env),
@@ -332,6 +363,7 @@ export async function runSmokeMain(options: {
     },
     now: () => Date.now(),
     log: (message) => console.log(message),
+    sleep: (ms) => defaultTimer.sleep(ms),
   });
   const summary = renderSmokeSummary(options.title, result, options.notes);
   writeSmokeOutputs(result, summary, {

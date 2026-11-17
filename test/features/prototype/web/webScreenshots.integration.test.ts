@@ -236,6 +236,23 @@ async function checkDevice3d(page: Page): Promise<void> {
   // Each press restarts the orbit's transform transition; measure the settled pose, not a
   // mid-turn one (#17260).
   await finishAnimations(page);
+  // Turned around, a rotate shows both views mid-turn; each is wrapped with a back plate, so
+  // neither shows its screen mirrored from behind, and only the shown one stays wrapped (#16769).
+  if (await page.$('[data-control="rotate"]')) {
+    await page.click('[data-control="rotate"]');
+    const midTurn = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-view]:not([hidden])")).map(
+        (view) =>
+          view.hasAttribute("data-wrapped") && view.querySelector(":scope > [data-back]") !== null,
+      ),
+    );
+    expect(midTurn.length).toBeGreaterThan(0);
+    expect(midTurn.every(Boolean)).toBe(true);
+    await finishAnimations(page);
+    expect(await page.$$eval("[data-wrapped]", (views) => views.length)).toBe(1);
+    await page.click('[data-control="rotate"]');
+    await finishAnimations(page);
+  }
   const centreX = () =>
     page.evaluate(() => {
       const box = document.querySelector("[data-view]:not([hidden]) > *")?.getBoundingClientRect();

@@ -234,8 +234,12 @@ INTERNET), and explicitly enabled components in structured XML. App-owned resour
 references retain the template resource namespace with private-resource access.
 `aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
 binary-manifest string replacement. The spec and assets are baked under
-`assets/prototype/` at stamp time. Icon customization is refused until adaptive
-icon replacement is implemented.
+`assets/prototype/` at stamp time. An `icon.backgroundColor` (`#RRGGBB` or
+`#AARRGGBB`) rewrites the `prototype_icon_background` colour value in the stored
+resource table, in every configuration. That colour backs the adaptive icon and the
+Android 12+ splash screen, so both follow it. The stamp fails if the template has no
+literal colour by that name. An `icon.asset` is refused: the raster foreground
+layer is not stamped yet.
 
 Template signatures are removed before assembly. The resource table stays stored;
 zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned

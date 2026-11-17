@@ -34,9 +34,10 @@ Test authoring stays off the navigation until recording and authoring tests is e
 pages and the JUnit and XCTestRunner runner pages are still built at their URLs but are not linked
 from the sidebar or user guides.
 
-Pages were not moved on disk, so no URL changed. Paired pages such as the device-ownership set and
+No page moved on disk, so every URL still works. Paired pages such as the device-ownership set and
 "Apple Watch" / "Apple Watch tool behavior" stay split, because merging them would break the
-1,500-word page budget for `using` pages. Page-level tags were not added: no page carries front
+1,500-word page budget for `using` pages. Platform landing pages for Android phones and tablets and
+for iPhone and iPad give the per-device view. They replace page-level tags: no page carries front
 matter, and the tags index needs MkDocs-only syntax that pages rendered on GitHub cannot use.
 
 ## Consequences

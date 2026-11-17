@@ -297,6 +297,8 @@ nav:
           - "Python SDK": using/python-sdk.md
           - "Usage skill": using/usage-skill.md
       - "Platforms":
+          - "Android phones and tablets": using/android.md
+          - "iPhone and iPad": using/ios.md
           - "Android TV": using/android-tv.md
           - "Wear OS": using/wear-os.md
           - "Wear OS tiles and watch faces": using/wear-os-watch-faces.md

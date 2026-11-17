@@ -84,10 +84,70 @@ describe("prototype web media nodes (#16539)", () => {
     expect(frame[0]!.style.background).toContain("linear-gradient");
   });
 
-  test("a poster asset is listed as not inlined", () => {
-    expect(
-      still({ type: "videoPlayer", id: "clip", player: "main", poster: "p" }).unsupportedNodes,
-    ).toEqual([{ type: "videoPlayer", id: "clip", path: "root", reason: "assetNotInlined" }]);
+  test("a poster asset without bytes is listed as not inlined and draws no poster", () => {
+    const video = still({ type: "videoPlayer", id: "clip", player: "main", poster: "p" });
+    expect(video.unsupportedNodes).toEqual([
+      { type: "videoPlayer", id: "clip", path: "root", reason: "assetNotInlined", asset: "p" },
+    ]);
+    expect(video.part("poster")).toEqual([]);
+    expect(video.imageDraws).toMatchObject([{ asset: "p", scale: "fit" }]);
+  });
+
+  test("a sized player encodes its poster at the player's size, not the screen's", () => {
+    const fixed = still({
+      type: "videoPlayer",
+      poster: "p",
+      style: { width: { dp: 80 }, height: { dp: 45 } },
+    });
+    expect(fixed.imageDraws).toMatchObject([
+      { asset: "p", widthDp: 80, heightDp: 45, scale: "fit" },
+    ]);
+    // The overlay fills the padding box, so padding does not shrink the encode.
+    const padded = still({
+      type: "videoPlayer",
+      poster: "p",
+      style: {
+        width: { dp: 80 },
+        height: { dp: 45 },
+        padding: { start: 16, end: 16, top: 16, bottom: 16 },
+      },
+    });
+    expect(padded.imageDraws).toMatchObject([{ asset: "p", widthDp: 80, heightDp: 45 }]);
+    // A height the style does not fix stays screen-bounded, so a taller box is never short.
+    const wide = still({
+      type: "videoPlayer",
+      poster: "p",
+      style: { width: { dp: 160 }, minHeight: 320 },
+    });
+    expect(wide.imageDraws).toMatchObject([{ asset: "p", widthDp: 160 }]);
+    expect(wide.imageDraws[0]!.heightDp).toBeUndefined();
+  });
+
+  test("a poster with a slot fits the player over black once its rule is inlined (#16591)", () => {
+    const rendered = renderPrototypeStill(
+      { ...reference, root: { type: "videoPlayer", id: "clip", poster: "p" } },
+      { frame: "pixel-9", imageSlots: new Map([["p", 2]]) },
+    );
+    expect(rendered.unsupportedNodes).toEqual([
+      { type: "videoPlayer", id: "clip", path: "root", reason: "assetOverBudget", asset: "p" },
+    ]);
+    const [poster] = find(rendered.element, (element) => element.attrs["data-part"] === "poster");
+    expect(poster!.style["background-color"]).toBe("rgba(0,0,0,var(--pa-2-on,0))");
+    const [layer] = find(poster!, (element) => element.attrs["data-image"] === "");
+    expect(layer!.style["background-image"]).toBe("var(--pa-2)");
+    expect(layer!.style["background-size"]).toBe("contain");
+  });
+
+  test("a poster sits over the first frame and under the chrome", () => {
+    const rendered = renderPrototypeStill(
+      { ...reference, root: { type: "videoPlayer", poster: "p", source: { sample: "colorBars" } } },
+      { frame: "pixel-9", imageSlots: new Map([["p", 0]]) },
+    );
+    const [player] = find(rendered.element, (e) => e.attrs["data-node"] === "videoPlayer");
+    const parts = player!.children.flatMap((child) =>
+      typeof child === "string" ? [] : [child.attrs["data-part"] ?? ""],
+    );
+    expect(parts.slice(0, 2)).toEqual(["frame", "poster"]);
   });
 
   test("a camera preview draws a labelled test pattern at its aspect ratio", () => {

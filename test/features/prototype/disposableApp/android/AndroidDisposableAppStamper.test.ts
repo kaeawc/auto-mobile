@@ -90,7 +90,10 @@ test("ZIP replaces manifest and spec, drops signatures, stores resources, and co
   linked.addFile("AndroidManifest.xml", Buffer.from("binary manifest"));
   const assembly = new DefaultAndroidStampZip();
   const result = new AdmZip(
-    assembly.assemble(template.toBuffer(), linked.toBuffer(), "{}", stampInput().assets),
+    assembly.assemble(template.toBuffer(), linked.toBuffer(), {
+      spec: "{}",
+      assets: stampInput().assets,
+    }),
   );
   expect(result.readAsText("AndroidManifest.xml")).toBe("binary manifest");
   expect(result.readAsText("assets/prototype/spec.json")).toBe("{}");
@@ -102,9 +105,10 @@ test("ZIP replaces manifest and spec, drops signatures, stores resources, and co
   expect(result.getEntry("META-INF/OLD.SF")).toBeNull();
   expect(result.getEntry("assets/prototype/old.json")).toBeNull();
   expect(() =>
-    assembly.assemble(template.toBuffer(), linked.toBuffer(), "{}", [
-      { id: "../escape", bytes: Buffer.from("") },
-    ]),
+    assembly.assemble(template.toBuffer(), linked.toBuffer(), {
+      spec: "{}",
+      assets: [{ id: "../escape", bytes: Buffer.from("") }],
+    }),
   ).toThrow("Invalid");
 });
 
@@ -134,4 +138,19 @@ test("canonical spec keys and permission order share a cache entry", async () =>
   });
   expect(second.apkPath).toBe(first.apkPath);
   expect(second.cacheHit).toBe(true);
+});
+
+test("ZIP assembly patches stamped colours into resources.arsc", () => {
+  const template = new AdmZip();
+  template.addFile("resources.arsc", Buffer.from("not a table"));
+  const linked = new AdmZip();
+  linked.addFile("AndroidManifest.xml", Buffer.from("binary manifest"));
+  const colors = new Map([[ANDROID_ICON_BACKGROUND_COLOR, 0xffc62828]]);
+  expect(() =>
+    new DefaultAndroidStampZip().assemble(template.toBuffer(), linked.toBuffer(), {
+      spec: "{}",
+      assets: [],
+      colors,
+    }),
+  ).toThrow("resources.arsc");
 });

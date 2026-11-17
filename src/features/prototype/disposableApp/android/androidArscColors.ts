@@ -28,21 +28,27 @@ export function patchArscColors(arsc: Uint8Array, colors: ReadonlyMap<string, nu
   if (table.type !== RES_TABLE_TYPE || table.size > out.length) {
     throw new ActionableError("Template resources.arsc is not a resource table.");
   }
-  const patched = new Set<string>();
+  const patch: Patch = { buf: out, colors, patched: new Set<string>() };
   for (let offset = table.headerSize; offset < table.size;) {
     const chunk = chunkAt(out, offset);
     if (chunk.type === RES_TABLE_PACKAGE_TYPE) {
-      patchPackage(out, offset, chunk, colors, patched);
+      patchPackage(patch, offset, chunk);
     }
     offset += chunk.size;
   }
-  const missing = [...colors.keys()].filter((name) => !patched.has(name));
+  const missing = [...colors.keys()].filter((name) => !patch.patched.has(name));
   if (missing.length > 0) {
     throw new ActionableError(
       `Template resources.arsc has no colour value for ${missing.join(", ")}. Repackage the template.`,
     );
   }
   return out;
+}
+
+interface Patch {
+  buf: Buffer;
+  colors: ReadonlyMap<string, number>;
+  patched: Set<string>;
 }
 
 interface Chunk {
@@ -66,13 +72,8 @@ function chunkAt(buf: Buffer, offset: number): Chunk {
   return chunk;
 }
 
-function patchPackage(
-  buf: Buffer,
-  start: number,
-  pkg: Chunk,
-  colors: ReadonlyMap<string, number>,
-  patched: Set<string>,
-): void {
+function patchPackage(patch: Patch, start: number, pkg: Chunk): void {
+  const { buf } = patch;
   const fields = start + 8 + 4 + PACKAGE_NAME_BYTES;
   const typeStrings = readStringPool(buf, start + buf.readUInt32LE(fields));
   const keyStrings = readStringPool(buf, start + buf.readUInt32LE(fields + 8));
@@ -83,20 +84,14 @@ function patchPackage(
   for (let offset = start + pkg.headerSize; offset < start + pkg.size;) {
     const chunk = chunkAt(buf, offset);
     if (chunk.type === RES_TABLE_TYPE_TYPE && buf.readUInt8(offset + 8) === colorTypeId) {
-      patchType(buf, offset, chunk, keyStrings, colors, patched);
+      patchType(patch, offset, chunk, keyStrings);
     }
     offset += chunk.size;
   }
 }
 
-function patchType(
-  buf: Buffer,
-  start: number,
-  type: Chunk,
-  keys: readonly string[],
-  colors: ReadonlyMap<string, number>,
-  patched: Set<string>,
-): void {
+function patchType(patch: Patch, start: number, type: Chunk, keys: readonly string[]): void {
+  const { buf } = patch;
   const flags = buf.readUInt8(start + 9);
   const entryCount = buf.readUInt32LE(start + 12);
   const entriesStart = start + buf.readUInt32LE(start + 16);
@@ -110,23 +105,34 @@ function patchType(
     if (entry + 8 > start + type.size) {
       throw new ActionableError("Template resources.arsc has an entry outside its type chunk.");
     }
-    const entryFlags = buf.readUInt16LE(entry + 2);
-    const compact = (entryFlags & ENTRY_FLAG_COMPACT) !== 0;
-    const name = keys[compact ? buf.readUInt16LE(entry) : buf.readUInt32LE(entry + 4)];
-    const argb = name === undefined ? undefined : colors.get(name);
-    if (name === undefined || argb === undefined) {
-      continue;
-    }
-    if ((entryFlags & ENTRY_FLAG_COMPLEX) !== 0) {
-      throw new ActionableError(`Template colour ${name} is not a plain colour value.`);
-    }
-    if (compact) {
-      writeCompactColor(buf, entry, entryFlags, name, argb);
-    } else {
-      writeValueColor(buf, entry + buf.readUInt16LE(entry), name, argb);
-    }
-    patched.add(name);
+    patchEntry(patch, entry, keys);
   }
+}
+
+function patchEntry(patch: Patch, entry: number, keys: readonly string[]): void {
+  const { buf } = patch;
+  const entryFlags = buf.readUInt16LE(entry + 2);
+  const compact = (entryFlags & ENTRY_FLAG_COMPACT) !== 0;
+  const name = keys[compact ? buf.readUInt16LE(entry) : buf.readUInt32LE(entry + 4)];
+  const argb = name === undefined ? undefined : patch.colors.get(name);
+  if (name === undefined || argb === undefined) {
+    return;
+  }
+  if ((entryFlags & ENTRY_FLAG_COMPLEX) !== 0) {
+    throw new ActionableError(`Template colour ${name} is not a plain colour value.`);
+  }
+  if (compact) {
+    // Compact entries keep the value type in the high byte of flags and the data inline.
+    assertColorType(entryFlags >> 8, name);
+    buf.writeUInt16LE((TYPE_INT_COLOR_ARGB8 << 8) | (entryFlags & 0xff), entry + 2);
+    buf.writeUInt32LE(argb >>> 0, entry + 4);
+  } else {
+    const value = entry + buf.readUInt16LE(entry);
+    assertColorType(buf.readUInt8(value + 3), name);
+    buf.writeUInt8(TYPE_INT_COLOR_ARGB8, value + 3);
+    buf.writeUInt32LE(argb >>> 0, value + 4);
+  }
+  patch.patched.add(name);
 }
 
 function entryOffset(
@@ -145,24 +151,6 @@ function entryOffset(
   }
   const value = buf.readUInt32LE(offsets + index * 4);
   return value === 0xffffffff ? undefined : value;
-}
-
-function writeValueColor(buf: Buffer, value: number, name: string, argb: number): void {
-  assertColorType(buf.readUInt8(value + 3), name);
-  buf.writeUInt8(TYPE_INT_COLOR_ARGB8, value + 3);
-  buf.writeUInt32LE(argb >>> 0, value + 4);
-}
-
-function writeCompactColor(
-  buf: Buffer,
-  entry: number,
-  flags: number,
-  name: string,
-  argb: number,
-): void {
-  assertColorType(flags >> 8, name);
-  buf.writeUInt16LE((TYPE_INT_COLOR_ARGB8 << 8) | (flags & 0xff), entry + 2);
-  buf.writeUInt32LE(argb >>> 0, entry + 4);
 }
 
 function assertColorType(dataType: number, name: string): void {

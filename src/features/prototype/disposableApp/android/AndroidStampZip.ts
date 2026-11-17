@@ -7,24 +7,19 @@ export interface AndroidStampAsset {
   id: string;
   bytes: Uint8Array;
 }
+/** What a stamp bakes into the template beside the relinked manifest. */
+export interface AndroidStampContent {
+  spec: string;
+  assets: readonly AndroidStampAsset[];
+  /** ARGB values for named template `color` resources, e.g. the icon and splash background. */
+  colors?: ReadonlyMap<string, number>;
+}
 export interface AndroidStampZip {
-  assemble(
-    template: Buffer,
-    linked: Buffer,
-    spec: string,
-    assets: readonly AndroidStampAsset[],
-    /** ARGB values for named template `color` resources, e.g. the icon and splash background. */
-    colors?: ReadonlyMap<string, number>,
-  ): Buffer;
+  assemble(template: Buffer, linked: Buffer, content: AndroidStampContent): Buffer;
 }
 export class DefaultAndroidStampZip implements AndroidStampZip {
-  assemble(
-    template: Buffer,
-    linked: Buffer,
-    spec: string,
-    assets: readonly AndroidStampAsset[],
-    colors: ReadonlyMap<string, number> = new Map(),
-  ): Buffer {
+  assemble(template: Buffer, linked: Buffer, content: AndroidStampContent): Buffer {
+    const { spec, assets, colors = new Map<string, number>() } = content;
     const zip = new AdmZip(template);
     const manifestZip = new AdmZip(linked);
     assertZipEntriesContained(zip, "/stamp", "Android template");

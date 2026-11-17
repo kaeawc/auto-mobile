@@ -174,13 +174,11 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
       await this.tools.linkManifest(input.template.apkPath, manifest, linked);
       await this.fs.writeFileBuffer(
         assembled,
-        this.zip.assemble(
-          templateBytes,
-          await this.fs.readFileBuffer(linked),
-          stableStringify(JSON.parse(input.spec)),
-          input.assets,
+        this.zip.assemble(templateBytes, await this.fs.readFileBuffer(linked), {
+          spec: stableStringify(JSON.parse(input.spec)),
+          assets: input.assets,
           colors,
-        ),
+        }),
       );
       await this.tools.zipalign(assembled, aligned);
       await this.tools.sign(aligned, signed, input.signer);

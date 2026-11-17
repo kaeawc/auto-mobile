@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * The verifiable log of haptic and sound calls (#14329): a device keeps the last 64 per

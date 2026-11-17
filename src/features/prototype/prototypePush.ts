@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { exceedsPushPayloadLimit } from "../utility/iosPushPayload";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeJsonObjectSchema, type PrototypeJson } from "./prototypeJson";

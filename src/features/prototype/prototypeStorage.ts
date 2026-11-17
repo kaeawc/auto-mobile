@@ -1,7 +1,7 @@
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { ActionableError } from "../../models/ActionableError";
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STORAGE_CAPABILITY, type PrototypeStorageReport } from "./prototypeStorageWire";
 import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototypeData";

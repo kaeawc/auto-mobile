@@ -244,6 +244,67 @@ describe("reversible bundled dependency pack trim", () => {
       "src/index.js sources-with-dist",
     ]);
   });
+  test("zod's require condition, legacy main and v3/mini subpaths are pruned; ESM entries stay", () => {
+    const { root, put } = fixture();
+    const zod = "node_modules/pkg/node_modules/dep";
+    const both = (base: string) => ({ import: `${base}.js`, require: `${base}.cjs` });
+    put(`${zod}/package.json`, {
+      name: "zod",
+      main: "./index.cjs",
+      module: "./index.js",
+      exports: {
+        ".": both("./index"),
+        "./v3": both("./v3/index"),
+        "./mini": both("./mini/index"),
+        "./v4/mini": both("./v4/mini/index"),
+        "./v4-mini": both("./v4-mini/index"),
+        "./v4/locales/*": { import: "./v4/locales/*", require: "./v4/locales/*" },
+      },
+      dependencies: { pngjs: "1" },
+    });
+    put(`${zod}/index.js`, 'export * from "./v4/classic/external.js";');
+    put(`${zod}/v4/classic/external.js`, 'export * as locales from "../locales/en.js";');
+    put(`${zod}/v4/locales/en.js`, "export default {};");
+    for (const file of [
+      "index.cjs",
+      "v4/classic/external.cjs",
+      "v4/locales/en.cjs",
+      "v3/index.js",
+      "v3/index.cjs",
+      "mini/index.js",
+      "v4/mini/index.js",
+      "v4-mini/index.js",
+    ]) {
+      put(`${zod}/${file}`, "module.exports = {};");
+    }
+    put(`${zod}/v3/package.json`, { main: "./index.cjs" });
+    const dep = listCandidates(root)
+      .filter((item) => item.path.includes("/dep/") && !item.path.includes("pngjs"))
+      .map((item) => `${item.path.slice(item.path.indexOf("/dep/") + 5)} ${item.class}`);
+    expect(dep).toEqual([
+      "index.cjs unloaded-entrypoints",
+      "mini/index.js unloaded-entrypoints",
+      "v3/index.cjs unloaded-entrypoints",
+      "v3/index.js unloaded-entrypoints",
+      "v4-mini/index.js unloaded-entrypoints",
+      "v4/classic/external.cjs unloaded-entrypoints",
+      "v4/locales/en.cjs unloaded-entrypoints",
+      "v4/mini/index.js unloaded-entrypoints",
+    ]);
+  });
+  test("an ambiguous zod entry keeps the whole package, unloaded entry points included", () => {
+    const { root, put } = fixture();
+    const zod = "node_modules/pkg/node_modules/dep";
+    put(`${zod}/package.json`, {
+      name: "zod",
+      module: "./absent.js",
+      exports: { ".": { import: "./index.js" } },
+      dependencies: { pngjs: "1" },
+    });
+    put(`${zod}/index.js`, "export {};");
+    put(`${zod}/index.cjs`, "module.exports = {};");
+    expect(listCandidates(root).some((item) => item.path.endsWith("dep/index.cjs"))).toBe(false);
+  });
   test("extensionless main and directory bin resolve; ambiguous main keeps entire package", () => {
     const { root, put } = fixture();
     put("node_modules/pkg/node_modules/dep/package.json", {
@@ -364,6 +425,7 @@ test("legal notices and package.json survive every class, even in test/doc/src d
     "typescript-sources",
     "sources-with-dist",
     "browser-builds",
+    "unloaded-entrypoints",
     "tooling-config",
   ]);
 });

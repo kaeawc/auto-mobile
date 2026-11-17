@@ -1,6 +1,6 @@
 // Harness locking and time are injected; command failures surface at the CLI boundary.
 import { join } from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { definedEnv } from "./privateDaemonStatus";
 import { harnessChildEnvironment } from "./harnessLogSink";
 import type { PrivateDaemonCliDeps } from "./private-daemon";

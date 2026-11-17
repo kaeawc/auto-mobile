@@ -15,6 +15,7 @@ To add one, copy the [template](template.md).
 | 2026-11-17 | concept  | [Material 3 Expressive component availability at the pinned Compose BOM](2026-11-17-m3-expressive-component-availability.md)       |
 | 2026-11-16 | decision | [Web library advertises the host's known capabilities](2026-11-16-prototype-web-library-capabilities.md)                           |
 | 2026-11-16 | idea     | [Communication-style notifications for prototypes](2026-11-16-prototype-communication-notifications.md)                            |
+| 2026-11-15 | decision | [Move to Zod 4 and override Jimp's Zod 3 range](2026-11-15-zod-4-jimp-override.md)                                                 |
 | 2026-11-15 | decision | [Headless taps run on the host, not in a browser](2026-11-15-prototype-headless-input.md)                                          |
 | 2026-11-15 | decision | [Stateless success reductions in the response envelope](2026-11-15-stateless-envelope-reductions.md)                               |
 | 2026-11-15 | decision | [Windows MSI signing with Azure Trusted Signing](2026-11-15-windows-msi-trusted-signing.md)                                        |

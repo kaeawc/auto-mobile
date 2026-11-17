@@ -416,6 +416,16 @@ export const observeDiffSchema = z
         "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
       ),
     changed: z.array(observeDiffNodeChangeSchema),
+    relayout: z
+      .object({
+        count: z.number().int().positive(),
+        dx: z.number().optional(),
+        dy: z.number().optional(),
+      })
+      .optional()
+      .describe(
+        "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+      ),
     fields: z.record(z.string(), layoutWarningsDiffFieldSchema).optional(),
     importedPrototypeContent: importedPrototypeContentSchema.optional(),
     ...observationBackendFields,

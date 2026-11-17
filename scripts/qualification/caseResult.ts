@@ -142,8 +142,9 @@ export type CaseResult = z.infer<typeof caseResultSchema>;
 export function parseCaseResult(value: unknown): CaseResult {
   return caseResultSchema.parse(value);
 }
-export function caseResultJsonSchema() {
-  return z.toJSONSchema(caseResultSchema);
+export function caseResultJsonSchema(): Record<string, unknown> {
+  // Zod 4.6 attaches a `~standard` adapter to the result; keep only the JSON document.
+  return JSON.parse(JSON.stringify(z.toJSONSchema(caseResultSchema))) as Record<string, unknown>;
 }
 
 if (import.meta.main) {

@@ -14,8 +14,14 @@ buttons, hover, eraser) and how it records it. Platform evidence for each input 
   `layer` fields.
 - A request a device or route cannot honour is refused before dispatch with the missing
   capability named. It never degrades to a finger touch.
-- iOS has no stylus or hover route: the runner advertises neither `stylus_input_v1` nor
-  `hover_input_v1`, and such requests are refused before dispatch.
+- iOS has no stylus or hover route yet: the runner advertises neither `stylus_input_v1` nor
+  `hover_input_v1`, and such requests are refused before dispatch. The route is to be built into
+  the CtrlProxy iOS runner. On the simulator, Pencil pressure, tilt and hover go through a virtual
+  HID digitizer (`PrimaryUsage 0x20`, `MaxHoverHeight 1.0`, three private HID entitlements). Mouse
+  hover goes through an `XCPointerEventPath` with two or more `moveMouseToPoint` calls. Public `hover()`
+  sends a zero-length move and does not hover, and the private XCTest pressure selectors never
+  produce force. Evidence is in
+  [Pressure, hover and stylus input](../plat/pressure-hover-stylus-input.md#ios).
 - `src/utils/disableStylusHandwriting.ts` runs `settings put secure stylus_handwriting_enabled 0`
   so injected touches are not treated as handwriting.
 
@@ -198,3 +204,4 @@ or `adb shell am start -a android.intent.action.VIEW -d automobile://playground/
 ## Background
 
 - [Stylus, pressure and hover injection spike](../../devlog/2026-10-19-stylus-pressure-hover-injection-spike.md)
+- [iOS simulator Pencil input through a virtual HID digitizer](../../devlog/2026-11-03-ios-simulator-pencil-virtual-digitizer.md)

@@ -514,6 +514,7 @@ nav:
       - "2026-11-04: Device farm design": devlog/2026-11-04-device-farm-design.md
       - "2026-11-04: AndroidX Wear libraries for the Wear OS fixture app": devlog/2026-11-04-androidx-wear-fixture-libraries.md
       - "2026-11-04: androidx.car.app for Car App Library template snapshots": devlog/2026-11-04-androidx-car-app-template-snapshots.md
+      - "2026-11-03: iOS simulator Pencil input through a virtual HID digitizer": devlog/2026-11-03-ios-simulator-pencil-virtual-digitizer.md
       - "2026-11-03: Device Streaming tokens come from gcloud": devlog/2026-11-03-session-broker-remote-devices-gcloud-token.md
       - "2026-11-03: qrcode-generator for the prototype share QR": devlog/2026-11-03-qrcode-generator-share-qr.md
       - "2026-11-03: Embeddable web prototype library plan": devlog/2026-11-03-prototype-web-library-plan.md

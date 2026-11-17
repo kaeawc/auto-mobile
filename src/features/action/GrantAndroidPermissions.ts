@@ -176,7 +176,9 @@ export class GrantAndroidPermissions {
         : {
             error:
               failedRequired.length > 0
-                ? `Failed step(s): ${failedRequired.map((f) => f.stepId).join(", ")}`
+                ? `Failed step(s): ${failedRequired
+                    .map((f) => (f.error ? `${f.stepId} (${f.error})` : f.stepId))
+                    .join("; ")}`
                 : "One or more required Android permission changes failed",
           }),
     };

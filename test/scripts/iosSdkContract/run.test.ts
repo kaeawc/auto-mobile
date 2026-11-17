@@ -95,6 +95,7 @@ test("--only selects named scenarios once in suite order, with all scenarios by 
   expect(selectScenarios(parseOptions(args).only)).toEqual([
     "network",
     "navigation",
+    "multi-scene",
     "capabilities",
     "faults",
     "observe",

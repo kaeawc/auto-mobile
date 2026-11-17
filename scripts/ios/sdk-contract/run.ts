@@ -33,6 +33,7 @@ import { NetworkState } from "../../../src/utils/NetworkState";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { formatFindings, type ContractBoundary, type ContractFinding } from "./boundaries";
 import { NAVIGATION_SLICE, judgeNavigation } from "./navigationSlice";
+import { MULTI_SCENE_SLICE, MULTI_SCENE_STEPS, judgeMultiScene } from "./multiSceneSlice";
 import { CAPABILITY_SLICE, judgeCapabilities } from "./capabilitySlice";
 import { setFaultRulesThroughCtrlProxy } from "./ctrlProxyFaultRules";
 import {
@@ -383,6 +384,7 @@ interface ScenarioContext {
 const SCENARIOS = [
   NETWORK_SLICE,
   NAVIGATION_SLICE,
+  MULTI_SCENE_SLICE,
   CAPABILITY_SLICE,
   FAULT_SLICE,
   OBSERVATION_SLICE,
@@ -458,6 +460,39 @@ async function driveObservationSteps(
   }
   const directory = contractDirectory(context.container);
   await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${runId}.actions-done`), "done\n");
+  return outcomes;
+}
+
+/** Waits for the host's actual scene activation before issuing either tool call. */
+async function driveMultiSceneSteps(
+  context: ScenarioContext,
+  runId: string,
+): Promise<Map<string, ToolOutcome>> {
+  const directory = contractDirectory(context.container);
+  const ready = await waitForManifest(join(directory, `${runId}.scenes-ready`));
+  if (ready === undefined) {
+    throw new ScenarioError("fixture-host", "no scenes-ready marker before multi-scene steps");
+  }
+  const outcomes = new Map<string, ToolOutcome>();
+  if (ready !== "not-applicable") {
+    // Like the observation slice, wait out a cached "bridge unavailable" capability: a rejection
+    // (an error) or an SDK-backed result ends the wait.
+    const deadline = defaultTimer.now() + BRIDGE_READY_WAIT_MS;
+    for (const step of MULTI_SCENE_STEPS) {
+      let outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
+      while (
+        step.tool === "observe" &&
+        outcome.error === undefined &&
+        outcome.result?.backend !== "sdk" &&
+        defaultTimer.now() < deadline
+      ) {
+        await defaultTimer.sleep(POLL_INTERVAL_MS);
+        outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
+      }
+      outcomes.set(step.caseName, outcome);
+    }
+  }
   await writeFile(join(directory, `${runId}.actions-done`), "done\n");
   return outcomes;
 }
@@ -552,6 +587,9 @@ async function judgeScenario(
   if (scenario === CAPABILITY_SLICE) {
     return judgeCapabilities(manifest);
   }
+  if (scenario === MULTI_SCENE_SLICE) {
+    return judgeMultiScene(manifest, live.observationOutcomes ?? new Map());
+  }
   if (scenario === OBSERVATION_SLICE) {
     return judgeObservationCases(manifest, live.observationOutcomes ?? new Map());
   }
@@ -607,7 +645,12 @@ async function runScenario(
     // Binds this session's CtrlProxy client so it drains the SDK events into this daemon, and
     // makes Playground CtrlProxy's tracked foreground app for the fault-rule command.
     boundary = "ios-client";
-    await callTool("observe", { platform: "ios" }, context.sessionUuid);
+    if (scenario === MULTI_SCENE_SLICE) {
+      // The second scene may already be connected, so this bind call may fail with multi_scene.
+      await invokeTool("observe", { platform: "ios" }, context.sessionUuid);
+    } else {
+      await callTool("observe", { platform: "ios" }, context.sessionUuid);
+    }
     boundary = "fixture-host";
     if (scenario === FAULT_SLICE) {
       const failure = await installFaultRules(context, runId);
@@ -616,7 +659,11 @@ async function runScenario(
       }
     }
     const observationOutcomes =
-      scenario === OBSERVATION_SLICE ? await driveObservationSteps(context, runId) : undefined;
+      scenario === OBSERVATION_SLICE
+        ? await driveObservationSteps(context, runId)
+        : scenario === MULTI_SCENE_SLICE
+          ? await driveMultiSceneSteps(context, runId)
+          : undefined;
     const webViewOutcomes =
       scenario === WEB_VIEW_SLICE ? await driveWebView(context, runId) : undefined;
     const manifestText = await waitForManifest(

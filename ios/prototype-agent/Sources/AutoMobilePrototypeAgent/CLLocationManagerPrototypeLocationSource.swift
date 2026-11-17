@@ -92,11 +92,11 @@
                     accuracyRequest = request
                     manager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: purpose) { [weak self] _ in
                         Task { @MainActor in
-                            guard let self, accuracyRequest == request else { return }
-                            accuracyRequest = nil
-                            let waiters = accuracyWaiters
-                            accuracyWaiters.removeAll()
-                            let precise = authorization == .authorizedPrecise
+                            guard let self, self.accuracyRequest == request else { return }
+                            self.accuracyRequest = nil
+                            let waiters = self.accuracyWaiters
+                            self.accuracyWaiters.removeAll()
+                            let precise = self.authorization == .authorizedPrecise
                             waiters.values.forEach { $0.resume(returning: precise) }
                         }
                     }

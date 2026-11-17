@@ -131,6 +131,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.mcp.supportsDaemonInput
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
+import dev.jasonpearson.automobile.desktop.core.performance.CollapsedPerformanceSummaryState
 import dev.jasonpearson.automobile.desktop.core.platform.NoOpNotificationHandler
 import dev.jasonpearson.automobile.desktop.core.platform.NotificationHandler
 import dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver
@@ -566,22 +567,9 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
   }
   var selectedHorizontalTabId by remember { mutableStateOf<String?>(null) }
 
-  // Track live performance metrics for collapsed Performance panel
-  var currentFps by remember { mutableStateOf<Float?>(null) }
-  var currentFrameTimeMs by remember { mutableStateOf<Float?>(null) }
-  var currentJankFrames by remember { mutableStateOf<Int?>(null) }
-  var currentMemoryMb by remember { mutableStateOf<Float?>(null) }
-  var currentTouchLatencyMs by remember { mutableStateOf<Float?>(null) }
-  var currentRecompositionRate by remember { mutableStateOf<Float?>(null) }
-  var perfUpdateCounter by remember { mutableIntStateOf(0) }
-  fun clearPerformanceMetrics() {
-    currentFps = null
-    currentFrameTimeMs = null
-    currentJankFrames = null
-    currentMemoryMb = null
-    currentTouchLatencyMs = null
-    currentRecompositionRate = null
-  }
+  // Live performance values for the collapsed Performance panel summary
+  val performanceSummary = remember { CollapsedPerformanceSummaryState() }
+  fun clearPerformanceMetrics() = performanceSummary.clear()
 
   // Track failure counts by type for collapsed Failures panel
   var crashCount by remember { mutableIntStateOf(0) }
@@ -1445,15 +1433,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
   // Listen for performance updates to update collapsed Performance panel summary
   LaunchedEffect(observationStreamClient) {
     val client = observationStreamClient ?: return@LaunchedEffect
-    client.performanceUpdates.collect { update ->
-      currentFps = update.fps
-      currentFrameTimeMs = update.frameTimeMs
-      currentJankFrames = update.jankFrames
-      currentMemoryMb = update.memoryUsageMb
-      currentTouchLatencyMs = update.touchLatencyMs
-      currentRecompositionRate = update.recompositionRate
-      perfUpdateCounter++
-    }
+    client.performanceUpdates.collect { update -> performanceSummary.apply(update) }
   }
 
   // Device-side CtrlProxy disconnects arrive as stream events while the daemon socket can remain
@@ -1779,8 +1759,8 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
           anrCount = anrCount,
           nonFatalCount = nonFatalCount,
           toolFailureCount = toolFailureCount,
-          currentFps = currentFps,
-          currentMemoryMb = currentMemoryMb,
+          currentFps = performanceSummary.fps,
+          currentMemoryMb = performanceSummary.memoryMb,
           isDaemonConnected = connectedMcpProcess != null,
           onNavigateUp = { if (selectedEventIndex > 0) selectedEventIndex-- },
           onNavigateDown = { selectedEventIndex++ },

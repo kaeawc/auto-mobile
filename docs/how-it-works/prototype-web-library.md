@@ -7,24 +7,27 @@ Compose library and the `AutoMobilePrototype` Swift package
 describes the renderer itself.
 
 `packages/prototype-web/` (`@kaeawc/auto-mobile-prototype-web`) is not published yet, and there is
-no `<automobile-prototype>` element or interactive runtime. The planned element and release are in
-the devlog entries under Background.
+no interactive runtime. The planned release is in the devlog entries under Background.
 
 ## Package
 
-- `packages/prototype-web/` holds only `package.json` (no dependencies), the entry
-  `src/index.ts`, the hand-written public types `index.d.ts` and `build.ts`. It is not a Bun
+- `packages/prototype-web/` holds only `package.json` (no dependencies), the entries
+  `src/index.ts` and `src/element.ts`, their hand-written public types `index.d.ts` and
+  `element.d.ts`, and `build.ts`. It is not a Bun
   workspace, so the root `bun.lock` and the pinned runtime graph do not change.
-- `bun run build` in that directory bundles the entry with `bun build --target=browser` into
-  `dist/index.js` (gitignored). The library source is `src/features/prototype/web/embed/`.
+- `bun run build` in that directory bundles each entry on its own with `bun build --target=browser`
+  into `dist/index.js` and `dist/element.js` (gitignored). `dist/element.js` is the package's only
+  side effect. The library source is `src/features/prototype/web/embed/`.
 - `test/features/prototype/web/prototypeWebPackage.typecheck.ts` assigns each export and public type
   both ways between `index.d.ts` and the implementation, so the typecheck fails when they drift.
-- `prototypeWebLibraryBundle.test.ts` is the boundary check. The entry's browser bundle reaches no
-  Node builtin and stays within the export budget below. Its only inputs are
+- `prototypeWebLibraryBundle.test.ts` is the boundary check. Each entry's browser bundle reaches no
+  Node builtin and stays within the export budget below, and the element adds at most 8,000 bytes
+  over `index`. Its only inputs are
   `src/features/prototype/`, the CtrlProxy protocol constants and the root `package.json`, whose
   `version` is the library version.
 - `webLibrary.integration.test.ts`, run by `Prototype Web Screenshots`, mounts the library build in
-  Chromium and compares its pixels with the still's `toHtml` output drawn the same way.
+  Chromium and compares its pixels with the still's `toHtml` output drawn the same way. It also
+  draws `<automobile-prototype>` from the element build and compares it with `mount`.
 
 ## API
 
@@ -46,6 +49,24 @@ the devlog entries under Background.
   `onZoomChange` and `onError`.
 - The host element is 640 px tall unless the page sets its height; `fit` scales the frame into
   the viewport below the controls and refits on resize.
+
+## Element
+
+Importing `@kaeawc/auto-mobile-prototype-web/element` registers `<automobile-prototype>`, once and
+only where `customElements` exists. `PrototypeElementController` (`embed/prototypeWebElement.ts`)
+holds its logic; the class in `src/element.ts` only forwards its lifecycle.
+
+- Attributes `frame`, `orientation`, `zoom`, `mode`, `screen` and `controls` set the scalar options.
+  `frame` and `controls` take `false` or `none` to turn them off. `controls` lists names separated
+  by spaces or commas. `zoom` is `fit` or a number; an unknown `orientation` or `mode` is ignored.
+- The spec comes from the `spec` property, else the first child `<script type="application/json">`.
+  It is never read from an attribute or fetched. Unparseable JSON draws the `invalidInput` error
+  view.
+- It mounts when connected with a spec and destroys the mount when disconnected. A changed
+  attribute or spec updates the mount; a removed attribute mounts afresh, because `update` keeps
+  an option it is not given.
+- Events are `CustomEvent`s carrying the `mount` callback's detail: `render`, `screenchange`,
+  `orientationchange`, `zoomchange` and `error`.
 
 ## Refusal
 

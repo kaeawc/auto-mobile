@@ -32,7 +32,7 @@ export type AndroidAutoProvisioningStepName =
 export interface AndroidAutoProvisioningStep {
   step: AndroidAutoProvisioningStepName;
   /** `already-done` steps made no change, so a rerun on a provisioned phone reports only those. */
-  status: "already-done" | "applied" | "skipped";
+  status: "already-done" | "applied";
   detail?: string;
 }
 
@@ -46,11 +46,6 @@ export interface AndroidAutoProjectionRequest {
   androidAutoApks: readonly string[];
   /** `desktop-head-unit` binary and head unit config (`.ini`). */
   dhu: { binaryPath: string; configPath: string };
-  /**
-   * Accept Android Auto's welcome screen (its terms) on the user's behalf. Only set this on
-   * the user's explicit instruction; without it a pending welcome screen is reported, not tapped.
-   */
-  acceptAndroidAutoTerms?: boolean;
   signal?: AbortSignal;
   /**
    * When the caller's deadline expires, on `deps.timer.now()`'s clock. The adb-online wait ends
@@ -659,16 +654,17 @@ export class AndroidAutoProjectionProvisioner {
     if (!(await ui.isOnboardingPending(request.signal))) {
       return { step: "onboarding", status: "already-done" };
     }
-    if (request.acceptAndroidAutoTerms !== true) {
-      return {
-        step: "onboarding",
-        status: "skipped",
-        detail:
-          "Android Auto shows its welcome screen, which accepts its terms. AutoMobile taps Continue only when asked to accept them (acceptAndroidAutoTerms).",
-      };
-    }
+    // Projection setup on an emulator accepts the welcome screen (its terms) as part of
+    // provisioning (#17838). It never signs in to Google.
+    logger.info(
+      `[AndroidAuto] ${request.deviceId} shows Android Auto's welcome screen; tapping Continue to accept its terms`,
+    );
     await ui.acceptOnboarding(request.signal);
-    return { step: "onboarding", status: "applied" };
+    return {
+      step: "onboarding",
+      status: "applied",
+      detail: "accepted Android Auto's welcome screen (its terms)",
+    };
   }
 }
 

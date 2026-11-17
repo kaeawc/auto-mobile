@@ -2,7 +2,7 @@ import {
   parsePrototypeDegradedEffects,
   prototypeDegradedEffectsOutput,
 } from "../../features/prototype/prototypeDegradedEffects";
-import { performPrototypeSimulate } from "../prototypeSimulateAction";
+import { performPrototypeSimulate, type PrototypeSimulateTarget } from "../prototypeSimulateAction";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
 import { parsePrototypeFeedbackLog } from "../../features/prototype/prototypeFeedbackLog";
 import { parsePrototypeTimerReports } from "../../features/prototype/prototypeTimerSchema";
@@ -232,7 +232,9 @@ export function isDeviceRequestAction(
 
 export async function deviceRequestAction(
   args: z.infer<typeof prototypeSchema>,
-  host: Pick<PrototypeHandlerDependencies, "store" | "events">,
+  host: Pick<PrototypeHandlerDependencies, "store" | "events"> & {
+    mocks?: PrototypeSimulateTarget["mocks"];
+  },
   device: BootedDevice,
   {
     target,
@@ -241,7 +243,7 @@ export async function deviceRequestAction(
   }: { target: PrototypeTarget; scope: PrototypeScope; signal: AbortSignal | undefined },
 ): Promise<PrototypeOutput> {
   if (args.action === "simulate") {
-    return performPrototypeSimulate(target, args);
+    return performPrototypeSimulate({ ...target, mocks: host.mocks }, args);
   }
   if (args.action === "clearStorage") {
     return performPrototypeClearStorage(target, args, host.store, device.deviceId);

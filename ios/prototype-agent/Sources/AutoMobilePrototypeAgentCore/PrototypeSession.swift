@@ -1633,10 +1633,14 @@ extension PrototypeSession {
     private func platformMeta(_ result: PlatformCallResult, durationMs: Int) -> JSONValue {
         var fields: [String: JSONValue] = ["durationMs": .number(Double(max(0, durationMs)))]
         if case let .failure(code, message) = result {
-            fields["error"] = .object([
+            var error: [String: JSONValue] = [
                 "code": .string(code.rawValue),
                 "message": .string(PrototypeRequestEvent.cut(message, to: PrototypeLimits.maxRequestMessageLength)),
-            ])
+            ]
+            if code == .unavailable, ["missing_usage_description", "disabled"].contains(message) {
+                error["reason"] = .string(message)
+            }
+            fields["error"] = .object(error)
         }
         return .object(fields)
     }

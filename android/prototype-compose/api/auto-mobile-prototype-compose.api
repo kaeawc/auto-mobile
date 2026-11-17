@@ -178,13 +178,16 @@ public interface dev.jasonpearson.automobile.prototype.PlatformCallResult {
 Compiled from "PrototypePlatform.kt"
 public final class dev.jasonpearson.automobile.prototype.PlatformError {
   public static final int $stable;
-  public dev.jasonpearson.automobile.prototype.PlatformError(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String);
+  public dev.jasonpearson.automobile.prototype.PlatformError(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, java.lang.String);
+  public dev.jasonpearson.automobile.prototype.PlatformError(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final dev.jasonpearson.automobile.prototype.PlatformErrorCode getCode();
   public final java.lang.String getMessage();
+  public final java.lang.String getReason();
   public final dev.jasonpearson.automobile.prototype.PlatformErrorCode component1();
   public final java.lang.String component2();
-  public final dev.jasonpearson.automobile.prototype.PlatformError copy(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String);
-  public static dev.jasonpearson.automobile.prototype.PlatformError copy$default(dev.jasonpearson.automobile.prototype.PlatformError, dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, int, java.lang.Object);
+  public final java.lang.String component3();
+  public final dev.jasonpearson.automobile.prototype.PlatformError copy(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, java.lang.String);
+  public static dev.jasonpearson.automobile.prototype.PlatformError copy$default(dev.jasonpearson.automobile.prototype.PlatformError, dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, java.lang.String, int, java.lang.Object);
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);

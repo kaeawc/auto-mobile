@@ -55,6 +55,24 @@ describe("applyPrototypeLocationOutcome", () => {
     }
   });
 
+  test("missing usage description is unavailable with its typed reason", () => {
+    const result = applyPrototypeLocationOutcome(data, "/data/here", {
+      ok: false,
+      error: {
+        code: "unavailable",
+        message: "missing_usage_description",
+        reason: "missing_usage_description",
+      },
+      durationMs: 0,
+    });
+    expect(result.meta.error).toEqual({
+      code: "unavailable",
+      message: "missing_usage_description",
+      reason: "missing_usage_description",
+    });
+    expect(result.data.here).toEqual({});
+  });
+
   test("location services off is unavailable with reason disabled", () => {
     const result = applyPrototypeLocationOutcome(data, "/data/here", {
       ok: false,

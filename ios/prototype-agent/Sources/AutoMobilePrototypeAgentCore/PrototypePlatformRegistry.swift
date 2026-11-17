@@ -51,6 +51,7 @@ public protocol PrototypePlatformModule: Sendable {
     var name: String { get }
     var capability: String { get }
     var requiredInfoPlistKeys: [String] { get }
+    func configure(root: JSONValue?)
     func availability() -> PlatformAvailability
     func call(_ call: PlatformCall) async -> PlatformCallResult
     var events: AsyncStream<PlatformEvent> { get }
@@ -59,6 +60,7 @@ public protocol PrototypePlatformModule: Sendable {
 
 extension PrototypePlatformModule {
     public var requiredInfoPlistKeys: [String] { [] }
+    public func configure(root _: JSONValue?) {}
 }
 
 @MainActor
@@ -93,6 +95,10 @@ public final class PrototypePlatformRegistry {
         self.modules = accepted
     }
 
+    public func configure(locationBlock: JSONValue?) {
+        modules["location"]?.configure(root: locationBlock)
+    }
+
     public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }
 
     // Production membership lives here so pure core tests exercise the same factories as UIKit.
@@ -102,17 +108,20 @@ public final class PrototypePlatformRegistry {
         connectivity: any PrototypeConnectivitySource,
         links: any PrototypeLinkOpener,
         settings: any PrototypeSettingsURLOpener,
-        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
+        location: (any PrototypeLocationSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
-        PrototypePlatformRegistry(modules: [
+        var modules: [any PrototypePlatformModule] = [
             PrototypeHapticsModule(player: haptics),
             PrototypeSoundModule(player: sound),
             PrototypeConnectivityModule(source: connectivity),
             PrototypeLinksModule(opener: links),
             PrototypeSettingsModule(opener: settings),
-        ], bundle: bundle)
+        ]
+        if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
     static func systemModules(
@@ -120,16 +129,19 @@ public final class PrototypePlatformRegistry {
         connectivity: any PrototypeConnectivitySource,
         links: any PrototypeLinkOpener,
         settings: any PrototypeSettingsURLOpener,
-        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
+        location: (any PrototypeLocationSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
-        PrototypePlatformRegistry(modules: [
+        var modules: [any PrototypePlatformModule] = [
             PrototypeClipboardModule(clipboard: clipboard),
             PrototypeConnectivityModule(source: connectivity),
             PrototypeLinksModule(opener: links),
             PrototypeSettingsModule(opener: settings),
-        ], bundle: bundle)
+        ]
+        if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
     var snapshot: [String: JSONValue] {

@@ -469,7 +469,9 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
   }));
   const hinge = rules.bodyHinge(doc.body);
   const state = { on: false, orbit: rules.flat, hinge: 180 };
-  let wrapped: PrototypeWeb3dWrapped | undefined;
+  // Every visible view is wrapped: a rotate keeps the outgoing view shown through its turn while
+  // the incoming one turns in, and both need their back plates and face rules (#16769).
+  let wraps: PrototypeWeb3dWrapped[] = [];
   // The orbit turns a box inside the stage that holds the views, not a view: a rotate animates the
   // views' own transforms, so both keep the orbit through the turn, and the stage's pan and zoom
   // stay in screen space outside it.
@@ -483,21 +485,21 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
   // The toolbar may now wrap onto another line; let the 2D runtime refit the frame.
   globalThis.dispatchEvent(new Event("resize"));
 
-  const unwrap = () => {
-    if (wrapped) {
-      rules.unwrap(wrapped);
-      wrapped = undefined;
-      doc.body.removeAttribute("data-device3d");
-    }
+  // Unwraps the views now hidden, or every view when `all` is set.
+  const unwrap = (all: boolean) => {
+    const gone = wraps.filter((entry) => all || entry.view.hidden);
+    gone.forEach((entry) => rules.unwrap(entry));
+    wraps = wraps.filter((entry) => !gone.includes(entry));
+    doc.body.toggleAttribute("data-device3d", wraps.length > 0);
   };
   const wrap = () => {
-    const view = Array.from(doc.querySelectorAll<HTMLElement>("[data-view]")).find(
-      (candidate) => !candidate.hidden,
+    unwrap(false);
+    const views = Array.from(doc.querySelectorAll<HTMLElement>("[data-view]")).filter(
+      (view) => !view.hidden && !wraps.some((entry) => entry.view === view),
     );
-    if (!view || wrapped?.view === view) {
+    if (views.length === 0) {
       return;
     }
-    unwrap();
     if (!orbitBox) {
       orbitBox = doc.createElement("div");
       orbitBox.setAttribute("data-orbit", "");
@@ -505,12 +507,13 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
       stage.append(orbitBox);
       orbitBox.append(...children);
     }
-    wrapped = rules.wrap(
-      view,
-      hinge && rules.hingeLine(hinge, view.dataset.orientation ?? ""),
-      rules.leaves,
-    );
-    doc.body.toggleAttribute("data-device3d", wrapped !== undefined);
+    const line = (view: HTMLElement) =>
+      hinge && rules.hingeLine(hinge, view.dataset.orientation ?? "");
+    wraps = [
+      ...wraps,
+      ...views.flatMap((view) => rules.wrap(view, line(view), rules.leaves) ?? []),
+    ];
+    doc.body.toggleAttribute("data-device3d", wraps.length > 0);
   };
   const apply = () => {
     if (state.on) {
@@ -520,11 +523,11 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     if (status) {
       status.textContent = state.on && layout ? `Hinge ${state.hinge}°, ${layout} layout` : "";
     }
-    if (wrapped) {
-      const pose = rules.pose(state.orbit, state.hinge, wrapped.axis);
+    wraps.forEach((entry) => {
+      const pose = rules.pose(state.orbit, state.hinge, entry.axis);
       orbitBox?.style.setProperty("transform", pose.device);
-      wrapped.leaf?.style.setProperty("transform", pose.leaf);
-    }
+      entry.leaf?.style.setProperty("transform", pose.leaf);
+    });
   };
   // The posture select follows the hinge: it names the posture whose layout the hinge shows.
   const moveHinge = (degrees: number) => {
@@ -560,7 +563,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     const exit = ++exits;
     const done = () => {
       if (exit === exits && !state.on && orbitBox === leaving && leaving) {
-        unwrap();
+        unwrap(true);
         stage.append(...Array.from(leaving.children));
         leaving.remove();
         orbitBox = undefined;
@@ -572,7 +575,9 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     }
     // Reading the animations flushes style, so the transition back to flat is already running; a
     // device that was already flat has none and unwraps at once.
-    const running = [leaving, wrapped?.leaf].flatMap((element) => element?.getAnimations() ?? []);
+    const running = [leaving, ...wraps.map((entry) => entry.leaf)].flatMap(
+      (element) => element?.getAnimations() ?? [],
+    );
     void Promise.allSettled(running.map((animation) => animation.finished)).then(done);
   };
   const setHinge = (degrees: number) => {
@@ -604,11 +609,10 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
   });
   // Shift-drag orbits in 3D; a plain drag still reaches the 2D runtime's pan.
   rules.dragOrbit(viewport, () => state.on, orbitBy);
-  // The 2D controls switch views; the newly shown one is wrapped in place of the hidden one.
+  // The 2D controls switch views: a hidden view is unwrapped, and in 3D a newly shown one is
+  // wrapped at once, so an incoming view turns in with its back plate (#16769).
   new MutationObserver(() => {
-    if (wrapped?.view.hidden) {
-      unwrap();
-      apply();
-    }
+    unwrap(false);
+    apply();
   }).observe(stage, { attributes: true, attributeFilter: ["hidden"], subtree: true });
 }

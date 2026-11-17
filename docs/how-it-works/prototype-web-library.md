@@ -39,8 +39,8 @@ the devlog entries under Background.
   `textSize`.
   - The frame is an id, a frame object, or `false` for the default frame's screen alone. A frame
     object is a `deviceFrames.json` entry without `source`. `prototypeWebFrameObject.ts` checks it
-    without zod against the same fields, ranges and cross-field rules (`deviceFrameRules.ts`) as
-    the registry schema, and a unit test keeps the two in agreement.
+    without zod. It applies the registry schema's fields, ranges and cross-field rules
+    (`deviceFrameRules.ts`), and a unit test keeps the two in agreement.
   - Zoom is `fit` or a scale from 0.5 to 4.
   - Mode is `light`, `dark`, or `system`, which follows `prefers-color-scheme`.
   - Controls are `false`, or any of `rotate`, `zoom` and `screen`.

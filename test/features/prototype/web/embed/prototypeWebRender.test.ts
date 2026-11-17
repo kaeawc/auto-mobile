@@ -135,6 +135,12 @@ describe("renderPrototype (#16453)", () => {
     expect(() => renderPrototype(twoScreens, { frame: invalid })).toThrow("frame.mask");
   });
 
+  test("refuses a null frame from a page script as an invalid frame object", () => {
+    expect(refusalCode(() => renderPrototype(twoScreens, { frame: frameOption(null) }))).toBe(
+      "invalidOption",
+    );
+  });
+
   test("draws an envelope's glyph through the given parser", () => {
     const parsed: string[] = [];
     const rendered = renderPrototype(

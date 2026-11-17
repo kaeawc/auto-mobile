@@ -173,9 +173,12 @@ function renderOptions(
   };
 }
 
-/** The frame `state` names while refused: the option's id, as a drawn view would. */
-function refusedFrame(frame: PrototypeMountOptions["frame"]): string | false {
-  if (typeof frame === "object") {
+/**
+ * The frame `state` names while refused: the option's id, as a drawn view would. A page script
+ * can pass anything, so a `null` or id-less object names the default frame rather than throwing.
+ */
+export function prototypeWebRefusedFrame(frame: PrototypeMountOptions["frame"]): string | false {
+  if (typeof frame === "object" && frame !== null) {
     return typeof frame.id === "string" ? frame.id : defaultDeviceFrameId("android");
   }
   return frame ?? defaultDeviceFrameId("android");
@@ -188,7 +191,7 @@ function refusedState(
   refusal: PrototypeWebRefusal,
 ): PrototypeViewState {
   return {
-    frame: refusedFrame(options.frame),
+    frame: prototypeWebRefusedFrame(options.frame),
     orientation: options.orientation ?? "portrait",
     ...view,
     scale: 1,

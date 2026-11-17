@@ -327,6 +327,8 @@ function hasScenarioOutput(manifest: SdkContractManifest, slice: string): boolea
       return manifest.network.length > 0;
     case "observe":
       return manifest.observation !== undefined;
+    case "web-view":
+      return manifest.webView !== undefined;
     case "storage":
     case "storage-default":
       return manifest.storage !== undefined;

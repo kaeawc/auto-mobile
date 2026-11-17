@@ -29,6 +29,12 @@ export class AutomobilePrototypeElement extends Base {
       getAttribute: (name) => this.getAttribute(name),
       childSpecText: () =>
         this.querySelector(':scope > script[type="application/json"]')?.textContent ?? null,
+      watchChildren: (changed) => {
+        // characterData catches a script whose text the parser is still streaming in.
+        const observer = new MutationObserver(changed);
+        observer.observe(this, { childList: true, subtree: true, characterData: true });
+        return () => observer.disconnect();
+      },
     },
     {
       mount: (options) => mount(this, options),

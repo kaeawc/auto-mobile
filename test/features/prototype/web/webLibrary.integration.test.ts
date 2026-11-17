@@ -282,4 +282,39 @@ globalThis.__early = { events, state: host.state, own: Object.prototype.hasOwnPr
     },
     CASE_TIMEOUT_MS,
   );
+
+  test(
+    "<automobile-prototype> draws a JSON script appended after it connected",
+    async () => {
+      const source = Buffer.from(element).toString("base64");
+      const json = JSON.stringify(JSON.stringify(spec));
+      const html = `<!doctype html><meta charset="utf-8">
+<script type="module">
+await import("data:text/javascript;base64,${source}");
+const host = document.createElement("automobile-prototype");
+const events = [];
+host.addEventListener("render", () => events.push("render"));
+document.body.append(host);
+const before = host.state;
+const script = document.createElement("script");
+script.type = "application/json";
+script.textContent = ${json};
+host.append(script);
+await new Promise((resolve) => setTimeout(resolve, 0));
+globalThis.__late = { events, before: before ?? null, state: host.state };
+</script>`;
+      const { page, errors } = await open(browser, html);
+      try {
+        await page.waitForFunction(() => Reflect.get(globalThis, "__late") !== undefined);
+        const late = await page.evaluate(() => Reflect.get(globalThis, "__late"));
+        expect(late.before).toBeNull();
+        expect(late.events).toEqual(["render"]);
+        expect(late.state).toMatchObject({ frame: "pixel-9", orientation: "portrait" });
+        expect(errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 });

@@ -32,13 +32,24 @@ function harness(
   onDispatch: (type: PrototypeElementEvent) => void = () => {},
 ) {
   const attrs = new Map(Object.entries(attributes));
-  const host = { script };
+  const host: { script: string | null; watcher?: () => void } = { script };
   const log: string[] = [];
   const mounts: PrototypeMountOptions[] = [];
   const updates: Partial<PrototypeMountOptions>[] = [];
   const events: [PrototypeElementEvent, unknown][] = [];
   const controller = new PrototypeElementController(
-    { getAttribute: (name) => attrs.get(name) ?? null, childSpecText: () => host.script },
+    {
+      getAttribute: (name) => attrs.get(name) ?? null,
+      childSpecText: () => host.script,
+      watchChildren: (changed) => {
+        host.watcher = changed;
+        log.push("watch");
+        return () => {
+          host.watcher = undefined;
+          log.push("unwatch");
+        };
+      },
+    },
     {
       mount: (options): PrototypeMountHandle => {
         mounts.push(options);
@@ -246,5 +257,28 @@ describe("<automobile-prototype> spec and lifecycle (#16454)", () => {
     controller.connect();
     expect(fixture.log).toEqual(["mount", "destroy"]);
     expect(controller.state).toBeUndefined();
+  });
+
+  test("a JSON script that arrives after connecting is drawn once it parses", () => {
+    const { controller, host, log, mounts } = harness();
+    controller.connect();
+    expect(log).toEqual(["watch"]);
+    // The parser has streamed in only part of the script so far.
+    host.script = '{"id": "hel';
+    host.watcher?.();
+    expect(mounts).toEqual([]);
+    host.script = JSON.stringify(spec);
+    host.watcher?.();
+    expect(mounts.map((options) => options.spec)).toEqual([spec]);
+    expect(log).toEqual(["watch", "unwatch", "mount"]);
+    expect(host.watcher).toBeUndefined();
+  });
+
+  test("stops watching for a script on disconnect", () => {
+    const { controller, host, log } = harness();
+    controller.connect();
+    controller.disconnect();
+    expect(log).toEqual(["watch", "unwatch"]);
+    expect(host.watcher).toBeUndefined();
   });
 });

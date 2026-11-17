@@ -39,6 +39,11 @@ export interface PrototypeElementHost {
   getAttribute(name: string): string | null;
   /** The text of the first child `<script type="application/json">`, if there is one. */
   childSpecText(): string | null;
+  /**
+   * Calls `changed` when the element's children change, until the returned stop is called. The
+   * parser may connect the element before its JSON script child arrives.
+   */
+  watchChildren(changed: () => void): () => void;
 }
 
 export interface PrototypeElementDeps {
@@ -132,6 +137,7 @@ export class PrototypeElementController {
   // Events `mount` fires while it draws, before its handle is stored: delivered once it is, so a
   // listener that sets the spec or removes the element acts on the mounted view.
   private queued: [PrototypeElementEvent, unknown][] | undefined;
+  private stopWatching: (() => void) | undefined;
 
   constructor(
     private readonly host: PrototypeElementHost,
@@ -159,12 +165,27 @@ export class PrototypeElementController {
   connect(): void {
     this.connected = true;
     this.draw();
+    // Connected with no spec yet: draw once a child JSON script arrives and parses, since the
+    // parser may still be streaming its text in.
+    if (this.connected && !this.handle && !this.stopWatching) {
+      this.stopWatching = this.host.watchChildren(() => {
+        if (this.scriptSpec()?.value !== undefined) {
+          this.draw();
+        }
+      });
+    }
   }
 
   disconnect(): void {
     this.connected = false;
+    this.unwatch();
     this.handle?.destroy();
     this.handle = undefined;
+  }
+
+  private unwatch(): void {
+    this.stopWatching?.();
+    this.stopWatching = undefined;
   }
 
   attributeChanged(): void {
@@ -202,6 +223,7 @@ export class PrototypeElementController {
     if (!this.connected || this.handle || !source) {
       return;
     }
+    this.unwatch();
     const options = this.attributeOptions();
     this.attributeKeys = Object.keys(options);
     const queued: [PrototypeElementEvent, unknown][] = [];

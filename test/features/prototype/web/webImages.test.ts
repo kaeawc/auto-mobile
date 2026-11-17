@@ -253,7 +253,20 @@ describe("webImageDraw and webImageRule", () => {
       naturalWidth: 120,
       naturalHeight: 80,
     });
-    expect(rule).toContain("--pa-1-ar:60/40;--pa-1-w:120px;");
+    expect(rule).toContain("--pa-1-ar:120/80;--pa-1-w:120px;");
+  });
+
+  test("the rule's ratio is the source's natural size, not the rounded encode (#18430)", () => {
+    // A 50x30000 source downscaled to 2x1167: the encode's ratio would make it 29175 points tall.
+    const rule = webImageRule(1, {
+      id: "a",
+      bytes: new Uint8Array([1]),
+      width: 2,
+      height: 1167,
+      naturalWidth: 50,
+      naturalHeight: 30000,
+    });
+    expect(rule).toContain("--pa-1-ar:50/30000;--pa-1-w:50px;");
   });
 });
 
@@ -457,6 +470,12 @@ describe("an image with an inlinable asset", () => {
       // Padded: the content box inside the padding takes the natural width.
       const padded = node({ padding: { start: 8, end: 8 } });
       expect((padded.children[0] as WebElement).style.width).toBe("var(--pa-3-w, auto)");
+      // It stays inside the room the node leaves after its padding: a 400px source in a 100px
+      // maximum with 10px padding draws 80px wide, not 400px (#18430).
+      const capped = node({ padding: { start: 10, end: 10, top: 10, bottom: 10 }, maxWidth: 100 });
+      expect((capped.children[0] as WebElement).style["max-width"]).toBe("100%");
+      expect(capped.style["max-width"]).toBe("100px");
+      expect(bare.style["max-width"]).toBeUndefined();
       expect(padded.style.width).toBeUndefined();
       // One fixed or filled axis, a weight or an authored ratio keeps the existing sizing.
       for (const style of [

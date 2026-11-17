@@ -269,13 +269,23 @@ export function webImageNodeRatioCss(
  * through the ratio. Authored minimums and maximums still bound it; until the page inlines the
  * asset the width stays `auto`, the placeholder's.
  */
-function webImageNaturalCss(slot: number, style: Raw): Record<string, string> {
+function webImageNaturalCss(
+  slot: number,
+  style: Raw,
+  { padded = false }: { readonly padded?: boolean } = {},
+): Record<string, string> {
   const natural =
     wrapped(style.width) &&
     wrapped(style.height) &&
     typeof style.aspectRatio !== "number" &&
     typeof style.weight !== "number";
-  return natural ? { width: `var(${webImageVar(slot, "-w")}, auto)` } : {};
+  if (!natural) {
+    return {};
+  }
+  const width = { width: `var(${webImageVar(slot, "-w")}, auto)` };
+  // Padded, the natural width sits on the content box, which must stay inside the room the
+  // node's bounds (its maximum, its parent) leave after the padding (#18430).
+  return padded ? { ...width, "max-width": "100%" } : width;
 }
 
 /** Each axis's size field, authored-minimum field, min and max properties, and padding sides. */
@@ -331,7 +341,7 @@ export function webImageContentCss(
     ...(ratio && typeof style.aspectRatio !== "number"
       ? { "aspect-ratio": `var(${webImageVar(slot, "-ar")}, auto)` }
       : {}),
-    ...webImageNaturalCss(slot, style),
+    ...webImageNaturalCss(slot, style, { padded: true }),
     ...contentMinimum(style, box),
   };
 }
@@ -416,7 +426,12 @@ export function webImageRule(slot: number, image: PrototypeWebImage): string {
     image.bytes.byteLength,
   ).toString("base64");
   const naturalWidth = image.naturalWidth ?? image.width;
-  return `:root{${webImageVar(slot)}:url(data:image/webp;base64,${base64});${webImageVar(slot, "-bg")}:transparent;${webImageVar(slot, "-ar")}:${image.width}/${image.height};${webImageVar(slot, "-w")}:${naturalWidth}px;${webImageVar(slot, "-on")}:1}`;
+  // The source's own ratio: the encode's rounded pixel size shifts with its downscale (#18430).
+  const ratio =
+    image.naturalWidth !== undefined && image.naturalHeight !== undefined
+      ? `${image.naturalWidth}/${image.naturalHeight}`
+      : `${image.width}/${image.height}`;
+  return `:root{${webImageVar(slot)}:url(data:image/webp;base64,${base64});${webImageVar(slot, "-bg")}:transparent;${webImageVar(slot, "-ar")}:${ratio};${webImageVar(slot, "-w")}:${naturalWidth}px;${webImageVar(slot, "-on")}:1}`;
 }
 
 /**

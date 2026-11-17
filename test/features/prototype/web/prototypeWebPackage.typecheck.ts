@@ -28,3 +28,4 @@ export type ErrorMatch = Assert<Same<Declared.PrototypeWebError, Implemented.Pro
 export type HandleMatch = Assert<
   Same<Declared.PrototypeMountHandle, Implemented.PrototypeMountHandle>
 >;
+export type FrameMatch = Assert<Same<Declared.PrototypeWebFrame, Implemented.PrototypeWebFrame>>;

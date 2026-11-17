@@ -282,9 +282,17 @@ class PrototypeRuntime(
     warn("onAppear action nesting limit reached")
   }
 
-  fun pauseTimers() = timerEngine.pause()
+  fun pauseTimers() {
+    timerEngine.pause()
+    platformForeground = false
+    locationModules().forEach { it.stopUpdates() }
+  }
 
-  fun resumeTimers() = timerEngine.resume()
+  fun resumeTimers() {
+    timerEngine.resume()
+    platformForeground = true
+    startLocationUpdates()
+  }
 
   fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
 
@@ -366,10 +374,11 @@ class PrototypeRuntime(
   /** The last haptic and sound calls this prototype made, for `inspect` (#14329). */
   val feedbackLog = PrototypeFeedbackLog()
 
-  val platformRegistry =
-    PrototypePlatformRegistry(
-      listOf(deviceModule) + platform.registry.modules,
-    )
+  private val sessionModules =
+    platform.registry.modules.map {
+      if (it is PrototypeLocationModule) it.session(requestScope) else it
+    }
+  val platformRegistry = PrototypePlatformRegistry(listOf(deviceModule) + sessionModules)
   private val platformDispatcher =
     PrototypePlatformDispatcher(
       platformRegistry,
@@ -385,11 +394,34 @@ class PrototypeRuntime(
       monotonicMs,
     )
 
+  private var platformModulesStarted = false
+  private var platformForeground = true
+
+  private fun locationModules(): List<PrototypeLocationModule> {
+    return platformRegistry.modules.filterIsInstance<PrototypeLocationModule>()
+  }
+
+  private fun startLocationUpdates() {
+    if (!platformModulesStarted || !platformForeground || !current.active) return
+    val block = current.spec.location
+    locationModules().forEach {
+      if (block == null) it.stopUpdates() else it.startUpdates(PrototypeLocationConfig.of(block))
+    }
+  }
+
   /** Start streams only after the host has installed this runtime in its surface table. */
-  fun startPlatformModules() = platformDispatcher.subscribe()
+  fun startPlatformModules() {
+    platformDispatcher.subscribe()
+    platformModulesStarted = true
+    startLocationUpdates()
+  }
 
   /** Hosts call this under their lock before replacement, reset or dismissal. */
-  suspend fun cancelPlatformCalls() = platformDispatcher.cancel()
+  suspend fun cancelPlatformCalls() {
+    platformModulesStarted = false
+    locationModules().forEach { it.stopUpdates() }
+    platformDispatcher.cancel()
+  }
 
   private fun publishModuleState(name: String, state: JsonObject) {
     if (!current.active || (name == "device" && state.isEmpty())) return
@@ -410,6 +442,7 @@ class PrototypeRuntime(
     if (!current.active) return
     stateWriteValidator = null
     mutableSnapshot.value = replacementSnapshot(spec)
+    startLocationUpdates()
   }
 
   /** Authoritative text replacement shares its epoch handling with patch commits. */
@@ -527,6 +560,7 @@ class PrototypeRuntime(
         revision = revision,
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
+    startLocationUpdates()
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
     storage?.record(current.spec, current.stacks)
     try {
@@ -543,6 +577,7 @@ class PrototypeRuntime(
   private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
 
   fun close() {
+    locationModules().forEach { it.detach() }
     platformDispatcher.close()
     platformState.close()
     mutableSnapshot.value = current.copy(active = false)
@@ -1413,8 +1448,38 @@ class PrototypeRuntime(
         buildJsonObject {
           put("code", failure.code.wireValue)
           put("message", failure.message.take(512))
+          val disabled =
+            failure.code == PlatformErrorCode.UNAVAILABLE && failure.reason == "disabled"
+          if (disabled) put("reason", "disabled")
         },
       )
+    }
+  }
+
+  private fun platformResultMeta(
+    call: PrototypePlatformDispatcher.Pending,
+    result: PlatformCallResult,
+    error: PlatformError?,
+    duration: Long,
+  ): JsonObject {
+    val payload = platformCallPayload(call, error, duration)
+    if (call.action.call != "location.request") return JsonObject(payload - "callId" - "call")
+    return buildJsonObject {
+      put("durationMs", duration)
+      if (error != null) {
+        val reported = payload.getValue("error").jsonObject
+        val code =
+          when (error.code) {
+            PlatformErrorCode.PERMISSION_DENIED,
+            PlatformErrorCode.UNAVAILABLE,
+            PlatformErrorCode.TIMEOUT,
+            PlatformErrorCode.PLATFORM_ERROR -> error.code
+            else -> PlatformErrorCode.PLATFORM_ERROR
+          }
+        put("error", JsonObject(reported + ("code" to JsonPrimitive(code.wireValue))))
+      } else if (result is PlatformCallResult.Success) {
+        (result.value as? JsonObject)?.get("approximate")?.let { put("approximate", it) }
+      }
     }
   }
 
@@ -1431,7 +1496,7 @@ class PrototypeRuntime(
     writes +=
       PrototypeDataWrite.Set(
         PrototypeRequests.metaPath(into),
-        platformCallPayload(call, error, duration).let { JsonObject(it - "callId" - "call") },
+        platformResultMeta(call, result, error, duration),
       )
     val refused = trialDataWrites(writes)
     if (refused == null) {
@@ -1443,7 +1508,7 @@ class PrototypeRuntime(
     applyDataWrite(
       PrototypeDataWrite.Set(
         PrototypeRequests.metaPath(into),
-        JsonObject(platformCallPayload(call, reported, duration) - "callId" - "call"),
+        platformResultMeta(call, result, reported, duration),
       ),
     )
     return reported
@@ -1907,7 +1972,9 @@ class PrototypeRuntime(
   }
 
   init {
-    platform.registry.modules.forEach { publishModuleState(it.name, it.state.value) }
+    for (module in platformRegistry.modules) {
+      if (module !== deviceModule) publishModuleState(module.name, module.state.value)
+    }
   }
 }
 

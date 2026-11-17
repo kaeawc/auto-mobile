@@ -50,8 +50,7 @@ protocol PrototypeConnectivitySource: AnyObject {
 /// been quiet for the contract's debounce. Every reading that changes the state refreshes
 /// `/platform` at once through a state-refresh signal; the first reading after start is the
 /// baseline, not a change, and a flap that settles back on the last delivered state is not an
-/// event. Like every registered module it lives as long as its registry; the monitor starts on the
-/// first read.
+/// event. The monitor starts on the first read and stops when the registry's final observer stops.
 @MainActor
 final class PrototypeConnectivityModule: PrototypePlatformModule {
     let name = "connectivity"
@@ -97,6 +96,18 @@ final class PrototypeConnectivityModule: PrototypePlatformModule {
 
     func availability() -> PlatformAvailability { .ready }
 
+    func stop() {
+        guard started else { return }
+        started = false
+        source.stop()
+        pending?.cancel()
+        pending = nil
+        subscribers.values.forEach { $0.finish() }
+        subscribers = [:]
+        reading = .offline
+        delivered = nil
+    }
+
     func call(_: PlatformCall) async -> PlatformCallResult {
         .failure(.unsupported, "The connectivity module has no calls")
     }
@@ -108,6 +119,7 @@ final class PrototypeConnectivityModule: PrototypePlatformModule {
     }
 
     private func receive(_ next: PrototypeConnectivityReading) {
+        guard started else { return }
         let changed = next.state != reading.state
         reading = next
         // `/platform` follows every reading at once; only the event waits for the debounce.

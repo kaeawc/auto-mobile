@@ -32,6 +32,7 @@ private final class DeviceStatusClock: PrototypeClock {
 @MainActor
 private final class FakeDeviceStatusSource: PrototypeDeviceStatusSource {
     private(set) var starts = 0
+    private(set) var stops = 0
     private var update: (@MainActor @Sendable ([String: JSONValue]) -> Void)?
     let initial: [String: JSONValue]
     init(_ initial: [String: JSONValue]) { self.initial = initial }
@@ -42,12 +43,105 @@ private final class FakeDeviceStatusSource: PrototypeDeviceStatusSource {
         update(initial)
     }
 
-    func stop() { update = nil }
+    func stop() {
+        stops += 1
+        update = nil
+    }
+
     func report(_ state: [String: JSONValue]) { update?(state) }
 }
 
 @MainActor
+private final class FakeBatteryMonitoringControl: BatteryMonitoringControl {
+    var isEnabled: Bool {
+        didSet { writes += 1 }
+    }
+
+    private(set) var writes = 0
+    init(isEnabled: Bool) { self.isEnabled = isEnabled }
+}
+
+@MainActor
 final class PrototypeDeviceStatusTests: XCTestCase {
+    func testBatteryMonitoringRestoresBothPriorValuesAndIsIdempotent() {
+        for prior in [false, true] {
+            let control = FakeBatteryMonitoringControl(isEnabled: prior)
+            let scope = BatteryMonitoringScope(control: control)
+            scope.stop()
+            XCTAssertEqual(control.writes, 0, "stop before start must leave the host alone")
+            scope.start()
+            XCTAssertTrue(control.isEnabled)
+            scope.start()
+            XCTAssertEqual(control.writes, 1, "a second start must preserve the original value")
+            // Make restoration observable even when monitoring was already enabled.
+            control.isEnabled = false
+            scope.stop()
+            XCTAssertEqual(control.isEnabled, prior)
+            let writes = control.writes
+            scope.stop()
+            XCTAssertEqual(control.writes, writes)
+            control.isEnabled = !prior
+            scope.start()
+            XCTAssertTrue(control.isEnabled)
+            scope.stop()
+            XCTAssertEqual(control.isEnabled, !prior, "a new start must capture a fresh prior value")
+        }
+    }
+
+    func testModuleStopReleasesSourceFinishesSubscribersAndCancelsDebounce() async {
+        for name in ["battery", "power", "audio"] {
+            let source = FakeDeviceStatusSource(["value": .number(0)])
+            let clock = DeviceStatusClock()
+            let module = PrototypeDeviceStatusModule(name: name, capability: name, source: source, clock: clock)
+            module.stop()
+            XCTAssertEqual(source.stops, 0)
+            var events = module.events.makeAsyncIterator()
+            var secondSubscriber = module.events.makeAsyncIterator()
+            source.report(["value": .number(1)])
+            XCTAssertEqual(clock.live, 1)
+            module.stop()
+            module.stop()
+            XCTAssertEqual(source.stops, 1)
+            XCTAssertEqual(clock.live, 0)
+            clock.elapse()
+            let refresh = await events.next()
+            let secondRefresh = await secondSubscriber.next()
+            let end = await events.next()
+            let secondEnd = await secondSubscriber.next()
+            XCTAssertEqual(refresh, .stateRefresh(name))
+            XCTAssertEqual(secondRefresh, .stateRefresh(name))
+            XCTAssertNil(end)
+            XCTAssertNil(secondEnd)
+            XCTAssertEqual(module.state, source.initial)
+            XCTAssertEqual(source.starts, 2)
+            XCTAssertEqual(clock.live, 0, "restart must establish a new baseline")
+            module.stop()
+            XCTAssertEqual(source.stops, 2)
+        }
+    }
+
+    func testDriverTeardownStopsSourcesOnlyAfterTheLastSharedObserver() {
+        let source = FakeDeviceStatusSource(["state": .string("unknown")])
+        let clock = DeviceStatusClock()
+        let module = PrototypeDeviceStatusModule.battery(source: source, clock: clock)
+        let registry = PrototypePlatformRegistry(modules: [module])
+        let first = PrototypePlatformDriver(registry: registry, clock: clock)
+        let second = PrototypePlatformDriver(registry: registry, clock: clock)
+        first.subscribe()
+        first.subscribe()
+        second.subscribe()
+        XCTAssertEqual(source.starts, 1)
+        first.stopEvents()
+        first.stopEvents()
+        XCTAssertEqual(source.stops, 0)
+        second.stopEvents()
+        XCTAssertEqual(source.stops, 1)
+        second.subscribe()
+        XCTAssertEqual(source.starts, 2)
+        second.stopEvents()
+        XCTAssertEqual(source.stops, 2)
+    }
+
     func testThermalAndBatteryStateTables() {
         for (raw, expected) in ["nominal", "fair", "serious", "critical"].enumerated() {
             XCTAssertEqual(PrototypeDeviceStatus.thermal(raw), expected)

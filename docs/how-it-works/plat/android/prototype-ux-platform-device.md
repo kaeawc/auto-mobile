@@ -71,7 +71,9 @@ runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
   `NOT_CHARGING` are `unplugged`, anything else `unknown`; iOS `UIDevice.BatteryState` maps one to one.
 - Battery `level` and audio `volume` are whole percents (Android level over scale and stream index over
   its maximum; iOS `batteryLevel` and `outputVolume`). An unknown reading, such as the Simulator's
-  battery level of -1, leaves the key absent.
+  battery level of -1, leaves the key absent. iOS omits `muted`: an inactive host audio session can
+  report zero `outputVolume`, so volume alone does not establish mute status. Observing audio does
+  not activate or reconfigure the host session.
 - `ringer` is Android `AudioManager.RINGER_MODE_*`: silent, vibrate or normal.
 
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,

@@ -712,6 +712,10 @@
             apply(activity: false) { $0.dismiss(reason: reason) }
         }
 
+        func stopPlatformEvents() {
+            platformDriver.stopEvents()
+        }
+
         /// The last host connection is gone: the prototype ends with `reason: disconnect` and its
         /// uploaded assets are dropped, shown or not (Android's `onClientCountChanged(0)`).
         func hostDisconnected() {

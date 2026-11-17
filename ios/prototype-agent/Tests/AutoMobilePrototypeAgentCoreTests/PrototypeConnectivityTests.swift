@@ -41,7 +41,11 @@ private final class FakeConnectivitySource: PrototypeConnectivitySource {
         self.update = update
     }
 
-    func stop() { stops += 1 }
+    func stop() {
+        stops += 1
+        update = nil
+    }
+
     func report(_ reading: PrototypeConnectivityReading) { update?(reading) }
 }
 
@@ -99,6 +103,32 @@ final class PrototypeConnectivityTests: XCTestCase {
         XCTAssertEqual(module.state, state(false, "none", false, false))
         _ = module.state
         XCTAssertEqual(source.starts, 1)
+    }
+
+    func testDriverTeardownStopsConnectivityAndCancelsDebounce() async {
+        let source = FakeConnectivitySource()
+        let clock = ConnectivityClock()
+        let module = PrototypeConnectivityModule(source: source, clock: clock)
+        let driver = PrototypePlatformDriver(registry: PrototypePlatformRegistry(modules: [module]), clock: clock)
+        driver.subscribe()
+        var events = module.events.makeAsyncIterator()
+        source.report(.offline)
+        source.report(wifi)
+        XCTAssertEqual(clock.live, 1)
+        driver.stopEvents()
+        driver.stopEvents()
+        XCTAssertEqual(source.stops, 1)
+        XCTAssertEqual(clock.live, 0)
+        clock.elapse()
+        let refresh = await events.next()
+        let end = await events.next()
+        XCTAssertEqual(refresh, .stateRefresh("connectivity"))
+        XCTAssertNil(end)
+        driver.subscribe()
+        source.report(cellular)
+        XCTAssertEqual(source.starts, 2)
+        XCTAssertEqual(clock.live, 0, "restart must establish a new baseline")
+        driver.stopEvents()
     }
 
     /// The first `count` events, or what arrived within a second, so a missing event fails

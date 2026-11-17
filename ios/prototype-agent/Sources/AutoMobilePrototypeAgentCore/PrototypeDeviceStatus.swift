@@ -1,5 +1,31 @@
 import Foundation
 
+@MainActor
+protocol BatteryMonitoringControl: AnyObject {
+    var isEnabled: Bool { get set }
+}
+
+/// Restores the host's setting after a matched start/stop, including repeated calls.
+@MainActor
+final class BatteryMonitoringScope {
+    private let control: any BatteryMonitoringControl
+    private var priorValue: Bool?
+
+    init(control: any BatteryMonitoringControl) { self.control = control }
+
+    func start() {
+        guard priorValue == nil else { return }
+        priorValue = control.isEnabled
+        control.isEnabled = true
+    }
+
+    func stop() {
+        guard let priorValue else { return }
+        control.isEnabled = priorValue
+        self.priorValue = nil
+    }
+}
+
 /// Pure iOS mappings, kept UIKit-free so the shared contract can be checked on the host.
 enum PrototypeDeviceStatus {
     static func thermal(_ rawValue: Int) -> String? {
@@ -116,6 +142,18 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
 
     func availability() -> PlatformAvailability { .ready }
 
+    func stop() {
+        guard started else { return }
+        started = false
+        source.stop()
+        pending?.cancel()
+        pending = nil
+        subscribers.values.forEach { $0.finish() }
+        subscribers = [:]
+        reading = [:]
+        delivered = nil
+    }
+
     func call(_: PlatformCall) async -> PlatformCallResult {
         .failure(.unsupported, "The \(name) module has no calls")
     }
@@ -127,6 +165,7 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
     }
 
     private func receive(_ next: [String: JSONValue]) {
+        guard started else { return }
         guard delivered != nil else {
             reading = next
             delivered = next

@@ -3,13 +3,22 @@
     import UIKit
 
     @MainActor
+    private final class UIDeviceBatteryMonitoringControl: BatteryMonitoringControl {
+        var isEnabled: Bool {
+            get { UIDevice.current.isBatteryMonitoringEnabled }
+            set { UIDevice.current.isBatteryMonitoringEnabled = newValue }
+        }
+    }
+
+    @MainActor
     final class UIDeviceBatterySource: NSObject, PrototypeDeviceStatusSource {
         private var update: (@MainActor @Sendable ([String: JSONValue]) -> Void)?
+        private let monitoring = BatteryMonitoringScope(control: UIDeviceBatteryMonitoringControl())
 
         func start(_ update: @escaping @MainActor @Sendable ([String: JSONValue]) -> Void) {
             guard self.update == nil else { return }
             self.update = update
-            UIDevice.current.isBatteryMonitoringEnabled = true
+            monitoring.start()
             for name in [UIDevice.batteryLevelDidChangeNotification, UIDevice.batteryStateDidChangeNotification] {
                 NotificationCenter.default.addObserver(self, selector: #selector(changed), name: name, object: nil)
             }
@@ -21,6 +30,7 @@
                 NotificationCenter.default.removeObserver(self, name: name, object: nil)
             }
             update = nil
+            monitoring.stop()
         }
 
         @objc
@@ -121,9 +131,8 @@
             ]
             if let volume = PrototypeDeviceStatus.volume(Double(session.outputVolume)) {
                 state["volume"] = .number(volume)
-                // iOS exposes no ringer switch: muted means the reported whole-percent volume is zero.
-                state["muted"] = .bool(volume == 0)
             }
+            // Omit muted: an inactive host session can report zero; outputVolume is not a mute signal.
             update?(state)
         }
     }

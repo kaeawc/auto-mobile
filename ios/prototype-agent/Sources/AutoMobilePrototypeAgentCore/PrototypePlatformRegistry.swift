@@ -55,10 +55,13 @@ public protocol PrototypePlatformModule: Sendable {
     func call(_ call: PlatformCall) async -> PlatformCallResult
     var events: AsyncStream<PlatformEvent> { get }
     var state: [String: JSONValue] { get }
+    /// Releases observations after the final driver stops; later reads may start them again.
+    func stop()
 }
 
 extension PrototypePlatformModule {
     public var requiredInfoPlistKeys: [String] { [] }
+    public func stop() {}
 }
 
 @MainActor
@@ -80,6 +83,16 @@ public final class PrototypePlatformRegistry {
     public static let empty = PrototypePlatformRegistry()
 
     let modules: [String: any PrototypePlatformModule]
+    private var observers = 0
+
+    func retainSources() { observers += 1 }
+
+    func releaseSources() {
+        guard observers > 0 else { return }
+        observers -= 1
+        // The system registry is shared by presentations; only the final observer tears it down.
+        if observers == 0 { modules.values.forEach { $0.stop() } }
+    }
 
     public init(
         modules: [any PrototypePlatformModule] = [],

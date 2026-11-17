@@ -154,9 +154,8 @@ The host log is the ground truth:
 
 On iPad, Playground registers the observation bridge and activates a second scene before writing
 `<runId>.scenes-ready`. The harness then calls `observe` and taps `contract-save` through the MCP
-CLI. `observe` must fail with the typed `multi_scene` message, without XCTest fallback. `tapOn`
-must fail without executing a host action; its selector search currently reports the element as
-not found rather than the typed error, so that report is accepted. After `<runId>.actions-done`, the manifest's `multiScene` log records the device class,
+CLI. `observe` and `tapOn` must fail with the typed `multi_scene` message, without XCTest fallback
+or executing a host action. After `<runId>.actions-done`, the manifest's `multiScene` log records the device class,
 scene identifiers and observation host log; no action may have executed. On iPhone its status is
 `not-applicable`, the harness skips these calls and the judge returns no findings.
 

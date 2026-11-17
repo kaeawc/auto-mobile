@@ -50,12 +50,7 @@ export function judgeMultiScene(
       /The app has (\d+) connected scenes \([^)]+\)\. SDK observation needs one scene; XCTest does not stand in for this result\./,
     );
     const typed = message.includes("multi_scene") || (documented && Number(documented[1]) >= 2);
-    // tapOn resolves its selector before any SDK action reaches the router, and that search
-    // reports a missing element instead of the typed error (#18466 follow-up). The act contract
-    // asserted today is therefore: it fails, and nothing ran on the host (checked above).
-    const actNotFound =
-      step.tool === "tapOn" && /Element not found with provided elementId/.test(message);
-    if (!failed || !(typed || actNotFound)) {
+    if (!failed || !typed) {
       fail(
         step.caseName,
         "ios-client",

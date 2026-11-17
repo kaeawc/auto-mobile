@@ -1,3 +1,4 @@
+import { IosSdkMultiSceneError } from "../observe/ios/sdkObservationBridge";
 import { deadlineRequest, type TapOnCall } from "./ActionCall";
 import {
   deviceIosSdkBridgeTapper,
@@ -352,6 +353,9 @@ export class TapExecution {
   private async failureResult(state: TapExecutionState, error: unknown): Promise<TapOnFocusResult> {
     const { options, requestedAction, recovery, perf } = state;
     perf.end();
+    if (error instanceof IosSdkMultiSceneError) {
+      throw error;
+    }
 
     // Only opted-in Android form orchestration receives the typed recovery signal.
     this.host.rethrowKeyboardOcclusion(error, requestedAction, recovery);

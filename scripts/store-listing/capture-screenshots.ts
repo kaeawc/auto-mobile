@@ -5,7 +5,13 @@ import { join, resolve, dirname } from "node:path";
 import { buildScreenshotPlan, toDrivePlan, type PlanPins } from "./screenshotPlan";
 
 import { tmpdir } from "node:os";
-import { captureShots, compareTrees, selectShots, type CaptureRunner } from "./captureRunner";
+import {
+  captureShots,
+  checkSeedTargets,
+  compareTrees,
+  selectShots,
+  type CaptureRunner,
+} from "./captureRunner";
 import { privateEnvError } from "../mcp-drive";
 
 export interface CaptureArgs {
@@ -117,6 +123,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       },
     };
     try {
+      await checkSeedTargets(shots, args.pins, runner);
       await captureShots(shots, resolve(args.out), plans, runner, {
         read: (path) => readFileSync(path),
         write: (path, data) => {

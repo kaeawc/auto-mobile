@@ -3,10 +3,19 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
 import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
+import { errorMessage } from "../../src/models/describeUnknownError";
+import { packageListingContains } from "../../src/utils/android-cmdline-tools/shellOutputHeuristics";
 import {
+  PROTOVIEWER_PACKAGE,
+  PROTOVIEWER_PACKAGES,
+  preferredProtoViewerPackage,
+} from "../../src/features/prototype/protoViewer/protoViewerContract";
+import {
+  APP_IDS,
   buildScreenshotPlan,
   toDrivePlan,
   type PlanPins,
+  type Platform,
   type ScreenshotShot,
 } from "./screenshotPlan";
 
@@ -44,6 +53,76 @@ export function selectShots(
     }
   }
   return shots;
+}
+
+/** The app ID a shot's `launchApp` steps (and so its capture) target. */
+function captureAppId(shot: ScreenshotShot): string {
+  const launch = shot.steps.find((step) => step.kind === "mcp" && step.tool === "launchApp");
+  const appId = launch?.kind === "mcp" ? launch.args.appId : undefined;
+  return typeof appId === "string" ? appId : APP_IDS[shot.profile.platform];
+}
+
+/** ProtoViewer app IDs installed on one pinned device, in `PROTOVIEWER_PACKAGES` order. */
+async function installedProtoViewerIds(
+  platform: Platform,
+  pin: string,
+  runner: CaptureRunner,
+): Promise<string[]> {
+  if (platform === "android") {
+    const listing = await runner.run([
+      "adb",
+      "-s",
+      pin,
+      "shell",
+      "pm",
+      "list",
+      "packages",
+      PROTOVIEWER_PACKAGE,
+    ]);
+    return PROTOVIEWER_PACKAGES.filter((id) => packageListingContains(listing, id));
+  }
+  const found: string[] = [];
+  for (const id of PROTOVIEWER_PACKAGES) {
+    try {
+      await runner.run(["xcrun", "simctl", "get_app_container", pin, id]);
+      found.push(id);
+    } catch (error) {
+      // simctl exits non-zero when the bundle ID is not installed on this simulator.
+      console.debug(`${id} not installed on ${pin}: ${errorMessage(error)}`);
+    }
+  }
+  return found;
+}
+
+/**
+ * `prototype` `save` imports into the installed ProtoViewer build the host prefers (`.dev` over the
+ * store build, #14144), with no way to name one. When that is not the app the shots launch and
+ * capture, the captured library would be empty (#18526), so refuse before any device step runs.
+ */
+export async function checkSeedTargets(
+  shots: readonly ScreenshotShot[],
+  pins: Partial<PlanPins>,
+  runner: CaptureRunner,
+): Promise<void> {
+  const targets = new Map<Platform, string>();
+  for (const shot of shots) {
+    targets.set(shot.profile.platform, captureAppId(shot));
+  }
+  for (const [platform, captureId] of targets) {
+    const pin = (platform === "android" ? pins.androidSerial : pins.iosUdid) ?? "";
+    const installed = await installedProtoViewerIds(platform, pin, runner);
+    const seedId = preferredProtoViewerPackage((id) => installed.includes(id));
+    if (seedId === captureId) {
+      continue;
+    }
+    const flag = platform === "android" ? "--android-app-id" : "--ios-app-id";
+    throw new Error(
+      seedId === undefined
+        ? `No ProtoViewer build is installed on ${platform} device ${pin}; install ${captureId} before capturing`
+        : `prototype save seeds ${seedId} on ${platform} device ${pin}, but the shots capture ${captureId}. ` +
+            `Uninstall ${seedId} or pass ${flag} ${seedId} so the seeded library is the one captured`,
+    );
+  }
 }
 
 /** --json prints the envelope after each ### tool header, followed by the next header or session. */

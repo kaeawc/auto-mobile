@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   captureShots,
+  checkSeedTargets,
   compareTrees,
   screenshotFromOutput,
   selectShots,
@@ -109,6 +110,57 @@ test("rejects dimensions, non-PNG, missing evidence and process errors before wr
     }),
   ).rejects.toThrow("process failed");
   expect(runner.calls).toHaveLength(1);
+});
+
+const STORE = "dev.jasonpearson.automobile.protoviewer";
+const DEV = `${STORE}.dev`;
+/** Answers the install probes as a device with exactly `installed` ProtoViewer builds would. */
+class InstalledAppsRunner implements CaptureRunner {
+  calls: string[][] = [];
+  constructor(private readonly installed: readonly string[]) {}
+  async run(argv: string[]) {
+    this.calls.push(argv);
+    if (argv[0] === "adb") {
+      return this.installed.map((id) => `package:${id}\n`).join("");
+    }
+    if (!this.installed.includes(argv.at(-1) ?? "")) {
+      throw new Error("No such file or directory");
+    }
+    return "/container";
+  }
+}
+
+test("refuses to seed .dev while capturing the store build when both are installed", async () => {
+  const android = selectShots({ androidSerial: "serial" }, "android-phone");
+  const both = new InstalledAppsRunner([DEV, STORE]);
+  await expect(checkSeedTargets(android, { androidSerial: "serial" }, both)).rejects.toThrow(
+    `prototype save seeds ${DEV} on android device serial, but the shots capture ${STORE}`,
+  );
+  expect(both.calls).toEqual([["adb", "-s", "serial", "shell", "pm", "list", "packages", STORE]]);
+  const ios = selectShots({ iosUdid: "udid" }, "ios-iphone-69");
+  await expect(
+    checkSeedTargets(ios, { iosUdid: "udid" }, new InstalledAppsRunner([DEV, STORE])),
+  ).rejects.toThrow("--ios-app-id");
+});
+
+test("accepts a seed target that matches the capture target", async () => {
+  const pins = { androidSerial: "serial" };
+  await checkSeedTargets(
+    selectShots(pins, "android-phone"),
+    pins,
+    new InstalledAppsRunner([STORE]),
+  );
+  const devPins = { ...pins, androidAppId: DEV };
+  await checkSeedTargets(
+    selectShots(devPins, "android-phone"),
+    devPins,
+    new InstalledAppsRunner([DEV, STORE]),
+  );
+  const ios = { iosUdid: "udid" };
+  await checkSeedTargets(selectShots(ios, "ios-iphone-69"), ios, new InstalledAppsRunner([STORE]));
+  await expect(
+    checkSeedTargets(selectShots(pins, "android-phone"), pins, new InstalledAppsRunner([])),
+  ).rejects.toThrow("No ProtoViewer build is installed");
 });
 
 test("compares every file by SHA256 and reports changed, missing and extra paths", async () => {

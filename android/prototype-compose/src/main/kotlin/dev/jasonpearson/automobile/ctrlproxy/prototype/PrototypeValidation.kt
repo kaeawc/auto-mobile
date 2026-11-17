@@ -12,7 +12,6 @@ import dev.jasonpearson.automobile.protocol.PrototypeFabNode
 import dev.jasonpearson.automobile.protocol.PrototypeIconButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
 import dev.jasonpearson.automobile.protocol.PrototypeListNode
-import dev.jasonpearson.automobile.protocol.PrototypeListRows
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
@@ -84,19 +83,21 @@ internal fun checkedPrototypeNodes(
   root: PrototypeNode,
   data: kotlinx.serialization.json.JsonObject? = null,
   formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
+  derived: Map<String, kotlinx.serialization.json.JsonElement?> = emptyMap(),
 ): List<PrototypeNode> = buildList {
   fun visit(node: PrototypeNode, path: String) {
     if (node.checks().isNotEmpty()) add(node)
     if (node is PrototypeListNode) {
       node.header?.let { visit(it, "$path.header") }
       if (node.children.any(::hasPrototypeChecks)) {
-        PrototypeListRows.items(node, data).forEachIndexed { index, item ->
+        prototypeDerivedListRows(node, data, derived).forEachIndexed { index, item ->
           visit(bindPrototypeListRow(node, item, index), "$path.repeat[$index].children[0]")
         }
       }
       node.footer?.let { visit(it, "$path.footer") }
     } else
-      prototypeChildEntries(node, path, formatter = formatter).forEach { visit(it.node, it.path) }
+      prototypeChildEntries(prototypeDerivedRepeatNode(node, derived), path, formatter = formatter)
+        .forEach { visit(it.node, it.path) }
   }
   visit(root, "root")
 }
@@ -144,26 +145,37 @@ internal fun prototypeIsError(
 private fun hasPrototypeChecks(node: PrototypeNode): Boolean =
   node.checks().isNotEmpty() || prototypeDescendants(node).any(::hasPrototypeChecks)
 
-/** State changes do not alter repeat projections; relative values refresh with their source. */
+/** Checked rows refresh with their source, collection membership or formatting environment. */
 internal class PrototypeCheckedNodeCache(private val formatter: PrototypeValueFormatter) {
   private var root: PrototypeNode? = null
   private var data: JsonObject? = null
   private var locale: Locale? = null
   private var zone: String? = null
   private var nodes: List<PrototypeNode> = emptyList()
+  private val derivedCache = PrototypeDerivedValuesCache()
+  private var derivedValues: Map<String, kotlinx.serialization.json.JsonElement?> = emptyMap()
 
   fun nodes(spec: PrototypeSpec): List<PrototypeNode> {
+    if (!hasPrototypeChecks(spec.root)) return emptyList()
     val currentLocale = Locale.getDefault()
     val currentZone = TimeZone.getDefault().id
+    val currentDerived = derivedCache.evaluate(spec)
+    val collectionsChanged = currentDerived.any { (name, value) ->
+      spec.derive?.get(name)?.collection != null &&
+        spec.derive?.get(name)?.reduce == null &&
+        derivedValues[name] !== value
+    }
     val environmentChanged = locale != currentLocale || zone != currentZone
-    if (root !== spec.root || data !== spec.data || environmentChanged) {
+    val sourceChanged = root !== spec.root || data !== spec.data
+    if (sourceChanged || environmentChanged || collectionsChanged) {
       val resolved = PrototypeDataResolver.resolve(spec)
-      val checked = checkedPrototypeNodes(resolved.root, spec.data, formatter)
+      val checked = checkedPrototypeNodes(resolved.root, spec.data, formatter, currentDerived)
       root = spec.root
       data = spec.data
       locale = currentLocale
       zone = currentZone
       nodes = checked
+      derivedValues = currentDerived
     }
     return nodes
   }

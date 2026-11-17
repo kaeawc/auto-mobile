@@ -28,6 +28,7 @@ data class PrototypeRepeat(
   val key: String? = null,
   val derive: Map<String, PrototypeDerivedEntry>? = null,
   val stagger: Int? = null,
+  val itemsDerived: String? = null,
 )
 
 @Serializable
@@ -39,7 +40,7 @@ private data class PrototypeRepeatWire(
   val stagger: Int? = null,
 )
 
-/** Keeps the source pointer in `items.path`, never as a wire-level `itemsPath` member. */
+/** Keeps dynamic sources in `items.path` or `items.derived`, alongside literal item arrays. */
 object PrototypeRepeatSerializer :
   PrototypeJsonValueSerializer<PrototypeRepeat>("PrototypeRepeat") {
   override fun fromJson(value: JsonElement): PrototypeRepeat {
@@ -47,19 +48,31 @@ object PrototypeRepeatSerializer :
     val wire = json.decodeFromJsonElement<PrototypeRepeatWire>(value)
     val source = wire.items as? JsonObject
     val pointer = source?.get("path") as? JsonPrimitive
-    if (source != null && (source.keys != setOf("path") || pointer?.isString != true)) {
-      throw kotlinx.serialization.SerializationException("Expected repeat path")
+    val derived = source?.get("derived") as? JsonPrimitive
+    val pathSource = source?.keys == setOf("path") && pointer?.isString == true
+    val derivedSource = source?.keys == setOf("derived") && derived?.isString == true
+    if (source != null && !pathSource && !derivedSource) {
+      throw kotlinx.serialization.SerializationException("Expected repeat path or derived source")
     }
     val items =
       if (source == null) json.decodeFromJsonElement<List<Map<String, PrototypeScalar>>>(wire.items)
       else emptyList()
-    return PrototypeRepeat(items, wire.`as`, pointer?.content, wire.key, wire.derive, wire.stagger)
+    return PrototypeRepeat(
+      items,
+      wire.`as`,
+      pointer?.content,
+      wire.key,
+      wire.derive,
+      wire.stagger,
+      derived?.content,
+    )
   }
 
   override fun toJson(value: PrototypeRepeat): JsonElement {
     val json = PrototypeSpecValidator.json
     val items =
-      value.itemsPath?.let { buildJsonObject { put("path", it) } }
+      value.itemsDerived?.let { buildJsonObject { put("derived", it) } }
+        ?: value.itemsPath?.let { buildJsonObject { put("path", it) } }
         ?: json.encodeToJsonElement(value.items)
     return json.encodeToJsonElement(
       PrototypeRepeatWire(items, value.`as`, value.key, value.derive, value.stagger),

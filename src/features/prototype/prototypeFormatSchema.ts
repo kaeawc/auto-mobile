@@ -39,7 +39,47 @@ const entry = {
   locale: z.string().max(35).regex(prototypeContractPatterns.formatLocale).optional(),
   timeZone: z.string().max(128).regex(prototypeContractPatterns.formatTimeZone).optional(),
 };
-export const prototypeDerivedEntrySchema = z.object({ of, ...entry }).strict();
+export const prototypeCollectionSchema = z
+  .object({
+    of: z.object({ data: pointerSchema }).strict(),
+    where: z
+      .array(
+        z
+          .object({
+            field: key,
+            op: z.enum(["contains", "eq", "neq", "gt", "gte", "lt", "lte"]),
+            value: z.union([
+              z.object({ state: key }).strict(),
+              z.object({ value: literal }).strict(),
+            ]),
+          })
+          .strict(),
+      )
+      .max(4)
+      .optional(),
+    sort: z
+      .object({ field: key, order: z.enum(["asc", "desc"]).optional() })
+      .strict()
+      .optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+  })
+  .strict();
+export const prototypeDerivedEntrySchema = z.union([
+  z.object({ of, ...entry }).strict(),
+  z
+    .object({
+      collection: prototypeCollectionSchema,
+      reduce: z
+        .union([
+          z.object({ op: z.literal("count") }).strict(),
+          z.object({ op: z.enum(["sum", "min", "max"]), field: key }).strict(),
+        ])
+        .optional(),
+      ...entry,
+      format: prototypeFormatSchema.optional(),
+    })
+    .strict(),
+]);
 export const prototypeRepeatDerivedEntrySchema = z
   .object({
     of: z.union([z.object({ item: key }).strict(), z.object({ value: literal }).strict()]),
@@ -55,3 +95,12 @@ export const prototypeRepeatDeriveSchema = z
 export type PrototypeFormat = z.infer<typeof prototypeFormatSchema>;
 export type PrototypeDerivedEntry = z.infer<typeof prototypeDerivedEntrySchema>;
 export type PrototypeRepeatDerivedEntry = z.infer<typeof prototypeRepeatDerivedEntrySchema>;
+
+export const prototypeRepeatItemsSchema = z.union([
+  z
+    .array(z.record(keySchema, z.union([z.string(), z.number().finite(), z.boolean()])))
+    .min(1)
+    .max(128),
+  z.object({ path: pointerSchema }).strict(),
+  z.object({ derived: keySchema }).strict(),
+]);

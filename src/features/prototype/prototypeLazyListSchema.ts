@@ -8,7 +8,14 @@ function shape<A extends z.ZodTypeAny, R extends z.ZodTypeAny>(action: A, refres
     type: z.enum(["list"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
     repeat: z
-      .object({ items: z.object({ path: pointerSchema }).strict(), as: keySchema, key: keySchema })
+      .object({
+        items: z.union([
+          z.object({ path: pointerSchema }).strict(),
+          z.object({ derived: keySchema }).strict(),
+        ]),
+        as: keySchema,
+        key: keySchema,
+      })
       .strict(),
     spacing: z.number().finite().min(0).optional(),
     contentPadding: z.number().finite().min(0).optional(),

@@ -46,6 +46,8 @@ import {
 } from "./prototypeSharedElement";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
+  prototypeDeriveFields,
+  prototypeDeriveUnsupportedMessage,
   prototypeFormatFields,
   prototypeFormatUnsupportedMessage,
 } from "./prototypeFormatCapability";
@@ -64,6 +66,7 @@ import {
   PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_FORMAT_CAPABILITY,
+  PROTOTYPE_DERIVE_CAPABILITY,
   PROTOTYPE_STACK_PATTERNS_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
@@ -334,6 +337,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_SEMANTICS_CAPABILITY,
     fields: prototypeSemanticsFields,
     unsupportedMessage: prototypeSemanticsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_DERIVE_CAPABILITY,
+    fields: prototypeDeriveFields,
+    unsupportedMessage: prototypeDeriveUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_FORMAT_CAPABILITY,

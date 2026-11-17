@@ -29,7 +29,7 @@ STUB
 @test "web-screenshots: runs every engine against the goldens by default" {
   run bash "${SCRIPT}"
   [ "${status}" -eq 0 ]
-  grep -qx 'args=test test/features/prototype/web/webScreenshots.integration.test.ts test/features/prototype/web/webAndroidParity.integration.test.ts test/features/prototype/web/webIosParity.integration.test.ts test/features/prototype/web/webImageLayout.integration.test.ts' "${CALLS}"
+  grep -qx 'args=test test/features/prototype/web/webScreenshots.integration.test.ts test/features/prototype/web/webAndroidParity.integration.test.ts test/features/prototype/web/webIosParity.integration.test.ts test/features/prototype/web/webImageLayout.integration.test.ts test/features/prototype/web/webLibrary.integration.test.ts test/features/prototype/web/webDevice3dFold.integration.test.ts' "${CALLS}"
   grep -qx 'run=1' "${CALLS}"
   grep -qx 'update=0' "${CALLS}"
   grep -qx 'engines=' "${CALLS}"

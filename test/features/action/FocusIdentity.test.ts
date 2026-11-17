@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { createFocusIdentity } from "../../../src/features/action/FocusIdentity";
+import {
+  changedOwnRange,
+  createFocusIdentity,
+  ownRangeOf,
+} from "../../../src/features/action/FocusIdentity";
 import type { FocusPathEntry, FocusScreen } from "../../../src/features/action/FocusNavigate";
 import type { FocusNavigateDirection } from "../../../src/features/action/FocusNavigateDirections";
 import { findFocusedElement } from "../../../src/features/observe/HierarchyFocus";
@@ -119,6 +123,75 @@ describe("createFocusIdentity toggle detection (#17209)", () => {
 
   describe("a captured Playground slider (#17209)", () => {
     const parser = new DefaultElementParser();
+
+    function settlingCapture(name: "before" | "after"): FocusScreen {
+      return JSON.parse(
+        readFileSync(
+          new URL(
+            `../../fixtures/android-focus-screens/playground-slider-settling-${name}.json`,
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ) as FocusScreen;
+    }
+
+    test("a one-pixel settle shift still detects the slider's own value change", () => {
+      const before = settlingCapture("before");
+      const after = settlingCapture("after");
+      expect(changedOwnRange(ownRangeOf(before)!, after)).toBe(true);
+    });
+
+    test("a one-pixel settle shift without a value change is not an adjustment", () => {
+      const before = settlingCapture("before");
+      const after = settlingCapture("after");
+      after.focused = { ...after.focused!, "range-info": before.focused!["range-info"] };
+      expect(changedOwnRange(ownRangeOf(before)!, after)).toBe(false);
+    });
+
+    test.each([
+      ["a whole row", 0, 96, 0, 0],
+      ["a different width", 0, 0, 1, 0],
+      ["a different height", 0, 0, 0, 1],
+      ["three pixels horizontally", 3, 0, 0, 0],
+      ["three pixels vertically", 0, 3, 0, 0],
+    ])("a value change at %s is another node", (_name, dx, dy, width, height) => {
+      const before = settlingCapture("before");
+      const after = settlingCapture("after");
+      const { left, top, right, bottom } = before.focused!.bounds;
+      after.focused = {
+        ...after.focused!,
+        bounds: {
+          left: left + dx,
+          top: top + dy,
+          right: right + dx + width,
+          bottom: bottom + dy + height,
+        },
+      };
+      expect(changedOwnRange(ownRangeOf(before)!, after)).toBe(false);
+    });
+
+    test("a two-pixel settle shift on both axes still detects an adjustment", () => {
+      const before = settlingCapture("before");
+      const after = settlingCapture("after");
+      const { left, top, right, bottom } = before.focused!.bounds;
+      after.focused = {
+        ...after.focused!,
+        bounds: { left: left + 2, top: top - 2, right: right + 2, bottom: bottom - 2 },
+      };
+      expect(changedOwnRange(ownRangeOf(before)!, after)).toBe(true);
+    });
+
+    test.each([
+      ["resource-id", "another_slider"],
+      ["class", "another.SeekBar"],
+      ["content-desc", "Brightness 49 percent"],
+    ])("a settle shift with a different %s is another node", (property, value) => {
+      const before = settlingCapture("before");
+      const after = settlingCapture("after");
+      after.focused = { ...after.focused!, [property]: value };
+      expect(changedOwnRange(ownRangeOf(before)!, after)).toBe(false);
+    });
 
     function capture(name: string): { entry: FocusPathEntry; screen: FocusScreen } {
       const hierarchy = JSON.parse(

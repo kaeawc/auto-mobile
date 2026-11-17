@@ -1,6 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
 import { inFlow, ownHeight, verticalPadding, type PrepareChild } from "./webRowAspect";
-import { INCOMING_ALLOCATED_KEY, INCOMING_HEIGHT_KEY } from "./webStyle";
+import { INCOMING_ALLOCATED_KEY, INCOMING_HEIGHT_KEY, INCOMING_SHARE_BOUND_KEY } from "./webStyle";
 
 const weightOf = (node: Raw | undefined): number | undefined => {
   const weight = record(node?.style)?.weight;
@@ -114,8 +114,8 @@ export function columnChildHeights(
 /**
  * Whether a column's weight shares are exact: every visible unweighted child has a dp height or
  * fills what is left (see takenHeight). A wrap-sized sibling counts as its minHeight, so with one
- * present each share is only an upper bound, and a weighted child keeps its own height as a bound
- * too rather than being marked as an allocation.
+ * present each share is only an upper bound, and a weighted child is marked as a share bound
+ * (INCOMING_SHARE_BOUND_KEY) rather than an allocation.
  */
 export function exactWeightShares(children: readonly (Raw | undefined)[]): boolean {
   return children.every((node) => {
@@ -131,18 +131,33 @@ export function exactWeightShares(children: readonly (Raw | undefined)[]): boole
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
+/** How a column hands a child its incoming height: as a ceiling, an exact share or a share bound. */
+type Handed = "ceiling" | "allocated" | "shareBound";
+
+const HANDED_KEYS: Readonly<Record<Handed, string | undefined>> = {
+  ceiling: undefined,
+  allocated: INCOMING_ALLOCATED_KEY,
+  shareBound: INCOMING_SHARE_BOUND_KEY,
+};
+
+/** How a column with these (prepared) children hands `node` its height (see withHeight). */
+const handedAs = (node: Raw | undefined, exact: boolean): Handed =>
+  weightOf(node) === undefined ? "ceiling" : exact ? "allocated" : "shareBound";
+
 /**
- * `entry` with `height` as its incoming height, marked as an allocation (INCOMING_ALLOCATED_KEY)
- * when `allocated` (a weighted child's exact share; see exactWeightShares), so its own dp height
- * and height bounds do not cap it.
+ * `entry` with `height` as its incoming height. A weighted child's exact share (see
+ * exactWeightShares) is marked as an allocation (INCOMING_ALLOCATED_KEY), so its own dp height
+ * and height bounds do not cap it; a share next to a wrap-height sibling is marked as a share
+ * bound (INCOMING_SHARE_BOUND_KEY), which CSS flex resolves at layout time.
  */
-function withHeight(entry: unknown, height: number | undefined, allocated: boolean): unknown {
+function withHeight(entry: unknown, height: number | undefined, handed: Handed): unknown {
   const node = record(entry);
   if (!node || height === undefined || height === Infinity) {
     return entry;
   }
   const style = { ...record(node.style), [INCOMING_HEIGHT_KEY]: height };
-  return { ...node, style: allocated ? { ...style, [INCOMING_ALLOCATED_KEY]: true } : style };
+  const key = HANDED_KEYS[handed];
+  return { ...node, style: key === undefined ? style : { ...style, [key]: true } };
 }
 
 /**
@@ -189,7 +204,7 @@ export function withColumnHeights(
   return {
     ...node,
     children: children.map((entry, index) =>
-      withHeight(entry, heights[index], exact && weightOf(prepared[index]) !== undefined),
+      withHeight(entry, heights[index], handedAs(prepared[index], exact)),
     ),
   };
 }
@@ -224,7 +239,7 @@ export function repeatInstanceChildren(
   return prepares.map((_prepare, instance) =>
     template.map((entry, index) => {
       const at = instance * template.length + index;
-      return withHeight(entry, heights[at], exact && weightOf(prepared[at]) !== undefined);
+      return withHeight(entry, heights[at], handedAs(prepared[at], exact));
     }),
   );
 }

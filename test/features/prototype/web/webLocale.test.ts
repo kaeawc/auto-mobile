@@ -27,4 +27,13 @@ describe("still locale (#16552)", () => {
       expect(localeLayoutDirection(tag)).toBe("ltr");
     }
   });
+
+  test("a tag without a script lays out by the script it implies (#16590)", () => {
+    for (const tag of ["pa-PK", "syr", "nqo", "rhg", "dv", "yi", "ks", "iw"]) {
+      expect(localeLayoutDirection(tag)).toBe("rtl");
+    }
+    for (const tag of ["pa-IN", "pa", "en-XA", "en-u-nu-arab", "ku"]) {
+      expect(localeLayoutDirection(tag)).toBe("ltr");
+    }
+  });
 });

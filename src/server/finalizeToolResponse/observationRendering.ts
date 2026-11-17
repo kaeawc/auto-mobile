@@ -679,6 +679,7 @@ function isEmptyObserveDiff(diff: ReturnType<typeof diffObserveResult>): boolean
     diff.added.length === 0 &&
     diff.removed.length === 0 &&
     diff.changed.length === 0 &&
+    diff.relayout === undefined &&
     diff.displayChanged === undefined &&
     diff.fields === undefined
   );

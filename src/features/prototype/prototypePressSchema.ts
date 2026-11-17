@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /** Node `press` (motion v3): draw-only press scale and alpha, at least one of them. */
 export const prototypePressSchema = z

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * The manifest Playground writes for one SDK contract run
@@ -64,6 +64,30 @@ const observationHostLogSchema = z.object({
   actions: z.array(observationHostActionSchema),
 });
 
+const webViewHostLogSchema = z.object({
+  origin: z.string().url(),
+  disallowedOrigin: z.string().url(),
+  pageEvents: z.array(
+    z.object({
+      kind: z.string().min(1),
+      clicks: z.number().int().nonnegative(),
+      value: z.string(),
+      document: z.string().min(1),
+      documentId: z.string().min(1).optional(),
+    }),
+  ),
+  captures: z.array(z.object({ snapshotId: z.string().min(1), documentId: z.string().min(1) })),
+  rejections: z.array(
+    z.object({
+      snapshotId: z.string().min(1),
+      documentId: z.string().min(1),
+      domain: z.string(),
+      code: z.number().int(),
+    }),
+  ),
+  staleProbeAccepted: z.boolean().optional(),
+});
+
 /** The storage registration a storage scenario applied. */
 const storageRegistrationSchema = z.object({
   allowKeychainDeletion: z.boolean(),
@@ -99,6 +123,7 @@ const sdkContractManifestSchema = z.object({
   faults: z.array(faultCaseObservationSchema),
   capabilities: capabilityObservationSchema.optional(),
   observation: observationHostLogSchema.optional(),
+  webView: webViewHostLogSchema.optional(),
   navigation: z
     .object({
       deviceClass: z.enum(["ipad", "iphone"]),
@@ -125,6 +150,7 @@ export type FaultCaseObservation = z.infer<typeof faultCaseObservationSchema>;
 export type TransportDescriptor = z.infer<typeof transportDescriptorSchema>;
 export type ObservationHostAction = z.infer<typeof observationHostActionSchema>;
 export type ObservationHostLog = z.infer<typeof observationHostLogSchema>;
+export type WebViewHostLog = z.infer<typeof webViewHostLogSchema>;
 export type StorageRegistration = z.infer<typeof storageRegistrationSchema>;
 export type SdkContractManifest = z.infer<typeof sdkContractManifestSchema>;
 

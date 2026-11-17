@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Whether the foreground iOS app's SDK observation bridge can serve observations and actions

@@ -7,7 +7,7 @@ import {
   PROTOTYPE_PUSH_TRANSPORTS,
   PROTOTYPE_SIMULATE_EVENTS,
 } from "../../features/prototype/prototypePushSimulate";
-import { z as specZ } from "zod";
+import { z as specZ } from "zod/v3";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
 import { prototypeContractPatterns } from "../../features/prototype/prototypeContractPatterns";
 import { z } from "zod/v4";

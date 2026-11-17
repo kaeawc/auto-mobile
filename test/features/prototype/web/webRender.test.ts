@@ -1012,6 +1012,47 @@ describe("prototype web still (#16346)", () => {
     });
   });
 
+  test("a column under a horizontal scroll hands a nested row what its earlier siblings left (#16765)", () => {
+    const row = {
+      type: "row",
+      children: [
+        { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+        { type: "box", style: { width: { dp: 40 } } },
+      ],
+    };
+    const ratioIn = (column: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "scroll",
+            axis: "horizontal",
+            style: { height: { dp: 100 } },
+            child: { type: "column", ...column },
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    // As Compose's Column measures it: the first child gets the column's whole height.
+    expect(ratioIn({ children: [row] })).toMatchObject({ width: "100px", "flex-basis": "100px" });
+    // A later child gets what its earlier siblings and the spacing left.
+    const above = { type: "box", style: { height: { dp: 30 } } };
+    expect(ratioIn({ children: [above, row] })).toMatchObject({
+      width: "70px",
+      "flex-basis": "70px",
+    });
+    expect(ratioIn({ style: { spacing: 10 }, children: [above, row] })).toMatchObject({
+      width: "60px",
+      "flex-basis": "60px",
+    });
+    // A weighted row gets its weight's share.
+    const weighted = { ...row, style: { weight: 1 } };
+    expect(ratioIn({ children: [weighted, { ...weighted }] })).toMatchObject({
+      width: "50px",
+      "flex-basis": "50px",
+    });
+  });
+
   test("a dp-width row under a horizontal scroll caps its aspect ratio by the scroll's height (#16718)", () => {
     const root = byTag(
       renderPrototypeStill({
@@ -1784,6 +1825,56 @@ describe("prototype web still (#16346)", () => {
     });
   });
 
+  test("theme typography's family reaches control labels through the window", () => {
+    const still = renderPrototypeStill({
+      ...reference,
+      theme: { ...(reference.theme as object), typography: { fontFamily: "serif" } },
+      root: { type: "button", testTag: "b", label: "Go" },
+    });
+    const window = find(still.element, (element) => element.attrs["data-window"] !== undefined)[0]!;
+    expect(window.style["font-family"]).toBe("serif");
+    // The screen, which also holds the status bar, keeps the system font.
+    const screen = find(still.element, (element) => element.attrs["data-chrome"] === "screen")[0]!;
+    expect(screen.style["font-family"]).toBe("system-ui, -apple-system, Roboto, sans-serif");
+  });
+
+  test("an explicit default family wins over the themed window's family (#18451)", () => {
+    for (const family of ["serif", "mono"]) {
+      const still = renderPrototypeStill({
+        ...reference,
+        theme: { ...(reference.theme as object), typography: { fontFamily: family } },
+        root: {
+          type: "column",
+          children: [
+            { type: "text", testTag: "d", text: "x", style: { fontFamily: "default" } },
+            {
+              type: "text",
+              testTag: "r",
+              text: "x",
+              style: { textStyle: "bodyLarge", fontFamily: "default" },
+            },
+            { type: "text", testTag: "t", text: "x" },
+          ],
+        },
+      });
+      const system = "system-ui, -apple-system, Roboto, sans-serif";
+      // As Android's FontFamily.Default: an explicit default draws the system font, role or not.
+      expect(byTag(still, "d")[0]!.style["font-family"]).toBe(system);
+      expect(byTag(still, "r")[0]!.style["font-family"]).toBe(system);
+      // A node naming no family inherits the window's themed one.
+      expect(byTag(still, "t")[0]!.style).not.toHaveProperty("font-family");
+    }
+  });
+
+  test("no theme family leaves the window on the system font", () => {
+    const still = renderPrototypeStill({
+      ...reference,
+      root: { type: "button", testTag: "b", label: "Go" },
+    });
+    const window = find(still.element, (element) => element.attrs["data-window"] !== undefined)[0]!;
+    expect(window.style).not.toHaveProperty("font-family");
+  });
+
   test("a horizontal divider stretches across a box", () => {
     const line = byTag(
       renderPrototypeStill({
@@ -2115,7 +2206,7 @@ describe("prototype web still parity (#16382)", () => {
   });
 
   test("an icon placeholder shows its name's initial", () => {
-    // An iOS frame has no glyph set yet (#16526), so every icon draws the placeholder.
+    // A still given no glyph source draws every icon as the placeholder.
     const iconOf = (name?: string) =>
       byTag(
         renderPrototypeStill(

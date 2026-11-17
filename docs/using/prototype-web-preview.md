@@ -148,7 +148,7 @@ set of its own. It covers:
   the spec's icons use. An icon whose name changes with state still has its glyph.
 
 A variant without that glyph carries the `filled` one. `iconMissing` lists the keys with no glyph
-at all; draw a placeholder for them. iOS-style glyphs are not included yet.
+at all; draw a placeholder for them. The same glyphs serve Android and iOS frames.
 
 `revision`, `variant` and `mcpSessionId` work as for the web page; there is no `frame`. Errors,
 listing and subscriptions also match the web page, and `_meta` reports the same fields except

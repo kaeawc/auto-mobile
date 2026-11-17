@@ -72,7 +72,10 @@ const writtenObservation = z.looseObject({
     }),
   }),
 });
-const finalizedStructured = z.looseObject({ viewHierarchy: z.unknown(), artifact: z.unknown() });
+const finalizedStructured = z.looseObject({
+  viewHierarchy: z.unknown().optional(),
+  artifact: z.unknown().optional(),
+});
 
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {

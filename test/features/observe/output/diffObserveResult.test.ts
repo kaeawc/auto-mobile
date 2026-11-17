@@ -1013,7 +1013,8 @@ describe("diffObserveResult", () => {
 
   // #11637: relayouts of non-interactive containers are not actionable, exactly as
   // non-interactive added/removed nodes are already dropped from the projection.
-  test("skeleton diffs drop bounds-only moves of non-interactive nodes but keep interactive ones", () => {
+  // #18348: moves of interactive ones are counted in `relayout` instead of `changed`.
+  test("skeleton diffs drop non-interactive moves and sum up interactive ones in relayout", () => {
     const tree = (shift: number) =>
       obs({
         "resource-id": "root",
@@ -1037,8 +1038,9 @@ describe("diffObserveResult", () => {
     const full = diffObserveResult(tree(0), tree(5));
 
     expect(full.changed.length).toBeGreaterThanOrEqual(2);
-    expect(compact.changed.map((entry) => entry.key.split("\0")[0])).toContain("go");
-    expect(compact.changed.map((entry) => entry.key.split("\0")[0])).not.toContain("content_frame");
+    expect(full.relayout).toBeUndefined();
+    expect(compact.changed).toEqual([]);
+    expect(compact.relayout).toEqual({ count: 1, dy: 5 });
   });
 
   // #11638: a label-less control that shares a generic resource id with a control in

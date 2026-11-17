@@ -730,6 +730,40 @@ describe("VirtualPrototypeInputs (#18360)", () => {
     expect(stale).toMatchObject({ success: false, error: "conflict", revision: 2 });
   });
 
+  test("a key set and restored before a dismissal still takes a revision (#18442)", async () => {
+    const { inputs, events, device } = await shown(
+      column({
+        type: "button",
+        label: "Blink",
+        onTap: [
+          { type: "setState", key: "n", value: 1 },
+          { type: "setState", key: "n", value: 0 },
+          { type: "dismiss" },
+        ],
+      }),
+      { state: { n: 0 } },
+    );
+    expect(inputs.tap({ text: "Blink" })).toMatchObject({
+      success: true,
+      events: [{ sequence: 1, kind: "dismissed" }],
+    });
+    expect(events.map((event) => [event.kind, event.state])).toEqual([["dismissed", { n: 0 }]]);
+    expect(device.shownIds()).toEqual([]);
+    // The id's ledger outlives the dismissal: the show was revision 1, the net-zero write 2, so
+    // showing it again is revision 3, as a device that stamps the write before dismissing has it.
+    await device.requestShowPrototype(
+      spec(column({ type: "text", text: "Back" }), { state: { n: 0 } }),
+    );
+    const patch = (baseRevision: number) =>
+      device.requestPatchPrototype({
+        id: "demo",
+        baseRevision,
+        ops: [{ op: "replace", path: "/state/n", value: 5 }],
+      });
+    expect(await patch(4)).toMatchObject({ success: false, revision: 3 });
+    expect(await patch(3)).toMatchObject({ success: true, revision: 4 });
+  });
+
   test("a later prototype shown again is the first a tap targets (#18401)", async () => {
     const timer = new FakeTimer();
     const device = new VirtualPrototypeDevice(timer);

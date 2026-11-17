@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { keySchema, pointerSchema } from "./prototypeActionValues";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 const fraction = z.number().int().min(0).max(20).optional();

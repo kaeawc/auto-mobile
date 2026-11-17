@@ -89,6 +89,20 @@ describe("buildPrototypeWebPage with images", () => {
     expect(built.html.split("var(--pa-0)").length).toBe(3);
   });
 
+  test("inlines a video poster and drops its entry (#16591)", async () => {
+    const spec = {
+      id: "watch",
+      window: { placement: { type: "fullscreen" } },
+      root: { type: "videoPlayer", id: "clip", poster: "cover" },
+    };
+    const images = encoder(30);
+    const built = await buildPrototypeWebPageWithImages(page([spec]), source(["cover"]), images);
+    expect(built.inlinedImages).toEqual(["cover"]);
+    expect(built.unsupportedNodes).toEqual([]);
+    expect(built.html).toContain('data-part="poster"');
+    expect(images.boxes[0]![0]!.cover).toBe(false);
+  });
+
   test("an asset that does not fit keeps its placeholder with reason assetOverBudget", () => {
     const images = [
       { id: "a", bytes: new Uint8Array(300), width: 4, height: 3 },
@@ -212,9 +226,55 @@ describe("encodePrototypeWebImages", () => {
     expect(images.map((image) => image.id)).toEqual(["small"]);
     expect([...overBudget]).toEqual(["big"]);
   });
+
+  test("caps the cumulative inlined bytes: exactly at the cap fits, past it falls back (#18418)", async () => {
+    // Each 30-byte encode is a 40-byte data URI.
+    const ids = ["a", "b", "c", "d"];
+    const encode = async (maxInlineBytes: number) => {
+      const counting = encoder(30);
+      const result = await encodePrototypeWebImages(
+        ids.map((id) => ({ id, boxes: [] })),
+        source(ids),
+        counting,
+        { maxInlineBytes },
+      );
+      return {
+        kept: result.images.map((image) => image.id),
+        overBudget: [...result.overBudget],
+        encodes: counting.boxes.length,
+      };
+    };
+    expect(await encode(80)).toEqual({ kept: ["a", "b"], overBudget: ["c", "d"], encodes: 3 });
+    // One byte short: the second image is the first past the cap; later ones are never encoded.
+    expect(await encode(79)).toEqual({ kept: ["a"], overBudget: ["b", "c", "d"], encodes: 2 });
+    expect(await encode(160)).toEqual({ kept: ids, overBudget: [], encodes: 4 });
+  });
+
+  test("an asset without bytes past the cap stays not inlined, not over budget (#18418)", async () => {
+    const { overBudget } = await encodePrototypeWebImages(
+      ["a", "missing", "b"].map((id) => ({ id, boxes: [] })),
+      source(["a", "b"]),
+      encoder(30),
+      { maxInlineBytes: 10 },
+    );
+    expect([...overBudget]).toEqual(["a", "b"]);
+  });
 });
 
 describe("buildPrototypeWebPageWithImages", () => {
+  test("reports images past the cumulative inline cap assetOverBudget (#18418)", async () => {
+    const input = page([feed("a", "b", "c")], { maxImageBytes: 80 });
+    const built = await buildPrototypeWebPageWithImages(
+      input,
+      source(["a", "b", "c"]),
+      encoder(30),
+    );
+    expect(built.inlinedImages).toEqual(["a", "b"]);
+    expect(built.unsupportedNodes.map((node) => [node.asset, node.reason])).toEqual([
+      ["c", "assetOverBudget"],
+    ]);
+  });
+
   test("encodes drawn assets at the boxes the frame draws them and inlines them", async () => {
     const encode = encoder(30);
     const built = await buildPrototypeWebPageWithImages(
@@ -260,6 +320,37 @@ describe("buildPrototypeWebPageWithImages", () => {
       (m) => Buffer.from(m[1]!, "base64").length,
     );
     expect(sizes).toEqual([3000, 600, 600]);
+  });
+
+  test("holds the inline cap on the mixed long-side and compact set (#18430)", async () => {
+    // Long-side encodes are 4000-byte data URIs, compact ones 800: one long plus two compact
+    // (5600) passes the 5000-byte cap, so every image draws its compact encode.
+    const { calls, encode } = sizedByBox(3000, 600);
+    const built = await buildPrototypeWebPageWithImages(
+      page([feed("a", "b", "c")], { maxImageBytes: 5000 }),
+      source(["a", "b", "c"]),
+      encode,
+    );
+    expect(calls).toEqual(["long", "long", "compact", "compact", "compact"]);
+    expect(built.inlinedImages).toEqual(["a", "b", "c"]);
+    const sizes = [...built.html.matchAll(/base64,([^)]*)\)/g)].map(
+      (m) => Buffer.from(m[1]!, "base64").length,
+    );
+    expect(sizes).toEqual([600, 600, 600]);
+  });
+
+  test("sets aside mixed-set images past the inline cap as assetOverBudget (#18430)", async () => {
+    // Compact encodes alone (3 x 800) pass a 2000-byte cap: the third is set aside.
+    const { encode } = sizedByBox(3000, 600);
+    const built = await buildPrototypeWebPageWithImages(
+      page([feed("a", "b", "c")], { maxImageBytes: 2000 }),
+      source(["a", "b", "c"]),
+      encode,
+    );
+    expect(built.inlinedImages).toEqual(["a", "b"]);
+    expect(built.unsupportedNodes.map((node) => [node.asset, node.reason])).toEqual([
+      ["c", "assetOverBudget"],
+    ]);
   });
 
   test("keeps every long-side encode when they all fit (#16605)", async () => {

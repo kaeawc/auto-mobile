@@ -10,7 +10,7 @@
 import type { CtrlProxyPerfTiming, WebSocketMessage } from "./types";
 import { rewriteUnknownCommandError as rewritePlatformUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import type { KeyValueEntry } from "../../storage/storageTypes";
-import { z, type ZodTypeAny } from "zod";
+import { z, type ZodTypeAny } from "zod/v3";
 
 const sceneIdentifiersSchema = z.array(z.string());
 import {

@@ -1,7 +1,8 @@
 # Pressure, hover and stylus input
 
 AutoMobile injects finger touches and Android stylus input, including pressure curves and hover
-through capable routes. Apple Pencil injection is unsupported. This page holds each platform's
+through capable routes. Apple Pencil injection is not implemented; on the iOS simulator it works
+through a virtual HID digitizer (#13083). This page holds each platform's
 input contract and the evidence for it (#12539). The injection routes, tool contract and failure
 modes are in [Stylus, pressure and hover injection](../mcp/stylus-pressure-hover-injection.md).
 
@@ -184,22 +185,35 @@ them. That header declares:
 It declares nothing for Apple Pencil tilt, azimuth, roll or hover, and no stylus
 tool type.
 
-The simulator probe in #13083 establishes two limits:
+The simulator probe in #13083 (iPad Pro 13-inch (M5), iOS 26.5) establishes:
 
-- **Pressure.** The private pressure selectors accept and range-check values, and
-  raw `XCPointerEvent` pressure is delivered, but `UITouch.force` stays `0.000`.
-  Pressure and Pencil injection are a no-go on the simulator: pressure has no
-  observable effect. Selector inventory exposes no pen, Pencil, tilt, azimuth,
-  altitude or tool-type selector on `XCPointerEvent`, `XCPointerEventPath` or
-  `XCSynthesizedEventRecord`. `setDeviceID` values 0–3 still produce touch type 0.
-  Public force press returns "Force press events are not supported for this device."
-  A pressure fallback cannot be validated there. **Reported:** Appium pressure
-  actions likewise succeed without visible effect
+- **XCTest pressure.** The private pressure selectors accept and range-check values,
+  and raw `XCPointerEvent` pressure is delivered, but `UITouch.force` stays `0.000`.
+  No pen, Pencil, tilt, azimuth, altitude or tool-type selector exists on
+  `XCPointerEvent`, `XCPointerEventPath` or `XCSynthesizedEventRecord`; `setDeviceID`
+  values 0–3 still produce touch type 0. Public force press returns "Force press
+  events are not supported for this device." **Reported:** Appium pressure actions
+  likewise succeed without visible effect
   ([Appium forum thread](https://discuss.appium.io/t/uitouch-with-force-pressure/30470)).
-- **Hover.** Mouse pointer paths produce `UIHoverGestureRecognizer` begin/end
-  callbacks on the simulator. Pencil hover is not observed. Public
-  `XCUIElement.hover()` and `XCUICoordinate.hover()` exist, but this observation is
-  from mouse pointer paths and does not establish the public calls' behavior.
+- **Mouse hover.** Public `XCUIElement.hover()` and `XCUICoordinate.hover()` send one
+  zero-length mouse move and produce no hover on a headless simulator. A private
+  `XCPointerEventPath` mouse path with two or more `moveMouseToPoint:atOffset:duration:`
+  calls produces `UIHoverGestureRecognizer` begin, change and end every time.
+- **Pencil through a virtual HID digitizer.** backboardd sets a digitizer's maximum
+  force (700) only when its `PrimaryUsage` is 0x20 (Digitizer/Stylus) and its maximum
+  hover height from `MaxHoverHeight`, reading both when the service is created. The
+  built-in simulator digitizer has neither, so its stylus events arrive as Pencil
+  touches (`UITouch.type` 2) with force 0 and no hover. A virtual digitizer
+  registered with `PrimaryUsage 0x20` and `MaxHoverHeight 1.0` delivers Pencil
+  touches with force (`maximumPossibleForce` 5.833, force = raw pressure / 120),
+  altitude and azimuth, and Pencil hover with `zOffset` and tilt. Registering it
+  needs the private entitlements `com.apple.private.hid.client.admin`,
+  `.event-dispatch` and `.service-protected` in a `__TEXT,__entitlements` section of
+  an ad-hoc signed simulator binary; without them backboardd refuses the service.
+  Digitizer events from a sender that is not a registered digitizer are dropped.
+
+These paths are the reference for the CtrlProxy iOS runner route; see
+[iOS simulator Pencil input through a virtual HID digitizer](../../devlog/2026-11-03-ios-simulator-pencil-virtual-digitizer.md).
 
 ### Physical devices
 
@@ -211,17 +225,18 @@ platforms), so there is no iOS recorder representation to extend.
 
 ## Capability matrix
 
-| Capability                          | Android emulator                                                                                                              | Android device                                     | iOS simulator                                                         | iOS device                  |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------- | --------------------------- |
-| Stylus tool type, constant pressure | Supported via `adb shell input stylus` on API 31+; API 30 reports tool type `UNKNOWN` (**Measured**)                          | Same (**Source**)                                  | No-go: no Pencil tool type; accepted pressure leaves force 0 (#13083) | Unverified                  |
-| Pressure curve                      | Instrumentation, `uinput` (root) and gRPC pen (**Measured**)                                                                  | Unverified (`UiAutomation`; `uinput` is root-only) | No-go: accepted pressure leaves force 0 (#13083)                      | Unverified                  |
-| Tilt, eraser, barrel button         | Tilt and button via instrumentation (**Measured**) or `uinput` encoding (**Source**); eraser via `uinput` only (**Measured**) | Unverified (`UiAutomation`; `uinput` is root-only) | No-go via known paths: no pen or tool-type selectors (#13083)         | Impossible without a Pencil |
-| Hover                               | Instrumentation (stylus or mouse) and `uinput` (**Measured**)                                                                 | Unverified (`UiAutomation`; `uinput` is root-only) | Observed on mouse pointer paths; Pencil hover not observed (#13083)   | Unverified                  |
-| Records the above                   | Tool type, pressure series and positioned hover with distance (**Source**)                                                    | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                | No (**Source**)             |
+| Capability                          | Android emulator                                                                                                              | Android device                                     | iOS simulator                                                                                             | iOS device                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Stylus tool type, constant pressure | Supported via `adb shell input stylus` on API 31+; API 30 reports tool type `UNKNOWN` (**Measured**)                          | Same (**Source**)                                  | Virtual HID digitizer (**Measured**, not implemented; #13083)                                             | Unverified                  |
+| Pressure curve                      | Instrumentation, `uinput` (root) and gRPC pen (**Measured**)                                                                  | Unverified (`UiAutomation`; `uinput` is root-only) | Virtual HID digitizer (**Measured**, not implemented); XCTest pressure leaves force 0                     | Unverified                  |
+| Tilt, eraser, barrel button         | Tilt and button via instrumentation (**Measured**) or `uinput` encoding (**Source**); eraser via `uinput` only (**Measured**) | Unverified (`UiAutomation`; `uinput` is root-only) | Tilt via virtual HID digitizer (**Measured**, not implemented); eraser and buttons untested               | Impossible without a Pencil |
+| Hover                               | Instrumentation (stylus or mouse) and `uinput` (**Measured**)                                                                 | Unverified (`UiAutomation`; `uinput` is root-only) | Mouse path with two or more moves; Pencil hover via virtual HID digitizer (**Measured**, not implemented) | Unverified                  |
+| Records the above                   | Tool type, pressure series and positioned hover with distance (**Source**)                                                    | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                                                    | No (**Source**)             |
 
-"Supported" means a documented path exists in source. Mouse pointer hover is
-observed on the iOS simulator; pressure and Pencil injection are a no-go there.
+"Supported" means a documented path exists in source. On the iOS simulator, mouse
+hover and Pencil pressure, tilt and hover are measured but not yet implemented.
 
 ## Background
 
 - [Pressure, hover and stylus input research](../../devlog/2026-10-18-pressure-hover-stylus-input-research.md)
+- [iOS simulator Pencil input through a virtual HID digitizer](../../devlog/2026-11-03-ios-simulator-pencil-virtual-digitizer.md)

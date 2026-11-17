@@ -732,7 +732,7 @@ load yq-helpers
     fi
     count=$((count + 1))
   done < <(yq -r '.jobs | to_entries[] | select(.value."runs-on" | tostring | contains("automobile-mac")) | .key' "$WF")
-  [ "$count" -eq 9 ]
+  [ "$count" -eq 10 ]
   # The routing job holds MAC_RUNNER_READ_TOKEN: least privilege, no write scopes.
   [ "$(yq -o=json -I=0 '.jobs."mac-pool-routing".permissions' "$WF")" = '{"contents":"read"}' ]
 }

@@ -41,12 +41,11 @@ starts a headless DHU against the emulator. No Google account is needed.
 }
 ```
 
-| Parameter                            | Required | Description                                                                                                                                                                                                                                       |
-| ------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `androidAuto.apkDirectory`           | yes      | Host directory with the Android Auto split APKs you supplied: `base.apk` plus its `split_*.apk` files for the emulator's ABI, language and density. AutoMobile never downloads them. They are installed only while the phone still runs the stub. |
-| `androidAuto.dhuPath`                | no       | The `desktop-head-unit` binary. Defaults to `$ANDROID_HOME/extras/google/auto/desktop-head-unit`.                                                                                                                                                 |
-| `androidAuto.dhuConfig`              | no       | Head unit config (`.ini`). Defaults to `config/default_720p.ini` beside the DHU binary.                                                                                                                                                           |
-| `androidAuto.acceptAndroidAutoTerms` | no       | Tap **Continue** on **Welcome to Android Auto**, which accepts Android Auto's terms. Set it only when you have decided to accept them. Without it, a pending welcome screen is reported, not tapped.                                              |
+| Parameter                  | Required | Description                                                                                                                                                                                                                                       |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `androidAuto.apkDirectory` | yes      | Host directory with the Android Auto split APKs you supplied: `base.apk` plus its `split_*.apk` files for the emulator's ABI, language and density. AutoMobile never downloads them. They are installed only while the phone still runs the stub. |
+| `androidAuto.dhuPath`      | no       | The `desktop-head-unit` binary. Defaults to `$ANDROID_HOME/extras/google/auto/desktop-head-unit`.                                                                                                                                                 |
+| `androidAuto.dhuConfig`    | no       | Head unit config (`.ini`). Defaults to `config/default_720p.ini` beside the DHU binary.                                                                                                                                                           |
 
 `androidAuto` requires `boot: true` (the default). The emulator's language must be English, because
 Android Auto's settings are driven by their visible labels.
@@ -57,14 +56,14 @@ The response gains an `androidAuto` block:
 
 - `steps`: one entry per step, in order: `android-auto-apk`, `keyguard`, `stay-awake`,
   `notification-access`, `developer-mode`, `unknown-sources`, `head-unit-server`, `transport`,
-  `desktop-head-unit` and `onboarding`. Each has a `status` of `applied`, `already-done` or `skipped`,
+  `desktop-head-unit` and `onboarding`. Each has a `status` of `applied` or `already-done`,
   and sometimes a `detail`. Running it again on a phone that is already set up reports `already-done`
   and reuses the running DHU.
 - `desktopHeadUnit.running`: whether the DHU holds its connection.
 - `desktopHeadUnit.configPath`: the head unit config the DHU started with.
 
-An `onboarding` step with status `skipped` means the welcome screen is waiting. Tap **Continue** on the
-phone, or provision again with `acceptAndroidAutoTerms: true`.
+When the phone shows **Welcome to Android Auto**, provisioning taps **Continue**, which accepts Android
+Auto's terms, and reports the `onboarding` step as `applied`. It never signs in to Google.
 
 ### Errors
 
@@ -101,12 +100,11 @@ against it and reports it. It never installs Android Auto here.
 }
 ```
 
-| Parameter                            | Required | Description                                                                                                                              |
-| ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `androidAuto.headUnit`               | yes      | Start the head unit. Pass `{}` for the SDK's DHU and `default_720p.ini`.                                                                 |
-| `androidAuto.headUnit.dhuPath`       | no       | The `desktop-head-unit` binary. Defaults to `$ANDROID_HOME/extras/google/auto/desktop-head-unit`.                                        |
-| `androidAuto.headUnit.dhuConfig`     | no       | Head unit config (`.ini`). Defaults to `config/default_720p.ini` beside the DHU binary.                                                  |
-| `androidAuto.acceptAndroidAutoTerms` | no       | Tap **Continue** on **Welcome to Android Auto**, as for `provisionDevice`. Without it, a pending welcome screen is reported, not tapped. |
+| Parameter                        | Required | Description                                                                                       |
+| -------------------------------- | -------- | ------------------------------------------------------------------------------------------------- |
+| `androidAuto.headUnit`           | yes      | Start the head unit. Pass `{}` for the SDK's DHU and `default_720p.ini`.                          |
+| `androidAuto.headUnit.dhuPath`   | no       | The `desktop-head-unit` binary. Defaults to `$ANDROID_HOME/extras/google/auto/desktop-head-unit`. |
+| `androidAuto.headUnit.dhuConfig` | no       | Head unit config (`.ini`). Defaults to `config/default_720p.ini` beside the DHU binary.           |
 
 The response gains the same `androidAuto` block as `provisionDevice` (`steps` and `desktopHeadUnit`). If
 a DHU is already projecting this phone, it is reused and reported as `already-done`, with the config

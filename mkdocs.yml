@@ -484,6 +484,7 @@ nav:
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
       - "2026-11-17: Material 3 Expressive component availability at the pinned Compose BOM": devlog/2026-11-17-m3-expressive-component-availability.md
+      - "2026-11-16: Android Auto provisioning accepts the welcome screen": devlog/2026-11-16-android-auto-terms-accepted-by-provisioning.md
       - "2026-11-16: Web library advertises the host's known capabilities": devlog/2026-11-16-prototype-web-library-capabilities.md
       - "2026-11-16: Communication-style notifications for prototypes": devlog/2026-11-16-prototype-communication-notifications.md
       - "2026-11-15: Move to Zod 4 and override Jimp's Zod 3 range": devlog/2026-11-15-zod-4-jimp-override.md

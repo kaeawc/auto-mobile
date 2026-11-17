@@ -370,12 +370,12 @@ describe("startDevice handler", () => {
     const started = headUnitApplier();
     const result = await callStartDevice({
       platform: "android",
-      androidAuto: { headUnit: { dhuConfig: "/hu.ini" }, acceptAndroidAutoTerms: true },
+      androidAuto: { headUnit: { dhuConfig: "/hu.ini" } },
     });
     expect(started).toEqual([
       {
         deviceId: "mock-Pixel_7_API_34",
-        options: { headUnit: { dhuConfig: "/hu.ini" }, acceptAndroidAutoTerms: true },
+        options: { headUnit: { dhuConfig: "/hu.ini" } },
       },
     ]);
     expect(result.androidAuto).toEqual({

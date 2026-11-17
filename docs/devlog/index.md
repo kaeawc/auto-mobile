@@ -13,6 +13,7 @@ To add one, copy the [template](template.md).
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-17 | concept  | [Material 3 Expressive component availability at the pinned Compose BOM](2026-11-17-m3-expressive-component-availability.md)       |
+| 2026-11-16 | decision | [Android Auto provisioning accepts the welcome screen](2026-11-16-android-auto-terms-accepted-by-provisioning.md)                  |
 | 2026-11-16 | decision | [Web library advertises the host's known capabilities](2026-11-16-prototype-web-library-capabilities.md)                           |
 | 2026-11-16 | idea     | [Communication-style notifications for prototypes](2026-11-16-prototype-communication-notifications.md)                            |
 | 2026-11-15 | decision | [Move to Zod 4 and override Jimp's Zod 3 range](2026-11-15-zod-4-jimp-override.md)                                                 |

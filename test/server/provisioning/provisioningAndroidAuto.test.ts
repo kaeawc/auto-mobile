@@ -71,11 +71,10 @@ class FakeApplier implements AndroidAutoProjectionApplier {
     return {
       androidAutoApks: ["/apks/base.apk"],
       dhu: { binaryPath: "/dhu", configPath: "/dhu.ini" },
-      acceptAndroidAutoTerms: false,
     };
   }
   async resolveHeadUnitInputs() {
-    return { dhu: { binaryPath: "/dhu", configPath: "/dhu.ini" }, acceptAndroidAutoTerms: false };
+    return { dhu: { binaryPath: "/dhu", configPath: "/dhu.ini" } };
   }
   /** The startDevice run: recorded apart from `apply`, with the same waits and failures. */
   /** The deadline each run was given, which caps the provisioner's adb-online wait. */
@@ -125,9 +124,17 @@ describe("provisionDevice androidAuto", () => {
   test("the schema accepts androidAuto on an Android request", () => {
     const parsed = provisionDeviceSchema.parse({
       device: ANDROID_DEVICE,
+      androidAuto: ANDROID_AUTO,
+    });
+    expect(parsed.androidAuto).toEqual({ apkDirectory: "/apks" });
+  });
+
+  test("the schema refuses the removed acceptAndroidAutoTerms flag (#17838)", () => {
+    const parsed = provisionDeviceSchema.safeParse({
+      device: ANDROID_DEVICE,
       androidAuto: { ...ANDROID_AUTO, acceptAndroidAutoTerms: true },
     });
-    expect(parsed.androidAuto).toEqual({ apkDirectory: "/apks", acceptAndroidAutoTerms: true });
+    expect(parsed.success).toBe(false);
   });
 
   test("the schema refuses androidAuto with boot=false or on iOS", () => {

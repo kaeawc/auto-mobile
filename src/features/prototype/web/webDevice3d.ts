@@ -251,18 +251,28 @@ export interface PrototypeWebLeaves {
   readonly clone: Readonly<Record<string, string>>;
 }
 
+/** A box inside the frame box, in px from its top-left corner. */
+export interface PrototypeWebBox {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /**
  * Splits a `width` × `height` frame at the hinge line: the fixed leaf is the start (left or top)
- * side up to the line, the moving leaf the rest, turning about the line.
+ * side up to the line, the moving leaf the rest, turning about the line. The hinge's `at` is a
+ * share of the `screen` box, not of the frame box, so a bezel never moves the seam off the hinge.
  */
 export function prototypeWebLeaves(
   width: number,
   height: number,
   line: PrototypeWebHingeLine,
+  screen: PrototypeWebBox,
 ): PrototypeWebLeaves {
   const px = (value: number) => `${value}px`;
   if (line.axis === "vertical") {
-    const split = width * line.at;
+    const split = screen.left + screen.width * line.at;
     return {
       flip: "rotateY(180deg)",
       clip: `inset(0 ${px(width - split)} 0 0)`,
@@ -274,7 +284,7 @@ export function prototypeWebLeaves(
       clone: { left: px(-split) },
     };
   }
-  const split = height * line.at;
+  const split = screen.top + screen.height * line.at;
   return {
     flip: "rotateX(180deg)",
     clip: `inset(0 0 ${px(height - split)} 0)`,
@@ -320,7 +330,19 @@ export function prototypeWeb3dWrap(
   ];
   let leaf: HTMLElement | undefined;
   if (line) {
-    const at = leaves(width, height, line);
+    // The screen's box inside the frame: offsets are from the frame when it is the screen's offset
+    // parent, otherwise both share one and the frame's own offset comes off.
+    const screen = frame.firstElementChild as HTMLElement | null;
+    const base = screen?.offsetParent === frame ? { offsetLeft: 0, offsetTop: 0 } : frame;
+    const panel = screen
+      ? {
+          left: screen.offsetLeft - base.offsetLeft,
+          top: screen.offsetTop - base.offsetTop,
+          width: screen.offsetWidth,
+          height: screen.offsetHeight,
+        }
+      : { left: 0, top: 0, width, height };
+    const at = leaves(width, height, line, panel);
     frame.style.clipPath = at.clip;
     const clone = frame.cloneNode(true) as HTMLElement;
     clone.inert = true;

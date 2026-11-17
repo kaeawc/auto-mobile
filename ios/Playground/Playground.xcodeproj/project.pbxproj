@@ -48,6 +48,7 @@
 		B29A9C90738A612625E68F3A /* CrayonGrainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B440AFD2C3249329A0069BD6 /* CrayonGrainTests.swift */; };
 		B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */; };
 		B5F4CE8A9F2A76C8B397C48A /* SdkContractNavigationScenarioTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D07338C21403ED20B1A11E4 /* SdkContractNavigationScenarioTests.swift */; };
+		B64005B9C13A8EF3E9783A81 /* SdkContractWebViewScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D043B8B93E4A3AA9A5007EC /* SdkContractWebViewScenario.swift */; };
 		B73660170723595B44749E9F /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51580F5FC5ADCD5576885563 /* Typography.swift */; };
 		C437D38FD2B064F815AE6F33 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */; };
 		C9A1977492B71CC9FE85DA16 /* PlaygroundDatabaseFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF899DC96DC92471BB6FC81 /* PlaygroundDatabaseFixture.swift */; };
@@ -107,6 +108,7 @@
 		2A0E49C79AD532DDF1FF940E /* ShareSinkSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSinkSummaryTests.swift; sourceTree = "<group>"; };
 		2A8BC8E5B6EA4CEE87E3D905 /* PhotosAuthorizationProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAuthorizationProbeTests.swift; sourceTree = "<group>"; };
 		2B46870C2DDF4A2F73A5778B /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
+		2D043B8B93E4A3AA9A5007EC /* SdkContractWebViewScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractWebViewScenario.swift; sourceTree = "<group>"; };
 		2E3EBAAF8B8FBFFD946B02E1 /* SdkContractStorageScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractStorageScenario.swift; sourceTree = "<group>"; };
 		32941883720B375F3B66BA7A /* SemanticLinkRotorDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLinkRotorDiscoveryTests.swift; sourceTree = "<group>"; };
 		36AB5EBCC198196FE5DA9934 /* PlaygroundShareSink.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PlaygroundShareSink.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -254,6 +256,7 @@
 				60A7309625B075243845F7B6 /* SdkContractObservationScenario.swift */,
 				6832B4473F28F2540F82E439 /* SdkContractRunner.swift */,
 				2E3EBAAF8B8FBFFD946B02E1 /* SdkContractStorageScenario.swift */,
+				2D043B8B93E4A3AA9A5007EC /* SdkContractWebViewScenario.swift */,
 			);
 			path = SdkContract;
 			sourceTree = "<group>";
@@ -527,6 +530,7 @@
 				CCE732EDB27B8BEAAC7FDFF6 /* SdkContractObservationScenario.swift in Sources */,
 				A03793F43CE3F28402017D11 /* SdkContractRunner.swift in Sources */,
 				AC6D703E53A619D00154BA6E /* SdkContractStorageScenario.swift in Sources */,
+				B64005B9C13A8EF3E9783A81 /* SdkContractWebViewScenario.swift in Sources */,
 				7FDB62C4B6F0092619122928 /* SemanticLinksDemo.swift in Sources */,
 				54C16E199D10E281E1E316CF /* SettingsTab.swift in Sources */,
 				327A28D4620038BBA8D02656 /* Shapes.swift in Sources */,

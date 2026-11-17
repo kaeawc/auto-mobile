@@ -102,7 +102,8 @@ public final class PrototypePlatformRegistry {
         connectivity: any PrototypeConnectivitySource,
         links: any PrototypeLinkOpener,
         settings: any PrototypeSettingsURLOpener,
-        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
+        deviceStatus: [any PrototypePlatformModule] = []
     )
         -> PrototypePlatformRegistry
     {
@@ -112,7 +113,7 @@ public final class PrototypePlatformRegistry {
             PrototypeConnectivityModule(source: connectivity),
             PrototypeLinksModule(opener: links),
             PrototypeSettingsModule(opener: settings),
-        ], bundle: bundle)
+        ] + deviceStatus, bundle: bundle)
     }
 
     static func systemModules(
@@ -120,7 +121,8 @@ public final class PrototypePlatformRegistry {
         connectivity: any PrototypeConnectivitySource,
         links: any PrototypeLinkOpener,
         settings: any PrototypeSettingsURLOpener,
-        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
+        deviceStatus: [any PrototypePlatformModule] = []
     )
         -> PrototypePlatformRegistry
     {
@@ -129,7 +131,7 @@ public final class PrototypePlatformRegistry {
             PrototypeConnectivityModule(source: connectivity),
             PrototypeLinksModule(opener: links),
             PrototypeSettingsModule(opener: settings),
-        ], bundle: bundle)
+        ] + deviceStatus, bundle: bundle)
     }
 
     var snapshot: [String: JSONValue] {

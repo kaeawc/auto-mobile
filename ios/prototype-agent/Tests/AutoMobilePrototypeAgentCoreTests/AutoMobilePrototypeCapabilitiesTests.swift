@@ -56,7 +56,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_platform_test_v1",
             "prototype_platform_share_v1", // Contract only; system share sheet runtime is owed.
-            // Contract only; the device status readers are owed (#14323).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_battery_v1", "prototype_platform_power_v1",
             "prototype_platform_audio_v1",
             // Registered by the agent and Viewer registries (#14273), not the static list.

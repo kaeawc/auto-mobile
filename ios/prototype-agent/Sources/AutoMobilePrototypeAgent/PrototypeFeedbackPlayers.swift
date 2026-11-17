@@ -60,7 +60,7 @@
     }
 
     extension PrototypePlatformRegistry {
-        /// The haptics, sound, connectivity, links and settings modules the injected agent and ProtoViewer
+        /// The feedback, connectivity, device status, links and settings modules the agent and ProtoViewer
         /// register; none needs a permission, an entitlement or an Info.plist key.
         static func feedbackModules() -> PrototypePlatformRegistry {
             feedbackModules(
@@ -68,7 +68,12 @@
                 sound: SystemSoundPlayer(),
                 connectivity: NWPathConnectivitySource(),
                 links: UIKitLinkOpener(),
-                settings: UIKitSettingsURLOpener()
+                settings: UIKitSettingsURLOpener(),
+                deviceStatus: [
+                    PrototypeDeviceStatusModule.battery(source: UIDeviceBatterySource()),
+                    PrototypeDeviceStatusModule.power(source: ProcessInfoPowerSource()),
+                    PrototypeDeviceStatusModule.audio(source: AVAudioSessionAudioSource()),
+                ]
             )
         }
     }

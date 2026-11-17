@@ -67,7 +67,7 @@ function isFocusable(element: Element | undefined): element is Element {
   return element !== undefined && isTruthyFlag(element.focusable);
 }
 
-function isClickable(element: Element | undefined): element is Element {
+function isClickable(element: Element | undefined): boolean {
   return element !== undefined && isTruthyFlag(element.clickable);
 }
 
@@ -109,10 +109,7 @@ export function focusOwnerBounds(
   if (!chosen?.element) {
     return undefined;
   }
-  if (isFocusable(chosen.element)) {
-    return chosen.element.bounds;
-  }
-  if (isClickable(chosen.element)) {
+  if (isTruthyFlag(chosen.element.focusable) || isClickable(chosen.element)) {
     return chosen.element.bounds;
   }
   const ancestor = nearestActionableAncestor(resolution.snapshotNodes ?? [], chosen);

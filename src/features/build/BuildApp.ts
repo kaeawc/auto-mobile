@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   DefaultHostCommandExecutor,
   type HostCommandExecutor,
@@ -87,6 +87,7 @@ const EXCERPT_MAX_LINES = 40;
 const EXCERPT_MAX_LINE_CHARS = 500;
 const APK_SEARCH_DEPTH = 3;
 const BUILD_SETTINGS_TIMEOUT_MS = 120_000;
+const GRADLE_PROPERTIES_TIMEOUT_MS = 120_000;
 
 const APPLE_SDK: Record<ApplePlatform, { sdk: string; destination: string }> = {
   ios: { sdk: "iphonesimulator", destination: "iOS Simulator" },
@@ -196,6 +197,26 @@ export function appProductPaths(settingsJson: string): string[] {
       : [];
   });
   return [...new Set(paths)];
+}
+
+/**
+ * The module's build directory from `gradlew :<module>:properties` output: its `buildDir`, or
+ * `<projectDir>/build` when the report has no `buildDir` line. `undefined` when neither is an
+ * absolute path.
+ */
+export function gradleBuildDirectory(report: string): string | undefined {
+  const values = new Map(
+    report.split(/\r?\n/).flatMap((line) => {
+      const match = /^(buildDir|projectDir): (.+)$/.exec(line.trim());
+      return match ? [[match[1], match[2].trim()] as const] : [];
+    }),
+  );
+  const buildDir = values.get("buildDir");
+  if (buildDir !== undefined && isAbsolute(buildDir)) {
+    return buildDir;
+  }
+  const projectDir = values.get("projectDir");
+  return projectDir !== undefined && isAbsolute(projectDir) ? join(projectDir, "build") : undefined;
 }
 
 interface PlannedBuild {
@@ -450,9 +471,54 @@ export class BuildApp {
       file: gradlew,
       args: [`:${module}:assemble${capitalize(variant)}`, "--console=plain"],
       cwd: request.projectPath,
-      findArtifacts: async () => await this.newestFirst(await this.variantApks(apkRoot, variant)),
-      artifactDescription: `signed ${variant} .apk under ${apkRoot} (an *-unsigned.apk needs a signingConfig for that build type before installApp can install it)`,
+      findArtifacts: async (signal) => {
+        const apks = await this.variantApks(apkRoot, variant);
+        if (apks.length > 0) {
+          return await this.newestFirst(apks);
+        }
+        // A settings-relocated projectDir builds elsewhere; ask Gradle where.
+        const reported = await this.reportedApkRoot(gradlew, request.projectPath, module, signal);
+        return reported === undefined || reported === apkRoot
+          ? []
+          : await this.newestFirst(await this.variantApks(reported, variant));
+      },
+      artifactDescription: `signed ${variant} .apk under ${apkRoot} or the module's Gradle build directory (an *-unsigned.apk needs a signingConfig for that build type before installApp can install it)`,
     };
+  }
+
+  /** The module's `outputs/apk` under the build directory Gradle's `properties` report names. */
+  private async reportedApkRoot(
+    gradlew: string,
+    projectPath: string,
+    module: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const invocation = windowsBatchInvocation(gradlew, [
+      `:${module}:properties`,
+      "--console=plain",
+      "-q",
+    ]);
+    let stdout: string;
+    try {
+      ({ stdout } = await this.dependencies.executor.executeCommand(
+        invocation.command,
+        invocation.args,
+        {
+          cwd: projectPath,
+          signal,
+          timeoutMs: GRADLE_PROPERTIES_TIMEOUT_MS,
+          maxBuffer: BUILD_MAX_BUFFER,
+        },
+      ));
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(`buildApp could not read :${module} Gradle properties: ${errorMessage(error)}`);
+      return undefined;
+    }
+    const buildDir = gradleBuildDirectory(stdout);
+    return buildDir === undefined ? undefined : join(buildDir, "outputs", "apk");
   }
 
   /**

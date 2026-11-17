@@ -34,6 +34,10 @@ import {
   FakeFieldTypeDetector,
 } from "../../fakes/FakeSetUIStateDependencies";
 import type { ActionCall, TapOnCall } from "../../../src/features/action/ActionCall";
+import {
+  tapFocusFailure,
+  type TapOnFocusResult,
+} from "../../../src/features/action/tapFocusResult";
 
 describe("SetUIState", () => {
   const device: BootedDevice = {
@@ -1460,6 +1464,71 @@ describe("SetUIState", () => {
       expect(result.success).toBe(false);
       expect(result.fields[0].attempts).toBe(3);
       expect(result.fields[0].error).toContain("Failed to tap");
+    });
+
+    test("fails fast when the selector matched a visible non-input (#18538)", async () => {
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "search",
+            text: "Search settings",
+            class: "android.widget.EditText",
+          }),
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("search", "text");
+      const guidance =
+        "'Search settings' matched an on-screen element that is not a text input yet: " +
+        '{label "Search settings"} (affordances: tap). ' +
+        'Tap it first (tapOn {text: "Search settings"}), then call sendKeys without a selector.';
+      const refusal: TapOnFocusResult = {
+        success: false,
+        action: "focus",
+        element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
+        error: guidance,
+        [tapFocusFailure]: "matched-non-input",
+      };
+      fakeTap.setDefaultResult(refusal);
+
+      const result = await createSetUIState().execute({
+        fields: [{ selector: { elementId: "search" }, value: "wifi" }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fields[0].attempts).toBe(1);
+      expect(result.fields[0].error).toContain(guidance);
+      expect(fakeTap.getCallCount()).toBe(1);
+      expect(fakeClear.getCallCount()).toBe(0);
+      expect(fakeInput.getCallCount()).toBe(0);
+    });
+
+    test("still retries a focus miss without the non-input marker", async () => {
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "search",
+            text: "",
+            class: "android.widget.EditText",
+          }),
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("search", "text");
+      const miss: TapOnFocusResult = {
+        success: false,
+        action: "focus",
+        element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
+        error: "Element not found",
+        [tapFocusFailure]: "not-found",
+      };
+      fakeTap.setDefaultResult(miss);
+
+      const result = await createSetUIState().execute({
+        fields: [{ selector: { elementId: "search" }, value: "wifi" }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fields[0].attempts).toBe(3);
+      expect(fakeTap.getCallCount()).toBe(3);
     });
 
     test("refreshes view hierarchy between retries when element not found", async () => {

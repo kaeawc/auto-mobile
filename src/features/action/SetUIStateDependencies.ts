@@ -7,6 +7,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import type { ActionCall, TapOnCall } from "./ActionCall";
 import type { TapAtCoordinate } from "./TapAtCoordinate";
+import type { tapFocusFailure, TapFocusFailure } from "./tapFocusResult";
 
 /**
  * Interface for TapOnElement dependency
@@ -26,6 +27,7 @@ export interface TapOnElementLike {
     focusVerified?: boolean;
     observation?: ObserveResult;
     error?: string;
+    [tapFocusFailure]?: TapFocusFailure;
   }>;
 }
 

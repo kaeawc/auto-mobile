@@ -176,6 +176,7 @@ describe("tapOn routes SDK bridge nodes through the bridge (#5159)", () => {
       const result = await h.run();
       expect(result.success).toBe(true);
       expect(result.backend).toBe("sdk");
+      expect(result).not.toHaveProperty("dispatchRoute");
       expect(result.fallbackReason).toBeUndefined();
       expect(h.client.sdkActions).toEqual([
         { tap: { observationIdentity: 41, elementId: "save" } },

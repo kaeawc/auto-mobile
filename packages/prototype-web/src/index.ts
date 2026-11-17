@@ -5,6 +5,7 @@ export {
   type PrototypeRenderOptions,
   type PrototypeRendered,
   type PrototypeRenderedStack,
+  type PrototypeWebFrame,
 } from "../../../src/features/prototype/web/embed/prototypeWebRender";
 export {
   mount,

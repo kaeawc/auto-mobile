@@ -109,6 +109,23 @@ export function simctlFailureText(error: unknown): string {
 }
 
 /**
+ * An actionable error for a boot whose data is missing on disk, or undefined for any other
+ * failure. Boot paths never erase on their own (erase destroys the device's apps and data), so
+ * this names the recovery instead of the generic wedge or readiness message.
+ */
+export function bootDataMissingError(udid: string, error: unknown): ActionableError | undefined {
+  if (classifySimctlFailure("boot", simctlFailureText(error)).kind !== "device-data-missing") {
+    return undefined;
+  }
+  return new ActionableError(
+    `Simulator ${udid} cannot boot because its data is missing on disk. ` +
+      `Run 'xcrun simctl erase ${udid}' to recreate it (this deletes the simulator's apps and data), ` +
+      "or delete the simulator and create a new one.",
+    { cause: error },
+  );
+}
+
+/**
  * Run a simctl lifecycle verb and apply the recovery its failure text maps to:
  * an already-reached target state is success, and missing on-disk data is
  * erased and retried once when destructive recovery is enabled.

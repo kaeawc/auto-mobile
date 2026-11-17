@@ -834,24 +834,23 @@ export class TapGestureDispatcher {
       isVoiceOverEnabled,
       ...fenceOptions
     }: IosTapOptions & { isVoiceOverEnabled?: boolean } & { element?: Element } = {},
-  ): Promise<void> {
+  ): Promise<{ route?: string } | void> {
     const { x, y } = point;
     if (isVoiceOverEnabled && element) {
-      await this.host.executeIOSTapWithVoiceOver(
+      return this.host.executeIOSTapWithVoiceOver(
         action,
         element,
         { x, y },
         { durationMs, fenceOptions },
       );
-      return;
     }
 
     const coordinateTap = () =>
       this.host.executeiOSTapWithCoordinates(action, x, y, { durationMs, fenceOptions });
     if (isVoiceOverEnabled) {
-      await withVoiceOverTimeoutContext(coordinateTap);
+      return withVoiceOverTimeoutContext(coordinateTap);
     } else {
-      await coordinateTap();
+      return coordinateTap();
     }
   }
 
@@ -860,7 +859,7 @@ export class TapGestureDispatcher {
     x: number,
     y: number,
     { durationMs, fenceOptions = {} }: { durationMs: number; fenceOptions?: IosTapOptions },
-  ): Promise<void> {
+  ): Promise<{ route?: string } | void> {
     const { displayFence: fence, signal } = fenceOptions;
     // Use short duration (50ms) for tap/doubleTap, full duration for longPress
     const tapDuration = action === "longPress" ? durationMs : 50;
@@ -869,22 +868,24 @@ export class TapGestureDispatcher {
 
     if (action === "doubleTap") {
       fence?.assertCurrent();
-      await dispatchIosDoubleTap(
+      const dispatch = await dispatchIosDoubleTap(
         client,
         { x, y },
         { durationMs: tapDuration, options: { signal } },
       );
       IOSCtrlProxyClient.getExistingInstance(this.host.device().deviceId)?.invalidateCache();
+      return dispatch;
     } else {
       // Single tap or long press
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(
+      const dispatch = await dispatchIosCoordinateTap(
         client,
         { x, y },
         { durationMs: tapDuration, options: { signal } },
       );
       IOSCtrlProxyClient.getExistingInstance(this.host.device().deviceId)?.invalidateCache();
+      return dispatch;
     }
   }
 
@@ -893,7 +894,7 @@ export class TapGestureDispatcher {
     element: Element,
     point: Point,
     { durationMs, fenceOptions }: { durationMs: number; fenceOptions?: IosTapOptions },
-  ): Promise<void> {
+  ): Promise<{ route?: string } | void> {
     const { x, y } = point;
     return tapViaVoiceOver({
       device: this.host.device(),

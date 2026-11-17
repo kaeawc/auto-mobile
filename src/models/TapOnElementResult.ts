@@ -54,6 +54,8 @@ export interface TapOnElementResult extends BaseActionResult {
   containerFailure?: ContainerFailure;
   skipped?: "already-checked";
   effect?: TapEffect;
+  /** iOS coordinate tap route reported by the runner; omitted when unreported. */
+  dispatchRoute?: string;
   /** Semantic link confirmed by the native runner. */
   activatedSubtext?: {
     text: string;

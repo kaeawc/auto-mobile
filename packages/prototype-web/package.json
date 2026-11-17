@@ -1,0 +1,28 @@
+{
+  "name": "@kaeawc/auto-mobile-prototype-web",
+  "version": "0.0.0-development",
+  "description": "Embed an AutoMobile prototype in a device frame on any web page.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kaeawc/auto-mobile.git",
+    "directory": "packages/prototype-web"
+  },
+  "files": [
+    "dist",
+    "index.d.ts",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun build.ts"
+  }
+}

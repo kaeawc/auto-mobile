@@ -649,3 +649,19 @@ export function prototypeGateCapabilities(spec: unknown): string[] {
 export function requiredPrototypeCapabilities(spec: unknown): string[] {
   return [...new Set([...prototypeGateCapabilities(spec), ...preflightCapabilities(spec)])].sort();
 }
+
+/**
+ * Every capability `requiredPrototypeCapabilities` can name: the gate table's and the preflight's.
+ * The web library advertises this set as of its release (#16453), so it refuses only a spec that
+ * needs a capability added after it.
+ */
+export function knownPrototypeCapabilities(): string[] {
+  return [
+    ...new Set([
+      ...PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability),
+      PROTOTYPE_ANCHOR_CAPABILITY,
+      PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+      PROTOTYPE_DEAD_TAP_CAPABILITY,
+    ]),
+  ].sort();
+}

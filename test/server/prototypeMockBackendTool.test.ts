@@ -228,8 +228,14 @@ test("two channels chat through a collection broadcast and an agent publish, wit
   ]);
   const log = (await call({ action: "backendLog", backendId: "chat" })).backendLog!;
   expect(
-    log.map((entry) => ("room" in entry ? `${entry.from} ${entry.room}` : entry.method)),
+    log.map((entry) =>
+      "method" in entry
+        ? entry.method
+        : `${"from" in entry ? entry.from : entry.event} ${entry.room}`,
+    ),
   ).toEqual([
+    "join /rooms/general",
+    "join /rooms/general",
     "GET",
     "POST",
     "broadcast /rooms/general",

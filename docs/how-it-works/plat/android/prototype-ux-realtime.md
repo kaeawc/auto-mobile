@@ -160,7 +160,9 @@ broadcasts).
   lists `PUT` or `PATCH`) to the room path the binding produces. The `{item}` and `{item:/pointer}`
   bindings bind the stored item, so a message one device posts reaches every device in its room.
 - Every answered request, client send, `publish` and broadcast is logged (latest 200, with one
-  sequence number) for assertions; a frame entry is `{seq, room, from, data}`.
+  sequence number) for assertions; a frame entry is `{seq, room, from, data}`. Each connection
+  joining or leaving a room is logged as `{seq, room, event}` with `event` `join` or `leave`; a
+  leave covers a client close and a backend close.
 - **Actors** (at most 16, each with 1–64 steps) write to collections and publish to rooms on the
   backend's injected timer. An actor with `on.route` (`"POST /path/:id"`) fires after a successful (status below 400)
   request matching it. Otherwise it runs `maxRuns` times every `every` ms (100 ms or more; run k

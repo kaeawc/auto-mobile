@@ -237,7 +237,7 @@ describe("mock actor publish", () => {
     await backend.answer({ method: "POST", path: "/log", query: {}, body: { room: "a" } });
     timer.advanceTime(10);
     expect(frames).toEqual(["hi"]);
-    expect(backend.requestLog().filter((entry) => "room" in entry)).toMatchObject([
+    expect(backend.requestLog().filter((entry) => "from" in entry)).toMatchObject([
       { room: "/rooms/a", from: "publish", data: "hi" },
     ]);
     expect(backend.snapshot().log).toHaveLength(2);

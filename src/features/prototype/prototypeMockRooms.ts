@@ -2,7 +2,8 @@
  * Realtime rooms of a mock backend (#14271): WebSocket and SSE connections to a room path join that
  * room. `onConnect` frames greet each connection, `timeline` frames follow on the injected `Timer`,
  * `echo` returns a client's send, `relay` fans it out to the other members, and `publish` and
- * collection broadcasts reach every member. No socket is involved.
+ * collection broadcasts reach every member. Joins and leaves are recorded beside the frames. No
+ * socket is involved.
  */
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -34,9 +35,13 @@ export type MockRoomJoin =
 /** Who put a frame into a room, as `backendLog` reports it. */
 export type MockFrameSource = "client" | "publish" | "broadcast";
 
+/** A connection joining or leaving a room, as `backendLog` reports it. */
+export type MockRoomEvent = "join" | "leave";
+
 export interface MockRoomsDeps {
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   record(room: string, from: MockFrameSource, data: string): void;
+  recordConnection(room: string, event: MockRoomEvent): void;
 }
 
 interface Member {
@@ -95,6 +100,7 @@ export class MockRooms {
     }
     const member: Member = { room: match.room, path: normalized, target, timers: [], left: false };
     this.members.add(member);
+    this.deps.recordConnection(normalized, "join");
     const context: MockBindingContext = { params: match.params, query, body: undefined };
     for (const frame of match.room.onConnect ?? []) {
       this.deliverBound(member, frame, context);
@@ -163,6 +169,7 @@ export class MockRooms {
     member.left = true;
     member.timers.forEach((handle) => this.deps.timer.clearTimeout(handle));
     this.members.delete(member);
+    this.deps.recordConnection(member.path, "leave");
   }
 
   private deliverBound(

@@ -16,6 +16,7 @@ import { bindMockValue, decodeURIComponentSafe, matchMockPath } from "./prototyp
 import {
   MockRooms,
   type MockFrameSource,
+  type MockRoomEvent,
   type MockRoomJoin,
   type MockRoomMember,
 } from "./prototypeMockRooms";
@@ -56,7 +57,14 @@ export interface MockFrameLogEntry {
   data: string;
 }
 
-export type MockLogEntry = MockRequestLogEntry | MockFrameLogEntry;
+/** A connection joining or leaving a room (a leave covers a client close and a backend close). */
+export interface MockRoomEventLogEntry {
+  seq: number;
+  room: string;
+  event: MockRoomEvent;
+}
+
+export type MockLogEntry = MockRequestLogEntry | MockFrameLogEntry | MockRoomEventLogEntry;
 
 export interface MockBackendDeps {
   random: Random;
@@ -85,6 +93,7 @@ export class PrototypeMockBackend {
     this.rooms = new MockRooms(definition.rooms ?? [], {
       timer: deps.timer,
       record: (room, from, data) => this.append({ seq: 0, room, from, data }),
+      recordConnection: (room, event) => this.append({ seq: 0, room, event }),
     });
     this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, {
       write: (write) => this.applyActorWrite(write),
@@ -129,7 +138,7 @@ export class PrototypeMockBackend {
   }
 
   /**
-   * Requests answered and room frames seen with `seq` above `since`, oldest first; bounded to the
+   * Requests answered, room frames and room joins and leaves with `seq` above `since`, oldest first; bounded to the
    * latest 200.
    */
   requestLog(since = 0): MockLogEntry[] {

@@ -4,6 +4,7 @@ import {
   mockFrameData,
   type MockFrameSource,
   type MockRoomConnection,
+  type MockRoomEvent,
 } from "../../../src/features/prototype/prototypeMockRooms";
 import {
   MAX_MOCK_ROOM_MEMBERS,
@@ -26,9 +27,11 @@ class Member {
 function setup(rooms: MockRoom[]) {
   const timer = new FakeTimer();
   const log: [string, MockFrameSource, string][] = [];
+  const connections: [string, MockRoomEvent][] = [];
   const engine = new MockRooms(rooms, {
     timer,
     record: (room, from, data) => log.push([room, from, data]),
+    recordConnection: (room, event) => connections.push([room, event]),
   });
   const join = (path: string, query: Record<string, string> = {}) => {
     const member = new Member();
@@ -38,10 +41,31 @@ function setup(rooms: MockRoom[]) {
     }
     return { member, connection: joined.connection as MockRoomConnection };
   };
-  return { timer, log, engine, join };
+  return { timer, log, connections, engine, join };
 }
 
 describe("MockRooms", () => {
+  test("records each join and one leave per connection, on the normalized room path (#18380)", () => {
+    const { join, connections, engine } = setup([{ path: "/rooms/:roomId" }]);
+    const a = join("/rooms/a b");
+    join("/rooms/x");
+    a.connection.leave();
+    a.connection.leave();
+    engine.closeAll("gone");
+    expect(connections).toEqual([
+      ["/rooms/a%20b", "join"],
+      ["/rooms/x", "join"],
+      ["/rooms/a%20b", "leave"],
+      ["/rooms/x", "leave"],
+    ]);
+  });
+
+  test("a refused join records nothing", () => {
+    const { engine, connections } = setup([{ path: "/rooms/:roomId" }]);
+    engine.join("/feed", {}, new Member());
+    expect(connections).toEqual([]);
+  });
+
   test("onConnect frames greet each connection with params and query bound", () => {
     const { join } = setup([
       {

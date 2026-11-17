@@ -8,7 +8,7 @@ build-android-buildTools = "37.0.0"        # Used in playground Android modules
 build-android-compileSdk = "37"            # Used in playground Android modules
 build-android-minSdk = "24"                # Used in playground Android modules
 build-android-targetSdk = "37"             # Used in playground Android modules
-build-robolectric-maxSdk = "35"             # Highest SDK that runs on JDK 21 without extra JVM flags (Robolectric 4.17 registers 37, but SDK 36+ fails in ApplicationSharedMemory); raise when fixed
+build-robolectric-maxSdk = "35"             # Highest SDK that runs on JDK 21 without extra JVM flags (Robolectric 4.18 registers 37, but SDK 36+ fails in ApplicationSharedMemory); raise when fixed
 build-android-agp = "9.5.1"
 
 # Kotlin versions
@@ -66,7 +66,7 @@ junit-jupiter-api = "6.1.3"
 junit-vintage-engine = "6.1.3"
 koog-agents = "1.3.0"
 mockk = "1.14.12"
-robolectric = "4.17"
+robolectric = "4.18"
 snakeyaml = "2.7"
 json-schema-validator = "3.0.9"
 test-junit = "4.13.2"

@@ -43,7 +43,7 @@ function resolve(files: AndroidAutoHostFiles, overrides: Record<string, unknown>
 
 describe("resolveAndroidAutoProvisionInputs", () => {
   test("lists base.apk first and every split, and finds the SDK's DHU and default config", async () => {
-    const inputs = await resolve(COMPLETE, { acceptAndroidAutoTerms: true });
+    const inputs = await resolve(COMPLETE);
     expect(inputs.androidAutoApks).toEqual(
       [
         "base.apk",
@@ -53,7 +53,6 @@ describe("resolveAndroidAutoProvisionInputs", () => {
       ].map((name) => path.join(APK_DIR, name)),
     );
     expect(inputs.dhu).toEqual({ binaryPath: DHU, configPath: CONFIG });
-    expect(inputs.acceptAndroidAutoTerms).toBe(true);
   });
 
   test("a missing APK directory is an actionable error naming it", async () => {

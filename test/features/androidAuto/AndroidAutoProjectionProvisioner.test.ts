@@ -406,20 +406,22 @@ describe("AndroidAutoProjectionProvisioner", () => {
     expect(launcher.launches).toBe(3);
   });
 
-  test("reports a pending welcome screen without accepting Android Auto's terms", async () => {
+  test("accepts a pending welcome screen as part of provisioning, with no request flag", async () => {
     const { ui, provisioner } = setup();
     ui.onboardingPending = true;
     const result = await provisioner.provision(request());
-    expect(result.steps.at(-1)).toMatchObject({ step: "onboarding", status: "skipped" });
-    expect(ui.changes).not.toContain("onboarding");
-  });
-
-  test("accepts the welcome screen only on explicit instruction", async () => {
-    const { ui, provisioner } = setup();
-    ui.onboardingPending = true;
-    const result = await provisioner.provision(request({ acceptAndroidAutoTerms: true }));
     expect(result.steps.at(-1)).toMatchObject({ step: "onboarding", status: "applied" });
     expect(ui.changes).toContain("onboarding");
+  });
+
+  test("a rerun after the welcome screen was accepted reports it already done", async () => {
+    const { ui, provisioner } = setup();
+    ui.onboardingPending = true;
+    await provisioner.provision(request());
+    ui.changes.length = 0;
+    const rerun = await provisioner.provision(request());
+    expect(rerun.steps.at(-1)).toEqual({ step: "onboarding", status: "already-done" });
+    expect(ui.changes).not.toContain("onboarding");
   });
 
   test("a head unit server that never listens is an actionable error after the bounded wait", async () => {

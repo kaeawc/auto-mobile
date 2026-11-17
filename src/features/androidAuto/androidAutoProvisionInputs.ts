@@ -17,7 +17,6 @@ export interface AndroidAutoProvisionInputs {
   /** `base.apk` first, then every `split_*.apk`, so `adb install-multiple` gets the base first. */
   androidAutoApks: string[];
   dhu: { binaryPath: string; configPath: string };
-  acceptAndroidAutoTerms: boolean;
 }
 
 /** The read-only host filesystem view the resolver needs. */
@@ -125,17 +124,12 @@ export async function resolveAndroidAutoProvisionInputs(
   if (missing.length > 0) {
     throw new ActionableError(`Android Auto projection is missing ${missing.join("; and ")}.`);
   }
-  return {
-    androidAutoApks,
-    dhu,
-    acceptAndroidAutoTerms: options.acceptAndroidAutoTerms === true,
-  };
+  return { androidAutoApks, dhu };
 }
 
 /** The host files startDevice's head unit needs: the DHU and its config, no APKs. */
 export interface DesktopHeadUnitInputs {
   dhu: { binaryPath: string; configPath: string };
-  acceptAndroidAutoTerms: boolean;
 }
 
 /**
@@ -151,5 +145,5 @@ export async function resolveDesktopHeadUnitInputs(
   if (missing.length > 0) {
     throw new ActionableError(`The Android Auto head unit is missing ${missing.join("; and ")}.`);
   }
-  return { dhu, acceptAndroidAutoTerms: options.acceptAndroidAutoTerms === true };
+  return { dhu };
 }

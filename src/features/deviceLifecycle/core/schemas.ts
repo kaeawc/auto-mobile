@@ -81,12 +81,6 @@ const provisionAndroidAutoSchema = z
       .describe(
         "Head unit config (.ini); defaults to config/default_720p.ini beside the DHU binary",
       ),
-    acceptAndroidAutoTerms: z
-      .boolean()
-      .optional()
-      .describe(
-        "Tap Continue on Android Auto's welcome screen, which accepts its terms. Set only on the user's explicit instruction; otherwise a pending welcome screen is reported, not tapped.",
-      ),
   })
   .strict();
 
@@ -107,7 +101,6 @@ const startDeviceAndroidAutoSchema = z
       .describe(
         "Start a headless Desktop Head Unit projecting this phone. Pass {} for the SDK's DHU and default_720p.ini.",
       ),
-    acceptAndroidAutoTerms: provisionAndroidAutoSchema.shape.acceptAndroidAutoTerms,
   })
   .strict();
 

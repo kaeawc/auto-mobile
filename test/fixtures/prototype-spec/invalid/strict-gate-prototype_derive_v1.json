@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "derived-collections",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "rows": [{ "id": "a", "name": "Alpha" }]
+    },
+    "derive": {
+      "rows": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": { "derived": "rows" },
+        "as": "row"
+      },
+      "children": [{ "type": "text", "text": "{row.name}" }]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_model_v1"]
+  },
+  "expectedPath": "$"
+}

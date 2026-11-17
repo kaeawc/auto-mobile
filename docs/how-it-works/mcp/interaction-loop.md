@@ -196,10 +196,11 @@ carries them. A baseline whose response carried no skeleton never yields
 `unchanged: true`. The advertised diff arm
 requires `skeleton` or `unchanged`.
 
-A skeleton-projected diff leaves bounds-only moves out of `changed`, because the
-`skeleton` already has the new bounds. The diff drops moves of nodes with no
-affordance and counts moves of actionable nodes in `relayout: {count, dx?, dy?}`.
-`dx` and `dy` appear only when every move shares the same non-zero offset.
+A skeleton-projected diff leaves bounds-only changes (moves, resizes or both) out of
+`changed`, because the `skeleton` already has the new bounds. The diff drops them for
+nodes with no affordance and counts them for actionable nodes in
+`relayout: {count, dx?, dy?}`. `dx` and `dy` appear only when every counted change
+shares the same non-zero left or top offset, so a resize in place adds neither.
 
 A requested post-action screenshot is published under the same `observationId`
 as the hierarchy it should match. Only a settle-gated action can replace its

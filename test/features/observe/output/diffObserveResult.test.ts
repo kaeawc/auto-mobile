@@ -1043,6 +1043,29 @@ describe("diffObserveResult", () => {
     expect(compact.relayout).toEqual({ count: 1, dy: 5 });
   });
 
+  // #18487: a width-only change of an actionable control is a relayout with no offset.
+  test("a width-only change of an actionable control counts in relayout without dx/dy", () => {
+    const tree = (right: number) =>
+      obs({
+        "resource-id": "root",
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        node: [
+          {
+            "resource-id": "go",
+            text: "Go",
+            clickable: true,
+            actions: ["click"],
+            bounds: { left: 0, top: 60, right, bottom: 80 },
+          },
+        ],
+      });
+
+    const compact = diffObserveResult(tree(20), tree(40), { projectAddedRemoved: true });
+
+    expect(compact.changed).toEqual([]);
+    expect(compact.relayout).toEqual({ count: 1 });
+  });
+
   // #11638: a label-less control that shares a generic resource id with a control in
   // a different row must not be paired as "the same switch flipped".
   test("does not re-pair label-less toggles from different rows as a state change (#11638)", () => {

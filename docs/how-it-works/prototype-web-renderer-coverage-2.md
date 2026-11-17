@@ -11,7 +11,10 @@ descriptions here are the Android skin's.
   sources.
 - **Video chrome.** Android draws a centred 56 px play button over a bottom bar. iOS draws play
   inside a rounded bottom bar. The bar has a CC button when the player has captions. When
-  `controls` is `none`, the still draws no chrome. The still lists a poster as `assetNotInlined`.
+  `controls` is `none`, the still draws no chrome.
+- **Poster.** The page treats a `poster` as it treats an `image` asset: it encodes the poster at
+  the player's size and fits it over black, above the first frame and under the chrome. Until the
+  page inlines it, the still lists the poster as `assetNotInlined` (no bytes) or `assetOverBudget`.
 - **Camera preview.** A camera preview is a portrait viewfinder at its `aspectRatio` (default 4:3)
   showing colour bars and a label naming its mode.
 - **Cast button.** A cast button is the skin's idle route icon (Cast on Android, AirPlay on iOS) in

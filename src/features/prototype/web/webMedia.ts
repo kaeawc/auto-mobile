@@ -21,6 +21,7 @@ import {
   Z_INDEX,
 } from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
+import { webImageDraw, webImageLayers, webImageVar, type WebImageDraw } from "./webImages";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
 import { cssColor } from "./webStyle";
@@ -208,21 +209,68 @@ function centredPlay(): WebElement {
 }
 
 /**
+ * The box the poster is encoded for: the player's own sizing, as an `image` with its style would
+ * draw, fit inside it. An axis the style does not fix (wrapped, filled, weighted or only bounded)
+ * stays bounded by the screen, as for an `image`, so the encode never falls short of the player.
+ * The poster overlay fills the padding box, so the player's padding is not taken out.
+ */
+function posterDraw(asset: string, node: Raw, scope: WebRenderScope): WebImageDraw {
+  const style = { ...record(node.style), padding: undefined };
+  return webImageDraw(asset, { style }, scope.style.parentAxis);
+}
+
+/**
+ * The poster over the first frame (#16591), as an `image` draws an asset: the draw is recorded so
+ * the page encodes it at the player's size, and the entry stays listed (not inlined, else over
+ * budget until the page inlines it and drops the entry). With a slot, the poster fits the player
+ * over black, which shows only once the page's rule sets the slot's `-on` flag.
+ */
+function posterLayers(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  kit: WebRenderKit,
+): WebElement[] {
+  const asset = typeof node.poster === "string" ? kit.bound(node.poster, scope) : "";
+  if (asset.length === 0) {
+    return [];
+  }
+  const slot = scope.imageSlots?.get(asset);
+  scope.unsupported.push({
+    type: "videoPlayer",
+    ...(typeof node.id === "string" ? { id: node.id } : {}),
+    path,
+    reason: slot === undefined ? "assetNotInlined" : "assetOverBudget",
+    asset,
+  });
+  scope.imageDraws?.push(posterDraw(asset, node, scope));
+  if (slot === undefined) {
+    return [];
+  }
+  const poster = el(
+    "div",
+    {
+      attrs: { [DATA_PART]: "poster", [ARIA_HIDDEN]: "true" },
+      style: {
+        position: ABSOLUTE,
+        inset: "0",
+        [BACKGROUND_COLOR]: `rgba(0,0,0,var(${webImageVar(slot, "-on")},0))`,
+      },
+    },
+    webImageLayers(slot, {}, scope.style),
+  );
+  return [poster];
+}
+
+/**
  * A video player before playback: the source's first frame (a built-in sample draws its own
- * synthetic frame; other sources are not inlined and show black) and the skin's player chrome at
- * `startMs`, unless `controls` is `none`. A poster asset is not inlined, so it is listed as such.
+ * synthetic frame; other sources are not inlined and show black), the poster over it once the
+ * page inlines its asset, and the skin's player chrome at `startMs`, unless `controls` is `none`.
  */
 const videoPlayerRenderer =
   (kit: WebRenderKit): NodeRenderer =>
   (node, scope, path) => {
-    if (typeof node.poster === "string") {
-      scope.unsupported.push({
-        type: "videoPlayer",
-        ...(typeof node.id === "string" ? { id: node.id } : {}),
-        path,
-        reason: "assetNotInlined",
-      });
-    }
+    const poster = posterLayers(node, scope, path, kit);
     const ios = scope.condition.platform === "ios";
     const { attrs, style } = kit.base(node, scope, {
       position: RELATIVE,
@@ -235,6 +283,7 @@ const videoPlayerRenderer =
       node.controls === "none" ? [] : [...(ios ? [] : [centredPlay()]), controlRow(node, ios)];
     return el("div", { attrs: { [ARIA_LABEL]: "Video player", ...attrs, role: "region" }, style }, [
       videoFrame(node, scope),
+      ...poster,
       ...chrome,
     ]);
   };

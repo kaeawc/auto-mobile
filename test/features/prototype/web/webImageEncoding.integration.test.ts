@@ -103,6 +103,8 @@ describe("prototype web page images with sharp", () => {
     const half = await encoder.encode(png, [{ width: 120, height: 120, cover: false }], ANDROID);
     expect(Buffer.from(half.bytes.subarray(8, 12)).toString("ascii")).toBe("WEBP");
     expect([half.width, half.height]).toEqual([120, 80]);
+    // The natural size in points is the source's, not the downscaled encode's (#18418).
+    expect([half.naturalWidth, half.naturalHeight]).toEqual([240, 160]);
     const whole = await encoder.encode(png, [{ height: 525, cover: true }], ANDROID);
     expect([whole.width, whole.height]).toEqual([240, 160]);
   });
@@ -122,6 +124,7 @@ describe("prototype web page images with sharp", () => {
     const box = [{ width: 100, height: 20, cover: false }];
     const ios = await encoder.encode(jpeg, box, { applyExifOrientation: true });
     expect([ios.width, ios.height]).toEqual([10, 20]);
+    expect([ios.naturalWidth, ios.naturalHeight]).toEqual([20, 40]);
     expect((await sharp(Buffer.from(ios.bytes)).metadata()).orientation).toBeUndefined();
     const android = await encoder.encode(jpeg, box, ANDROID);
     expect([android.width, android.height]).toEqual([40, 20]);

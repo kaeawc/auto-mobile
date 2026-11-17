@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import type { BrokerClientFiles } from "./brokerClientFiles";

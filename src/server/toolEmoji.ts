@@ -54,6 +54,7 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   siri: tool("🗣️"),
   // Apps, files & data
   listApps: tool("🗂️"),
+  buildApp: tool("🔨"),
   launchApp: tool("🚀"),
   terminateApp: tool("🛑"),
   crashApp: tool("💥"),

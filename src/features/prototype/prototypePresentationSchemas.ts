@@ -1,5 +1,6 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { z } from "zod";
+import { z } from "zod/v3";
+import { prototypeOwnKeyRecordV3 } from "./prototypeOwnKeyRecord";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { pointerSchema, stateKeySchema } from "./prototypeActionValues";
@@ -334,12 +335,10 @@ export const TEXT_STYLE_ROLES = [
 export const prototypeShaderSchema = z
   .object({
     asset: z.string().min(1).max(256),
-    uniforms: z
-      .record(
-        z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$(?![\s\S])/),
-        z.number().finite().min(-1000000).max(1000000),
-      )
-      .and(z.unknown())
+    uniforms: prototypeOwnKeyRecordV3(
+      z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$(?![\s\S])/),
+      z.number().finite().min(-1000000).max(1000000),
+    )
       .refine((value) => Object.keys(value).length <= 16)
       .optional(),
   })

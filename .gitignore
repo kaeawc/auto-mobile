@@ -64,7 +64,9 @@ android/ide-plugin/.intellijPlatform/
 /css/
 /index.html
 /js/
-/packages/
+/packages/*
+!/packages/prototype-web/
+/packages/prototype-web/dist/
 demo/tmp-home/
 
 # Xcode index-build artifacts

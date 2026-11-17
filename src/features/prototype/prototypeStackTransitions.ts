@@ -1,6 +1,6 @@
 import { fail, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { routeParamsSchema } from "./prototypeRouteSchema";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { PROTOTYPE_STACK_TRANSITIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { mapBindableFields, record } from "./prototypeTemplate";

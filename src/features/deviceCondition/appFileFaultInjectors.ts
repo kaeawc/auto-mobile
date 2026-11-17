@@ -1,6 +1,6 @@
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,

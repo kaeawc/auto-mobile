@@ -1,6 +1,6 @@
 import "./harnessLogSink";
 import { join, resolve } from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import {
   iosReusePolicy,

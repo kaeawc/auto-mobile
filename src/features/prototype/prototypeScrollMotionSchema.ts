@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 const scrollRangeSchema = z.array(z.number().finite()).length(2);
 const scrollLinkedSchema = z
   .object({

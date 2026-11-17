@@ -331,13 +331,21 @@ function inlineResidueKeys(ctx: FinalizeToolResponseContext): readonly string[] 
  * refinements on ZodObject itself; pipes and transparent wrappers may instead
  * expose their output or unwrapped schema separately.
  */
+/**
+ * A key the object may omit. `isOptional()` asks whether the value accepts `undefined`, which
+ * `z.unknown()` does, but Zod 4.6 still requires that key; `optin` is the object's own rule.
+ */
+function isOmittableKey(fieldSchema: z.ZodType): boolean {
+  return fieldSchema._zod.optin !== undefined;
+}
+
 export function requiredOutputSchemaKeys(schema: unknown): readonly string[] {
   const objectSchema = unwrapOutputObjectSchema(schema);
   if (!objectSchema) {
     return [];
   }
   return Object.entries(objectSchema.shape)
-    .filter(([, fieldSchema]) => !fieldSchema.isOptional())
+    .filter(([, fieldSchema]) => !isOmittableKey(fieldSchema))
     .map(([key]) => key);
 }
 
@@ -348,7 +356,7 @@ function requiredOutputSchemaArrayKeys(schema: unknown): readonly string[] {
     return [];
   }
   return Object.entries(objectSchema.shape)
-    .filter(([, fieldSchema]) => !fieldSchema.isOptional() && fieldSchema instanceof z.ZodArray)
+    .filter(([, fieldSchema]) => !isOmittableKey(fieldSchema) && fieldSchema instanceof z.ZodArray)
     .map(([key]) => key);
 }
 

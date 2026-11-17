@@ -68,7 +68,8 @@ describe("screenshot plan", () => {
       const tools = shot.steps.flatMap((step) => (step.kind === "mcp" ? [step.tool] : []));
       expect(tools[0]).toBe(shot.profile.platform === "android" ? "getAndroid" : "getApple");
       expect(tools).toContain("statusBar");
-      expect(tools.indexOf("putAppFile")).toBeGreaterThan(tools.indexOf("terminateApp"));
+      expect(tools).not.toContain("putAppFile");
+      expect(tools.indexOf("prototype")).toBeGreaterThan(tools.indexOf("terminateApp"));
       const last = shot.steps[shot.steps.length - 1];
       expect(last).toEqual({
         kind: "mcp",
@@ -104,7 +105,38 @@ describe("screenshot plan", () => {
     expect(buildScreenshotPlan(pins)).toEqual(plan);
   });
 
-  test("app ID pins reach Android launch and iOS launch, termination, and file target", () => {
+  test("seeds the library through ProtoViewer's import path, one save per sample (#18397)", () => {
+    const loaded: string[] = [];
+    const seeded = buildScreenshotPlan(pins, (file) => {
+      loaded.push(file);
+      return { id: `spec:${file}` };
+    });
+    expect(loaded).toEqual(SAMPLE_LIBRARY.map((entry) => entry.file));
+    seeded.forEach((shot) => {
+      const saves = shot.steps.flatMap((step) =>
+        step.kind === "mcp" && step.tool === "prototype" ? [step.args] : [],
+      );
+      expect(saves).toEqual(
+        SAMPLE_LIBRARY.map((entry) => ({
+          action: "save",
+          platform: shot.profile.platform,
+          label: entry.label,
+          spec: { id: `spec:${entry.file}` },
+        })),
+      );
+      const tools = shot.steps.flatMap((step) => (step.kind === "mcp" ? [step.tool] : []));
+      expect(tools.lastIndexOf("prototype")).toBeLessThan(tools.lastIndexOf("launchApp"));
+    });
+  });
+
+  test("the default loader inlines each corpus spec", () => {
+    const save = plan[0]!.steps.find((step) => step.kind === "mcp" && step.tool === "prototype");
+    expect(save?.kind === "mcp" ? save.args.spec : undefined).toMatchObject({
+      id: expect.any(String),
+    });
+  });
+
+  test("app ID pins reach Android launch and iOS launch and termination", () => {
     const pinnedPlan = buildScreenshotPlan({
       ...pins,
       androidAppId: "dev.example.debug",
@@ -128,10 +160,6 @@ describe("screenshot plan", () => {
       "dev.example.iosdebug",
       "dev.example.iosdebug",
     ]);
-    const putAppFile = ios.steps.find((step) => step.kind === "mcp" && step.tool === "putAppFile");
-    expect(putAppFile?.kind === "mcp" ? putAppFile.args : undefined).toMatchObject({
-      target: { appId: "dev.example.iosdebug" },
-    });
   });
 });
 

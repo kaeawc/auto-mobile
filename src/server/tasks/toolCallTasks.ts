@@ -22,7 +22,9 @@ export function taskEligibleByName(names: ReadonlySet<string>): TaskEligibility 
   return ({ name }) => (names.has(name) ? { onCancel: "abort" } : undefined);
 }
 
-const abortEligible = taskEligibleByName(new Set(["startDevice", "executePlan", "installApp"]));
+const abortEligible = taskEligibleByName(
+  new Set(["startDevice", "executePlan", "installApp", "setUIState"]),
+);
 
 /** Recording stop must finish finalization even after the client stops polling (#13090). */
 export const TASK_ELIGIBILITY: TaskEligibility = (call) =>

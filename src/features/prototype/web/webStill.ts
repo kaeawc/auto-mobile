@@ -61,8 +61,8 @@ import {
 import { stillTextScale, type StillTextSize } from "./webTextScale";
 
 export interface PrototypeStillOptions {
-  /** A device frame id; defaults to the platform's default frame. */
-  readonly frame?: string;
+  /** A device frame id, or a frame already checked; defaults to the platform's default frame. */
+  readonly frame?: string | DeviceFrame;
   readonly platform?: "android" | "ios";
   /** The platform skin components draw in; defaults to the frame's platform. */
   readonly skin?: WebSkinId;
@@ -442,14 +442,19 @@ function postureFrameOptions(
   return { ...postureOf(view), ...(fold ? { fold } : {}) };
 }
 
+/** The frame drawn: one already checked, the one an id names, or the platform's default. */
+function stillFrame(options: PrototypeStillOptions): DeviceFrame {
+  if (typeof options.frame === "object") {
+    return options.frame;
+  }
+  return deviceFrameOrThrow(options.frame ?? defaultDeviceFrameId(options.platform ?? "android"));
+}
+
 export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
 ): PrototypeStill {
-  const view = frameInPosture(
-    deviceFrameOrThrow(options.frame ?? defaultDeviceFrameId(options.platform ?? "android")),
-    options.posture,
-  );
+  const view = frameInPosture(stillFrame(options), options.posture);
   const { frame } = view;
   const locale = stillLocale(options.locale);
   // Components expand, then string tables resolve for the host locale, as on devices.

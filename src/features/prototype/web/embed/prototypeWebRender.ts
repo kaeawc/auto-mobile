@@ -1,17 +1,23 @@
-import { defaultDeviceFrameId, deviceFrameOrThrow } from "../deviceFrames";
+import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "../deviceFrames";
 import { PrototypeWebInputError } from "../prototypeWebInputError";
 import { frameOrientations, type WebOrientation } from "../webFrame";
 import type { WebElement } from "../webNodes";
 import type { UnsupportedWebNode } from "../webRender";
 import { renderPrototypeStill } from "../webStill";
 import type { StillTextSize } from "../webTextScale";
+import { customDeviceFrame, type PrototypeWebFrame } from "./prototypeWebFrameObject";
 import { envelopeGlyphSource, type PrototypeGlyphParser } from "./prototypeWebGlyphs";
 import { PrototypeWebRefusal, readPrototypeWebInput } from "./prototypeWebInput";
 
+export type { PrototypeWebFrame } from "./prototypeWebFrameObject";
+
 /** Options of the pure `renderPrototype`; `mount` resolves `system` mode and `fit` zoom first. */
 export interface PrototypeRenderOptions {
-  /** A device frame id, or `false` for the default frame's screen alone (chromeless). */
-  readonly frame?: string | false;
+  /**
+   * A device frame id, a frame object, or `false` for the default frame's screen alone
+   * (chromeless).
+   */
+  readonly frame?: string | PrototypeWebFrame | false;
   readonly orientation?: WebOrientation;
   readonly mode?: "light" | "dark";
   /** A screen key of the outermost stack; an unknown key draws the stack's start. */
@@ -55,6 +61,14 @@ function refusingInputErrors<T>(draw: () => T): T {
   }
 }
 
+/** The frame an option names: an id, a checked frame object, or the default for `false`. */
+function drawnFrame(option: PrototypeRenderOptions["frame"]): DeviceFrame {
+  if (typeof option === "object") {
+    return customDeviceFrame(option);
+  }
+  return deviceFrameOrThrow(option === false ? DEFAULT_FRAME : (option ?? DEFAULT_FRAME));
+}
+
 /** The stack's screens with its start first, as the picker offers them. */
 function pickerStack(
   stack: PrototypeRenderedStack | undefined,
@@ -77,8 +91,8 @@ export function renderPrototype(
   options: PrototypeRenderOptions = {},
 ): PrototypeRendered {
   const input = readPrototypeWebInput(spec);
-  const frameId = options.frame === false ? DEFAULT_FRAME : (options.frame ?? DEFAULT_FRAME);
-  const orientations = refusingInputErrors(() => frameOrientations(deviceFrameOrThrow(frameId)));
+  const frame = refusingInputErrors(() => drawnFrame(options.frame));
+  const orientations = frameOrientations(frame);
   const orientation = options.orientation ?? orientations[0] ?? "portrait";
   const glyphs =
     input.glyphs && options.parseGlyph
@@ -86,7 +100,7 @@ export function renderPrototype(
       : undefined;
   const still = refusingInputErrors(() =>
     renderPrototypeStill(input.spec, {
-      frame: frameId,
+      frame,
       orientation,
       ...(options.frame === false ? { chromeless: true } : {}),
       ...(options.mode ? { mode: options.mode } : {}),

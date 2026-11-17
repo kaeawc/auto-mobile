@@ -173,6 +173,14 @@ function renderOptions(
   };
 }
 
+/** The frame `state` names while refused: the option's id, as a drawn view would. */
+function refusedFrame(frame: PrototypeMountOptions["frame"]): string | false {
+  if (typeof frame === "object") {
+    return typeof frame.id === "string" ? frame.id : defaultDeviceFrameId("android");
+  }
+  return frame ?? defaultDeviceFrameId("android");
+}
+
 /** The view state while the error view is drawn. */
 function refusedState(
   options: PrototypeMountOptions,
@@ -180,7 +188,7 @@ function refusedState(
   refusal: PrototypeWebRefusal,
 ): PrototypeViewState {
   return {
-    frame: options.frame ?? defaultDeviceFrameId("android"),
+    frame: refusedFrame(options.frame),
     orientation: options.orientation ?? "portrait",
     ...view,
     scale: 1,

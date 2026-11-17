@@ -4,6 +4,10 @@ import {
   SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
 } from "../models/deviceSnapshotTimeout";
 import { BARRIER_TIMEOUT_MS } from "../features/action/coordinationTimeout";
+import {
+  BUILD_APP_MCP_TIMEOUT_HEADROOM_MS,
+  DEFAULT_BUILD_TIMEOUT_MS,
+} from "../features/build/buildAppTimeout";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../features/navigation/exploreTimeout";
 import {
   DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
@@ -470,6 +474,15 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
         ),
     ],
     ["observe", resolveObserveWaitBudgetMs],
+    [
+      "buildApp",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          args.timeoutMs,
+          DEFAULT_BUILD_TIMEOUT_MS,
+          BUILD_APP_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
     ["mediaSession", resolveMediaSessionWaitBudgetMs],
     [
       "barrier",

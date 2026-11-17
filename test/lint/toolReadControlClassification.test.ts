@@ -240,6 +240,7 @@ const PLAIN_CLASSIFICATION: Classification = {
   },
   control: [
     "blePeripheral",
+    "buildApp",
     "deleteDevice",
     // Stops the active recording.
     "exportPlan",

@@ -35,6 +35,7 @@ object ValidTools {
         "exportPlan",
         "exportPrototypeWeb",
         "blePeripheral",
+        "buildApp",
         "focusNavigate",
         "getAppPermissions",
         "getDeepLinks",

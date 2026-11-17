@@ -55,6 +55,12 @@ test("accepts the typed reason, documented message and structured failure", () =
   }
 });
 
+test("tapOn accepts the documented typed multi-scene message", () => {
+  const calls = outcomes();
+  calls.set("tap", { error: message(2) });
+  expect(judgeMultiScene(manifest(), calls)).toEqual([]);
+});
+
 for (const backend of ["xctest", "sdk", undefined]) {
   test(`rejects success with backend ${backend}, even with multi_scene text`, () => {
     expect(
@@ -123,13 +129,15 @@ test("iPhone is not applicable and needs no tool outcomes", () => {
   expect(judgeMultiScene(input, new Map())).toEqual([]);
 });
 
-test("accepts a not-found tapOn only for the tap step", () => {
+test("reports a not-found tapOn as an ios-client finding", () => {
   const notFound = {
     error: "Failed to perform tap on element: Element not found with provided elementId 'x'",
   };
   const mixed = outcomes();
   mixed.set("tap", notFound);
-  expect(judgeMultiScene(manifest(), mixed)).toEqual([]);
+  expect(judgeMultiScene(manifest(), mixed)).toMatchObject([
+    { caseName: "tap", boundary: "ios-client" },
+  ]);
   mixed.set("observe", notFound);
-  expect(judgeMultiScene(manifest(), mixed)).toHaveLength(1);
+  expect(judgeMultiScene(manifest(), mixed)).toHaveLength(2);
 });

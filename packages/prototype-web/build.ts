@@ -1,16 +1,22 @@
-// Bundles the prototype web renderer from src/features/prototype/web/ into dist/index.js for the
-// browser (#16453). Run from this directory: `bun run build`. Nothing is installed here; the
+// Bundles the prototype web renderer from src/features/prototype/web/ into dist/index.js, and the
+// <automobile-prototype> element over it into dist/element.js, for the browser (#16453, #16454). Run from this directory: `bun run build`. Nothing is installed here; the
 // bundle inlines everything it reaches, so the package has no dependencies.
 import { fileURLToPath } from "node:url";
 
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
+/** The package's entry points; each bundles on its own, so `element` holds `mount` too. */
+export type PrototypeWebEntry = "index" | "element";
+
 /** The library bundle's source; the screenshot check loads the same build. */
-export async function buildPrototypeWebLibrary(outdir?: string): Promise<string> {
+export async function buildPrototypeWebLibrary(
+  outdir?: string,
+  entry: PrototypeWebEntry = "index",
+): Promise<string> {
   const result = await Bun.build({
-    entrypoints: [here("./src/index.ts")],
+    entrypoints: [here(`./src/${entry}.ts`)],
     ...(outdir ? { outdir } : {}),
-    naming: "index.js",
+    naming: `${entry}.js`,
     target: "browser",
     format: "esm",
     minify: true,
@@ -22,6 +28,8 @@ export async function buildPrototypeWebLibrary(outdir?: string): Promise<string>
 }
 
 if (import.meta.main) {
-  const code = await buildPrototypeWebLibrary(here("./dist"));
-  console.log(`prototype-web: dist/index.js, ${Buffer.byteLength(code)} bytes minified`);
+  for (const entry of ["index", "element"] as const) {
+    const code = await buildPrototypeWebLibrary(here("./dist"), entry);
+    console.log(`prototype-web: dist/${entry}.js, ${Buffer.byteLength(code)} bytes minified`);
+  }
 }

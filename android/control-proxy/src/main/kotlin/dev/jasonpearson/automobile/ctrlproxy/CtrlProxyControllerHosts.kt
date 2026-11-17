@@ -21,6 +21,8 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboa
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
+import java.io.File
+import java.io.OutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
@@ -136,10 +138,7 @@ internal class CtrlProxyDisplayHost(private val service: CtrlProxy) : DisplayCon
 
   override fun displayInsetsProvider() = insetsProvider
 
-  override fun frameworkDimenPx(name: String): Int {
-    val id = service.resources.getIdentifier(name, "dimen", "android")
-    return if (id > 0) service.resources.getDimensionPixelSize(id) else 0
-  }
+  override fun frameworkDimenPx(name: String) = service.frameworkDimenPx(name)
 
   override fun isXrSpatialDevice() =
     service.packageManager.hasSystemFeature(CtrlProxy.XR_SPATIAL_FEATURE)
@@ -148,6 +147,8 @@ internal class CtrlProxyDisplayHost(private val service: CtrlProxy) : DisplayCon
 }
 
 /** Wires [HierarchyController] to window selection, device facts, the WebSocket and app files. */
+// One forwarder per HierarchyController.Host method, so the count is the interface's.
+@Suppress("TooManyFunctions")
 internal class CtrlProxyHierarchyHost(private val service: CtrlProxy) : HierarchyController.Host {
   override fun currentFrameContext() = service.currentFrameContext()
 
@@ -200,9 +201,10 @@ internal class CtrlProxyHierarchyHost(private val service: CtrlProxy) : Hierarch
   override fun launchRequestScope(requestId: String?, block: suspend CoroutineScope.() -> Unit) =
     service.launchRequestScope(requestId, block)
 
-  override fun openFileOutput(filename: String, mode: Int) = service.openFileOutput(filename, mode)
+  override fun openFileOutput(filename: String, mode: Int): OutputStream =
+    service.openFileOutput(filename, mode)
 
-  override fun filesDir() = service.filesDir
+  override fun filesDir(): File = service.filesDir
 }
 
 /** Wires [ScreenshotController] to the framework screenshot API (API 30+). */

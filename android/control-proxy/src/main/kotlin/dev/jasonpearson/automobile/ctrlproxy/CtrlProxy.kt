@@ -1244,6 +1244,15 @@ class CtrlProxy : AccessibilityService() {
     get() = if (::webSocketServer.isInitialized) webSocketServer else null
 
   /** Whether the WebSocket server exists and is accepting connections. */
+  /**
+   * A framework `dimen` by name, or 0 when the platform has none. Kept on the service so its
+   * baselined DiscouragedApi lookup stays where `lint-baseline.xml` records it.
+   */
+  internal fun frameworkDimenPx(name: String): Int {
+    val id = resources.getIdentifier(name, "dimen", "android")
+    return if (id > 0) resources.getDimensionPixelSize(id) else 0
+  }
+
   internal fun isWebSocketRunning(): Boolean = webSocketServerOrNull?.isRunning() == true
 
   /** Connected clients; zero before the WebSocket server exists. */

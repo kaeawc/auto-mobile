@@ -145,9 +145,9 @@ Store screenshots must come from the store build; `--android-app-id` and `--ios-
 
 `--run` requires the private daemon environment used by `mcp-drive --private`, a built server,
 and already booted, dedicated devices with ProtoViewer installed. `prototype` `save` imports into
-the `.dev` build whenever it is installed, so before any shot `--run` lists the installed builds and
-stops when that seed target is not the app the shots capture (for example, both builds installed
-while capturing the store build); uninstall the other build or pass the matching app ID flag. It runs each shot's host
+the `.dev` build whenever it is installed. Before any shot, `--run` lists the installed builds for
+the current user. It stops when the build seeding would use is not the app the shots capture.
+Uninstall the other build, or pass the matching app ID flag. It runs each shot's host
 appearance commands before its MCP plan, then reads `screenshotPath` from the final `observe`
 JSON envelope. It accepts only a PNG whose header dimensions match the profile, and copies it to
 `<out>/<destination>` relative to `fastlane/metadata`. Temporary plan files are removed on exit.

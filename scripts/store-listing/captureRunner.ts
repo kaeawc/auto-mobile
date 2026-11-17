@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
 import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
 import { errorMessage } from "../../src/models/describeUnknownError";
+import { isMissingIosAppError } from "../../src/features/preferences/preferenceValues";
 import { packageListingContains } from "../../src/utils/android-cmdline-tools/shellOutputHeuristics";
 import {
   PROTOVIEWER_PACKAGE,
@@ -69,6 +70,12 @@ async function installedProtoViewerIds(
   runner: CaptureRunner,
 ): Promise<string[]> {
   if (platform === "android") {
+    // Seeding lists only the foreground user's packages (AndroidProtoViewer), so the probe does too.
+    const current = await runner.run(["adb", "-s", pin, "shell", "am", "get-current-user"]);
+    const userId = Number.parseInt(current.trim(), 10);
+    if (!Number.isSafeInteger(userId) || userId < 0) {
+      throw new Error(`Could not read the current Android user on ${pin}: ${current.trim()}`);
+    }
     const listing = await runner.run([
       "adb",
       "-s",
@@ -77,6 +84,8 @@ async function installedProtoViewerIds(
       "pm",
       "list",
       "packages",
+      "--user",
+      String(userId),
       PROTOVIEWER_PACKAGE,
     ]);
     return PROTOVIEWER_PACKAGES.filter((id) => packageListingContains(listing, id));
@@ -87,8 +96,11 @@ async function installedProtoViewerIds(
       await runner.run(["xcrun", "simctl", "get_app_container", pin, id]);
       found.push(id);
     } catch (error) {
-      // simctl exits non-zero when the bundle ID is not installed on this simulator.
-      console.debug(`${id} not installed on ${pin}: ${errorMessage(error)}`);
+      // Only a not-installed answer means absent; any other failure could hide the build seeding uses.
+      if (!isMissingIosAppError(errorMessage(error))) {
+        throw error;
+      }
+      console.debug(`${id} not installed on ${pin}`);
     }
   }
   return found;

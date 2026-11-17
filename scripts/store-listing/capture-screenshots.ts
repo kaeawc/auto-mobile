@@ -113,11 +113,16 @@ export async function main(argv: readonly string[]): Promise<number> {
     const plans = mkdtempSync(join(tmpdir(), "store-listing-plans-"));
     const runner: CaptureRunner = {
       async run(argv) {
-        const child = Bun.spawn(argv, { stdout: "pipe", stderr: "inherit" });
-        const stdout = await new Response(child.stdout).text();
+        const child = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
+        const [stdout, stderr] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+        ]);
+        process.stderr.write(stderr);
         const code = await child.exited;
         if (code !== 0) {
-          throw new Error(`${argv[0]} exited ${code}: ${stdout}`);
+          // stderr carries the reason a probe classifies (e.g. simctl's not-installed text).
+          throw new Error(`${argv[0]} exited ${code}: ${stdout}\n${stderr}`);
         }
         return stdout;
       },

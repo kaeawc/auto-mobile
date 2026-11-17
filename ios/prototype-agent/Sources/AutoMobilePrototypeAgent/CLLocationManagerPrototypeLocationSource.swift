@@ -66,7 +66,12 @@
                     if fixWaiters.count == 1 {
                         manager.desiredAccuracy = update == nil ? requested : min(requested, updateAccuracy)
                     } else { manager.desiredAccuracy = min(manager.desiredAccuracy, requested) }
-                    if fixWaiters.count == 1 { manager.requestLocation() }
+                    if fixWaiters.count == 1 {
+                        // A running update stream swallows requestLocation (a static simulated fix
+                        // never repeats), so pause it; finishFixes restarts it.
+                        if update != nil { manager.stopUpdatingLocation() }
+                        manager.requestLocation()
+                    }
                 }
             } onCancel: {
                 Task { @MainActor [weak self] in
@@ -153,7 +158,7 @@
                 altitudeM: location.verticalAccuracy >= 0 ? location.altitude : nil,
                 speedMps: location.speed >= 0 ? location.speed : nil,
                 bearingDeg: location.course >= 0 ? location.course : nil,
-                timestampMs: location.timestamp.timeIntervalSince1970 * 1000,
+                timestampMs: (location.timestamp.timeIntervalSince1970 * 1000).rounded(.down),
                 approximate: authorization == .authorizedApproximate
             )
             finishFixes(.success(fix))
@@ -180,7 +185,10 @@
             let waiters = fixWaiters
             fixWaiters.removeAll()
             waiters.values.forEach { $0.resume(with: result) }
-            if update != nil { manager.desiredAccuracy = updateAccuracy }
+            if update != nil {
+                manager.desiredAccuracy = updateAccuracy
+                manager.startUpdatingLocation()
+            }
             stopIfIdle()
         }
     }

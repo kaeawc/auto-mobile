@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   type DpadSelector,
+  focusOwnerBounds,
   pinnedFocusOptions,
   SelectorDpadTargetResolver,
 } from "../../../src/features/action/DpadTargetResolver";
@@ -209,8 +210,7 @@ describe("SelectorDpadTargetResolver", () => {
       node: [button],
     });
     const resolved = real().resolve(screen(capture(row)), { label: "Remove" });
-    expect(resolved).not.toEqual(row.bounds);
-    expect([title.bounds, button.bounds]).toContainEqual(resolved);
+    expect(resolved).toEqual(button.bounds);
   });
 
   test("a focused row in the upper window beats a focusable control in a lower window", () => {
@@ -283,6 +283,41 @@ describe("SelectorDpadTargetResolver", () => {
       expect.objectContaining(FIELD_BOUNDS),
     );
     expect(resolver.resolve(screen(searchField), { label: "Settings" })).toBeNull();
+  });
+});
+
+describe("focusOwnerBounds", () => {
+  const remove = (parent: TestNode): ResolvedSnapshot => {
+    const { resolution } = new ResolverElementSelector().selectWithResolution(
+      capture(parent),
+      { text: "Remove" },
+      { partialMatch: true, strategy: "first", intentAction: "inspect" },
+    );
+    const nodes = resolution.snapshotNodes ?? [];
+    const label = nodes.find((entry) => entry.element?.text === "Remove");
+    if (!label) {
+      throw new Error("label not in snapshot");
+    }
+    return { chosen: label, candidates: [label], snapshotNodes: nodes };
+  };
+  type ResolvedSnapshot = Pick<ElementResolution, "chosen" | "candidates" | "snapshotNodes">;
+  const title = node({ bounds: { left: 810, top: 30, right: 970, bottom: 70 }, text: "Remove" });
+  const rowBounds = { left: 0, top: 0, right: 1000, bottom: 100 };
+
+  test("stops the ancestor walk at a clickable intermediate, keeping the label's bounds", () => {
+    const button = node({
+      bounds: { left: 800, top: 20, right: 980, bottom: 80 },
+      clickable: "true",
+      focusable: "false",
+      node: [title],
+    });
+    const row = node({ bounds: rowBounds, focusable: "true", focused: "true", node: [button] });
+    expect(focusOwnerBounds(remove(row), "Remove")).toEqual(title.bounds);
+  });
+
+  test("promotes a pure label to its nearest focusable ancestor", () => {
+    const row = node({ bounds: rowBounds, focusable: "true", focused: "true", node: [title] });
+    expect(focusOwnerBounds(remove(row), "Remove")).toEqual(rowBounds);
   });
 });
 

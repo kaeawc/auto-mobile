@@ -52,6 +52,8 @@ sent, replacing backends of the same id, and a saved prototype does not carry th
   An actor write broadcasts like a request's. \`value\`, \`id\`, \`room\` and \`frame\` bind
   \`{params.x}\`, \`{query.x}\` and \`{body:/pointer}\` from the triggering request. A failed step is skipped and the run goes on;
   redefining or clearing the backend cancels pending steps. Poll the collection to see the result.
+  Actor delays follow wall time; \`simulate advanceTimeMs\` also moves every backend's actors ahead,
+  applying due steps in order, and returns \`actorSteps\`.
   \`advance\` and \`notify\` steps are not supported yet.
 - A request's \`timeoutMs\` applies to the mock too, and a response over the 262144-byte cap fails
   with \`too_large\`.
@@ -139,6 +141,8 @@ Patch preserves them. Fires never restart idle TTL.
 
 \`prototype {action:"simulate",id,advanceTimeMs:1000}\` advances without waiting (integer
 1..3600000), requiring the same capability. It returns \`fired\`; paused timers fire zero times.
+While a mock backend is defined it also advances the backends' actors, even on a device without
+the capability, and returns \`actorSteps\` (the actor steps applied).
 Due timers run chronologically, ties by start order, including timers started during advancement.
 Exactly 10000 due fires succeed. If another fire is still due, advance stops at the last fire with
 an error and fired=10000, keeping pending timers for the next call. Real scheduling continues from the shifted clock.

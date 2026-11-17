@@ -3,6 +3,7 @@ import type { AndroidStampToolchain } from "../../../../../src/features/prototyp
 import type {
   AndroidStampZip,
   AndroidStampAsset,
+  AndroidStampContent,
 } from "../../../../../src/features/prototype/disposableApp/android/AndroidStampZip";
 import type { DisposableAppSigner } from "../../../../../src/features/prototype/disposableApp/android/DisposableAppSigner";
 import type { AndroidDisposableAppStampInput } from "../../../../../src/features/prototype/disposableApp/android/AndroidDisposableAppStamper";
@@ -38,16 +39,13 @@ export class FakeAndroidStampToolchain implements AndroidStampToolchain {
 export class FakeAndroidStampZip implements AndroidStampZip {
   spec = "";
   assets: readonly AndroidStampAsset[] = [];
+  colors: ReadonlyMap<string, number> = new Map();
   constructor(private readonly calls: string[]) {}
-  assemble(
-    _template: Buffer,
-    _linked: Buffer,
-    spec: string,
-    assets: readonly AndroidStampAsset[],
-  ): Buffer {
+  assemble(_template: Buffer, _linked: Buffer, content: AndroidStampContent): Buffer {
     this.calls.push("zip");
-    this.spec = spec;
-    this.assets = assets;
+    this.spec = content.spec;
+    this.assets = content.assets;
+    this.colors = content.colors ?? new Map();
     return Buffer.from("assembled");
   }
 }

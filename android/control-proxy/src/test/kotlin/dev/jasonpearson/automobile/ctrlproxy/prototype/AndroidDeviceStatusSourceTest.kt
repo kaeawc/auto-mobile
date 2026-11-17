@@ -94,12 +94,19 @@ class AndroidDeviceStatusSourceTest {
       )
       shadowOf(Looper.getMainLooper()).idle()
     }
+    fun batteryReceivers() =
+      shadowOf(context as Application).registeredReceivers.count {
+        it.intentFilter.hasAction(Intent.ACTION_BATTERY_CHANGED)
+      }
     send(1, BatteryManager.BATTERY_STATUS_CHARGING)
     val source = AndroidBatteryStatusSource(context)
+    assertEquals(0, batteryReceivers())
     assertEquals(PrototypeDeviceStatus.battery(1, 3, 2), source.state.value)
+    assertEquals(1, batteryReceivers())
     send(2, BatteryManager.BATTERY_STATUS_FULL)
     assertEquals(PrototypeDeviceStatus.battery(2, 3, 5), source.state.value)
     source.close()
+    assertEquals(0, batteryReceivers())
     send(0, BatteryManager.BATTERY_STATUS_DISCHARGING)
     assertEquals(PrototypeDeviceStatus.battery(2, 3, 5), source.state.value)
   }

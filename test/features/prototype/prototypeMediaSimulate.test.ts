@@ -110,6 +110,18 @@ describe("simulatePrototypeMedia", () => {
       success: false,
       error: "code: Required",
     });
+    expect(validatePrototypeMediaSimPayload("media.ended", {})).toEqual({
+      success: false,
+      error: "player: Required",
+    });
+    // A present but wrong value keeps Zod's own message; only an omitted field reads Required.
+    const wrongCode = validatePrototypeMediaSimPayload("media.error", {
+      player: "main",
+      code: "teapot",
+    });
+    expect(wrongCode.success).toBe(false);
+    expect(wrongCode).not.toMatchObject({ error: "code: Required" });
+    expect(wrongCode).toMatchObject({ error: expect.stringContaining("code: Invalid option") });
     expect(
       validatePrototypeMediaSimPayload("media.statusChanged", {
         player: "main",

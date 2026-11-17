@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import mapping from "../../../schemas/prototype-platform-permissions.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 

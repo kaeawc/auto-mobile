@@ -93,6 +93,29 @@ const payloadSchemas: Record<
   "media.error": z.object({ player, code, advanceMs }).strict(),
 };
 
+/** The value `data` holds at `path`, or undefined when any step of it is absent. */
+function valueAtPath(data: unknown, path: readonly PropertyKey[]): unknown {
+  return path.reduce<unknown>(
+    (value, key) =>
+      typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined,
+    data,
+  );
+}
+
+/**
+ * The message for a payload issue. Zod 4 reports an omitted field as a type or option mismatch
+ * against `undefined`; callers are told the field is `Required`, as before Zod 4 (#16102).
+ */
+function payloadIssueMessage(issue: z.core.$ZodIssue | undefined, data: unknown): string {
+  if (!issue) {
+    return "invalid";
+  }
+  const typeOrOption = issue.code === "invalid_type" || issue.code === "invalid_value";
+  return typeOrOption && issue.path.length > 0 && valueAtPath(data, issue.path) === undefined
+    ? "Required"
+    : issue.message;
+}
+
 /** Parse `data` for a `media.*` event; the error names the first bad field. */
 export function validatePrototypeMediaSimPayload(
   event: PrototypeMediaSimEvent,
@@ -102,7 +125,7 @@ export function validatePrototypeMediaSimPayload(
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const path = issue?.path.length ? issue.path.join(".") : "data";
-    return { success: false, error: `${path}: ${issue?.message ?? "invalid"}` };
+    return { success: false, error: `${path}: ${payloadIssueMessage(issue, data)}` };
   }
   return { success: true, request: { event, ...parsed.data } };
 }

@@ -27,6 +27,32 @@ const waitForContainerField = nestedElementContainerSchema
 
 const publicActiveWindowAppIdAliases = ["packageName", "bundleId"] as const;
 
+/**
+ * `base.and(presence)` that still rejects keys outside the strict `base` shape. Zod 4.6
+ * reports an intersection's unknown key only when BOTH sides reject it, so a
+ * passthrough presence arm would let the strict base accept any extra key (#16102).
+ */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function strictPresenceIntersection<B extends z.ZodObject, P extends z.ZodType>(
+  base: B,
+  presence: P,
+) {
+  const known = new Set(Object.keys(base.shape));
+  return base.and(presence).check((ctx) => {
+    const value: unknown = ctx.value;
+    if (!isPlainRecord(value)) {
+      return;
+    }
+    const keys = Object.keys(value).filter((key) => !known.has(key));
+    if (keys.length > 0) {
+      ctx.issues.push({ code: "unrecognized_keys", keys, input: value });
+    }
+  });
+}
+
 const appIdAliasShape = {
   packageName: z.string().optional(),
   bundleId: z.string().optional(),
@@ -45,7 +71,8 @@ const activeWindowWaitForBaseSchema = z
   })
   .strict();
 
-const activeWindowWaitForSchema = activeWindowWaitForBaseSchema.and(
+const activeWindowWaitForSchema = strictPresenceIntersection(
+  activeWindowWaitForBaseSchema,
   z.union([...appIdPresenceBranches, z.object({ activityName: z.string() }).passthrough()]),
 );
 
@@ -80,7 +107,10 @@ const absentPredicatePresenceSchema = z.union([
   z.object({ contentDescription: z.string() }).passthrough(),
 ]);
 
-const absentPredicateSchema = absentPredicateBaseSchema.and(absentPredicatePresenceSchema);
+const absentPredicateSchema = strictPresenceIntersection(
+  absentPredicateBaseSchema,
+  absentPredicatePresenceSchema,
+);
 
 const POSTURE_WAIT_DESCRIPTION =
   "Wait for the observed device posture. Single-panel inventory fails immediately; multi-panel or unavailable inventory keeps polling. Timeout diagnostics distinguish unobservable posture (no hierarchy captured), unavailable inventory, and the last observed posture.";
@@ -239,7 +269,10 @@ const waitForPredicatePresenceSchema = z.union([
   z.object({ absent: absentPredicateSchema }).passthrough(),
 ]);
 
-const waitForElementSchema = waitForElementBaseSchema.and(waitForPredicatePresenceSchema);
+const waitForElementSchema = strictPresenceIntersection(
+  waitForElementBaseSchema,
+  waitForPredicatePresenceSchema,
+);
 
 // Declarative predicate DSL (issue #4398): `for` selects a condition backed by a
 // #4389 primitive. Everything but `stable` is a WaitForCondition predicate; the

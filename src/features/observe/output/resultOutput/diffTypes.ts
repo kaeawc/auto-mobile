@@ -85,6 +85,17 @@ export interface ObserveDiffNodeChange {
 }
 
 /**
+ * Bounds-only moves of actionable nodes in a skeleton-projected diff, summed up
+ * instead of listed in `changed` (#18348). `dx`/`dy` are present only when
+ * every move shares that non-zero offset.
+ */
+export interface ObserveDiffRelayout {
+  count: number;
+  dx?: number;
+  dy?: number;
+}
+
+/**
  * Compact diff of one observation against a baseline. `isDiff` is a discriminant
  * so a consumer can tell a diff apart from a full `ObserveResult` (which has no
  * such marker). Empty `added`/`removed`/`changed` and absent `fields` means the
@@ -225,6 +236,8 @@ export interface ObserveDiff {
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];
+  /** Skeleton projection only: bounds-only moves left out of `changed` (#18348). */
+  relayout?: ObserveDiffRelayout;
   /**
    * Changed top-level fields: scalars (`rotation`, `wakefulness`, …) and the
    * Element mirror fields (`focusedElement`, `accessibilityFocusedElement`,

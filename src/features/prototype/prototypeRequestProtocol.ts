@@ -4,7 +4,7 @@
  * answers with one `prototype_response` carrying the same `requestId`. Responses never go through
  * `patch`, so they cannot collide with `baseRevision`.
  */
-import { z } from "zod";
+import { z } from "zod/v3";
 
 export const PROTOTYPE_REQUEST_MESSAGE_TYPE = "prototype_request";
 export const PROTOTYPE_RESPONSE_MESSAGE_TYPE = "prototype_response";

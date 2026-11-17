@@ -472,6 +472,7 @@
             // Keep consuming the module stream for the model lifetime: cancelling an AsyncStream
             // iterator terminates it. Hidden sessions drop events; the next show seeds fresh state.
             platformDriver.subscribe()
+            platformRegistry.configure(locationBlock: seeded.locationBlock)
             deviceState.reset()
             if let lastDeviceState { updateDeviceState(lastDeviceState) }
             timers.perform(timerCommands)
@@ -752,6 +753,7 @@
                 onEvent?(event.wireObject(timestamp: timestamp))
             }
             if wasShown, !session.isShown {
+                platformRegistry.configure(locationBlock: nil)
                 hitRects.removeAll()
                 onVisibilityChange?(false)
             }

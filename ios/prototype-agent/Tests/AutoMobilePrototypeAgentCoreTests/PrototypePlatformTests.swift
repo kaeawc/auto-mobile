@@ -186,4 +186,35 @@ final class PrototypePlatformTests: XCTestCase {
         XCTAssertEqual(children[0].visibleWhen?.holds([:]), false)
         XCTAssertEqual(children[1].visibleWhen?.holds([:]), true)
     }
+
+    @MainActor
+    func testLocationUnavailableReasonsReachSessionMetadataWithoutTouchingMissingUsageSource() async throws {
+        let url = PrototypeSpecFixtures.directory.appendingPathComponent("valid/platform-location.json")
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: url))
+        let action = try XCTUnwrap(spec.root.children?[1].onTap?.first)
+        for reason in ["missing_usage_description", "disabled"] {
+            let source = LocationTestSource()
+            source.enabled = false
+            let bundle = reason == "disabled" ? LocationBundle() : LocationBundle(keys: [])
+            let clock = LocationClock()
+            let module = PrototypeLocationModule(source: source, bundle: bundle, clock: clock)
+            let registry = PrototypePlatformRegistry(modules: [module], bundle: bundle)
+            let driver = PrototypePlatformDriver(registry: registry, clock: clock)
+            var session = PrototypeSession()
+            session.show(spec)
+            _ = session.run([action])
+            driver.onComplete = { id, result, duration in
+                _ = session.completePlatformCall(id, result, durationMs: duration)
+            }
+            driver.perform(session.takePlatformCommands())
+            await driver.settled()
+            let error = session.data?["here__meta"]?.objectFields?["error"]?.objectFields
+            XCTAssertEqual(error?["code"], .string("unavailable"))
+            XCTAssertEqual(error?["reason"], .string(reason))
+            XCTAssertEqual(error?["message"], .string(reason))
+            XCTAssertEqual(session.state["locStatus"], .string("error"))
+            XCTAssertEqual(session.data?["here"], .object([:]))
+            if reason == "missing_usage_description" { XCTAssertEqual(source.touches, 0) }
+        }
+    }
 }

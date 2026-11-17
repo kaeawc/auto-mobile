@@ -23,6 +23,7 @@
 		3A2A9A65828D3CD103C00BE1 /* StatusSheetDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA12565BE3936B47614D8005 /* StatusSheetDemo.swift */; };
 		41A9106D251A3C850BDF5B2E /* CrayonGrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7824DDA408B56A9A41551ED /* CrayonGrain.swift */; };
 		4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */; };
+		4728B171C05093B3318F3D26 /* SdkContractMultiSceneScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10BB45FB502CB3E8B5B01BB5 /* SdkContractMultiSceneScenario.swift */; };
 		4E220C88A805ED0A7AFDEE38 /* PlaygroundDatabaseFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */; };
 		5339DAC5909A688059ABBA80 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01BCE22E951887741F32904 /* ContentView.swift */; };
 		54C16E199D10E281E1E316CF /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FD18EC8D1B9A665615C374 /* SettingsTab.swift */; };
@@ -53,7 +54,6 @@
 		C437D38FD2B064F815AE6F33 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */; };
 		C9A1977492B71CC9FE85DA16 /* PlaygroundDatabaseFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF899DC96DC92471BB6FC81 /* PlaygroundDatabaseFixture.swift */; };
 		CCE732EDB27B8BEAAC7FDFF6 /* SdkContractObservationScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A7309625B075243845F7B6 /* SdkContractObservationScenario.swift */; };
-		A18466000000000000000001 /* SdkContractMultiSceneScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18466000000000000000002 /* SdkContractMultiSceneScenario.swift */; };
 		D12E3E79A9005EE401375ACD /* SemanticLinkRotorDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32941883720B375F3B66BA7A /* SemanticLinkRotorDiscoveryTests.swift */; };
 		E46744897A309BECE20573D9 /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 5B1F96DAE2D3DE50DD89C21C /* AutoMobileSDK */; };
 		EA349DF37933D70B410F7135 /* DiscoverTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */; };
@@ -103,6 +103,7 @@
 /* Begin PBXFileReference section */
 		06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPickerProbeUITests.swift; sourceTree = "<group>"; };
 		0C5B41C44C18F0045A6B61C2 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		10BB45FB502CB3E8B5B01BB5 /* SdkContractMultiSceneScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractMultiSceneScenario.swift; sourceTree = "<group>"; };
 		11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonSketchTests.swift; sourceTree = "<group>"; };
 		24F5CDEF4DC174B7ACDBB1C8 /* highlight-core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "highlight-core"; path = "../highlight-core"; sourceTree = SOURCE_ROOT; };
 		25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemosTab.swift; sourceTree = "<group>"; };
@@ -120,7 +121,6 @@
 		52535C47CE2D35FDF1493DF7 /* SdkContractNetworkScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractNetworkScenario.swift; sourceTree = "<group>"; };
 		60750CB5B8FA6D4E22AFACC7 /* ShareSinkSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSinkSummary.swift; sourceTree = "<group>"; };
 		60A7309625B075243845F7B6 /* SdkContractObservationScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractObservationScenario.swift; sourceTree = "<group>"; };
-		A18466000000000000000002 /* SdkContractMultiSceneScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractMultiSceneScenario.swift; sourceTree = "<group>"; };
 		64FD18EC8D1B9A665615C374 /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
 		6832B4473F28F2540F82E439 /* SdkContractRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractRunner.swift; sourceTree = "<group>"; };
 		6CF4AE2E3B75AC24CF7B717F /* SdkContractBatchTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractBatchTap.swift; sourceTree = "<group>"; };
@@ -253,10 +253,10 @@
 				76D62C2A235EB2D2A41251D4 /* SdkContractLaunch.swift */,
 				D1D72A3B96460640F2B23D70 /* SdkContractLoopbackServer.swift */,
 				DD50FBCE86DE338DFF1B3A8A /* SdkContractManifest.swift */,
+				10BB45FB502CB3E8B5B01BB5 /* SdkContractMultiSceneScenario.swift */,
 				98C8931C04A4164E76D17EEA /* SdkContractNavigationScenario.swift */,
 				52535C47CE2D35FDF1493DF7 /* SdkContractNetworkScenario.swift */,
 				60A7309625B075243845F7B6 /* SdkContractObservationScenario.swift */,
-				A18466000000000000000002 /* SdkContractMultiSceneScenario.swift */,
 				6832B4473F28F2540F82E439 /* SdkContractRunner.swift */,
 				2E3EBAAF8B8FBFFD946B02E1 /* SdkContractStorageScenario.swift */,
 				2D043B8B93E4A3AA9A5007EC /* SdkContractWebViewScenario.swift */,
@@ -528,10 +528,10 @@
 				788B7DDDA3C8D747DCEC3E79 /* SdkContractLaunch.swift in Sources */,
 				ACC936F8CCF85CF89A058CE0 /* SdkContractLoopbackServer.swift in Sources */,
 				618E6925DDB73B95D843352E /* SdkContractManifest.swift in Sources */,
+				4728B171C05093B3318F3D26 /* SdkContractMultiSceneScenario.swift in Sources */,
 				F3295E5FEF53D1F42CB0411C /* SdkContractNavigationScenario.swift in Sources */,
 				6387D87FD823A3F1A4814A7A /* SdkContractNetworkScenario.swift in Sources */,
 				CCE732EDB27B8BEAAC7FDFF6 /* SdkContractObservationScenario.swift in Sources */,
-				A18466000000000000000001 /* SdkContractMultiSceneScenario.swift in Sources */,
 				A03793F43CE3F28402017D11 /* SdkContractRunner.swift in Sources */,
 				AC6D703E53A619D00154BA6E /* SdkContractStorageScenario.swift in Sources */,
 				B64005B9C13A8EF3E9783A81 /* SdkContractWebViewScenario.swift in Sources */,

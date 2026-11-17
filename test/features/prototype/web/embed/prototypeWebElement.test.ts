@@ -281,4 +281,13 @@ describe("<automobile-prototype> spec and lifecycle (#16454)", () => {
     expect(log).toEqual(["watch", "unwatch"]);
     expect(host.watcher).toBeUndefined();
   });
+
+  test("clearing the spec after it mounted mounts afresh with no spec, not the stale one", () => {
+    const { controller, log, mounts } = harness();
+    controller.spec = spec;
+    controller.connect();
+    controller.spec = undefined;
+    expect(log).toEqual(["mount", "destroy", "mount"]);
+    expect(mounts.map((options) => options.spec)).toEqual([spec, undefined]);
+  });
 });

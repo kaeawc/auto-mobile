@@ -151,10 +151,12 @@ export class PrototypeElementController {
 
   set spec(value: unknown) {
     this.propertySpec = { value };
-    if (this.handle) {
+    // mount's update drops an undefined option, so clearing the spec mounts afresh: it draws the
+    // invalidInput error view rather than keeping the previous prototype.
+    if (this.handle && value !== undefined) {
       this.handle.update({ spec: value });
     } else {
-      this.draw();
+      this.remount();
     }
   }
 

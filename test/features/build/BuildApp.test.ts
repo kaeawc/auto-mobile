@@ -6,6 +6,7 @@ import {
   BuildApp,
   nodeBuildFileSystem,
   buildLogExcerpt,
+  gradleBuildDirectory,
   type BuildFileSystem,
   type BuildPathInfo,
 } from "../../../src/features/build/BuildApp";
@@ -249,6 +250,32 @@ describe("BuildApp apple", () => {
     });
   });
 
+  test("an Xcode timeout keeps the output printed before the stall in logExcerpt", async () => {
+    const fs = new FakeFileSystem().add(TV_PROJECT, true);
+    const timeout = new Error("Command timed out after 5ms: xcodebuild -project", {
+      cause: Object.assign(new Error("aborted"), {
+        name: "AbortError",
+        stdout: "CompileSwift normal arm64 /work/TvApp/Slow.swift",
+        stderr: "",
+      }),
+    });
+    const result = await new BuildApp(
+      deps(
+        new FakeExecutor(() => {
+          throw timeout;
+        }),
+        fs,
+        "darwin",
+      ),
+    ).build({ platform: "tvos", projectPath: TV_PROJECT, scheme: "TvApp", timeoutMs: 5 });
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: "build_timed_out",
+      logExcerpt: "CompileSwift normal arm64 /work/TvApp/Slow.swift",
+    });
+  });
+
   test("rethrows when the caller aborted", async () => {
     const fs = new FakeFileSystem().add(TV_PROJECT, true);
     const controller = new AbortController();
@@ -302,6 +329,48 @@ describe("BuildApp android", () => {
       success: true,
       artifactPaths: [p(`${apkRoot}/free/debug/app-free-debug.apk`)],
     });
+  });
+
+  test("finds the APK under a projectDir relocated in settings, as Gradle reports it", async () => {
+    const relocated = p("/work/droid/mobile/build/outputs/apk");
+    const fs = new FakeFileSystem()
+      .add(p("/work/droid/gradlew"), false)
+      .add(relocated, true)
+      .add(p(`${relocated}/debug`), true)
+      .add(p(`${relocated}/debug/mobile-debug.apk`), false, 4);
+    const executor = new FakeExecutor((call) =>
+      call.args[0] === ":app:properties"
+        ? `name: app\nprojectDir: ${p("/work/droid/mobile")}\npath: :app\n`
+        : undefined,
+    );
+    const result = await new BuildApp(deps(executor, fs, "linux")).build({
+      platform: "android",
+      projectPath: p("/work/droid"),
+    });
+
+    expect(executor.calls[1]).toMatchObject({
+      file: p("/work/droid/gradlew"),
+      args: [":app:properties", "--console=plain", "-q"],
+      options: { cwd: p("/work/droid") },
+    });
+    expect(result).toMatchObject({
+      success: true,
+      artifactPaths: [p(`${relocated}/debug/mobile-debug.apk`)],
+    });
+  });
+
+  test("an unreadable Gradle properties report leaves artifact_not_found", async () => {
+    const fs = new FakeFileSystem().add(p("/work/droid/gradlew"), false);
+    const executor = new FakeExecutor((call) => {
+      if (call.args[0] === ":app:properties") {
+        throw new Error("properties failed");
+      }
+    });
+    const result = await new BuildApp(deps(executor, fs, "linux")).build({
+      platform: "android",
+      projectPath: p("/work/droid"),
+    });
+    expect(result).toMatchObject({ success: false, errorCode: "artifact_not_found" });
   });
 
   test("uses gradlew.bat on Windows and a nested module path", async () => {
@@ -391,6 +460,19 @@ describe("nodeBuildFileSystem", () => {
   test("a missing path is null, not an error", async () => {
     const missing = join(tmpdir(), "auto-mobile-build-app-missing", "nope");
     expect(await nodeBuildFileSystem.stat(missing)).toBeNull();
+  });
+});
+
+describe("gradleBuildDirectory", () => {
+  test("prefers buildDir, falls back to projectDir/build, and ignores relative values", () => {
+    const projectDir = p("/work/droid/mobile");
+    const buildDir = p("/work/out/mobile");
+    expect(gradleBuildDirectory(`projectDir: ${projectDir}\nbuildDir: ${buildDir}\n`)).toBe(
+      buildDir,
+    );
+    expect(gradleBuildDirectory(`projectDir: ${projectDir}\r\n`)).toBe(join(projectDir, "build"));
+    expect(gradleBuildDirectory("projectDir: mobile\nbuildDir: null\n")).toBeUndefined();
+    expect(gradleBuildDirectory("")).toBeUndefined();
   });
 });
 

@@ -5,6 +5,8 @@ import {
   PLAYGROUND_BUNDLE_ID,
   probeCtrlProxyQueue,
   collectScenarioFindings,
+  daemonPortRangeLabel,
+  sdkDiscoveryWindowFindings,
   readStorageCapabilities,
   parseOptions,
   selectScenarios,
@@ -42,6 +44,7 @@ test("failed CLI calls prefer structured tool diagnostics over the command line"
         });
         expect(outcome.result).toEqual(result);
         expect(outcome.error).toBe(longDetail.slice(0, 240));
+        expect(outcome.fullError).toBe(longDetail.trim());
         expect(outcome.error).not.toContain("Command failed:");
       }
     }
@@ -60,6 +63,7 @@ test("failed CLI calls fall back to a bounded stderr tail, then the exception", 
         throw Object.assign(new Error("Command failed: bun long-argv"), { stdout, stderr });
       });
       expect(outcome.error).toBe(stderr.slice(-240));
+      expect(outcome.fullError).toBe(stderr);
     }
     for (const error of [new Error("failure ".repeat(100)), "plain failure", null]) {
       const outcome = await invokeTool("tapOn", {}, "session", async () => {
@@ -95,6 +99,7 @@ test("--only selects named scenarios once in suite order, with all scenarios by 
   expect(selectScenarios(parseOptions(args).only)).toEqual([
     "network",
     "navigation",
+    "multi-scene",
     "capabilities",
     "faults",
     "observe",
@@ -127,7 +132,7 @@ test("main passes --only to the scenario runner", async () => {
   const selected: string[][] = [];
   expect(
     await main(["--device", "fake", "--app", "fake.app", "--only", "web-view"], {
-      acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 1 }),
+      acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 8765 }),
       run: async (options) => {
         selected.push(selectScenarios(options.only));
         return [];
@@ -152,7 +157,7 @@ test("a throwing scenario still outputs findings, writes a report and exits 1", 
   const output: string[] = [];
   let cleaned = false;
   const code = await main(["--device", "fake", "--app", "fake.app", "--report", "fake.json"], {
-    acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 1 }),
+    acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 8765 }),
     run: async () => {
       throw new Error("resource read failed");
     },
@@ -182,7 +187,7 @@ for (const phase of ["connect", "read"] as const) {
     const visited: string[] = [];
     let closed = false;
     const code = await main(["--device", "fake", "--app", "fake.app", "--report", "fake.json"], {
-      acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 1 }),
+      acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 8765 }),
       run: async () =>
         collectScenarioFindings(["storage", "next"], async (scenario) => {
           visited.push(scenario);
@@ -226,7 +231,7 @@ for (const phase of ["connect", "read"] as const) {
 test("a successful harness run still reports PASS and exits zero", async () => {
   const output: string[] = [];
   const code = await main(["--device", "fake", "--app", "fake.app"], {
-    acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 1 }),
+    acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 8765 }),
     run: async () => [],
     cleanup: async () => {},
     writeReport: async () => {},
@@ -248,4 +253,62 @@ test("a successful empty queue probe is conclusive", async () => {
   expect(
     await probeCtrlProxyQueue(1, async () => ({ ok: true, status: 200, text: async () => "[]" })),
   ).toEqual(new Set());
+});
+
+test("a runner port outside the SDK discovery window fails network and faults at once", async () => {
+  const reports: string[] = [];
+  let ran = false;
+  let cleaned = false;
+  const code = await main(["--device", "fake", "--app", "fake.app", "--report", "fake.json"], {
+    acquire: async () => ({ sessionUuid: "session", ctrlProxyPort: 19820 }),
+    run: async () => {
+      ran = true;
+      return [];
+    },
+    cleanup: async () => {
+      cleaned = true;
+    },
+    writeReport: async (_path, contents) => {
+      reports.push(contents);
+    },
+    output: () => {},
+    env: { AUTOMOBILE_PORT_RANGE_START: "19820", AUTOMOBILE_PORT_RANGE_SIZE: "40" },
+  });
+  expect(code).toBe(1);
+  expect(ran).toBe(false);
+  expect(cleaned).toBe(true);
+  const findings: { slice: string; boundary: string; message: string }[] = JSON.parse(
+    reports[0],
+  ).findings;
+  expect(findings.map((finding) => finding.slice)).toEqual(["network", "faults"]);
+  for (const finding of findings) {
+    expect(finding.boundary).toBe("sdk-endpoint");
+    expect(finding.message).toContain("port 19820");
+    expect(finding.message).toContain(
+      "AUTOMOBILE_PORT_RANGE_START=19820 AUTOMOBILE_PORT_RANGE_SIZE=40",
+    );
+    expect(finding.message).toContain("8765..8796 (excluding 8766)");
+  }
+});
+
+test("the discovery window guard ignores slices that do not need SDK discovery", () => {
+  expect(sdkDiscoveryWindowFindings(["observe", "storage"], 19820, {})).toEqual([]);
+  expect(sdkDiscoveryWindowFindings(selectScenarios(), 8780, {})).toEqual([]);
+  expect(sdkDiscoveryWindowFindings(selectScenarios(), 8796, {})).toEqual([]);
+  for (const port of [8764, 8766, 8797]) {
+    expect(sdkDiscoveryWindowFindings(["faults"], port, {})).toHaveLength(1);
+  }
+});
+
+test("the daemon port range label names the configured range", () => {
+  expect(daemonPortRangeLabel({})).toBe("the daemon's default range");
+  expect(daemonPortRangeLabel({ AUTO_MOBILE_PORT_RANGE_START: "19700" })).toBe(
+    "AUTOMOBILE_PORT_RANGE_START=19700",
+  );
+  expect(
+    daemonPortRangeLabel({
+      AUTOMOBILE_PORT_RANGE_START: "9000",
+      AUTOMOBILE_PORT_RANGE_END: "9010",
+    }),
+  ).toBe("AUTOMOBILE_PORT_RANGE_START=9000 AUTOMOBILE_PORT_RANGE_END=9010");
 });

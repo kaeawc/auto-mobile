@@ -116,6 +116,7 @@ final class FakeGesturePerformer: GesturePerforming {
     var onTap: (() -> Void)?
     var tapStrategies: [String?] = []
     var tapDiagnosticsResult: TapDiagnostics?
+    var tapRoute: TapDiagnostics.Route?
     var lockScreenSwipeCalls = 0
     var swipeCalls = 0
     var onSwipe: (() -> Void)?
@@ -172,6 +173,22 @@ final class FakeGesturePerformer: GesturePerforming {
     func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws {
         tapStrategies.append(strategy)
         try tap(x: x, y: y, duration: duration)
+    }
+
+    func tapReportingRoute(
+        x: Double, y: Double, duration: TimeInterval, strategy: String?
+    )
+        throws -> TapDiagnostics?
+    {
+        try tap(x: x, y: y, duration: duration, strategy: strategy)
+        return tapRoute.map {
+            .routeOnly(x: x, y: y, durationMs: Int(duration * 1000), route: $0)
+        }
+    }
+
+    func doubleTapReportingRoute(x: Double, y: Double) throws -> TapDiagnostics? {
+        try doubleTap(x: x, y: y)
+        return tapRoute.map { .routeOnly(x: x, y: y, durationMs: 0, route: $0) }
     }
 
     func tapWithDiagnostics(x: Double, y: Double, durationMs: Int, strategy: String?) throws -> TapDiagnostics {

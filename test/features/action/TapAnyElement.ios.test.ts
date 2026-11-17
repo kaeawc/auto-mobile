@@ -1,3 +1,5 @@
+import { IosSdkMultiSceneError } from "../../../src/features/observe/ios/sdkObservationBridge";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { afterEach, beforeEach, describe, expect, test, spyOn, mock } from "bun:test";
@@ -120,6 +122,34 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   afterEach(() => {
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
+  });
+
+  test("multi_scene during a fresh selector capture rejects without an XCTest tap", async () => {
+    const error = new IosSdkMultiSceneError(["primary", "secondary"]);
+    const capture = new FakeHierarchyCapture(
+      () => {
+        throw error;
+      },
+      "ios",
+      fakeTimer,
+    );
+    const command = new TapAnyElement(IOS_DEVICE, new FakeAdbClient(), {
+      timer: fakeTimer,
+      hierarchyCapture: capture,
+      elementSelector: new FakeElementSelector(),
+      iosVoiceOverDetector: fakeVoiceOverDetector,
+      lastRenderedObservation: displayLookup,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
+    await expect(command.execute({ action: "tap", searchUntil: { duration: 500 } })).rejects.toBe(
+      error,
+    );
+    expect(error.failure).toBe("multi_scene");
+    expect(capture.requests.length).toBe(1);
+    expect(fakeIosClient.getTapHistory()).toEqual([]);
+    expect(fakeIosClient.getActionHistory()).toEqual([]);
   });
 
   test.each([false, true])(

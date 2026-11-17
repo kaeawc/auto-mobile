@@ -33,6 +33,7 @@ import { NetworkState } from "../../../src/utils/NetworkState";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { formatFindings, type ContractBoundary, type ContractFinding } from "./boundaries";
 import { NAVIGATION_SLICE, judgeNavigation } from "./navigationSlice";
+import { MULTI_SCENE_SLICE, MULTI_SCENE_STEPS, judgeMultiScene } from "./multiSceneSlice";
 import { CAPABILITY_SLICE, judgeCapabilities } from "./capabilitySlice";
 import { setFaultRulesThroughCtrlProxy } from "./ctrlProxyFaultRules";
 import {
@@ -157,6 +158,20 @@ async function callTool(
   return parseToolOutput(stdout);
 }
 
+const DIAGNOSTIC_LIMIT = 240;
+
+/** Bounds the diagnostic, keeping the full text when the bound cut it so slices judge all of it. */
+function boundedError(
+  text: string,
+  keep: "head" | "tail",
+): Pick<ToolOutcome, "error" | "fullError"> {
+  if (text.length <= DIAGNOSTIC_LIMIT) {
+    return { error: text };
+  }
+  const error = keep === "head" ? text.slice(0, DIAGNOSTIC_LIMIT) : text.slice(-DIAGNOSTIC_LIMIT);
+  return { error, fullError: text };
+}
+
 /** A tool call that may fail: contract slices judge failures as well as results. */
 export async function invokeTool(
   tool: string,
@@ -169,7 +184,7 @@ export async function invokeTool(
     return result.success === false
       ? {
           result,
-          error: (toolFailureMessage(result) ?? "tool reported success: false").slice(0, 240),
+          ...boundedError(toolFailureMessage(result) ?? "tool reported success: false", "head"),
         }
       : { result };
   } catch (error) {
@@ -189,12 +204,14 @@ export async function invokeTool(
         );
       }
     }
-    const message =
-      toolFailureMessage(result)?.trim().slice(0, 240) ||
-      stderr.trim().slice(-240) ||
-      (error instanceof Error ? error.message : String(error)).slice(0, 240);
-    console.warn(`warning: ${tool} failed: ${message}`);
-    return { result, error: message };
+    const toolMessage = toolFailureMessage(result)?.trim();
+    const outcome = toolMessage
+      ? boundedError(toolMessage, "head")
+      : stderr.trim()
+        ? boundedError(stderr.trim(), "tail")
+        : boundedError(error instanceof Error ? error.message : String(error), "head");
+    console.warn(`warning: ${tool} failed: ${outcome.error}`);
+    return { result, ...outcome };
   }
 }
 
@@ -383,6 +400,7 @@ interface ScenarioContext {
 const SCENARIOS = [
   NETWORK_SLICE,
   NAVIGATION_SLICE,
+  MULTI_SCENE_SLICE,
   CAPABILITY_SLICE,
   FAULT_SLICE,
   OBSERVATION_SLICE,
@@ -458,6 +476,39 @@ async function driveObservationSteps(
   }
   const directory = contractDirectory(context.container);
   await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${runId}.actions-done`), "done\n");
+  return outcomes;
+}
+
+/** Waits for the host's actual scene activation before issuing either tool call. */
+async function driveMultiSceneSteps(
+  context: ScenarioContext,
+  runId: string,
+): Promise<Map<string, ToolOutcome>> {
+  const directory = contractDirectory(context.container);
+  const ready = await waitForManifest(join(directory, `${runId}.scenes-ready`));
+  if (ready === undefined) {
+    throw new ScenarioError("fixture-host", "no scenes-ready marker before multi-scene steps");
+  }
+  const outcomes = new Map<string, ToolOutcome>();
+  if (ready !== "not-applicable") {
+    // Like the observation slice, wait out a cached "bridge unavailable" capability: a rejection
+    // (an error) or an SDK-backed result ends the wait.
+    const deadline = defaultTimer.now() + BRIDGE_READY_WAIT_MS;
+    for (const step of MULTI_SCENE_STEPS) {
+      let outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
+      while (
+        step.tool === "observe" &&
+        outcome.error === undefined &&
+        outcome.result?.backend !== "sdk" &&
+        defaultTimer.now() < deadline
+      ) {
+        await defaultTimer.sleep(POLL_INTERVAL_MS);
+        outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
+      }
+      outcomes.set(step.caseName, outcome);
+    }
+  }
   await writeFile(join(directory, `${runId}.actions-done`), "done\n");
   return outcomes;
 }
@@ -552,6 +603,9 @@ async function judgeScenario(
   if (scenario === CAPABILITY_SLICE) {
     return judgeCapabilities(manifest);
   }
+  if (scenario === MULTI_SCENE_SLICE) {
+    return judgeMultiScene(manifest, live.observationOutcomes ?? new Map());
+  }
   if (scenario === OBSERVATION_SLICE) {
     return judgeObservationCases(manifest, live.observationOutcomes ?? new Map());
   }
@@ -607,7 +661,12 @@ async function runScenario(
     // Binds this session's CtrlProxy client so it drains the SDK events into this daemon, and
     // makes Playground CtrlProxy's tracked foreground app for the fault-rule command.
     boundary = "ios-client";
-    await callTool("observe", { platform: "ios" }, context.sessionUuid);
+    if (scenario === MULTI_SCENE_SLICE) {
+      // The second scene may already be connected, so this bind call may fail with multi_scene.
+      await invokeTool("observe", { platform: "ios" }, context.sessionUuid);
+    } else {
+      await callTool("observe", { platform: "ios" }, context.sessionUuid);
+    }
     boundary = "fixture-host";
     if (scenario === FAULT_SLICE) {
       const failure = await installFaultRules(context, runId);
@@ -616,7 +675,11 @@ async function runScenario(
       }
     }
     const observationOutcomes =
-      scenario === OBSERVATION_SLICE ? await driveObservationSteps(context, runId) : undefined;
+      scenario === OBSERVATION_SLICE
+        ? await driveObservationSteps(context, runId)
+        : scenario === MULTI_SCENE_SLICE
+          ? await driveMultiSceneSteps(context, runId)
+          : undefined;
     const webViewOutcomes =
       scenario === WEB_VIEW_SLICE ? await driveWebView(context, runId) : undefined;
     const manifestText = await waitForManifest(
@@ -698,6 +761,58 @@ async function connectMcpClient(): Promise<Client> {
   return client;
 }
 
+/**
+ * The ports the SDK probes for this simulator's CtrlProxy (`CtrlProxyEndpointResolver`):
+ * 8765..8796, skipping the SDK hierarchy server at 8766.
+ */
+export const SDK_CTRL_PROXY_DISCOVERY = { first: 8765, last: 8796, reserved: 8766 } as const;
+/** Slices whose SDK events must reach CtrlProxy through the SDK's own discovery. */
+const SDK_DISCOVERY_SLICES: readonly string[] = [NETWORK_SLICE, FAULT_SLICE];
+
+/** The daemon's configured runner port range, as its environment names it. */
+export function daemonPortRangeLabel(env: Readonly<Record<string, string | undefined>>): string {
+  const read = (name: string) => env[`AUTOMOBILE_${name}`] ?? env[`AUTO_MOBILE_${name}`];
+  const start = read("PORT_RANGE_START");
+  if (start === undefined) {
+    return "the daemon's default range";
+  }
+  const end = read("PORT_RANGE_END");
+  const size = read("PORT_RANGE_SIZE");
+  if (end !== undefined) {
+    return `AUTOMOBILE_PORT_RANGE_START=${start} AUTOMOBILE_PORT_RANGE_END=${end}`;
+  }
+  return size === undefined
+    ? `AUTOMOBILE_PORT_RANGE_START=${start}`
+    : `AUTOMOBILE_PORT_RANGE_START=${start} AUTOMOBILE_PORT_RANGE_SIZE=${size}`;
+}
+
+/**
+ * A runner the SDK never probes leaves the network and faults events pending, which the slices
+ * would otherwise report as `sdk-endpoint` findings after their live wait. Fail before running.
+ */
+export function sdkDiscoveryWindowFindings(
+  scenarios: readonly string[],
+  ctrlProxyPort: number,
+  env: Readonly<Record<string, string | undefined>>,
+): ContractFinding[] {
+  const { first, last, reserved } = SDK_CTRL_PROXY_DISCOVERY;
+  if (ctrlProxyPort >= first && ctrlProxyPort <= last && ctrlProxyPort !== reserved) {
+    return [];
+  }
+  return scenarios
+    .filter((scenario) => SDK_DISCOVERY_SLICES.includes(scenario))
+    .map((slice) => ({
+      slice,
+      caseName: "run",
+      boundary: "sdk-endpoint" as const,
+      message:
+        `the session's CtrlProxy runner is on port ${ctrlProxyPort} (${daemonPortRangeLabel(env)}), ` +
+        `outside the SDK's CtrlProxy discovery window ${first}..${last} (excluding ${reserved}); ` +
+        `SDK events would never reach CtrlProxy. Start the daemon with a runner port range inside ` +
+        `${first}..${last}, e.g. AUTOMOBILE_PORT_RANGE_START=8780 AUTOMOBILE_PORT_RANGE_SIZE=16.`,
+    }));
+}
+
 function fixtureFailure(slice: string, message: string): ContractFinding {
   return { slice, caseName: "run", boundary: "fixture-host", message };
 }
@@ -708,6 +823,8 @@ interface HarnessRuntime {
   cleanup: (deviceId: string, sessionUuid: string) => Promise<void>;
   writeReport: (path: string, contents: string) => Promise<void>;
   output: (text: string) => void;
+  /** The daemon's environment, for naming its runner port range; defaults to this process's. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 const defaultRuntime: HarnessRuntime = {
@@ -731,9 +848,15 @@ export async function main(
 ): Promise<number> {
   const options = parseOptions(argv);
   const { sessionUuid, ctrlProxyPort } = await runtime.acquire(options.deviceId);
-  let findings: ContractFinding[];
+  let findings: ContractFinding[] = sdkDiscoveryWindowFindings(
+    selectScenarios(options.only),
+    ctrlProxyPort,
+    runtime.env ?? process.env,
+  );
   try {
-    findings = await runtime.run(options, sessionUuid, ctrlProxyPort);
+    if (findings.length === 0) {
+      findings = await runtime.run(options, sessionUuid, ctrlProxyPort);
+    }
   } catch (error) {
     findings = [
       {

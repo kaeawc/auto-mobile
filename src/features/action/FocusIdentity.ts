@@ -242,9 +242,11 @@ function rangeOf(screen: Pick<FocusScreen, "focused" | "elements">): string {
 /**
  * The control's label without its signed digits: a slider announcing its value (`Volume 49%`,
  * `Balance -1`) keeps its stem across a step, zero crossings included, while a recycled focus slot that now shows another control (`Brightness`) does not (#18393).
+ * Digits are any Unicode decimal digits, so localized readouts (`Volume ٥٠`, Arabic-Indic, with
+ * its own decimal and thousands separators) keep their stem too (#18438).
  */
 function labelStem(element: Element): string {
-  return labelOf(element).replace(/[-+\u2212]?\d+([.,]\d+)?/g, "#");
+  return labelOf(element).replace(/[-+\u2212]?\p{Nd}+([.,\u066B\u066C]\p{Nd}+)?/gu, "#");
 }
 
 /**

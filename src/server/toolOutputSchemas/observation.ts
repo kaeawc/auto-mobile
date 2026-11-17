@@ -424,7 +424,7 @@ export const observeDiffSchema = z
       })
       .optional()
       .describe(
-        "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+        "Actionable controls whose only change is their bounds (moved, resized or both), left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every one shares that non-zero left/top offset, so a resize in place adds neither.",
       ),
     fields: z.record(z.string(), layoutWarningsDiffFieldSchema).optional(),
     importedPrototypeContent: importedPrototypeContentSchema.optional(),

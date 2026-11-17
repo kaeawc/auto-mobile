@@ -74,8 +74,6 @@ final class SdkContractWebViewScenario: NSObject, WKNavigationDelegate, WKScript
     }
 
     func registerWebView() {
-        // #18475: merged DOM bounds ignore an adjusted content inset
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.navigationDelegate = self
         webView.configuration.userContentController.add(self, name: "contractLog")
         bridge.register(webView)

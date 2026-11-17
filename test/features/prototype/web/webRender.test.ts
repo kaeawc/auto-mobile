@@ -1792,6 +1792,23 @@ describe("prototype web still (#16346)", () => {
     expect(button.style).not.toHaveProperty("padding");
   });
 
+  test("a bottom sheet with an aspect ratio in a row leaves the text after it its width (#16711)", () => {
+    const text = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          children: [
+            { type: "bottomSheet", style: { aspectRatio: 1 }, child: { type: "text", text: "s" } },
+            { type: "text", testTag: "t", text: "after" },
+          ],
+        },
+      }),
+      "t",
+    )[0]!;
+    expect(text.style).not.toHaveProperty("max-width");
+  });
+
   test("theme typography scales and sets the family of every type-scale role", () => {
     const text = byTag(
       renderPrototypeStill({

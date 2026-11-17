@@ -17,7 +17,7 @@ shipped artifacts. Each SDK capability is covered by one slice, described in the
 Playground does nothing unless launched with `PLAYGROUND_SDK_CONTRACT=<scenario>` and
 `PLAYGROUND_SDK_CONTRACT_RUN_ID=<id>` (passed as `SIMCTL_CHILD_*`). The run id is limited to
 ASCII letters, digits and hyphens because it becomes a file name and a URL path segment. The
-harness runs the `network`, `capabilities`, `faults`, `observe`, `storage-default` and `storage`
+harness runs the `network`, `navigation`, `multi-scene`, `capabilities`, `faults`, `observe`, `storage-default` and `storage`
 scenarios in that order, each in a fresh Playground process, because host registration cannot be
 undone inside a process.
 
@@ -150,6 +150,15 @@ The host log is the ground truth:
 - An undeclared action reaching the bridge is `sdk-adapter`.
 - A node that was not routed, or a stale target that did not fail closed, is `ios-client`.
 
+## Multi-scene slice
+
+On iPad, Playground registers the observation bridge and activates a second scene before writing
+`<runId>.scenes-ready`. The harness then calls `observe` and taps `contract-save` through the MCP
+CLI. `observe` and `tapOn` must fail with the typed `multi_scene` message, without XCTest fallback
+or executing a host action. After `<runId>.actions-done`, the manifest's `multiScene` log records the device class,
+scene identifiers and observation host log; no action may have executed. On iPhone its status is
+`not-applicable`, the harness skips these calls and the judge returns no findings.
+
 ## Storage slice
 
 The `storage-default` scenario applies the default storage configuration (nothing registered, Keychain deletion
@@ -168,6 +177,11 @@ reachable SDK reporting the wrong state is `sdk-adapter`; `BRIDGE_UNAVAILABLE` w
 
 - No CtrlProxy reachable from the app: the SDK keeps events pending and the cases report
   `sdk-endpoint`.
+- The SDK finds CtrlProxy only on ports 8765..8796, excluding 8766. The `network` and `faults`
+  scenarios therefore need the daemon's runner port range inside that window; a private daemon
+  can use, for example, `AUTOMOBILE_PORT_RANGE_START=8780 AUTOMOBILE_PORT_RANGE_SIZE=16`. When the
+  session's runner port is outside it, the harness reports one `sdk-endpoint` finding per selected
+  scenario, naming both ranges, and runs no scenario.
 - The session's CtrlProxy client is not draining: events stay queued and report `ios-client`.
 - The scenario times out after 30 s, a case fails or a listener fails: `fixture-host`. The report carries the
   case name, the error domain and code, and the loopback server's event log (accepted, request

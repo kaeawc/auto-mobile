@@ -25,7 +25,10 @@ type JsonRecord = Record<string, unknown>;
 /** A tool call's structured result, or the error it failed with. */
 export interface ToolOutcome {
   result?: JsonRecord;
+  /** Diagnostic text, bounded for logs and findings. */
   error?: string;
+  /** The untruncated failure text, present only when `error` was cut; judge against this. */
+  fullError?: string;
 }
 
 /** One harness step: the tool, its arguments, and the case it is judged as. */

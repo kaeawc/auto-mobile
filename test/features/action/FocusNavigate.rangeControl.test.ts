@@ -319,6 +319,46 @@ describe("FocusNavigate around range controls (#17209)", () => {
     expect(home.valueOf("balance")).toBe(-1);
   });
 
+  test.each([
+    ["Arabic-Indic", 0x0660, ""],
+    ["Devanagari", 0x0966, ""],
+    ["Arabic-Indic decimal", 0x0660, "\u066B\u0665"],
+  ])(
+    "a slider announcing its value in %s digits is still undone (#18438)",
+    async (_name, zero, fraction) => {
+      const localized = (value: number) =>
+        [...String(value)].map((digit) => String.fromCodePoint(zero + Number(digit))).join("");
+      const home: FakeSettingsColumn = new FakeSettingsColumn("volume", {
+        volume: {
+          element: () => ({
+            "resource-id": "volume",
+            class: "android.widget.SeekBar",
+            "content-desc": `Volume ${localized(home.valueOf("volume"))}${fraction}`,
+            focusable: true,
+            "range-info": `current:${home.valueOf("volume")}.0,min:0.0,max:100.0`,
+            bounds: { left: 0, top: 100, right: 1000, bottom: 200 },
+          }),
+          moves: { down: "done" },
+          adjusts: ["left", "right"],
+        },
+        done: {
+          element: () => ({
+            text: "Done",
+            focusable: true,
+            bounds: { left: 1500, top: 120, right: 1700, bottom: 180 },
+          }),
+          moves: { up: "volume" },
+        },
+      });
+      const result = await new FocusNavigate(home, home, timer).execute({
+        until: { text: "Done" },
+      });
+      expect(result).toMatchObject({ success: true, status: "focused" });
+      expect(home.presses.slice(0, 2)).toEqual(["arrow_right", "arrow_left"]);
+      expect(home.valueOf("volume")).toBe(50);
+    },
+  );
+
   test("a focused scrollable container with a range child walks toward its contained target (#18393)", async () => {
     const home = new FakeSettingsColumn(
       "list",

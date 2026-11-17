@@ -105,6 +105,75 @@ describe("XcodebuildClient executeCommand timeout", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("a timeout keeps the output the command printed before it stalled", async () => {
+    const timer = new FakeTimer();
+    let capturedSignal: AbortSignal | undefined;
+    const client = new XcodebuildClient(async (_file, args, _maxBuffer, signal) => {
+      if (args.join(" ") === "-version") {
+        return createExecResult("Xcode 26.5", "");
+      }
+      capturedSignal = signal;
+      return new Promise<ExecResult>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(
+            Object.assign(new Error("aborted"), {
+              name: "AbortError",
+              stdout: "CompileSwift normal arm64 Stalled.swift",
+              stderr: "warning: still linking",
+            }),
+          );
+        });
+      });
+    }, timer);
+
+    const promise = client.executeCommand(["build"], { timeoutMs: 100 });
+    while (!capturedSignal) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(100);
+
+    const error = await promise.then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Command timed out after 100ms: xcodebuild build");
+    expect((error as Error).cause).toMatchObject({
+      stdout: "CompileSwift normal arm64 Stalled.swift",
+      stderr: "warning: still linking",
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a timed-out child that never settles still reports the bare timeout", async () => {
+    const timer = new FakeTimer();
+    let capturedSignal: AbortSignal | undefined;
+    const client = new XcodebuildClient(async (_file, args, _maxBuffer, signal) => {
+      if (args.join(" ") === "-version") {
+        return createExecResult("Xcode 26.5", "");
+      }
+      capturedSignal = signal;
+      return new Promise<ExecResult>(() => {});
+    }, timer);
+
+    const promise = client.executeCommand(["build"], { timeoutMs: 100 });
+    while (!capturedSignal) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(100);
+    while (timer.getPendingTimeoutCount() === 0) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(2_000);
+
+    const error = await promise.then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
+    expect((error as Error).message).toBe("Command timed out after 100ms: xcodebuild build");
+    expect((error as Error).cause).toBeUndefined();
+  });
+
   test("bounds the availability probe within the command timeout", async () => {
     const timer = new FakeTimer();
     let probeSignal: AbortSignal | undefined;

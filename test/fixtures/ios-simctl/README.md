@@ -54,3 +54,10 @@ Captured verbatim from real `xcrun simctl` runs. Nothing here is hand-written.
   Vision Pro 4K simulator, quoted in the issue from the #16854 dogfood run (2026-11-11).
   The app logs with `Logger(subsystem: "dev.dogfood.vision", category: "ui")`; the output
   starts with the same `getpwuid_r` preamble as watchOS and tvOS.
+- `failures/*.stderr.txt` (#14116): verbatim simctl stderr quoted in the #14116 capture
+  comment (macOS 26.6.2, Xcode 26.6 (17F113), iOS 27.0 runtime, `iPhone 18 Pro` spare
+  simulator). The host already replaced the device id with `<UDID>`, the home directory
+  user with `<user>`, and the bad-device argument with `<arg>`. Exit codes, which the
+  files do not carry: `boot-already-booted-405`, `shutdown-already-shutdown-405` and
+  `erase-booted-405` exit 149; `boot-invalid-device` exits 148;
+  `boot-data-missing-on-disk` (after removing the device's `data/` subtree) exits 2.

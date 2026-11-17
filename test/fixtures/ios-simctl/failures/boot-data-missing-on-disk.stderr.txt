@@ -1,0 +1,4 @@
+An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2):
+Unable to boot device because it cannot be located on disk.
+The device's data is no longer present at /Users/<user>/Library/Developer/CoreSimulator/Devices/<UDID>/data.
+Use the device manager in Xcode or the simctl command line tool to either delete the device properly or erase contents and settings.

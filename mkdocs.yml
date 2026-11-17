@@ -295,6 +295,7 @@ nav:
       - "Screen control": using/screen-control.md
       - "Performance traces": using/performance-trace.md
       - "Accessibility and performance audits": using/audits.md
+      - "In-app purchase testing": using/storekit-test.md
       - "Emulator and simulator audio": using/emulator-audio.md
       - "Headless host audio setup": using/headless-audio.md
       - "Device ownership": using/device-ownership.md

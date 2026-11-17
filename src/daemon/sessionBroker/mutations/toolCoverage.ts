@@ -53,6 +53,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
+    ["storeKitTest"],
+    "StoreKit Testing state lives in the iOS simulator runner's in-memory SKTestSession, keyed by bundle id for the runner's lifetime; clear resets it, and no persistent device setting is changed.",
+    "notJournaled",
+  ),
+  ...tools(
     [
       "accessibility",
       "accessibilityAction",

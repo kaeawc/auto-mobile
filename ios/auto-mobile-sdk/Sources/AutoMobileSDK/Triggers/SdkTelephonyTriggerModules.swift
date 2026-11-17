@@ -109,6 +109,13 @@
         }
     }
 
+    /// Notification permission states needed by the trigger, independent of UserNotifications.
+    enum SdkNotificationAuthorization: Equatable, Sendable {
+        case notDetermined
+        case denied
+        case allowed
+    }
+
     /// `messages` trigger module: `sms` posts an SMS-style local notification titled with the
     /// sender's number, with the same `phoneNumber` and `message` fields as the host `sendSms` tool.
     /// `handled` means the system accepted the notification; a scheduling failure or timeout is
@@ -172,7 +179,24 @@
                     title: title,
                     body: body,
                     settingsProbe: { done in
-                        UNUserNotificationCenter.current().getNotificationSettings { _ in done() }
+                        UNUserNotificationCenter.current().getNotificationSettings { settings in
+                            switch settings.authorizationStatus {
+                            case .notDetermined: done(.notDetermined)
+                            case .denied: done(.denied)
+                            case .authorized, .provisional: done(.allowed)
+                            #if os(iOS)
+                                case .ephemeral: done(.allowed)
+                            #endif
+                            @unknown default: done(.denied)
+                            }
+                        }
+                    },
+                    requestAuthorization: {
+                        // The system alert needs a human decision, outside the trigger deadline.
+                        Task {
+                            _ = try? await UNUserNotificationCenter.current()
+                                .requestAuthorization(options: [.alert, .sound, .badge])
+                        }
                     },
                     post: { title, body, done in
                         Task {
@@ -185,19 +209,38 @@
             #endif
         }
 
-        /// The settings probe and post share one deadline. Callback and wait seams keep timeout
-        /// tests deterministic without calling the notification service.
+        /// The settings probe and post share one deadline. `requestAuthorization` starts the
+        /// permission request without waiting for a decision. Seams avoid the notification service
+        /// and real waits in tests.
         static func postLocalNotification(
             title: String,
             body: String,
-            settingsProbe: @Sendable (@escaping @Sendable () -> Void) -> Void,
+            settingsProbe: @Sendable (@escaping @Sendable (SdkNotificationAuthorization) -> Void) -> Void,
+            requestAuthorization: @Sendable () -> Void,
             post: @Sendable (String, String, @escaping @Sendable (Bool) -> Void) -> Void,
             wait: (DispatchSemaphore, DispatchTime) -> DispatchTimeoutResult = { $0.wait(timeout: $1) }
-        ) -> String? {
+        )
+            -> String?
+        {
             let deadline = DispatchTime.now() + postTimeout
             let settingsReady = DispatchSemaphore(value: 0)
-            settingsProbe { settingsReady.signal() }
+            let authorization = OSAllocatedUnfairLock<SdkNotificationAuthorization?>(initialState: nil)
+            settingsProbe { status in
+                authorization.withLock { $0 = status }
+                settingsReady.signal()
+            }
             guard wait(settingsReady, deadline) == .success else {
+                return "notification_settings_unavailable"
+            }
+            switch authorization.withLock({ $0 }) {
+            case .notDetermined:
+                requestAuthorization()
+                return "notification_permission_pending"
+            case .denied:
+                return "notification_permission_denied"
+            case .allowed:
+                break
+            case nil:
                 return "notification_settings_unavailable"
             }
 

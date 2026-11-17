@@ -15,7 +15,6 @@ import android.util.Base64
 import android.util.Log
 import android.view.Display
 import android.view.View
-import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -79,7 +78,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 // AccessibilityEvent constants are inlined on every API level; preserve the subscribed values.
 private const val SPEECH_STATE_CHANGE_EVENT = 0x02000000 // TYPE_SPEECH_STATE_CHANGE, API 33.
@@ -124,7 +122,7 @@ class CtrlProxy : AccessibilityService() {
 
   companion object {
     private const val TAG = "CtrlProxy"
-    private const val XR_SPATIAL_FEATURE = "android.software.xr.api.spatial"
+    internal const val XR_SPATIAL_FEATURE = "android.software.xr.api.spatial"
 
     // File name for app-scoped storage
 
@@ -336,7 +334,7 @@ class CtrlProxy : AccessibilityService() {
    * The one path every request result takes to the wire (#11877): running check, broadcast guard,
    * perf flush and routing. Declared ahead of the eagerly built [textInputController].
    */
-  private val hierarchyExtractFrames =
+  internal val hierarchyExtractFrames =
     HierarchyExtractFrameSender(
       transport = hierarchyExtractTransport(),
       resultBroadcaster = resultBroadcaster,
@@ -742,26 +740,7 @@ class CtrlProxy : AccessibilityService() {
   private val logicalSizeReaderDelegate = lazy { createDisplayLogicalSizeReader(this) }
   internal val displayController by lazy {
     DisplayController(
-      host =
-        object : DisplayController.Host {
-          override fun displayManager() =
-            getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-
-          override fun windowManager() = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-
-          private val insetsProvider by lazy { createDisplayInsetsProvider(this@CtrlProxy) }
-
-          override fun displayInsetsProvider() = insetsProvider
-
-          override fun frameworkDimenPx(name: String): Int {
-            val id = resources.getIdentifier(name, "dimen", "android")
-            return if (id > 0) resources.getDimensionPixelSize(id) else 0
-          }
-
-          override fun isXrSpatialDevice() = packageManager.hasSystemFeature(XR_SPATIAL_FEATURE)
-
-          override fun densityDpi() = resources.displayMetrics.densityDpi
-        },
+      host = CtrlProxyDisplayHost(this),
       logicalSizeReader = logicalSizeReaderDelegate.value,
     )
   }
@@ -776,66 +755,7 @@ class CtrlProxy : AccessibilityService() {
   }
   internal val hierarchyController by lazy {
     HierarchyController(
-      host =
-        object : HierarchyController.Host {
-          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
-
-          override fun selectDisplayWindows(displayId: Int?) =
-            viewHierarchyExtractor.selectDisplayWindows(this@CtrlProxy, displayId)
-
-          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
-
-          override fun lastWindowState() = this@CtrlProxy.lastWindowState
-
-          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
-
-          override fun occlusionEnabled() = accessibilityFlags.occlusionEnabled
-
-          override fun wakefulness() = deviceInfoController.getWakefulness()
-
-          override fun foregroundActivity(
-            rootPackage: String?,
-            windowClass: String?,
-            windowPackage: String?,
-          ) = deviceInfoController.getForegroundActivity(rootPackage, windowClass, windowPackage)
-
-          override fun isEmulator() = deviceInfoController.getIsEmulator()
-
-          override fun accessibilityTool() = deviceInfoController.getAccessibilityTool()
-
-          override fun isServerRunning() = isWebSocketRunning()
-
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-
-          override fun releaseRequestOwner(requestId: String?) {
-            webSocketServerOrNull?.releaseRequestOwner(requestId)
-          }
-
-          override suspend fun broadcastHierarchyWithPerf(
-            routeByRequestId: Boolean,
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) = webSocketServer.broadcastWithPerf(routeByRequestId, messageBuilder)
-
-          override suspend fun broadcastHierarchyWithPerfSync(
-            routeByRequestId: Boolean,
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) = webSocketServer.broadcastWithPerfSync(routeByRequestId, messageBuilder)
-
-          override suspend fun broadcastHierarchyExtractFrame(
-            frame: ErrorResponse?,
-            externallyCorrelated: Boolean,
-          ) = hierarchyExtractFrames.send(frame, externallyCorrelated)
-
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) = this@CtrlProxy.launchRequestScope(requestId, block)
-
-          override fun openFileOutput(filename: String, mode: Int) =
-            this@CtrlProxy.openFileOutput(filename, mode)
-
-          override fun filesDir() = this@CtrlProxy.filesDir
-        },
+      host = CtrlProxyHierarchyHost(this),
       serviceScope = serviceScope,
       viewHierarchyExtractor = viewHierarchyExtractor,
       displayController = displayController,
@@ -850,40 +770,14 @@ class CtrlProxy : AccessibilityService() {
   }
   private val screenshotController by lazy {
     ScreenshotController(
-      host =
-        object : ScreenshotController.Host {
-          override fun takeScreenshot(displayId: Int, callback: TakeScreenshotCallback) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-              this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
-            }
-          }
-
-          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
-        },
+      host = CtrlProxyScreenshotHost(this),
       displayController = displayController,
       timeProvider = timeProvider,
     )
   }
   private val interactionEventController by lazy {
     InteractionEventController(
-      host =
-        object : InteractionEventController.Host {
-          override fun connectionCount() = webSocketConnectionCount()
-
-          override fun observerSessionGeneration() = webSocketObserverGeneration()
-
-          override fun isServerRunning() = isWebSocketRunning()
-
-          override suspend fun broadcast(message: String) {
-            webSocketServer.broadcast(message)
-          }
-
-          override fun lastWindowClassName() = this@CtrlProxy.lastWindowClassName
-
-          override fun launchInServiceScope(block: suspend CoroutineScope.() -> Unit) {
-            serviceScope.launch(block = block)
-          }
-        },
+      host = CtrlProxyInteractionEventHost(this),
       timeProvider = timeProvider,
       jsonCompact = jsonCompact,
     )
@@ -1019,8 +913,11 @@ class CtrlProxy : AccessibilityService() {
         ),
       gestureThreadFactory = { gestureThreadFactory() },
     )
-  @Volatile private var lastWindowState = AccessibilityEventDispatcher.WindowState(null, null)
-  private val lastWindowClassName: String?
+  @Volatile
+  internal var lastWindowState = AccessibilityEventDispatcher.WindowState(null, null)
+    private set
+
+  internal val lastWindowClassName: String?
     get() = lastWindowState.className
 
   internal val frameContextGate =

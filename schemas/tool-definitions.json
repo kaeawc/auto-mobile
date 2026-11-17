@@ -4640,6 +4640,25 @@
                     "additionalProperties": {}
                   }
                 },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
+                },
                 "fields": {
                   "type": "object",
                   "propertyNames": {
@@ -7388,6 +7407,25 @@
                     "required": ["key", "changes"],
                     "additionalProperties": {}
                   }
+                },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
                 },
                 "fields": {
                   "type": "object",
@@ -13987,6 +14025,25 @@
                     "additionalProperties": {}
                   }
                 },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
+                },
                 "fields": {
                   "type": "object",
                   "propertyNames": {
@@ -17596,6 +17653,25 @@
                     "required": ["key", "changes"],
                     "additionalProperties": {}
                   }
+                },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
                 },
                 "fields": {
                   "type": "object",
@@ -28403,6 +28479,25 @@
                     "additionalProperties": {}
                   }
                 },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
+                },
                 "fields": {
                   "type": "object",
                   "propertyNames": {
@@ -31033,6 +31128,25 @@
                     "required": ["key", "changes"],
                     "additionalProperties": {}
                   }
+                },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
                 },
                 "fields": {
                   "type": "object",
@@ -37128,6 +37242,25 @@
                     "additionalProperties": {}
                   }
                 },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
+                },
                 "fields": {
                   "type": "object",
                   "propertyNames": {
@@ -40568,6 +40701,25 @@
                     "additionalProperties": {}
                   }
                 },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
+                },
                 "fields": {
                   "type": "object",
                   "propertyNames": {
@@ -42925,6 +43077,25 @@
                     "required": ["key", "changes"],
                     "additionalProperties": {}
                   }
+                },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
                 },
                 "fields": {
                   "type": "object",
@@ -51942,6 +52113,25 @@
                     "additionalProperties": {}
                   }
                 },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
+                },
                 "fields": {
                   "type": "object",
                   "propertyNames": {
@@ -53982,6 +54172,25 @@
                     "required": ["key", "changes"],
                     "additionalProperties": {}
                   }
+                },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
                 },
                 "fields": {
                   "type": "object",
@@ -57441,6 +57650,25 @@
                     "additionalProperties": {}
                   }
                 },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
+                },
                 "fields": {
                   "type": "object",
                   "propertyNames": {
@@ -60434,6 +60662,25 @@
                     "additionalProperties": {}
                   }
                 },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
+                },
                 "fields": {
                   "type": "object",
                   "propertyNames": {
@@ -62614,6 +62861,25 @@
                     "required": ["key", "changes"],
                     "additionalProperties": {}
                   }
+                },
+                "relayout": {
+                  "description": "Controls that only moved, left out of `changed`; `skeleton` has their new bounds. dx/dy appear when every move shares that offset.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["count"],
+                  "additionalProperties": false
                 },
                 "fields": {
                   "type": "object",

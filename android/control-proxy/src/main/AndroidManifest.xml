@@ -33,6 +33,10 @@
   <!-- Prototype request actions with via "device" make their own HTTP calls (#12528). -->
   <uses-permission android:name="android.permission.INTERNET" />
 
+  <!-- Prototype platform location uses LocationManager (#14325). -->
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
   <!-- Prototype /platform/connectivity reads the default network and Data Saver (#14273). -->
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 

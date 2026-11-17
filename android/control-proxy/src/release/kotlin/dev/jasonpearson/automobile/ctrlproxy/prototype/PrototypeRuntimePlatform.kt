@@ -14,6 +14,7 @@ internal fun prototypeRuntimePlatform(
   PrototypePlatform(
     prototypeFeedbackModules(context) +
       listOfNotNull(clipboard?.let { PrototypeClipboardModule(it) }) +
+      PrototypeLocationModule(AndroidLocationSource(context)) +
       PrototypeConnectivityModule(AndroidConnectivitySource(context)) +
       PrototypeDeviceStatusModule(DeviceStatusKind.BATTERY, AndroidBatteryStatusSource(context)) +
       PrototypeDeviceStatusModule(DeviceStatusKind.POWER, AndroidPowerStatusSource(context)) +

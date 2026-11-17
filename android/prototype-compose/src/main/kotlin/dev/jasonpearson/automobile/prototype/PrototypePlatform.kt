@@ -29,7 +29,11 @@ enum class PlatformErrorCode(val wireValue: String) {
   PLATFORM_ERROR("platform_error"),
 }
 
-data class PlatformError(val code: PlatformErrorCode, val message: String)
+data class PlatformError(
+  val code: PlatformErrorCode,
+  val message: String,
+  val reason: String? = null,
+)
 
 sealed interface PlatformCallResult {
   data class Success(val value: JsonElement) : PlatformCallResult

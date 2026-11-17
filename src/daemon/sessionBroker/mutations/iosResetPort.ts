@@ -232,9 +232,15 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       return false;
     }
     if (
-      ["installed-app", "app-group", "keychain", "permission", "location", "status-bar"].includes(
-        mutation.kind,
-      )
+      [
+        "installed-app",
+        "app-group",
+        "keychain",
+        "permission",
+        "location",
+        "status-bar",
+        STOREKIT_MUTATION_KIND,
+      ].includes(mutation.kind)
     ) {
       return prior.state === "absent";
     }
@@ -245,8 +251,6 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         return canRestoreIosSetting(mutation);
       case "biometric-enrollment":
         return iosBiometricEnrollmentTarget(mutation) !== undefined;
-      case STOREKIT_MUTATION_KIND:
-        return prior.state === "absent" && mutation.key.trim().length > 0;
       case "preference":
         return (
           mutation.key.split(":").length === 2 &&

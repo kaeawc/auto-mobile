@@ -545,9 +545,9 @@ function sharedOffset(moves: ObserveDiffNodeChange[], axis: "left" | "top"): num
 }
 
 /**
- * The skeleton-projected `changed` list. A bounds-only move is a relayout, not
- * a change the client acts on: the skeleton shipped beside the diff already
- * carries the new positions. Moves of non-actionable nodes are dropped (#11637);
+ * The skeleton-projected `changed` list. A bounds-only change (a move, a resize
+ * or both) is a relayout, not a change the client acts on: the skeleton shipped
+ * beside the diff already carries the new bounds. Moves of non-actionable nodes are dropped (#11637);
  * moves of actionable ones are counted in one `relayout` line, with the shared
  * offset when every move has the same one (#18348).
  */

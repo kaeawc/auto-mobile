@@ -505,7 +505,10 @@ describe("GrantAndroidPermissions", () => {
     const stderr = [
       "Exception occurred while executing 'grant':",
       "java.lang.SecurityException: Permission denial",
-      ...Array.from({ length: 20 }, (_, i) => `\tat com.android.server.pm.Frame${i}(Frame.java:${i})`),
+      ...Array.from(
+        { length: 20 },
+        (_, i) => `\tat com.android.server.pm.Frame${i}(Frame.java:${i})`,
+      ),
     ].join("\n");
     adb.setCommandResponse("shell dumpsys package", createExecResult(snapshots("grant", 0)[0], ""));
     adb.setCommandResponse(
@@ -532,9 +535,9 @@ describe("GrantAndroidPermissions", () => {
     const reason = result.error!.slice(prefix.length, -1);
     expect(reason.endsWith("…")).toBe(true);
     expect(reason.length).toBe(MAX_STEP_REASON_LENGTH + 1);
-    expect(reason.startsWith("Exception occurred while executing 'grant': java.lang.SecurityException")).toBe(
-      true,
-    );
+    expect(
+      reason.startsWith("Exception occurred while executing 'grant': java.lang.SecurityException"),
+    ).toBe(true);
   });
 
   test("lists at most five failed steps in the top-level error", async () => {

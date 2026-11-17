@@ -170,14 +170,9 @@ export class PrototypeElementController {
   connect(): void {
     this.connected = true;
     this.draw();
-    // Connected with no spec yet: draw once a child JSON script arrives. While the parser may still
-    // be streaming its text in, wait until it parses; after that, invalid JSON draws the error view.
+    // Connected with no spec yet: draw once a child JSON script is ready (see readyScriptSpec).
     if (this.connected && !this.handle && !this.stopWatching) {
-      this.stopWatching = this.host.watchChildren(() => {
-        if (!this.host.parsing() || this.scriptSpec()?.value !== undefined) {
-          this.draw();
-        }
-      });
+      this.stopWatching = this.host.watchChildren(() => this.draw());
     }
   }
 
@@ -220,6 +215,16 @@ export class PrototypeElementController {
     return text === null ? undefined : { value: prototypeElementScriptSpec(text) };
   }
 
+  /**
+   * The child script's spec once it can be drawn. While the parser may still be streaming its text
+   * in, a script that does not parse yet is not ready; once parsing ends, invalid JSON is drawn as
+   * the error view.
+   */
+  private readyScriptSpec(): { readonly value: unknown } | undefined {
+    const script = this.scriptSpec();
+    return script && (script.value !== undefined || !this.host.parsing()) ? script : undefined;
+  }
+
   private attributeOptions(): AttributeOptions {
     return prototypeElementOptions((name) => this.host.getAttribute(name));
   }
@@ -231,7 +236,7 @@ export class PrototypeElementController {
   }
 
   private draw(): void {
-    const source = this.propertySpec ?? this.scriptSpec();
+    const source = this.propertySpec ?? this.readyScriptSpec();
     if (!this.connected || this.handle || !source) {
       return;
     }

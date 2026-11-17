@@ -183,7 +183,9 @@ describe("<automobile-prototype> spec and lifecycle (#16454)", () => {
 
   test("mounts an unparseable child script as no spec, so mount refuses it", () => {
     expect(prototypeElementScriptSpec("{not json")).toBeUndefined();
-    const { controller, mounts } = harness({}, "{not json");
+    const { controller, host, mounts } = harness({}, "{not json");
+    // The page has finished parsing, so the script is complete and still not JSON.
+    host.parsing = false;
     controller.connect();
     expect(mounts).toHaveLength(1);
     expect(mounts[0]?.spec).toBeUndefined();
@@ -332,5 +334,14 @@ describe("<automobile-prototype> spec and lifecycle (#16454)", () => {
     host.script = "{not json";
     host.watcher?.();
     expect(mounts).toHaveLength(1);
+  });
+
+  test("an incomplete script present at connect waits for its text while the page parses", () => {
+    const { controller, host, mounts } = harness({}, '{"id": "hel');
+    controller.connect();
+    expect(mounts).toEqual([]);
+    host.script = JSON.stringify(spec);
+    host.watcher?.();
+    expect(mounts.map((options) => options.spec)).toEqual([spec]);
   });
 });

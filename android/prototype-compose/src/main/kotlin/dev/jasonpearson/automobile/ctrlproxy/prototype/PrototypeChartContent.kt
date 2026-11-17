@@ -154,7 +154,7 @@ private fun DrawScope.drawRing(fraction: Float, color: Color, track: Color) {
 
 /** The first series' x labels: none, the two ends, or all of them evenly spaced. */
 @Composable
-private fun ChartXLabels(chart: PrototypeChartModel, labelModifier: Modifier) {
+private fun ChartXLabels(chart: PrototypeChartModel, modifier: Modifier) {
   val labels = chart.series.firstOrNull()?.points?.mapNotNull { it.x }.orEmpty()
   val shown =
     when (chart.xLabels) {
@@ -167,7 +167,7 @@ private fun ChartXLabels(chart: PrototypeChartModel, labelModifier: Modifier) {
     shown.forEach {
       Text(
         it,
-        labelModifier.clearAndSetSemantics {},
+        modifier.clearAndSetSemantics {},
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,

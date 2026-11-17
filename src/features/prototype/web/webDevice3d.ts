@@ -445,40 +445,55 @@ export function prototypeWeb3dDragOrbit(
   viewport.addEventListener("pointercancel", end);
 }
 
+/** What the reflow needs of a 2D `<select>`: a page's select, or a fake under test. */
+export interface PrototypeWebReflowSelect {
+  value: string;
+  readonly options: ArrayLike<{ readonly value: string }>;
+  readonly dataset: DOMStringMap;
+  dispatchEvent(event: Event): boolean;
+}
+
 /**
  * Reflow during a fold: a crossed posture threshold chooses that posture's view in the 2D
  * runtime's posture select, which shows it, and the 3D runtime wraps it like any newly shown view.
- * Leaving 3D restores the posture 2D showed before entering. Self-contained: it is inlined.
+ * The select carries `data-keep-framing` while its change runs, so the 2D runtime keeps the user's
+ * zoom and pan rather than refitting. Leaving 3D restores the posture and screen 2D showed before entering, since a
+ * posture without that screen moved the screen to its stack's start. Self-contained: it is inlined.
  */
 export function prototypeWeb3dLayoutReflow(
-  doc: Document,
+  doc: { querySelector(selector: string): PrototypeWebReflowSelect | null },
   reflowPosture: typeof prototypeWebReflowPosture,
 ) {
-  const select = doc.querySelector<HTMLSelectElement>('[data-control="layout-posture"]');
+  const select = doc.querySelector('[data-control="layout-posture"]');
+  const screen = doc.querySelector('[data-control="screen"]');
   const layouts = Array.from(select?.options ?? []).map((option) => option.value);
-  // The 2D posture shown when 3D was entered, and the layout the hinge last showed.
-  let entry: string | undefined;
+  // The 2D posture and screen shown when 3D was entered, and the layout the hinge last showed.
+  let entry: { layout?: string; screen?: string } = {};
   let last: string | undefined;
-  const show = (layout: string | undefined) => {
-    if (select && layout && select.value !== layout) {
-      select.value = layout;
-      select.dispatchEvent(new Event("change"));
+  const choose = (target: PrototypeWebReflowSelect | null, value: string | undefined) => {
+    const offered = Array.from(target?.options ?? []).some((option) => option.value === value);
+    if (target && value !== undefined && offered && target.value !== value) {
+      target.value = value;
+      target.dataset.keepFraming = "";
+      target.dispatchEvent(new Event("change"));
+      delete target.dataset.keepFraming;
     }
   };
   return {
     /** The device starts flat, so a hinge already moved off flat reflows on the first pose. */
     enter(flat: string | undefined) {
-      entry = select?.value;
+      entry = { layout: select?.value, screen: screen?.value };
       last = flat;
     },
     reflow(layout: string | undefined) {
       if (select && layout !== last) {
         last = layout;
-        show(reflowPosture(layout, select.value, layouts));
+        choose(select, reflowPosture(layout, select.value, layouts));
       }
     },
     leave() {
-      show(entry);
+      choose(select, entry.layout);
+      choose(screen, entry.screen);
     },
   };
 }

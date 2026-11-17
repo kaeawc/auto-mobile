@@ -189,4 +189,29 @@ describeBrowser("3D fold postures in headless Chromium (#16458)", () => {
       CASE_TIMEOUT_MS,
     );
   }
+
+  test(
+    "a reflow keeps the user's zoom and pan, through 3D and back to 2D",
+    async () => {
+      const { page, errors } = await open(browser, webSpecPage(spec, "reflow-zoom", "pixel-fold"));
+      const stageTransform = () =>
+        page.evaluate(() => document.querySelector<HTMLElement>("[data-stage]")?.style.transform);
+      try {
+        await page.click('[data-control="zoom-in"]');
+        const before = { html: await shownViewHtml(page), stage: await stageTransform() };
+        await page.click('[data-control="3d"]');
+        await page.selectOption('[data-control="posture"]', "half_opened");
+        expect(await shownPosture(page)).toBe("half_opened");
+        expect(await stageTransform()).toBe(before.stage);
+        await page.click('[data-control="3d"]');
+        await page.waitForFunction(() => !document.querySelector("[data-orbit]"));
+        expect(await shownPosture(page)).toBe("opened");
+        expect({ html: await shownViewHtml(page), stage: await stageTransform() }).toEqual(before);
+        expect(errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 });

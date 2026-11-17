@@ -215,7 +215,7 @@ internal fun locationProvider(
     when {
       sdk >= 31 ->
         listOf(
-          LocationManager.FUSED_PROVIDER,
+          FUSED_PROVIDER,
           LocationManager.GPS_PROVIDER,
           LocationManager.NETWORK_PROVIDER,
         )
@@ -230,7 +230,10 @@ internal fun locationProvider(
 
 private val ALL_PROVIDERS =
   listOf(
-    LocationManager.FUSED_PROVIDER,
+    FUSED_PROVIDER,
     LocationManager.GPS_PROVIDER,
     LocationManager.NETWORK_PROVIDER,
   )
+
+// LocationManager.FUSED_PROVIDER, which only API 31 declares; used only where it is selected.
+private const val FUSED_PROVIDER = "fused"

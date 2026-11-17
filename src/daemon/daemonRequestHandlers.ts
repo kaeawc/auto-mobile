@@ -22,7 +22,7 @@ import {
   type ReleaseCutExecutions,
 } from "./releaseSessionAndDevice";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,

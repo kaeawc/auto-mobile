@@ -1,7 +1,7 @@
 import { bindBrokerRegistration } from "../sessionBroker/handlers";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   MAX_OBSERVER_CLIENT_NAME_LENGTH,
   MAX_OBSERVER_SESSION_ID_LENGTH,

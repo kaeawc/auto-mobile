@@ -18,7 +18,7 @@ import { hostPreflight, recordHostPreflight, type HostStats } from "./hostPrefli
 import { bootGate, bootGateOptions, BOOT_GATE_FLAGS, type BootGateCommand } from "./bootGate";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import {

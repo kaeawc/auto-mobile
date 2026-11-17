@@ -4,7 +4,7 @@ import {
 } from "../../../src/features/prototype/prototypeSpec";
 import { PROTOTYPE_EVENT_KINDS } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   PROTOTYPE_COLOR_ROLES,

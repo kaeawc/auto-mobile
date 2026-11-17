@@ -17,9 +17,11 @@ and bundles migrations through static imports. But an `AUTOMOBILE_MIGRATIONS_DIR
 override loads raw migrations that import `kysely`'s `sql` tag and resolve it from
 their own location.
 
-The server uses the `zod/v4` subpath exported by **`zod@3.25.76`**. It remains
-bundled into `dist/`, while the exact root package is also published so every
-Jimp `zod: ^3.23.8` edge resolves to the same pinned version. Every other
+The server uses the `zod/v4` and `zod/v3` subpaths exported by **`zod@4.6.7`**
+(`zod/v3` keeps the v3 API for schemas written against it). It remains bundled into
+`dist/`, while the exact root package is also published. Jimp's `@jimp/plugin-*`
+packages declare `zod: ^3.23.8`; a root `overrides.zod` entry lifts those edges onto the
+same 4.x version, so the lock holds one zod copy below no patched floor. Every other
 inlined package (`werift`, the MCP SDK, `@anthropic-ai/sdk`, …) is not needed at install time and
 lives in `devDependencies`; consumers never install them.
 
@@ -34,9 +36,9 @@ and ignores a published `npm-shrinkwrap.json`. The graph is flattened into exact
   `@material-design-icons/svg` (read from disk through `import.meta.resolve`, which
   the roots derivation counts like a dynamic import) — and every
   **pure-transitive** node of their closure are pinned to exact versions;
-- **shared Jimp validator** — `zod@3.25.76` is a direct exact pin. AutoMobile
-  imports its `zod/v4` subpath, so the bundled server retains the v4 API while
-  Jimp's v3-compatible ranges cannot re-resolve;
+- **shared Jimp validator** — `zod@4.6.7` is a direct exact pin, and `overrides.zod`
+  holds Jimp's `^3.23.8` ranges on it. Jimp's plugins call only the zod API shared by
+  v3 and v4 (`z.object`, `z.number`, `z.union`, …);
 - **platform-native `@img/sharp-*`** binaries stay in `optionalDependencies`
   (already exact-pinned, resolved per platform);
 - non-native `@img` transitives, including sharp's `@img/colour`, remain in
@@ -93,8 +95,12 @@ only when they belong to a class in the `PRUNE_CLASSES` allowlist
 (`scripts/release/trim-bundled-deps.ts`). The classes are declarations, source maps, tests,
 docs/markdown, TypeScript sources, `src/` beside a built `dist/`, browser-only
 builds (`browser` field and `browser` export-condition targets, `dist/browser/`,
-UMD) and CI/build tooling config. Bun and Node never resolve the `browser`
-condition. Package metadata and legal notices (LICENSE, NOTICE, COPYING, PATENTS,
+UMD), CI/build tooling config, and the hand-audited unloaded entry points in
+`PACKAGE_UNLOADED_ENTRYPOINTS`. Bun and Node never resolve the `browser`
+condition. The bundled `zod` is loaded only by the `@jimp/*` closure, through its ESM
+`.` entry, so its `require` condition and `main` (every `.cjs` file) and its `v3`,
+`mini`, `v4/mini` and `v4-mini` subpaths are pruned; those files go even under a loaded
+wildcard prefix such as `./v4/locales/*`. Package metadata and legal notices (LICENSE, NOTICE, COPYING, PATENTS,
 AUTHORS) are never removed. Runtime entry points and wildcard export prefixes are
 protected, except that declarations and maps are pruned inside wildcard prefixes
 because nothing loads them. A candidate that any retained JS file names literally
@@ -224,3 +230,4 @@ refresh is a release failure, not an expected registry update.
 ## Background
 
 - [Pinning the published runtime dependency graph](../../devlog/2026-08-21-runtime-dependency-pinning.md)
+- [Move to Zod 4 and override Jimp's Zod 3 range](../../devlog/2026-11-15-zod-4-jimp-override.md)

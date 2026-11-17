@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { StartupFailureStore } from "../DaemonStartupFailureTracker";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";

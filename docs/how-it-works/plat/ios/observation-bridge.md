@@ -167,9 +167,11 @@ XCTest-only, since the pairing is ambiguous. Each visible DOM element of the mer
 becomes a child of its `WKWebView` node:
 
 - Bounds: CSS-pixel bounds map to points through the snapshot's visual viewport. It
-  subtracts the viewport's offset and scales its CSS width to the web view's width, which covers pages without a `device-width` viewport and pinch zoom. A snapshot without a viewport
-  counts as points. It then offsets them by the web view's origin, clips them to it and
-  truncates to whole points, as the runner truncates XCTest frames.
+  subtracts the viewport's offset and scales its CSS width to the web view's width minus the
+  reported adjusted content insets. This covers pages without a `device-width` viewport and
+  pinch zoom. A snapshot without a viewport counts as points. Bounds start at the inset-reduced
+  page origin, clip to the full web view frame and truncate to whole points, as the runner
+  truncates XCTest frames. Missing, negative or non-finite inset fields count as zero.
 - Dropped: an element wholly outside the web view, and elements whose id repeats in the snapshot,
   since an action naming that id could reach either.
 - Attributes: `label` → `content-desc`, `value` → `text`, `role` → `class`; `enabled` elements are

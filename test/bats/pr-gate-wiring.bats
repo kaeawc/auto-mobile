@@ -120,7 +120,12 @@ load yq-helpers
     'test/fixtures/daemon-http-endpoints.json' \
     'test/fixtures/daemon-isolation-paths.json' \
     'test/fixtures/ime-commit-contract.json' \
-    'test/fixtures/plan-schedule-feasibility/**'; do
+    'test/fixtures/plan-schedule-feasibility/**' \
+    'samples/prototype-embedding/android/**' \
+    'test/fixtures/prototype-embedding/**' \
+    'scripts/prototype/generateEmbeddingSamples.ts' \
+    'src/features/prototype/nativePrototype*.ts' \
+    'src/features/prototype/prototypeEject*.ts'; do
     [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
   done
 }

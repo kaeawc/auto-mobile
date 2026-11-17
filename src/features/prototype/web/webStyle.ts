@@ -13,6 +13,7 @@ import {
   FLEX_DIRECTION,
   FLEX_SHRINK,
   FONT_FAMILY,
+  SYSTEM_FONT_STACK,
   FONT_SIZE,
   FONT_WEIGHT,
   JUSTIFY_CONTENT,
@@ -473,12 +474,23 @@ function typographyRole(style: Raw, context: WebStyleContext): Css {
 }
 
 /** Text styles inherit in CSS as they do down a native text tree. */
-/** Built-in families; `default` and bundled assets keep the frame's font, since no font is inlined. */
+/**
+ * Built-in families. Any other authored family (`default`, or a bundled asset, which the page does
+ * not inline) draws the frame's system font, explicitly, so it overrides a themed window's family
+ * as Android's `FontFamily.Default` and iOS's system font do (#18451).
+ */
 const FONT_FAMILY_VALUES: Readonly<Record<string, string>> = {
   sansSerif: "sans-serif",
   serif: "serif",
   monospace: "monospace",
 };
+
+/** The family a node authors, or nothing, so it inherits the window's. */
+function authoredFamily(family: unknown): Css {
+  return family === undefined
+    ? {}
+    : { [FONT_FAMILY]: FONT_FAMILY_VALUES[String(family)] ?? SYSTEM_FONT_STACK };
+}
 
 const FONT_STYLE: Readonly<Record<string, string>> = { italic: "italic", normal: "normal" };
 
@@ -519,10 +531,7 @@ export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
   if (fontStyle) {
     css["font-style"] = fontStyle;
   }
-  const family = FONT_FAMILY_VALUES[String(style.fontFamily)];
-  if (family) {
-    css[FONT_FAMILY] = family;
-  }
+  Object.assign(css, authoredFamily(style.fontFamily));
   const decoration = TEXT_DECORATION[String(style.textDecoration)];
   if (decoration) {
     css["text-decoration"] = decoration;

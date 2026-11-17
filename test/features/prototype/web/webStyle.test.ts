@@ -142,7 +142,12 @@ test("maps built-in font families to CSS", () => {
   expect(textCss({ fontFamily: "serif" }, context)["font-family"]).toBe("serif");
   expect(textCss({ fontFamily: "monospace" }, context)["font-family"]).toBe("monospace");
   expect(textCss({ fontFamily: "sansSerif" }, context)["font-family"]).toBe("sans-serif");
-  expect(textCss({ fontFamily: "default" }, context)).not.toHaveProperty("font-family");
+  // Default, or an asset the page does not inline, draws the system font explicitly, so it
+  // overrides a themed window's family (#18451); no family leaves it inherited.
+  const system = "system-ui, -apple-system, Roboto, sans-serif";
+  expect(textCss({ fontFamily: "default" }, context)["font-family"]).toBe(system);
+  expect(textCss({ fontFamily: { asset: "brand" } }, context)["font-family"]).toBe(system);
+  expect(textCss({ textSize: 12 }, context)).not.toHaveProperty("font-family");
 });
 
 test("an explicit normal font style is emitted so it overrides an italic parent", () => {

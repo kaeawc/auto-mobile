@@ -1821,6 +1821,34 @@ describe("prototype web still (#16346)", () => {
     expect(screen.style["font-family"]).toBe("system-ui, -apple-system, Roboto, sans-serif");
   });
 
+  test("an explicit default family wins over the themed window's family (#18451)", () => {
+    for (const family of ["serif", "mono"]) {
+      const still = renderPrototypeStill({
+        ...reference,
+        theme: { ...(reference.theme as object), typography: { fontFamily: family } },
+        root: {
+          type: "column",
+          children: [
+            { type: "text", testTag: "d", text: "x", style: { fontFamily: "default" } },
+            {
+              type: "text",
+              testTag: "r",
+              text: "x",
+              style: { textStyle: "bodyLarge", fontFamily: "default" },
+            },
+            { type: "text", testTag: "t", text: "x" },
+          ],
+        },
+      });
+      const system = "system-ui, -apple-system, Roboto, sans-serif";
+      // As Android's FontFamily.Default: an explicit default draws the system font, role or not.
+      expect(byTag(still, "d")[0]!.style["font-family"]).toBe(system);
+      expect(byTag(still, "r")[0]!.style["font-family"]).toBe(system);
+      // A node naming no family inherits the window's themed one.
+      expect(byTag(still, "t")[0]!.style).not.toHaveProperty("font-family");
+    }
+  });
+
   test("no theme family leaves the window on the system font", () => {
     const still = renderPrototypeStill({
       ...reference,

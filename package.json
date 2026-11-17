@@ -226,7 +226,7 @@
     "oxlint": "1.93.0",
     "oxlint-tsgolint": "7.0.2007",
     "pixelmatch": "^8.0.0",
-    "playwright-core": "1.65.0",
+    "playwright-core": "1.65.1",
     "pngjs": "^7.0.0",
     "qrcode-generator": "2.0.4",
     "reflect-metadata": "^0.2.2",

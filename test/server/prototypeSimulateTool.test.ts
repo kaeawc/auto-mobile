@@ -226,6 +226,28 @@ describe("prototype simulate and timer reports", () => {
     ]);
   });
 
+  test("simulate advances mock backend actors and reports actorSteps (#14211)", async () => {
+    const backend = {
+      collections: { ticks: [] },
+      actors: [{ every: 1000, maxRuns: 5, do: [{ append: "ticks", value: { n: 1 } }] }],
+    };
+    const define = await call(android, { action: "defineBackend", backendId: "demo", backend });
+    expect(define.success).toBe(true);
+    const unsupported = await call(android, { action: "simulate", id: "p", advanceTimeMs: 2500 });
+    expect(unsupported).toMatchObject({ success: false, actorSteps: 2 });
+    proxy.setSupportedCommands(["prototype_timers_v1"]);
+    proxy.setAdvanceClockResult({ success: true, fired: 0 });
+    const capable = await call(android, { action: "simulate", id: "p", advanceTimeMs: 500 });
+    expect(capable).toMatchObject({ success: true, fired: 0, actorSteps: 1 });
+  });
+
+  test("simulate omits actorSteps when no mock backend is defined", async () => {
+    proxy.setSupportedCommands(["prototype_timers_v1"]);
+    proxy.setAdvanceClockResult({ success: true, fired: 1 });
+    const result = await call(android, { action: "simulate", id: "proto", advanceTimeMs: 100 });
+    expect(result.actorSteps).toBeUndefined();
+  });
+
   test("advance cap failures retain the number of completed fires", async () => {
     proxy.setSupportedCommands(["prototype_timers_v1"]);
     proxy.setAdvanceClockResult({ success: false, fired: 10000, error: "10000-fire limit" });

@@ -748,8 +748,10 @@ export function createPrototypeToolRuntime(
     }
     const { action } = args;
     if (isDeviceRequestAction(action)) {
-      const host = { store, events };
-      return respond(await deviceRequestAction(args, host, device, { target, scope, signal }));
+      const requestHost = { store, events, mocks: host.mocks };
+      return respond(
+        await deviceRequestAction(args, requestHost, device, { target, scope, signal }),
+      );
     }
     if (action === "awaitEvent") {
       const source = prototypeEventSource(target.transport);

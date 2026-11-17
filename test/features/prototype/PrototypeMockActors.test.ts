@@ -15,6 +15,8 @@ interface TimelineStep {
   request?: { method: string; path: string; body?: PrototypeRequestJson };
   status?: number;
   advanceMs?: number;
+  simulateMs?: number;
+  applied?: number;
   expect?: Record<string, unknown>;
   join?: string;
   frames?: Record<string, unknown[]>;
@@ -58,6 +60,10 @@ describe("PrototypeMockActors fixtures", () => {
         }
         if (step.advanceMs !== undefined) {
           timer.advanceTime(step.advanceMs);
+        }
+        if (step.simulateMs !== undefined) {
+          const applied = backend.advanceClock(step.simulateMs);
+          expect({ at, applied }).toEqual({ at, applied: step.applied! });
         }
         if (step.expect !== undefined) {
           const snapshot: Record<string, unknown> = backend.snapshot();
@@ -132,6 +138,30 @@ test("a full step queue drops runs but keeps an every actor's cadence", async ()
   // Runs while the queue was full are dropped; the ones after it drains still land.
   expect(backend.snapshot().ticks.length).toBeGreaterThan(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("a wall-clock step back does not stall scheduled actor steps", () => {
+  const { timer, backend } = engine({
+    collections: { ticks: [] },
+    actors: [
+      {
+        every: 1000,
+        maxRuns: 1,
+        do: [
+          { afterMs: 100, append: "ticks", value: { n: 1 } },
+          { afterMs: 100, append: "ticks", value: { n: 2 } },
+        ],
+      },
+    ],
+  });
+  timer.advanceTime(1000);
+  timer.stepWallClock(-3_600_000);
+  timer.advanceTime(200);
+  expect(backend.snapshot().ticks).toEqual([
+    { n: 1, id: "fake-1" },
+    { n: 2, id: "fake-2" },
+  ]);
+  backend.dispose();
 });
 
 describe("mock actor definitions", () => {

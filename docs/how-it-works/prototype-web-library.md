@@ -40,8 +40,10 @@ no interactive runtime. The planned release is in the devlog entries under Backg
   orientation and screen, and an unknown screen draws the stack's start.
 - Options: `spec`, `frame`, `orientation`, `zoom`, `mode`, `screen`, `controls`, `locale` and
   `textSize`.
-  - The frame is an id, or `false` for the default frame's screen alone. A frame object is not
-    accepted yet.
+  - The frame is an id, a frame object, or `false` for the default frame's screen alone. A frame
+    object is a `deviceFrames.json` entry without `source`. `prototypeWebFrameObject.ts` checks it
+    without zod. It applies the registry schema's fields, ranges and cross-field rules
+    (`deviceFrameRules.ts`), and a unit test keeps the two in agreement.
   - Zoom is `fit` or a scale from 0.5 to 4.
   - Mode is `light`, `dark`, or `system`, which follows `prefers-color-scheme`.
   - Controls are `false`, or any of `rotate`, `zoom` and `screen`.
@@ -80,8 +82,9 @@ holds its logic; the class in `packages/prototype-web/src/element.ts` only forwa
   `PROTOTYPE_WEB_CAPABILITIES`, draws an error view (`role="alert"`) and calls `onError`.
 - `PROTOTYPE_WEB_CAPABILITIES` is generated from `knownPrototypeCapabilities()` by
   `scripts/prototype/generate-prototype-web-capabilities.ts`; a unit test fails when it is stale.
-- A bare spec is drawn without a capability check. An unknown frame, an orientation the frame lacks
-  or an invalid locale is refused with `invalidOption`.
+- A bare spec is drawn without a capability check. An unknown frame, an invalid frame object (the
+  message names each problem's path), an orientation the frame lacks or an invalid locale is
+  refused with `invalidOption`.
 - Envelope glyphs are parsed with the browser's `DOMParser` into allow-listed SVG shapes; without
   one (in a worker) icons draw the placeholder.
 

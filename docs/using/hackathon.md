@@ -123,7 +123,8 @@ with `injectAudioInput` before tapping Record.
   ```
 
 - **Rehearse timers.** `prototype` with `action: "simulate"` and `advanceTimeMs` moves prototype
-  timers forward without waiting, so the dashboard timer can be shown mid-run on demand.
+  timers forward without waiting, so the dashboard timer can be shown mid-run on demand. It also
+  moves a mock backend's scripted actors ahead, so a bot reply lands on demand.
 
 ## Known limits
 

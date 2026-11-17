@@ -61398,6 +61398,9 @@
           "required": ["screenChanged", "basis"],
           "additionalProperties": {}
         },
+        "dispatchRoute": {
+          "type": "string"
+        },
         "selectedElement": {
           "$ref": "#/$defs/__schema130"
         },

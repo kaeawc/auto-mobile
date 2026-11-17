@@ -187,6 +187,7 @@ interface TapTargetState extends TapHierarchyState {
   screenReaderNavigation?: ScreenReaderNavigationResult;
   /** Which backend tapped an iOS SDK bridge node, and why XCTest stood in (#5159). */
   iosBackend?: IosSdkTapOutcome;
+  dispatchRoute?: string;
 }
 
 /** Executes one selector action while keeping its observation and verification state local. */
@@ -829,6 +830,7 @@ export class TapExecution {
         element: target.tapElement,
         selectedElement: target.selectedElementMetadata,
         ...iosBackendFields(target.iosBackend),
+        ...(target.dispatchRoute !== undefined ? { dispatchRoute: target.dispatchRoute } : {}),
         searchUntil: target.searchOutcome.stats,
         ...(target.screenReaderNavigation
           ? { screenReaderNavigation: target.screenReaderNavigation }
@@ -908,12 +910,18 @@ export class TapExecution {
         if (target.iosBackend?.backend === "sdk") {
           return;
         }
-        await this.host.executeiOSTap(target.action, tapPoint, target.longPressDuration, {
-          element: target.tapElement,
-          isVoiceOverEnabled: target.isAccessibilityServiceEnabled,
-          displayFence: fence,
-          signal,
-        });
+        const dispatch = await this.host.executeiOSTap(
+          target.action,
+          tapPoint,
+          target.longPressDuration,
+          {
+            element: target.tapElement,
+            isVoiceOverEnabled: target.isAccessibilityServiceEnabled,
+            displayFence: fence,
+            signal,
+          },
+        );
+        target.dispatchRoute = dispatch?.route;
       },
     });
   }

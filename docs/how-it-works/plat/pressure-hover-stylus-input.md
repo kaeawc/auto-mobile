@@ -212,10 +212,8 @@ The simulator probe in #13083 (iPad Pro 13-inch (M5), iOS 26.5) establishes:
   an ad-hoc signed simulator binary; without them backboardd refuses the service.
   Digitizer events from a sender that is not a registered digitizer are dropped.
 
-The owner decision is to build stylus and hover injection into the CtrlProxy iOS
-runner: Pencil through the virtual digitizer on its simulator build, mouse hover
-through a two-move path. Whether the runner's simulator build can carry the
-entitlements section is unverified.
+These paths are the reference for the CtrlProxy iOS runner route; see
+[iOS simulator Pencil input through a virtual HID digitizer](../../devlog/2026-11-03-ios-simulator-pencil-virtual-digitizer.md).
 
 ### Physical devices
 

@@ -23,7 +23,9 @@ final class LocationClock: PrototypeClock {
     func advance(_ milliseconds: Int) {
         nowMilliseconds += milliseconds
         let due = timers.filter { !$0.cancelled && $0.deadline <= nowMilliseconds }
-        for timer in due { timer.cancel(); timer.fire() }
+        for timer in due {
+            timer.cancel(); timer.fire()
+        }
     }
 }
 
@@ -215,7 +217,7 @@ final class PrototypeLocationTests: XCTestCase {
             PrototypeLocationFix(latitude: 1, longitude: -181, accuracyM: 3, timestampMs: 0, approximate: false),
             PrototypeLocationFix(latitude: 1, longitude: 2, accuracyM: -1, timestampMs: 0, approximate: false),
             PrototypeLocationFix(
-                latitude: 1, longitude: 2, accuracyM: 3, altitudeM: 100001, timestampMs: 0, approximate: false
+                latitude: 1, longitude: 2, accuracyM: 3, altitudeM: 100_001, timestampMs: 0, approximate: false
             ),
             PrototypeLocationFix(
                 latitude: 1, longitude: 2, accuracyM: 3, speedMps: -1, timestampMs: 0, approximate: false
@@ -295,7 +297,9 @@ final class PrototypeLocationTests: XCTestCase {
                 ready.resume()
                 var values: [PlatformEvent] = []
                 var iterator = stream.makeAsyncIterator()
-                while let event = await iterator.next(isolation: MainActor.shared) { values.append(event) }
+                while let event = await iterator.next(isolation: MainActor.shared) {
+                    values.append(event)
+                }
                 return values
             }
         }
@@ -317,20 +321,20 @@ final class PrototypeLocationTests: XCTestCase {
             let module = module(source)
             let stream = module.events
             module.configure(root: .object([:]))
-            source.report(PrototypeLocationFix(
-                latitude: try XCTUnwrap(fix["latitude"]?.numberValue),
-                longitude: try XCTUnwrap(fix["longitude"]?.numberValue),
-                accuracyM: try XCTUnwrap(fix["accuracyM"]?.numberValue),
+            try source.report(PrototypeLocationFix(
+                latitude: XCTUnwrap(fix["latitude"]?.numberValue),
+                longitude: XCTUnwrap(fix["longitude"]?.numberValue),
+                accuracyM: XCTUnwrap(fix["accuracyM"]?.numberValue),
                 altitudeM: fix["altitudeM"]?.numberValue,
                 speedMps: fix["speedMps"]?.numberValue,
                 bearingDeg: fix["bearingDeg"]?.numberValue,
-                timestampMs: try XCTUnwrap(fix["timestampMs"]?.numberValue),
-                approximate: try XCTUnwrap(fix["approximate"]?.boolValue)
+                timestampMs: XCTUnwrap(fix["timestampMs"]?.numberValue),
+                approximate: XCTUnwrap(fix["approximate"]?.boolValue)
             ))
             let events = await bufferedEvents(stream)
-            XCTAssertEqual(events, [
+            XCTAssertEqual(events, try [
                 .stateRefresh("location"),
-                PlatformEvent(event: "location.updated", data: try XCTUnwrap(fields["expected"])),
+                PlatformEvent(event: "location.updated", data: XCTUnwrap(fields["expected"])),
             ])
             module.configure(root: nil)
         }

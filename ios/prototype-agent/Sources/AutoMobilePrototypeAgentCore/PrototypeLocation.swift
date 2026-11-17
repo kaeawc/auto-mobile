@@ -26,8 +26,8 @@ struct PrototypeLocationFix: Equatable, Sendable {
         latitude.isFinite && (-90 ... 90).contains(latitude)
             && longitude.isFinite && (-180 ... 180).contains(longitude)
             && accuracyM.isFinite && accuracyM >= 0
-            && timestampMs.isFinite && (0 ... 9007199254740991).contains(timestampMs)
-            && (altitudeM.map { $0.isFinite && (-20000 ... 100000).contains($0) } ?? true)
+            && timestampMs.isFinite && (0 ... 9_007_199_254_740_991).contains(timestampMs)
+            && (altitudeM.map { $0.isFinite && (-20000 ... 100_000).contains($0) } ?? true)
             && (speedMps.map { $0.isFinite && (0 ... 1000).contains($0) } ?? true)
             && (bearingDeg.map { $0.isFinite && (0 ... 360).contains($0) } ?? true)
     }
@@ -38,7 +38,7 @@ struct PrototypeLocationFix: Equatable, Sendable {
         let a = pow(sin((other.latitude - latitude) * radians / 2), 2)
             + cos(latitude * radians) * cos(other.latitude * radians)
             * pow(sin((other.longitude - longitude) * radians / 2), 2)
-        return 6371000 * 2 * asin(sqrt(min(1, max(0, a))))
+        return 6_371_000 * 2 * asin(sqrt(min(1, max(0, a))))
     }
 }
 

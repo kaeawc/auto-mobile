@@ -2,7 +2,10 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { ActionableError, BootedDevice } from "../../../src/models";
-import { GrantAndroidPermissions } from "../../../src/features/action/GrantAndroidPermissions";
+import {
+  GrantAndroidPermissions,
+  MAX_STEP_REASON_LENGTH,
+} from "../../../src/features/action/GrantAndroidPermissions";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -334,6 +337,9 @@ describe("GrantAndroidPermissions", () => {
         error: "Android reset is device-wide and does not support userId",
       },
     ]);
+    expect(result.error).toBe(
+      "Failed step(s): pm_reset_permissions (Android reset is device-wide and does not support userId)",
+    );
     expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(false);
   });
 
@@ -361,7 +367,9 @@ describe("GrantAndroidPermissions", () => {
         error: "java.lang.SecurityException: Permission reset denied",
       },
     ]);
-    expect(result.error).toContain("pm_reset_permissions");
+    expect(result.error).toBe(
+      "Failed step(s): pm_reset_permissions (java.lang.SecurityException: Permission reset denied)",
+    );
   });
 
   test("marks failure when stderr contains SecurityException", async () => {
@@ -414,14 +422,14 @@ describe("GrantAndroidPermissions", () => {
 
     // One required step failed → batch fails and the aggregate names it.
     expect(result.success).toBe(false);
-    expect(result.error).toBe("Failed step(s): pm_grant:(empty)");
+    expect(result.error).toBe("Failed step(s): pm_grant:(empty) (empty permission name)");
   });
 
   test.each([
     ["grant", "android.permission.READ_EXTERNAL_STORAGE"],
     ["revoke", "android.permission.READ_EXTERNAL_STORAGE"],
   ] as const)(
-    "reports the failed %s step ID when setting a permission fails",
+    "reports the failed %s step ID and reason when setting a permission fails",
     async (actionType, permission) => {
       const factory = new FakeAdbClientFactory();
       const client = factory.getFakeClient();
@@ -446,9 +454,115 @@ describe("GrantAndroidPermissions", () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe(`Failed step(s): pm_${actionType}:${permission}`);
+      expect(result.error).toBe(
+        `Failed step(s): pm_${actionType}:${permission} (java.lang.SecurityException: Permission denial)`,
+      );
     },
   );
+
+  test.each(["grant", "revoke"] as const)(
+    "includes pm stderr and undeclared-permission reasons in the top-level %s error",
+    async (actionType) => {
+      const adb = new FakeAdbExecutor();
+      const permission = "android.permission.READ_EXTERNAL_STORAGE";
+      const undeclaredPermission = "android.permission.ACCESS_FINE_LOCATION";
+      const stderr = "java.lang.SecurityException: Permission denial";
+      const undeclaredReason = `${undeclaredPermission} is not requested by com.example.app (not declared in its manifest); nothing was changed`;
+      adb.setCommandResponse(
+        "shell dumpsys package",
+        createExecResult(snapshots(actionType, 0)[0], ""),
+      );
+      adb.setCommandResponse(
+        `shell pm ${actionType} --user 0 'com.example.app' '${permission}'`,
+        createExecResult("", stderr),
+      );
+      const action = new GrantAndroidPermissions(
+        androidDevice,
+        new FakeAdbClientFactory(adb),
+        () => new NoOpPerformanceTracker(),
+      );
+
+      const result = await action.execute("com.example.app", {
+        action: actionType,
+        permissions: [permission, undeclaredPermission],
+        userId: 0,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.results.map((item) => item.error)).toEqual([stderr, undeclaredReason]);
+      expect(result.error).toBe(
+        `Failed step(s): pm_${actionType}:${permission} (${stderr}); pm_${actionType}:${undeclaredPermission} (${undeclaredReason})`,
+      );
+      expect(
+        adb.getExecutedCommands().filter((command) => command.startsWith(`shell pm ${actionType}`)),
+      ).toEqual([`shell pm ${actionType} --user 0 'com.example.app' '${permission}'`]);
+    },
+  );
+
+  test("bounds a long multi-line pm stderr in the top-level error but keeps it in results", async () => {
+    const adb = new FakeAdbExecutor();
+    const permission = "android.permission.READ_EXTERNAL_STORAGE";
+    const stderr = [
+      "Exception occurred while executing 'grant':",
+      "java.lang.SecurityException: Permission denial",
+      ...Array.from(
+        { length: 20 },
+        (_, i) => `\tat com.android.server.pm.Frame${i}(Frame.java:${i})`,
+      ),
+    ].join("\n");
+    adb.setCommandResponse("shell dumpsys package", createExecResult(snapshots("grant", 0)[0], ""));
+    adb.setCommandResponse(
+      `shell pm grant --user 0 'com.example.app' '${permission}'`,
+      createExecResult("", stderr),
+    );
+    const action = new GrantAndroidPermissions(
+      androidDevice,
+      new FakeAdbClientFactory(adb),
+      () => new NoOpPerformanceTracker(),
+    );
+
+    const result = await action.execute("com.example.app", {
+      permissions: [permission],
+      userId: 0,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.results[0].error).toBe(stderr);
+    const prefix = `Failed step(s): pm_grant:${permission} (`;
+    expect(result.error!.startsWith(prefix)).toBe(true);
+    expect(result.error).not.toContain("\n");
+    expect(result.error).not.toContain("\t");
+    const reason = result.error!.slice(prefix.length, -1);
+    expect(reason.endsWith("…")).toBe(true);
+    expect(reason.length).toBe(MAX_STEP_REASON_LENGTH + 1);
+    expect(
+      reason.startsWith("Exception occurred while executing 'grant': java.lang.SecurityException"),
+    ).toBe(true);
+  });
+
+  test("lists at most five failed steps in the top-level error", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell dumpsys package", createExecResult(snapshots("grant", 0)[0], ""));
+    const permissions = Array.from({ length: 8 }, (_, i) => `com.example.PERM_${i}`);
+    const action = new GrantAndroidPermissions(
+      androidDevice,
+      new FakeAdbClientFactory(adb),
+      () => new NoOpPerformanceTracker(),
+    );
+
+    const result = await action.execute("com.example.app", { permissions, userId: 0 });
+
+    expect(result.success).toBe(false);
+    expect(result.results).toHaveLength(8);
+    expect(result.results.every((item) => item.error?.includes("is not requested"))).toBe(true);
+    const listed = permissions
+      .slice(0, 5)
+      .map(
+        (p) =>
+          `pm_grant:${p} (${p} is not requested by com.example.app (not declared in its manifest); nothing was changed)`,
+      );
+    expect(result.error).toBe(`Failed step(s): ${listed.join("; ")}; +3 more`);
+  });
 
   test("non-Android device returns structured failure without adb", async () => {
     const factory = new FakeAdbClientFactory();

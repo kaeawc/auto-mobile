@@ -69,7 +69,7 @@ export type MockLogEntry = MockRequestLogEntry | MockFrameLogEntry | MockRoomEve
 export interface MockBackendDeps {
   random: Random;
   ids: IdGenerator;
-  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout" | "now">;
+  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout" | "now" | "monotonicNow">;
 }
 
 const MAX_LOG_ENTRIES = 200;

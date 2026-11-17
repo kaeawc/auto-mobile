@@ -16,7 +16,7 @@ import {
 
 export interface MockBackendRegistryDeps {
   ids: IdGenerator;
-  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout" | "now">;
+  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout" | "now" | "monotonicNow">;
   /** The stream behind a backend: seeded when the definition has a seed, so a run replays. */
   createRandom?: (seed: number | undefined) => Random;
 }

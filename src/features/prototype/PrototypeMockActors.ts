@@ -18,7 +18,7 @@ import { bindMockValue, matchMockPath, type MockBindingContext } from "./prototy
 import type { MockActor, MockActorStep } from "./prototypeMockSchema";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
 
-export type MockActorTimer = Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
+export type MockActorTimer = Pick<Timer, "setTimeout" | "clearTimeout" | "now" | "monotonicNow">;
 
 interface PendingStep {
   /** Virtual time the step falls due. */
@@ -195,8 +195,9 @@ export class PrototypeMockActors {
     }
   }
 
+  /** Elapsed time, so a wall-clock correction (NTP, a manual change) cannot stall a timeline. */
   private now(): number {
-    return this.timer.now() + this.offsetMs;
+    return (this.timer.monotonicNow?.() ?? this.timer.now()) + this.offsetMs;
   }
 
   private arm(entry: PendingStep): NodeJS.Timeout {

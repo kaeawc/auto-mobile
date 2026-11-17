@@ -140,6 +140,30 @@ test("a full step queue drops runs but keeps an every actor's cadence", async ()
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
+test("a wall-clock step back does not stall scheduled actor steps", () => {
+  const { timer, backend } = engine({
+    collections: { ticks: [] },
+    actors: [
+      {
+        every: 1000,
+        maxRuns: 1,
+        do: [
+          { afterMs: 100, append: "ticks", value: { n: 1 } },
+          { afterMs: 100, append: "ticks", value: { n: 2 } },
+        ],
+      },
+    ],
+  });
+  timer.advanceTime(1000);
+  timer.stepWallClock(-3_600_000);
+  timer.advanceTime(200);
+  expect(backend.snapshot().ticks).toEqual([
+    { n: 1, id: "fake-1" },
+    { n: 2, id: "fake-2" },
+  ]);
+  backend.dispose();
+});
+
 describe("mock actor definitions", () => {
   const issueOf = (definition: unknown): string | undefined => {
     const result = mockBackendDefinitionSchema.safeParse(definition);

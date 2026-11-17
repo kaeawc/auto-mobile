@@ -59,6 +59,8 @@ import {
 import {
   OBSERVATION_SLICE,
   OBSERVATION_STEPS,
+  SDK_BRIDGE_READY_WAIT_MS,
+  waitForSdkBridge,
   judgeObservationCases,
   type ToolOutcome,
 } from "./observationSlice";
@@ -408,8 +410,6 @@ const SCENARIOS = [
   STORAGE_DEFAULT_SLICE,
   STORAGE_SLICE,
 ] as const;
-/** How long observe may take to report the contract bridge after launch. */
-const BRIDGE_READY_WAIT_MS = 30_000;
 type Scenario = (typeof SCENARIOS)[number];
 
 /** Retain the suite's ordering and run each selected scenario once. */
@@ -461,17 +461,18 @@ async function driveObservationSteps(
   runId: string,
 ): Promise<Map<string, ToolOutcome>> {
   const outcomes = new Map<string, ToolOutcome>();
-  const deadline = defaultTimer.now() + BRIDGE_READY_WAIT_MS;
   for (const step of OBSERVATION_STEPS) {
-    let outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
-    while (
-      step.tool === "observe" &&
-      outcome.result?.backend !== "sdk" &&
-      defaultTimer.now() < deadline
-    ) {
-      await defaultTimer.sleep(POLL_INTERVAL_MS);
-      outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
-    }
+    const invoke = () => invokeTool(step.tool, step.args, context.sessionUuid);
+    const outcome =
+      step.tool === "observe"
+        ? await waitForSdkBridge({
+            invoke,
+            timer: defaultTimer,
+            pollMs: POLL_INTERVAL_MS,
+            waitMs: SDK_BRIDGE_READY_WAIT_MS,
+            stopOnError: false,
+          })
+        : await invoke();
     outcomes.set(step.caseName, outcome);
   }
   const directory = contractDirectory(context.container);
@@ -494,18 +495,18 @@ async function driveMultiSceneSteps(
   if (ready !== "not-applicable") {
     // Like the observation slice, wait out a cached "bridge unavailable" capability: a rejection
     // (an error) or an SDK-backed result ends the wait.
-    const deadline = defaultTimer.now() + BRIDGE_READY_WAIT_MS;
     for (const step of MULTI_SCENE_STEPS) {
-      let outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
-      while (
-        step.tool === "observe" &&
-        outcome.error === undefined &&
-        outcome.result?.backend !== "sdk" &&
-        defaultTimer.now() < deadline
-      ) {
-        await defaultTimer.sleep(POLL_INTERVAL_MS);
-        outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
-      }
+      const invoke = () => invokeTool(step.tool, step.args, context.sessionUuid);
+      const outcome =
+        step.tool === "observe"
+          ? await waitForSdkBridge({
+              invoke,
+              timer: defaultTimer,
+              pollMs: POLL_INTERVAL_MS,
+              waitMs: SDK_BRIDGE_READY_WAIT_MS,
+              stopOnError: true,
+            })
+          : await invoke();
       outcomes.set(step.caseName, outcome);
     }
   }

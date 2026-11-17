@@ -57,12 +57,14 @@ load yq-helpers
   done
 }
 
-@test "ios-build-gate rolls up both deterministic iOS build legs" {
+@test "ios-build-gate rolls up every deterministic iOS build leg" {
   block="$(job_block ios-build-gate)"
   [[ "$block" == *"- ios-swift-packages"* ]]
+  [[ "$block" == *"- ios-swift-prototype-apps"* ]]
   [[ "$block" == *"- ios-xcode-build"* ]]
   # And actually checks their results (not just declares needs).
   [[ "$block" == *"needs.ios-swift-packages.result"* ]]
+  [[ "$block" == *"needs.ios-swift-prototype-apps.result"* ]]
   [[ "$block" == *"needs.ios-xcode-build.result"* ]]
 }
 

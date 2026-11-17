@@ -2844,8 +2844,10 @@ jobs:
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
     # infra-cancels the job (a cancelled terminal run blocks the required
-    # "iOS Build" gate). Generous backstop, not a tight bound.
-    timeout-minutes: 45
+    # "iOS Build" gate). The prototype simulator apps build in
+    # ios-swift-prototype-apps (#18429); without them a hosted macos-26 run is
+    # about 11-15 min, so 30 is a backstop at twice the slow measured run.
+    timeout-minutes: 30
     env:
       # Never import signing certificates into the self-hosted Mac's keychains:
       # the self-hosted leg always builds unsigned.
@@ -2951,6 +2953,8 @@ jobs:
           IOS_SIGNING_IDENTITY: ${{ secrets.IOS_SIGNING_IDENTITY }}
           IOS_SIGNING_TEAM_ID: ${{ secrets.IOS_SIGNING_TEAM_ID }}
           IOS_SIGNING_STRICT: ${{ env.IOS_SIGNING_ENABLED }}
+          # Built by the ios-swift-prototype-apps matrix in parallel (#18429).
+          SWIFT_BUILD_PROTOTYPE_APPS: skip
         run: |
           echo "Swift cache hit: ${{ steps.cache-swift-packages.outputs.cache-hit }}"
           SECONDS=0
@@ -2966,6 +2970,82 @@ jobs:
         if: always() && runner.environment == 'self-hosted'
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/swift-packages-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+  # The three iOS simulator prototype apps are each an `swiftc -O` whole-module
+  # compile of the shared renderer and took 27-38 of the 37-45+ min that one
+  # serial Swift Packages job needed on hosted macos-26 (#18429). One app per
+  # leg runs them beside the package build and tests; every leg still runs on
+  # every iOS-changing PR, so coverage is unchanged.
+  ios-swift-prototype-apps:
+    name: "Swift Prototype Apps (${{ matrix.config.name }})"
+    # Same small-pool routing as ios-swift-packages (#11011, #17580).
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.small != 'hosted') && fromJSON('["self-hosted","automobile-mac"]') || matrix.config.runner }}
+    needs: [detect-changes, fast-validation, mac-pool-routing]
+    if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
+    # Hosted macos-26 legs measured 6-8 min (agent), 10.5-14 min (viewer) and
+    # 10-15.5 min (ProtoViewer) of compile, plus ~2 min setup (#18429).
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {
+              name: "prototype-agent, Xcode 26.6",
+              app: "prototype-agent",
+              runner: "macos-26",
+              xcode: "26.6",
+            }
+          - {
+              name: "prototype-viewer, Xcode 26.6",
+              app: "prototype-viewer",
+              runner: "macos-26",
+              xcode: "26.6",
+            }
+          - {
+              name: "protoviewer, Xcode 26.6",
+              app: "protoviewer",
+              runner: "macos-26",
+              xcode: "26.6",
+            }
+    steps:
+      - name: "Isolate self-hosted Swift prototype apps home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/swift-prototype-apps-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.config.app }}"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          clean: true
+
+      - name: "Select Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'github-hosted'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ matrix.config.xcode }}
+
+      - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+
+      - name: "Build ${{ matrix.config.app }}"
+        run: ./scripts/ios/swift-build-prototype-apps.sh "${{ matrix.config.app }}"
+
+      - name: "Remove isolated Swift prototype apps home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/swift-prototype-apps-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.config.app }}"
 
   ios-xcode-build:
     name: "Build Xcode Projects (${{ matrix.config.name }})"
@@ -4115,8 +4195,8 @@ jobs:
             fi
           done
 
-  # Deterministic-only roll-up of the iOS *build* legs (Swift packages + Xcode
-  # projects). Reports a stable context name so it can be a required status
+  # Deterministic-only roll-up of the iOS *build* legs (Swift packages, Swift
+  # prototype apps + Xcode projects). Reports a stable context name so it can be a required status
   # check without the matrix-skip footgun (a gated-out matrix job reports its
   # literal "(${{ ... }})" name instead of the expanded one). Deliberately
   # excludes ios-xctest-runner-simulator-tests, which is simulator-flaky and
@@ -4128,6 +4208,7 @@ jobs:
     needs:
       - detect-changes
       - ios-swift-packages
+      - ios-swift-prototype-apps
       - ios-xcode-build
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
@@ -4138,6 +4219,7 @@ jobs:
           declare -A results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
             [ios-swift-packages]="${{ needs.ios-swift-packages.result }}"
+            [ios-swift-prototype-apps]="${{ needs.ios-swift-prototype-apps.result }}"
             [ios-xcode-build]="${{ needs.ios-xcode-build.result }}"
           )
           fail=

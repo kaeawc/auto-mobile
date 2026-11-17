@@ -69,7 +69,7 @@ export type MockLogEntry = MockRequestLogEntry | MockFrameLogEntry | MockRoomEve
 export interface MockBackendDeps {
   random: Random;
   ids: IdGenerator;
-  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
+  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout" | "now">;
 }
 
 const MAX_LOG_ENTRIES = 200;
@@ -118,6 +118,11 @@ export class PrototypeMockBackend {
   /** The agent speaks as the other side: `frame` to every member of `room`; how many it reached. */
   publish(room: string, frame: PrototypeRequestJson): number {
     return this.rooms.publish(room, frame, "publish");
+  }
+
+  /** Moves the actors' virtual clock ahead by `ms`; how many actor steps that applied. */
+  advanceClock(ms: number): number {
+    return this.actors.advance(ms);
   }
 
   /**

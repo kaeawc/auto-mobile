@@ -15,6 +15,8 @@ interface TimelineStep {
   request?: { method: string; path: string; body?: PrototypeRequestJson };
   status?: number;
   advanceMs?: number;
+  simulateMs?: number;
+  applied?: number;
   expect?: Record<string, unknown>;
   join?: string;
   frames?: Record<string, unknown[]>;
@@ -58,6 +60,10 @@ describe("PrototypeMockActors fixtures", () => {
         }
         if (step.advanceMs !== undefined) {
           timer.advanceTime(step.advanceMs);
+        }
+        if (step.simulateMs !== undefined) {
+          const applied = backend.advanceClock(step.simulateMs);
+          expect({ at, applied }).toEqual({ at, applied: step.applied! });
         }
         if (step.expect !== undefined) {
           const snapshot: Record<string, unknown> = backend.snapshot();

@@ -16,7 +16,7 @@ import {
 
 export interface MockBackendRegistryDeps {
   ids: IdGenerator;
-  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
+  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout" | "now">;
   /** The stream behind a backend: seeded when the definition has a seed, so a run replays. */
   createRandom?: (seed: number | undefined) => Random;
 }
@@ -77,6 +77,14 @@ export class PrototypeMockBackendRegistry {
 
   get(backendId: string): PrototypeMockBackend | undefined {
     return this.backends.get(backendId);
+  }
+
+  /**
+   * `prototype simulate advanceTimeMs`: moves every backend's actor clock ahead by `ms`, so a
+   * scripted reply lands deterministically; how many actor steps that applied in all.
+   */
+  advanceClock(ms: number): number {
+    return [...this.backends.values()].reduce((sum, backend) => sum + backend.advanceClock(ms), 0);
   }
 
   /** Removes `backendId`, closing its open channels. */

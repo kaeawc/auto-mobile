@@ -110,7 +110,14 @@ describe("prototype web 3D pose rules (#16458)", () => {
   });
 
   test("a book splits at the hinge into a left fixed leaf and a right moving leaf", () => {
-    expect(prototypeWebLeaves(400, 300, { axis: "vertical", at: 0.25 })).toEqual({
+    expect(
+      prototypeWebLeaves(
+        400,
+        300,
+        { axis: "vertical", at: 0.25 },
+        { left: 0, top: 0, width: 400, height: 300 },
+      ),
+    ).toEqual({
       flip: "rotateY(180deg)",
       clip: "inset(0 300px 0 0)",
       fixed: { width: "100px", height: "300px" },
@@ -123,11 +130,40 @@ describe("prototype web 3D pose rules (#16458)", () => {
   });
 
   test("a flip splits into a top fixed leaf and a bottom moving leaf", () => {
-    const leaves = prototypeWebLeaves(200, 400, { axis: "horizontal", at: 0.5 });
+    const leaves = prototypeWebLeaves(
+      200,
+      400,
+      { axis: "horizontal", at: 0.5 },
+      { left: 0, top: 0, width: 200, height: 400 },
+    );
     expect(leaves.clip).toBe("inset(0 0 200px 0)");
     expect(leaves.moving).toEqual({ top: "200px", width: "200px", height: "200px" });
     expect(leaves.origin).toBe("50% 0");
     expect(leaves.clone).toEqual({ top: "-200px" });
+  });
+
+  test("an off-centre hinge behind a bezel splits on the screen's hinge, not the frame's share (#16768)", () => {
+    // A 12 px bezel around a 400 × 300 screen: the hinge a quarter across the screen is 112 px
+    // into the 424 px frame, where a share of the frame box would put it 106 px in.
+    const book = prototypeWebLeaves(
+      424,
+      324,
+      { axis: "vertical", at: 0.25 },
+      { left: 12, top: 12, width: 400, height: 300 },
+    );
+    expect(book.clip).toBe("inset(0 312px 0 0)");
+    expect(book.fixed).toEqual({ width: "112px", height: "324px" });
+    expect(book.moving).toEqual({ left: "112px", width: "312px", height: "324px" });
+    expect(book.clone).toEqual({ left: "-112px" });
+    const flip = prototypeWebLeaves(
+      324,
+      424,
+      { axis: "horizontal", at: 0.75 },
+      { left: 12, top: 12, width: 300, height: 400 },
+    );
+    expect(flip.clip).toBe("inset(0 0 112px 0)");
+    expect(flip.moving).toEqual({ top: "312px", width: "324px", height: "112px" });
+    expect(flip.clone).toEqual({ top: "-312px" });
   });
 });
 

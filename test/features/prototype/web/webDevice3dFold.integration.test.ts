@@ -76,6 +76,16 @@ function shownViewHtml(page: Page): Promise<string> {
   );
 }
 
+/** The posture of the view the page shows, once every transition has finished. */
+async function shownPosture(page: Page): Promise<string> {
+  await page.evaluate(() => {
+    document.getAnimations().forEach((animation) => animation.finish());
+  });
+  return page.evaluate(
+    () => document.querySelector<HTMLElement>("[data-view]:not([hidden])")?.dataset.posture ?? "",
+  );
+}
+
 /** The fold as drawn once every transition has finished. */
 async function settledFold(page: Page) {
   await page.evaluate(() => {
@@ -135,6 +145,41 @@ describeBrowser("3D fold postures in headless Chromium (#16458)", () => {
           expect(await page.evaluate(() => document.body.hasAttribute("data-device3d"))).toBe(
             false,
           );
+          expect(await shownViewHtml(page)).toBe(before);
+          expect(errors).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      },
+      CASE_TIMEOUT_MS,
+    );
+  }
+
+  for (const { frame } of FOLDS) {
+    test(
+      `${frame} reflows to each open posture's view as the hinge crosses it, never to closed`,
+      async () => {
+        const { page, errors } = await open(browser, webSpecPage(spec, `reflow-${frame}`, frame));
+        try {
+          const before = await shownViewHtml(page);
+          expect(await shownPosture(page)).toBe("opened");
+          await page.click('[data-control="3d"]');
+          const shown: string[] = [];
+          for (const posture of ["half_opened", "closed", "opened", "half_opened"]) {
+            await page.selectOption('[data-control="posture"]', posture);
+            shown.push(await shownPosture(page));
+          }
+          // Shutting keeps the last open layout: the closed view is the cover panel's.
+          expect(shown).toEqual(["half_opened", "half_opened", "opened", "half_opened"]);
+          // The reflowed view is wrapped for 3D like the one it replaced.
+          expect(
+            await page.evaluate(() =>
+              document.querySelector("[data-view]:not([hidden])")?.hasAttribute("data-wrapped"),
+            ),
+          ).toBe(true);
+          await page.click('[data-control="3d"]');
+          await page.waitForFunction(() => !document.querySelector("[data-orbit]"));
+          expect(await shownPosture(page)).toBe("opened");
           expect(await shownViewHtml(page)).toBe(before);
           expect(errors).toEqual([]);
         } finally {

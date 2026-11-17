@@ -17,6 +17,7 @@ import {
   prototypeWebOrbitKey,
   prototypeWebPose,
   prototypeWebPostureAt,
+  prototypeWebReflowPosture,
 } from "../../../../src/features/prototype/web/webDevice3d";
 import { toHtml } from "../../../../src/features/prototype/web/webNodes";
 import {
@@ -101,6 +102,28 @@ describe("prototype web 3D pose rules (#16458)", () => {
   test("a tie keeps the posture listed first, and no postures shows none", () => {
     expect(prototypeWebPostureAt(45, BOOK_POSTURES)).toBe("closed");
     expect(prototypeWebPostureAt(90, [])).toBeUndefined();
+  });
+
+  test("a fold reflows to a posture view the page has and does not show (#16458)", () => {
+    const views = ["opened", "half_opened", "closed"];
+    expect(prototypeWebReflowPosture("half_opened", "opened", views)).toBe("half_opened");
+    expect(prototypeWebReflowPosture("opened", "half_opened", views)).toBe("opened");
+    expect(prototypeWebReflowPosture("opened", "opened", views)).toBeUndefined();
+    expect(prototypeWebReflowPosture("tent", "opened", views)).toBeUndefined();
+    expect(prototypeWebReflowPosture(undefined, "opened", views)).toBeUndefined();
+  });
+
+  test("shutting never reflows to the cover panel's closed view", () => {
+    expect(prototypeWebReflowPosture("closed", "half_opened", ["half_opened", "closed"])).toBe(
+      undefined,
+    );
+  });
+
+  test("the reflow rule is self-contained, as the inlined runtime needs", () => {
+    const inlined = new Function(`return (${prototypeWebReflowPosture.toString()})`)() as (
+      ...args: Parameters<typeof prototypeWebReflowPosture>
+    ) => string | undefined;
+    expect(inlined("half_opened", "opened", ["half_opened"])).toBe("half_opened");
   });
 
   test("arrow keys orbit by 5°, 15° with Shift; other keys do nothing", () => {

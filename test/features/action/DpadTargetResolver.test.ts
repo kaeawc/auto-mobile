@@ -65,8 +65,8 @@ const capture = (...children: FlatHierarchyNode[]): ViewHierarchyResult => ({
 const windowed = (lower: FlatHierarchyNode[], upper: FlatHierarchyNode[]): ViewHierarchyResult => ({
   hierarchy: {},
   windows: [
-    { windowLayer: 1, hierarchy: { node: root(lower) } },
-    { windowLayer: 5, hierarchy: { node: root(upper) } },
+    { windowLayer: 1, hierarchy: { node: [root(lower)] } },
+    { windowLayer: 5, hierarchy: { node: [root(upper)] } },
   ],
 });
 

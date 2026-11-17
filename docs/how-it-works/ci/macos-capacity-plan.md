@@ -77,18 +77,17 @@ order with `terminal` requirements so a failure never skips later jobs:
 CircleCI posts no commit status for the scheduled pipeline (#11615), so
 `.github/workflows/circleci-nightly-visibility.yml` (ubuntu, daily 10:40 UTC, not a
 required check) runs `scripts/ci/report-circleci-nightly.sh`. It reads the nightly
-through the CircleCI API with the existing `CIRCLECI_TOKEN` secret and opens or
-updates one `circleci-nightly-macos` issue naming each red job, its job URL and its
+through the CircleCI API with the `CIRCLECI_TOKEN` secret and opens or
+updates one `circleci-nightly-macos` issue naming each red job, its URL and
 artifact names (for example `bats-unit-joblog/bats-unit-joblog-durations.tsv`).
-Without the secret, or if CircleCI refuses it, the run skips with a notice.
+Without a usable secret, the run skips with a notice.
 
-The
-nightly sweeps build unsigned (the CircleCI executor pins signing off); the
-GitHub sweeps signed when certificates were configured. Release and signing
+CircleCI nightly sweeps build unsigned (its executor pins signing off); GitHub
+sweeps signed when certificates were configured. Release and signing
 workflows (`build-ctrl-proxy-ios-ipa`, `build-network-filter-probe`,
 `build-prototype-agent`, `build-screen-capture-helper`, the desktop installers)
-stay on GitHub. The `build-*` artifact workflows run on the hosted `xcode-27` image and
-select Xcode 27.2 explicitly.
+stay on GitHub; the `build-*` artifact workflows pin Xcode 27.2 on the hosted
+`xcode-27` image.
 
 ## Self-hosted Mac (#11011)
 

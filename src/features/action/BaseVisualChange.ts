@@ -1,3 +1,4 @@
+import { IosSdkMultiSceneError } from "../observe/ios/sdkObservationBridge";
 import {
   captureStabilityWindow,
   resolveObservationStartTime,
@@ -441,6 +442,9 @@ export class BaseVisualChange {
         this.readCachedOrFreshPrevious(options, perf, requiresFreshRead, evidence),
       );
     } catch (error) {
+      if (error instanceof IosSdkMultiSceneError) {
+        throw error;
+      }
       if (evidence.knownWrongWindow && resolvesFromObservation) {
         throw new MissingViewHierarchyError({ cause: error });
       }

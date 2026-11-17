@@ -1,3 +1,4 @@
+import { IosSdkMultiSceneError } from "../observe/ios/sdkObservationBridge";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import {
   TapAnyAndroidTapper,
@@ -431,6 +432,7 @@ export class TapAnyElement extends BaseVisualChange {
       });
       return snapshot.hierarchy;
     } catch (error) {
+      this.rethrowMultiSceneError(error);
       throwIfAborted(signal);
       logger.warn(`[TapAnyElement] Fresh capture failed: ${errorMessage(error)}`);
       return null;
@@ -967,6 +969,7 @@ export class TapAnyElement extends BaseVisualChange {
       return { ...result, ...(warnings.size > 0 ? { warnings: [...warnings] } : {}) };
     } catch (error) {
       perf.end();
+      this.rethrowMultiSceneError(error);
       this.rethrowObservationAbort(error, signal, rethrowAbort);
       const errorMsg = errorMessage(error);
       logger.warn(`[TapAnyElement] Tap failed: ${errorMsg}`, error);
@@ -984,6 +987,12 @@ export class TapAnyElement extends BaseVisualChange {
         },
         error,
       );
+    }
+  }
+
+  private rethrowMultiSceneError(error: unknown): void {
+    if (error instanceof IosSdkMultiSceneError) {
+      throw error;
     }
   }
 

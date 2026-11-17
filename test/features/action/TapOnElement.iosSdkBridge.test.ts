@@ -1,3 +1,5 @@
+import { IosSdkMultiSceneError } from "../../../src/features/observe/ios/sdkObservationBridge";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { readFreshPlatformHierarchy } from "../../../src/features/action/tapHierarchyRead";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -77,7 +79,7 @@ afterEach(() => {
   resetObserveCacheStore();
 });
 
-function harness(actionReply: CtrlProxySdkActionResult) {
+function harness(actionReply: CtrlProxySdkActionResult, captureError?: Error) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   timer.setCurrentTime(1000);
@@ -103,6 +105,15 @@ function harness(actionReply: CtrlProxySdkActionResult) {
   const xctestTap = spyOn(client, "requestTapCoordinates");
   const tap = new TapOnElement(device, new FakeAdbClient(), {
     timer,
+    hierarchyCapture: captureError
+      ? new FakeHierarchyCapture(
+          () => {
+            throw captureError;
+          },
+          "ios",
+          timer,
+        )
+      : undefined,
     tapStrategy: FakeTapStrategy.ios(),
     visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
@@ -140,6 +151,8 @@ function harness(actionReply: CtrlProxySdkActionResult) {
     });
   return {
     client,
+    tap,
+    observe,
     xctestTap,
     run,
     restore: () => {
@@ -330,3 +343,99 @@ test.each([25, 60])(
     }
   },
 );
+
+describe("tapOn preserves multi-scene failures", () => {
+  test("elementId search rejects the original capture error instead of not-found", async () => {
+    const error = new IosSdkMultiSceneError(["primary", "secondary"]);
+    const h = harness({ success: false, available: false, totalTimeMs: 0 }, error);
+    try {
+      await expect(
+        h.tap.execute({
+          action: "tap",
+          elementId: "contract-save",
+          searchUntil: { duration: 100 },
+        }),
+      ).rejects.toBe(error);
+      expect(error.failure).toBe("multi_scene");
+      expect(h.xctestTap).not.toHaveBeenCalled();
+    } finally {
+      h.restore();
+    }
+  });
+
+  test("SDK observation multi_scene survives the fresh hierarchy merge and search", async () => {
+    const h = harness({ success: false, available: false, totalTimeMs: 0 });
+    h.client.sdkObservationReply = {
+      success: false,
+      available: true,
+      failure: "multi_scene",
+      scenes: ["primary", "secondary"],
+      totalTimeMs: 0,
+    };
+    try {
+      await expect(
+        h.tap.execute({
+          action: "tap",
+          elementId: "contract-save",
+          searchUntil: { duration: 100 },
+        }),
+      ).rejects.toMatchObject({
+        failure: "multi_scene",
+        message: new IosSdkMultiSceneError(["primary", "secondary"]).message,
+      });
+      expect(h.xctestTap).not.toHaveBeenCalled();
+    } finally {
+      h.restore();
+    }
+  });
+
+  test("ordinary capture failure retains elementId not-found", async () => {
+    const h = harness(
+      { success: false, available: false, totalTimeMs: 0 },
+      new Error("capture unavailable"),
+    );
+    try {
+      const result = await h.tap.execute({
+        action: "tap",
+        elementId: "contract-save",
+        searchUntil: { duration: 100 },
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Element not found with provided elementId 'contract-save'");
+      expect(h.xctestTap).not.toHaveBeenCalled();
+    } finally {
+      h.restore();
+    }
+  });
+
+  test("SDK action multi_scene rejects without an XCTest fallback", async () => {
+    const h = harness({
+      success: false,
+      available: true,
+      failure: "multi_scene",
+      scenes: ["primary", "secondary"],
+      totalTimeMs: 0,
+    });
+    try {
+      await expect(h.run()).rejects.toMatchObject({
+        failure: "multi_scene",
+        message: new IosSdkMultiSceneError(["primary", "secondary"]).message,
+      });
+      expect(h.xctestTap).not.toHaveBeenCalled();
+    } finally {
+      h.restore();
+    }
+  });
+
+  test("initial observation multi_scene bypasses previous-observation fallback", async () => {
+    const error = new IosSdkMultiSceneError(["primary", "secondary"]);
+    const h = harness({ success: false, available: false, totalTimeMs: 0 });
+    h.observe.setFailureMode("getMostRecentCachedObserveResult", error);
+    try {
+      await expect(h.run()).rejects.toBe(error);
+      expect(h.xctestTap).not.toHaveBeenCalled();
+    } finally {
+      h.restore();
+    }
+  });
+});

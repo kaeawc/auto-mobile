@@ -7,24 +7,27 @@ Compose library and the `AutoMobilePrototype` Swift package
 describes the renderer itself.
 
 `packages/prototype-web/` (`@kaeawc/auto-mobile-prototype-web`) is not published yet, and there is
-no `<automobile-prototype>` element or interactive runtime. The planned element and release are in
-the devlog entries under Background.
+no interactive runtime. The planned release is in the devlog entries under Background.
 
 ## Package
 
-- `packages/prototype-web/` holds only `package.json` (no dependencies), the entry
-  `src/index.ts`, the hand-written public types `index.d.ts` and `build.ts`. It is not a Bun
+- `packages/prototype-web/` holds only `package.json` (no dependencies), the entries
+  `packages/prototype-web/src/index.ts` and `packages/prototype-web/src/element.ts`, their
+  hand-written public types `index.d.ts` and `element.d.ts`, and `build.ts`. It is not a Bun
   workspace, so the root `bun.lock` and the pinned runtime graph do not change.
-- `bun run build` in that directory bundles the entry with `bun build --target=browser` into
-  `dist/index.js` (gitignored). The library source is `src/features/prototype/web/embed/`.
+- `bun run build` in that directory bundles each entry on its own with `bun build --target=browser`
+  into `dist/index.js` and `dist/element.js` (gitignored). `dist/element.js` is the package's only
+  side effect. The library source is `src/features/prototype/web/embed/`.
 - `test/features/prototype/web/prototypeWebPackage.typecheck.ts` assigns each export and public type
   both ways between `index.d.ts` and the implementation, so the typecheck fails when they drift.
-- `prototypeWebLibraryBundle.test.ts` is the boundary check. The entry's browser bundle reaches no
-  Node builtin and stays within the export budget below. Its only inputs are
+- `prototypeWebLibraryBundle.test.ts` is the boundary check. Each entry's browser bundle reaches no
+  Node builtin and stays within the export budget below, and the element adds at most 8,000 bytes
+  over `index`. Its only inputs are
   `src/features/prototype/`, the CtrlProxy protocol constants and the root `package.json`, whose
   `version` is the library version.
 - `webLibrary.integration.test.ts`, run by `Prototype Web Screenshots`, mounts the library build in
-  Chromium and compares its pixels with the still's `toHtml` output drawn the same way.
+  Chromium and compares its pixels with the still's `toHtml` output drawn the same way. It also
+  draws `<automobile-prototype>` from the element build and compares it with `mount`.
 
 ## API
 
@@ -37,8 +40,10 @@ the devlog entries under Background.
   orientation and screen, and an unknown screen draws the stack's start.
 - Options: `spec`, `frame`, `orientation`, `zoom`, `mode`, `screen`, `controls`, `locale` and
   `textSize`.
-  - The frame is an id, or `false` for the default frame's screen alone. A frame object is not
-    accepted yet.
+  - The frame is an id, a frame object, or `false` for the default frame's screen alone. A frame
+    object is a `deviceFrames.json` entry without `source`. `prototypeWebFrameObject.ts` checks it
+    without zod. It applies the registry schema's fields, ranges and cross-field rules
+    (`deviceFrameRules.ts`), and a unit test keeps the two in agreement.
   - Zoom is `fit` or a scale from 0.5 to 4.
   - Mode is `light`, `dark`, or `system`, which follows `prefers-color-scheme`.
   - Controls are `false`, or any of `rotate`, `zoom` and `screen`.
@@ -47,14 +52,39 @@ the devlog entries under Background.
 - The host element is 640 px tall unless the page sets its height; `fit` scales the frame into
   the viewport below the controls and refits on resize.
 
+## Element
+
+Importing `@kaeawc/auto-mobile-prototype-web/element` registers `<automobile-prototype>`, once and
+only where `customElements` exists. `PrototypeElementController` (`embed/prototypeWebElement.ts`)
+holds its logic; the class in `packages/prototype-web/src/element.ts` only forwards its lifecycle.
+
+- Attributes `frame`, `orientation`, `zoom`, `mode`, `screen` and `controls` set the scalar options.
+  - The `frame` and `controls` attributes take `false` or `none` to turn them off.
+  - The `controls` attribute lists names separated by spaces or commas.
+  - The `zoom` attribute is `fit` or a number. An unknown `orientation` or `mode` is ignored.
+- The spec comes from the `spec` property, else the first child `<script type="application/json">`.
+  It is never read from an attribute or fetched. Unparseable JSON draws the `invalidInput` error
+  view. A `spec` set before the module defined the element is replayed through the setter on
+  upgrade.
+- It mounts when connected with a spec and destroys the mount when disconnected. Connected without
+  one, it watches its children and mounts once a JSON script arrives. While the page is still
+  parsing, it waits for the script's text to parse; after that, invalid JSON draws the error view.
+- A changed attribute passes on only its own option, so the toolbar's orientation and zoom stay.
+  A changed spec updates the mount. A removed attribute mounts afresh, because `update` keeps an
+  option it is not given.
+- Events are `CustomEvent`s carrying the `mount` callback's detail: `render`, `screenchange`,
+  `orientationchange`, `zoomchange` and `error`. Events fired while the first mount draws are
+  dispatched once it returns, so a listener can set the spec or remove the element.
+
 ## Refusal
 
 - An envelope with a `version` other than 1, or whose `requires` names a capability outside
   `PROTOTYPE_WEB_CAPABILITIES`, draws an error view (`role="alert"`) and calls `onError`.
 - `PROTOTYPE_WEB_CAPABILITIES` is generated from `knownPrototypeCapabilities()` by
   `scripts/prototype/generate-prototype-web-capabilities.ts`; a unit test fails when it is stale.
-- A bare spec is drawn without a capability check. An unknown frame, an orientation the frame lacks
-  or an invalid locale is refused with `invalidOption`.
+- A bare spec is drawn without a capability check. An unknown frame, an invalid frame object (the
+  message names each problem's path), an orientation the frame lacks or an invalid locale is
+  refused with `invalidOption`.
 - Envelope glyphs are parsed with the browser's `DOMParser` into allow-listed SVG shapes; without
   one (in a worker) icons draw the placeholder.
 

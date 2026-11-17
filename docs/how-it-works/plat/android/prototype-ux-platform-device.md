@@ -8,7 +8,8 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 values, delivered like `connectivity.changed`. The state updates at once, and the event fires once
 the state has been quiet for 500 ms. A flap that settles back on the last delivered values is not an
 event. Unknown keys and events fail validation with a
-path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
+path. Android provides these read-only modules with lazy system observers and debounced change events;
+thermal state is absent below API 29. The iOS readers are pending (#14323).
 
 The host mirrors each delivered `<module>.changed` as `platformStatus.<module>` in `prototype status`
 and `inspect`: `values`, the event's device `timestamp`, the host `receivedAt`, and `simulated` for an

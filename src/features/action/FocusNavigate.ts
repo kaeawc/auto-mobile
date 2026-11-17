@@ -133,7 +133,7 @@ export interface FocusNavigateOptions {
   /**
    * Resolve the target on each read: its bounds, null when nothing on the screen is the target,
    * or undefined to fall back to matching `until` here. tapOn's D-pad path resolves with the
-   * touch selector so both inputs pick the same element.
+   * touch selector, preferring a focusable label match when the touch target cannot focus.
    */
   pinTarget?: (screen: FocusScreen) => ElementBounds | null | undefined;
 }
@@ -244,15 +244,16 @@ function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): Focu
 }
 
 /**
- * Pin `target` to the first match on this screen as tapOn's `first` selection ranks it: smallest
+ * Prefer focusable matches, then pin `target` as tapOn's `first` selection ranks it: smallest
  * area, then hierarchy order (the same {@link compareSelectionRank} ordering tvOS tapOn uses).
  */
 export function firstMatchTarget(
   screen: FocusScreen,
   target: FocusNavigateTarget,
 ): FocusNavigateTarget {
-  const [first] = screen.elements
-    .filter((element) => elementMatchesTarget(element, target))
+  const matches = screen.elements.filter((element) => elementMatchesTarget(element, target));
+  const focusable = matches.filter((element) => isTruthyFlag(element.focusable));
+  const [first] = (focusable.length ? focusable : matches)
     .map((element, order) => ({
       element,
       windowRank: 0,

@@ -5,7 +5,7 @@ import {
 } from "../../../src/features/action/DpadTargetResolver";
 import type { FocusScreen } from "../../../src/features/action/FocusNavigate";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
-import type { ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
+import type { Element, ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
 import type { ElementQuery } from "../../../src/models/ElementQuery";
 import type {
   ElementSelectionOptions,
@@ -79,6 +79,57 @@ describe("SelectorDpadTargetResolver", () => {
         },
       },
     ]);
+  });
+
+  test("keeps a neighbour label pin when only a non-focusable node matches", () => {
+    const neighbour: Element = { bounds: FIELD_BOUNDS, text: "Neighbour", focusable: "false" };
+    const selector = new FakeSelector({ ...miss, element: neighbour, totalMatches: 1 });
+    const read = { ...screen(searchField), elements: [neighbour] };
+    expect(new SelectorDpadTargetResolver(selector).resolve(read, { label: "Neighbour" })).toEqual(
+      FIELD_BOUNDS,
+    );
+  });
+
+  test.each([false, "false", undefined])(
+    "prefers focusable label matches by area then hierarchy order (selected focusable: %s)",
+    (focusable) => {
+      const title: Element = { bounds: FIELD_BOUNDS, text: "Ring volume", focusable };
+      const large: Element = {
+        bounds: { left: 0, top: 100, right: 200, bottom: 200 },
+        "content-desc": "RING VOLUME slider",
+        focusable: true,
+      };
+      const small: Element = {
+        ...large,
+        bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+        focusable: "true",
+      };
+      const tied: Element = {
+        ...small,
+        bounds: { left: 0, top: 250, right: 100, bottom: 300 },
+      };
+      const unrelated: Element = { ...small, bounds: FIELD_BOUNDS, "content-desc": "Media volume" };
+      const selector = new FakeSelector({ ...miss, element: title, totalMatches: 1 });
+      const read = { ...screen(searchField), elements: [title, unrelated, large, small, tied] };
+      expect(
+        new SelectorDpadTargetResolver(selector).resolve(read, { label: "ring volume" }),
+      ).toEqual(small.bounds);
+    },
+  );
+
+  test("keeps a focusable tap selection even when another label match is smaller", () => {
+    const selected: Element = { bounds: FIELD_BOUNDS, text: "Play", focusable: "true" };
+    const smaller: Element = {
+      ...selected,
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    };
+    const selector = new FakeSelector({ ...miss, element: selected, totalMatches: 2 });
+    expect(
+      new SelectorDpadTargetResolver(selector).resolve(
+        { ...screen(searchField), elements: [smaller, selected] },
+        { label: "Play" },
+      ),
+    ).toEqual(selected.bounds);
   });
 
   test("resolves elementId exactly", () => {

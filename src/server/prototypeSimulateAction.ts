@@ -16,6 +16,7 @@ import {
   type PrototypeMediaSimulateResult,
 } from "../features/prototype/prototypeMediaSimulate";
 import { prototypeTimersUnsupportedMessage } from "../features/prototype/prototypeTimers";
+import type { PrototypeMockBackendRegistry } from "../features/prototype/PrototypeMockBackendRegistry";
 import { toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import type { z } from "zod/v4";
@@ -27,14 +28,23 @@ export interface PrototypeSimulateTarget {
   push?: PrototypePushRoutes;
   /** The shown prototype's media module; no runtime exposes one to simulate yet. */
   media?: PrototypeMediaSimRoute;
+  /** This session's mock backends: advanceTimeMs also moves their actors' clock (#14211). */
+  mocks?: Pick<PrototypeMockBackendRegistry, "advanceClock" | "ids">;
 }
 /** The simulate slice of the validated prototype input. */
 export type PrototypeSimulateInput = Pick<
   z.output<typeof prototypeSchema>,
   "id" | "advanceTimeMs" | "event" | "data" | "transport" | "timeoutMs"
 >;
+interface PrototypeClockOutput {
+  success: boolean;
+  error?: string;
+  fired?: number;
+  /** Mock backend actor steps the advance applied; present while a backend is defined. */
+  actorSteps?: number;
+}
 export type PrototypeSimulateOutput =
-  | { success: boolean; error?: string; fired?: number }
+  | PrototypeClockOutput
   | PrototypePushSimulateResult
   | PrototypeMediaSimulateResult;
 export async function performPrototypeSimulate(
@@ -62,7 +72,18 @@ export async function performPrototypeSimulate(
 async function advancePrototypeClock(
   target: PrototypeSimulateTarget,
   args: PrototypeSimulateInput,
-): Promise<{ success: boolean; error?: string; fired?: number }> {
+): Promise<PrototypeClockOutput> {
+  // Host-side first and whatever the device answers: a scripted reply needs no device timers.
+  const actors =
+    target.mocks !== undefined && target.mocks.ids().length > 0
+      ? { actorSteps: target.mocks.advanceClock(args.advanceTimeMs!) }
+      : {};
+  return { ...(await advanceDeviceClock(target, args)), ...actors };
+}
+async function advanceDeviceClock(
+  target: PrototypeSimulateTarget,
+  args: PrototypeSimulateInput,
+): Promise<PrototypeClockOutput> {
   try {
     const supported = target.android
       ? await target.android.supportsCommand(PROTOTYPE_TIMERS_CAPABILITY)

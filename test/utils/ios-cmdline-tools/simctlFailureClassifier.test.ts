@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
+  bootDataMissingError,
   classifySimctlFailure,
   planSimctlRecovery,
   runSimctlWithRecovery,
@@ -129,6 +130,23 @@ describe("simctlFailureText", () => {
 
   test("falls back to the message when there is no stderr", () => {
     expect(simctlFailureText(new Error(SHUTDOWN_ON_SHUTDOWN))).toBe(SHUTDOWN_ON_SHUTDOWN);
+  });
+});
+
+describe("bootDataMissingError", () => {
+  test("names the erase recovery for missing on-disk data and keeps the cause", () => {
+    const failure = execFailure(2, DATA_MISSING);
+    const error = bootDataMissingError(UDID, failure);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error?.message).toContain(`xcrun simctl erase ${UDID}`);
+    expect(error?.message).toContain("data is missing on disk");
+    expect(error?.cause).toBe(failure);
+  });
+
+  test("leaves every other boot failure to the caller", () => {
+    for (const stderr of [BOOT_ON_BOOTED, INVALID_DEVICE, "something else"]) {
+      expect(bootDataMissingError(UDID, execFailure(149, stderr))).toBeUndefined();
+    }
   });
 });
 

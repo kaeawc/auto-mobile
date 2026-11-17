@@ -243,17 +243,9 @@ function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): Focu
   return options.firstMatch ? firstMatchTarget(screen, exact) : exact;
 }
 
-/**
- * Prefer focusable matches, then pin `target` as tapOn's `first` selection ranks it: smallest
- * area, then hierarchy order (the same {@link compareSelectionRank} ordering tvOS tapOn uses).
- */
-export function firstMatchTarget(
-  screen: FocusScreen,
-  target: FocusNavigateTarget,
-): FocusNavigateTarget {
-  const matches = screen.elements.filter((element) => elementMatchesTarget(element, target));
-  const focusable = matches.filter((element) => isTruthyFlag(element.focusable));
-  const [first] = (focusable.length ? focusable : matches)
+/** tapOn's `first` ranking for flat elements: smallest area, then hierarchy order. */
+function rankFirst(elements: readonly Element[]): Element[] {
+  return elements
     .map((element, order) => ({
       element,
       windowRank: 0,
@@ -261,8 +253,49 @@ export function firstMatchTarget(
       order,
       interactive: false,
     }))
-    .sort((a, b) => compareSelectionRank(a, b));
-  return first ? { ...target, atBounds: first.element.bounds } : target;
+    .sort((a, b) => compareSelectionRank(a, b))
+    .map(({ element }) => element);
+}
+
+/** Whether a focusable, non-scrolling element encloses `element` (it owns focus for that label). */
+function hasFocusableOwner(elements: readonly Element[], element: Element): boolean {
+  return elements.some((owner) => {
+    if (owner === element || !isTruthyFlag(owner.focusable) || isTruthyFlag(owner.scrollable)) {
+      return false;
+    }
+    const overlap = intersectBounds(owner.bounds, element.bounds);
+    return overlap !== null && boundsEqual(overlap, element.bounds);
+  });
+}
+
+/**
+ * Pin `target` to the first match as tapOn's `first` selection ranks it: exact labels first
+ * ({@link exactFirstTarget}), then smallest area, then hierarchy order (the same {@link compareSelectionRank} ordering tvOS tapOn uses). A first match
+ * that cannot take focus keeps the pin when a focusable owner encloses it (focus on that owner
+ * matches the label); otherwise the pin moves to the best focusable match, exact before contains.
+ */
+export function firstMatchTarget(
+  screen: FocusScreen,
+  target: FocusNavigateTarget,
+): FocusNavigateTarget {
+  const ranked = exactFirstTarget(screen, target);
+  const matches = rankFirst(
+    screen.elements.filter((element) => elementMatchesTarget(element, ranked)),
+  );
+  const [first] = matches;
+  if (!first) {
+    return target;
+  }
+  if (isTruthyFlag(first.focusable) || hasFocusableOwner(screen.elements, first)) {
+    return { ...target, atBounds: first.bounds };
+  }
+  const exact = target.label ? { ...target, labelExact: true } : target;
+  const focusable = matches.filter((element) => isTruthyFlag(element.focusable));
+  const [owner] = [
+    ...focusable.filter((element) => elementMatchesTarget(element, exact)),
+    ...focusable,
+  ];
+  return { ...target, atBounds: (owner ?? first).bounds };
 }
 
 /** Whether the closed intervals [aStart, aEnd] and [bStart, bEnd] share any length. */

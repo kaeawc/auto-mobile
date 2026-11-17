@@ -4,11 +4,17 @@ import {
   pinnedFocusOptions,
   SelectorDpadTargetResolver,
 } from "../../../src/features/action/DpadTargetResolver";
-import { FocusNavigate, type FocusKeyPresser } from "../../../src/features/action/FocusNavigate";
+import {
+  FocusNavigate,
+  firstMatchTarget,
+  type FocusKeyPresser,
+  type FocusScreen,
+} from "../../../src/features/action/FocusNavigate";
 import { createFocusNavigateObserver } from "../../../src/features/action/FocusNavigateObserver";
 import type { InputKeyName } from "../../../src/features/action/InputKey";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+import type { Element } from "../../../src/models/Element";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -66,3 +72,49 @@ test.each(["pinned", "firstMatch"] as const)(
     expect(timer.getSleepHistory()).toEqual([]);
   },
 );
+
+const element = (fields: Partial<Element> & Pick<Element, "bounds">): Element => fields;
+const flat = (...elements: Element[]): FocusScreen => ({ focused: null, elements });
+
+const moviesLabel = element({
+  bounds: { left: 10, top: 10, right: 200, bottom: 90 },
+  text: "Movies",
+});
+const moviesRow = element({
+  bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+  focusable: true,
+});
+const moviesPlus = element({
+  bounds: { left: 600, top: 0, right: 650, bottom: 20 },
+  text: "Movies Plus",
+  focusable: true,
+});
+
+test("firstMatchTarget keeps a label its focusable row owns over a focusable contains match", () => {
+  expect(firstMatchTarget(flat(moviesRow, moviesLabel, moviesPlus), { label: "Movies" })).toEqual({
+    label: "Movies",
+    atBounds: moviesLabel.bounds,
+  });
+});
+
+test("firstMatchTarget moves an ownerless label to a focusable match, exact before contains", () => {
+  const title = element({ bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Play" });
+  const play = element({
+    bounds: { left: 0, top: 100, right: 300, bottom: 200 },
+    "content-desc": "Play",
+    focusable: true,
+  });
+  const playAll = element({
+    bounds: { left: 0, top: 60, right: 20, bottom: 70 },
+    text: "Play all",
+    focusable: true,
+  });
+  expect(firstMatchTarget(flat(title, playAll, play), { label: "play" }).atBounds).toEqual(
+    play.bounds,
+  );
+});
+
+test("firstMatchTarget keeps an ownerless label when nothing focusable matches", () => {
+  const title = element({ bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Play" });
+  expect(firstMatchTarget(flat(title), { label: "Play" }).atBounds).toEqual(title.bounds);
+});

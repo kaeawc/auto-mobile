@@ -45,6 +45,7 @@ To add one, copy the [template](template.md).
 | 2026-11-04 | idea     | [Device farm design](2026-11-04-device-farm-design.md)                                                                             |
 | 2026-11-04 | decision | [AndroidX Wear libraries for the Wear OS fixture app](2026-11-04-androidx-wear-fixture-libraries.md)                               |
 | 2026-11-04 | decision | [androidx.car.app for Car App Library template snapshots](2026-11-04-androidx-car-app-template-snapshots.md)                       |
+| 2026-11-03 | decision | [iOS simulator Pencil input through a virtual HID digitizer](2026-11-03-ios-simulator-pencil-virtual-digitizer.md)                 |
 | 2026-11-03 | decision | [Device Streaming tokens come from gcloud](2026-11-03-session-broker-remote-devices-gcloud-token.md)                               |
 | 2026-11-03 | decision | [qrcode-generator for the prototype share QR](2026-11-03-qrcode-generator-share-qr.md)                                             |
 | 2026-11-03 | decision | [Embeddable web prototype library plan](2026-11-03-prototype-web-library-plan.md)                                                  |

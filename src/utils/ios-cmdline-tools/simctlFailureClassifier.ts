@@ -1,4 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
+import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 
 /** simctl verbs whose failures this classifier understands. */
@@ -103,7 +104,7 @@ export function simctlFailureText(error: unknown): string {
   const stderr = (error as { stderr?: unknown } | null)?.stderr;
   const stderrText =
     typeof stderr === "string" ? stderr : Buffer.isBuffer(stderr) ? stderr.toString() : "";
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return stderrText ? `${stderrText}\n${message}` : message;
 }
 
@@ -118,20 +119,22 @@ export async function runSimctlWithRecovery(
   udid: string,
   options: SimctlRecoveryOptions,
 ): Promise<SimctlRecoveryOutcome> {
-  try {
-    await port.run(verb, udid);
+  // Resolve to the failure (or undefined) so the benign outcome is a plain return.
+  const error = await port.run(verb, udid).then(
+    () => undefined,
+    (failure: unknown) => failure ?? new Error(`simctl ${verb} rejected without a reason`),
+  );
+  if (error === undefined) {
     return { status: "ok" };
-  } catch (error) {
-    const failure = classifySimctlFailure(verb, simctlFailureText(error));
-    const plan = planSimctlRecovery(failure, options);
-    if (plan.action === "treat-as-success") {
-      return { status: "already-in-target-state", state: plan.state };
-    }
-    if (plan.action === "fail") {
-      throw new ActionableError(`simctl ${verb} ${udid} failed: ${plan.reason}`, { cause: error });
-    }
-    logger.warn(`[simctl recovery] ${verb} ${udid}: device data missing on disk; erasing`, error);
   }
+  const plan = planSimctlRecovery(classifySimctlFailure(verb, simctlFailureText(error)), options);
+  if (plan.action === "treat-as-success") {
+    return { status: "already-in-target-state", state: plan.state };
+  }
+  if (plan.action === "fail") {
+    throw new ActionableError(`simctl ${verb} ${udid} failed: ${plan.reason}`, { cause: error });
+  }
+  logger.warn(`[simctl recovery] ${verb} ${udid}: device data missing on disk; erasing`, error);
   await port.erase(udid);
   try {
     await port.run(verb, udid);

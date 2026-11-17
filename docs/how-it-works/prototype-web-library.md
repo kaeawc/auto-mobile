@@ -12,8 +12,8 @@ no interactive runtime. The planned release is in the devlog entries under Backg
 ## Package
 
 - `packages/prototype-web/` holds only `package.json` (no dependencies), the entries
-  `src/index.ts` and `src/element.ts`, their hand-written public types `index.d.ts` and
-  `element.d.ts`, and `build.ts`. It is not a Bun
+  `packages/prototype-web/src/index.ts` and `packages/prototype-web/src/element.ts`, their
+  hand-written public types `index.d.ts` and `element.d.ts`, and `build.ts`. It is not a Bun
   workspace, so the root `bun.lock` and the pinned runtime graph do not change.
 - `bun run build` in that directory bundles each entry on its own with `bun build --target=browser`
   into `dist/index.js` and `dist/element.js` (gitignored). `dist/element.js` is the package's only
@@ -54,7 +54,7 @@ no interactive runtime. The planned release is in the devlog entries under Backg
 
 Importing `@kaeawc/auto-mobile-prototype-web/element` registers `<automobile-prototype>`, once and
 only where `customElements` exists. `PrototypeElementController` (`embed/prototypeWebElement.ts`)
-holds its logic; the class in `src/element.ts` only forwards its lifecycle.
+holds its logic; the class in `packages/prototype-web/src/element.ts` only forwards its lifecycle.
 
 - Attributes `frame`, `orientation`, `zoom`, `mode`, `screen` and `controls` set the scalar options.
   `frame` and `controls` take `false` or `none` to turn them off. `controls` lists names separated

@@ -1,6 +1,6 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
-import { nodeBounds } from "../../models/ViewHierarchyResult";
-import { parseBounds } from "../../utils/bounds";
+import { childrenOf, nodeAttributes, nodeBounds } from "../../models/ViewHierarchyResult";
+import { intersectBounds, parseBounds } from "../../utils/bounds";
 
 const PIXEL_ORIENTATION_TOLERANCE_POINTS = 1;
 
@@ -79,6 +79,19 @@ function isExactSwappedFrame(
   );
 }
 
+/** Oversized dismiss/transition backdrops are not screen geometry (#18560). */
+function isSwappedFrameBackdrop(
+  child: NonNullable<ReturnType<typeof parseBounds>>,
+  bounds: NonNullable<ReturnType<typeof parseBounds>>,
+): boolean {
+  return (
+    child.left < bounds.left &&
+    child.top < bounds.top &&
+    child.right >= bounds.left + (bounds.bottom - bounds.top) &&
+    child.bottom >= bounds.top + (bounds.right - bounds.left)
+  );
+}
+
 interface SwappedRootEvidence {
   maxRight: number;
   maxBottom: number;
@@ -114,7 +127,7 @@ function landscapeExtentFitsSwappedRoot(
   }
   const root = rootNode ? parseBounds(nodeBounds(rootNode)) : null;
   const rootIsApplicationFrame = sameBounds(root, bounds);
-  const rootChildren = Array.isArray(rootNode?.node) ? rootNode.node : [];
+  const rootChildren = rootNode ? childrenOf(rootNode) : [];
   return swappedExtentFits(
     rootIsApplicationFrame ? rootChildren : rootNode ? [rootNode] : [],
     bounds,
@@ -122,28 +135,47 @@ function landscapeExtentFitsSwappedRoot(
   );
 }
 
+function countsAsScreenExtent(
+  child: NonNullable<ReturnType<typeof parseBounds>>,
+  bounds: NonNullable<ReturnType<typeof parseBounds>>,
+): boolean {
+  return child.top < bounds.bottom && !isSwappedFrameBackdrop(child, bounds);
+}
+
+function isScrollable(node: ViewHierarchyNode): boolean {
+  const scrollable = nodeAttributes(node).scrollable;
+  return scrollable === true || scrollable === "true";
+}
+
 function swappedExtentFits(
   nodes: ViewHierarchyNode[],
   bounds: NonNullable<ReturnType<typeof parseBounds>>,
   iosMultiPanel: boolean,
 ): boolean {
-  const stack = [...nodes];
+  type Bounds = NonNullable<ReturnType<typeof parseBounds>>;
+  const stack: { node: ViewHierarchyNode; clip?: Bounds | null }[] = nodes.map((node) => ({
+    node,
+  }));
   let maxRight = bounds.left;
   let maxBottom = bounds.top;
   let fullLandscapeFrame = false;
   let exactSwappedFrame = false;
   while (stack.length > 0) {
-    const node = stack.pop()!;
+    const { node, clip } = stack.pop()!;
     const child = parseBounds(nodeBounds(node));
-    if (child) {
-      maxRight = Math.max(maxRight, child.right);
-      maxBottom = Math.max(maxBottom, child.bottom);
+    const clipped = child && (clip === undefined ? child : clip && intersectBounds(child, clip));
+    // Flattened scroll rows below the root are outside either orientation (#18560).
+    if (child && countsAsScreenExtent(child, bounds)) {
+      if (clipped) {
+        maxRight = Math.max(maxRight, clipped.right);
+        maxBottom = Math.max(maxBottom, clipped.bottom);
+      }
       fullLandscapeFrame ||= isFullLandscapeFrame(child, bounds);
       exactSwappedFrame ||= isExactSwappedFrame(child, bounds);
     }
-    if (Array.isArray(node.node)) {
-      stack.push(...node.node);
-    }
+    // A scroll view contributes its own frame, but only its visible descendants.
+    const descendantClip = child && isScrollable(node) ? clipped : clip;
+    stack.push(...childrenOf(node).map((node) => ({ node, clip: descendantClip })));
   }
   return fitsSwappedBounds(
     bounds,

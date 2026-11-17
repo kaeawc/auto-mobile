@@ -1,0 +1,1326 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": "Settings",
+        "class": "XCUIApplication",
+        "bounds": {
+          "bottom": 951,
+          "left": 0,
+          "right": 669,
+          "top": 0
+        },
+        "view-id": "s2-b4f0bca63127676c"
+      },
+      "node": [
+        {
+          "$": {
+            "text": "dismiss popup",
+            "resource-id": "PopoverDismissRegion",
+            "class": "UIView",
+            "bounds": {
+              "bottom": 1338,
+              "left": -951,
+              "right": 1902,
+              "top": -669
+            },
+            "view-id": "PopoverDismissRegion"
+          }
+        },
+        {
+          "$": {
+            "resource-id": "_TtGC7SwiftUI32NavigationStackHosting",
+            "class": "UINavigationBar",
+            "bounds": {
+              "bottom": 82,
+              "left": 149,
+              "right": 802,
+              "top": 24
+            },
+            "view-id": "_TtGC7SwiftUI32NavigationStackHosting"
+          },
+          "node": {
+            "$": {
+              "text": "Close",
+              "class": "UIButton",
+              "bounds": {
+                "bottom": 68,
+                "left": 169,
+                "right": 209,
+                "top": 28
+              },
+              "clickable": "true",
+              "role": "button",
+              "view-id": "s2-79549273d54daf41"
+            }
+          }
+        },
+        {
+          "$": {
+            "class": "UIScrollView",
+            "bounds": {
+              "bottom": 635,
+              "left": 149,
+              "right": 802,
+              "top": 82
+            },
+            "scrollable": "true",
+            "view-id": "s2-da87525387b2a6a1"
+          },
+          "node": [
+            {
+              "$": {
+                "text": "Siri, Dictation & Privacy",
+                "class": "UILabel",
+                "bounds": {
+                  "bottom": 108,
+                  "left": 237,
+                  "right": 714,
+                  "top": 82
+                },
+                "role": "text",
+                "view-id": "s2-46af082e385452b7"
+              }
+            },
+            {
+              "$": {
+                "value": "Siri is designed to protect your information and enable you to choose what you share.",
+                "class": "UITextView",
+                "bounds": {
+                  "bottom": 165,
+                  "left": 237,
+                  "right": 714,
+                  "top": 108
+                },
+                "clickable": "true",
+                "scrollable": "true",
+                "role": "textfield",
+                "view-id": "s2-6f35a69ebc51c742",
+                "actions": [
+                  "set_text",
+                  "clear_text"
+                ]
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "Siri is designed to protect your information and enable you to choose what you share.",
+                    "class": "UITextView",
+                    "bounds": {
+                      "bottom": 165,
+                      "left": 237,
+                      "right": 682,
+                      "top": 108
+                    },
+                    "clickable": "true",
+                    "scrollable": "true",
+                    "role": "textfield",
+                    "view-id": "s2-9359e698fc43da15-1",
+                    "actions": [
+                      "set_text",
+                      "clear_text"
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": {
+                      "bottom": 165,
+                      "left": 681,
+                      "right": 711,
+                      "top": 108
+                    },
+                    "view-id": "s2-edd1e9ee444fedac-1"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Horizontal scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": {
+                      "bottom": 162,
+                      "left": 237,
+                      "right": 714,
+                      "top": 133
+                    },
+                    "view-id": "s2-a79830a9c63cf5c5-1"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "value": "Siri, Dictation & Privacy outlines the default behavior for Siri and Dictation. If you opt in to Improve Siri and Dictation or Improve Siri & Apple Intelligence, Apple will collect, store, and review additional data, including audio and text of what you say to Siri, Dictation, and Translate, as well as your conversation history with Siri if you use the Siri app. Your data will be associated with a random, device-generated identifier that rotates multiple times per hour and is not tied to your Apple Account ",
+                "class": "UITextView",
+                "bounds": {
+                  "bottom": 9607,
+                  "left": 237,
+                  "right": 714,
+                  "top": 182
+                },
+                "clickable": "true",
+                "scrollable": "true",
+                "role": "textfield",
+                "view-id": "s2-2adda7c5eeb5d35c",
+                "actions": [
+                  "set_text",
+                  "clear_text"
+                ]
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "Siri, Dictation & Privacy outlines the default behavior for Siri and Dictation. If you opt in to Improve Siri and Dictation or Improve Siri & Apple Intelligence, Apple will collect, store, and review additional data, including audio and text of what you say to Siri, Dictation, and Translate, as well as your conversation history with Siri if you use the Siri app. Your data will be associated with a random, device-generated identifier that rotates multiple times per hour and is not tied to your Apple Account or email address. For more information, visit www.apple.com/legal/privacy/data/en/improve-siri-dictation.",
+                    "class": "UITextView",
+                    "bounds": {
+                      "bottom": 552,
+                      "left": 237,
+                      "right": 712,
+                      "top": 182
+                    },
+                    "clickable": "true",
+                    "scrollable": "true",
+                    "role": "textfield",
+                    "view-id": "s2-31c8bb80a5af93e1",
+                    "actions": [
+                      "set_text",
+                      "clear_text"
+                    ]
+                  },
+                  "node": {
+                    "$": {
+                      "text": "www.apple.com/legal/privacy/data/en/improve-siri-dictation",
+                      "class": "UILink",
+                      "bounds": {
+                        "bottom": 552,
+                        "left": 237,
+                        "right": 679,
+                        "top": 495
+                      },
+                      "clickable": "true",
+                      "semantic-links": [
+                        {
+                          "occurrence": 0,
+                          "text": "www.apple.com/legal/privacy/data/en/improve-siri-dictation"
+                        }
+                      ],
+                      "role": "link",
+                      "view-id": "s2-b293c98c74d601fa"
+                    }
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Siri and Dictation",
+                    "class": "UITextView",
+                    "bounds": {
+                      "bottom": 597,
+                      "left": 237,
+                      "right": 398,
+                      "top": 569
+                    },
+                    "clickable": "true",
+                    "scrollable": "true",
+                    "role": "textfield",
+                    "view-id": "s2-9359e698fc43da15-2",
+                    "actions": [
+                      "set_text",
+                      "clear_text"
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "text": "If you choose to enable Siri AI, when you talk or type to Siri, your request may be processed on your device or sent to Private Cloud Compute. Private Cloud Compute is a server-based intelligence system that handles your Siri requests while protecting your privacy. The data being processed in Private Cloud Compute is not stored or made accessible to Apple. Your request is analyzed in Private Cloud Compute to determine the best way to respond, including whether a response can be fulfilled using on-device processing, by going out to the web to get up-to-date information, or using information from apps on your device. Private Cloud Compute provides this information securely to your device and does not retain your data. If you do not choose to enable Siri AI, or if Siri AI is not available, when you talk or type to Siri, your request is not sent to Private Cloud Compute and is processed on-device whenever possible, and can provide relevant and up-to-date information from Search.",
+                    "class": "UITextView",
+                    "bounds": {
+                      "bottom": 1212,
+                      "left": 237,
+                      "right": 715,
+                      "top": 614
+                    },
+                    "clickable": "true",
+                    "scrollable": "true",
+                    "role": "textfield",
+                    "view-id": "s2-9359e698fc43da15-3",
+                    "actions": [
+                      "set_text",
+                      "clear_text"
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": {
+                      "bottom": 9607,
+                      "left": 681,
+                      "right": 711,
+                      "top": 182
+                    },
+                    "view-id": "s2-edd1e9ee444fedac-2"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "text": "Vertical scroll bar, 20 pages",
+                "class": "UIView",
+                "bounds": {
+                  "bottom": 563,
+                  "left": 769,
+                  "right": 799,
+                  "top": 82
+                },
+                "view-id": "s2-63ea9f66bafb3dd3"
+              }
+            },
+            {
+              "$": {
+                "text": "Horizontal scroll bar, 1 page",
+                "class": "UIView",
+                "bounds": {
+                  "bottom": 560,
+                  "left": 149,
+                  "right": 802,
+                  "top": 530
+                },
+                "view-id": "s2-a79830a9c63cf5c5-2"
+              }
+            }
+          ]
+        },
+        {
+          "$": {
+            "text": "Toolbar",
+            "resource-id": "Toolbar",
+            "class": "UIToolbar",
+            "bounds": {
+              "bottom": 669,
+              "left": 149,
+              "right": 802,
+              "top": 8
+            },
+            "view-id": "Toolbar"
+          }
+        },
+        {
+          "$": {
+            "text": "Requests you make using Siri may be sent to Apple to provide relevant, up-to-date responses. For example, Search requests such as requests to play an album, search the web, or if you write with Siri to perform an action that requires world knowledge may be sent to Apple. For Search requests, including Search requests made using Siri, the request will also be stored by Apple and used to improve Search, Siri, and related features. If you do not want your Search queries to be stored by Apple and used to improve Search, you can disable Improve Search by going to Settings > Search and tapping to turn off Help Apple Improve Search.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 1627,
+              "left": 237,
+              "right": 716,
+              "top": 1228
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-4",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "If you opt in to Improve Siri and Dictation or Improve Siri & Apple Intelligence, searches you make through Siri will still be stored and used to improve Siri. You can disable Improve Siri and Dictation or Improve Siri & Apple Intelligence by going to Settings > Privacy & Security > Analytics & Improvements and tapping to turn off Improve Siri & Dictation or Improve Siri & Apple Intelligence. For more information about what data Apple collects when Siri fulfills your request using Search, visit www.apple.com/legal/privacy/data/en/siri-suggestions-search.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 1985,
+              "left": 237,
+              "right": 709,
+              "top": 1643
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-5",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "A history of your Siri and Dictation interactions is stored on your device and may be used to personalize your Siri experience.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 2087,
+              "left": 237,
+              "right": 699,
+              "top": 2001
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-6",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "When you use Siri or Dictation, your device will indicate in Siri Settings or Keyboard Settings whether the things you say are processed on your device and not sent to Apple. Otherwise, the things you say are sent to and processed by Apple. Your audio data is not stored by Apple unless you opt in to Improve Siri and Dictation or Improve Siri & Apple Intelligence.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 2331,
+              "left": 237,
+              "right": 712,
+              "top": 2103
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-7",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "When you use Siri, Dictation, or Translate, Apple will also store data related to your request, such as the category of request you made and whether it was completed successfully, device specifications, device configuration, performance statistics, and, if you have turned on Location Services for Siri, the approximate location of your device at the time your Siri request was made.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 2575,
+              "left": 237,
+              "right": 717,
+              "top": 2347
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-8",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "This data is part of your Siri and Dictation request history and is associated with a random, device-generated identifier that rotates multiple times per hour and is not tied to your Apple Account or email address. Apple may retain and use this data for up to two years to develop and improve Siri, Dictation, Search, and limited other language processing functionality in Apple products and services. For example, your data may be used to fine-tune Siri, Search, Voice Control, Translate, and automatic speech recognition models.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 2905,
+              "left": 237,
+              "right": 719,
+              "top": 2592
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-9",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "When you use Siri and Dictation, your device may send other contextual data to Apple, including from third-party apps you allow to integrate with Use with Siri Requests, such as:",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3035,
+              "left": 237,
+              "right": 707,
+              "top": 2921
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-10",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "• Contact names, nicknames, and relationships (for example, “my dad”), if you set them up in your contacts",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3137,
+              "left": 237,
+              "right": 712,
+              "top": 3052
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-11",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "• Form of address, if set in language and region settings",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3194,
+              "left": 237,
+              "right": 686,
+              "top": 3137
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-12",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "• Music and podcasts you enjoy",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3222,
+              "left": 237,
+              "right": 537,
+              "top": 3194
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-13",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "• Names of your and your Family Sharing members’ devices",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3279,
+              "left": 237,
+              "right": 626,
+              "top": 3222
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-14",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "• Names of accessories, homes, scenes, shared home members in the Home app, and Apple TV user profiles",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3365,
+              "left": 237,
+              "right": 692,
+              "top": 3279
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-15",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "• Labels for items, such as people names in Photos, Alarm names, and names of Reminders lists",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3450,
+              "left": 237,
+              "right": 687,
+              "top": 3365
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-16",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "• Names of apps installed on your device and shortcuts you added through Siri",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3507,
+              "left": 237,
+              "right": 668,
+              "top": 3450
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-17",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "This data is associated with a random, device-generated identifier that is not tied to your Apple Account or email address. It is used by Apple only to determine whether Siri understood your request and to help your iOS device and any connected Apple device, such as your Apple Watch, HomePod, or supported HomeKit accessory, understand you better and recognize what you say.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3780,
+              "left": 237,
+              "right": 705,
+              "top": 3524
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-18",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "This contextual data, as well as your related request data, is not used to build a marketing profile, and is never sold to anyone.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 3882,
+              "left": 237,
+              "right": 665,
+              "top": 3796
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-19",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "When you enable Siri, Apple also collects information about your device specifications, Siri settings, and Siri performance metrics to understand how Siri is used. This information is associated with identifiers that are not attached to your Apple Account or other information that might identify you.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 4097,
+              "left": 237,
+              "right": 714,
+              "top": 3898
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-20",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Siri in Camera",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 4142,
+              "left": 237,
+              "right": 368,
+              "top": 4114
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-21",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "When you open Siri in Camera, Visual Intelligence can look up information about images or your surroundings using Private Cloud Compute or Private Information Retrieval so that Apple does not learn the information in the image or your surroundings.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 4330,
+              "left": 237,
+              "right": 707,
+              "top": 4159
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-22",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Additionally, Visual Intelligence may send your location to Apple Maps to look up information about businesses, landmarks, and other places of interest it detects. For more information about the data collected when you use Apple Maps, visit www.apple.com/legal/privacy/data/en/apple-maps.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 4545,
+              "left": 237,
+              "right": 708,
+              "top": 4346
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-23",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "You can also use Google Search to look up search results for images, which sends an image from your camera to Google when you press the search button. When you use Google Search, Google’s data privacy policies will apply.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 4704,
+              "left": 237,
+              "right": 715,
+              "top": 4562
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-24",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "When you tap the shutter button, Visual Intelligence can use Siri to look up information about images.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 4806,
+              "left": 237,
+              "right": 675,
+              "top": 4721
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-25",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "If you enable the ChatGPT extension, you can send images to ChatGPT to learn more about the image. Your IP address is obscured from Google and ChatGPT and is not shared with them.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 4937,
+              "left": 237,
+              "right": 704,
+              "top": 4823
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-26",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Third-Party Apps",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 4981,
+              "left": 237,
+              "right": 399,
+              "top": 4953
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-27",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "When Siri interacts with a third-party app or service on your behalf, you are subject to that app or service’s terms and conditions and privacy policy. In addition, if you choose to allow apps to use Speech Recognition for transcription, the audio data to be transcribed may be sent to Apple.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 5169,
+              "left": 237,
+              "right": 713,
+              "top": 4998
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-28",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "ChatGPT Extension",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 5214,
+              "left": 237,
+              "right": 421,
+              "top": 5185
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-29",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "When you choose to enable the ChatGPT extension in Siri, Apple stores data related to your request, such as the category of request you made and whether it was completed successfully. This data is part of your related request history, and is used and retained by Apple as described above.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 5429,
+              "left": 237,
+              "right": 710,
+              "top": 5230
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-30",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Apple collects limited information about ChatGPT’s response back to you, such as the approximate size of the response, in order to operate the service and prevent fraud. For more information, visit www.apple.com/legal/privacy/data/en/chatgpt-extension.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 5617,
+              "left": 237,
+              "right": 691,
+              "top": 5446
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-31",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Connected Apple Devices",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 5662,
+              "left": 237,
+              "right": 483,
+              "top": 5633
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-32",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Using Siri on a connected Apple device, such as an Apple Watch or HomePod, may require additional server processing of your audio and transcripts. For more information, see the Siri Settings for your connected Apple device.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 5821,
+              "left": 237,
+              "right": 694,
+              "top": 5678
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-33",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Siri Suggestions in Spotlight, Siri, and Apps",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 5865,
+              "left": 237,
+              "right": 642,
+              "top": 5837
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-34",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "To personalize your experience, Suggestions uses local, on-device processing to learn how you use your devices and apps. Using information stored on your device, such as your Safari browsing history, emails, messages, images, notifications, and contacts, as well as information donated or contributed by other installed apps, Siri can suggest shortcuts and provide suggestions in searches, share sheet, calendar, Look Up, Visual Look Up, Safari, apps, and more. For example, Siri may use on-device intelligence to suggest who to share a photo with in share sheet based on who is in the photo. Suggestions may be used to personalize Apple services but are not stored on Apple servers or shared with other third-party apps. When you run a Siri-suggested shortcut, you are subject to the app’s terms and conditions and privacy policy.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 6394,
+              "left": 237,
+              "right": 712,
+              "top": 5882
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-35",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Location Services",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 6439,
+              "left": 237,
+              "right": 405,
+              "top": 6411
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-36",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "If you have Location Services turned on for Siri, the location of your device at the time you make a request will be sent to Apple to help Siri and Dictation improve the accuracy of its response to your requests. To deliver relevant responses and suggestions, Apple may use the IP address of your internet connection to approximate your location by matching it to a geographic region.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 6684,
+              "left": 237,
+              "right": 718,
+              "top": 6456
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-37",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "iCloud Syncing",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 6729,
+              "left": 237,
+              "right": 379,
+              "top": 6700
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-38",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "Your Siri settings and Siri Suggestions personalization will sync across your Apple devices using end-to-end encryption if you use iCloud. Additionally, the audio from when you set up Siri to recognize your voice syncs using end-to-end encryption to improve personalized Siri recognition on your devices. For example, this is how audio from your phone can enable Recognize My Voice on your HomePod. The personalized speech recognition models and your interactions with Siri and Dictation that are performed on device may leverage your on-device information to improve accuracy and model performance. Personalized speech recognition is performed on your device and not on Apple servers. The status of your nearby timers, alarms, shared media, and, if you opted in to Personal Requests on HomePod, phone call status, from your device and the proximity of such device may be shared locally with your nearby Apple devices for other devices to be able to control them from your nearby devices with Siri enabled.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 7371,
+              "left": 237,
+              "right": 713,
+              "top": 6745
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-39",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "If you enable Siri AI and use iCloud, the history of your interactions with Siri that are saved within the Siri app will also sync across your Apple devices using end-to-end encryption, which cannot be read by Apple, to allow you to access your past conversations with Siri across your Apple devices.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 7559,
+              "left": 237,
+              "right": 716,
+              "top": 7388
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-40",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "You Have Choice and Control",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 7604,
+              "left": 237,
+              "right": 514,
+              "top": 7575
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-41",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "You can disable Siri or Dictation at any time. To turn off Siri, go to Settings > Siri > Talk & Type to Siri, and tap Off, then tap to turn off “Press Side Button for Siri” and “Type to Siri”. To turn off Dictation, go to Settings > General > Keyboard, then tap to turn off Enable Dictation. If you turn off both Siri and Dictation, the transcripts of your Siri and Dictation requests that are stored on your device and used to personalize your experience will be deleted.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 7905,
+              "left": 237,
+              "right": 714,
+              "top": 7620
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-42",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "You can delete the transcripts of your Siri and Dictation requests that are stored on your device by going to Settings > Siri > Turn Off Siri and tapping Turn Off Siri.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 8035,
+              "left": 237,
+              "right": 701,
+              "top": 7921
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-43",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "You can control which apps can integrate with Siri Requests at any time by going to Settings > Siri > Apps > [app name] > Use with Siri Requests.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 8137,
+              "left": 237,
+              "right": 710,
+              "top": 8052
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-44",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "You can also restrict the ability to use Siri and Dictation altogether by going to Settings > Screen Time > Content & Privacy Restrictions > Allowed Apps & Features and tapping Siri & Dictation.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 8267,
+              "left": 237,
+              "right": 713,
+              "top": 8153
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-45",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "If you do not want Siri Suggestions in apps, or when sharing, searching, or listening, you can disable Siri Suggestions by going to Settings > Siri > Suggestions, or by going to Settings > Siri > Apps > [app name] and tapping to change your selection for an app.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 8455,
+              "left": 237,
+              "right": 716,
+              "top": 8284
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-46",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "You can see and control the full list of features that Siri personalizes and apps that Siri suggests shortcuts for by going to Settings > Siri. To stop apps from contributing information to personalize Siri, go to Settings > Siri > Apps > [app name], then tap to turn off Learn from this App. To stop app clips from contributing information to personalize Siri, go to Settings > Siri > App Clips and tap to turn off Learn from App Clips.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 8727,
+              "left": 237,
+              "right": 718,
+              "top": 8471
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-47",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "If you have enabled Location Services, you can turn off Location Services for Siri by going to Settings > Privacy & Security > Location Services > Siri and tapping Never.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 8858,
+              "left": 237,
+              "right": 708,
+              "top": 8744
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-48",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "If you have enabled Location Services, you can turn off Location Services for Siri Suggestions by going to Settings > Privacy & Security > Location Services > System Services and tapping to turn off Suggestions & Search.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 9017,
+              "left": 237,
+              "right": 704,
+              "top": 8874
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-49",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "If you do not want Siri personalization to sync across your devices, you can disable Siri by going to Settings > [your name] > iCloud > Saved to iCloud > See All and tapping to turn off Siri.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 9147,
+              "left": 237,
+              "right": 708,
+              "top": 9033
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-50",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "You can control which apps use Speech Recognition for transcription by going to Settings > Privacy & Security > Speech Recognition.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 9249,
+              "left": 237,
+              "right": 704,
+              "top": 9163
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-51",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        },
+        {
+          "$": {
+            "text": "By using Siri, Dictation, or Siri Suggestions, you agree and consent to Apple’s and its subsidiaries’ and agents’ transmission, collection, maintenance, processing, and use of this information to provide and improve Siri, Dictation, Search, and limited other language processing functionality in Apple products and services as described above. Apple may process and store this information with trusted third-party service providers. At all times, information collected by Apple will be treated in accordance with Apple’s Privacy Policy, which can be found at www.apple.com/privacy.",
+            "class": "UITextView",
+            "bounds": {
+              "bottom": 9607,
+              "left": 237,
+              "right": 716,
+              "top": 9265
+            },
+            "clickable": "true",
+            "scrollable": "true",
+            "role": "textfield",
+            "view-id": "s2-9359e698fc43da15-52",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "packageName": "com.apple.Preferences",
+  "updatedAt": 1794956768559,
+  "windows": [
+    {
+      "bounds": {
+        "bottom": 951,
+        "left": 0,
+        "right": 669,
+        "top": 0
+      },
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "screenScale": 3,
+  "screenWidth": 669,
+  "screenHeight": 951,
+  "nativeScale": 3,
+  "pixelWidth": 2007,
+  "pixelHeight": 2853,
+  "insets": {
+    "available": false,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "frameContext": "C3F70AF6-0036-4A41-99EA-8162A688378E:1:e91bb4a0f6513d57",
+  "fresh": true
+}

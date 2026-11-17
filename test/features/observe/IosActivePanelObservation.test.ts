@@ -27,6 +27,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 
+import modalSheetHierarchy from "../../fixtures/ios-duo/observe-inner-modal-sheet-hierarchy-18560.json";
+import { wireCapture } from "../../helpers/wireCapture";
+import { extractHierarchyScreenSize } from "../../../src/features/observe/hierarchyScreenSize";
+import type { HierarchyCollectorPort } from "../../../src/features/observe/collectors/collectorPorts";
+
 const fixtureDir = join(process.cwd(), "test/fixtures");
 function displays(panel: "inner" | "cover"): DevicectlDisplayInfo[] {
   const parsed = parseDevicectlDisplayInfo(
@@ -70,6 +75,7 @@ class FakeDisplaySource implements DevicectlDisplayInfoSource {
 async function collect(
   source?: DevicectlDisplayInfoSource,
   options: {
+    capturedHierarchy?: ViewHierarchyResult;
     rotation?: number;
     size?: { width: number; height: number };
     target?: BootedDevice;
@@ -80,7 +86,7 @@ async function collect(
 ) {
   const target = options.target ?? device;
   const size = options.size ?? stale.screenSize;
-  const hierarchy: ViewHierarchyResult = {
+  const hierarchy: ViewHierarchyResult = options.capturedHierarchy ?? {
     hierarchy: {},
     pixelWidth: options.pixels?.width ?? 1398,
     pixelHeight: options.pixels?.height ?? 2034,
@@ -93,8 +99,10 @@ async function collect(
         ? { packageName: "com.example.duo" }
         : {}),
   };
-  const hierarchyCollector = new FakeHierarchyCollector();
-  hierarchyCollector.extractScreenSize = () => size;
+  const hierarchyCollector: HierarchyCollectorPort = new FakeHierarchyCollector();
+  hierarchyCollector.extractScreenSize = options.capturedHierarchy
+    ? extractHierarchyScreenSize
+    : () => size;
   const collector = new DefaultIosObservationCollector({
     hierarchyCollector: () => hierarchyCollector,
     viewHierarchy: () => new FakeViewHierarchy(),
@@ -295,4 +303,15 @@ test("the runner's inner-panel home screen is observed, not dropped (#17046)", a
   expect(result.errors).toBeUndefined();
   expect(result.display).toMatchObject({ key: "primary-1", role: "inner" });
   expect(springboardInnerHome.skeleton?.map((element) => element.label)).toContain("Settings");
+});
+
+test("captured inner modal sheet derives landscape size and rotation", async () => {
+  const result = await collect(undefined, {
+    capturedHierarchy: wireCapture(structuredClone(modalSheetHierarchy)),
+  });
+  expect(device.displays!.panels).toHaveLength(2);
+  expect(result.screenSize).toEqual({ width: 951, height: 669 });
+  expect(result.rotation).toBe(1);
+  // The pre-projection capture still yields no semantic screen identity.
+  expect(result.screenIdentity).toBeUndefined();
 });

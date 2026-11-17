@@ -96,15 +96,28 @@ export function expectNoText(appId: string, text: string) {
     (payloadMentions(payload, text) ? `"${text}" is still on screen` : undefined);
 }
 
-function observeStep(id: string, expectation: string, assert: SmokeStep["assert"]): SmokeStep {
+function observeStep(
+  id: string,
+  expectation: string,
+  assert: SmokeStep["assert"],
+  extra: Partial<Pick<SmokeStep, "retry">> = {},
+): SmokeStep {
   return {
     id,
     tool: "observe",
     args: { platform: "android", screenshot: "settled" },
     expectation,
     assert,
+    ...extra,
   };
 }
+
+/**
+ * A fresh watch AVD boots into the Wear setup wizard, whose "Hello" overlay exposes no
+ * accessibility nodes, so observe returns an empty skeleton until the emulator's setup finishes on
+ * its own. The first observe waits up to about a minute for it.
+ */
+export const WEAR_SETUP_RETRY = { attempts: 12, delayMs: 5_000 } as const;
 
 function step(
   id: string,
@@ -288,6 +301,7 @@ export function buildWearSmokePlan(options: WearSmokePlanOptions = {}): SmokeSte
       "observe-initial",
       "hierarchy is observable and isScreenRound is true",
       assertRoundObservation,
+      { retry: WEAR_SETUP_RETRY },
     ),
     ...(options.fixtureApkPath
       ? fixtureSteps(options.fixtureApkPath, breakAssertion)

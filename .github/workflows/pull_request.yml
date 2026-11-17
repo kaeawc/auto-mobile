@@ -369,6 +369,15 @@ jobs:
               - 'test/fixtures/daemon-isolation-paths.json'
               - 'test/fixtures/ime-commit-contract.json'
               - 'test/fixtures/plan-schedule-feasibility/**'
+              # The committed automobile:prototype/native and /eject Android samples,
+              # the fixture specs and emitter sources that generate them, and their
+              # generator: JVM Consumer Checks compiles the samples against the
+              # published renderer (#18381).
+              - 'samples/prototype-embedding/android/**'
+              - 'test/fixtures/prototype-embedding/**'
+              - 'scripts/prototype/generateEmbeddingSamples.ts'
+              - 'src/features/prototype/nativePrototype*.ts'
+              - 'src/features/prototype/prototypeEject*.ts'
               # The emulator jobs are exactly what this composite action drives,
               # so an edit to it must exercise them rather than skip them. #4199
               # rewired this action and only ran the emulator jobs incidentally,

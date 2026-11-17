@@ -123,7 +123,9 @@ Each shot:
 
 1. sets appearance on its already booted, pinned device through a host command;
 2. acquires the device and fixes the clock and bars with `statusBar` (9:41, full battery);
-3. clears the app and seeds a fixed sample library from the shared valid prototype corpus;
+3. clears the app and imports a fixed sample library from the shared valid prototype corpus
+   with `prototype` `save` (no `pin` or `icon`), which routes each spec into the installed
+   ProtoViewer library;
 4. drives the screen with `tapOn` and `launchApp`;
 5. captures with `observe` (`screenshot: "settled"`).
 

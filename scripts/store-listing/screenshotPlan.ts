@@ -7,6 +7,9 @@
  * runner: a fixed sample library, the `statusBar` tool's fixed clock and bars, a fixed appearance,
  * and a clean app (`clearAppData`) seeded before every shot.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type Platform = "android" | "ios";
 export type Appearance = "light" | "dark";
@@ -149,12 +152,26 @@ function appearanceStep(profile: DeviceProfile, appearance: Appearance, pins: Pl
       };
 }
 
-/** Clean slate, then the fixed sample files; the app is relaunched by each screen's own steps. */
-function seedSteps(profile: DeviceProfile, pins: PlanPins): McpStep[] {
-  const files = SAMPLE_LIBRARY.map((entry) => ({
-    sourcePath: entry.file,
-    destinationPath: `${entry.label}.automobile-proto`,
-  }));
+/** Reads a sample prototype spec; injected so tests can supply specs without the file system. */
+export type SpecLoader = (file: string) => Record<string, unknown>;
+
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
+/** Reads a corpus spec relative to the repository root. */
+export const readSampleSpec: SpecLoader = (file) =>
+  JSON.parse(readFileSync(join(REPO_ROOT, file), "utf8")) as Record<string, unknown>;
+
+/**
+ * Clean slate, then the fixed sample library through the app's own import path: `prototype` `save`
+ * without `pin` or `icon` imports each spec into the installed ProtoViewer library (#18397). Files
+ * written with `putAppFile` are never imported, so the library would stay empty. The app is
+ * relaunched by each screen's own steps.
+ */
+function seedSteps(
+  profile: DeviceProfile,
+  pins: PlanPins,
+  specs: ReadonlyMap<string, Record<string, unknown>>,
+): McpStep[] {
   const appId =
     profile.platform === "android"
       ? (pins.androidAppId ?? APP_IDS.android)
@@ -162,21 +179,16 @@ function seedSteps(profile: DeviceProfile, pins: PlanPins): McpStep[] {
   return [
     { kind: "mcp", tool: "launchApp", args: { appId, clearAppData: true } },
     { kind: "mcp", tool: "terminateApp", args: { appId } },
-    {
+    ...SAMPLE_LIBRARY.map((entry): McpStep => ({
       kind: "mcp",
-      tool: "putAppFile",
-      args:
-        profile.platform === "android"
-          ? { target: { domain: "user_files", namespace: "protoviewer-shots", reset: true }, files }
-          : {
-              target: {
-                domain: "app_containers",
-                appId: pins.iosAppId ?? APP_IDS.ios,
-                container: "documents",
-              },
-              files,
-            },
-    },
+      tool: "prototype",
+      args: {
+        action: "save",
+        platform: profile.platform,
+        label: entry.label,
+        spec: specs.get(entry.file),
+      },
+    })),
   ];
 }
 
@@ -241,7 +253,11 @@ export function destinationFor(
 }
 
 /** The full matrix: every profile x appearance x screen, in a stable order. */
-export function buildScreenshotPlan(pins: PlanPins): ScreenshotShot[] {
+export function buildScreenshotPlan(
+  pins: PlanPins,
+  loadSpec: SpecLoader = readSampleSpec,
+): ScreenshotShot[] {
+  const specs = new Map(SAMPLE_LIBRARY.map((entry) => [entry.file, loadSpec(entry.file)]));
   return PROFILES.flatMap((profile) =>
     (["light", "dark"] as const).flatMap((appearance) =>
       SCREENS.map((screen) => ({
@@ -258,7 +274,7 @@ export function buildScreenshotPlan(pins: PlanPins): ScreenshotShot[] {
             tool: "statusBar",
             args: { ...STATUS_BAR, platform: profile.platform },
           },
-          ...seedSteps(profile, pins),
+          ...seedSteps(profile, pins, specs),
           ...screenSteps(profile, screen, pins),
         ],
       })),

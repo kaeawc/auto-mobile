@@ -16,7 +16,8 @@ import {
 /**
  * Headless Chromium check that un-padded inlined images lay out as they did before #17679 wrapped
  * their layers in a content box (#17716): each fixture's image, parent and drawn layer box must
- * match the golden, which was measured from the renderer at #17679's first parent. Opt-in, as it
+ * match the golden, which was measured from the renderer at #17679's first parent and regenerated
+ * when wrap-both images took their natural size (#18418). Opt-in, as it
  * launches a browser: it runs through `bash scripts/prototype/web-screenshots.sh` (Chromium), whose
  * `--update` rewrites the golden from the current renderer — only for a deliberate layout change.
  */

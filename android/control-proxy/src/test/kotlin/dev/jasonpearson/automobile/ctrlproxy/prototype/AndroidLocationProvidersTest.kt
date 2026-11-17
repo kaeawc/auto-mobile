@@ -39,7 +39,13 @@ class AndroidLocationProvidersTest {
   @Before
   fun setUp() {
     app = RuntimeEnvironment.getApplication()
-    shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+    // ContextCompat's pre-33 not-exported receivers need androidx's signature permission, which a
+    // device grants at install and Robolectric does not.
+    shadowOf(app)
+      .grantPermissions(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        "${app.packageName}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      )
     manager = app.getSystemService(LocationManager::class.java)
     shadow = shadowOf(manager)
     shadow.setProviderEnabled(LocationManager.GPS_PROVIDER, false)

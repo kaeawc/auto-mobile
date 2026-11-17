@@ -38,16 +38,19 @@ export class FakeAndroidStampToolchain implements AndroidStampToolchain {
 export class FakeAndroidStampZip implements AndroidStampZip {
   spec = "";
   assets: readonly AndroidStampAsset[] = [];
+  colors: ReadonlyMap<string, number> = new Map();
   constructor(private readonly calls: string[]) {}
   assemble(
     _template: Buffer,
     _linked: Buffer,
     spec: string,
     assets: readonly AndroidStampAsset[],
+    colors: ReadonlyMap<string, number> = new Map(),
   ): Buffer {
     this.calls.push("zip");
     this.spec = spec;
     this.assets = assets;
+    this.colors = colors;
     return Buffer.from("assembled");
   }
 }

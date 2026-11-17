@@ -1,6 +1,7 @@
 import AdmZip from "adm-zip";
 import { ActionableError } from "../../../../models/ActionableError";
 import { assertZipEntriesContained } from "../../../../utils/workers/assertZipEntriesContained";
+import { patchArscColors } from "./androidArscColors";
 
 export interface AndroidStampAsset {
   id: string;
@@ -12,6 +13,8 @@ export interface AndroidStampZip {
     linked: Buffer,
     spec: string,
     assets: readonly AndroidStampAsset[],
+    /** ARGB values for named template `color` resources, e.g. the icon and splash background. */
+    colors?: ReadonlyMap<string, number>,
   ): Buffer;
 }
 export class DefaultAndroidStampZip implements AndroidStampZip {
@@ -20,6 +23,7 @@ export class DefaultAndroidStampZip implements AndroidStampZip {
     linked: Buffer,
     spec: string,
     assets: readonly AndroidStampAsset[],
+    colors: ReadonlyMap<string, number> = new Map(),
   ): Buffer {
     const zip = new AdmZip(template);
     const manifestZip = new AdmZip(linked);
@@ -51,7 +55,7 @@ export class DefaultAndroidStampZip implements AndroidStampZip {
     if (!resources) {
       throw new ActionableError("Template APK has no resources.arsc.");
     }
-    resources.setData(resources.getData());
+    resources.setData(patchArscColors(resources.getData(), colors));
     resources.header.method = 0;
     return zip.toBuffer();
   }

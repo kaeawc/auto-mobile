@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import AdmZip from "adm-zip";
-import { AndroidDisposableAppStamper } from "../../../../../src/features/prototype/disposableApp/android/AndroidDisposableAppStamper";
+import {
+  ANDROID_ICON_BACKGROUND_COLOR,
+  AndroidDisposableAppStamper,
+} from "../../../../../src/features/prototype/disposableApp/android/AndroidDisposableAppStamper";
 import { DefaultAndroidStampZip } from "../../../../../src/features/prototype/disposableApp/android/AndroidStampZip";
 import { CountingIdGenerator } from "../../../../../src/utils/IdGenerator";
 import { FakeFileSystem } from "../../../../fakes/FakeFileSystem";
@@ -34,15 +37,30 @@ test("cache miss follows link, zip, align, sign, verify; cache hit skips tools",
   expect(calls.length).toBe(5);
   expect((await stamper.stamp({ ...input, label: "Other" })).apkPath).not.toBe(first.apkPath);
 });
-test("rejects icons and ids outside the disposable prefix before tools", async () => {
+test("rejects asset icons, bad colours and ids outside the disposable prefix before tools", async () => {
   const { calls, stamper } = setup();
+  await expect(stamper.stamp({ ...stampInput(), icon: { asset: "logo" } })).rejects.toThrow(
+    "icon asset",
+  );
   await expect(
-    stamper.stamp({ ...stampInput(), icon: { backgroundColor: "#ffffff" } }),
-  ).rejects.toThrow("Omit icon");
+    stamper.stamp({ ...stampInput(), icon: { backgroundColor: "red" } }),
+  ).rejects.toThrow("#AARRGGBB");
   await expect(stamper.stamp({ ...stampInput(), appId: "com.real.app" })).rejects.toThrow(
     "not a disposable",
   );
   expect(calls).toEqual([]);
+});
+test("icon backgroundColor recolours the icon and splash background and keys the cache", async () => {
+  const { fs, zip, stamper } = setup();
+  const input = stampInput();
+  await fs.writeFileBuffer(input.template.apkPath, Buffer.from("template"));
+  const plain = await stamper.stamp(input);
+  expect(zip.colors.size).toBe(0);
+  const red = await stamper.stamp({ ...input, icon: { backgroundColor: "#C62828" } });
+  expect(zip.colors).toEqual(new Map([[ANDROID_ICON_BACKGROUND_COLOR, 0xffc62828]]));
+  const translucent = await stamper.stamp({ ...input, icon: { backgroundColor: "#80C62828" } });
+  expect(zip.colors.get(ANDROID_ICON_BACKGROUND_COLOR)).toBe(0x80c62828);
+  expect(new Set([plain.apkPath, red.apkPath, translucent.apkPath]).size).toBe(3);
 });
 test("failed verification never creates a cache receipt", async () => {
   const { fs, tools, stamper } = setup();

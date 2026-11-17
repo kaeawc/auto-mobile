@@ -6,6 +6,7 @@ import { defaultIdGenerator, type IdGenerator } from "../../../../utils/IdGenera
 import { stableStringify } from "../../../../utils/stableStringify";
 import { resolveAutoMobileBaseDir } from "../../../../utils/tempDir";
 import type {
+  DisposableAppIcon,
   DisposableAppStamper,
   DisposableAppStampInput,
   DisposableAppStamped,
@@ -24,12 +25,16 @@ import {
   type AndroidStampAsset,
 } from "./AndroidStampZip";
 import { HostKeystoreSigner, type DisposableAppSigner } from "./DisposableAppSigner";
+import { parsePrototypeHex } from "../../prototypeContrast";
+
+/** Template colour behind the adaptive icon and the Android 12+ splash screen. */
+export const ANDROID_ICON_BACKGROUND_COLOR = "prototype_icon_background";
 
 export interface AndroidDisposableAppStampInput {
   template: AndroidDisposableAppTemplate;
   appId: string;
   label: string;
-  icon?: { backgroundColor: string };
+  icon?: DisposableAppIcon;
   permissions: readonly string[];
   enabledComponents: readonly string[];
   spec: string;
@@ -78,12 +83,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
     input: AndroidDisposableAppStampInput | DisposableAppStampInput,
   ): Promise<AndroidDisposableAppStamped> {
     assertDisposableAppId(input.appId);
-    // Adaptive icon replacement is a follow-up; accepting the shape must never silently ignore it.
-    if (input.icon !== undefined) {
-      throw new ActionableError(
-        "Android disposable app icon replacement is not supported yet. Omit icon to use the template icon.",
-      );
-    }
+    const colors = stampColors(input.icon);
     const android =
       typeof input.spec === "string"
         ? (input as AndroidDisposableAppStampInput)
@@ -98,6 +98,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
           manifest: android.template.manifestXml,
           appId: android.appId,
           label: android.label,
+          colors: Object.fromEntries(colors),
           permissions: [...new Set(android.permissions)].sort(),
           enabledComponents: [...new Set(android.enabledComponents)].sort(),
           spec: JSON.parse(android.spec),
@@ -111,7 +112,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
       if (existing) {
         return await existing;
       }
-      const pending = this.build(android, key, signer);
+      const pending = this.build(android, key, signer, colors);
       this.inFlight.set(key, pending);
       try {
         return await pending;
@@ -138,6 +139,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
     input: AndroidDisposableAppStampInput,
     key: string,
     signer: string,
+    colors: ReadonlyMap<string, number>,
   ): Promise<AndroidDisposableAppStamped> {
     const directory = join(this.cacheDir, key);
     const apkPath = join(directory, "app.apk");
@@ -177,6 +179,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
           await this.fs.readFileBuffer(linked),
           stableStringify(JSON.parse(input.spec)),
           input.assets,
+          colors,
         ),
       );
       await this.tools.zipalign(assembled, aligned);
@@ -192,6 +195,27 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
       await this.fs.remove(staging);
     }
   }
+}
+/**
+ * A `backgroundColor` icon recolours the template's adaptive icon background and splash. An
+ * uploaded `asset` icon needs a raster foreground layer, which is not stamped yet, so it is refused
+ * rather than silently ignored.
+ */
+function stampColors(icon: DisposableAppIcon | undefined): ReadonlyMap<string, number> {
+  if (icon === undefined) {
+    return new Map();
+  }
+  if (!("backgroundColor" in icon)) {
+    throw new ActionableError(
+      "Android disposable apps do not support an icon asset yet. Use icon.backgroundColor or omit icon.",
+    );
+  }
+  const rgba = parsePrototypeHex(icon.backgroundColor);
+  if (rgba === undefined) {
+    throw new ActionableError("Icon backgroundColor must be #RRGGBB or #AARRGGBB.");
+  }
+  const argb = ((Math.round(rgba.a * 255) << 24) | (rgba.r << 16) | (rgba.g << 8) | rgba.b) >>> 0;
+  return new Map([[ANDROID_ICON_BACKGROUND_COLOR, argb]]);
 }
 function hash(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");

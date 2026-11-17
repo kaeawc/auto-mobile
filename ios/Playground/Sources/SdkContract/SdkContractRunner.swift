@@ -9,6 +9,7 @@ enum SdkContractRunner {
     static let faultScenario = "faults"
     static let capabilityScenario = "capabilities"
     static let observationScenario = "observe"
+    static let multiSceneScenario = "multi-scene"
     static let scenarioTimeoutSeconds: UInt64 = 30
     /// How long the fault scenario waits for the harness to install its rules through CtrlProxy.
     static let rulesReadyWaitSeconds: Double = 60
@@ -104,6 +105,8 @@ enum SdkContractRunner {
             manifest.navigation = navigation
         case capabilityScenario:
             manifest.capabilities = SdkContractCapabilityScenario.run()
+        case multiSceneScenario:
+            manifest.multiScene = try await SdkContractMultiSceneScenario.run(runId: runId)
         case observationScenario:
             let host = SdkContractObservationScenario.register()
             try await waitForMarker(
@@ -134,7 +137,7 @@ enum SdkContractRunner {
     /// The harness writes `<runId>.<suffix>` next to the manifest when the scenario may go on:
     /// `rules-ready` once CtrlProxy has delivered the fault rules to the SDK, so no case runs before
     /// its rule exists, and `actions-done` once it has finished acting on the observation bridge.
-    private static func waitForMarker(
+    static func waitForMarker(
         runId: String,
         suffix: String,
         seconds: Double,

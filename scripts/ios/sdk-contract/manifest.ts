@@ -99,6 +99,14 @@ const sdkContractManifestSchema = z.object({
   faults: z.array(faultCaseObservationSchema),
   capabilities: capabilityObservationSchema.optional(),
   observation: observationHostLogSchema.optional(),
+  multiScene: z
+    .object({
+      deviceClass: z.enum(["ipad", "iphone"]),
+      status: z.enum(["complete", "not-applicable"]),
+      sceneIdentifiers: z.array(z.string().min(1)),
+      observation: observationHostLogSchema,
+    })
+    .optional(),
   navigation: z
     .object({
       deviceClass: z.enum(["ipad", "iphone"]),

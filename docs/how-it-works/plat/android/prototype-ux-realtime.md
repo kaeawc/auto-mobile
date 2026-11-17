@@ -166,9 +166,9 @@ broadcasts).
 - **Actors** (at most 16, each with 1–64 steps) write to collections and publish to rooms on the
   backend's injected timer. An actor with `on.route` (`"POST /path/:id"`) fires after a successful (status below 400)
   request matching it. Otherwise it runs `maxRuns` times every `every` ms (100 ms or more; run k
-  starts at `afterMs + k * every`). Its steps run in order: `append`, `update` and `remove` go
+  starts at `afterMs + k * every`). Its steps run in order. `append`, `update` and `remove` go
   through the same collection code as `POST`, `PATCH` and `DELETE` (ids, 409, 413 and the size
-  budget apply), and an actor write triggers its collection's broadcast like a request would. A
+  budget apply). An actor write triggers its collection's broadcast like a request would. A
   `publish {room, frame}` step sends a frame to a room path, logged with `from: "publish"`. Each
   step's `afterMs` is relative to the previous step, and `value`, `id`, `room` and `frame` bind the
   triggering request's placeholders.

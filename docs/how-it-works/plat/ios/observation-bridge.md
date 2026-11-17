@@ -2,8 +2,7 @@
 
 `AutoMobileObservationBridge` lets a host app serve observations and actions from inside the app,
 with stale-observation and actionability checks the SDK enforces. AutoMobile uses it as an
-alternate backend behind the existing `observe` and action tools, not as separate tools (#5159,
-following #7627's one capture, one selector schema, one resolver).
+alternate backend behind the existing `observe` and action tools, not as separate tools (#5159, #7627).
 
 ## Discovery
 
@@ -35,9 +34,7 @@ schema version and sorted action kinds, or `unavailable` with one of these reaso
 | `MALFORMED_RESPONSE` | the bridge object does not match the schema                                                  |
 | `UNKNOWN`            | a reason written by a newer SDK                                                              |
 
-A failed probe throws `SdkCapabilityQueryError` instead of returning `unavailable`, so a timeout is
-never mistaken for a missing bridge. CtrlProxy also drops a malformed bridge object rather than
-failing the whole capability reply.
+A failed probe throws `SdkCapabilityQueryError` instead of returning `unavailable`, so a timeout never reads as a missing bridge. CtrlProxy drops a malformed bridge object instead of failing the whole capability reply.
 
 ## Observation and action commands
 
@@ -71,8 +68,7 @@ host executor can return `action_queue_overloaded` or `action_cancelled`. The re
 the bridge took after it.
 
 Bridge requests share the runner's SDK data budget (2 s per request, 5 s in total). A daemon-side
-timeout on `request_sdk_action` reports `available: true`, because the action may have run. Neither
-reply is stall evidence for runner recovery: a slow host executor is not a stalled runner.
+timeout on `request_sdk_action` reports `available: true`, because the action may have run. Neither reply counts as runner stall evidence.
 
 ## WKWebView snapshot and action commands
 

@@ -14,6 +14,7 @@ import {
   postedNotificationKey,
 } from "../daemon/sessionBroker/mutations/postedNotification";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
+import { storeKitMutation } from "../daemon/sessionBroker/mutations/storeKitSession";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations, isCoreDataRead } from "./deviceMutationDataAdapters";
@@ -243,6 +244,20 @@ function mutationCallIsRead(
   }
 }
 
+/**
+ * One `storekit` row per touched bundle id on iOS (#18399). list reads and clear only ends a
+ * session; other platforms return unsupported without a device call.
+ */
+function storeKitToolMutations(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
+  return platform === "ios" &&
+    args.action !== "list" &&
+    args.action !== "clear" &&
+    typeof args.appId === "string" &&
+    args.appId.length > 0
+    ? [storeKitMutation(args.appId)]
+    : [];
+}
+
 function rotationMutations(args: Record<string, unknown>): ToolMutation[] {
   return typeof args.display === "number" && args.display !== 0
     ? [mutation("opaque", opaqueIntentKey("rotate", "display", args.display))]
@@ -313,6 +328,9 @@ function namedToolMutations(
   const posted = postedNotificationMutations(name, args, platform);
   if (posted !== undefined) {
     return posted;
+  }
+  if (name === "storeKitTest") {
+    return storeKitToolMutations(args, platform);
   }
   if (name === "rotate") {
     return rotationMutations(args);

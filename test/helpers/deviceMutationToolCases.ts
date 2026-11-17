@@ -2,6 +2,8 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
   name: string;
   args: Record<string, unknown>;
   kind: string;
+  /** The dispatch device's platform when the tool journals only there (default android). */
+  platform?: "ios";
 }[] = [
   {
     name: "installApp",
@@ -107,6 +109,12 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
   { name: "resetAppLogs", args: { appId: "com.example", paths: ["app.log"] }, kind: "opaque" },
   { name: "deviceSnapshot", args: { action: "restore", snapshotName: "baseline" }, kind: "opaque" },
   { name: "statusBar", args: { action: "override", time: "9:41" }, kind: "status-bar" },
+  {
+    name: "storeKitTest",
+    args: { action: "buy", appId: "com.example", productId: "pro" },
+    kind: "storekit",
+    platform: "ios",
+  },
   { name: "manufacturerProfile", args: { action: "apply" }, kind: "keyboard" },
   { name: "pressButton", args: { button: "power" }, kind: "device-setting" },
   {

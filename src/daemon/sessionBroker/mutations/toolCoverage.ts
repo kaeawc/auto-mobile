@@ -54,8 +54,8 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["storeKitTest"],
-    "StoreKit Testing state lives in the iOS simulator runner's in-memory SKTestSession, keyed by bundle id for the runner's lifetime; clear resets it, and no persistent device setting is changed.",
-    "notJournaled",
+    "StoreKit Testing state lives in the iOS simulator runner's in-memory SKTestSession, keyed by bundle id for the runner's lifetime, and keep-booted reuse keeps the runner: every iOS call but list and clear records a storekit row for its appId, which keep-booted reset reverts with the runner's clear (a clear the runner cannot confirm erases); other platforms change nothing.",
+    "journaled",
   ),
   ...tools(
     [

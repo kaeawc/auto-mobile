@@ -56426,7 +56426,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Test in-app purchases with StoreKit Testing on an iOS simulator. load a .storekit configuration first (it resets the session, clears transactions and disables purchase dialogs); then buy, refund, expire, setTimeRate, setSimulatedError (unknown, paymentCancelled or storeProductNotAvailable, for the next purchase) or disableDialogs, list the transactions, and clear to end the session. buy, refund, expire, list and clear return transactions. The session is keyed by appId and lasts for the runner's lifetime; StoreKitTest applies it to the runner's target app. Android, other Apple platforms and physical iPhones return unsupported (unsupported_platform or unsupported_device) without a device call; a runner without request_storekit returns unsupported_capability.",
+    "description": "Test in-app purchases with StoreKit Testing on an iOS simulator. load a .storekit configuration first (it resets the session, clears transactions and disables purchase dialogs); then buy, refund, expire, setTimeRate, setSimulatedError (unknown, paymentCancelled or storeProductNotAvailable, for the next purchase) or disableDialogs, list the transactions, and clear to end the session. buy, refund, expire, list and clear return transactions. The session is keyed by appId and lasts until clear or the device session's release; StoreKitTest applies it to the runner's target app. Android, other Apple platforms and physical iPhones return unsupported (unsupported_platform or unsupported_device) without a device call; a runner without request_storekit returns unsupported_capability.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

@@ -36,7 +36,9 @@ fails the call before anything reaches the device.
    Purchases the app starts itself keep failing until `clear` or another `load`.
 4. `clear` resets the session, returns the final transactions and ends the session.
 
-The session lasts as long as the runner. StoreKit Testing applies it to the runner's own target
+The session lasts as long as the runner, until `clear` or until your device session is released:
+release clears the StoreKit session of every `appId` you used, so the next session on the same
+simulator starts with no purchases and no simulated error. StoreKit Testing applies it to the runner's own target
 app, so your app sees the purchases only when it runs as that target.
 
 Two calls for the same `appId` cannot overlap: the second fails until the first finishes. Retry

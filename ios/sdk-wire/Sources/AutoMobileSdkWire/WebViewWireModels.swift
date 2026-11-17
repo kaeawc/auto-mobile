@@ -91,6 +91,21 @@ public struct AutoMobileWebViewport: Codable, Sendable, Equatable {
     }
 }
 
+/// Points between the web view's frame and where the page's layout viewport begins.
+public struct AutoMobileWebContentInset: Codable, Sendable, Equatable {
+    public let top: Double
+    public let left: Double
+    public let bottom: Double
+    public let right: Double
+
+    public init(top: Double = 0, left: Double = 0, bottom: Double = 0, right: Double = 0) {
+        self.top = top
+        self.left = left
+        self.bottom = bottom
+        self.right = right
+    }
+}
+
 /// A bounded DOM snapshot. Element IDs are valid only for this snapshot.
 public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable {
     public let snapshotId: String
@@ -101,6 +116,8 @@ public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable {
     /// The page document that posted the snapshot. Element ids restart for each document, so the
     /// same id in another document names an unrelated element.
     public let documentId: String?
+    /// Points between the web view's frame and where the page's layout viewport begins.
+    public let contentInset: AutoMobileWebContentInset?
 
     public init(
         snapshotId: String = UUID().uuidString,
@@ -108,7 +125,8 @@ public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable {
         title: String? = nil,
         elements: [AutoMobileWebElement] = [],
         viewport: AutoMobileWebViewport? = nil,
-        documentId: String? = nil
+        documentId: String? = nil,
+        contentInset: AutoMobileWebContentInset? = nil
     ) {
         self.snapshotId = snapshotId
         self.url = url
@@ -116,6 +134,7 @@ public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable {
         self.elements = elements
         self.viewport = viewport
         self.documentId = documentId
+        self.contentInset = contentInset
     }
 }
 

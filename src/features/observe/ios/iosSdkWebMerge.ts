@@ -204,6 +204,17 @@ function originOf(url: string | undefined): string | undefined {
   return origin === "null" ? undefined : origin;
 }
 
+/** The page's layout viewport inside the native frame, with invalid inset fields ignored. */
+function pageBox(webView: Box, inset: IosSdkWebSnapshot["contentInset"]): Box {
+  const points = (value = 0): number => (Number.isFinite(value) && value > 0 ? value : 0);
+  return {
+    left: webView.left + points(inset?.left),
+    top: webView.top + points(inset?.top),
+    right: webView.right - points(inset?.right),
+    bottom: webView.bottom - points(inset?.bottom),
+  };
+}
+
 /** How CSS pixels map onto the web view: an offset in CSS pixels, then points per CSS pixel. */
 interface CssToPoints {
   offsetLeft: number;
@@ -212,11 +223,11 @@ interface CssToPoints {
 }
 
 /**
- * The visual viewport fills the web view, so its CSS width spans the web view's width in points.
+ * The visual viewport fills the inset-reduced page box, so its CSS width spans that width in points.
  * That ratio covers a page without a `device-width` viewport (a 980 px layout viewport in a 390 pt
  * web view) and pinch zoom alike. Without a usable viewport, CSS pixels are taken as points.
  */
-function cssToPoints(viewport: IosSdkWebViewport | undefined, webView: Box): CssToPoints {
+function cssToPoints(viewport: IosSdkWebViewport | undefined, page: Box): CssToPoints {
   const usable =
     viewport !== undefined &&
     [viewport.offsetLeft, viewport.offsetTop, viewport.width].every(Number.isFinite) &&
@@ -227,23 +238,28 @@ function cssToPoints(viewport: IosSdkWebViewport | undefined, webView: Box): Css
   return {
     offsetLeft: viewport.offsetLeft,
     offsetTop: viewport.offsetTop,
-    pointsPerPixel: (webView.right - webView.left) / viewport.width,
+    pointsPerPixel: (page.right - page.left) / viewport.width,
   };
 }
 
 /**
  * The element's screen bounds: its `[x, y, width, height]` in the page's CSS pixels, converted to
- * points relative to the visual viewport, offset by the web view's origin and clipped to the web
+ * points relative to the visual viewport, offset by the page box's origin and clipped to the web
  * view, truncated to whole points as the runner reports XCTest frames (`Int(value)`), so a DOM
  * element and its XCTest twin get the same bounds.
  */
-function screenBounds(element: IosSdkWebElement, webView: Box, scale: CssToPoints): Box | null {
+function screenBounds(
+  element: IosSdkWebElement,
+  webView: Box,
+  page: Box,
+  scale: CssToPoints,
+): Box | null {
   const [x, y, width, height] = element.bounds;
   if ([x, y, width, height].some((part) => part === undefined || !Number.isFinite(part))) {
     return null;
   }
-  const originX = webView.left + (x - scale.offsetLeft) * scale.pointsPerPixel;
-  const originY = webView.top + (y - scale.offsetTop) * scale.pointsPerPixel;
+  const originX = page.left + (x - scale.offsetLeft) * scale.pointsPerPixel;
+  const originY = page.top + (y - scale.offsetTop) * scale.pointsPerPixel;
   const left = Math.trunc(Math.max(webView.left, originX));
   const top = Math.trunc(Math.max(webView.top, originY));
   const right = Math.trunc(Math.min(webView.right, originX + width * scale.pointsPerPixel));
@@ -418,12 +434,14 @@ export function mergeIosSdkWebSnapshots(
     }
     const origin = originOf(snapshot.url);
     const ambiguous = duplicateIds(snapshot.elements);
-    const scale = cssToPoints(snapshot.viewport, webViewBox);
+    const page = pageBox(webViewBox, snapshot.contentInset);
+    const scale = cssToPoints(snapshot.viewport, page);
     const converted = snapshot.elements.flatMap((element) => {
       // An action names its element by id: with none it cannot be routed, and with two elements
       // sharing one it could act on either.
       const routable = element.id !== "" && !ambiguous.has(element.id);
-      const bounds = element.visible && routable ? screenBounds(element, webViewBox, scale) : null;
+      const bounds =
+        element.visible && routable ? screenBounds(element, webViewBox, page, scale) : null;
       return bounds ? [{ element, bounds }] : [];
     });
     if (converted.length === 0) {

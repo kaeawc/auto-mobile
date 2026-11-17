@@ -187,6 +187,34 @@ function buildWithImages(
 
 type EncodeOptions = Parameters<typeof encodePrototypeWebImages>[3];
 
+/** The cumulative inline cap `encodePrototypeWebImages` applies with these options. */
+function inlineCap(options: EncodeOptions): number {
+  return options?.maxInlineBytes ?? options?.maxBytes ?? MAX_PROTOTYPE_WEB_PAGE_BYTES;
+}
+
+/**
+ * The leading images whose data URIs fit `maxInlineBytes` together, and the ids set aside: the
+ * first image past the cap and every later one, as `encodePrototypeWebImages` caps a single pass.
+ */
+function capInlineImages(
+  images: readonly PrototypeWebImage[],
+  maxInlineBytes: number,
+): { readonly kept: PrototypeWebImage[]; readonly setAside: string[] } {
+  let inlineBytes = 0;
+  let end = 0;
+  for (const image of images) {
+    inlineBytes += base64Bytes(image.bytes.byteLength);
+    if (inlineBytes > maxInlineBytes) {
+      break;
+    }
+    end += 1;
+  }
+  return {
+    kept: images.slice(0, end),
+    setAside: images.slice(end).map((image) => image.id),
+  };
+}
+
 /**
  * The second pass when the long-side encodes do not all fit: the assets with compact boxes
  * re-encoded at them, then the page that keeps the most leading images (budget order) at the long
@@ -227,18 +255,25 @@ async function buildWithCompactImages(
   const ids = first.imageRequests
     .map((request) => request.id)
     .filter((id) => largeById.has(id) || compactById.has(id));
-  const builds = new Map<number, PrototypeWebPage | undefined>();
-  const build = (keepLarge: number) => {
+  const maxInlineBytes = inlineCap(options);
+  // Each pass held the inline cap on its own; the mixed set must hold it too (#18430).
+  const builds = new Map<
+    number,
+    { readonly page: PrototypeWebPage | undefined; readonly setAside: readonly string[] }
+  >();
+  const mixed = (keepLarge: number) => {
     if (!builds.has(keepLarge)) {
       const images = ids.map((id, index) =>
         index < keepLarge
           ? (largeById.get(id) ?? compactById.get(id)!)
           : (compactById.get(id) ?? largeById.get(id)!),
       );
-      builds.set(keepLarge, buildWithImages(input, images));
+      const { kept, setAside } = capInlineImages(images, maxInlineBytes);
+      builds.set(keepLarge, { page: buildWithImages(input, kept), setAside });
     }
-    return builds.get(keepLarge);
+    return builds.get(keepLarge)!;
   };
+  const build = (keepLarge: number) => mixed(keepLarge).page;
   const inlined = (page: PrototypeWebPage | undefined) => page?.inlinedImages.length ?? -1;
   const best = inlined(build(0));
   // Only images the first pass inlined ahead of its first overflow can stay large.
@@ -255,6 +290,9 @@ async function buildWithCompactImages(
   }
   const overBudget = new Set([...large.overBudget].filter((id) => !compactById.has(id)));
   for (const id of compact.overBudget) {
+    overBudget.add(id);
+  }
+  for (const id of mixed(low).setAside) {
     overBudget.add(id);
   }
   const chosen = build(low);

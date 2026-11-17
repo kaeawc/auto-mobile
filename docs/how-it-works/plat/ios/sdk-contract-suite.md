@@ -177,6 +177,11 @@ reachable SDK reporting the wrong state is `sdk-adapter`; `BRIDGE_UNAVAILABLE` w
 
 - No CtrlProxy reachable from the app: the SDK keeps events pending and the cases report
   `sdk-endpoint`.
+- The SDK finds CtrlProxy only on ports 8765..8796, excluding 8766. The `network` and `faults`
+  scenarios therefore need the daemon's runner port range inside that window; a private daemon
+  can use, for example, `AUTOMOBILE_PORT_RANGE_START=8780 AUTOMOBILE_PORT_RANGE_SIZE=16`. When the
+  session's runner port is outside it, the harness reports one `sdk-endpoint` finding per selected
+  scenario, naming both ranges, and runs no scenario.
 - The session's CtrlProxy client is not draining: events stay queued and report `ios-client`.
 - The scenario times out after 30 s, a case fails or a listener fails: `fixture-host`. The report carries the
   case name, the error domain and code, and the loopback server's event log (accepted, request

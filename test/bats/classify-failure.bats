@@ -172,6 +172,26 @@ JSON
   done
 }
 
+@test "a Swift Packages or Swift Prototype Apps job-limit cancellation classifies as rerun (#18429)" {
+  fixture="$BATS_TEST_TMPDIR/issue-18429-run.json"
+  for job in 'Swift Packages (Xcode 26.6)' 'Swift Prototype Apps (prototype-viewer, Xcode 26.6)'; do
+    printf '{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"%s","conclusion":"cancelled","steps":[{"name":"Build Swift Packages","conclusion":"cancelled"}]}]}\n' "$job" > "$fixture"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='The job has exceeded the maximum execution time of 45m0s' bash "$SCRIPT" 607
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — hosted macos-26 throughput"* ]]
+  done
+
+  # A plain cancellation (superseded run) and other jobs' timeouts stay unclassified.
+  printf '{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Swift Packages (Xcode 26.6)","conclusion":"cancelled","steps":[]}]}\n' > "$fixture"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='The operation was canceled.' bash "$SCRIPT" 608
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"hosted macos-26 throughput"* ]]
+  printf '{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Build Xcode Projects (Xcode 26.6)","conclusion":"cancelled","steps":[]}]}\n' > "$fixture"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='The job has exceeded the maximum execution time of 25m0s' bash "$SCRIPT" 609
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"hosted macos-26 throughput"* ]]
+}
+
 @test "the BATS lane budget and bounded FFmpeg install annotations classify as rerun (#17131)" {
   fixture="$BATS_TEST_TMPDIR/issue-17131-run.json"
   cat > "$fixture" <<'JSON'

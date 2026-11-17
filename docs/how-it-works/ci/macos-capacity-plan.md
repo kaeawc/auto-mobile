@@ -132,10 +132,10 @@ job does not skip it.
 - Fallback cost: an iOS run on hosted macOS uses about 18-20 macOS minutes, and
   hosted jobs count toward the 40-concurrent-job cap. The job summary repeats this whenever a pool falls back.
 
-| Pool                   | Jobs                                                                                                                            |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `automobile-mac`       | Swift Code Coverage, Build Desktop App (macos-latest), Installer Minimal (macos-latest), Swift Packages, Build Root SPM Package |
-| `automobile-mac-heavy` | Build Xcode Projects (Playground, CtrlProxy), Prototype Simulator iOS 26, iOS Playground Tests (label-forced fallback only)     |
+| Pool                   | Jobs                                                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `automobile-mac`       | Swift Code Coverage, Build Desktop App (macos-latest), Installer Minimal (macos-latest), Swift Packages, Swift Prototype Apps, Build Root SPM Package |
+| `automobile-mac-heavy` | Build Xcode Projects (Playground, CtrlProxy), Prototype Simulator iOS 26, iOS Playground Tests (label-forced fallback only)                           |
 
 - Installer Minimal's macOS leg uses a Mac only when `scripts/install.sh`,
   `package.json`, `android/gradle/libs.versions.toml`, or
@@ -253,6 +253,7 @@ ports. Use that fallback only with the heavy runner under a dedicated user.
 | Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest` |
 | Swift Packages (Xcode 26.6)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
+| Swift Prototype Apps (one leg per simulator app, Xcode 26.6)                   | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`     |
 | Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`     |
 | Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |

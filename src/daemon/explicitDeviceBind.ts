@@ -14,10 +14,8 @@ import {
   type AcquisitionReceipt,
   type DeferredRebindCleanup,
 } from "./acquisitionReceipt";
-import {
-  DeviceOwnedByOtherDaemonError,
-  freshStartAlreadyBoundError,
-} from "../models/deviceAcquisitionRefusals";
+import { freshStartAlreadyBoundError } from "../models/deviceAcquisitionRefusals";
+import { claimRefusalError } from "./claimRefusalError";
 import type { AutolockClient, DeviceAutolockManager } from "./deviceAutolockManager";
 import {
   CREATE_SESSION_RELEASE_WAIT_MS,
@@ -611,11 +609,9 @@ export class ExplicitDeviceBind {
       `[DevicePool] Another AutoMobile process claimed ${deviceId} first; releasing it from session ${sessionId}`,
     );
     await this.port.rollbackAssignments(new Map([[sessionId, { deviceId, session }]]));
-    throw new DeviceOwnedByOtherDaemonError(
+    throw claimRefusalError(
+      this.port.foreignOwnershipFor(this.port.devices.get(deviceId)?.platform),
       deviceId,
-      this.port
-        .foreignOwnershipFor(this.port.devices.get(deviceId)?.platform)
-        ?.foreignOwnerPid(deviceId),
     );
   }
 

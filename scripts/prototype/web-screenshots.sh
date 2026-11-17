@@ -3,6 +3,7 @@
 # specs (#16346) in Chromium, Firefox and WebKit (#16459), and the
 # web still against Android and iOS renderer goldens in Chromium (#16534, #16535),
 # un-padded inlined image boxes against their layout golden in Chromium (#17716),
+# the prototype-web library build against the still's HTML in Chromium (#16453),
 # and the 3D view folding each foldable frame through its postures in Chromium (#16458).
 #
 #   bash scripts/prototype/web-screenshots.sh                    # every engine
@@ -29,6 +30,7 @@ readonly PAGE_TEST="test/features/prototype/web/webScreenshots.integration.test.
 readonly IOS_PARITY_TEST="test/features/prototype/web/webIosParity.integration.test.ts"
 readonly PARITY_TEST="test/features/prototype/web/webAndroidParity.integration.test.ts"
 readonly IMAGE_LAYOUT_TEST="test/features/prototype/web/webImageLayout.integration.test.ts"
+readonly LIBRARY_TEST="test/features/prototype/web/webLibrary.integration.test.ts"
 readonly FOLD_3D_TEST="test/features/prototype/web/webDevice3dFold.integration.test.ts"
 
 usage() {
@@ -97,7 +99,7 @@ fi
 
 tests=("${PAGE_TEST}")
 if [[ -z "${engines}" || ",${engines}," == *",chromium,"* ]]; then
-  tests+=("${PARITY_TEST}" "${IOS_PARITY_TEST}" "${IMAGE_LAYOUT_TEST}" "${FOLD_3D_TEST}")
+  tests+=("${PARITY_TEST}" "${IOS_PARITY_TEST}" "${IMAGE_LAYOUT_TEST}" "${LIBRARY_TEST}" "${FOLD_3D_TEST}")
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -53,7 +53,7 @@ The renderer is described across these pages:
   `iconName` slot: filter chip and segment checks, the select arrow, the date picker's month arrows. Every iconName-valid string
   in `state` or `data` adds a key in `filled` and in each variant an icon node uses, because a state change can hand that name
   to any icon. A
-  value is the allow-listed shapes as SVG markup. iOS-skin glyphs are not included.
+  value is the allow-listed shapes as SVG markup. Both skins draw these Material glyphs (#16526).
 - **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision,mcpSessionId}` (`text/x-kotlin`)
   and `automobile:prototype/{id}/swiftui{?frame,revision,mcpSessionId}` (`text/x-swift`) are read by
   `readPrototypeSourceResource` in `src/features/prototype/prototypeSourceResource.ts`. They render
@@ -149,6 +149,12 @@ it inlined per variant.
   400 ms turn, as its window re-lays out while the bounds animate. The end state is the plain
   landscape view. A second rotate finishes the running turn first. The `prefers-reduced-motion:
   reduce` setting skips the animation.
+- **Rotation lock.** `data-rotation-lock="on"` on `body` locks rotation. While locked the app
+  keeps the frame's natural orientation. Rotate still turns the frame, but the same portrait view
+  turns with it and ends sideways in the landscape frame. The fitted scale uses its turned size.
+  Changing the lock re-lays out in place: the frame does not move, and the outgoing and incoming
+  views cross-fade at their own angles with the platform's turn timing. Reduced motion skips both
+  animations. Nothing in the page sets the attribute yet; the quick settings tile will.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL, and declares an
   empty `data:` icon so no browser requests `/favicon.ico` against that CSP.

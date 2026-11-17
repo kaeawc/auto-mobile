@@ -104,6 +104,16 @@ export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 export const INCOMING_ALLOCATED_KEY = "webIncomingAllocated";
 
 /**
+ * A style key the web renderer adds beside INCOMING_HEIGHT_KEY, never authored: true when that
+ * height is a column's weight share that is only an upper bound, because a wrap-height sibling's
+ * height is known only at layout time (see exactWeightShares). The weight still pins the child's
+ * height on both devices, so its own dp height does not cap it either, but nothing static sizes
+ * it: CSS flex resolves the share, and a capped aspect ratio inside sizes from that height (see
+ * RowMeasure's `fillHeight`).
+ */
+export const INCOMING_SHARE_BOUND_KEY = "webIncomingShareBound";
+
+/**
  * A style key the web renderer adds to a node, never authored: the frame's safe-area inset (dp)
  * its `safeAreaPadding` adds on its top and bottom edges where no ancestor consumed them. CSS reads
  * the inset from a variable, so the static height pass needs it in dp to take it out of the node's
@@ -115,7 +125,9 @@ export const SAFE_INSET_KEY = "webSafeInset";
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
  * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
  * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width
- * remains.
+ * remains. `fillHeight` sizes a capped aspect ratio from its row's laid-out height instead of a
+ * static `basis`, when that height is only known as an upper bound (INCOMING_SHARE_BOUND_KEY);
+ * `capHeight` is then the tallest its own `maxHeight` and `maxWidth` let it be.
  */
 export interface RowMeasure {
   readonly take?: true;
@@ -123,6 +135,21 @@ export interface RowMeasure {
   readonly shrink?: number;
   readonly basis?: number;
   readonly later?: true;
+  readonly fillHeight?: true;
+  readonly capHeight?: number;
+}
+
+/**
+ * A capped aspect ratio that takes its row's whole content height, held under `capHeight`, and
+ * its width from `aspect-ratio`, as Compose sizes it against a weighted row's share.
+ */
+function fillHeightStyle(css: Css, capHeight: unknown) {
+  css["flex-grow"] = "0";
+  css[FLEX_BASIS] = "auto";
+  css.height = "100%";
+  if (typeof capHeight === "number") {
+    css[MAX_HEIGHT] = px(capHeight);
+  }
 }
 
 function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
@@ -189,6 +216,9 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   }
   if (typeof measure.shrink === "number") {
     rowShrinkStyle(css, measure.shrink, measure.basis);
+  }
+  if (measure.fillHeight === true) {
+    fillHeightStyle(css, measure.capHeight);
   }
   if (measure.later === true && typeof style.minWidth === "number") {
     laterMinWidth(css, style, style.minWidth, measure.basis);

@@ -87,7 +87,8 @@ nightly sweeps build unsigned (the CircleCI executor pins signing off); the
 GitHub sweeps signed when certificates were configured. Release and signing
 workflows (`build-ctrl-proxy-ios-ipa`, `build-network-filter-probe`,
 `build-prototype-agent`, `build-screen-capture-helper`, the desktop installers)
-stay on GitHub.
+stay on GitHub. The `build-*` artifact workflows run on the hosted `xcode-27` image and
+select Xcode 27.2 explicitly.
 
 ## Self-hosted Mac (#11011)
 

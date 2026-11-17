@@ -1,7 +1,6 @@
 # Test prep tools
 
-Prepare a repeatable device and app state, such as fixtures, locale,
-permissions, and system state, before running a flow.
+Prepare a repeatable device and app state (fixtures, locale, permissions, system state) before running a flow.
 
 ## App files
 
@@ -36,16 +35,12 @@ Android, in the written user profile), and never for other domains.
 
 `user_files` on an iOS Simulator stages files through the managed Files fixture
 app `dev.jasonpearson.automobile.FilesFixture`. Writes go only to
-`Documents/automobile/<namespace>`, and reset deletes only that namespace. If the
-fixture app is not installed, the call returns guidance on installing it. Staging a
-file does not guarantee it shows up in a document picker. Physical iOS devices and
+`Documents/automobile/<namespace>`, and reset deletes only that namespace. Without the fixture app, the call explains how to install it. A staged file may not show up in a document picker. Physical iOS devices and
 listing or reading user files on iOS are not supported.
 
 On Android, `putAppFile` accepts an optional `userId` (a non-negative integer) to
-target a work or secondary profile. When you omit it, AutoMobile uses the only user
-the app is installed for. With several candidates it prefers the foreground app's
-user, then the current user. If it is still ambiguous, the error lists the candidate
-IDs and asks you to pass `userId`.
+target a work or secondary profile. Without it, AutoMobile uses the only user the app is installed for. With several candidates it prefers the foreground app's
+user, then the current user. If that is still ambiguous, the error lists the candidate IDs for `userId`.
 
 Private `documents`/`cache`/`tmp` containers require a debuggable app.
 `externalFiles` writes to the app's external files directory for the chosen user.
@@ -75,7 +70,7 @@ iOS URIs have no user query.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.
 - `postNotification` creates a notification for notification-flow tests. On a watchOS or
   Apple TV simulator, provide the app’s bundle ID as `appId` to deliver a push to that app.
-  On iOS a single notification shows no app name, so `systemTray` can match it by
+  A single iOS notification shows no app name, so `systemTray` can match it by
   `appId` only when it was posted with `postNotification`; otherwise omit `appId`.
 - `clipboard` sets, reads, pastes, or clears clipboard content.
 
@@ -91,7 +86,7 @@ iOS URIs have no user query.
 | iOS physical        | Not supported                                     | Not supported                             |
 
 On iOS the app under test must embed the AutoMobile iOS SDK; without it `sendSms`
-and `phoneCall` `call`, `cancel` and `busy` fail with an error asking for the SDK.
+and `phoneCall` `call`, `cancel` and `busy` fail and ask for the SDK.
 
 If the app's notification permission is undecided, the first iOS `sendSms` returns
 `notification_permission_pending` and shows the system alert. Tap Allow, then call
@@ -113,8 +108,7 @@ the app. It returns this result without an error, with or without the SDK or a
 }
 ```
 
-Check `supported` and `reason` rather than treating this as a failure, and drive
-the in-call state with `call`, `cancel` and `busy` instead. Every other failure
+This is not a failure: check `supported` and `reason`, and drive the in-call state with `call`, `cancel` and `busy`. Every other failure
 (missing `phoneNumber`, no SDK, an SDK rejection, an unsupported device) returns a
 tool error.
 
@@ -146,8 +140,7 @@ Android devices, and Apple platforms other than iOS, do not support camera poste
 accepts posters when already running.
 
 On iOS, `launchApp` applies a registered poster with a cold launch and reports
-`cameraPosterApplied: true`. Apple system apps (`com.apple.*`) launch normally
-without the poster; the result reports `cameraPosterApplied: false` with a note in
+`cameraPosterApplied: true`. Apple system apps (`com.apple.*`) launch without the poster and report `cameraPosterApplied: false` with a note in
 `message`.
 
 An iOS poster lasts until one of these happens:
@@ -168,8 +161,7 @@ rather than failing the later `launchApp`. To skip the build, set
 ## Clean start
 
 For a clean app start, use `launchApp` with `clearAppData: true` where the
-platform supports it. Use `observe` after preparation to confirm the expected
-state before continuing.
+platform supports it. Then confirm the state with `observe`.
 
 ## Device snapshots
 
@@ -227,16 +219,11 @@ again with the new UUID. Settings-only restores omit this field.
 ### Fixtures
 
 Capture with `fixture: true` to keep an Android emulator VM snapshot as a
-reusable fixture, for example a device state that took a long setup to reach.
+reusable fixture, such as a state that took long to set up.
 The snapshot then records what it depends on: the AVD, its system image and
-hardware config, the emulator version, and its userdata image. A fixture must
-be an emulator VM snapshot: on a physical device, an iOS simulator, or with
-`useVmSnapshot: false`, the capture is refused with
-`fixture_requires_vm_snapshot` and nothing is saved.
+hardware config, the emulator version, and its userdata image. A fixture must be an emulator VM snapshot: on a physical device, an iOS simulator, or with `useVmSnapshot: false`, the capture fails with `fixture_requires_vm_snapshot` and saves nothing.
 
-AutoMobile reads the identity again once the snapshot is saved. If it changed
-while the capture ran, AutoMobile refuses the capture with `fixture_invalidated`
-and records nothing. When `AUTOMOBILE_EMULATOR_ARGS` redirects the userdata image with
+AutoMobile re-reads the identity after saving; if it changed during the capture, the capture fails with `fixture_invalidated` and records nothing. When `AUTOMOBILE_EMULATOR_ARGS` redirects the userdata image with
 `-data`, the fixture tracks that image.
 
 Every restore of a fixture checks those inputs first, settings-only restores

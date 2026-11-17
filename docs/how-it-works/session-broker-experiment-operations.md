@@ -231,11 +231,13 @@ optimistic compare-and-set on the device's row: judge a foreign owner's liveness
 write only if the row, including its `updated_at_ms`, is unchanged. For one more release the
 winner also writes its allocation claim file, so a daemon that cannot use the table and falls
 back to the files still sees it. A winner whose claim file a files-deciding daemon took meanwhile
-gives the row back. The same compare-and-set records a claim the files decided, and it never
+gives the row back.
+
+The same compare-and-set records a claim the files decided, and it never
 replaces a row a live foreign owner holds. Every local daemon creates and migrates the registry
-after its control socket binds. From then on a claim the table cannot decide (no registry open
-yet, or a write still busy after four attempts 50, 100 and 200 ms apart) is refused retryably
-instead of falling back to the files (#11811, owner decision E1). The claim files decide before
+after its control socket binds. From then on the daemon refuses, retryably, a claim the table cannot decide instead of
+falling back to the files (#11811, owner decision E1). That covers no registry open yet, and a
+write still busy after four attempts 50, 100 and 200 ms apart. The claim files decide before
 bind (startup recovery), for watch and TV, and in files-only mode.
 
 The device-claims mirror skips

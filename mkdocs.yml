@@ -186,6 +186,11 @@ theme:
     - content.code.copy
     - content.code.select
     - content.tabs.link
+    - navigation.sections
+    - navigation.indexes
+    - navigation.prune
+    - navigation.footer
+    - search.suggest
 
 extra_css:
   - assets/stylesheets/automobile-brand.css
@@ -243,246 +248,260 @@ not_in_nav: |
   /release/ios-simulator-continuity.md
   /release/device-claims-registry-migration.md
   /how-it-works/plat/ios/xctestrunner/ci-integration.md
+  /using/ui-tests.md
+  /using/ui-tests-accessibility.md
+  /how-it-works/plat/android/junit-runner/index.md
+  /protoviewer/privacy.md
+  /protoviewer/support.md
 
 nav:
-  - "Overview": index.md
-  - "Tools": tools.md
+  - "Get started":
+      - "Overview": index.md
+      - "Agent examples": using/agent-examples.md
+      - "Choosing a device": using/device-ownership-ambiguous-target.md
+      - "FAQ": faq.md
   - "Using AutoMobile":
-      - "Agent Examples": using/agent-examples.md
-      - "UI tests": using/ui-tests.md
-      - "Accessibility in UI tests": using/ui-tests-accessibility.md
-      - "Test prep tools": using/test-prep-tools.md
-      - "MCP message size": using/mcp-message-size.md
-      - "Reaching a host server": using/port-reverse.md
-      - "Manufacturer profiles": using/oem-personas.md
-      - "Kill profiles": using/kill-profiles.md
-      - "Session execution logs": using/session-logs.md
-      - "Storage capabilities": using/storage-capabilities.md
-      - "Keystore test state": using/keystore-test-state.md
-      - "Seed content": using/seed-content.md
-      - "Keystore metadata": using/keystore-metadata.md
-      - "SDK capabilities": using/sdk-capabilities.md
-      - "Hackathon demo kit": using/hackathon.md
-      - "Embedding prototypes in an app": using/prototype-embedding.md
-      - "Prototype web preview": using/prototype-web-preview.md
-      - "Prototype icons": using/prototype-icons.md
-      - "Virtual BLE peripherals": using/ble-peripheral.md
-      - "Headless prototypes": using/prototype-headless.md
-      - "Installing ProtoViewer (Android)": using/protoviewer-install.md
-      - "Dynamic Tools": using/dynamic-tools.md
+      - "Explore and interact":
+          - "Navigation graph": using/navigation-graph.md
+          - "Screen control": using/screen-control.md
+          - "Dynamic tools": using/dynamic-tools.md
+      - "App and device state":
+          - "Overview": using/test-prep-tools.md
+          - "Seed content": using/seed-content.md
+          - "Storage capabilities": using/storage-capabilities.md
+          - "Keystore state": using/keystore-test-state.md
+          - "Keystore metadata": using/keystore-metadata.md
+          - "Device condition fixtures": using/device-condition.md
+          - "Kill profiles": using/kill-profiles.md
+          - "Manufacturer profiles": using/oem-personas.md
+          - "SDK capabilities": using/sdk-capabilities.md
+      - "Audit and measure":
+          - "Accessibility and performance audits": using/audits.md
+          - "Performance traces": using/performance-trace.md
+      - "Devices and sessions":
+          - "Device ownership": using/device-ownership.md
+          - "Device availability and capacity": using/device-ownership-availability.md
+          - "Apple simulator sessions": using/device-ownership-apple.md
+          - "Listing device images": using/device-images.md
+          - "Reaching a host server": using/port-reverse.md
+      - "CI and shared hosts":
+          - "Managed Macs and CI runners": using/managed-macs.md
+          - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
+          - "Headless host audio setup": using/headless-audio.md
+          - "Emulator and simulator audio": using/emulator-audio.md
+          - "WebRTC streaming": webrtc-streaming.md
+      - "Debug a session":
+          - "Session execution logs": using/session-logs.md
+          - "MCP message size": using/mcp-message-size.md
+      - "Integrations":
+          - "Python SDK": using/python-sdk.md
+          - "Usage skill": using/usage-skill.md
+      - "Platforms":
+          - "Android phones and tablets": using/android.md
+          - "iPhone and iPad": using/ios.md
+          - "Android TV": using/android-tv.md
+          - "Wear OS": using/wear-os.md
+          - "Wear OS tiles and watch faces": using/wear-os-watch-faces.md
+          - "Android Auto and the DHU": using/android-auto.md
+          - "Desktop Head Unit by hand": using/android-auto-dhu.md
+          - "Android Automotive OS": using/android-automotive.md
+          - "Android Automotive secondary displays": using/android-automotive-displays.md
+          - "Android XR": using/android-xr.md
+          - "Android XR glasses": using/android-xr-glasses.md
+          - "iPhone Duo simulator": using/iphone-duo.md
+          - "Apple TV": using/apple-tv.md
+          - "Apple TV app tools": using/apple-tv-app-tools.md
+          - "Apple Watch": using/apple-watch.md
+          - "Apple Watch tool behavior": using/apple-watch-tools.md
+          - "Apple Vision Pro simulator": using/visionos-simulator.md
+      - "Prototyping":
+          - "Embedding prototypes in an app": using/prototype-embedding.md
+          - "Prototype web preview": using/prototype-web-preview.md
+          - "Prototype icons": using/prototype-icons.md
+          - "Headless prototypes": using/prototype-headless.md
+          - "Installing ProtoViewer (Android)": using/protoviewer-install.md
+          - "Virtual BLE peripherals": using/ble-peripheral.md
+          - "Hackathon demo kit": using/hackathon.md
+  - "Tools":
+      - "Tool reference": tools.md
+      - "observe": using/observe.md
       - "tapAt": using/tap-at.md
       - "swipeOn": using/swipe-on.md
-      - "observe": using/observe.md
-      - "Navigation graph": using/navigation-graph.md
-      - "Device condition fixtures": using/device-condition.md
-      - "Android Automotive OS": using/android-automotive.md
-      - "Android Automotive secondary displays": using/android-automotive-displays.md
-      - "Android Auto and the DHU": using/android-auto.md
-      - "Desktop Head Unit by hand": using/android-auto-dhu.md
-      - "Android TV": using/android-tv.md
-      - "Wear OS": using/wear-os.md
-      - "Wear OS tiles and watch faces": using/wear-os-watch-faces.md
-      - "Android XR": using/android-xr.md
-      - "Android XR glasses": using/android-xr-glasses.md
-      - "Apple TV": using/apple-tv.md
-      - "Apple TV app tools": using/apple-tv-app-tools.md
-      - "Apple Watch": using/apple-watch.md
-      - "Apple Watch tool behavior": using/apple-watch-tools.md
       - "Environment variables": using/environment-variables.md
-      - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
-      - "Apple Vision Pro simulator": using/visionos-simulator.md
-      - "iPhone Duo simulator": using/iphone-duo.md
-      - "Screen control": using/screen-control.md
-      - "Performance traces": using/performance-trace.md
-      - "Accessibility and performance audits": using/audits.md
-      - "Emulator and simulator audio": using/emulator-audio.md
-      - "Headless host audio setup": using/headless-audio.md
-      - "Device ownership": using/device-ownership.md
-      - "Choosing a device for an ambiguous call": using/device-ownership-ambiguous-target.md
-      - "Device availability and capacity": using/device-ownership-availability.md
-      - "Apple simulator sessions": using/device-ownership-apple.md
-      - "Listing device images": using/device-images.md
-      - "Usage skill": using/usage-skill.md
-      - "Python SDK": using/python-sdk.md
-      - "Managed Macs and CI runners": using/managed-macs.md
-      - "WebRTC Streaming": webrtc-streaming.md
+      - "Usage data": metrics/usage-data.md
   - "How it Works":
       - "System design": how-it-works/index.md
-      - "Device-description audit": how-it-works/device-description-audit.md
-      - "Live device acceptance": how-it-works/live-device-acceptance.md
-      - "Manual-test harness":
-          - "Overview": how-it-works/manual-test-harness.md
-          - "Private daemons, path policy and staggered boots": how-it-works/manual-test-harness-daemons.md
-          - "Devices, teardown, stdio-proxy sessions and raw frames": how-it-works/manual-test-harness-sessions.md
-          - "Broker scenarios, auxiliary sockets, Python SDK clients and evidence": how-it-works/manual-test-harness-broker.md
-      - "Agent benchmarks": how-it-works/agent-benchmarks.md
-      - "iOS Simulator fleet cost measurement": how-it-works/ios-simulator-fleet-cost.md
-      - "Device resources":
-          - "Overview": how-it-works/device-resources.md
-          - "Configuring resources, workload profiles and disabled iOS services": how-it-works/device-resources-configuring.md
-          - "Automation capabilities, Android controls, snapshots, preflight and audio": how-it-works/device-resources-android.md
-      - "Host toolchain resource": how-it-works/host-toolchain-resource.md
-      - "Session broker experiment":
-          - "Overview": how-it-works/session-broker-experiment.md
-          - "Android keep-booted and snapshot reset": how-it-works/session-broker-experiment-reset.md
-          - "Operator configuration, consumer contract, native identity and recovery": how-it-works/session-broker-experiment-operations.md
-      - "Session broker device mutation journal":
-          - "Overview": how-it-works/session-broker-device-mutation-journal.md
-          - "Keep-booted baseline cleaning, recorder failure policy and accepted residual": how-it-works/session-broker-device-mutation-journal-cleaning.md
-      - "Session broker device reuse": how-it-works/session-broker-device-reuse.md
-      - "Session broker remote devices": how-it-works/session-broker-remote-devices.md
-      - "Device farm": how-it-works/device-farm.md
-      - "Session device requirements": how-it-works/session-requirements.md
-      - "iOS simctl and devicectl boundary": how-it-works/plat/ios/simctl-devicectl-boundary.md
-      - "iOS SDK contract suite": how-it-works/plat/ios/sdk-contract-suite.md
-      - "tvOS XCUITest spike": how-it-works/plat/tvos/xcuitest-spike.md
-      - "tvOS explore and plan replay": how-it-works/plat/tvos/focus-explore.md
-      - "tvOS tool support matrix": how-it-works/plat/tvos/tool-matrix.md
-      - "watchOS XCUITest spike": how-it-works/plat/watchos/xcuitest-spike.md
-      - "watchOS Smart Stack cells": how-it-works/plat/watchos/smart-stack.md
-      - "visionOS XCUITest capability boundary": how-it-works/plat/visionos/xcuitest-capabilities.md
-      - "iOS iproxy tunnel client": how-it-works/plat/ios/iproxy-tunnel-client.md
-      - "iOS network capture wire contract": how-it-works/plat/ios/network-capture-wire-contract.md
-      - "iOS WKWebView bridge actions": how-it-works/plat/ios/webview-bridge-actions.md
-      - "iOS SDK observation bridge": how-it-works/plat/ios/observation-bridge.md
-      - "iOS Playground theme parity": how-it-works/plat/ios/playground-theme-parity.md
-      - "iOS Keychain and shared-store capabilities": how-it-works/plat/ios/keychain-and-shared-store-capabilities.md
-      - "iOS Photos full access": how-it-works/plat/ios/photos-full-access.md
-      - "iOS simulator load reduction": how-it-works/plat/ios/simulator-load-reduction.md
-      - "iOS Simulator audio loopback": how-it-works/plat/ios/simulator-audio-loopback.md
-      - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
-      - "iOS SDK host-integration profile": how-it-works/plat/ios/host-integration-profile.md
-      - "iOS keep-booted reset": how-it-works/ios-keep-booted-reset.md
-      - "Android emulator optimization": how-it-works/android-emulator-optimization.md
-      - "Android emulator host cost": how-it-works/android-emulator-host-cost.md
-      - "Android port reverse ownership": how-it-works/plat/android/port-reverse.md
-      - "CtrlProxy baseline profile": how-it-works/plat/android/ctrlproxy-baseline-profile.md
-      - "Android prototype specification":
-          - "Overview": how-it-works/plat/android/prototype-ux.md
-          - "Envelope and data model": how-it-works/plat/android/prototype-ux-envelope.md
-          - "Theme": how-it-works/plat/android/prototype-ux-theme.md
-          - "Windows, Wear OS, Automotive and common node properties": how-it-works/plat/android/prototype-ux-windows.md
-          - "Nodes and text field options": how-it-works/plat/android/prototype-ux-nodes.md
-          - "Style and icon effects": how-it-works/plat/android/prototype-ux-style.md
-          - "Icons and images": how-it-works/plat/android/prototype-ux-icons.md
-          - "Motion": how-it-works/plat/android/prototype-ux-motion.md
-          - "Screen map and route transitions": how-it-works/plat/android/prototype-ux-routes.md
-          - "Actions, emit context and data actions": how-it-works/plat/android/prototype-ux-actions.md
-          - "Storage": how-it-works/plat/android/prototype-ux-storage.md
-          - "Request action and share contract": how-it-works/plat/android/prototype-ux-request.md
-          - "Platform actions and events": how-it-works/plat/android/prototype-ux-platform.md
-          - "Platform: device status, connectivity, window controls and pickers": how-it-works/plat/android/prototype-ux-platform-device.md
-          - "Platform: links, media pickers, sign-in, location and BLE": how-it-works/plat/android/prototype-ux-platform-identity.md
-          - "Platform: commerce, secure storage, sensors, permissions and notifications": how-it-works/plat/android/prototype-ux-platform-services.md
-          - "Platform: media players, camera, casting and haptics": how-it-works/plat/android/prototype-ux-platform-media.md
-          - "Conditions, repeat templates and components": how-it-works/plat/android/prototype-ux-conditions.md
-          - "Patch, re-showing and device destination": how-it-works/plat/android/prototype-ux-patch.md
-          - "Realtime channels": how-it-works/plat/android/prototype-ux-realtime.md
-          - "Data, storage and network; anchors; safe area": how-it-works/plat/android/prototype-ux-data-network.md
-          - "Lifecycle and safety": how-it-works/plat/android/prototype-ux-lifecycle.md
-          - "Lint, rejection paths, worked examples and fixtures": how-it-works/plat/android/prototype-ux-lint.md
-          - "Flow, carousel, refresh, chat, swipe, gestures, search and loading": how-it-works/plat/android/prototype-ux-layout-contracts.md
-          - "Effects, maps, web content and charts": how-it-works/plat/android/prototype-ux-effects.md
-          - "Rich text, menus, tooltips, drawers and checks": how-it-works/plat/android/prototype-ux-controls.md
-          - "Saved prototype activity and home screen": how-it-works/plat/android/prototype-ux-saved.md
-          - "Lazy lists, strings and semantics": how-it-works/plat/android/prototype-ux-lists-strings.md
-          - "Dead taps, value formatters, platform namespaces, glass and disposable apps": how-it-works/plat/android/prototype-ux-platform-extras.md
-      - "Prototype performance measurement": how-it-works/plat/android/prototype-performance-measurement.md
-      - "Prototype Compose compiler report": how-it-works/plat/android/prototype-compose-compiler-report.md
-      - "iOS simulator prototype agent":
-          - "Overview": how-it-works/plat/ios/prototype-agent.md
-          - "Native look and feature support": how-it-works/plat/ios/prototype-agent-native-look.md
-          - "How it works, limits, entry point and Android differences": how-it-works/plat/ios/prototype-agent-runtime.md
-          - "Appearance, anchors and Material components": how-it-works/plat/ios/prototype-agent-components.md
-          - "Data, storage and network": how-it-works/plat/ios/prototype-agent-data.md
-          - "Layout and component contracts": how-it-works/plat/ios/prototype-agent-contracts.md
-          - "Saved prototypes, sharing and effects": how-it-works/plat/ios/prototype-agent-saved.md
-      - "iOS CarPlay template snapshots": how-it-works/plat/ios/carplay-template-snapshot.md
-      - "iOS CarPlay prototypes": how-it-works/plat/ios/carplay-prototypes.md
-      - "ProtoViewer":
-          - "Overview": how-it-works/protoviewer.md
-          - "4. Data model and formats; 5. Import validation flow": how-it-works/protoviewer-data-model.md
-          - "6. Network policy and limits; 7. MCP integration": how-it-works/protoviewer-network-mcp.md
-          - "8. Distribution": how-it-works/protoviewer-distribution.md
-      - "ProtoViewer localization": how-it-works/protoviewer-localization.md
-      - "ProtoViewer agent": how-it-works/protoviewer-agent.md
-      - "ProtoViewer privacy": protoviewer/privacy.md
-      - "ProtoViewer support": protoviewer/support.md
-      - "ProtoViewer store listing": how-it-works/protoviewer-store-listing.md
-      - "Native prototype embedding": how-it-works/prototype-embedding.md
-      - "Virtual BLE peripheral": how-it-works/ble-peripheral.md
-      - "Prototype platform security": how-it-works/prototype-platform-security.md
-      - "Prototype user-test sessions": how-it-works/prototype-user-test-sessions.md
-      - "Prototype SDK support matrix": how-it-works/prototype-sdk-matrix.md
-      - "Prototype camera and media guide": how-it-works/prototype-camera-media.md
-      - "Prototype web renderer":
-          - "Overview": how-it-works/prototype-web-renderer.md
-          - "Browser, Android and iOS parity checks": how-it-works/prototype-web-renderer-checks.md
-          - "Still renderer": how-it-works/prototype-web-renderer-still.md
-          - "Still renderer coverage": how-it-works/prototype-web-renderer-coverage.md
-          - "Still renderer coverage (continued)": how-it-works/prototype-web-renderer-coverage-2.md
-          - "Skins, frames and the device frame registry": how-it-works/prototype-web-renderer-frames.md
-      - "Headless prototype mode": how-it-works/prototype-headless.md
-      - "Prototype web frames for every form factor": how-it-works/prototype-web-frames-v2.md
-      - "Prototype web library": how-it-works/prototype-web-library.md
-      - "Prototype web 3D device view": how-it-works/prototype-web-3d.md
-      - "Prototype live preview server": how-it-works/prototype-web-preview-server.md
-      - "Runtime dependency pinning": how-it-works/release/runtime-dependency-pinning.md
-      - "Windows MSI signing": how-it-works/release/windows-msi-signing.md
-      - "Unit lane scaling": how-it-works/ci/unit-lane-scaling.md
-      - "Workflow de-duplication": how-it-works/ci/workflow-deduplication.md
-      - "CI attestation shadow promotion": how-it-works/ci/attestation-shadow-promotion.md
-      - "CI attestation store": how-it-works/ci/attestation-store.md
-      - "CI attestation signing envelope": how-it-works/ci/attestation-envelope.md
-      - "CI attestation GitHub App transport": how-it-works/ci/attestation-github-app-transport.md
-      - "CircleCI macOS migration": how-it-works/ci/circleci-macos-migration.md
-      - "macOS CI capacity plan": how-it-works/ci/macos-capacity-plan.md
-      - "macOS-only iOS tests": how-it-works/ci/macos-only-tests.md
-      - "Pre-push vs CI misses": how-it-works/ci/prepush-ci-misses.md
-      - "Interaction loop":
-          - "Overview": how-it-works/mcp/interaction-loop.md
+      - "MCP server":
+          - "Interaction loop": how-it-works/mcp/interaction-loop.md
           - "Default compact action metadata": how-it-works/mcp/interaction-loop-compaction.md
-      - "Stylus, pressure and hover injection": how-it-works/mcp/stylus-pressure-hover-injection.md
-      - "Daemon": how-it-works/mcp/daemon.md
-      - "Push-stream backpressure": push-stream-backpressure.md
-      - "MCP SDK v2 and stateless daemon":
-          - "Overview": how-it-works/mcp/sdk-v2-stateless-migration.md
-          - "Tasks and skills extensions": how-it-works/mcp/sdk-v2-extensions.md
-      - "MCP SDK v2 adoption survey": how-it-works/mcp/sdk-v2-adoption-survey.md
-      - "Elicitation for an ambiguous device": how-it-works/mcp/elicitation-ambiguous-device.md
-      - "Live observe App shell": how-it-works/mcp/observe-app-shell.md
-      - "Interactive observe App": how-it-works/mcp/observe-app-interactive.md
-      - "Build source revision": how-it-works/mcp/build-source-revision.md
-      - "Tool requirements": how-it-works/mcp/tool-requirements.md
-      - "Session state record":
-          - "Overview": how-it-works/session-state-record.md
-          - "5. Where SessionRowWriter sits; 6. Row writer implementation": how-it-works/session-state-record-row-writer.md
-      - "Test runners": how-it-works/plat/android/junit-runner/index.md
-      - "Robolectric runtime jars": how-it-works/plat/android/robolectric-android-all.md
-      - "InputConnection trace comparison": how-it-works/plat/android/ime-trace-conformance.md
-      - "Persona robustness harness": how-it-works/plat/android/persona-robustness-harness.md
-      - "OEM identity lane": how-it-works/plat/android/oem-identity-lane.md
-      - "Android physical panel identity": how-it-works/plat/android/physical-panel-identity.md
-      - "Android windowing": how-it-works/plat/android/windowing.md
-      - "Android form factors":
-          - "Overview": how-it-works/plat/android/form-factors.md
-          - "Common behaviour": how-it-works/plat/android/form-factors-common.md
-          - "Android TV": how-it-works/plat/android/form-factors-tv.md
-          - "TV behaviour, limits and fixture apps": how-it-works/plat/android/form-factors-tv-fixtures.md
-          - "Wear OS, Android Auto and Android Automotive OS": how-it-works/plat/android/form-factors-wear-auto.md
-      - "Android XR headset baseline": how-it-works/plat/android/xr-headset.md
-      - "Car App Library template snapshots": how-it-works/plat/android/car-app-templates.md
-      - "Android Auto projection provisioning": how-it-works/plat/android/android-auto-projection-provisioning.md
-      - "Emulator gRPC audio": how-it-works/plat/android/emulator-grpc-audio.md
-      - "Device-condition capability probe": how-it-works/plat/android/device-condition-capability-probe.md
-      - "Device-condition attestation ceiling": how-it-works/plat/android/device-condition-attestation-ceiling.md
-      - "Keystore StrongBox-unavailable fault": how-it-works/plat/android/keystore-strongbox-fault.md
-      - "Content seeding": how-it-works/plat/android/content-seeding.md
-      - "Desktop App": how-it-works/plat/android/desktop-app.md
-      - "Pressure, hover and stylus input": how-it-works/plat/pressure-hover-stylus-input.md
+          - "Daemon": how-it-works/mcp/daemon.md
+          - "Push-stream backpressure": push-stream-backpressure.md
+          - "MCP SDK v2 and stateless daemon": how-it-works/mcp/sdk-v2-stateless-migration.md
+          - "MCP SDK v2 tasks and skills extensions": how-it-works/mcp/sdk-v2-extensions.md
+          - "MCP SDK v2 adoption survey": how-it-works/mcp/sdk-v2-adoption-survey.md
+          - "Elicitation for an ambiguous device": how-it-works/mcp/elicitation-ambiguous-device.md
+          - "Live observe App shell": how-it-works/mcp/observe-app-shell.md
+          - "Interactive observe App": how-it-works/mcp/observe-app-interactive.md
+          - "Build source revision": how-it-works/mcp/build-source-revision.md
+          - "Tool requirements": how-it-works/mcp/tool-requirements.md
+          - "Stylus, pressure and hover injection": how-it-works/mcp/stylus-pressure-hover-injection.md
+          - "Pressure, hover and stylus input": how-it-works/plat/pressure-hover-stylus-input.md
+      - "Sessions and devices":
+          - "Session device requirements": how-it-works/session-requirements.md
+          - "Session state record": how-it-works/session-state-record.md
+          - "Session state row writer": how-it-works/session-state-record-row-writer.md
+          - "Session broker experiment": how-it-works/session-broker-experiment.md
+          - "Session broker: keep-booted and snapshot reset": how-it-works/session-broker-experiment-reset.md
+          - "Session broker: operations": how-it-works/session-broker-experiment-operations.md
+          - "Session broker device mutation journal": how-it-works/session-broker-device-mutation-journal.md
+          - "Session broker: baseline cleaning": how-it-works/session-broker-device-mutation-journal-cleaning.md
+          - "Session broker device reuse": how-it-works/session-broker-device-reuse.md
+          - "Session broker remote devices": how-it-works/session-broker-remote-devices.md
+          - "Device resources": how-it-works/device-resources.md
+          - "Device resources: configuring": how-it-works/device-resources-configuring.md
+          - "Device resources: Android": how-it-works/device-resources-android.md
+          - "Host toolchain resource": how-it-works/host-toolchain-resource.md
+          - "Device farm": how-it-works/device-farm.md
+      - "Android":
+          - "Android windowing": how-it-works/plat/android/windowing.md
+          - "Android form factors": how-it-works/plat/android/form-factors.md
+          - "Form factors: common behaviour": how-it-works/plat/android/form-factors-common.md
+          - "Form factors: Android TV": how-it-works/plat/android/form-factors-tv.md
+          - "Form factors: TV fixtures": how-it-works/plat/android/form-factors-tv-fixtures.md
+          - "Form factors: Wear OS, Auto and Automotive": how-it-works/plat/android/form-factors-wear-auto.md
+          - "Android XR headset baseline": how-it-works/plat/android/xr-headset.md
+          - "Car App Library template snapshots": how-it-works/plat/android/car-app-templates.md
+          - "Android Auto projection provisioning": how-it-works/plat/android/android-auto-projection-provisioning.md
+          - "CtrlProxy baseline profile": how-it-works/plat/android/ctrlproxy-baseline-profile.md
+          - "Android port reverse ownership": how-it-works/plat/android/port-reverse.md
+          - "InputConnection trace comparison": how-it-works/plat/android/ime-trace-conformance.md
+          - "Android emulator optimization": how-it-works/android-emulator-optimization.md
+          - "Android emulator host cost": how-it-works/android-emulator-host-cost.md
+          - "Emulator gRPC audio": how-it-works/plat/android/emulator-grpc-audio.md
+          - "Device-condition capability probe": how-it-works/plat/android/device-condition-capability-probe.md
+          - "Device-condition attestation ceiling": how-it-works/plat/android/device-condition-attestation-ceiling.md
+          - "Keystore StrongBox-unavailable fault": how-it-works/plat/android/keystore-strongbox-fault.md
+          - "Content seeding": how-it-works/plat/android/content-seeding.md
+          - "OEM identity lane": how-it-works/plat/android/oem-identity-lane.md
+          - "Android physical panel identity": how-it-works/plat/android/physical-panel-identity.md
+          - "Desktop App": how-it-works/plat/android/desktop-app.md
+      - "Apple":
+          - "iOS simctl and devicectl boundary": how-it-works/plat/ios/simctl-devicectl-boundary.md
+          - "iOS SDK contract suite": how-it-works/plat/ios/sdk-contract-suite.md
+          - "iOS SDK observation bridge": how-it-works/plat/ios/observation-bridge.md
+          - "iOS SDK host-integration profile": how-it-works/plat/ios/host-integration-profile.md
+          - "iOS iproxy tunnel client": how-it-works/plat/ios/iproxy-tunnel-client.md
+          - "iOS network capture wire contract": how-it-works/plat/ios/network-capture-wire-contract.md
+          - "iOS WKWebView bridge actions": how-it-works/plat/ios/webview-bridge-actions.md
+          - "iOS Keychain and shared-store capabilities": how-it-works/plat/ios/keychain-and-shared-store-capabilities.md
+          - "iOS Photos full access": how-it-works/plat/ios/photos-full-access.md
+          - "iOS simulator load reduction": how-it-works/plat/ios/simulator-load-reduction.md
+          - "iOS Simulator audio loopback": how-it-works/plat/ios/simulator-audio-loopback.md
+          - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
+          - "iOS keep-booted reset": how-it-works/ios-keep-booted-reset.md
+          - "iOS CarPlay template snapshots": how-it-works/plat/ios/carplay-template-snapshot.md
+          - "iOS CarPlay prototypes": how-it-works/plat/ios/carplay-prototypes.md
+          - "tvOS XCUITest spike": how-it-works/plat/tvos/xcuitest-spike.md
+          - "tvOS explore and plan replay": how-it-works/plat/tvos/focus-explore.md
+          - "tvOS tool support matrix": how-it-works/plat/tvos/tool-matrix.md
+          - "watchOS XCUITest spike": how-it-works/plat/watchos/xcuitest-spike.md
+          - "watchOS Smart Stack cells": how-it-works/plat/watchos/smart-stack.md
+          - "visionOS XCUITest capability boundary": how-it-works/plat/visionos/xcuitest-capabilities.md
+      - "Prototyping platform":
+          - "Android prototype specification":
+              - "Overview": how-it-works/plat/android/prototype-ux.md
+              - "Envelope and data model": how-it-works/plat/android/prototype-ux-envelope.md
+              - "Theme": how-it-works/plat/android/prototype-ux-theme.md
+              - "Windows, Wear OS, Automotive and common node properties": how-it-works/plat/android/prototype-ux-windows.md
+              - "Nodes and text field options": how-it-works/plat/android/prototype-ux-nodes.md
+              - "Style and icon effects": how-it-works/plat/android/prototype-ux-style.md
+              - "Icons and images": how-it-works/plat/android/prototype-ux-icons.md
+              - "Motion": how-it-works/plat/android/prototype-ux-motion.md
+              - "Screen map and route transitions": how-it-works/plat/android/prototype-ux-routes.md
+              - "Actions, emit context and data actions": how-it-works/plat/android/prototype-ux-actions.md
+              - "Storage": how-it-works/plat/android/prototype-ux-storage.md
+              - "Request action and share contract": how-it-works/plat/android/prototype-ux-request.md
+              - "Platform actions and events": how-it-works/plat/android/prototype-ux-platform.md
+              - "Platform: device status, connectivity, window controls and pickers": how-it-works/plat/android/prototype-ux-platform-device.md
+              - "Platform: links, media pickers, sign-in, location and BLE": how-it-works/plat/android/prototype-ux-platform-identity.md
+              - "Platform: commerce, secure storage, sensors, permissions and notifications": how-it-works/plat/android/prototype-ux-platform-services.md
+              - "Platform: media players, camera, casting and haptics": how-it-works/plat/android/prototype-ux-platform-media.md
+              - "Conditions, repeat templates and components": how-it-works/plat/android/prototype-ux-conditions.md
+              - "Patch, re-showing and device destination": how-it-works/plat/android/prototype-ux-patch.md
+              - "Realtime channels": how-it-works/plat/android/prototype-ux-realtime.md
+              - "Data, storage and network; anchors; safe area": how-it-works/plat/android/prototype-ux-data-network.md
+              - "Lifecycle and safety": how-it-works/plat/android/prototype-ux-lifecycle.md
+              - "Lint, rejection paths, worked examples and fixtures": how-it-works/plat/android/prototype-ux-lint.md
+              - "Flow, carousel, refresh, chat, swipe, gestures, search and loading": how-it-works/plat/android/prototype-ux-layout-contracts.md
+              - "Effects, maps, web content and charts": how-it-works/plat/android/prototype-ux-effects.md
+              - "Rich text, menus, tooltips, drawers and checks": how-it-works/plat/android/prototype-ux-controls.md
+              - "Saved prototype activity and home screen": how-it-works/plat/android/prototype-ux-saved.md
+              - "Lazy lists, strings and semantics": how-it-works/plat/android/prototype-ux-lists-strings.md
+              - "Dead taps, value formatters, platform namespaces, glass and disposable apps": how-it-works/plat/android/prototype-ux-platform-extras.md
+          - "Prototype performance measurement": how-it-works/plat/android/prototype-performance-measurement.md
+          - "Prototype Compose compiler report": how-it-works/plat/android/prototype-compose-compiler-report.md
+          - "iOS simulator prototype agent":
+              - "Overview": how-it-works/plat/ios/prototype-agent.md
+              - "Native look and feature support": how-it-works/plat/ios/prototype-agent-native-look.md
+              - "How it works, limits, entry point and Android differences": how-it-works/plat/ios/prototype-agent-runtime.md
+              - "Appearance, anchors and Material components": how-it-works/plat/ios/prototype-agent-components.md
+              - "Data, storage and network": how-it-works/plat/ios/prototype-agent-data.md
+              - "Layout and component contracts": how-it-works/plat/ios/prototype-agent-contracts.md
+              - "Saved prototypes, sharing and effects": how-it-works/plat/ios/prototype-agent-saved.md
+          - "ProtoViewer":
+              - "Overview": how-it-works/protoviewer.md
+              - "4. Data model and formats; 5. Import validation flow": how-it-works/protoviewer-data-model.md
+              - "6. Network policy and limits; 7. MCP integration": how-it-works/protoviewer-network-mcp.md
+              - "8. Distribution": how-it-works/protoviewer-distribution.md
+          - "ProtoViewer localization": how-it-works/protoviewer-localization.md
+          - "ProtoViewer agent": how-it-works/protoviewer-agent.md
+          - "Native prototype embedding": how-it-works/prototype-embedding.md
+          - "Virtual BLE peripheral": how-it-works/ble-peripheral.md
+          - "Prototype platform security": how-it-works/prototype-platform-security.md
+          - "Prototype user-test sessions": how-it-works/prototype-user-test-sessions.md
+          - "Prototype SDK support matrix": how-it-works/prototype-sdk-matrix.md
+          - "Prototype camera and media guide": how-it-works/prototype-camera-media.md
+          - "Prototype web renderer":
+              - "Overview": how-it-works/prototype-web-renderer.md
+              - "Browser, Android and iOS parity checks": how-it-works/prototype-web-renderer-checks.md
+              - "Still renderer": how-it-works/prototype-web-renderer-still.md
+              - "Still renderer coverage": how-it-works/prototype-web-renderer-coverage.md
+              - "Still renderer coverage (continued)": how-it-works/prototype-web-renderer-coverage-2.md
+              - "Skins, frames and the device frame registry": how-it-works/prototype-web-renderer-frames.md
+          - "Headless prototype mode": how-it-works/prototype-headless.md
+          - "Prototype web frames for every form factor": how-it-works/prototype-web-frames-v2.md
+          - "Prototype web library": how-it-works/prototype-web-library.md
+          - "Prototype web 3D device view": how-it-works/prototype-web-3d.md
+          - "Prototype live preview server": how-it-works/prototype-web-preview-server.md
+      - "Maintaining AutoMobile":
+          - "Manual-test harness": how-it-works/manual-test-harness.md
+          - "Manual-test harness: private daemons": how-it-works/manual-test-harness-daemons.md
+          - "Manual-test harness: sessions": how-it-works/manual-test-harness-sessions.md
+          - "Manual-test harness: broker scenarios": how-it-works/manual-test-harness-broker.md
+          - "Live device acceptance": how-it-works/live-device-acceptance.md
+          - "Device-description audit": how-it-works/device-description-audit.md
+          - "Agent benchmarks": how-it-works/agent-benchmarks.md
+          - "iOS Simulator fleet cost measurement": how-it-works/ios-simulator-fleet-cost.md
+          - "Persona robustness harness": how-it-works/plat/android/persona-robustness-harness.md
+          - "iOS Playground theme parity": how-it-works/plat/ios/playground-theme-parity.md
+          - "Robolectric runtime jars": how-it-works/plat/android/robolectric-android-all.md
+          - "ProtoViewer store listing": how-it-works/protoviewer-store-listing.md
+          - "Unit lane scaling": how-it-works/ci/unit-lane-scaling.md
+          - "Workflow de-duplication": how-it-works/ci/workflow-deduplication.md
+          - "macOS-only iOS tests": how-it-works/ci/macos-only-tests.md
+          - "Pre-push vs CI misses": how-it-works/ci/prepush-ci-misses.md
+          - "CircleCI macOS migration": how-it-works/ci/circleci-macos-migration.md
+          - "macOS CI capacity plan": how-it-works/ci/macos-capacity-plan.md
+          - "CI attestation shadow promotion": how-it-works/ci/attestation-shadow-promotion.md
+          - "CI attestation store": how-it-works/ci/attestation-store.md
+          - "CI attestation signing envelope": how-it-works/ci/attestation-envelope.md
+          - "CI attestation GitHub App transport": how-it-works/ci/attestation-github-app-transport.md
+          - "Runtime dependency pinning": how-it-works/release/runtime-dependency-pinning.md
+          - "Windows MSI signing": how-it-works/release/windows-msi-signing.md
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-17: Docs navigation grouped by task and platform": devlog/2026-11-17-docs-navigation-by-task.md
       - "2026-11-17: Material 3 Expressive component availability at the pinned Compose BOM": devlog/2026-11-17-m3-expressive-component-availability.md
       - "2026-11-16: Android Auto provisioning accepts the welcome screen": devlog/2026-11-16-android-auto-terms-accepted-by-provisioning.md
       - "2026-11-16: Web library advertises the host's known capabilities": devlog/2026-11-16-prototype-web-library-capabilities.md
@@ -598,5 +617,3 @@ nav:
       - "2026-08-21: Pinning the published runtime dependency graph": devlog/2026-08-21-runtime-dependency-pinning.md
       - "2026-07-29: MCP SDK v2 and stateless daemon migration": devlog/2026-07-29-sdk-v2-stateless-migration-decisions.md
   - "Contributing": contributing.md
-  - "Usage Data": metrics/usage-data.md
-  - "FAQ": faq.md

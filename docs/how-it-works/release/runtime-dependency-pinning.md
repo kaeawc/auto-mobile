@@ -93,13 +93,15 @@ manifest) and enforced by:
 The prepack hook moves files out of the bundled production dependency closure
 only when they belong to a class in the `PRUNE_CLASSES` allowlist
 (`scripts/release/trim-bundled-deps.ts`). The classes are declarations, source maps, tests,
-docs/markdown, TypeScript sources, `src/` beside a built `dist/`, browser-only
+docs/markdown, TypeScript sources, `src/` beside a built `dist/`, and browser-only
 builds (`browser` field and `browser` export-condition targets, `dist/browser/`,
-UMD), CI/build tooling config, and the hand-audited unloaded entry points in
-`PACKAGE_UNLOADED_ENTRYPOINTS`. Bun and Node never resolve the `browser`
-condition. The bundled `zod` is loaded only by the `@jimp/*` closure, through its ESM
-`.` entry, so its `require` condition and `main` (every `.cjs` file) and its `v3`,
-`mini`, `v4/mini` and `v4-mini` subpaths are pruned; those files go even under a loaded
+UMD). CI/build tooling config and the hand-audited unloaded entry points in
+`PACKAGE_UNLOADED_ENTRYPOINTS` are pruned too. Bun and Node never resolve the `browser`
+condition.
+
+The bundled `zod` is loaded only by the `@jimp/*` closure, through its ESM
+`.` entry. Its `require` condition and `main` (every `.cjs` file) are pruned, and so are its `v3`,
+`mini`, `v4/mini` and `v4-mini` subpaths. Those files go even under a loaded
 wildcard prefix such as `./v4/locales/*`. Package metadata and legal notices (LICENSE, NOTICE, COPYING, PATENTS,
 AUTHORS) are never removed. Runtime entry points and wildcard export prefixes are
 protected, except that declarations and maps are pruned inside wildcard prefixes

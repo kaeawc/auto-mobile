@@ -135,6 +135,7 @@ deviceOrientation=... interfaceOrientation=... sampleErrors=...` line, including
 fast taps, under the same `dev.jasonpearson.automobile` / `GesturePerformer`
 subsystem/category. The daemon logs compact JSON with `[CTRLPROXY_TAP_DIAG]`;
 its existing 1,000-character line limit can truncate unusually long errors.
+
 Sampled diagnostics stay out of tool/observe output. Without the diagnostics flag,
 taps and native double taps still return the requested point/duration and delivery
 route in `tapDiagnostics`, without diagnostic sampling or extra platform reads.

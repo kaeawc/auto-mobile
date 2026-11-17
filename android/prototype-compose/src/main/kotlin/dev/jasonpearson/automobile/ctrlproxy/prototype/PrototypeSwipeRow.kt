@@ -148,10 +148,13 @@ internal fun PrototypeSwipeRow(
     val shown = offset.value
     if (shown != 0f) {
       val side = if (shown > 0f) SwipeSide.START else SwipeSide.END
-      PrototypeSwipeButtons(side, abs(shown), swipe, tag, density) { action ->
-        interact(PrototypeInteraction.Tap(action.onTap))
-        coordinator.closed(id)
-        scope.launch { moveTo(0f) }
+      // Measure actions against the foreground height without letting them size the row.
+      Box(Modifier.matchParentSize()) {
+        PrototypeSwipeButtons(side, abs(shown), swipe, tag, density) { action ->
+          interact(PrototypeInteraction.Tap(action.onTap))
+          coordinator.closed(id)
+          scope.launch { moveTo(0f) }
+        }
       }
     }
     Box(

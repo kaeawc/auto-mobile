@@ -174,7 +174,11 @@ function arrayOf(item: Check, max: number): Check {
       return problem(path, "expected an array");
     }
     const tooLong = value.length > max ? problem(path, `expected at most ${max} entries`) : [];
-    return [...tooLong, ...value.flatMap((entry, index) => item(entry, `${path}[${index}]`))];
+    // Array.from visits a sparse array's holes as undefined, which flatMap would skip.
+    const entries = Array.from(value as unknown[], (entry, index) =>
+      item(entry, `${path}[${index}]`),
+    );
+    return [...tooLong, ...entries.flat()];
   };
 }
 

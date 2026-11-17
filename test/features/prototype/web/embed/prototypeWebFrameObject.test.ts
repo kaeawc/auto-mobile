@@ -140,6 +140,18 @@ describe("frame object check (#16453)", () => {
     ]);
   });
 
+  test("refuses a sparse panels or postures array instead of normalizing its hole", () => {
+    // Index 0 is a hole: assigning only index 1 leaves it unset, not undefined.
+    const sparse: unknown[] = [];
+    sparse[1] = { posture: "opened", panel: "inner", hingeDegrees: 180 };
+    expect(customDeviceFrameProblems({ ...pixel(), panels: new Array(1) })).toEqual([
+      "frame.panels[0]: expected an object",
+    ]);
+    expect(customDeviceFrameProblems({ ...pixel(), postures: sparse })).toEqual([
+      "frame.postures[0]: expected an object",
+    ]);
+  });
+
   test("names the path of each problem", () => {
     expect(customDeviceFrameProblems({ ...pixel(), frame: { bezelDp: -1 }, mask: "oval" })).toEqual(
       [

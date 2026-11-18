@@ -70,6 +70,32 @@ describe("PrototypeEventCoordinator", () => {
     expect((await awaitEvent({ kind: "dismissed" })).event?.sequence).toBe(2);
   });
 
+  test.each([0, 2])(
+    "adopting after the first wait preserves queued events and the cursor with ledger %i",
+    async (lastSequence) => {
+      const waiting = awaitEvent();
+      client.emitPrototypeEvent(event(1));
+      client.emitPrototypeEvent(event(2));
+      expect((await waiting).event?.sequence).toBe(1);
+      const before = { pendingCount: 1, lastSequence: 2, droppedCount: 0 };
+      expect(coordinator.counts(scope, "panel")).toEqual(before);
+
+      coordinator.adopt(scope, "panel", client, { replayed: [], lastSequence });
+
+      expect(coordinator.counts(scope, "panel")).toEqual(before);
+      expect(await awaitEvent()).toMatchObject({
+        event: { sequence: 2 },
+        pendingCount: 0,
+        lastSequence: 2,
+        droppedCount: 0,
+      });
+      client.emitPrototypeEvent(event(2));
+      expect(coordinator.counts(scope, "panel")?.pendingCount).toBe(0);
+      coordinator.replaceShown(scope.deviceId, "other");
+      expect(coordinator.counts(scope, "panel")).toBeUndefined();
+    },
+  );
+
   test("accepted events record telemetry once with their owning scope", () => {
     const recorded: {
       scope: Parameters<PrototypeEventCoordinator["show"]>[0];

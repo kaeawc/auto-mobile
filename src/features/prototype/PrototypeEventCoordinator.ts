@@ -112,14 +112,13 @@ export class PrototypeEventCoordinator {
     { replayed, lastSequence }: { replayed: readonly PrototypeEvent[]; lastSequence: number },
   ): void {
     const known = this.entries.get(scopeKey(scope, id));
-    // A replayed terminal event may already have ended the entry (shown false, terminal true)
-    // before this runs; its unconsumed events are still this host's to deliver.
-    const holdsEvents = known?.terminal === true && known.buffer.status().pendingCount > 0;
-    if ((known?.shown && !known.terminal) || holdsEvents) {
-      // Re-inspecting a prototype this host already tracks must not start a new epoch: that would
-      // clear the unconsumed events, and advancing the ledger below would make them unrecoverable.
-      this.watch(scope, id, client);
+    if (known) {
+      // awaitEvent can track an entry before it is shown. Inspection must retain its pending
+      // events and cursor, including terminal replay that arrived before the inspect reply.
+      const entry = this.watch(scope, id, client);
+      entry.shown = !entry.terminal;
     } else {
+      // Initialise the epoch before subscribing: the source may synchronously release replay.
       this.show(scope, id, client);
     }
     for (const event of replayed) {

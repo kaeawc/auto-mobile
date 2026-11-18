@@ -156,6 +156,32 @@ test("awaitEvent receives events buffered before the first host subscription", a
   expect(ctrlCalls).toBe(0);
 });
 
+test("status after the first wait preserves the next pending app event", async () => {
+  const waiting = call({ action: "awaitEvent", id: "panel" });
+  await drainUntil(() => timer.getPendingTimeoutCount() > 0, {
+    description: "first prototype event wait",
+  });
+  agent.emit({ ...event(1) });
+  agent.emit({ ...event(2) });
+  expect(await waiting).toMatchObject({ success: true, event: { sequence: 1 } });
+  agent.queueReplies({
+    status: { shown: true, id: "panel", state: {}, pages: {}, lastSequence: 2 },
+  });
+
+  expect(await call({ action: "status", id: "panel" })).toMatchObject({
+    success: true,
+    prototypes: [{ id: "panel", pendingCount: 1, lastSequence: 2, droppedCount: 0 }],
+  });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    success: true,
+    event: { sequence: 2 },
+    pendingCount: 0,
+    lastSequence: 2,
+    droppedCount: 0,
+  });
+  expect(ctrlCalls).toBe(0);
+});
+
 test("a disposable patch preserves the separately shown overlay spec", async () => {
   const overlay = { ...spec, id: "overlay" };
   const ticket = store.shownSpecs.beginShow(device.deviceId, overlay.id);

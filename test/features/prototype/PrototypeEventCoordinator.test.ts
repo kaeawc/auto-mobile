@@ -25,6 +25,37 @@ describe("PrototypeEventCoordinator", () => {
   afterEach(() => coordinator.dispose());
   const awaitEvent = (options = {}) => coordinator.awaitEvent(scope, "panel", client, options);
 
+  test("relaunch resets the epoch for a wait while socket reconnect preserves it", async () => {
+    const source = (instanceId: string) => {
+      const fake = new FakeCtrlProxy(timer);
+      return { fake, instanceId, onPrototypeEvent: fake.onPrototypeEvent.bind(fake) };
+    };
+    const first = source("first");
+    coordinator.adopt(scope, "panel", first, { replayed: [], lastSequence: 10 });
+    const reconnected = source("first");
+    coordinator.adopt(scope, "panel", reconnected, { replayed: [event(1)], lastSequence: 0 });
+    expect(coordinator.counts(scope, "panel")).toMatchObject({ pendingCount: 0, lastSequence: 10 });
+    const relaunched = source("second");
+    const waiting = coordinator.awaitEvent(scope, "panel", relaunched, {});
+    first.fake.emitPrototypeEvent(event(100));
+    relaunched.fake.emitPrototypeEvent(event(1));
+    expect(coordinator.counts(scope, "panel")?.lastSequence).toBe(1);
+    expect((await waiting).event?.sequence).toBe(1);
+  });
+
+  test("two sources on one device retain independent waits and subscriptions", async () => {
+    const app = new FakeCtrlProxy(timer);
+    coordinator.show(scope, "panel", client);
+    coordinator.show(scope, "app", app);
+    const overlayWait = coordinator.awaitEvent(scope, "panel", client, {});
+    const appWait = coordinator.awaitEvent(scope, "app", app, {});
+    client.emitPrototypeEvent(event(1));
+    app.emitPrototypeEvent(event(1, "app"));
+    expect(coordinator.counts(scope, "panel")?.lastSequence).toBe(1);
+    expect((await overlayWait).event?.id).toBe("panel");
+    expect((await appWait).event?.id).toBe("app");
+  });
+
   test("adopting after a replayed terminal event keeps the events the host had queued", async () => {
     coordinator.show(scope, "panel", client);
     const tap = event(1);
@@ -38,6 +69,32 @@ describe("PrototypeEventCoordinator", () => {
     expect((await awaitEvent()).event?.sequence).toBe(1);
     expect((await awaitEvent({ kind: "dismissed" })).event?.sequence).toBe(2);
   });
+
+  test.each([0, 2])(
+    "adopting after the first wait preserves queued events and the cursor with ledger %i",
+    async (lastSequence) => {
+      const waiting = awaitEvent();
+      client.emitPrototypeEvent(event(1));
+      client.emitPrototypeEvent(event(2));
+      expect((await waiting).event?.sequence).toBe(1);
+      const before = { pendingCount: 1, lastSequence: 2, droppedCount: 0 };
+      expect(coordinator.counts(scope, "panel")).toEqual(before);
+
+      coordinator.adopt(scope, "panel", client, { replayed: [], lastSequence });
+
+      expect(coordinator.counts(scope, "panel")).toEqual(before);
+      expect(await awaitEvent()).toMatchObject({
+        event: { sequence: 2 },
+        pendingCount: 0,
+        lastSequence: 2,
+        droppedCount: 0,
+      });
+      client.emitPrototypeEvent(event(2));
+      expect(coordinator.counts(scope, "panel")?.pendingCount).toBe(0);
+      coordinator.replaceShown(scope.deviceId, "other");
+      expect(coordinator.counts(scope, "panel")).toBeUndefined();
+    },
+  );
 
   test("accepted events record telemetry once with their owning scope", () => {
     const recorded: {

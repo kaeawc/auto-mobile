@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
-  applyRequiresColumn,
+  applyRequirementColumns,
   applyRequiresKey,
-  findDocsRequiresDrift,
+  findDocsRequirementDrift,
   findRequiresKeyDrift,
   findMissingToolRows,
   findToolRequirementsDrift,
-  renderRequiresCell,
+  renderNeedsCell,
+  renderPlatformsCell,
   renderRequiresKey,
   REQUIRES_KEY_END,
   REQUIRES_KEY_START,
@@ -110,7 +111,8 @@ describe("findToolRequirementsDrift (#18141)", () => {
 
 const emoji = (glyph: string, label: string) =>
   `<span role="img" aria-label="${label}" title="${label}">${glyph}</span>`;
-const cell = (body: string) => `<span class="tool-requires">${body}</span>`;
+const plat = (body: string) => `<span class="tool-platforms">${body}</span>`;
+const need = (body: string) => `<span class="tool-needs">${body}</span>`;
 const SDK = emoji("🧩", "sdkEmbed");
 const DEBUG = emoji("🐞", "debugBuild");
 const ANDROID = emoji("🤖", "Android");
@@ -118,7 +120,7 @@ const IOS = emoji("🍎", "iOS");
 const TVOS = emoji("📺", "tvOS");
 const WATCHOS = emoji("⌚", "watchOS");
 
-describe("docs/tools.md Requires column (#18141)", () => {
+describe("docs/tools.md Platforms and Needs columns (#18141)", () => {
   const requires = new Map<string, string[]>([
     ["observe", ["platform:android", "platform:ios", "platform:tvos"]],
     ["sqlQuery", ["sdkEmbed", "platform:android", "platform:ios"]],
@@ -126,20 +128,21 @@ describe("docs/tools.md Requires column (#18141)", () => {
     ["rotateCrown", ["platform:watchos"]],
   ]);
 
-  test("renders gates and only non-default platforms as emoji with hover text", () => {
-    expect(renderRequiresCell(requires.get("observe")!)).toBe(cell(`${ANDROID} ${IOS} ${TVOS}`));
-    expect(renderRequiresCell(requires.get("sqlQuery")!)).toBe(cell(SDK));
-    expect(renderRequiresCell([])).toBe(cell("—"));
-    expect(renderRequiresCell(requires.get("rotateCrown")!)).toBe(cell(WATCHOS));
-    expect(renderRequiresCell(["debugBuild", "platform:watchos"])).toBe(
-      cell(`${DEBUG} · ${WATCHOS}`),
-    );
-    expect(renderRequiresCell(["featureFlag:device-condition"])).toBe(
-      cell(`${emoji("🚩", "featureFlag:device-condition")} <code>device-condition</code>`),
+  test("Platforms lists every platform; Needs lists gates; each falls back to a dash", () => {
+    expect(renderPlatformsCell(requires.get("observe")!)).toBe(plat(`${ANDROID} ${IOS} ${TVOS}`));
+    expect(renderNeedsCell(requires.get("observe")!)).toBe(need("—"));
+    expect(renderPlatformsCell(requires.get("sqlQuery")!)).toBe(plat(`${ANDROID} ${IOS}`));
+    expect(renderNeedsCell(requires.get("sqlQuery")!)).toBe(need(SDK));
+    expect(renderPlatformsCell([])).toBe(plat("—"));
+    expect(renderNeedsCell([])).toBe(need("—"));
+    expect(renderPlatformsCell(["debugBuild", "platform:watchos"])).toBe(plat(WATCHOS));
+    expect(renderNeedsCell(["debugBuild", "sdkEmbed"])).toBe(need(`${DEBUG} · ${SDK}`));
+    expect(renderNeedsCell(["featureFlag:device-condition"])).toBe(
+      need(`${emoji("🚩", "featureFlag:device-condition")} <code>device-condition</code>`),
     );
   });
 
-  test("adds the column, fills each tool row, and the check then passes", () => {
+  test("adds both columns, fills each tool row, and the check then passes", () => {
     const markdown = [
       "# Tools",
       "| Tool | What it does |",
@@ -152,54 +155,68 @@ describe("docs/tools.md Requires column (#18141)", () => {
       "| --- | --- |",
       "| 41 mm | 176 |",
     ].join("\n");
-    expect(findDocsRequiresDrift(markdown, requires)).toEqual([
-      "line 2: tool table has no Requires column",
+    expect(findDocsRequirementDrift(markdown, requires)).toEqual([
+      "line 2: tool table does not end with Platforms and Needs columns",
     ]);
-    const applied = applyRequiresColumn(markdown, requires);
+    const applied = applyRequirementColumns(markdown, requires);
     expect(applied.split("\n").slice(1, 6)).toEqual([
-      "| Tool | What it does | Requires |",
-      "| --- | --- | --- |",
-      `| 👁️ <code>observe</code> | Read the screen | ${cell(`${ANDROID} ${IOS} ${TVOS}`)} |`,
-      `| [<code>sqlQuery</code>](x.md) | Run SQL | ${cell(SDK)} |`,
-      "| <code>unknown</code> | Not registered | — |",
+      "| Tool | What it does | Platforms | Needs |",
+      "| --- | --- | --- | --- |",
+      `| 👁️ <code>observe</code> | Read the screen | ${plat(`${ANDROID} ${IOS} ${TVOS}`)} | ${need("—")} |`,
+      `| [<code>sqlQuery</code>](x.md) | Run SQL | ${plat(`${ANDROID} ${IOS}`)} | ${need(SDK)} |`,
+      "| <code>unknown</code> | Not registered | — | — |",
     ]);
     expect(applied.split("\n").slice(7)).toEqual(markdown.split("\n").slice(7));
-    expect(findDocsRequiresDrift(applied, requires)).toEqual([]);
-    expect(applyRequiresColumn(applied, requires)).toBe(applied);
+    expect(findDocsRequirementDrift(applied, requires)).toEqual([]);
+    expect(applyRequirementColumns(applied, requires)).toBe(applied);
+  });
+
+  test("a table with the old Requires column is rewritten to Platforms and Needs", () => {
+    const markdown = [
+      "| Tool | What it does | Requires |",
+      "| --- | --- | --- |",
+      "| <code>sqlQuery</code> | Run SQL | old |",
+    ].join("\n");
+    expect(applyRequirementColumns(markdown, requires).split("\n")).toEqual([
+      "| Tool | What it does | Platforms | Needs |",
+      "| --- | --- | --- | --- |",
+      `| <code>sqlQuery</code> | Run SQL | ${plat(`${ANDROID} ${IOS}`)} | ${need(SDK)} |`,
+    ]);
   });
 
   test("a stale cell is reported", () => {
     const markdown = [
-      "| Tool | What it does | Requires |",
-      "| --- | --- | --- |",
-      "| <code>sqlQuery</code> | Run SQL |   —   |",
+      "| Tool | What it does | Platforms | Needs |",
+      "| --- | --- | --- | --- |",
+      `| <code>sqlQuery</code> | Run SQL | ${plat(`${ANDROID} ${IOS}`)} |   —   |`,
     ].join("\n");
-    expect(findDocsRequiresDrift(markdown, requires)).toEqual([
-      `sqlQuery: docs say "—", definitions say "${cell(SDK)}"`,
+    expect(findDocsRequirementDrift(markdown, requires)).toEqual([
+      `sqlQuery: docs Needs "—", definitions say "${need(SDK)}"`,
     ]);
   });
 });
 
-describe("docs/tools.md Requires key (#18361)", () => {
+describe("docs/tools.md Platforms and Needs key (#18361)", () => {
   const page = (body: string) =>
     ["## Requires column", REQUIRES_KEY_START, body, REQUIRES_KEY_END, "## Next"].join("\n");
 
   test("key lists every gate and platform emoji", () => {
     const key = renderRequiresKey();
-    expect(key.split("\n")[0]).toBe("| Emoji | Requirement | Meaning |");
+    expect(key.split("\n")[0]).toBe("| Emoji | Column | Requirement | Meaning |");
     for (const glyph of ["🧩", "🐞", "🚩", "🤖", "🍎", "⌚", "📺", "🥽"]) {
       expect(key).toContain(`| ${glyph} |`);
     }
-    expect(key).toContain("| `featureFlag:<key>` |");
+    expect(key).toContain("| Needs | `featureFlag:<key>` |");
+    expect(key).toContain("| Platforms | `platform:android` |");
   });
 
   test("missing markers, then a stale key, are reported; applying fills and is idempotent", () => {
     expect(findRequiresKeyDrift("## Requires column")).toEqual([
-      `Requires key markers ${REQUIRES_KEY_START} / ${REQUIRES_KEY_END} are missing`,
+      `Key markers ${REQUIRES_KEY_START} / ${REQUIRES_KEY_END} are missing`,
     ]);
     const stale = page("| Emoji | Requirement | Meaning |\n| --- | --- | --- |\n| 🧩 | `x` | y |");
     expect(findRequiresKeyDrift(stale)).toEqual([
-      "Requires key table differs from the generated key",
+      "Platforms and Needs key table differs from the generated key",
     ]);
     const applied = applyRequiresKey(stale);
     expect(applied).toContain(renderRequiresKey());
@@ -221,14 +238,14 @@ describe("findMissingToolRows (#18140)", () => {
   test("reports each page tool without a tool table row", () => {
     const markdown = [
       "# Audits",
-      "| Tool | What it does | Requires |",
-      "| --- | --- | --- |",
-      "| ✅ <code>accessibilityAudit</code> | Audit | — |",
+      "| Tool | What it does | Platforms | Needs |",
+      "| --- | --- | --- | --- |",
+      "| ✅ <code>accessibilityAudit</code> | Audit | — | — |",
       "",
       "Prose naming <code>performanceAudit</code> is not a row.",
     ].join("\n");
     expect(findMissingToolRows(markdown, ["accessibilityAudit", "performanceAudit"])).toEqual([
-      "performanceAudit: page has no `| Tool | What it does | Requires |` row for it",
+      "performanceAudit: page has no `| Tool | What it does | Platforms | Needs |` row for it",
     ]);
   });
 });

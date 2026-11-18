@@ -451,3 +451,27 @@ describe("prototype request timeout overrides", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });
+
+test("disposable-app hello exposes its instance and acknowledgements name that instance", async () => {
+  const socket = new FakePrototypeAgentSocket();
+  const connecting = connectPrototypeAgent({
+    port: PORT,
+    token: TOKEN,
+    connector: new FakePrototypeAgentConnector(socket),
+    timer: new FakeTimer(),
+    acknowledgeEvents: true,
+  });
+  await flushMicrotasks();
+  socket.push(
+    helloResult({ appInstanceId: "app-process-2", capabilities: ["prototype_event_ack_v1"] }),
+  );
+  const client = await connecting;
+  expect(client.handshake).toMatchObject({ appInstanceId: "app-process-2" });
+  client.acknowledgeEventsThrough?.(1);
+  expect(socket.frames().at(-1)).toEqual({
+    type: "ack",
+    sequence: 1,
+    appInstanceId: "app-process-2",
+  });
+  client.close();
+});

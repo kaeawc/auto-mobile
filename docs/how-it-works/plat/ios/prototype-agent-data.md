@@ -44,10 +44,11 @@ host's traversal order; the strict boundary also enforces the host data byte-cos
 ## Data actions capability
 
 Advertises `prototype_data_actions_v1` for `setData`, `appendData`, `prependData`, `removeData`
-([contract](../android/prototype-ux-actions.md#data-actions-12519)). The `PrototypeRepeat` type binds a whole `{index}`
+([contract](../android/prototype-ux-actions.md#data-actions-12519)), plus `prototype_data_actions_v2`
+for keyed writes with `where` and optional set `member`. The `PrototypeRepeat` type binds a whole `{index}`
 path segment and `{item}`/`{index}` values per row at expansion, so row actions arrive concrete.
 The `PrototypeSession` type resolves `{value}`/`{state}`/`{data}` and applies `PrototypeDataWrite` (twin of the
-host's `applyPrototypeDataWrite`: codes `invalid_path`, `invalid_value`, `not_found`, `not_array`,
+host's `applyPrototypeDataWrite`: codes `invalid_path`, `invalid_value`, `not_found`, `ambiguous_match`, `not_array`,
 `limit_exceeded`; `MAX_PROTOTYPE_DATA_WRITE_BYTES`). It then rebuilds the tree from the authored root with
 `PrototypeSpec.replacingData`, so data text, repeat rows and conditions refresh. The session refuses a write when it
 can't rebuild the tree for it within show limits.
@@ -65,7 +66,7 @@ until the acceptance run.
 A refused write changes and emits nothing and does not stop the rest of the action list. An accepted
 write bumps the id's data revision. The revision is monotonic per id, and re-show never rewinds it. Every show is one
 revision, so the first reports 1 as on Android (#13040). The write also emits one `change` event named by the
-written `/data/...` path (the array for an append) with payload `{op, value?, revision}`. Extend/prepend values may be absent when over the emit byte budget, which abandons the host mirror. The counter is shared with `prototype_patch_v1` (#11675): device state writes and
+written `/data/...` path (the array for an append) with payload `{op, value?, where?, member?, revision}`. Extend/prepend values may be absent when over the emit byte budget, which abandons the host mirror. Keyed writes are refused if selector metadata exceeds the emit budget. The counter is shared with `prototype_patch_v1` (#11675): device state writes and
 accepted patches take the next revision too.
 
 ## Storage capability
@@ -155,6 +156,7 @@ Android doc, [Data, storage and network](../android/prototype-ux-data-network.md
 | Capability                    | Gates                                                                | iOS agent                                                      |
 | ----------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `prototype_data_actions_v1`   | `setData`, `appendData`, `prependData`, `removeData`                 | [Data actions capability](#data-actions-capability)            |
+| `prototype_data_actions_v2`   | Keyed `setData`, `removeData`                                        | [Data actions capability](#data-actions-capability)            |
 | `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clear_prototype_storage` | Sandbox `Application Support/AutoMobilePrototypeAgent/storage` |
 | `prototype_network_v1`        | `request` with `via: "host"`                                         | [Request action capability](#request-action-capability)        |
 | `prototype_network_device_v1` | `request` with `via: "device"`                                       | Dedicated ephemeral `URLSession`                               |

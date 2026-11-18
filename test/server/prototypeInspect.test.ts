@@ -83,10 +83,14 @@ describe("prototype inspect (#10494)", () => {
     return prototypeOutputSchema.parse(readToolResponse(response).structuredContent);
   }
 
-  test("inspect is an argument-free action", () => {
-    expect(prototypeSchema.safeParse({ action: "inspect" }).success).toBe(true);
-    expect(prototypeSchema.safeParse({ action: "inspect", id: "proto" }).success).toBe(false);
-  });
+  test.each(["inspect", "status"])(
+    "%s accepts only an optional disposable-app selection id",
+    (action) => {
+      expect(prototypeSchema.safeParse({ action }).success).toBe(true);
+      expect(prototypeSchema.safeParse({ action, id: "proto" }).success).toBe(true);
+      expect(prototypeSchema.safeParse({ action, goal: "unrelated" }).success).toBe(false);
+    },
+  );
 
   test("a device without prototype_persistence_replay_v1 gets a clear error and nothing is sent", async () => {
     client.setSupportedCommands(["prototype_window_options_v1"]);

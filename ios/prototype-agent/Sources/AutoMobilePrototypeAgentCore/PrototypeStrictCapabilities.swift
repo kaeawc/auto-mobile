@@ -171,6 +171,8 @@ enum PrototypeStrictCapabilities {
             }
             if ["setData", "appendData", "prependData", "upsertData", "removeData"]
                 .contains(type) { need("data_actions") }
+            if ["setData", "removeData"].contains(type),
+               fields["where"] != nil || fields["member"] != nil { result.insert("prototype_data_actions_v2") }
             if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
                 .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }

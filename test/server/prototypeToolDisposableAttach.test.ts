@@ -11,6 +11,7 @@ import { InMemoryDisposableAppRegistryStore } from "../fakes/InMemoryDisposableA
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { toolStructured } from "../helpers/toolResponse";
 import { event } from "../helpers/prototypeTestEvent";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 const device = { name: "fake", deviceId: "attach-routing", platform: "android" as const };
 const spec = {
@@ -28,13 +29,16 @@ let attachError: Error | undefined;
 let buffered: BufferedViewerClient;
 let store: InMemoryPrototypeStatusStore;
 let registry: FileDisposableAppRegistry;
+let appClients: Map<string, BufferedViewerClient>;
+let timer: FakeTimer;
 beforeEach(async () => {
-  const timer = new FakeTimer();
+  timer = new FakeTimer();
   ctrl = new FakeCtrlProxy(timer);
   ctrl.setSupportedCommands(["prototype_persistence_replay_v1", "prototype_patch_v1"]);
   ctrlCalls = 0;
   attachCalls = 0;
   attachError = undefined;
+  appClients = new Map();
   agent = new FakePrototypeAgentClient({
     agentVersion: "app",
     appInstanceId: "first",
@@ -71,12 +75,14 @@ beforeEach(async () => {
     },
     disposableAppRegistry: registry,
     disposableAppAttacher: {
-      attach: async () => {
+      release: async () => {},
+      dispose: async () => {},
+      attach: async (_device, appId) => {
         attachCalls++;
-        if (attachError) {
+        if (attachError && !appClients.has(appId)) {
           throw attachError;
         }
-        return buffered;
+        return appClients.get(appId) ?? buffered;
       },
     },
     cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
@@ -235,6 +241,46 @@ test("a stale host cache cannot route to a prototype absent from CtrlProxy", asy
     success: false,
     error: expect.stringContaining("launchApp"),
   });
+});
+
+test("stopped app fallback preserves another app's live entry and pending wait", async () => {
+  await call({ action: "show", spec: { ...spec, id: "overlay" } });
+  const record = (await registry.list(device.deviceId))[0]!;
+  const otherAppId = "dev.jasonpearson.automobile.app.other";
+  await registry.put(device.deviceId, {
+    ...record,
+    appId: otherAppId,
+    slug: "other",
+    specId: "other-panel",
+  });
+  const other = new FakePrototypeAgentClient({ ...agent.handshake, appInstanceId: "other" });
+  appClients.set(otherAppId, new BufferedViewerClient(other));
+  for (const [client, id] of [
+    [agent, "panel"],
+    [other, "other-panel"],
+  ] as const) {
+    client.queueReplies({ status: { shown: true, id, state: {}, pages: {}, lastSequence: 0 } });
+    expect(await call({ action: "inspect", id })).toMatchObject({ success: true });
+  }
+  let settled = false;
+  const waiting = call({ action: "awaitEvent", id: "other-panel" }).then((result) => {
+    settled = true;
+    return result;
+  });
+  await drainUntil(() => timer.getPendingTimeoutCount() > 0, {
+    description: "the other app's event wait",
+  });
+  attachError = new ActionableError("Call launchApp and retry.");
+  ctrl.setInspectReply({ success: true, prototypes: [] });
+  expect(await call({ action: "status", id: "panel" })).toMatchObject({
+    success: false,
+    error: expect.stringContaining("launchApp"),
+  });
+  expect(store.shownIds(device.deviceId)).toContain("other-panel");
+  expect(store.shownIds(device.deviceId)).not.toContain("overlay");
+  expect(settled).toBe(false);
+  other.emit({ ...event(1, "other-panel") });
+  expect(await waiting).toMatchObject({ event: { id: "other-panel", sequence: 1 } });
 });
 
 test("reconnect replay is deduplicated against events already delivered by the prior connection", async () => {

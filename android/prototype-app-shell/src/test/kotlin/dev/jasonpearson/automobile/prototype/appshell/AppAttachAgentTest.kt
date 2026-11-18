@@ -79,6 +79,69 @@ class AppAttachAgentTest {
     PrototypeEvent(0, "panel", sequence, PrototypeEventKind.EMIT, null, null, emptyMap())
 
   @Test
+  fun `activity rebinding retains listener identity sequences and unacknowledged events`() =
+    runTest {
+      var listenerStarts = 0
+      val process =
+        AppAttachProcess(
+          "secret",
+          backgroundScope,
+          appInstanceId = "test-instance",
+          clock = { 0L },
+          log = {},
+          startListener = { listenerStarts++ },
+        )
+      val detachFirst = process.bind(Target())
+      val first = Connection().also { it.hello() }
+      backgroundScope.launch { process.agent.serve(first) }
+      runCurrent()
+      process.agent.emit(event(process.nextSequence()))
+      runCurrent()
+      detachFirst()
+      val detachReplacement = process.bind(Target())
+      // A late old-Activity teardown must not detach the replacement's target.
+      detachFirst()
+      first.send("""{"type":"patch_prototype","requestId":"new-ui","id":"panel","ops":[]}""")
+      runCurrent()
+      assertTrue(first.written.last().getValue("success").jsonPrimitive.boolean)
+      assertFalse(first.closed)
+      first.close()
+      runCurrent()
+      process.agent.emit(event(process.nextSequence()))
+      val second = Connection().also { it.hello() }
+      backgroundScope.launch { process.agent.serve(second) }
+      runCurrent()
+      assertEquals("test-instance", second.written.first()["appInstanceId"]?.jsonPrimitive?.content)
+      assertEquals(
+        listOf(1L, 2L),
+        second.written.drop(1).map { it.getValue("sequence").jsonPrimitive.long },
+      )
+      second.send("""{"type":"ack","sequence":2,"appInstanceId":"test-instance"}""")
+      runCurrent()
+      second.close()
+      runCurrent()
+      val third = Connection().also { it.hello() }
+      backgroundScope.launch { process.agent.serve(third) }
+      runCurrent()
+      assertEquals(1, third.written.size)
+      assertEquals(1, listenerStarts)
+      detachReplacement()
+      third.send("""{"type":"patch_prototype","requestId":"detached-ui","id":"panel","ops":[]}""")
+      runCurrent()
+      val detachedReply = third.written.last()
+      assertEquals("detached-ui", detachedReply.getValue("requestId").jsonPrimitive.content)
+      assertFalse(detachedReply.getValue("success").jsonPrimitive.boolean)
+      assertEquals(
+        "Prototype Activity is not attached",
+        detachedReply.getValue("error").jsonPrimitive.content,
+      )
+      val relaunched =
+        AppAttachProcess("secret", backgroundScope, appInstanceId = "new-process", log = {})
+      assertNotEquals(process.appInstanceId, relaunched.appInstanceId)
+      assertEquals(1L, relaunched.nextSequence())
+    }
+
+  @Test
   fun `old app instance hello and ack cannot discard new process replay`() = runTest {
     val agent = agent()
     agent.emit(event(1))

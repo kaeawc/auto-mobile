@@ -92,7 +92,8 @@ function groupByPrototype(events: readonly PrototypeEvent[]): Map<string, Protot
 /**
  * The report is authoritative for what the device shows: a prototype this host still lists that the
  * device neither reports nor ended with a replayed terminal event is gone (for example CtrlProxy
- * restarted), including when the report is empty. A single-app report reconciles only its id.
+ * restarted), including when the report is empty. CtrlProxy reconciles its own sources; a
+ * single-app report reconciles only its id.
  */
 function dropUnreportedPrototypes(
   store: PrototypeStatusStore,
@@ -101,15 +102,21 @@ function dropUnreportedPrototypes(
     scope,
     reportedIds,
     reconciliationId,
+    reconciliationSource,
   }: {
     scope: PrototypeScope;
     reportedIds: ReadonlySet<string>;
     reconciliationId?: string;
+    reconciliationSource?: PrototypeEventSource;
   },
 ): void {
   // Shown ids are device-wide, so stale ids are enumerated across every session: a
   // session that tracked the vanished prototype is not necessarily the one inspecting.
   for (const id of store.shownIds(scope.deviceId)) {
+    const owner = events.sourceFor(scope.deviceId, id);
+    if (reconciliationSource && owner && owner !== reconciliationSource) {
+      continue;
+    }
     if ((reconciliationId === undefined || reconciliationId === id) && !reportedIds.has(id)) {
       events.dismiss(scope.deviceId, id);
       store.dismissed(scope, id);
@@ -126,8 +133,10 @@ function adoptReportedPrototypes(
     scope,
     report,
     reconciliationId,
+    reconciliationSource,
   }: {
     reconciliationId?: string;
+    reconciliationSource?: PrototypeEventSource;
     scope: PrototypeScope;
     report: {
       prototypes: readonly unknown[] | undefined;
@@ -151,7 +160,12 @@ function adoptReportedPrototypes(
       });
     }
   }
-  dropUnreportedPrototypes(store, events, { scope, reportedIds, reconciliationId });
+  dropUnreportedPrototypes(store, events, {
+    scope,
+    reportedIds,
+    reconciliationId,
+    reconciliationSource,
+  });
   for (const entry of reported) {
     if (!history.has(entry.id)) {
       events.adopt(scope, entry.id, source, { replayed: [], lastSequence: entry.lastSequence });
@@ -221,8 +235,10 @@ async function inspectDevice(
   if (!result.success) {
     return { success: false, error: result.error ?? "Prototype inspect failed" };
   }
-  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), {
+  const source = prototypeEventSource(target.transport);
+  adoptReportedPrototypes(store, events, source, {
     scope,
+    reconciliationSource: source,
     report: {
       prototypes: result.prototypes,
       replayed,

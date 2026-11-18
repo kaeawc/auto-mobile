@@ -391,6 +391,8 @@ interface PrototypeHost {
   commits: PrototypeCommitGenerations;
   patchQueue: PrototypePatchQueue;
   transports: PrototypeTransportCache;
+  /** One attachment and resume ledger per installed app, shared across MCP registrations. */
+  disposableAgent: ReturnType<typeof lazyDisposableAppAttach>;
   /** Declarative mock backends of this session (#14271). */
   mocks: PrototypeMockBackendRegistry;
   /** The headless virtual device (#17974); holds state only while headless calls use it. */
@@ -426,9 +428,15 @@ function createPrototypeHost(
     requests: channelWiring.combinedPrototypeCancellation(requests, channels),
     recorder,
   });
+  const disposableAgent = lazyDisposableAppAttach(dependencies);
   const cleanup = subscribePrototypeCleanup(
     dependencies.lifecycle ?? defaultPrototypeLifecycle(),
     events,
+    (deviceId) => {
+      void disposableAgent.release(deviceId).catch((error) => {
+        logger.warn("Could not release disposable app attachments for device cleanup.", error);
+      });
+    },
   );
   const virtualDevice =
     dependencies.virtualDevice ?? new VirtualPrototypeDevice(prototypeClock(dependencies));
@@ -436,6 +444,7 @@ function createPrototypeHost(
   return {
     store,
     events,
+    disposableAgent,
     recorder,
     commits: new PrototypeCommitGenerations(),
     patchQueue: createPrototypePatchQueue(),
@@ -456,6 +465,9 @@ function createPrototypeHost(
         cleanup.unsubscribe();
         events.dispose();
         mocks.clearAll();
+        void disposableAgent.dispose().catch((error) => {
+          logger.warn("Could not dispose prototype host app attachments.", error);
+        });
       }
     },
   };
@@ -739,7 +751,7 @@ export function createPrototypeToolRuntime(
     host.transports,
     dependencies.iosAssetCache,
   );
-  const disposableAgent = lazyDisposableAppAttach(dependencies);
+  const disposableAgent = host.disposableAgent;
   const cacheInvalidator =
     dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   const clock = prototypeClock(dependencies);
@@ -875,7 +887,10 @@ async function prototypeDeviceOutput(context: PrototypeDeviceContext) {
             device,
             { target, scope, signal },
           );
-          return report.success && store.shownIds(device.deviceId).includes(args.id ?? "")
+          return report.success &&
+            store.shownIds(device.deviceId).includes(args.id ?? "") &&
+            events.sourceFor(device.deviceId, args.id ?? "") ===
+              prototypeEventSource(target.transport)
             ? target
             : undefined;
         },

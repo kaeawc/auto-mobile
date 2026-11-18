@@ -8,21 +8,22 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeEffectReport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeResolveAppearance
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
-import java.util.UUID
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 
 internal class RuntimeAttachTarget(
   private val host: EmbeddedPrototypeHost,
-  override val appInstanceId: String = UUID.randomUUID().toString(),
+  private val ledger: AttachEventLedger,
   private val deviceDark: () -> Boolean,
 ) : AttachTarget {
   var runtime: PrototypeRuntime? = null
-  private var sequence = 0L
+  override val appInstanceId: String
+    get() = ledger.appInstanceId
+
   // Match CtrlProxy's spec encoding: optional defaults must be absent, not null.
   private val specJson = Json(attachJson) { encodeDefaults = false }
 
-  fun nextSequence(): Long = ++sequence
+  fun nextSequence(): Long = ledger.nextSequence()
 
   override suspend fun patch(id: String, baseRevision: Long?, ops: JsonArray): PrototypeResult =
     host.interactions.withLock {
@@ -59,7 +60,7 @@ internal class RuntimeAttachTarget(
           put("pages", JsonObject(emptyMap()))
           put("stacks", JsonObject(emptyMap()))
           put("state", JsonObject(emptyMap()))
-          put("lastSequence", sequence)
+          put("lastSequence", ledger.lastSequence)
         }
       else {
         val snapshot = current.current
@@ -72,7 +73,7 @@ internal class RuntimeAttachTarget(
             data = snapshot.spec.data,
             pages = snapshot.pages.toMap(),
             stacks = snapshot.stacks.toMap(),
-            lastSequence = sequence,
+            lastSequence = ledger.lastSequence,
             appearance = prototypeResolveAppearance(model.root, snapshot.spec.theme, deviceDark()),
             storage = current.storage?.report(),
             timers = current.timerReports(),

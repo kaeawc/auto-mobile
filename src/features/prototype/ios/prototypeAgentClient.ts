@@ -155,6 +155,12 @@ export function createPrototypeAgentLaunchConfig(
   };
 }
 
+/** Host-owned delivery cursor, retained across sockets for one app on one device. */
+export interface PrototypeAgentResumeState {
+  appInstanceId?: string;
+  lastAcknowledgedSequence: number;
+}
+
 export interface ConnectPrototypeAgentOptions {
   port: number;
   token: string;
@@ -165,6 +171,7 @@ export interface ConnectPrototypeAgentOptions {
   maxFrameBytes?: number;
   /** Android disposable-app event acknowledgement; other agent protocols stay unchanged. */
   acknowledgeEvents?: boolean;
+  eventResumeState?: PrototypeAgentResumeState;
 }
 
 /** Connects, authenticates and checks the protocol version; rejects with an ActionableError. */
@@ -186,6 +193,7 @@ export async function connectPrototypeAgent(
     requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     maxFrameBytes: options.maxFrameBytes ?? PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES,
     acknowledgeEvents: options.acknowledgeEvents,
+    eventResumeState: options.eventResumeState,
   });
   await client.authenticate(
     options.token,

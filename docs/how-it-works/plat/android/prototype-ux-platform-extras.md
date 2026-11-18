@@ -190,11 +190,11 @@ The Android stamper packages a spec into a signed APK. The `prototype` actions `
 `DisposableAppManager`, built on the first such call. iOS refuses them until its stamper exists.
 The headless virtual device refuses them too.
 
-For a running Android disposable app, `patch`, `status`, `inspect` and `awaitEvent` with its
-spec id attach over `automobile-app-<appId>` instead of CtrlProxy. Multiple installed slugs with
-the same spec id are refused with their names. Launch the app with `launchApp` before attaching.
-If attachment fails, the host uses CtrlProxy only after a live inspect confirms that it shows
-that prototype; otherwise it returns attach guidance. Other actions keep using CtrlProxy.
+On Android, `patch`, `status`, `inspect` and `awaitEvent` with an installed spec id attach over
+`automobile-app-<appId>`. Conflicting installed spec ids return their slugs. Call `launchApp` first.
+Failed attachment uses CtrlProxy only when live inspection confirms that id; otherwise it
+returns attach guidance. Inspection reconciles CtrlProxy sources, preserving disposable-app
+entries and waits. Other actions use CtrlProxy.
 
 The listener requires a nonblank `assets/prototype/attach-token` and an emulator identity
 (kernel qemu flag or emulator build fingerprint/hardware). The stamper's explicit
@@ -204,12 +204,15 @@ APK debuggability. The token-in-APK model is development-only: anyone who can re
 recover its token. Reinstalling a slug in place reuses the token. A second connection cannot
 replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
 
-Attach events use at-least-once delivery within the app process. `hello_result` includes a random
-`appInstanceId`, stable across socket reconnects. Identity changes reset the host's event epoch and high-water mark. `hello` carries `lastAcknowledgedSequence` (zero for a fresh
-connection); hello and `{type: "ack", sequence, appInstanceId}` acknowledgements apply only to the
-matching app instance. Acknowledgements follow subscriber delivery, so events awaiting the first
-subscriber remain unacknowledged. The host initializes the epoch before releasing buffered replay,
-retains subscriptions per source, and reconciles single-app status reports only against that app.
+Events replay at least once. A process-scoped agent retains its listener, buffer, sequence ledger
+and random `appInstanceId` across reconnects and Activity recreation. Activities rebind targets;
+a new process resets identity and epoch. `hello_result` reports identity. One daemon-host attacher
+serves every MCP registration and retains app/device cursors. `hello` sends `appInstanceId` and
+`lastAcknowledgedSequence` (initially zero); `{type: "ack", sequence, appInstanceId}` acknowledges
+matching instances after subscriber delivery. Epochs initialize before replay; status reconciles
+only its app. Between waits, events buffer unacknowledged until subscribed delivery. The 256-event
+buffer closes on overflow for replay. Device cleanup and host disposal close sockets and remove
+adb forwards.
 
 Successful socket writes do not remove events: unacknowledged events replay on the next hello,
 and the host de-duplicates within the connection and coordinator. The app retains 200 events,

@@ -237,6 +237,7 @@ On Android emulators, access a running disposable app with `prototype` actions `
 selects the app without filtering returned prototypes. Without it, `status` reads host-local state
 and `inspect` queries the overlay. First call `launchApp` with the app id from `prototype installApp`.
 
-If attachment fails, calls use an overlay showing that id. Otherwise relaunch; reinstall with
+Events survive rotation and reconnects within the app process. If attachment fails, calls use an
+overlay showing that id without ending other apps' waits. Otherwise relaunch; reinstall with
 `prototype installApp` for a stale saved token. Installed apps need distinct spec ids; ambiguous
 ids return conflicting app slugs. Other actions use the overlay.

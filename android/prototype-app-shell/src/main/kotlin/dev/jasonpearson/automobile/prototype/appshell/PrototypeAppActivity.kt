@@ -49,12 +49,8 @@ import kotlinx.coroutines.withContext
 class PrototypeAppActivity : ComponentActivity() {
   private val attachScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private val embeddedHost = EmbeddedPrototypeHost(attachScope, Mutex())
-  private val attachTarget =
-    RuntimeAttachTarget(embeddedHost) {
-      resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-        Configuration.UI_MODE_NIGHT_YES
-    }
-  private var attachServer: AppAttachServer? = null
+  private lateinit var attachTarget: RuntimeAttachTarget
+  private var detachAttachTarget: (() -> Unit)? = null
   private val generation = mutableIntStateOf(0)
   private val remountGate = ResumedRemountGate { generation.intValue++ }
 
@@ -62,37 +58,16 @@ class PrototypeAppActivity : ComponentActivity() {
     installSplashScreen()
     super.onCreate(savedInstanceState)
     lifecycle.addObserver(remountGate)
-    val token =
-      try {
-        assets.open("prototype/attach-token").bufferedReader(Charsets.UTF_8).use {
-          it.readText().trim()
-        }
-      } catch (_: IOException) {
-        // Unstamped templates intentionally have no attach endpoint.
-        Log.d("PrototypeAppShell", "Attach token asset unavailable")
-        null
+    val process = AndroidAppAttachProcess.get(applicationContext)
+    attachTarget =
+      RuntimeAttachTarget(embeddedHost, process) {
+        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+          Configuration.UI_MODE_NIGHT_YES
       }
-    val agent =
-      AppAttachAgent(token, attachTarget, attachScope, log = { Log.w("PrototypeAppShell", it) })
+    detachAttachTarget = process.bind(attachTarget)
     embeddedHost.onRuntime = { attachTarget.runtime = it }
     embeddedHost.nextSequence = { attachTarget.nextSequence() }
-    embeddedHost.eventSink = PrototypeEventSink { agent.emit(it) }
-    val allowPhysicalDevice =
-      try {
-        assets.open("prototype/attach-allow-physical-device").bufferedReader(Charsets.UTF_8).use {
-          it.readText().trim() == "true"
-        }
-      } catch (_: IOException) {
-        Log.d("PrototypeAppShell", "Physical-device attach opt-in absent")
-        false
-      }
-    attachServer =
-      AppAttachServer.start(
-        packageName,
-        agent,
-        attachScope,
-        policy = AttachDevicePolicy(AndroidAttachDeviceEnvironment, allowPhysicalDevice),
-      )
+    embeddedHost.eventSink = PrototypeEventSink { process.agent.emit(it) }
     val source = ApkPrototypeSource(assets)
     val loader = AppShellLoader(source, PrototypeStorage.fileBacked(this))
     val prototypeAssets = PrototypeAssets(image = source::readAsset, font = source::readAsset)
@@ -124,7 +99,7 @@ class PrototypeAppActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
-    attachServer?.close()
+    detachAttachTarget?.invoke()
     flushRuntime()
     attachTarget.runtime?.close()
     attachScope.cancel()

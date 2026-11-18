@@ -136,6 +136,13 @@ export class PrototypeEventCoordinator {
     return this.entries.get(scopeKey(scope, id))?.buffer.status();
   }
 
+  /** Device reports may reconcile only the prototypes belonging to their event source. */
+  sourceFor(deviceId: string, id: string): PrototypeEventSource | undefined {
+    return Array.from(this.entries.values()).find(
+      (entry) => entry.scope.deviceId === deviceId && entry.id === id,
+    )?.source;
+  }
+
   async awaitEvent(
     scope: PrototypeScope,
     id: string,

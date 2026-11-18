@@ -21,6 +21,18 @@ class RuntimeAttachTargetTest {
     }
   }
 
+  private class Ledger(override val appInstanceId: String = "test-process") : AttachEventLedger {
+    override var lastSequence = 0L
+      private set
+
+    override fun nextSequence(): Long = ++lastSequence
+  }
+
+  private fun target(
+    scope: kotlinx.coroutines.CoroutineScope,
+    ledger: AttachEventLedger = Ledger(),
+  ) = RuntimeAttachTarget(EmbeddedPrototypeHost(scope, Mutex()), ledger) { false }
+
   private fun runtime(
     scope: kotlinx.coroutines.CoroutineScope,
     id: String = "panel",
@@ -47,20 +59,22 @@ class RuntimeAttachTargetTest {
       .jsonArray
 
   @Test
-  fun `app instance identity is fresh per target and injectable`() = runTest {
-    val host = EmbeddedPrototypeHost(backgroundScope, Mutex())
-    val first = RuntimeAttachTarget(host) { false }
-    val second = RuntimeAttachTarget(host) { false }
-    assertNotEquals(first.appInstanceId, second.appInstanceId)
-    val fixed = RuntimeAttachTarget(host, appInstanceId = "fixed-instance") { false }
-    assertEquals("fixed-instance", fixed.appInstanceId)
-    fixed.nextSequence()
-    assertEquals("fixed-instance", fixed.appInstanceId)
+  fun `activity targets share process identity and sequence ledger`() = runTest {
+    val ledger = Ledger("first-process")
+    val first = target(backgroundScope, ledger)
+    assertEquals(1L, first.nextSequence())
+    val recreated = target(backgroundScope, ledger)
+    assertEquals(first.appInstanceId, recreated.appInstanceId)
+    assertEquals(JsonPrimitive(1L), recreated.status()["lastSequence"])
+    assertEquals(2L, recreated.nextSequence())
+    val relaunched = target(backgroundScope, Ledger("new-process"))
+    assertNotEquals(first.appInstanceId, relaunched.appInstanceId)
+    assertEquals(1L, relaunched.nextSequence())
   }
 
   @Test
   fun `runtime patch replies match CtrlProxy applied rejected and conflict fields`() = runTest {
-    val target = RuntimeAttachTarget(EmbeddedPrototypeHost(backgroundScope, Mutex())) { false }
+    val target = target(backgroundScope)
     val runtime = runtime(backgroundScope)
     target.runtime = runtime
     val rejected = target.patch("panel", null, ops("next"))
@@ -94,7 +108,7 @@ class RuntimeAttachTargetTest {
 
   @Test
   fun `unknown inactive and replaced runtimes cannot be patched`() = runTest {
-    val target = RuntimeAttachTarget(EmbeddedPrototypeHost(backgroundScope, Mutex())) { false }
+    val target = target(backgroundScope)
     val old = runtime(backgroundScope)
     target.runtime = old
     val unknown = target.patch("other", 0, ops("next"))
@@ -118,12 +132,12 @@ class RuntimeAttachTargetTest {
 
   @Test
   fun `status follows the current runtime and sequence survives remount`() = runTest {
-    val target = RuntimeAttachTarget(EmbeddedPrototypeHost(backgroundScope, Mutex())) { false }
+    val target = target(backgroundScope)
     assertEquals(JsonPrimitive(false), target.status()["shown"])
     assertEquals(JsonNull, target.status()["id"])
     val first = runtime(backgroundScope)
     target.runtime = first
-    target.nextSequence()
+    assertEquals(1L, target.nextSequence())
     val shown = target.status()
     assertEquals(JsonPrimitive(true), shown["shown"])
     assertEquals(JsonPrimitive("panel"), shown["id"])
@@ -144,7 +158,7 @@ class RuntimeAttachTargetTest {
 
   @Test
   fun `status and conflict redact secure keys while retaining public state`() = runTest {
-    val target = RuntimeAttachTarget(EmbeddedPrototypeHost(backgroundScope, Mutex())) { false }
+    val target = target(backgroundScope)
     val runtime =
       PrototypeRuntime(
         PrototypeSpec(

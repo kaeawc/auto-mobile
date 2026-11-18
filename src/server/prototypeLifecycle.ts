@@ -33,8 +33,12 @@ export interface PrototypeEventLifecycle {
 export function subscribePrototypeCleanup(
   lifecycle: PrototypeEventLifecycle,
   events: Pick<PrototypeEventCoordinator, "releaseDevice" | "releaseSession">,
+  releaseDeviceAttachments: (deviceId: string) => void,
 ): { ensureSubscribed: () => void; unsubscribe: () => void } {
-  const releaseDevice = (deviceId: string) => events.releaseDevice(deviceId);
+  const releaseDevice = (deviceId: string) => {
+    events.releaseDevice(deviceId);
+    releaseDeviceAttachments(deviceId);
+  };
   const cleanups = [
     lifecycle.subscribeSessionRelease((sessionUuid, releasedDeviceId) => {
       events.releaseSession(sessionUuid);

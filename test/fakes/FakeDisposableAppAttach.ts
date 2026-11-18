@@ -17,6 +17,7 @@ export class FakeDisposableAppSocket
     "prototype_event_ack_v1",
   ];
   replay: Record<string, unknown>[] = [];
+  appInstanceId: string | undefined;
   override write(data: string): void {
     super.write(data);
     const frame = JSON.parse(data) as Record<string, unknown>;
@@ -29,6 +30,7 @@ export class FakeDisposableAppSocket
             agentVersion: "app",
             protocolVersion: 1,
             capabilities: this.capabilities,
+            appInstanceId: this.appInstanceId,
           }),
           ...this.replay.map((event) => JSON.stringify(event)),
         ].join("\n") + "\n",

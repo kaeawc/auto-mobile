@@ -4000,6 +4000,12 @@
           "type": "list",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "status",
+          "type": "json",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },

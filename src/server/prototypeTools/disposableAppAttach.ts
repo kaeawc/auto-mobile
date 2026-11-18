@@ -25,7 +25,8 @@ export function isDisposableAppAttachAction(
 export function lazyDisposableAppAttach(deps: PrototypeToolDependencies) {
   let registry = deps.disposableAppRegistry;
   let attacher = deps.disposableAppAttacher;
-  return (device: BootedDevice, args: { action: string; id?: string }) => {
+  let disposed = false;
+  const attach = (device: BootedDevice, args: { action: string; id?: string }) => {
     if (!isDisposableAppAttachAction(device, args)) {
       return undefined;
     }
@@ -38,6 +39,13 @@ export function lazyDisposableAppAttach(deps: PrototypeToolDependencies) {
     }
     return attachMatch(device, args, registry);
   };
+  return Object.assign(attach, {
+    release: async (deviceId: string) => attacher?.release(deviceId),
+    dispose: async () => {
+      disposed = true;
+      await attacher?.dispose();
+    },
+  });
 
   async function attachMatch(
     device: BootedDevice,
@@ -47,6 +55,9 @@ export function lazyDisposableAppAttach(deps: PrototypeToolDependencies) {
     const matches = (await registry.list(device.deviceId)).filter(
       (record) => record.platform === "android" && record.specId === args.id,
     );
+    if (disposed) {
+      throw new ActionableError("Disposable app attachment host was disposed.");
+    }
     if (matches.length > 1) {
       throw new AmbiguousDisposableAppError(
         `Prototype id "${args.id}" matches disposable app slugs: ${matches

@@ -60,7 +60,7 @@ export interface PrototypeTarget {
 }
 export interface PrototypeToolDependencies {
   disposableAppRegistry?: DisposableAppRegistry;
-  disposableAppAttacher?: Pick<AndroidDisposableAppAttacher, "attach">;
+  disposableAppAttacher?: Pick<AndroidDisposableAppAttacher, "attach" | "release" | "dispose">;
   testSessionStore?: PrototypeTestSessionStore;
   idGenerator?: IdGenerator;
   /** Replaces the host WebSocket and SSE transports for channels; tests supply a fake. */

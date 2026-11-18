@@ -9,7 +9,7 @@ import {
 
 export const REPLAY_LIMIT = 256;
 
-/** Buffers only until the first subscription; subsequent subscribers receive live events only. */
+/** Viewer replay is one-shot; acknowledged app streams also buffer between subscriptions. */
 export class BufferedViewerClient implements PrototypeAgentClient {
   private readonly events: PrototypeAgentMessage[] = [];
   private readonly listeners = new Set<(event: PrototypeAgentMessage) => void>();
@@ -18,16 +18,25 @@ export class BufferedViewerClient implements PrototypeAgentClient {
   private closedError: Error | undefined;
   private readonly closedListeners = new Set<(error: Error) => void>();
 
-  constructor(private readonly client: PrototypeAgentClient) {
+  constructor(
+    private readonly client: PrototypeAgentClient,
+    private readonly retainBetweenSubscriptions = false,
+  ) {
     const unsubscribe = client.onEvent((event) => {
       if (this.buffering) {
         if (this.events.length === REPLAY_LIMIT) {
+          if (this.retainBetweenSubscriptions) {
+            // Reconnect from the delivered cursor instead of acknowledging a locally dropped event.
+            this.client.close();
+            return;
+          }
           this.events.shift();
         }
         this.events.push(event);
       } else {
-        this.listeners.forEach((listener) => listener(event));
-        if (this.listeners.size > 0) {
+        const listeners = [...this.listeners];
+        listeners.forEach((listener) => listener(event));
+        if (listeners.length > 0) {
           this.acknowledge(event);
         }
       }
@@ -64,7 +73,13 @@ export class BufferedViewerClient implements PrototypeAgentClient {
       }
       this.buffering = false;
     }
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+      if (this.retainBetweenSubscriptions && this.listeners.size === 0) {
+        this.buffering = true;
+        this.replayDelivered = false;
+      }
+    };
   }
   private acknowledge(event: PrototypeAgentMessage): void {
     if (typeof event.sequence === "number") {

@@ -24,6 +24,7 @@ import type {
   PrototypeAgentMessage,
   PrototypeAgentRequestType,
   PrototypeAgentResult,
+  PrototypeAgentResumeState,
   PrototypeAgentSocket,
   Waiter,
 } from "./prototypeAgentClient";
@@ -84,6 +85,7 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
   private lastAcknowledgedSequence = 0;
   private lastReceivedSequence = 0;
   private readonly acknowledgeEvents: boolean;
+  private readonly eventResumeState?: PrototypeAgentResumeState;
 
   constructor(
     private readonly socket: PrototypeAgentSocket,
@@ -93,14 +95,19 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
       requestTimeoutMs,
       maxFrameBytes,
       acknowledgeEvents = false,
+      eventResumeState,
     }: {
       requestTimeoutMs: number;
       maxFrameBytes: number;
       acknowledgeEvents?: boolean;
+      eventResumeState?: PrototypeAgentResumeState;
     },
   ) {
     this.requestTimeoutMs = requestTimeoutMs;
     this.acknowledgeEvents = acknowledgeEvents;
+    this.eventResumeState = eventResumeState;
+    this.lastAcknowledgedSequence = eventResumeState?.lastAcknowledgedSequence ?? 0;
+    this.lastReceivedSequence = this.lastAcknowledgedSequence;
     this.framer = new LineFramer(maxFrameBytes, {
       onLine: (line) => {
         // LineFramer can emit several lines in a push; fail() closes dispatch immediately.
@@ -139,7 +146,7 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
         ...(this.acknowledgeEvents
           ? {
               lastAcknowledgedSequence: this.lastAcknowledgedSequence,
-              appInstanceId: this.agentHandshake?.appInstanceId,
+              appInstanceId: this.eventResumeState?.appInstanceId,
             }
           : {}),
       });
@@ -188,6 +195,9 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
     ) {
       this.lastAcknowledgedSequence = sequence;
       this.send({ type: "ack", sequence, appInstanceId: this.handshake.appInstanceId });
+      if (this.eventResumeState) {
+        this.eventResumeState.lastAcknowledgedSequence = sequence;
+      }
     }
   }
 
@@ -263,6 +273,17 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
     this.pendingHandshake = undefined;
     this.timer.clearTimeout(pending.timeout);
     this.agentHandshake = handshake;
+    if (this.acknowledgeEvents && this.eventResumeState) {
+      if (
+        handshake.appInstanceId === undefined ||
+        handshake.appInstanceId !== this.eventResumeState.appInstanceId
+      ) {
+        this.lastAcknowledgedSequence = 0;
+        this.lastReceivedSequence = 0;
+        this.eventResumeState.lastAcknowledgedSequence = 0;
+      }
+      this.eventResumeState.appInstanceId = handshake.appInstanceId;
+    }
     pending.resolve(handshake);
   }
 

@@ -12,6 +12,7 @@ import {
   NodePrototypeAgentConnector,
   type PrototypeAgentClient,
   type PrototypeAgentConnector,
+  type PrototypeAgentResumeState,
 } from "../../ios/prototypeAgentClient";
 import type { DisposableAppRegistry } from "../DisposableAppRegistry";
 import { assertDisposableAppId } from "../disposableAppId";
@@ -26,7 +27,10 @@ export interface AndroidDisposableAppAttachDependencies {
 
 /** Owns host connections and adb forwards; installation records survive app exit. */
 export class AndroidDisposableAppAttacher {
+  private disposed = false;
+  private disposal: Promise<void> | undefined;
   private readonly clients = new Map<string, Attachment>();
+  private readonly resumeStates = new Map<string, PrototypeAgentResumeState>();
   private readonly pending = new Map<
     string,
     { deviceId: string; promise: Promise<PrototypeAgentClient> }
@@ -34,6 +38,9 @@ export class AndroidDisposableAppAttacher {
   constructor(private readonly deps: AndroidDisposableAppAttachDependencies) {}
 
   attach(device: BootedDevice, appId: string): Promise<PrototypeAgentClient> {
+    if (this.disposed) {
+      return Promise.reject(new ActionableError("Disposable app attachment host was disposed."));
+    }
     const key = JSON.stringify([device.deviceId, appId]);
     const cached = this.clients.get(key);
     if (cached) {
@@ -46,6 +53,17 @@ export class AndroidDisposableAppAttacher {
     const promise = this.connect(device, appId, key).finally(() => this.pending.delete(key));
     this.pending.set(key, { deviceId: device.deviceId, promise });
     return promise;
+  }
+
+  dispose(): Promise<void> {
+    this.disposed = true;
+    return (this.disposal ??= Promise.all(
+      [
+        ...new Set(
+          [...this.clients.values(), ...this.pending.values()].map((entry) => entry.deviceId),
+        ),
+      ].map((deviceId) => this.release(deviceId)),
+    ).then(() => this.resumeStates.clear()));
   }
 
   async release(deviceId: string): Promise<void> {
@@ -102,11 +120,16 @@ export class AndroidDisposableAppAttacher {
       if (forwarded.stderr.trim()) {
         throw new ActionableError("adb forward failed.");
       }
+      let eventResumeState = this.resumeStates.get(key);
+      if (!eventResumeState) {
+        eventResumeState = { lastAcknowledgedSequence: 0 };
+        this.resumeStates.set(key, eventResumeState);
+      }
       const client = await connectBufferedPrototypeAgent(
         port,
         record.attachToken,
         this.deps.connector ?? new NodePrototypeAgentConnector(),
-        { timer: this.deps.timer ?? defaultTimer, acknowledgeEvents: true },
+        { timer: this.deps.timer ?? defaultTimer, acknowledgeEvents: true, eventResumeState },
       );
       if (!client.handshake.capabilities.includes(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY)) {
         client.close();

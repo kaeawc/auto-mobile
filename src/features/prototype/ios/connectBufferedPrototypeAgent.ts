@@ -2,16 +2,27 @@ import { ActionableError } from "../../../models/ActionableError";
 import type { Timer } from "../../../utils/SystemTimer";
 import { BufferedViewerClient } from "./BufferedViewerClient";
 import { HandshakeReplaySocket } from "./HandshakeReplaySocket";
-import { connectPrototypeAgent, type PrototypeAgentConnector } from "./prototypeAgentClient";
+import {
+  connectPrototypeAgent,
+  type PrototypeAgentConnector,
+  type PrototypeAgentResumeState,
+} from "./prototypeAgentClient";
 
 /** Subscribe before releasing replay, including hello and events received in one socket chunk. */
 export async function connectBufferedPrototypeAgent(
   port: number,
   token: string,
   connector: PrototypeAgentConnector,
-  options: { timer: Timer; acknowledgeEvents?: boolean },
+  options: {
+    timer: Timer;
+    acknowledgeEvents?: boolean;
+    eventResumeState?: PrototypeAgentResumeState;
+  },
 ): Promise<BufferedViewerClient> {
-  const socket = new HandshakeReplaySocket(await connector.connect(port));
+  const socket = new HandshakeReplaySocket(
+    await connector.connect(port),
+    options.acknowledgeEvents,
+  );
   try {
     const raw = await connectPrototypeAgent({
       port,
@@ -19,8 +30,9 @@ export async function connectBufferedPrototypeAgent(
       connector: { connect: async () => socket },
       timer: options.timer,
       acknowledgeEvents: options.acknowledgeEvents,
+      eventResumeState: options.eventResumeState,
     });
-    const buffered = new BufferedViewerClient(raw);
+    const buffered = new BufferedViewerClient(raw, options.acknowledgeEvents);
     socket.release();
     return buffered;
   } catch {

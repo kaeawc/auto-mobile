@@ -11,6 +11,9 @@ export type ScrollsInDirection = (element: Element, direction: SwipeDirection) =
 /** Fraction of a list's width at which a child counts as one of its full-width rows. */
 const FULL_WIDTH_ROW_RATIO = 0.9;
 
+/** A full-width child shorter than this fraction of the list's height is a row; taller is a page. */
+const ROW_MAX_HEIGHT_RATIO = 0.5;
+
 type Bounds = Element["bounds"];
 
 function isIosList(element: Element): boolean {
@@ -23,6 +26,10 @@ function isIosList(element: Element): boolean {
 
 function width(bounds: Bounds): number {
   return bounds.right - bounds.left;
+}
+
+function height(bounds: Bounds): number {
+  return bounds.bottom - bounds.top;
 }
 
 function childNodes(node: ViewHierarchyNode): ViewHierarchyNode[] {
@@ -67,8 +74,9 @@ function childLayout(listNode: ViewHierarchyNode, parser: ElementParser): Layout
  * is not the target. The runner reports no scroll axis for iOS lists, so the axis comes from an
  * explicit orientation when present, otherwise from geometry: children stacked vertically mean a
  * vertical list (skip), children side by side mean a carousel or paging collection (escalate,
- * #10752), and without a readable layout a row spanning the list's width is a row (skip) while a
- * narrower cell escalates.
+ * #10752), and without a readable layout a child spanning the list's width but under half its
+ * height is a row (skip), while a narrower cell or a full-bleed page (a paging collection that
+ * reports only its visible page) escalates.
  */
 function isIosListRowSwipe({
   candidate,
@@ -103,7 +111,14 @@ function isIosListRowSwipe({
   }
   const row = parser.parseNodeBounds(rowNode);
   const listWidth = width(candidate.bounds);
-  return row !== null && listWidth > 0 && width(row.bounds) >= listWidth * FULL_WIDTH_ROW_RATIO;
+  const listHeight = height(candidate.bounds);
+  return (
+    row !== null &&
+    listWidth > 0 &&
+    listHeight > 0 &&
+    width(row.bounds) >= listWidth * FULL_WIDTH_ROW_RATIO &&
+    height(row.bounds) < listHeight * ROW_MAX_HEIGHT_RATIO
+  );
 }
 
 /** Root-to-`target` node path in `root`'s subtree, or `undefined` when `target` is not under it. */

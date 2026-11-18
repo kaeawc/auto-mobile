@@ -254,6 +254,13 @@ describe("resolveScrollableSwipeTarget iOS geometry (no reported orientation)", 
       expect(target.bounds).toEqual(pager.bounds);
     });
 
+    test(`iOS ${direction} on a lone reported full-bleed page escalates to the paging collection`, () => {
+      const { resolve } = geometryFixture(pager, [pages[0]], 0);
+      const target = resolve(direction, "ios");
+      expect(target.class).toBe("UICollectionView");
+      expect(target.bounds).toEqual(pager.bounds);
+    });
+
     test(`Android ${direction} on a full-width row still escalates to the list`, () => {
       const { resolve } = geometryFixture(verticalList, verticalRows, 0);
       expect(resolve(direction, "android").bounds).toEqual(verticalList.bounds);

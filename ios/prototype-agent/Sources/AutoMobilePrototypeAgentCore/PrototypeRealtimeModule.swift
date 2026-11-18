@@ -45,7 +45,10 @@ final class PrototypeRealtimeModule: PrototypePlatformModule {
             },
             apply: parent.apply
         )
-        let next = PrototypeChannelController(prototypeID: prototypeID, config: config, sink: scoped, clock: clock)
+        let next = PrototypeChannelController(
+            prototypeID: prototypeID, config: config, sink: scoped, clock: clock,
+            onError: { [weak self] error in self?.onError(error) }
+        )
         next.post = { [weak self] work in self?.post(work) }
         controller = next
     }
@@ -85,8 +88,11 @@ final class PrototypeRealtimeModule: PrototypePlatformModule {
             // Cancellation of the CALLER (including a driver deadline) cancels this task while it
             // waits for the inbox. Check here, not just before enqueueing.
             guard !Task.isCancelled else { return PlatformCallResult.failure(.cancelled, "Call cancelled") }
-            do { return try await controller.call(call) }
-            catch {
+            do {
+                let result = try await controller.call(call)
+                guard !Task.isCancelled else { return .failure(.cancelled, "Call cancelled") }
+                return result
+            } catch {
                 self?.onError(error)
                 return .failure(.platformError, String(describing: error))
             }

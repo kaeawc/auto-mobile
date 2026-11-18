@@ -188,14 +188,26 @@ final class PrototypeRealtimeRuntimeTests: XCTestCase {
         XCTAssertEqual(disconnected, .success(.object([:])))
         XCTAssertEqual(harness.transport.connections[0].closes, [1000])
         _ = await harness.module.call(harness.call("connect"))
+        let connection = try XCTUnwrap(harness.transport.connections.last)
+        connection.listener.opened()
+        await drained(harness.module)
         await harness.mutex.lock()
+        let blocked = expectation(description: "frame blocks the inbox before dismissal")
+        harness.mutex.onWait = { blocked.fulfill() }
+        connection.listener.frame("1", nil, nil)
+        await fulfillment(of: [blocked], timeout: 1)
         let queued = Task { await harness.module.call(harness.call("send", body: .string("dismissed"))) }
+        for _ in 0 ..< 1000 where harness.module.pendingCalls == 0 {
+            await Task.yield()
+        }
+        XCTAssertEqual(harness.module.pendingCalls, 1)
         harness.module.close()
         harness.mutex.unlock()
-        _ = await queued.value
+        let result = await queued.value
+        XCTAssertEqual(result, .failure(.cancelled, "The channels are closed"))
         await drained(harness.module)
-        XCTAssertEqual(harness.transport.connections.last?.closes, [1001])
-        XCTAssertTrue(harness.transport.connections.last?.sent.isEmpty == true)
+        XCTAssertEqual(connection.closes, [1001])
+        XCTAssertTrue(connection.sent.isEmpty)
     }
 
     func testThrowingInitialOpenRetriesAndRecovers() async throws {

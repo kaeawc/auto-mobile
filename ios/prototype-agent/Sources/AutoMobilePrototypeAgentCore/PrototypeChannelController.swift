@@ -51,6 +51,7 @@ final class PrototypeChannelController {
     private let config: PrototypeRealtimeConfig
     private let sink: PrototypeChannelSink
     private let clock: any PrototypeClock
+    private let onError: (Error) -> Void
     var post: (@escaping @MainActor () async throws -> Void) -> Void = { _ in }
     private var slots: [String: Slot] = [:]
     private var window: [Routed] = []
@@ -59,11 +60,15 @@ final class PrototypeChannelController {
     private var started = false
     private(set) var closing = false
 
-    init(prototypeID: String, config: PrototypeRealtimeConfig, sink: PrototypeChannelSink, clock: any PrototypeClock) {
+    init(
+        prototypeID: String, config: PrototypeRealtimeConfig, sink: PrototypeChannelSink, clock: any PrototypeClock,
+        onError: @escaping (Error) -> Void
+    ) {
         self.prototypeID = prototypeID
         self.config = config
         self.sink = sink
         self.clock = clock
+        self.onError = onError
     }
 
     // No lock acquisition here: dismissal suppresses queued work immediately.
@@ -82,9 +87,11 @@ final class PrototypeChannelController {
             if let old { abandon(old) }
             let slot = Slot(id, declaration)
             slots[id] = slot
-            try await publish(slot)
+            do { try await publish(slot) }
+            catch { onError(error) }
             if live || (old == nil && started && declaration["connect"] != .string("manual")) {
-                try await connect(slot)
+                do { try await connect(slot) }
+                catch { onError(error) }
             }
         }
     }
@@ -95,7 +102,8 @@ final class PrototypeChannelController {
         for id in slots.keys.sorted() {
             guard let slot = slots[id], slot.status == "idle", slot.declaration["connect"] != .string("manual")
             else { continue }
-            try await connect(slot)
+            do { try await connect(slot) }
+            catch { onError(error) }
         }
     }
 
@@ -162,13 +170,21 @@ final class PrototypeChannelController {
         slot.closeCode = nil
         slot.closeReason = nil
         slot.error = nil
-        try await status(slot, slot.attempt == 0 ? "connecting" : "reconnecting")
+        do { try await status(slot, slot.attempt == 0 ? "connecting" : "reconnecting") }
+        catch { onError(error) }
         guard isCurrent(slot, generation) else { slot.queue = []; return }
+        guard !Task.isCancelled else {
+            end(slot)
+            do { try await status(slot, "idle") }
+            catch { onError(error) }
+            return
+        }
         try await open(slot)
     }
 
     private func open(_ slot: Slot) async throws {
         guard !closing, slots[slot.id] === slot else { slot.queue = []; return }
+        guard !Task.isCancelled else { slot.status = "idle"; slot.queue = []; return }
         slot.generation += 1
         let generation = slot.generation
         let listener = PrototypeChannelListener(
@@ -208,7 +224,8 @@ final class PrototypeChannelController {
 
     private func opened(_ slot: Slot) async throws {
         let generation = slot.generation
-        try await status(slot, "open")
+        do { try await status(slot, "open") }
+        catch { onError(error) }
         guard isCurrent(slot, generation) else { slot.queue = []; return }
         for text in slot.queue {
             _ = slot.connection?.send(text)
@@ -259,23 +276,48 @@ final class PrototypeChannelController {
         flush = nil
         let frames = window.filter { slots[$0.slot.id] === $0.slot }
         window = []
-        for index in PrototypeChannelCoalescer.keptIndices(frames.map(\.actions)) {
+        for index in PrototypeChannelCoalescer.keptIndices(frames.map(coalescingActions)) {
             let frame = frames[index]
-            try await sink.commit(.init(
-                channel: frame.slot.id, declaration: frame.slot.declaration,
-                event: frame.event, actions: frame.actions
-            ))
+            do {
+                try await sink.commit(.init(
+                    channel: frame.slot.id, declaration: frame.slot.declaration,
+                    event: frame.event, actions: frame.actions
+                ))
+            } catch { onError(error) }
         }
         let changed = dirty.sorted()
         dirty = []
         for id in changed {
-            if let slot = slots[id] { try await publish(slot) }
+            if let slot = slots[id] {
+                do { try await publish(slot) }
+                catch { onError(error) }
+            }
         }
     }
 
+    private func coalescingActions(_ frame: Routed) -> [JSONValue] {
+        for action in frame.actions {
+            guard let fields = action.objectFields, let binding = fields["value"]?.objectFields,
+                  binding["event"] != nil || binding["platform"] != nil else { continue }
+            // State bindings also need runtime control validation; platform values are unavailable
+            // here. An empty signature is a barrier, but the original list is still committed.
+            guard fields["type"] == .string("setData"), binding.count == 1,
+                  let pointer = binding["event"]?.stringValue,
+                  pointer.isEmpty || PrototypeDataPointer.isValid(pointer),
+                  let value = PrototypeDataPointer.resolve(
+                      frame.event,
+                      tokens: PrototypeDataPointer.tokens(pointer)[...]
+                  ),
+                  PrototypeDataValues.isScalar(value) else { return [] }
+        }
+        return frame.actions
+    }
+
     private func ended(_ slot: Slot, code: Int?, reason: String?, error: PrototypeChannelError?) async throws {
+        slot.generation += 1
         let generation = slot.generation
         slot.timer?.cancel()
+        slot.timer = nil
         slot.connection = nil
         slot.closeCode = code
         slot.closeReason = reason
@@ -290,10 +332,12 @@ final class PrototypeChannelController {
         )
         if delay == nil {
             slot.queue = []
-            try await status(slot, error == nil ? "closed" : "error")
+            do { try await status(slot, error == nil ? "closed" : "error") }
+            catch { onError(error) }
         } else {
             slot.attempt = next
-            try await status(slot, "reconnecting")
+            do { try await status(slot, "reconnecting") }
+            catch { onError(error) }
         }
         guard isCurrent(slot, generation) else { slot.queue = []; return }
         if let delay {

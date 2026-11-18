@@ -77,13 +77,16 @@ final class PrototypeStateBindingTests: XCTestCase {
     }
 
     func testScalarStateBindingsWriteStringsNumbersAndBooleans() throws {
-        let values: [JSONValue] = [.string("frame"), .number(0), .bool(false)]
+        let values: [(JSONValue, JSONValue)] = [
+            (.string("frame"), .string("platform")), (.number(0), .number(7)), (.bool(false), .bool(true)),
+        ]
         for source in ["event", "platform"] {
             var session = try session()
-            for value in values {
-                try session.setPlatformState(["value": value])
+            for (event, platform) in values {
+                let value = source == "event" ? event : platform
+                try session.setPlatformState(["value": platform])
                 let binding = setState(.object([source: .string("/value")]))
-                let events = try session.runChannelActions([binding], event: .object(["value": value]))
+                let events = try session.runChannelActions([binding], event: .object(["value": event]))
                 XCTAssertEqual(session.state["n"], value)
                 XCTAssertEqual(events.last?.payload, .object(["key": .string("n"), "value": value]))
             }

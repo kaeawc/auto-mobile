@@ -80,9 +80,11 @@ final class RealtimeHarness {
     var session = PrototypeSession()
     private var document: [String: JSONValue] = [:]
     var effects: [PrototypeChannelEffect] = []
+    var attemptedEffects: [PrototypeChannelEffect] = []
     var events: [PrototypeEvent] = []
     var failures = 0
     var throwNext = false
+    var shouldThrow: (PrototypeChannelEffect) -> Bool = { _ in false }
     lazy var module = PrototypeRealtimeModule(
         config: PrototypeRealtimeConfig(host: transport, device: transport, random: { 0.5 }, newID: { "connection" }),
         sink: PrototypeChannelSink(
@@ -95,7 +97,9 @@ final class RealtimeHarness {
             },
             apply: { [weak self] effect in
                 guard let self else { return }
+                attemptedEffects.append(effect)
                 if throwNext { throwNext = false; throw Failure.injected }
+                if shouldThrow(effect) { throw Failure.injected }
                 effects.append(effect)
                 var failure: Error?
                 events += session.transition { session in
@@ -112,6 +116,7 @@ final class RealtimeHarness {
     init(
         manual: Bool = false,
         secondChannel: Bool = false,
+        manualChannel: Bool = false,
         raw: Bool = false,
         coalesced: Bool = false,
         sse: Bool = false,
@@ -134,7 +139,8 @@ final class RealtimeHarness {
         let bytes = Data("""
         {"id":"rt","window":{"placement":{"type":"fullscreen"}},
          "requires":{"platform":["realtime"]},"state":{"status":"idle","room":"one","n":0},
-         "data":{"frames":[]},"channels":{"a":\(channel)\(secondChannel ? ",\"b\":" + channel : "")},
+         "data":{"frames":[]},"channels":{"a":\(channel)\(secondChannel ? ",\"b\":" + channel : "")
+         \(manualChannel ? ",\"c\":" + channel.replacingOccurrences(of: "onShow", with: "manual") : "")},
          "root":{"type":"text","text":"{status}"}}
         """.utf8)
         document = try JSONDecoder().decode(JSONValue.self, from: bytes).objectFields ?? [:]

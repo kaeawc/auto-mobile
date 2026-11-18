@@ -394,7 +394,10 @@ describe("prototype simulate and timer reports", () => {
     expect(patched.warning).toContain('cancelTimer id "unknown"');
   });
   test("simulate platform routes to the capable iOS agent", async () => {
-    agent.handshake.capabilities.push("prototype_platform_simulation_v1");
+    agent.handshake.capabilities.push(
+      "prototype_platform_simulation_v1",
+      "simulate_prototype_platform",
+    );
     expect(
       await call(ios, { action: "simulate", id: "p", event: "test.tick", data: { count: 7 } }),
     ).toMatchObject({ success: true });

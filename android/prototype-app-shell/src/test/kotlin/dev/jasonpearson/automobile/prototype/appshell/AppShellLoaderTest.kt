@@ -52,14 +52,27 @@ class AppShellLoaderTest {
     assertEquals(1, storage.loads)
   }
 
+  @Test
+  fun `biometric fixture loads without rewriting its contract`() {
+    assertEquals(AppShellState.Ready(biometricSpec), loader(biometricSpec).load())
+  }
+
   private fun loader(spec: String?) = AppShellLoader(FakeAppSpecSource(spec), PrototypeStorage.None)
 
   companion object {
     private lateinit var validSpec: String
+    private lateinit var biometricSpec: String
 
     @BeforeClass
     @JvmStatic
     fun prepareFixture() {
+      biometricSpec =
+        generateSequence(java.io.File(System.getProperty("user.dir")).absoluteFile) {
+            it.parentFile
+          }
+          .map { java.io.File(it, "test/fixtures/prototype-spec/valid/platform-biometric.json") }
+          .first { it.isFile }
+          .readText()
       // Shared valid/emit-context-empty.json fixture; warm contract initialization off test time.
       validSpec =
         checkNotNull(AppShellLoaderTest::class.java.getResource("/valid-spec.json")).readText()

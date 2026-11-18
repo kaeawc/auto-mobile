@@ -12,6 +12,7 @@ import org.junit.Test
 class ProtoViewerCapabilitiesTest {
   companion object {
     private lateinit var locationSpec: String
+    private lateinit var biometricSpec: String
 
     @JvmStatic
     @BeforeClass
@@ -19,6 +20,11 @@ class ProtoViewerCapabilitiesTest {
       locationSpec =
         generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
           .map { File(it, "test/fixtures/prototype-spec/valid/location-block-minimal.json") }
+          .first { it.isFile }
+          .readText()
+      biometricSpec =
+        generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+          .map { File(it, "test/fixtures/prototype-spec/valid/platform-biometric.json") }
           .first { it.isFile }
           .readText()
       Fixtures.spec
@@ -46,6 +52,16 @@ class ProtoViewerCapabilitiesTest {
     assertTrue(added.toString(), added is LibraryResult.Success)
     val loaded = repository.get(FIRST)
     assertTrue(loaded.toString(), loaded is LibraryResult.Success)
+  }
+
+  @Test
+  fun reportedCapabilitiesAcceptBiometricSpec() {
+    val capabilities = protoViewerMcpAbout(42, "test").capabilities
+    assertTrue("prototype_platform_biometric_v1" in capabilities)
+    assertTrue(
+      PrototypeSpecValidator.validate(biometricSpec, capabilities, library = true)
+        is PrototypeSpecValidation.Success,
+    )
   }
 
   @Test

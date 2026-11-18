@@ -19,6 +19,46 @@ import org.robolectric.annotation.Config
 @Config(sdk = [30])
 class PrototypePlatformControllerTest {
   @Test
+  fun `Activity registry includes biometric while overlay registry omits it`() {
+    val controller =
+      org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup()
+    val platform = prototypeRuntimePlatform(controller.get())
+    assertTrue(PrototypeBiometricModule.CAPABILITY in platform.registry.capabilities)
+    assertFalse(
+      PrototypeBiometricModule.CAPABILITY in
+        prototypeRuntimePlatform(android.content.ContextWrapper(null)).registry.capabilities,
+    )
+    closePrototypeModules(platform)
+    controller.pause().stop().destroy()
+  }
+
+  @Test
+  fun `overlay refuses a biometric spec before opening its window`() = runTest {
+    var result: Boolean? = null
+    val host = FakePrototypeHost()
+    val controller =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, success, _ -> result = success },
+        clock = { testScheduler.currentTime },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        requestScope = backgroundScope,
+        render = { mapPrototypeSpec(it).request() },
+      )
+    val spec =
+      PrototypeSpec(
+        "biometric",
+        PrototypeWindow(PrototypeFullscreenPlacement()),
+        requires = PrototypeRequires(platform = listOf("biometric")),
+        root = PrototypeButtonNode(label = "Unlock"),
+      )
+    controller.show("show", spec)
+    assertEquals(false, result)
+    assertNull(controller.activeRuntime)
+    assertTrue(host.calls.isEmpty())
+  }
+
+  @Test
   fun `dismiss replacement and reset cancel calls before the old surface closes`() = runTest {
     for (mode in listOf("dismiss", "replace", "reset")) {
       val events = mutableListOf<PrototypeEvent>()

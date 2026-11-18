@@ -133,7 +133,7 @@ export interface FocusNavigateOptions {
   /**
    * Resolve the target on each read: its bounds, null when nothing on the screen is the target,
    * or undefined to fall back to matching `until` here. tapOn's D-pad path resolves with the
-   * touch selector so both inputs pick the same element.
+   * touch selector, preferring a focusable label match when the touch target cannot focus.
    */
   pinTarget?: (screen: FocusScreen) => ElementBounds | null | undefined;
 }
@@ -243,16 +243,9 @@ function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): Focu
   return options.firstMatch ? firstMatchTarget(screen, exact) : exact;
 }
 
-/**
- * Pin `target` to the first match on this screen as tapOn's `first` selection ranks it: smallest
- * area, then hierarchy order (the same {@link compareSelectionRank} ordering tvOS tapOn uses).
- */
-export function firstMatchTarget(
-  screen: FocusScreen,
-  target: FocusNavigateTarget,
-): FocusNavigateTarget {
-  const [first] = screen.elements
-    .filter((element) => elementMatchesTarget(element, target))
+/** tapOn's `first` ranking for flat elements: smallest area, then hierarchy order. */
+function rankFirst(elements: readonly Element[]): Element[] {
+  return elements
     .map((element, order) => ({
       element,
       windowRank: 0,
@@ -260,8 +253,67 @@ export function firstMatchTarget(
       order,
       interactive: false,
     }))
-    .sort((a, b) => compareSelectionRank(a, b));
-  return first ? { ...target, atBounds: first.element.bounds } : target;
+    .sort((a, b) => compareSelectionRank(a, b))
+    .map(({ element }) => element);
+}
+
+function isActionableElement(element: Element): boolean {
+  return isTruthyFlag(element.focusable) || isTruthyFlag(element.clickable);
+}
+
+/**
+ * The nearest element enclosing `element` that is clickable, focusable or scrollable (the flat
+ * read's stand-in for its nearest actionable ancestor): the smallest such enclosure, the first one
+ * a walk up from `element` would reach.
+ */
+function nearestActionableOwner(
+  elements: readonly Element[],
+  element: Element,
+): Element | undefined {
+  const [nearest] = elements
+    .filter((owner) => {
+      if (owner === element || !(isActionableElement(owner) || isTruthyFlag(owner.scrollable))) {
+        return false;
+      }
+      const overlap = intersectBounds(owner.bounds, element.bounds);
+      return overlap !== null && boundsEqual(overlap, element.bounds);
+    })
+    .sort((a, b) => boundsArea(a.bounds) - boundsArea(b.bounds));
+  return nearest;
+}
+
+/**
+ * Pin `target` to the first match as tapOn's `first` selection ranks it: exact labels first
+ * ({@link exactFirstTarget}), then smallest area, then hierarchy order (the same
+ * {@link compareSelectionRank} ordering tvOS tapOn uses). A focusable or clickable first match is
+ * its own control and keeps the pin, so a focused row never stands in for a clickable child. A
+ * pure label keeps the pin when its nearest actionable owner is focusable (focus on that owner
+ * matches the label) or only clickable (that control owns it); a label with no actionable owner
+ * moves the pin to the best focusable match, exact before contains.
+ */
+export function firstMatchTarget(
+  screen: FocusScreen,
+  target: FocusNavigateTarget,
+): FocusNavigateTarget {
+  const ranked = exactFirstTarget(screen, target);
+  const matches = rankFirst(
+    screen.elements.filter((element) => elementMatchesTarget(element, ranked)),
+  );
+  const [first] = matches;
+  if (!first) {
+    return target;
+  }
+  const owner = nearestActionableOwner(screen.elements, first);
+  if (isActionableElement(first) || (owner && !isTruthyFlag(owner.scrollable))) {
+    return { ...target, atBounds: first.bounds };
+  }
+  const exact = target.label ? { ...target, labelExact: true } : target;
+  const focusable = matches.filter((element) => isTruthyFlag(element.focusable));
+  const [fallback] = [
+    ...focusable.filter((element) => elementMatchesTarget(element, exact)),
+    ...focusable,
+  ];
+  return { ...target, atBounds: (fallback ?? first).bounds };
 }
 
 /** Whether the closed intervals [aStart, aEnd] and [bStart, bEnd] share any length. */

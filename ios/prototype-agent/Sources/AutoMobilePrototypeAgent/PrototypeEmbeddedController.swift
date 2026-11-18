@@ -97,6 +97,7 @@
             model.onEmbeddedEvent = nil
             model.dismiss(reason: .user) // Cancels in-flight requests without a synthetic host dismissal callback.
             model.flushStorage()
+            model.stopPlatformEvents()
             stopObserving()
         }
 

@@ -96,10 +96,7 @@
                 "scrollable": "true",
                 "role": "textfield",
                 "view-id": "s2-6f35a69ebc51c742",
-                "actions": [
-                  "set_text",
-                  "clear_text"
-                ]
+                "actions": ["set_text", "clear_text"]
               },
               "node": [
                 {
@@ -116,10 +113,7 @@
                     "scrollable": "true",
                     "role": "textfield",
                     "view-id": "s2-9359e698fc43da15-1",
-                    "actions": [
-                      "set_text",
-                      "clear_text"
-                    ]
+                    "actions": ["set_text", "clear_text"]
                   }
                 },
                 {
@@ -164,10 +158,7 @@
                 "scrollable": "true",
                 "role": "textfield",
                 "view-id": "s2-2adda7c5eeb5d35c",
-                "actions": [
-                  "set_text",
-                  "clear_text"
-                ]
+                "actions": ["set_text", "clear_text"]
               },
               "node": [
                 {
@@ -184,10 +175,7 @@
                     "scrollable": "true",
                     "role": "textfield",
                     "view-id": "s2-31c8bb80a5af93e1",
-                    "actions": [
-                      "set_text",
-                      "clear_text"
-                    ]
+                    "actions": ["set_text", "clear_text"]
                   },
                   "node": {
                     "$": {
@@ -225,10 +213,7 @@
                     "scrollable": "true",
                     "role": "textfield",
                     "view-id": "s2-9359e698fc43da15-2",
-                    "actions": [
-                      "set_text",
-                      "clear_text"
-                    ]
+                    "actions": ["set_text", "clear_text"]
                   }
                 },
                 {
@@ -245,10 +230,7 @@
                     "scrollable": "true",
                     "role": "textfield",
                     "view-id": "s2-9359e698fc43da15-3",
-                    "actions": [
-                      "set_text",
-                      "clear_text"
-                    ]
+                    "actions": ["set_text", "clear_text"]
                   }
                 },
                 {
@@ -322,10 +304,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-4",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -342,10 +321,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-5",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -362,10 +338,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-6",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -382,10 +355,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-7",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -402,10 +372,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-8",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -422,10 +389,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-9",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -442,10 +406,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-10",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -462,10 +423,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-11",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -482,10 +440,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-12",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -502,10 +457,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-13",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -522,10 +474,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-14",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -542,10 +491,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-15",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -562,10 +508,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-16",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -582,10 +525,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-17",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -602,10 +542,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-18",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -622,10 +559,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-19",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -642,10 +576,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-20",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -662,10 +593,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-21",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -682,10 +610,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-22",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -702,10 +627,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-23",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -722,10 +644,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-24",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -742,10 +661,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-25",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -762,10 +678,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-26",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -782,10 +695,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-27",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -802,10 +712,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-28",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -822,10 +729,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-29",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -842,10 +746,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-30",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -862,10 +763,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-31",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -882,10 +780,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-32",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -902,10 +797,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-33",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -922,10 +814,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-34",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -942,10 +831,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-35",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -962,10 +848,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-36",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -982,10 +865,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-37",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1002,10 +882,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-38",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1022,10 +899,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-39",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1042,10 +916,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-40",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1062,10 +933,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-41",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1082,10 +950,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-42",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1102,10 +967,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-43",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1122,10 +984,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-44",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1142,10 +1001,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-45",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1162,10 +1018,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-46",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1182,10 +1035,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-47",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1202,10 +1052,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-48",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1222,10 +1069,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-49",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1242,10 +1086,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-50",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1262,10 +1103,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-51",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         },
         {
@@ -1282,10 +1120,7 @@
             "scrollable": "true",
             "role": "textfield",
             "view-id": "s2-9359e698fc43da15-52",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ]
+            "actions": ["set_text", "clear_text"]
           }
         }
       ]

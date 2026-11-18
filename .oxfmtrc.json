@@ -1,7 +1,6 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
-    "test/fixtures/ios-duo/observe-inner-modal-sheet-hierarchy-18560.json",
     "test/fixtures/observe-output/swipeon-container-floating-bar-18338/*.json",
     "test/fixtures/observe-output/compose-control-shapes-17955/*.json",
     "test/fixtures/wear/systemtray/ctrlproxy-card-expanded-reply-input.json",
@@ -36,6 +35,7 @@
     "test/fixtures/android-focus-multidisplay/*.txt",
     "test/fixtures/android-focus/leanback-headers-pane-focused.json",
     "test/fixtures/android-focus/playground-slider-value-*.json",
+    "test/fixtures/android-focus/sound-settings-ring-volume-focused.json",
     "test/fixtures/android-focus-screens/*.json",
     "test/fixtures/android-focus/leanback-row-content-focused.json",
     "test/fixtures/android-am-start/*.txt",

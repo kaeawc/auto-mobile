@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import innerModalSheet from "../../../fixtures/ios-duo/observe-inner-modal-sheet-hierarchy-18560.json";
 import { deriveIosScreenIdentity } from "../../../../src/features/observe/ios/IosScreenIdentity";
+import type { ScreenIdentity } from "../../../../src/models/ObserveResult";
 import type {
   ViewHierarchyNode,
   ViewHierarchyResult,
@@ -34,6 +36,81 @@ function navigationBar(title: string): ViewHierarchyNode {
 }
 
 describe("deriveIosScreenIdentity", () => {
+  test("identifies the captured inner-panel popover by its sibling label", () => {
+    const identity = deriveIosScreenIdentity(innerModalSheet);
+    const underlying = structuredClone(innerModalSheet);
+    underlying.hierarchy.node.node = underlying.hierarchy.node.node.filter(
+      (child) => child.$["resource-id"] !== "PopoverDismissRegion",
+    );
+
+    expect(identity).toBeDefined();
+    expect(identity?.components.presentation).toBe("popover");
+    expect(identity?.components.modalTitle).toBe("Siri, Dictation & Privacy");
+    expect(identity?.components.modalClass).toBeUndefined();
+    expect(identity?.confidence).toBe("high");
+    expect(JSON.parse(identity!.key)).toEqual([
+      ["bundle", "com.apple.Preferences"],
+      ["modalTitle", "Siri, Dictation & Privacy"],
+      ["presentation", "popover"],
+    ]);
+    expect(identity?.key).not.toBe(deriveIosScreenIdentity(underlying)?.key);
+  });
+
+  test("preserves the plain UIAlertController identity even with a dismiss region", () => {
+    const alert = node({ class: "UIAlertController" }, [
+      node({ class: "UILabel", text: "Allow access?" }),
+      node({ class: "UIButton", text: "Close" }),
+    ]);
+    const expected: ScreenIdentity = {
+      platform: "ios",
+      source: "heuristic",
+      confidence: "high",
+      key: '[["bundle","com.apple.reminders"],["modalClass","UIAlertController"],["modalTitle","Allow access?"]]',
+      components: {
+        bundleId: "com.apple.reminders",
+        modalClass: "UIAlertController",
+        modalTitle: "Allow access?",
+      },
+    };
+    expect(deriveIosScreenIdentity(hierarchy([alert]))).toEqual(expected);
+    expect(
+      deriveIosScreenIdentity(
+        hierarchy([node({ class: "UIView", "resource-id": "PopoverDismissRegion" }), alert]),
+      ),
+    ).toEqual(expected);
+  });
+
+  test("keeps an untitled popover identity without using the Close button or outside labels", () => {
+    const identity = deriveIosScreenIdentity(
+      hierarchy([
+        node({ class: "UILabel", text: "Underlying screen" }),
+        node({ class: "UIView" }, [
+          node({ class: "UIView", "resource-id": "PopoverDismissRegion", text: "dismiss popup" }),
+          node({ class: "UIButton", text: "Close" }),
+        ]),
+      ]),
+    );
+    expect(identity?.components.presentation).toBe("popover");
+    expect(identity?.components.modalTitle).toBeUndefined();
+    expect(identity?.confidence).toBe("high");
+  });
+
+  test("uses the first nested XCTest static text in dismiss-region sibling order", () => {
+    const identity = deriveIosScreenIdentity(
+      hierarchy([
+        node({ class: "UIView", "resource-id": "PopoverDismissRegion" }, [
+          node({ class: "UILabel", text: "Dismiss region child" }),
+        ]),
+        node({ class: "UIView" }, [
+          node({ class: "UIButton", text: "Close" }),
+          node({ class: "XCUIElementTypeStaticText", text: "Sheet title" }),
+          node({ class: "UILabel", text: "Later label" }),
+        ]),
+      ]),
+    );
+    expect(identity?.components.modalTitle).toBe("Sheet title");
+  });
+
   test("an empty selected tab skips its descendants but continues to later siblings", () => {
     const identity = deriveIosScreenIdentity(
       hierarchy([
@@ -264,7 +341,7 @@ describe("deriveIosScreenIdentity", () => {
  * PARAM-4: confidence-tier table.
  *
  * `confidence()` (IosScreenIdentity.ts:236) tiers signals:
- *   - high   ← modalClass OR navigationTitle present
+ *   - high   ← modalClass OR navigationTitle OR presentation present
  *   - medium ← selectedTab OR focusedElementId OR keyboardVisible present
  *   - low    ← a useful signal present but none of the above
  * and `deriveIosScreenIdentity` returns undefined entirely when NO useful
@@ -278,8 +355,9 @@ describe("deriveIosScreenIdentity", () => {
  *
  * The "low" tier is intentionally omitted: it is unreachable through the public
  * deriver, since the only useful-but-non-high/medium signal is `modalTitle`, and
- * `findModal` never emits `modalTitle` without also emitting `modalClass` (which
- * forces "high"). Fabricating a "low" fixture would misrepresent real input.
+ * `findModal` never emits `modalTitle` without also emitting `modalClass` or
+ * `presentation` (which forces "high"). Fabricating a "low" fixture would
+ * misrepresent real input.
  */
 describe("deriveIosScreenIdentity confidence tiers (PARAM-4)", () => {
   function selectedTabBar(selected: string): ViewHierarchyNode {

@@ -51,4 +51,30 @@ class AndroidLocationSourceTest {
       ),
     )
   }
+
+  @Test
+  fun `selects only enabled providers and nothing when none is enabled`() {
+    val available = listOf("gps", "network", "passive")
+    // Network-only mode on API 24-27 disables GPS; a precise request must use network.
+    assertEquals(
+      "network",
+      locationProvider(
+        26,
+        PrototypeLocationAccuracy.PRECISE,
+        PrototypeLocationGrant.PRECISE,
+        available,
+        listOf("network", "passive"),
+      ),
+    )
+    assertEquals(
+      null,
+      locationProvider(
+        26,
+        PrototypeLocationAccuracy.PRECISE,
+        PrototypeLocationGrant.PRECISE,
+        available,
+        listOf("passive"),
+      ),
+    )
+  }
 }

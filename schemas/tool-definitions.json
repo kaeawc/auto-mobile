@@ -10375,6 +10375,7 @@
               "sqlQuery",
               "statusBar",
               "stopAudioInput",
+              "storeKitTest",
               "swipeAt",
               "swipeOn",
               "systemAlerts",
@@ -10549,6 +10550,7 @@
               "sqlQuery",
               "statusBar",
               "stopAudioInput",
+              "storeKitTest",
               "swipeAt",
               "swipeOn",
               "systemAlerts",
@@ -35947,6 +35949,7 @@
               "sqlQuery",
               "statusBar",
               "stopAudioInput",
+              "storeKitTest",
               "swipeAt",
               "swipeOn",
               "systemAlerts",
@@ -49580,6 +49583,7 @@
             "sqlQuery",
             "statusBar",
             "stopAudioInput",
+            "storeKitTest",
             "swipeAt",
             "swipeOn",
             "systemAlerts",
@@ -49713,6 +49717,7 @@
               "sqlQuery",
               "statusBar",
               "stopAudioInput",
+              "storeKitTest",
               "swipeAt",
               "swipeOn",
               "systemAlerts",
@@ -56412,6 +56417,180 @@
       "additionalProperties": {}
     },
     "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
+    }
+  },
+  {
+    "name": "storeKitTest",
+    "title": "Test In-App Purchases",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Test in-app purchases with StoreKit Testing on an iOS simulator. load a .storekit configuration first (it resets the session, clears transactions and disables purchase dialogs); then buy, refund, expire, setTimeRate, setSimulatedError (unknown, paymentCancelled or storeProductNotAvailable, for the next purchase) or disableDialogs, list the transactions, and clear to end the session. buy, refund, expire, list and clear return transactions. The session is keyed by appId and lasts until clear or the device session's release; StoreKitTest applies it to the runner's target app. Android, other Apple platforms and physical iPhones return unsupported (unsupported_platform or unsupported_device) without a device call; a runner without request_storekit returns unsupported_capability.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "load",
+            "buy",
+            "refund",
+            "expire",
+            "setTimeRate",
+            "setSimulatedError",
+            "disableDialogs",
+            "clear",
+            "list"
+          ],
+          "description": "load (configPath) starts a session; buy (productId), refund (transactionId), expire (subscriptionId), setTimeRate (timeRate), setSimulatedError (simulatedError), disableDialogs (enabled), list, clear (ends the session)"
+        },
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Bundle id that keys the StoreKit session",
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "configPath": {
+          "description": "load: absolute path of a .storekit file on the simulator's Mac",
+          "type": "string",
+          "minLength": 1
+        },
+        "productId": {
+          "description": "buy: product id",
+          "type": "string",
+          "minLength": 1
+        },
+        "transactionId": {
+          "description": "refund: transaction identifier from list",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "subscriptionId": {
+          "description": "expire: subscription product id",
+          "type": "string",
+          "minLength": 1
+        },
+        "timeRate": {
+          "description": "setTimeRate: renewal time rate",
+          "type": "string",
+          "enum": [
+            "realTime",
+            "monthlyRenewalEveryHour",
+            "monthlyRenewalEveryThirtyMinutes",
+            "monthlyRenewalEveryFifteenMinutes",
+            "monthlyRenewalEveryFiveMinutes",
+            "monthlyRenewalEveryThirtySeconds",
+            "oneRenewalEveryFifteenMinutes",
+            "oneRenewalEveryFiveMinutes",
+            "oneRenewalEveryMinute",
+            "oneRenewalEveryThirtySeconds",
+            "oneRenewalEveryTenSeconds",
+            "oneRenewalEveryTwoSeconds"
+          ]
+        },
+        "simulatedError": {
+          "description": "setSimulatedError: purchase error for the next buy",
+          "type": "string",
+          "enum": ["unknown", "paymentCancelled", "storeProductNotAvailable"]
+        },
+        "enabled": {
+          "description": "disableDialogs: true suppresses purchase dialogs",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action", "appId"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "load",
+            "buy",
+            "refund",
+            "expire",
+            "setTimeRate",
+            "setSimulatedError",
+            "disableDialogs",
+            "clear",
+            "list"
+          ]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "transactions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "number"
+              },
+              "productId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "originalIdentifier": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["identifier", "productId", "state"],
+            "additionalProperties": {}
+          }
+        },
+        "unsupported": {
+          "type": "string",
+          "enum": ["unsupported_platform", "unsupported_device", "unsupported_capability"]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "appId"],
+      "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["list"]
+        }
+      ],
       "automobile/requires": ["platform:android", "platform:ios"]
     }
   },

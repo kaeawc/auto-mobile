@@ -673,6 +673,8 @@ const EXCLUDED: Record<string, string> = {
     "sends only when the device advertises the optional command, which this harness does not",
   resetKeystore:
     "optional command covered with advertised capability, timeout and round-trip tests in CtrlProxyStorage tests",
+  requestSimulatePrototypePlatform:
+    "sends only when the device advertises prototype_platform_simulation_v1, covered in CtrlProxyPrototypes tests",
   discoverKeystore:
     "sends only when the device advertises the optional command, which this harness does not",
   addStorageChangeListener: "registers an in-process listener; it sends nothing",

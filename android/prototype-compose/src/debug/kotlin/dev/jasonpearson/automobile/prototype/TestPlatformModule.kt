@@ -34,6 +34,12 @@ class TestPlatformModule(private val wait: suspend (Long) -> Unit = { delay(it) 
     return PlatformCallResult.Success(message)
   }
 
+  override suspend fun simulate(event: PlatformEvent): Boolean {
+    if (event.name != "test.tick") return false
+    mutableState.value = event.data
+    return true
+  }
+
   suspend fun tick(data: JsonObject) {
     mutableState.value = data
     mutableEvents.emit(PlatformEvent("test.tick", data))

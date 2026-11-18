@@ -50,6 +50,12 @@ interface PrototypePlatformModule {
 
   suspend fun call(call: PlatformCall): PlatformCallResult
 
+  /**
+   * Apply simulated state without emitting: the runtime delivers once through its event path.
+   * Return false without mutations when this event is unsupported. Only a host may invoke this.
+   */
+  suspend fun simulate(event: PlatformEvent): Boolean = false
+
   val events: Flow<PlatformEvent>
   val state: StateFlow<JsonObject>
 

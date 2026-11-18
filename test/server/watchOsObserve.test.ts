@@ -1,6 +1,9 @@
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
-import { FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
+import {
+  FakeScreenChangingAfterTapWatchRunner,
+  FakeWatchRunnerClient,
+} from "../fakes/FakeWatchRunnerClient";
 import { WatchRunnerError } from "../../src/features/watch/WatchRunnerError";
 import { WATCH_APP_NOT_FOREGROUND_MESSAGE } from "../../src/models/WatchObservation";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
@@ -182,7 +185,7 @@ describe("observe on an Apple Watch simulator through the registry", () => {
 
   test("watch action tools dispatch through the registry to their bound runner", async () => {
     await arrange();
-    const runner = new FakeWatchRunnerClient();
+    const runner = new FakeScreenChangingAfterTapWatchRunner();
     cleanups.push(watchRunners.register(watch.deviceId, runner));
     registerInteractionTools();
     const target = { platform: "watchos", deviceId: watch.deviceId };
@@ -194,8 +197,11 @@ describe("observe on an Apple Watch simulator through the registry", () => {
       { type: "face", op: "dump" },
       { type: "hierarchy" },
       { type: "tap", identifier: "ctrlproxy-crown" },
+      { type: "hierarchy" },
       { type: "face", op: "dump" },
+      { type: "hierarchy" },
       { type: "tap", x: 10, y: 20 },
+      { type: "hierarchy" },
       { type: "swipe", direction: "up" },
       { type: "home" },
     ]);

@@ -38,3 +38,18 @@ export class FakeWatchRunnerClient implements WatchRunnerClient {
     this.closed = true;
   }
 }
+
+/** A tap changes the screen, so the effect poll settles on its first read instead of waiting out its budget. */
+export class FakeScreenChangingAfterTapWatchRunner extends FakeWatchRunnerClient {
+  private taps = 0;
+  override async request(...args: Parameters<FakeWatchRunnerClient["request"]>): Promise<unknown> {
+    if (args[0].type === "tap") {
+      this.taps++;
+    }
+    return super.request(...args);
+  }
+  override async hierarchy(signal?: AbortSignal) {
+    const tree = await super.hierarchy(signal);
+    return { ...tree, root: { ...tree.root, accessibilityLabel: `after ${this.taps} taps` } };
+  }
+}

@@ -68,3 +68,13 @@ describe("FileDisposableAppRegistry", () => {
     expect((await registry.list("d1")).map((entry) => entry.appId)).toEqual(["app.good"]);
   });
 });
+
+test("attach metadata round-trips, old records parse, and bad tokens are rejected", async () => {
+  const registry = new FileDisposableAppRegistry(new InMemoryDisposableAppRegistryStore());
+  await registry.put("d", record("old"));
+  const attached = record("new", { specId: "spec", attachToken: "a".repeat(64) });
+  await registry.put("d", attached);
+  expect(await registry.list("d")).toContainEqual(attached);
+  expect(await registry.list("d")).toContainEqual(record("old"));
+  await expect(registry.put("d", record("bad", { attachToken: "secret" }))).rejects.toThrow();
+});

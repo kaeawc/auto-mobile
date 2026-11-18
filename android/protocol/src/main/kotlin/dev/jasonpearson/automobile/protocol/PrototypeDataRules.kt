@@ -39,6 +39,10 @@ internal object PrototypeDataRules {
 
   val dataActionTypes = setOf("setData", "appendData", "prependData", "upsertData", "removeData")
 
+  fun isKeyedAction(action: JsonObject): Boolean =
+    action.text("type") in setOf("setData", "removeData") &&
+      ("where" in action || "member" in action)
+
   /**
    * Static checks for `setData`, `appendData`, `prependData` and `removeData` (#12519) that the
    * contract cannot express: the `/data/<pointer>` path, a literal value data can hold, and an

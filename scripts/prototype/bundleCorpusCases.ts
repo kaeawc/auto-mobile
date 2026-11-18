@@ -286,7 +286,30 @@ export function manifestCases(): BundleCorpusCase[] {
   modify("manifest-version", text.replace('"bundleFormatVersion":1', '"bundleFormatVersion":2'));
   modify("manifest-not-json", "{");
   modify("manifest-depth", "[".repeat(65) + "0" + "]".repeat(65));
-  for (const requires of [["z", "a"], ["a", "a"], ["Bad Name"], [1], "a"]) {
+  // Generated capability names are camelCase (#18598); bundles requiring them must load.
+  cases.push(
+    makeCorpusCase("requires-camelCase", [
+      {
+        name: "bundle.json",
+        bytes: Buffer.from(
+          text.replace(
+            '"requires":[]',
+            '"requires":["prototype_platform_deviceStatus_v1","prototype_platform_secureStorage_v1"]',
+          ),
+        ),
+      },
+      base[1],
+    ]),
+  );
+  for (const requires of [
+    ["z", "a"],
+    ["a", "a"],
+    ["Bad Name"],
+    ["SecureStorage"],
+    ["prototype_platform_secure-storage_v1"],
+    [1],
+    "a",
+  ]) {
     modify(
       `requires-${JSON.stringify(requires)}`,
       text.replace('"requires":[]', `"requires":${JSON.stringify(requires)}`),

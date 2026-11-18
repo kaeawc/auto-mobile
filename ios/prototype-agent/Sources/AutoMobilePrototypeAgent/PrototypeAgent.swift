@@ -151,7 +151,7 @@ final class PrototypeAgent: NSObject {
     private static var instance: PrototypeAgent?
     static var shared: PrototypeAgent {
         if let instance { return instance }
-        let agent = PrototypeAgent(mode: .session, registry: .feedbackModules())
+        let agent = PrototypeAgent(mode: .session, registry: .feedbackModules(includePermissions: false))
         instance = agent
         return agent
     }

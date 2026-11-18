@@ -1,8 +1,8 @@
 # `swipeOn`
 
-| Tool                    | What it does                       | Requires                                                                                                                                                                                                                   |
-| ----------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 👉 <code>swipeOn</code> | Swipe/scroll on screen or elements | <span class="tool-requires"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span></span> |
+| Tool                    | What it does                       | Platforms                                                                                                                                                                                                                   | Needs                             |
+| ----------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 👉 <code>swipeOn</code> | Swipe/scroll on screen or elements | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span></span> | <span class="tool-needs">—</span> |
 
 `swipeOn` swipes in a `direction` on the screen or a selected `container`.
 When the selected range control changes its numeric state, `effect.value`

@@ -198,6 +198,7 @@ extra_css:
 
 extra_javascript:
   - assets/javascripts/prompt-form.js
+  - assets/javascripts/tool-table.js
   - assets/javascripts/usage-data.js
 
 markdown_extensions:

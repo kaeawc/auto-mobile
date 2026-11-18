@@ -39,8 +39,8 @@ Most tools work the same on both platforms. These guides cover both:
 - [Accessibility and performance audits](audits.md) and
   [Performance traces](performance-trace.md)
 
-The **Requires** column in [Tools](../tools.md) shows which tools are limited to
-one platform.
+The **Platforms** column in [Tools](../tools.md) shows which devices each tool
+drives.
 
 ## Other Android form factors
 

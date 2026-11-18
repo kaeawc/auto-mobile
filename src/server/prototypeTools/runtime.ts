@@ -1,3 +1,4 @@
+import { lazyDisposableAppAttach, disposableAppTarget } from "./disposableAppAttach";
 import {
   createTestSessionRecorder,
   isHostLocalPrototypeAction,
@@ -13,7 +14,10 @@ import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { SessionReleaseBroadcaster } from "../../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../daemon/streamDeviceLifecycleEvents";
-import { DefaultDeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../../features/observe/DeviceWindowCacheInvalidator";
 import { AndroidCtrlProxyClient } from "../../features/observe/android/AndroidCtrlProxyClient";
 import type { PrototypeSpecRevisions } from "../../features/prototype/prototypeSpecRevisions";
 import {
@@ -23,7 +27,11 @@ import {
 } from "./daemonSpecRevisions";
 import { MAX_MOCK_DOCUMENT_BYTES } from "../../features/prototype/prototypeMockSchema";
 import { mockBackendOutput } from "./mockBackend";
-import { isPrototypeHostOnlyAction, isPrototypePreviewAction } from "./hostOnlyActions";
+import {
+  isPrototypeHostOnlyAction,
+  isPrototypePreviewAction,
+  type PrototypeHostOnlyAction,
+} from "./hostOnlyActions";
 import { PrototypeMockBackendRegistry } from "../../features/prototype/PrototypeMockBackendRegistry";
 import { PrototypeCommitGenerations } from "../../features/prototype/PrototypeCommitGenerations";
 import { PrototypeEventCoordinator } from "../../features/prototype/PrototypeEventCoordinator";
@@ -95,6 +103,13 @@ import {
 } from "../prototypeSavedActions";
 import type { ProgressCallback } from "../toolRegistry";
 import { stageAssets } from "./assets";
+import {
+  disposableAppOutput,
+  isDisposableAppAction,
+  lazyDisposableApps,
+  type PrototypeDisposableAppAction,
+  type PrototypeDisposableApps,
+} from "./disposableApps";
 import {
   daemonPrototypePreviewBinding,
   prototypePreviewOutput,
@@ -322,6 +337,7 @@ function prototypeTargets(
 ): {
   androidTarget: (device: BootedDevice) => PrototypeTarget;
   iosTarget: (device: BootedDevice) => PrototypeTarget | undefined;
+  agentTarget: (device: BootedDevice, agent: PrototypeAgentClient) => PrototypeTarget;
 } {
   const androidTarget = (device: BootedDevice): PrototypeTarget => {
     const client = clientFactory(device);
@@ -339,6 +355,9 @@ function prototypeTargets(
     if (agent === undefined) {
       return undefined;
     }
+    return agentTarget(device, agent);
+  };
+  const agentTarget = (device: BootedDevice, agent: PrototypeAgentClient): PrototypeTarget => {
     let transport = transports.ios.get(agent);
     if (transport === undefined) {
       transport = new IosPrototypeTransport(
@@ -346,6 +365,7 @@ function prototypeTargets(
         iosAssetCache === undefined
           ? undefined
           : { serial: device.deviceId, cache: iosAssetCache, puts: transports.iosAssetPuts },
+        device.platform === "android" ? "android" : "ios",
       );
       transports.ios.set(agent, transport);
       requestWiring.attachIosPrototypeRequests(agent, device.deviceId, transports.requests);
@@ -353,7 +373,7 @@ function prototypeTargets(
     }
     return { transport, ios: transport };
   };
-  return { androidTarget, iosTarget };
+  return { androidTarget, iosTarget, agentTarget };
 }
 
 function prototypeClock(dependencies: PrototypeToolDependencies): Pick<Timer, "now"> {
@@ -371,6 +391,8 @@ interface PrototypeHost {
   commits: PrototypeCommitGenerations;
   patchQueue: PrototypePatchQueue;
   transports: PrototypeTransportCache;
+  /** One attachment and resume ledger per installed app, shared across MCP registrations. */
+  disposableAgent: ReturnType<typeof lazyDisposableAppAttach>;
   /** Declarative mock backends of this session (#14271). */
   mocks: PrototypeMockBackendRegistry;
   /** The headless virtual device (#17974); holds state only while headless calls use it. */
@@ -406,9 +428,15 @@ function createPrototypeHost(
     requests: channelWiring.combinedPrototypeCancellation(requests, channels),
     recorder,
   });
+  const disposableAgent = lazyDisposableAppAttach(dependencies);
   const cleanup = subscribePrototypeCleanup(
     dependencies.lifecycle ?? defaultPrototypeLifecycle(),
     events,
+    (deviceId) => {
+      void disposableAgent.release(deviceId).catch((error) => {
+        logger.warn("Could not release disposable app attachments for device cleanup.", error);
+      });
+    },
   );
   const virtualDevice =
     dependencies.virtualDevice ?? new VirtualPrototypeDevice(prototypeClock(dependencies));
@@ -416,6 +444,7 @@ function createPrototypeHost(
   return {
     store,
     events,
+    disposableAgent,
     recorder,
     commits: new PrototypeCommitGenerations(),
     patchQueue: createPrototypePatchQueue(),
@@ -436,6 +465,9 @@ function createPrototypeHost(
         cleanup.unsubscribe();
         events.dispose();
         mocks.clearAll();
+        void disposableAgent.dispose().catch((error) => {
+          logger.warn("Could not dispose prototype host app attachments.", error);
+        });
       }
     },
   };
@@ -538,7 +570,7 @@ async function specFromPath(
 }
 
 const takesSpecPath = (action: string): boolean =>
-  action === "show" || action === "screenMap" || action === "share";
+  action === "show" || action === "screenMap" || action === "share" || action === "installApp";
 
 /** A show with `mockPath` becomes a show with the file's `{backendId: definition}` as `mock`. */
 async function mockFromPath(
@@ -630,6 +662,29 @@ async function hostOnlyOutput(
     : mockBackendOutput(host.mocks, args);
 }
 
+interface EarlyRoutes {
+  disposableApps: () => PrototypeDisposableApps;
+  hostOnly: { mocks: PrototypeMockBackendRegistry; preview: () => PrototypePreviewBinding };
+  assetReaders: AssetReaders;
+  shareFiles: ProtoViewerShareFiles | undefined;
+}
+
+const isEarlyAction = (
+  action: string,
+): action is PrototypeHostOnlyAction | PrototypeDisposableAppAction =>
+  isDisposableAppAction(action) || isPrototypeHostOnlyAction(action);
+
+/** Disposable-app and host-only actions, answered before any prototype scope or target. */
+function earlyOutput(
+  routes: EarlyRoutes,
+  device: BootedDevice,
+  args: z.infer<typeof prototypeSchema>,
+): Promise<PrototypeOutput> {
+  return isDisposableAppAction(args.action)
+    ? disposableAppOutput(routes.disposableApps(), device, args)
+    : hostOnlyOutput(routes.hostOnly, args, routes.assetReaders, routes.shareFiles);
+}
+
 /** share writes local files only: the spec was validated, and no device or scope is involved. */
 async function shareOutput(
   args: z.infer<typeof prototypeSchema>,
@@ -651,10 +706,29 @@ function screenMapOutput(spec: unknown) {
   return { success: true, screenMap: map, mermaid: prototypeScreenMapMermaid(map) };
 }
 
-/**
- * The prototype tool's implementation for one registration (#17709): the handler and the disposer
- * of the host state it uses. `registration.ts` imports this module on the tool's first call.
- */
+function localPrototypeOutput(context: {
+  host: PrototypeHost;
+  preview: () => PrototypePreviewBinding;
+  live: PrototypeTarget | undefined;
+  device: BootedDevice;
+  args: z.infer<typeof prototypeSchema>;
+  scope: PrototypeScope;
+  signal: AbortSignal | undefined;
+}): Promise<PrototypeOutput> | PrototypeOutput {
+  const { host, preview, live, device, args, scope, signal } = context;
+  if (live) {
+    return deviceRequestAction(args, host, device, { target: live, scope, signal });
+  }
+  const local = {
+    recorder: host.recorder,
+    store: host.store,
+    events: host.events,
+    preview: () => preview().server,
+  };
+  return hostLocalPrototypeOutput(local, scope, args);
+}
+
+/** The handler and host-state disposer for one lazy tool registration. */
 export function createPrototypeToolRuntime(
   dependencies: PrototypeToolDependencies = {},
 ): PrototypeToolRuntime {
@@ -665,19 +739,19 @@ export function createPrototypeToolRuntime(
   }
   // Per-connection registrations run after DaemonState initialises: pick up the unbound hook.
   host.ensureLifecycle();
-  const { store, events, commits } = host;
   const deviceClientFactory =
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
   const clientFactory = (device: BootedDevice): PrototypeClient =>
     isVirtualPrototypeDevice(device) ? host.virtualDevice : deviceClientFactory(device);
   const agentConnections = dependencies.agentConnections ?? noPrototypeAgentConnections;
-  const { androidTarget, iosTarget } = prototypeTargets(
+  const targets = prototypeTargets(
     clientFactory,
     agentConnections,
     host.transports,
     dependencies.iosAssetCache,
   );
+  const disposableAgent = host.disposableAgent;
   const cacheInvalidator =
     dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   const clock = prototypeClock(dependencies);
@@ -694,6 +768,12 @@ export function createPrototypeToolRuntime(
   });
   // Resolved on first use: building the daemon's (unbound) server is deferred until a call needs it.
   const preview = () => dependencies.preview ?? daemonPrototypePreviewBinding();
+  const earlyRoutes: EarlyRoutes = {
+    disposableApps: lazyDisposableApps(dependencies, clock),
+    hostOnly: { mocks: host.mocks, preview },
+    assetReaders,
+    shareFiles: dependencies.protoViewerShareFiles,
+  };
   const handler = async (
     device: BootedDevice,
     input: unknown,
@@ -731,78 +811,156 @@ export function createPrototypeToolRuntime(
         return respond(settled);
       }
     }
-    if (isPrototypeHostOnlyAction(args.action)) {
-      const shareFiles = dependencies.protoViewerShareFiles;
-      const hostOnly = { mocks: host.mocks, preview };
-      return respond(await hostOnlyOutput(hostOnly, args, assetReaders, shareFiles));
+    if (isEarlyAction(args.action)) {
+      return respond(await earlyOutput(earlyRoutes, device, args));
     }
-    const scope = prototypeScope(device, args);
-    if (isHostLocalPrototypeAction(args.action)) {
-      const local = { recorder: host.recorder, store, events, preview: () => preview().server };
-      return respond(await hostLocalPrototypeOutput(local, scope, args));
-    }
-    const target = device.platform === "android" ? androidTarget(device) : iosTarget(device);
-    if (!target) {
-      const error = new ActionableError(prototypeAgentNotConnectedMessage(device.deviceId));
-      return respond({ success: false, error: error.message });
-    }
-    const { action } = args;
-    if (isDeviceRequestAction(action)) {
-      const requestHost = { store, events, mocks: host.mocks };
-      return respond(
-        await deviceRequestAction(args, requestHost, device, { target, scope, signal }),
-      );
-    }
-    if (action === "awaitEvent") {
-      const source = prototypeEventSource(target.transport);
-      const waited = await waitForPrototypeEvent(events, scope, source, {
-        query: args,
-        context: { progress, signal },
-      });
-      return respond({
-        success: true,
-        ...waited,
-        ...suspendedWaitWarning(store, scope, args.id, waited),
-      });
-    }
-    const handlerDependencies: PrototypeHandlerDependencies = {
-      store,
-      events,
-      target,
+    return prototypeDeviceOutput({
+      host,
+      device,
+      args: { ...args, action: args.action },
+      dependencies,
+      preview,
+      respond,
+      progress,
+      signal,
       assetReaders,
-      commits,
       cacheInvalidator,
-      now: () => clock.now(),
-      timer: dependencies.timer,
-      adbFactory: dependencies.adbFactory,
-      lastRenderedObservation: dependencies.lastRenderedObservation,
-      anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
-      screenRoundFactory: dependencies.screenRoundFactory,
-      shaderAssetCache: dependencies.shaderAssetCache,
-      env: dependencies.env,
-    };
-    const dispatched = await dispatchPrototypeSavedAction(
-      { ...args, action, spec: args.spec as PrototypeSpec | undefined },
-      () => {
-        const savedSignal = combineWithAmbientAbort(signal);
-        return {
-          client: target.android!,
-          ...savedAdbDependencies(device, dependencies),
-          signal: savedSignal,
-          stageAssets: () => stageAssets(target, args, assetReaders, { signal: savedSignal }),
-        };
-      },
-      (action) =>
-        performPrototypeAction(
-          handlerDependencies,
-          device,
-          { ...args, action },
-          mutationCallOptions(scope, host.patchQueue, signal),
-        ),
-    );
-    return respond(attributeRevision(dispatched, action));
+      clock,
+      targets,
+      disposableAgent,
+    });
   };
   const dispose = prototypeRegistrationDisposer(host);
   activeRegistration = { host, dispose };
   return { handler, dispose };
+}
+
+interface PrototypeDeviceContext {
+  host: PrototypeHost;
+  device: BootedDevice;
+  args: z.infer<typeof prototypeSchema> & {
+    action: Exclude<
+      z.infer<typeof prototypeSchema>["action"],
+      PrototypeHostOnlyAction | PrototypeDisposableAppAction
+    >;
+  };
+  dependencies: PrototypeToolDependencies;
+  preview: () => PrototypePreviewBinding;
+  respond: ReturnType<typeof responderFor>;
+  progress: ProgressCallback | undefined;
+  signal: AbortSignal | undefined;
+  assetReaders: AssetReaders;
+  cacheInvalidator: DeviceWindowCacheInvalidator;
+  clock: Pick<Timer, "now">;
+  targets: ReturnType<typeof prototypeTargets>;
+  disposableAgent: ReturnType<typeof lazyDisposableAppAttach>;
+}
+
+async function prototypeDeviceOutput(context: PrototypeDeviceContext) {
+  const {
+    host,
+    device,
+    args,
+    dependencies,
+    preview,
+    respond,
+    progress,
+    signal,
+    assetReaders,
+    cacheInvalidator,
+    clock,
+    targets,
+    disposableAgent,
+  } = context;
+  const { store, events, commits } = host;
+  const { androidTarget, iosTarget, agentTarget } = targets;
+  const scope = prototypeScope(device, args);
+  const pendingLive = disposableAgent(device, args);
+  const live = pendingLive
+    ? await disposableAppTarget(device, pendingLive, {
+        target: agentTarget,
+        fallback: async () => {
+          const target = androidTarget(device);
+          const report = await deviceRequestAction(
+            { action: "inspect" },
+            { store, events, mocks: host.mocks },
+            device,
+            { target, scope, signal },
+          );
+          return report.success &&
+            store.shownIds(device.deviceId).includes(args.id ?? "") &&
+            events.sourceFor(device.deviceId, args.id ?? "") ===
+              prototypeEventSource(target.transport)
+            ? target
+            : undefined;
+        },
+      })
+    : undefined;
+  if (live && "success" in live) {
+    return respond(live);
+  }
+  if (isHostLocalPrototypeAction(args.action)) {
+    return respond(
+      await localPrototypeOutput({ host, preview, live, device, args, scope, signal }),
+    );
+  }
+  const target =
+    live ?? (device.platform === "android" ? androidTarget(device) : iosTarget(device));
+  if (!target) {
+    const error = new ActionableError(prototypeAgentNotConnectedMessage(device.deviceId));
+    return respond({ success: false, error: error.message });
+  }
+  const { action } = args;
+  if (isDeviceRequestAction(action)) {
+    const requestHost = { store, events, mocks: host.mocks };
+    return respond(await deviceRequestAction(args, requestHost, device, { target, scope, signal }));
+  }
+  if (action === "awaitEvent") {
+    const source = prototypeEventSource(target.transport);
+    const waited = await waitForPrototypeEvent(events, scope, source, {
+      query: args,
+      context: { progress, signal },
+    });
+    return respond({
+      success: true,
+      ...waited,
+      ...suspendedWaitWarning(store, scope, args.id, waited),
+    });
+  }
+  const handlerDependencies: PrototypeHandlerDependencies = {
+    store,
+    events,
+    target,
+    assetReaders,
+    commits,
+    cacheInvalidator,
+    now: () => clock.now(),
+    timer: dependencies.timer,
+    adbFactory: dependencies.adbFactory,
+    lastRenderedObservation: dependencies.lastRenderedObservation,
+    anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
+    screenRoundFactory: dependencies.screenRoundFactory,
+    shaderAssetCache: dependencies.shaderAssetCache,
+    env: dependencies.env,
+  };
+  const dispatched = await dispatchPrototypeSavedAction(
+    { ...args, action, spec: args.spec as PrototypeSpec | undefined },
+    () => {
+      const savedSignal = combineWithAmbientAbort(signal);
+      return {
+        client: target.android!,
+        ...savedAdbDependencies(device, dependencies),
+        signal: savedSignal,
+        stageAssets: () => stageAssets(target, args, assetReaders, { signal: savedSignal }),
+      };
+    },
+    (action) =>
+      performPrototypeAction(
+        handlerDependencies,
+        device,
+        { ...args, action },
+        mutationCallOptions(scope, host.patchQueue, signal),
+      ),
+  );
+  return respond(attributeRevision(dispatched, action));
 }

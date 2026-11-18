@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.*
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -12,5 +13,17 @@ internal class CtrlProxyTimerHandlerTest : CtrlProxyMessageHandlerFixtures() {
     )
     assertEquals("advancePrototypeClock", lastCall.first)
     assertEquals(listOf("advance", "panel", 250), lastCall.second)
+  }
+
+  @Test
+  fun `simulate platform dispatches correlated id event and data`() = runTest {
+    dispatch(
+      """{"type":"simulate_prototype_platform","requestId":"sim","id":"panel","event":"test.tick","data":{"count":7}}""",
+    )
+    assertEquals("simulatePrototypePlatform", lastCall.first)
+    assertEquals(
+      listOf("sim", "panel", "test.tick", buildJsonObject { put("count", 7) }),
+      lastCall.second,
+    )
   }
 }

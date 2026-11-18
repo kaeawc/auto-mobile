@@ -26,6 +26,17 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         )
     }
 
+    func testPermissionsIsAdvertisedOnlyThroughItsRegisteredModuleAtMinimumOS() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        let capability = "prototype_platform_permissions_v1"
+        XCTAssertFalse(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()).contains(capability))
+        XCTAssertFalse(AutoMobilePrototypeCapabilities.supported.contains(capability))
+        XCTAssertTrue(
+            PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS(), registryCapabilities: [capability])
+                .contains(capability)
+        )
+    }
+
     func testLayoutDirectionIsAdvertisedAtTheMinimumOS() {
         struct OS: OSVersionProvider { let majorVersion = 17 }
         XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(os: OS()).contains("prototype_layout_direction_v1"))
@@ -61,7 +72,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_audio_v1",
             // Registered by the agent and Viewer registries (#14273), not the static list.
             "prototype_platform_connectivity_v1",
-            // Contract only; the biometric prompt runtime is owed (#14328).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_biometric_v1",
             // Registered by the agent and Viewer registries (#14238), not the static list.
             "prototype_platform_links_v1",
@@ -69,10 +80,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_settings_v1",
             // Contract only; the system picker runtimes are owed (#14318).
             "prototype_platform_contacts_v1", "prototype_platform_calendar_v1",
-            // Contract only; the motion and sensor runtimes are owed (#14327).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_sensors_v1",
-            // Contract only; the map renderers are owed (#14310, #14311).
-            "prototype_platform_map_v1",
             // Contract only; map backends are advertised once their renderers can serve them (#14302).
             "prototype_platform_map_google_v1",
             "prototype_platform_map_maplibre_v1",
@@ -99,7 +108,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_audioRecorder_v1",
             // Contract only; the Viewer notification runtime is owed (#14282).
             "prototype_platform_notifications_v1",
-            // Contract only; the Viewer permission runtime is owed (#14299).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_permissions_v1",
             // Contract only; the scheduled notification runtimes are owed (#14283).
             "prototype_platform_notifications_scheduled_v1",

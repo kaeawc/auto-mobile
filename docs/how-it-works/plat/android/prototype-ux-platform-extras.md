@@ -185,8 +185,40 @@ are available.
 
 A disposable app installs one spec as its own app, with its own package, label, icon, permissions
 and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
-The Android stamper packages a spec into a signed APK; the `prototype installApp`, `listApps`
-and `uninstallApp` actions remain separate from this artifact pipeline.
+The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
+`listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
+`DisposableAppManager`, built on the first such call. iOS refuses them until its stamper exists.
+The headless virtual device refuses them too.
+
+On Android, `patch`, `status`, `inspect` and `awaitEvent` with an installed spec id attach over
+`automobile-app-<appId>`. Conflicting installed spec ids return their slugs. Call `launchApp` first.
+Failed attachment uses CtrlProxy only when live inspection confirms that id; otherwise it
+returns attach guidance. Inspection reconciles CtrlProxy sources, preserving disposable-app
+entries and waits. Other actions use CtrlProxy.
+
+The listener requires a nonblank `assets/prototype/attach-token` and an emulator identity
+(kernel qemu flag or emulator build fingerprint/hardware). The stamper's explicit
+`allowPhysicalDeviceAttach: true` option writes `assets/prototype/attach-allow-physical-device`
+to permit physical devices. This applies to both debug and release templates, independently of
+APK debuggability. The token-in-APK model is development-only: anyone who can read the APK can
+recover its token. Reinstalling a slug in place reuses the token. A second connection cannot
+replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
+
+Events replay at least once. A process-scoped agent retains its listener, buffer, sequence ledger
+and random `appInstanceId` across reconnects and Activity recreation. Activities rebind targets;
+a new process resets identity and epoch. `hello_result` reports identity. One daemon-host attacher
+serves every MCP registration and retains app/device cursors. `hello` sends `appInstanceId` and
+`lastAcknowledgedSequence` (initially zero); `{type: "ack", sequence, appInstanceId}` acknowledges
+matching instances after subscriber delivery. Epochs initialize before replay; status reconciles
+only its app. Between waits, events buffer unacknowledged until subscribed delivery. The 256-event
+buffer closes on overflow for replay. Device cleanup and host disposal close sockets and remove
+adb forwards.
+
+Successful socket writes do not remove events: unacknowledged events replay on the next hello,
+and the host de-duplicates within the connection and coordinator. The app retains 200 events,
+drops the oldest on overflow, and reports cumulative `droppedEvents` in hello and status;
+sequence gaps expose missing events. A separate writer uses a 256-frame queue and five-second
+write deadline. Queue overflow or blocked writes close the peer; events and requests continue, retaining replay.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
   Hyphens in the slug become underscores because Android package segments allow only

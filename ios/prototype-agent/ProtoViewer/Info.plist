@@ -8,6 +8,8 @@
         <key>CFBundleURLName</key><string>AutoMobile ProtoViewer</string>
         <key>CFBundleURLSchemes</key><array><string>automobile-proto</string></array>
     </dict></array>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Confirm your identity when a prototype asks you to authenticate.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Used only when you allow network for imported prototypes, to reach devices on your local network.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

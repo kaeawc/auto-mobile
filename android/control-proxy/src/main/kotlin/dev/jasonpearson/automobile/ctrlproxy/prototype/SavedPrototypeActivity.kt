@@ -186,7 +186,7 @@ class SavedPrototypeActivity : ComponentActivity() {
         // Serialize the validated model: test stores and replaced documents need not keep their
         // original JSON text in sync with the immutable saved snapshot.
         Json.encodeToString(loaded.spec),
-        PrototypeAssets(image = source::read, font = source::read),
+        PrototypeAssets(image = source::read, font = source::read).withUploadFiles(source::file),
         prototypeHostStorage(SavedPrototypeActivityDependencies.storageStore(this)),
         SavedPrototypeActivityDependencies.network(),
         host,

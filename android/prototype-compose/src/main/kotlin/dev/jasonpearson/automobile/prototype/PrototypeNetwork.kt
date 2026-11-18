@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.prototype
 
+import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest as InternalPrototypeHttpRequest
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeUploadBody
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
 import kotlinx.serialization.json.JsonElement
 
@@ -24,6 +26,8 @@ class PrototypeHttpRequest internal constructor(request: InternalPrototypeHttpRe
   val headers: Map<String, String> = request.headers
   val body: JsonElement? = request.body
   val timeoutMs: Int = request.timeoutMs
+  @InternalAutoMobilePrototypeApi val uploadBody: PrototypeUploadBody? = request.uploadBody
+  val onUploadProgress: ((Int) -> Unit)? = request.onUploadProgress
 }
 
 /** An app-owned transport; the renderer adds no HTTP stack or network policy. */

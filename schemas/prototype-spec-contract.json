@@ -20,7 +20,8 @@
     "decimalAmount": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,2})?$(?![\\s\\S])",
     "isoPeriod": "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])",
     "webViewUrl": "^https://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
-    "webOrigin": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(?!443(?![\\s\\S]))(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$(?![\\s\\S])"
+    "webOrigin": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(?!443(?![\\s\\S]))(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$(?![\\s\\S])",
+    "dataMember": "^[^~/]+$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -2131,7 +2132,25 @@
                 ]
               },
               "optional": false
+            },
+            "where": {
+              "rule": {
+                "kind": "ref",
+                "name": "dataWhere"
+              },
+              "optional": true
+            },
+            "member": {
+              "rule": {
+                "kind": "string",
+                "pattern": "dataMember",
+                "max": 256
+              },
+              "optional": true
             }
+          },
+          "dependents": {
+            "where": ["member"]
           }
         },
         "appendData": {
@@ -2286,6 +2305,13 @@
                 "max": 261
               },
               "optional": false
+            },
+            "where": {
+              "rule": {
+                "kind": "ref",
+                "name": "dataWhere"
+              },
+              "optional": true
             }
           }
         },
@@ -22336,6 +22362,84 @@
             "name": "iconEffectRepeat"
           },
           "optional": true
+        }
+      }
+    },
+    "dataWhere": {
+      "kind": "object",
+      "fields": {
+        "field": {
+          "rule": {
+            "kind": "string",
+            "pattern": "dataMember",
+            "max": 256
+          },
+          "optional": false
+        },
+        "equals": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "state": {
+                    "rule": {
+                      "kind": "boundKey"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "item": {
+                    "rule": {
+                      "kind": "key"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "index": {
+                    "rule": {
+                      "kind": "enum",
+                      "values": [true]
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "data": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "value": {
+                    "rule": {
+                      "kind": "json",
+                      "maxDepth": 24
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
+          },
+          "optional": false
         }
       }
     }

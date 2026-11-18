@@ -1,12 +1,10 @@
+import { prototypeOwnKeyRecord } from "../../features/prototype/prototypeOwnKeyRecord";
 import {
   MAX_MOCK_DOCUMENT_BYTES,
   MOCK_BACKEND_ID,
 } from "../../features/prototype/prototypeMockSchema";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
-import {
-  PROTOTYPE_PUSH_TRANSPORTS,
-  PROTOTYPE_SIMULATE_EVENTS,
-} from "../../features/prototype/prototypePushSimulate";
+import { PROTOTYPE_PUSH_TRANSPORTS } from "../../features/prototype/prototypePushSimulate";
 import { z as specZ } from "zod/v3";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
 import { prototypeContractPatterns } from "../../features/prototype/prototypeContractPatterns";
@@ -40,6 +38,14 @@ import {
   prototypeDataError,
   validatePrototypeSpec,
 } from "../../features/prototype/prototypeValidation";
+import {
+  DEFAULT_DISPOSABLE_APP_TTL_HOURS,
+  MAX_DISPOSABLE_APP_TTL_HOURS,
+} from "../../features/prototype/disposableApp/DisposableAppManager";
+import {
+  DISPOSABLE_APP_SLUG_PATTERN,
+  MAX_DISPOSABLE_APP_SLUG_LENGTH,
+} from "../../features/prototype/disposableApp/disposableAppId";
 import { getRemovedToolActionHint } from "../../utils/removedTools";
 import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../../utils/schemaHelpers";
 import { validatePrototypeSavedInput } from "../prototypeSavedActions";
@@ -164,6 +170,60 @@ const assetsInput = z
   .min(1)
   .max(MAX_PROTOTYPE_ASSET_COUNT);
 
+const disposableAppInput = z
+  .object({
+    slug: z
+      .string()
+      .min(1)
+      .max(MAX_DISPOSABLE_APP_SLUG_LENGTH)
+      .regex(
+        DISPOSABLE_APP_SLUG_PATTERN,
+        "app.slug must be lowercase letters and digits in hyphen-separated words, starting with a letter",
+      )
+      .describe("Lowercase hyphenated words such as feedly or news-reader; names the app id"),
+    label: z.string().min(1).max(120).describe("The launcher label, such as Feedly"),
+    icon: z
+      .object({
+        backgroundColor: z
+          .string()
+          .regex(
+            /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
+            "icon.backgroundColor must be #RRGGBB or #AARRGGBB",
+          )
+          .describe("#RRGGBB or #AARRGGBB behind the adaptive icon and splash screen"),
+      })
+      .strict()
+      .optional(),
+    ttlHours: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_DISPOSABLE_APP_TTL_HOURS)
+      .optional()
+      .describe(
+        `Hours until the app expires and uninstallApp {expired: true} removes it; default ${DEFAULT_DISPOSABLE_APP_TTL_HOURS}, 0 keeps it until uninstallApp`,
+      ),
+    permissions: z
+      .union([
+        z.enum(["prompt", "grantDeclared"]),
+        z
+          .object({
+            grant: z.array(z.string().min(1)).optional(),
+            deny: z.array(z.string().min(1)).optional(),
+          })
+          .strict(),
+      ])
+      .optional()
+      .describe(
+        "prompt (default) leaves the spec's declared permissions to the runtime dialog; grantDeclared grants them all; {grant, deny} names declared permissions to grant or deny (user-fixed)",
+      ),
+    reset: z
+      .boolean()
+      .optional()
+      .describe("true clears the app's storage when the slug is already installed"),
+  })
+  .strict();
+
 export const prototypeSchema = addDeviceTargetingToSchema(
   z
     .object({
@@ -192,11 +252,14 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "publish",
           "serve",
           "stop",
+          "installApp",
+          "listApps",
+          "uninstallApp",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; ProtoViewer link: share; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend, backendLog or publish; preview server: serve or stop; host-only: screenMap",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; ProtoViewer link: share; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend, backendLog or publish; preview server: serve or stop; host-only: screenMap; disposable apps: installApp, listApps or uninstallApp",
         },
       ),
       goal: z
@@ -375,16 +438,17 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .optional()
         .describe("simulate only: advance the prototype clock without waiting"),
       event: z
-        .enum(PROTOTYPE_SIMULATE_EVENTS)
+        .string()
+        .min(1)
+        .max(128)
         .optional()
         .describe(
-          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player",
+          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require Android prototype_platform_simulation_v1 and a module that supports simulation",
         ),
-      data: z
-        .record(z.string(), z.unknown())
+      data: prototypeOwnKeyRecord(z.string(), z.unknown())
         .optional()
         .describe(
-          "simulate event only: notifications.push takes the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON; media.* takes {player, status? (buffering|ready|ended|error), code? (for error), advanceMs? (fake engine only: advance its clock first)}",
+          "simulate event only: other module events take their event data schema where defined, otherwise any JSON object, within the 4096-byte delivered emit budget; notifications.push takes the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON; media.* takes {player, status? (buffering|ready|ended|error), code? (for error), advanceMs? (fake engine only: advance its clock first)}",
         ),
       transport: z
         .enum(PROTOTYPE_PUSH_TRANSPORTS)
@@ -397,7 +461,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
+          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
         ),
       assets: assetsInput
         .optional()
@@ -447,7 +511,28 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           "deleteSaved only (Android): clear CtrlProxy's shortcuts with adb when no saved prototype remains; otherwise a disabled icon remains",
         ),
-      all: z.literal(true).optional().describe("Dismiss all prototypes on the targeted device"),
+      all: z
+        .literal(true)
+        .optional()
+        .describe(
+          "dismiss: all prototypes on the targeted device; uninstallApp: every disposable app on it",
+        ),
+      app: disposableAppInput
+        .optional()
+        .describe(
+          "installApp only (Android): the disposable app to stamp the spec into. Its id is always dev.jasonpearson.automobile.app.<slug>_<8 hex>, never agent-chosen; permissions come only from the spec's requires.permissions (INTERNET is always declared). Re-installing a slug updates it in place and keeps its storage unless reset",
+        ),
+      appId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "uninstallApp only: the disposable app id installApp or listApps returned; ids outside dev.jasonpearson.automobile.app. and apps signed by another key are refused",
+        ),
+      expired: z
+        .literal(true)
+        .optional()
+        .describe("uninstallApp only: remove every disposable app on the device whose ttl ended"),
       eventName: z
         .string()
         .min(1)
@@ -545,6 +630,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "port",
     "remote",
     "idleTimeoutMs",
+    "app",
+    "appId",
+    "expired",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -577,12 +665,15 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     clearBackend: ["backendId"],
     backendLog: ["backendId", "since"],
     publish: ["backendId", "room", "frame"],
-    status: [],
-    inspect: [],
+    status: ["id"],
+    inspect: ["id"],
     screenMap: ["spec", "specPath"],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
     serve: ["id", "port", "remote", "idleTimeoutMs"],
     stop: [],
+    installApp: ["spec", "specPath", "app"],
+    listApps: [],
+    uninstallApp: ["appId", "all", "expired"],
   };
   for (const field of fields) {
     if (value[field] !== undefined && !allowed[value.action].includes(field)) {
@@ -610,6 +701,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
   }
   validateProtoViewerTimeout(value, ctx);
   validateSpecSource(value, ctx);
+  validateDisposableAppInput(value, ctx);
   if (value.action === "dismiss" && (value.id === undefined) === (value.all === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -698,7 +790,10 @@ function validateProtoViewerTimeout(
 
 function validateSpecSource(value: z.infer<typeof prototypeSchema>, ctx: z.RefinementCtx): void {
   const takesSpecSource =
-    value.action === "show" || value.action === "screenMap" || value.action === "share";
+    value.action === "show" ||
+    value.action === "screenMap" ||
+    value.action === "share" ||
+    value.action === "installApp";
   if (takesSpecSource && (value.spec === undefined) === (value.specPath === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -707,6 +802,23 @@ function validateSpecSource(value: z.infer<typeof prototypeSchema>, ctx: z.Refin
         value.spec === undefined
           ? `${value.action} requires exactly one of spec or specPath`
           : `${value.action} takes either spec or specPath, not both`,
+    });
+  }
+}
+
+function validateDisposableAppInput(
+  value: { action: string; app?: unknown; appId?: string; all?: true; expired?: true },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.action === "installApp" && value.app === undefined) {
+    ctx.addIssue({ code: "custom", path: ["app"], message: "installApp requires app" });
+  }
+  const targets = [value.appId, value.all, value.expired].filter((target) => target !== undefined);
+  if (value.action === "uninstallApp" && targets.length !== 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["appId"],
+      message: "uninstallApp requires exactly one of appId, all: true or expired: true",
     });
   }
 }
@@ -743,6 +855,7 @@ export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
   "publish",
   "serve",
   "stop",
+  "listApps",
 ];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {

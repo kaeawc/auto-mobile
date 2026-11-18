@@ -514,6 +514,8 @@
                 PrototypeProgressView(node: node, model: model)
             case "adaptive":
                 PrototypeAdaptiveView(node: node, model: model)
+            case "map":
+                PrototypeMapView(node: node, model: model)
             case "chart":
                 PrototypeChartView(node: node, model: model)
             case "timePicker":
@@ -669,6 +671,7 @@
         /// Text nodes already read their text, so only an authored description or a tappable icon's
         /// name needs to be applied explicitly.
         private var accessibilityLabelOverride: String? {
+            if node.type == "map" { return node.mapLabel(data: model.spec?.data, state: model.state) }
             // A chart reads its summary, unless an authored description wins (#14679).
             if node.type == "chart",
                node.semantics?.label == nil { return node.chartLabel(data: model.spec?.data, state: model.state) }

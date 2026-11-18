@@ -33,32 +33,39 @@ records `declined`. Simulated `entitlementsChanged` events work on a subscriptio
 `refund` events remove an entitlement and also apply to a non-consumable. The module raises
 `commerce.entitlementsChanged` only when the entitlements actually change.
 
-**Secure storage (#14321).** The `storage.secure` field lists up to 8 `state:` keys the runtime keeps in the Android
-Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
-and it may not also appear in `storage.keys`. The list needs the `secureStorage` module
-(`prototype_platform_secureStorage_v1`) in `requires.platform`. Its one read-only key,
-`/platform/secureStorage/locked`, is true while a biometric-bound key is still locked.
-A `secureAuth: {"state:<key>": "biometric"}` entry binds a secure key to a `biometric.authenticate` and needs `biometric`
-in `requires.platform`. A secure key never leaves the device through an emit `context`: the validators refuse
-`{state: <secure key>}` there. A `request` may send one only with `allowSecureInRequest: true`. Otherwise the
-validators refuse a `{state: <secure key>}` binding in a header, query value or body (whole, form entry or
-multipart value), or a `{<secure key>}` placeholder in the URL, a header or a query value.
+**Secure storage (#14321).** `storage.secure` lists up to eight declared string `state:` keys,
+separate from `storage.keys`. It requires `secureStorage` in `requires.platform` and
+`prototype_platform_secureStorage_v1`. ProtoViewer, saved-prototype Activities and the disposable
+app shell register the module. CtrlProxy's injected overlay and unsupported embedded hosts refuse it.
+The module has no calls; `/platform/secureStorage/locked` is false. Biometric-bound `secureAuth`
+keys remain live-only and are neither persisted nor restored by this runtime.
 
-On a show, `restorePrototypeStorage` and its Kotlin and Swift twins apply the secure store's values under the
-same version and listing rules. A value restores only into a listed secure key, as a string of at most
-`MAX_PROTOTYPE_SECURE_VALUE_BYTES` (4096) UTF-8 bytes into a string state key, and a plaintext stored copy
-never fills one. The runtime does not read a biometric-bound key that holds a value: its state holds `""` and
-`locked` reports it until `biometric.authenticate` unlocks it. The runtime drops a key the store reports
-invalidated (biometric re-enrolment revoked its hardware key), and the spec's value stands. No production
-runtime advertises the module yet.
+Each value is limited to 4096 UTF-8 bytes and excluded from the plaintext document and its byte
+budget. An app-private file under `prototype-storage/secure/` holds a Base64-encoded AES-GCM
+ciphertext with a fresh random 12-byte IV. The 256-bit AES key stays in AndroidKeyStore under
+`dev.automobile.prototype.<slug>-<full-id-sha256>`, without user authentication. The full id also
+authenticates the ciphertext; ProtoViewer uses its library entry id to isolate duplicate imports.
+Writes sync a temporary file before atomic replacement. Missing or unusable keys and corrupt
+ciphertext leave values absent and produce a fixed warning without payloads or exception details.
+
+The [storage precedence and clearing rules](prototype-ux-storage.md) apply to both stores.
+Reset, `clearStorage` and deletion remove the secure file and its Keystore alias; dismissal retains
+them. Status, inspect, patch conflicts and events omit secure state values, including `change`
+payload values. Storage reports add optional `secure: [{key, present, bytes}]` metadata for
+persisted values. Neither values nor ciphertext appear in reports or runtime warnings.
+
+Secure keys cannot leave through an emit `context`. Requests may reference them only with
+`allowSecureInRequest: true`; otherwise validation refuses state bindings and text placeholders
+in URLs, headers, query values and bodies. See [request bindings](prototype-ux-request.md).
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
 exactly one `/<module>/<key>`. The keys are `pitchDeg` and `rollDeg` (whole degrees, -180 to 180), `headingDeg` (0 to 359),
 `steps` (counted since the subscription started), `proximityNear` (boolean) and `lightLux` (whole lux, Android
 only). There is no public ambient-light API on iOS. A sensor the device lacks leaves its key absent, so it compares as
-missing. The `prototypeSensorReference.ts` module is the reference the runtimes copy: whole-unit rounding, per-key
-throttling at `1000 / rateHz` ms (`rateHz` 1 to 30), and a shake at 2.7 g or more with a 1000 ms cooldown.
+missing. The runtimes copy whole-unit rounding from `prototypeSensorReference.ts`. Continuous values use per-key
+throttling at `1000 / rateHz` ms (`rateHz` 1 to 30). A shake needs 2.7 g or more with a 1000 ms cooldown.
+On iOS, every distinct proximity change publishes immediately; identical consecutive values are ignored.
 The runtimes replay it from `test/fixtures/prototype-sensors/`.
 
 The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`.
@@ -66,8 +73,17 @@ In it, `shake`, `steps` and `proximity` take `{}`, while `orientation` (the thre
 `rateHz` of 1 to 30. The `steps` sensor also needs the `motion` permission in `requires.permissions`. A `/platform/sensors`
 read or a `sensors.shake` handler must name a sensor the block lists. Android CtrlProxy advertises the module
 using platform sensors, with subscriptions only while the prototype is active and in the foreground. Steps
-remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it. iOS does not yet
-advertise the module.
+remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it.
+
+The iOS agent, ProtoViewer and Viewer registries advertise the module using CoreMotion and UIKit proximity monitoring.
+Steps require `NSMotionUsageDescription`, available step counting and motion authorization that is neither
+denied nor restricted. The `CMPedometer` source counts steps from each subscription's start date; the first callback
+already includes steps since that date, and restarting a subscription resets the baseline. Orientation uses
+magnetic north when available, omitting an invalid heading. CoreMotion acceleration is converted from g to m/s²
+before shake detection. iOS never subscribes to or publishes light readings. Each iOS presentation owns its
+sensor state and subscriptions; motion and proximity hardware are shared until their final user stops.
+Hiding, replacing or re-showing it, even with an identical block or reset, stops its subscriptions and clears
+state, filters and the shake cooldown. Stopped subscriptions cannot publish into a later session.
 
 **Android biometric runtime support.** The [biometric module](prototype-ux-platform-device.md) is
 registered by Android Activity hosts (SavedPrototypeActivity, ProtoViewer and disposable apps). CtrlProxy overlays omit the capability and
@@ -116,9 +132,59 @@ The `permissions` module (`prototype_platform_permissions_v1`) has one call, `pe
 `names` (1-16 unique canonical names). A literal list may only name permissions declared in
 `requires.permissions`; a bound list is checked by the runtime. State is `/platform/permissions/<name>`, one
 of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `unavailable`, and
-`permissions.changed` fires when the user changes a permission in Settings and the app resumes. A call that
-needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
+`permissions.changed` carries `{name, state}` when a request changes authorization. It also fires when
+the user changes a permission in Settings and the app resumes. A call that needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
 runtimes do not advertise the module, since a grant there would go to CtrlProxy or the borrowed host app.
+
+iOS standalone hosts and ProtoViewer register `permissions` for `notifications`; borrowed-app sessions
+do not expose the module. Other canonical names return `unavailable`.
+The first status read establishes `/platform/permissions/notifications` asynchronously without prompting.
+Requests and foreground Settings re-reads publish only changed states. A request prompts with alert,
+sound and badge options only while authorization is `notDetermined`, then re-reads notification settings
+for its result. iOS never re-prompts after a determination. Outside an app bundle with a bundle
+identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
+required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
+cancellation drops the late result while foreground observation stays active. The registry stops
+observation when its final observer releases it. The iOS driver uses the same
+platform-call deadline as other iOS modules. This module does not publish
+`/platform/notifications/authorization`; `provisional` authorization reads as `limited` here.
+
+| iOS `UNAuthorizationStatus` | State           |
+| --------------------------- | --------------- |
+| `notDetermined`             | `notDetermined` |
+| `denied`                    | `denied`        |
+| `authorized`                | `granted`       |
+| `provisional`               | `limited`       |
+| `ephemeral`                 | `granted`       |
+| Unknown future value        | `unavailable`   |
+
+Android Activity hosts register `permissions` for `notifications`: ProtoViewer, disposable apps and
+CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity without an
+ActivityResultRegistry and the CtrlProxy overlay omit it. Other canonical names return `unavailable`.
+The result is `{results: {<name>: <state>}}`; each result also updates `/platform/permissions/<name>`.
+Bound request lists must name declared permissions, just like literal lists. Only one request can be
+in flight per Activity; a second returns `too_many_in_flight`. A permission prompt waits for the user
+without a platform-call deadline, including an explicit `timeoutMs`; `statusKey` remains `loading`
+until a result or cancellation. Cancellation, Activity destruction and teardown unregister the result
+launcher and drop late callbacks. Activity resume re-reads notification authorization and emits only
+changed states. Denial history belongs to each runtime session, is recorded only after a successful
+launch delivers a denial, and is cleared on reset or teardown and whenever a grant is observed.
+
+| Android notification authorization                                      | State           |
+| ----------------------------------------------------------------------- | --------------- |
+| Activity is not resumed, or source is closed                            | `unavailable`   |
+| API below 33, notifications enabled                                     | `granted`       |
+| API below 33, notifications disabled in Settings                        | `blocked`       |
+| API 33+, POST_NOTIFICATIONS granted and notifications enabled           | `granted`       |
+| API 33+, POST_NOTIFICATIONS granted but notifications disabled          | `blocked`       |
+| API 33+, not granted and no denial recorded in this session             | `notDetermined` |
+| API 33+, denial recorded and rationale available                        | `denied`        |
+| API 33+, denial recorded and no rationale (including user-fixed denial) | `blocked`       |
+
+`POST_NOTIFICATIONS` is a runtime permission starting at API 33. Earlier versions never prompt;
+Settings alone controls notification availability. Already-granted and blocked requests return their
+state without a prompt. This runtime does not publish `/platform/notifications/authorization` or
+advertise the notifications module.
 
 The host sets declared permissions after install and before launch, so the first frame shows the final
 state. The mode is `prompt`, `grantDeclared`, or `{grant: [...], deny: [...]}` naming declared
@@ -127,8 +193,8 @@ granted, so the first request shows the system dialog and plans rely on the syst
 an explicit mode. An Android denial revokes with the `user-fixed` flag, so it reads `blocked` and no dialog
 appears; an iOS simulator denial is `simctl privacy revoke` and reads `denied`. Each declared permission is
 reported as `{name, state, verified}`; `verified` is false, with `reason`, for a simulator name that is
-notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`). No production runtime
-advertises the module, and `prototype show` does not yet accept the mode.
+notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`).
+`prototype show` does not yet accept the mode.
 
 **Notifications (#14280).** The `notifications` module (`prototype_platform_notifications_v1`) has three
 calls:
@@ -152,10 +218,9 @@ carries typed text) and `.dismissed`.
 State is `/platform/notifications/{badge, active, pending, authorization}` plus
 `/platform/notifications/channels/<id>/blocked` (a boolean, readable only for a declared channel). The
 `active` key is at most 24 per prototype, and `authorization` uses the permission vocabulary (`granted`,
-`denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). The runtime homes follow
-the owner decision on #14276: the disposable app, the iOS per-prototype Viewer and ProtoViewer advertise
-the module. The CtrlProxy overlay advertises it as a disclosed preview, and the iOS injected agent never
-does.
+`denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). Android hosts do not
+advertise this module. The `permissions` module above supplies notification authorization without
+publishing the notifications state tree.
 
 Channels come from a root `notifications` block,
 `{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique

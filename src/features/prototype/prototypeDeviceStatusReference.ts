@@ -114,7 +114,7 @@ export function prototypeStatusChangeEvents(
   let delivered: PrototypeStatusValues | undefined;
   let dueMs: number | undefined;
   const fire = (atMs: number) => {
-    if (current && delivered && !sameValues(current, delivered)) {
+    if (current && delivered && !prototypeStatusValuesEqual(current, delivered)) {
       events.push({ timestampMs: atMs, values: current });
       delivered = current;
     }
@@ -126,7 +126,7 @@ export function prototypeStatusChangeEvents(
     }
     if (current === undefined) {
       current = delivered = update.values;
-    } else if (!sameValues(current, update.values)) {
+    } else if (!prototypeStatusValuesEqual(current, update.values)) {
       current = update.values;
       dueMs = update.timestampMs + debounceMs;
     }
@@ -137,7 +137,11 @@ export function prototypeStatusChangeEvents(
   return events;
 }
 
-function sameValues(first: PrototypeStatusValues, second: PrototypeStatusValues): boolean {
+/** The same keys with the same values; key order does not matter. */
+export function prototypeStatusValuesEqual(
+  first: PrototypeStatusValues,
+  second: PrototypeStatusValues,
+): boolean {
   const keys = Object.keys(first);
   return (
     keys.length === Object.keys(second).length &&

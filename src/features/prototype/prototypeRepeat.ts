@@ -735,6 +735,20 @@ function expansionScope(
     : scopeOf(node, path, data);
 }
 
+function expansionInstanceScope(
+  scope: Scope | undefined,
+  outer: Scope | undefined,
+  instance: number,
+): Scope | undefined {
+  return scope
+    ? {
+        ...scope,
+        items: scope.items.slice(instance, instance + 1),
+        sourceItems: (scope.sourceItems ?? scope.items).slice(instance, instance + 1),
+      }
+    : outer;
+}
+
 /** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
 function expandedErrors(
   node: Raw,
@@ -766,13 +780,7 @@ function expandedErrors(
     : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
-    const single = scope
-      ? {
-          ...scope,
-          items: scope.items.slice(instance, instance + 1),
-          sourceItems: (scope.sourceItems ?? scope.items).slice(instance, instance + 1),
-        }
-      : outer;
+    const single = expansionInstanceScope(scope, outer, instance);
     const error = expandedChildErrors(node, path, budget, {
       data,
       repeatPath: nestedPath,

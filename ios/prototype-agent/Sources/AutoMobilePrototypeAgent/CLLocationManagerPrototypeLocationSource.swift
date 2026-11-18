@@ -2,24 +2,43 @@
     import CoreLocation
     import Foundation
 
+    extension CLLocationManager: PrototypeLocationStreamActions {
+        func setDesiredAccuracy(_ accuracy: Double) { desiredAccuracy = accuracy }
+        func startUpdates() { startUpdatingLocation() }
+        func stopUpdates() { stopUpdatingLocation() }
+    }
+
     /// Main-actor ownership serializes delegate callbacks and cancellation. Each waiter is removed
     /// before it resumes; a cancelled request cannot be resumed again by a later delegate callback.
     @MainActor
     final class CLLocationManagerPrototypeLocationSource: NSObject, @preconcurrency CLLocationManagerDelegate,
         PrototypeLocationSource
     {
-        private let manager: CLLocationManager
+        private let suppliedManager: CLLocationManager?
+        // Construction and clearing a callback must not access the host's location manager.
+        // Registering a callback creates the delegate, even while Location Services are disabled.
+        private lazy var manager: CLLocationManager = {
+            let manager = suppliedManager ?? CLLocationManager()
+            manager.delegate = self
+            return manager
+        }()
+
         private var authorizationWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
         private var fixWaiters: [UUID: CheckedContinuation<PrototypeLocationFix, any Error>] = [:]
         private var accuracyWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
         private var accuracyRequest: UUID?
-        private var updateAccuracy = kCLLocationAccuracyBest
+        private var streamArbiter = PrototypeLocationStreamArbiter(updateAccuracy: kCLLocationAccuracyBest)
         private var update: (@MainActor @Sendable (PrototypeLocationFix) -> Void)?
+        private var authorizationChangeHandler: (@MainActor @Sendable () -> Void)?
 
-        init(manager: CLLocationManager = CLLocationManager()) {
-            self.manager = manager
+        init(manager: CLLocationManager? = nil) {
+            suppliedManager = manager
             super.init()
-            manager.delegate = self
+        }
+
+        func setAuthorizationChangeHandler(_ handler: (@MainActor @Sendable () -> Void)?) {
+            authorizationChangeHandler = handler
+            if handler != nil { _ = manager }
         }
 
         var servicesEnabled: Bool { CLLocationManager.locationServicesEnabled() }
@@ -61,24 +80,15 @@
                         return
                     }
                     fixWaiters[id] = continuation
-                    // Keep the finest accuracy needed by any one-shot or continuous consumer.
                     let requested = accuracy == "precise" ? kCLLocationAccuracyBest : kCLLocationAccuracyKilometer
-                    if fixWaiters.count == 1 {
-                        manager.desiredAccuracy = update == nil ? requested : min(requested, updateAccuracy)
-                    } else { manager.desiredAccuracy = min(manager.desiredAccuracy, requested) }
-                    if fixWaiters.count == 1 {
-                        // A running update stream swallows requestLocation (a static simulated fix
-                        // never repeats), so pause it; finishFixes restarts it.
-                        if update != nil { manager.stopUpdatingLocation() }
-                        manager.requestLocation()
-                    }
+                    streamArbiter.requestFix(accuracy: requested, using: manager)
                 }
             } onCancel: {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    fixWaiters.removeValue(forKey: id)?.resume(throwing: CancellationError())
-                    if fixWaiters.isEmpty, update != nil { manager.desiredAccuracy = updateAccuracy }
-                    stopIfIdle()
+                    guard let waiter = fixWaiters.removeValue(forKey: id) else { return }
+                    streamArbiter.cancelFix(using: manager)
+                    waiter.resume(throwing: CancellationError())
                 }
             }
         }
@@ -114,7 +124,8 @@
         }
 
         func setUpdateAccuracy(_ accuracy: String) {
-            updateAccuracy = accuracy == "approximate" ? kCLLocationAccuracyKilometer : kCLLocationAccuracyBest
+            streamArbiter.updateAccuracy = accuracy == "approximate"
+                ? kCLLocationAccuracyKilometer : kCLLocationAccuracyBest
         }
 
         func startUpdates(
@@ -122,22 +133,18 @@
             _ handler: @escaping @MainActor @Sendable (PrototypeLocationFix) -> Void
         ) {
             update = handler
-            manager.desiredAccuracy = fixWaiters.isEmpty
-                ? updateAccuracy : min(manager.desiredAccuracy, updateAccuracy)
             manager.distanceFilter = minDistanceM
-            manager.startUpdatingLocation()
+            streamArbiter.startUpdates(using: manager)
         }
 
         func stopUpdates() {
             update = nil
-            // requestLocation and continuous updates share a manager; keep a pending one-shot alive.
-            manager.stopUpdatingLocation()
-            if !fixWaiters.isEmpty { manager.requestLocation() }
+            streamArbiter.stopUpdates(using: manager)
         }
 
         func stop() {
-            manager.stopUpdatingLocation()
             update = nil
+            authorizationChangeHandler = nil
             let authorizations = authorizationWaiters
             let fixes = fixWaiters
             let accuracies = accuracyWaiters
@@ -145,13 +152,10 @@
             fixWaiters.removeAll()
             accuracyWaiters.removeAll()
             accuracyRequest = nil
+            streamArbiter.stop(using: manager)
             authorizations.values.forEach { $0.resume() }
             fixes.values.forEach { $0.resume(throwing: CancellationError()) }
             accuracies.values.forEach { $0.resume(returning: false) }
-        }
-
-        private func stopIfIdle() {
-            if fixWaiters.isEmpty, update == nil { manager.stopUpdatingLocation() }
         }
 
         func locationManagerDidChangeAuthorization(_: CLLocationManager) {
@@ -162,6 +166,7 @@
             if !authorization.authorized {
                 finishFixes(.failure(PrototypeLocationSourceError.permissionDenied))
             }
+            authorizationChangeHandler?()
         }
 
         func locationManager(_: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -199,12 +204,8 @@
         private func finishFixes(_ result: Result<PrototypeLocationFix, any Error>) {
             let waiters = fixWaiters
             fixWaiters.removeAll()
+            streamArbiter.finishFixes(using: manager)
             waiters.values.forEach { $0.resume(with: result) }
-            if update != nil {
-                manager.desiredAccuracy = updateAccuracy
-                manager.startUpdatingLocation()
-            }
-            stopIfIdle()
         }
     }
 #endif

@@ -104,11 +104,13 @@ class PrototypeSecureValueStoreTest {
 
   @Test
   fun `every write uses a different nonce and authenticates the full prototype id`() {
-    val cipher = PrototypeSecureCipher(keys, FakeNonceRandom())
+    val sharedKeys = FakeSecureKeys(SecretKeySpec(ByteArray(32) { 7 }, "AES"))
+    val cipher = PrototypeSecureCipher(sharedKeys, FakeNonceRandom())
     val first = cipher.encrypt("vault/a", byteArrayOf(1, 2, 3))
     val second = cipher.encrypt("vault/a", byteArrayOf(1, 2, 3))
     cipher.encrypt("vault?a", byteArrayOf(1, 2, 3))
     assertFalse(first.contentEquals(second))
+    assertArrayEquals(byteArrayOf(1, 2, 3), cipher.decrypt("vault/a", first))
     try {
       cipher.decrypt("vault?a", first)
       fail("Cross-prototype decryption must fail")
@@ -118,13 +120,14 @@ class PrototypeSecureValueStoreTest {
   }
 }
 
-internal class FakeSecureKeys : PrototypeSecureKeyProvider {
+internal class FakeSecureKeys(private val sharedKey: SecretKey? = null) :
+  PrototypeSecureKeyProvider {
   val values = mutableMapOf<String, SecretKey>()
 
   override fun key(alias: String, create: Boolean): SecretKey? =
     values[alias]
       ?: if (create)
-        SecretKeySpec(ByteArray(32) { (values.size + 1).toByte() }, "AES").also {
+        (sharedKey ?: SecretKeySpec(ByteArray(32) { (values.size + 1).toByte() }, "AES")).also {
           values[alias] = it
         }
       else null

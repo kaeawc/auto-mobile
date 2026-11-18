@@ -220,6 +220,8 @@ class PrototypeController(
   private val validateShaders: (PrototypeNode) -> Unit = {},
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
+  /** Explicit reset/removal may purge Activity storage without exposing it to overlay shows. */
+  private val purgeSecureStorage: suspend (String) -> Int = { 0 },
 ) {
   // Asset cleanup must outlive service cancellation while retaining the injected worker dispatcher.
   private val assetCleanupScope = CoroutineScope(requestScope.coroutineContext + SupervisorJob())
@@ -1159,9 +1161,10 @@ class PrototypeController(
 
   /** The stored keys removed for [id]; callers hold no controller state of their own. */
   suspend fun clearStoredValues(id: String): Int {
-    val persistence = storage ?: return 0
+    val secureRemoved = purgeSecureStorage(id)
+    val persistence = storage ?: return secureRemoved
     val live = surfaces[id]?.runtime?.storage
-    return live?.clear() ?: persistence.clear(id)
+    return secureRemoved + (live?.clear() ?: persistence.clear(id))
   }
 
   private suspend fun statusOf(surface: Surface): PrototypeStatusEntry {

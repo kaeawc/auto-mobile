@@ -11,6 +11,13 @@ class LibraryStorage(
 ) {
   private val generations = mutableMapOf<String, Long>()
 
+  /** Both stores for one viewer capture their generation while reset is excluded. */
+  @Synchronized
+  fun namespaces(libraryId: String): Namespaces =
+    Namespaces(namespace(libraryId), secureNamespace(libraryId))
+
+  class Namespaces(val plain: PrototypeStorage, val secure: PrototypeSecureValueStore?)
+
   @Synchronized
   fun namespace(libraryId: String): PrototypeStorage {
     val generation = generations.getOrPut(libraryId) { 0 }

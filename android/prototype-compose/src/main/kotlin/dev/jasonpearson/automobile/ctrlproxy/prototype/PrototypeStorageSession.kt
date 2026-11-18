@@ -205,11 +205,6 @@ class PrototypeStoragePersistence(
     val rewriteNeeded =
       loaded !is PrototypeStorageLoad.Missing &&
         (restore.dropped.isNotEmpty() || stored == null || spec.storage == null)
-    val plan: suspend () -> Unit = {
-      if (rewriteNeeded)
-        rewrite(spec.id, stored?.version, kept, spec.storage?.secure.orEmpty().isNotEmpty())
-      withContext(io) { secureValues.commit(secure) }
-    }
     val session =
       session(
         restore.spec,
@@ -218,7 +213,20 @@ class PrototypeStoragePersistence(
         else onDisk?.takeIf { it.version == spec.storage?.version }?.values.orEmpty(),
         secureValues,
       )
+    val plan: suspend () -> Unit = {
+      if (rewriteNeeded)
+        rewrite(spec.id, stored?.version, kept, spec.storage?.secure.orEmpty().isNotEmpty())
+      commitSecurePreparation(session, secureValues)
+    }
     return PrototypeStorageOpen(restore.spec, session, plan)
+  }
+
+  private suspend fun commitSecurePreparation(
+    session: PrototypeStorageSession?,
+    preparation: PrototypeSecureStoragePreparation,
+  ) {
+    if (session != null) session.commitSecurePreparation { preparation.commit(secure) }
+    else withContext(io) { preparation.commit(secure) }
   }
 
   private fun session(
@@ -434,6 +442,19 @@ internal constructor(
   /** Writes anything not yet written; called on dismissal and before a same-id show. */
   suspend fun flush() = write(cancelPending = true)
 
+  /**
+   * A delete/reset since prepare makes its snapshot obsolete, even after a failed delete resumes.
+   */
+  internal suspend fun commitSecurePreparation(commit: () -> Unit) = diskLock.withLock {
+    withContext(io) {
+      // Quiesce takes this monitor before deleting. It cannot pass this check until the write
+      // finishes, and a commit arriving after quiesce observes the changed generation.
+      synchronized(lock) {
+        if (!invalidated && !quiesced && generation == 0L) commit()
+      }
+    }
+  }
+
   private suspend fun write(cancelPending: Boolean) {
     var snapshotGeneration = 0L
     val document =
@@ -450,10 +471,19 @@ internal constructor(
       diskLock.withLock {
         // A clear that ran after the snapshot already emptied the disk; the snapshot is stale.
         if (synchronized(lock) { generation != snapshotGeneration }) return
-        withContext(io) {
-          if (document.values.isEmpty()) store.delete(id)
-          else store.save(id, document.copy(secure = emptyMap()))
-          writeSecure(document)
+        try {
+          withContext(io) {
+            if (document.values.isEmpty()) store.delete(id)
+            else store.save(id, document.copy(secure = emptyMap()))
+            writeSecure(document)
+          }
+        } catch (error: CancellationException) {
+          // I/O may have finished before the dispatch back was cancelled. Invalidate before
+          // releasing diskLock, so a later flush cannot trust the previous secure baseline.
+          synchronized(lock) {
+            if (generation == snapshotGeneration) secureBaselineStale = true
+          }
+          throw error
         }
         synchronized(lock) {
           persistedValues = LinkedHashMap(document.values)
@@ -543,33 +573,36 @@ internal constructor(
         generation++
         forgotten.putAll(values)
         secureForgotten.putAll(secureValues)
-        (persistedValues.size + persistedSecureValues.size).also {
+        persistedValues.size.also {
           secureValues.clear()
           values.clear()
           sizes.clear()
           skipped.clear()
         }
       }
-    try {
-      diskLock.withLock {
-        withContext(io) {
-          store.delete(id)
-          secureStore?.delete(id)
+    val secureRemoved =
+      try {
+        diskLock.withLock {
+          val count =
+            withContext(io) {
+              store.delete(id)
+              secureStore?.delete(id) ?: 0
+            }
+          synchronized(lock) {
+            persistedValues = LinkedHashMap()
+            persistedSecureValues = LinkedHashMap()
+            secureBaselineStale = false
+          }
+          count
         }
+      } catch (error: CancellationException) {
+        restoreAfterFailedClear(forgotten, secureForgotten)
+        throw error
+      } catch (error: IOException) {
+        restoreAfterFailedClear(forgotten, secureForgotten)
+        throw error
       }
-    } catch (error: CancellationException) {
-      restoreAfterFailedClear(forgotten, secureForgotten)
-      throw error
-    } catch (error: IOException) {
-      restoreAfterFailedClear(forgotten, secureForgotten)
-      throw error
-    }
-    synchronized(lock) {
-      persistedValues = LinkedHashMap()
-      persistedSecureValues = LinkedHashMap()
-      secureBaselineStale = false
-    }
-    return removed
+    return removed + secureRemoved
   }
 
   private fun restoreAfterFailedClear(

@@ -1358,20 +1358,27 @@ class PrototypeRuntime(
   }
 
   /** Binds the action's value; null when the value cannot be resolved (the write is refused). */
-  private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
-    fun value(binding: EmitContextBinding, path: String): JsonElement? =
-      when (val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())) {
-        is PrototypeDataValue.Resolved -> resolved.value
-        is PrototypeDataValue.Failure -> {
-          warn("Refused data write at $path: ${resolved.error.message}")
-          null
-        }
+  private fun dataWriteValue(binding: EmitContextBinding, path: String): JsonElement? {
+    val key = (binding["state"] as? JsonPrimitive)?.content
+    if (key != null && "state:$key" in current.spec.storage?.secure.orEmpty()) {
+      warn("Refused data write: secure state cannot be copied to public data")
+      return null
+    }
+    return when (val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())) {
+      is PrototypeDataValue.Resolved -> resolved.value
+      is PrototypeDataValue.Failure -> {
+        warn("Refused data write at $path: ${resolved.error.message}")
+        null
       }
+    }
+  }
+
+  private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
     return when (action) {
       is PrototypeSetDataAction ->
-        value(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
+        dataWriteValue(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
       is PrototypeAppendDataAction ->
-        value(action.value, action.path)?.let {
+        dataWriteValue(action.value, action.path)?.let {
           PrototypeDataWrite.Append(
             action.path,
             it,
@@ -1381,7 +1388,7 @@ class PrototypeRuntime(
       // `prependData` inserts one row, so the resolved value is wrapped as the page `[row]`, as on
       // iOS and in the `change` event (#16715).
       is PrototypePrependDataAction ->
-        value(action.value, action.path)?.let {
+        dataWriteValue(action.value, action.path)?.let {
           PrototypeDataWrite.Prepend(
             action.path,
             JsonArray(listOf(it)),
@@ -1389,7 +1396,7 @@ class PrototypeRuntime(
           )
         }
       is PrototypeUpsertDataAction ->
-        value(action.value, action.path)?.let {
+        dataWriteValue(action.value, action.path)?.let {
           PrototypeDataWrite.Upsert(
             action.path,
             action.key,
@@ -1636,6 +1643,7 @@ class PrototypeRuntime(
     val onError: List<PrototypeAction>?,
     val eventContext: JsonObject?,
     val append: PrototypeRequestAppend?,
+    val sensitive: Boolean,
   ) {
     lateinit var job: Job
 
@@ -1686,6 +1694,9 @@ class PrototypeRuntime(
       else entry
     }
 
+  private fun canCarrySecure(action: PrototypeRequestAction): Boolean =
+    action.allowSecureInRequest == true || current.spec.storage?.secure.orEmpty().isNotEmpty()
+
   /**
    * A `request` action: resolves its bindings against the committed state and data, moves
    * `statusKey` to `loading`, then waits for the response off the interaction. The latest request
@@ -1714,6 +1725,7 @@ class PrototypeRuntime(
         action.onError,
         eventData,
         action.append,
+        canCarrySecure(action),
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
@@ -1828,14 +1840,21 @@ class PrototypeRuntime(
     }
   }
 
-  private fun publicResponse(response: PrototypeRequestResponse): PrototypeRequestResponse =
+  private fun publicResponse(
+    response: PrototypeRequestResponse,
+    sensitive: Boolean,
+  ): PrototypeRequestResponse =
     if (response is PrototypeRequestResponse.Failed)
       response.copy(
         error =
           response.error.copy(
-            message = publicDiagnostic(response.error.message, "Prototype request failed"),
+            message =
+              if (sensitive) "Prototype request failed"
+              else publicDiagnostic(response.error.message, "Prototype request failed"),
           ),
       )
+    else if (response is PrototypeRequestResponse.Received && sensitive)
+      response.copy(headers = emptyMap())
     else response
 
   /**
@@ -1847,7 +1866,7 @@ class PrototypeRuntime(
     val result =
       PrototypeRequestOutcome.complete(
         request.into,
-        publicResponse(response),
+        publicResponse(response, request.sensitive),
         request.append?.let {
           it.copy(maxItems = prototypeListMaxItemsFor(current.spec, it.to)?.toLong())
         },

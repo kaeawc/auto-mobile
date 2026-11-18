@@ -52,7 +52,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageBackends
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
@@ -496,13 +495,18 @@ class CtrlProxy : AccessibilityService() {
   // scope and hit the disk on IO.
   internal val prototypeStorage by lazy {
     PrototypeStoragePersistence(
-      PrototypeStorageBackends(
-        PrototypeStorageStores.inDirectory(prototypeStorageRoot(filesDir)),
-        PrototypeSecureValueStores.inDirectory(prototypeStorageRoot(filesDir)),
-      ),
+      PrototypeStorageStores.inDirectory(prototypeStorageRoot(filesDir)),
       CoroutinePrototypeScheduler(serviceScope),
     )
   }
+
+  // Overlay shows only reconcile plain values. Secure storage belongs to Activity hosts and is
+  // touched here solely by explicit reset/removal.
+  internal suspend fun purgePrototypeSecureStorage(id: String): Int =
+    kotlinx.coroutines.withContext(Dispatchers.IO) {
+      PrototypeSecureValueStores.inDirectory(prototypeStorageRoot(filesDir)).delete(id)
+    }
+
   internal val savedPrototypeController by lazy {
     SavedPrototypeController(
       SavedPrototypeStores.inDirectory(File(filesDir, "saved-prototypes")),
@@ -513,7 +517,7 @@ class CtrlProxy : AccessibilityService() {
       // Deleting a saved prototype also removes the values its storage block kept.
       clearStorage = { id ->
         if (::prototypeController.isInitialized) prototypeController.clearStoredValues(id)
-        else prototypeStorage.clear(id)
+        else purgePrototypeSecureStorage(id) + prototypeStorage.clear(id)
       },
     )
   }

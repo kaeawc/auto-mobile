@@ -114,6 +114,7 @@ class ViewerActivity : ComponentActivity() {
   }
 
   private fun prepare(prototype: LibraryPrototype) {
+    val stores = services.storage.namespaces(prototype.entry.libraryId)
     val host =
       EmbeddedPrototypeHost(lifecycleScope, interactions, services.io).apply {
         clock = services.clock::nowMillis
@@ -131,8 +132,8 @@ class ViewerActivity : ComponentActivity() {
     content =
       ViewerContent(
         prototype,
-        services.storage.namespace(prototype.entry.libraryId),
-        services.storage.secureNamespace(prototype.entry.libraryId),
+        stores.plain,
+        stores.secure,
         host,
         services.networkClient,
       )

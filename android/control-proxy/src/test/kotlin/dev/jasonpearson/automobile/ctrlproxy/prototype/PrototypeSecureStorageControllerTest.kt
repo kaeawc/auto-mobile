@@ -19,10 +19,12 @@ class PrototypeSecureStorageControllerTest {
   private val plain = FakePrototypeStorageStore()
   private val statuses = mutableListOf<PrototypeStatusEntry>()
   private val results = mutableListOf<Boolean>()
+  private val errors = mutableListOf<String?>()
   private val sink =
     object : PrototypeResultSink {
       override suspend fun send(requestId: String?, success: Boolean, error: String?) {
         results += success
+        errors += error
       }
 
       override suspend fun sendPrototypeStatus(
@@ -34,7 +36,7 @@ class PrototypeSecureStorageControllerTest {
       }
     }
 
-  private fun controller(registered: Boolean) =
+  private fun controller(registered: Boolean, plainOnly: Boolean = false) =
     PrototypeController(
       FakePrototypeHost(),
       sink,
@@ -42,13 +44,14 @@ class PrototypeSecureStorageControllerTest {
       lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
       storage =
         PrototypeStoragePersistence(
-          PrototypeStorageBackends(plain, secure),
+          PrototypeStorageBackends(plain, if (plainOnly) null else secure),
           FakePrototypeTimer(),
           EmptyCoroutineContext,
         ),
       platform =
         if (registered) PrototypePlatform(listOf(PrototypeSecureStorageModule(secure)))
         else PrototypePlatform.None,
+      purgeSecureStorage = { id -> if (plainOnly) secure.delete(id) else 0 },
     )
 
   private fun spec() =
@@ -77,9 +80,34 @@ class PrototypeSecureStorageControllerTest {
 
   @Test
   fun `overlay refuses secure storage without registering the module`() = runTest {
-    controller(false).show("show", spec())
+    val controller = controller(false)
+    controller.show("show", spec())
     assertEquals(listOf(false), results)
-    assertTrue(statuses.isEmpty())
+    assertTrue(errors.single()!!.contains("app-owned Activity host"))
+    assertNull(controller.activeRuntime)
+  }
+
+  @Test
+  fun `plain overlay show preserves Activity secure storage until explicit clear`() = runTest {
+    secure.value = PrototypeStoredValues(1, mapOf("state:token" to JsonPrimitive("dummy-token")))
+    val controller = controller(false, plainOnly = true)
+    val original = spec()
+    controller.show(
+      "show",
+      original.copy(requires = null, storage = original.storage!!.copy(secure = null)),
+    )
+    assertEquals(listOf(true), results)
+    assertNotNull(secure.value)
+    assertEquals(1, controller.clearStoredValues("vault"))
+    assertNull(secure.value)
+    controller.dismiss("dismiss", "vault", false)
+  }
+
+  @Test
+  fun `explicit purge clears Activity secure storage without an overlay session`() = runTest {
+    secure.value = PrototypeStoredValues(1, mapOf("state:token" to JsonPrimitive("dummy-token")))
+    assertEquals(1, controller(false, plainOnly = true).clearStoredValues("vault"))
+    assertNull(secure.value)
   }
 
   @Test

@@ -5,7 +5,16 @@ import dev.jasonpearson.automobile.prototype.PlatformCall
 import dev.jasonpearson.automobile.prototype.PlatformCallResult
 import dev.jasonpearson.automobile.prototype.PlatformErrorCode
 import java.io.IOException
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
@@ -13,6 +22,7 @@ import org.junit.Assert.*
 import org.junit.BeforeClass
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class PrototypeSecureStorageTest {
   companion object {
     private const val SECRET = "private-token-14321"
@@ -29,16 +39,20 @@ class PrototypeSecureStorageTest {
   private val warnings = mutableListOf<String>()
   private val scheduler = PrototypeScheduler { _, _ -> PrototypeScheduledTask {} }
 
-  private fun persistence() =
+  private fun persistence(
+    io: CoroutineContext = EmptyCoroutineContext,
+    registry: PrototypeStorageSessionRegistry? = null,
+  ) =
     PrototypeStoragePersistence(
       PrototypeStorageBackends(plain, secure),
       scheduler,
-      EmptyCoroutineContext,
+      io,
       warn =
         PrototypeStorageWarn { message, cause ->
           warnings += message
           assertNull(cause)
         },
+      registry = registry,
     )
 
   private fun spec(id: String = "vault", version: Int = 1): PrototypeSpec {
@@ -218,6 +232,103 @@ class PrototypeSecureStorageTest {
   }
 
   @Test
+  fun `quiesced and deleted preparations cannot recreate retained secure values`() = runTest {
+    for (invalidate in listOf(false, true)) {
+      secure.values["vault"] =
+        PrototypeStoredValues(
+          1,
+          mapOf("state:token" to JsonPrimitive(SECRET), "state:obsolete" to JsonPrimitive("old")),
+        )
+      val registry = PrototypeStorageSessionRegistry()
+      val opened = persistence(registry = registry).prepare(spec())
+      val held = registry.quiesce("vault")
+      assertEquals(2, secure.delete("vault"))
+      if (invalidate) held.invalidate()
+      opened.commit()
+      assertTrue(secure.values.isEmpty())
+    }
+  }
+
+  @Test
+  fun `accepted preparation prunes obsolete secure keys and retains the current token`() = runTest {
+    secure.values["vault"] =
+      PrototypeStoredValues(
+        1,
+        mapOf("state:token" to JsonPrimitive(SECRET), "state:obsolete" to JsonPrimitive("old")),
+      )
+    val opened = persistence().prepare(spec())
+    assertEquals(2, secure.values.getValue("vault").values.size)
+    opened.commit()
+    assertEquals(
+      mapOf("state:token" to JsonPrimitive(SECRET)),
+      secure.values.getValue("vault").values,
+    )
+  }
+
+  @Test
+  fun `cancel after secure io invalidates the baseline so restoring the old value writes it`() =
+    runTest {
+      val original = spec()
+      secure.values["vault"] = PrototypeStoredValues(1, mapOf("state:token" to JsonPrimitive("A")))
+      val session = persistence(StandardTestDispatcher(testScheduler)).open(original).session!!
+      session.record(changed(original, "B"))
+      lateinit var write: Job
+      secure.afterSave = { write.cancel() }
+      write = launch { session.flush() }
+      runCurrent()
+      assertTrue(write.isCancelled)
+      assertEquals(JsonPrimitive("B"), secure.values.getValue("vault").values["state:token"])
+      assertFalse(session.report().secure!!.first().present)
+      secure.afterSave = {}
+      session.record(changed(original, "A"))
+      session.flush()
+      assertEquals(JsonPrimitive("A"), secure.values.getValue("vault").values["state:token"])
+    }
+
+  @Test
+  fun `clear counts the secure record written before its baseline update`() = runTest {
+    val original = spec()
+    val session = persistence().open(original).session!!
+    lateinit var clearing: Deferred<Int>
+    secure.afterSave = { clearing = async(start = CoroutineStart.UNDISPATCHED) { session.clear() } }
+    session.record(changed(original))
+    session.flush()
+    assertEquals(1, clearing.await())
+    assertTrue(secure.values.isEmpty())
+    assertTrue(session.report().secure!!.none { it.present })
+  }
+
+  @Test
+  fun `clear reports zero for pending secure values that never reached disk`() = runTest {
+    val original = spec()
+    val session = persistence().open(original).session!!
+    session.record(changed(original))
+    assertEquals(0, session.clear())
+    session.flush()
+    assertTrue(secure.values.isEmpty())
+  }
+
+  @Test
+  fun `cancelled secure io cannot dirty a session after clear advances its generation`() = runTest {
+    val original = spec()
+    val session = persistence(StandardTestDispatcher(testScheduler)).open(original).session!!
+    lateinit var clearing: Deferred<Int>
+    lateinit var write: Job
+    secure.afterSave = {
+      clearing = async(start = CoroutineStart.UNDISPATCHED) { session.clear() }
+      write.cancel()
+    }
+    session.record(changed(original))
+    write = launch { session.flush() }
+    runCurrent()
+    assertEquals(1, clearing.await())
+    assertNull(session.unsavedValues())
+    session.flush()
+    assertTrue(secure.values.isEmpty())
+    assertTrue(session.report().secure!!.none { it.present })
+  }
+
+  @Test
   fun `switching a secure key to biometric drops its persisted value and keeps authored live state`() =
     runTest {
       val original = spec()
@@ -255,12 +366,14 @@ internal class MemorySecureStore : PrototypeSecureValueStore {
   val values = mutableMapOf<String, PrototypeStoredValues>()
   var fail = false
   var failDeleteAfterRemoving = false
+  var afterSave: () -> Unit = {}
 
   override fun load(id: String) = values[id]
 
   override fun save(id: String, stored: PrototypeStoredValues) {
     if (fail) throw IOException("private-token-14321")
     values[id] = stored
+    afterSave()
   }
 
   override fun delete(id: String): Int {

@@ -7,6 +7,9 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleRegistry
+import dev.jasonpearson.automobile.ctrlproxy.prototype.FakePlatformModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.MemorySecureStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
@@ -74,6 +77,34 @@ class AutoMobilePrototypeTest {
       )
       .assertIsDisplayed()
     compose.runOnIdle { assertTrue(errors.last() is PrototypeLoadError.Invalid) }
+  }
+
+  @Test
+  fun `secure storage requires the typed module rather than a capability claimant`() {
+    val input =
+      """{"id":"vault","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["secureStorage"]},"state":{"token":"","count":0},"storage":{"version":1,"keys":["state:count"],"secure":["state:token"]},"root":{"type":"text","testTag":"vault","text":"Vault"}}"""
+    val platform = mutableStateOf(PrototypePlatform(listOf(FakePlatformModule("secureStorage"))))
+    val errors = mutableListOf<PrototypeLoadError>()
+    compose.setContent {
+      host.Content {
+        AutoMobilePrototype(
+          input,
+          platform = platform.value,
+          onError = {
+            errors += it
+            DefaultPrototypeError(it)
+          },
+        )
+      }
+    }
+    compose.onNodeWithTag("vault").assertDoesNotExist()
+    compose.onNodeWithText("Unsupported capabilities:", substring = true).assertIsDisplayed()
+    compose.runOnIdle {
+      assertTrue(errors.last() is PrototypeLoadError.Invalid)
+      platform.value = PrototypePlatform(listOf(PrototypeSecureStorageModule(MemorySecureStore())))
+    }
+    compose.onNodeWithTag("vault").assertExists()
+    compose.onNodeWithText("Unsupported capabilities:", substring = true).assertDoesNotExist()
   }
 
   @Test

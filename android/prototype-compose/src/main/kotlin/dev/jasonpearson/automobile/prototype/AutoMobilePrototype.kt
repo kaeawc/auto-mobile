@@ -97,7 +97,7 @@ fun AutoMobilePrototype(
       if (
         parsed is PrototypeSpecValidation.Success &&
           "secureStorage" in parsed.spec.requires?.platform.orEmpty() &&
-          PrototypeSecureStorageModule.CAPABILITY !in runtimePlatform.registry.capabilities
+          runtimePlatform.registry.modules.none { it is PrototypeSecureStorageModule }
       ) {
         PrototypeSpecValidation.Failure(
           dev.jasonpearson.automobile.protocol.PrototypeSpecError(

@@ -312,6 +312,10 @@ test("captured inner modal sheet derives landscape size and rotation", async () 
   expect(device.displays!.panels).toHaveLength(2);
   expect(result.screenSize).toEqual({ width: 951, height: 669 });
   expect(result.rotation).toBe(1);
-  // The pre-projection capture still yields no semantic screen identity.
-  expect(result.screenIdentity).toBeUndefined();
+  // The frontmost popover sheet keeps its semantic identity alongside the corrected size.
+  expect(result.screenIdentity?.components).toEqual({
+    bundleId: "com.apple.Preferences",
+    presentation: "popover",
+    modalTitle: "Siri, Dictation & Privacy",
+  });
 });

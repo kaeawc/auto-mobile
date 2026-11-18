@@ -144,7 +144,7 @@ describe("prototypeStorageSchema secure fields", () => {
 
 describe("secure route params and platform args", () => {
   const error = (action: Record<string, unknown>, root = spec()) =>
-    prototypePlatformError(root, [{ value: action, path: "root.onTap[0]" }], () => true);
+    prototypePlatformError(root, [{ value: action, path: "root.onTap[0]" }], () => undefined);
   const binding = { state: "token" };
   const actions = [
     { type: "push", stack: "nav", screen: "detail", params: { t: binding } },

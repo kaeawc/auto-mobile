@@ -113,10 +113,10 @@ milliseconds, 0 to one day). The call needs `location` in `requires.permissions`
 `ACCESS_FINE_LOCATION` on Android and full accuracy on iOS, and `approximate` maps to `ACCESS_COARSE_LOCATION` and
 reduced accuracy. Its `into` receives `{latitude, longitude, accuracyM, altitudeM?, speedMps?, bearingDeg?,
 timestampMs, approximate}`. A grant of approximate only sets `approximate: true` rather than failing. Failures
-use the typed codes `permission_denied`, `unavailable` (location services off), `timeout` and `platform_error`.
+use the typed codes `permission_denied`, `unavailable` with reason `disabled` (location services off or no provider usable under the grant), `timeout` and `platform_error`.
 
 The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
-`/platform/location/servicesEnabled` (the system location toggle) complete the module. The call and the event
+`/platform/location/servicesEnabled` (location services and a usable provider) complete the module. The call and the event
 are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
 that fix after the session ends.
 
@@ -130,8 +130,9 @@ The root `location` block `{accuracy?, minIntervalMs?, minDistanceM?}` subscribe
 It keeps `/platform/location/current` current while the prototype is shown and raises `location.updated` for each
 write. It writes at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
-`requires.permissions`. The runtime delivers no updates in the background. CtrlProxy advertises it using platform
-`LocationManager`, without Play services. ProtoViewer and disposable-app registration are still owed.
+`requires.permissions`. The runtime delivers no updates in the background. CtrlProxy, ProtoViewer and disposable apps register it using platform
+`LocationManager`, without Play services. Before API 31, a coarse-only grant uses network only;
+GPS requires fine permission. Disposable apps declare location permissions only when the spec requires them.
 
 The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
 only when the spec emits them or writes them into `/data`. The reference the runtimes copy is `prototypeLocationEventSummary`

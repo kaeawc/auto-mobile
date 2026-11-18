@@ -30,10 +30,10 @@ class AndroidLocationSourceTest {
   }
 
   @Test
-  fun `falls back to gps when the image has no network provider`() {
+  fun `coarse-only cannot use gps before API 31 when the image has no network provider`() {
     val available = listOf("gps", "passive")
     assertEquals(
-      "gps",
+      null,
       locationProvider(
         30,
         PrototypeLocationAccuracy.APPROXIMATE,

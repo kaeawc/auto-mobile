@@ -9,7 +9,6 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeLoadResult
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
-import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.After
@@ -94,7 +93,7 @@ class ViewerDiagnosticsTest {
     assertTrue(text, text.contains("watchdog-tripped: false"))
     assertTrue(
       text,
-      text.contains("capabilities: ${AutoMobilePrototype.capabilities.sorted().joinToString(",")}"),
+      text.contains("capabilities: ${protoViewerCapabilities.sorted().joinToString(",")}"),
     )
   }
 

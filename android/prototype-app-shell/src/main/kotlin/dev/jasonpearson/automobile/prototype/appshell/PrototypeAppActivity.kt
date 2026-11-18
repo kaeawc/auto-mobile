@@ -9,16 +9,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeRootBack
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
+import dev.jasonpearson.automobile.prototype.PrototypePlatform
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -62,6 +67,13 @@ class PrototypeAppActivity : ComponentActivity() {
             }
           }
       }
+    val platform =
+      remember(this) {
+        PrototypePlatform(listOf(PrototypeLocationModule(AndroidLocationSource(this))))
+      }
+    DisposableEffect(platform) {
+      onDispose { platform.registry.modules.forEach { it.close() } }
+    }
     Surface(Modifier.fillMaxSize()) {
       val current = state
       if (current is AppShellState.Ready) {
@@ -69,6 +81,7 @@ class PrototypeAppActivity : ComponentActivity() {
         CompositionLocalProvider(LocalPrototypeRootBack provides { moveTaskToBack(true) }) {
           key(generation.intValue) {
             AutoMobilePrototype(
+              platform = platform,
               spec = current.spec,
               assets = prototypeAssets,
               storage = loader.storage,

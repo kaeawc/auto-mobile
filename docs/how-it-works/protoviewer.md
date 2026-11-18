@@ -65,8 +65,9 @@ A standalone app per platform reuses the existing renderer and saved-prototype c
 prototypes never render inside CtrlProxy: it is an accessibility service, input method and overlay,
 and its renderer honours privileged window options. ProtoViewer declares `INTERNET` and the
 runtime-granted `ACCESS_LOCAL_NETWORK` permission that Android 17 (API 37) requires for private LAN
-connections. It declares nothing else: no accessibility, input method, overlay, device-admin or
-camera. The app requests `ACCESS_LOCAL_NETWORK` only when the user turns on "Allow network for
+connections, plus `ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION` for the prototype location
+module (never requested by the app itself; grants come from the device or the host). It declares
+nothing else: no accessibility, input method, overlay, device-admin or camera. The app requests `ACCESS_LOCAL_NETWORK` only when the user turns on "Allow network for
 imported prototypes" (section 6), never at install or first launch. If the user denies it, the
 switch turns off and the library explains that network access is disabled until permission is granted. The validator rejects `window.layer: "system"` and any other privileged window
 option for library prototypes.

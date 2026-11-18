@@ -8,6 +8,7 @@ import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
 import dev.jasonpearson.automobile.protocol.PrototypeBundleDirectoryFileSystem
@@ -55,7 +56,7 @@ class ProtoViewerApplication : Application() {
           app.contentResolver.openInputStream(uri.toUri())
             ?: throw IOException("Content unavailable")
         },
-        AutoMobilePrototype.capabilities,
+        protoViewerCapabilities,
         AndroidImportAssetCheck(),
         staging.canonicalFile.toPath().let { stagingRoot ->
           DirectoryLibraryImport(
@@ -119,11 +120,7 @@ private fun Application.mcpAbout(): McpAbout {
     } else {
       @Suppress("DEPRECATION") packageManager.getPackageInfo(packageName, 0)
     }
-  return McpAbout(
-    PackageInfoCompat.getLongVersionCode(info),
-    info.versionName,
-    AutoMobilePrototype.capabilities,
-  )
+  return protoViewerMcpAbout(PackageInfoCompat.getLongVersionCode(info), info.versionName)
 }
 
 // Application composition root: keep independent dependencies explicit for constructor injection.
@@ -180,3 +177,10 @@ class ProtoViewerServices(
     return true
   }
 }
+
+internal fun protoViewerMcpAbout(versionCode: Long, versionName: String?): McpAbout =
+  McpAbout(versionCode, versionName, protoViewerCapabilities)
+
+/** Capabilities of the renderer and the app-owned modules registered by ViewerActivity. */
+internal val protoViewerCapabilities: Set<String>
+  get() = AutoMobilePrototype.capabilities + PrototypeLocationModule.CAPABILITY

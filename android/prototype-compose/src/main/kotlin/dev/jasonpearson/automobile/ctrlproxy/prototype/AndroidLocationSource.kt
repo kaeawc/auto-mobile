@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /** Platform providers only: no Play services. Construction never touches the context. */
-internal class AndroidLocationSource(private val context: Context) : PrototypeLocationSource {
+class AndroidLocationSource(private val context: Context) : PrototypeLocationSource {
   private val manager by lazy { context.getSystemService(LocationManager::class.java) }
   private val enabled = MutableStateFlow(false)
   // Enabled platform providers; each change re-selects the provider of every live subscription.
@@ -46,6 +46,7 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
   override val servicesEnabled: StateFlow<Boolean>
     get() {
       start()
+      refresh()
       return enabled.asStateFlow()
     }
 
@@ -65,7 +66,16 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
         it in ALL_PROVIDERS && manager.isProviderEnabled(it)
       }
     enabledProviders.value = providers
-    enabled.value = LocationManagerCompat.isLocationEnabled(manager) && providers.isNotEmpty()
+    enabled.value =
+      LocationManagerCompat.isLocationEnabled(manager) &&
+        providers.isNotEmpty() &&
+        (grant == PrototypeLocationGrant.NONE ||
+          locationProvider(
+            Build.VERSION.SDK_INT,
+            PrototypeLocationAccuracy.PRECISE,
+            grant,
+            providers,
+          ) != null)
   }
 
   @Synchronized
@@ -78,7 +88,9 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
       IntentFilter(LocationManager.MODE_CHANGED_ACTION).apply {
         addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
       },
-      ContextCompat.RECEIVER_NOT_EXPORTED,
+      // Both actions are protected system broadcasts. Exported registration also works before
+      // API 33 in disposable apps without AndroidX's generated signature permission.
+      ContextCompat.RECEIVER_EXPORTED,
     )
     registered = true
   }
@@ -108,12 +120,12 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
         if (age in 0..maxAgeMs) return reading(cached)
       }
     }
+    // No usable provider under this grant: report disabled without starting a pending read.
+    if (provider == null) return null
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
       // Re-selects when the provider turns off; the module ends the wait if services turn off.
       return updates(accuracy, 1000, 0.0).firstOrNull()
     }
-    // No enabled provider: report no fix now instead of waiting for the dispatcher timeout.
-    if (provider == null) return null
     return suspendCancellableCoroutine { continuation ->
       val signal = CancellationSignal()
       val cancel: () -> Unit = {
@@ -264,17 +276,17 @@ internal fun locationProvider(
           LocationManager.GPS_PROVIDER,
           LocationManager.NETWORK_PROVIDER,
         )
-      accuracy == PrototypeLocationAccuracy.APPROXIMATE ||
-        grant != PrototypeLocationGrant.PRECISE ->
+      grant != PrototypeLocationGrant.PRECISE -> listOf(LocationManager.NETWORK_PROVIDER)
+      accuracy == PrototypeLocationAccuracy.APPROXIMATE ->
         listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
       else -> listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
     }
-  // AOSP images have no network provider; the platform fuzzes a coarse-only grant on GPS itself.
+  // Before API 31, GPS requires fine permission; coarse-only grants cannot fall back to it.
   // A disabled provider never delivers (network-only mode on API 24-27 disables GPS): skip it.
   return preferred.firstOrNull { it in available && it in enabled }
 }
 
-private val ALL_PROVIDERS =
+internal val ALL_PROVIDERS =
   listOf(
     FUSED_PROVIDER,
     LocationManager.GPS_PROVIDER,
@@ -282,4 +294,4 @@ private val ALL_PROVIDERS =
   )
 
 // LocationManager.FUSED_PROVIDER, which only API 31 declares; used only where it is selected.
-private const val FUSED_PROVIDER = "fused"
+internal const val FUSED_PROVIDER = "fused"

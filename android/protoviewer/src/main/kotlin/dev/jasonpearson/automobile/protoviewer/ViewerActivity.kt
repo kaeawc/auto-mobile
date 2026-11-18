@@ -29,13 +29,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.lifecycleScope
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
 import dev.jasonpearson.automobile.protocol.PrototypeLibraryProvenance
@@ -46,6 +49,7 @@ import dev.jasonpearson.automobile.prototype.PrototypeAssets
 import dev.jasonpearson.automobile.prototype.PrototypeHttpClient as EmbeddedHttpClient
 import dev.jasonpearson.automobile.prototype.PrototypeLoadError
 import dev.jasonpearson.automobile.prototype.PrototypeNetwork
+import dev.jasonpearson.automobile.prototype.PrototypePlatform
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
 import java.io.IOException
@@ -236,7 +240,7 @@ class ViewerActivity : ComponentActivity() {
       ViewerDiagnostics(
         appVersion = appVersionName(),
         androidSdk = Build.VERSION.SDK_INT,
-        capabilities = AutoMobilePrototype.capabilities,
+        capabilities = protoViewerCapabilities,
         lastFailure = lastFailure,
         watchdogTripped = watchdogTripped,
       )
@@ -324,11 +328,20 @@ private class ViewerContent(
     onDismiss: () -> Unit,
     onError: (PrototypeLoadError) -> Unit,
   ) {
+    val context = LocalContext.current
+    val platform =
+      remember(context) {
+        PrototypePlatform(listOf(PrototypeLocationModule(AndroidLocationSource(context))))
+      }
+    DisposableEffect(platform) {
+      onDispose { platform.registry.modules.forEach { it.close() } }
+    }
     renderer.Render(
       onFailure = onFailure,
       content = {
         ProvideEmbeddedPrototypeHost(host) {
           AutoMobilePrototype(
+            platform = platform,
             spec = prototype.saved.specJson,
             modifier = Modifier.fillMaxSize().testTag("viewer-ready"),
             assets = assets,

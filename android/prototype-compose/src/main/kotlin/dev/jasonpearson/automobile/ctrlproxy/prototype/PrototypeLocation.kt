@@ -144,11 +144,15 @@ class PrototypeLocationModule(
   scope: CoroutineScope? = null,
   private val warn: (String) -> Unit = { Log.w("PrototypeLocation", it) },
 ) : PrototypePlatformModule {
+  companion object {
+    const val CAPABILITY = "prototype_platform_location_v1"
+  }
+
   private val moduleScope by lazy {
     scope ?: CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   }
   override val name = "location"
-  override val capability = "prototype_platform_location_v1"
+  override val capability = CAPABILITY
   private val mutableState = MutableStateFlow(buildJsonObject { put("servicesEnabled", false) })
   private val mutableEvents = MutableSharedFlow<PlatformEvent>()
   private var servicesJob: Job? = null

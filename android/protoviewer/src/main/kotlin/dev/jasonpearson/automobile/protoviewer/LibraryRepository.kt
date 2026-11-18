@@ -8,7 +8,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.sha256Hex
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
-import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -157,7 +156,7 @@ class DirectoryLibraryRepository(
     entry: LibraryEntry,
     saved: SavedPrototypeLoadResult.Loaded,
   ): LibraryResult<LibraryPrototype> {
-    if (!AutoMobilePrototype.capabilities.containsAll(entry.requires))
+    if (!protoViewerCapabilities.containsAll(entry.requires))
       return LibraryResult.Failure(LibraryError.UnsupportedFormat)
     if (
       saved.id != entry.libraryId ||
@@ -336,7 +335,7 @@ internal fun <T> storageResult(block: () -> T): LibraryResult<T> =
   }
 
 private fun validLibrarySpec(spec: String): Boolean =
-  PrototypeSpecValidator.validate(spec, AutoMobilePrototype.capabilities, library = true) is
+  PrototypeSpecValidator.validate(spec, protoViewerCapabilities, library = true) is
     PrototypeSpecValidation.Success
 
 /**
@@ -349,8 +348,8 @@ private fun rejectedEntry(
   admitted: () -> Boolean,
 ): LibraryError? =
   when {
-    !validLibrarySpec(request.specJson) ||
-      !AutoMobilePrototype.capabilities.containsAll(requires) -> LibraryError.Invalid
+    !validLibrarySpec(request.specJson) || !protoViewerCapabilities.containsAll(requires) ->
+      LibraryError.Invalid
     !admitted() -> LibraryError.Hidden
     else -> null
   }

@@ -17,7 +17,12 @@ import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
-import { describeFocus, elementMatchesTarget, stringProp } from "./FocusNavigateMatching";
+import {
+  describeFocus,
+  elementMatchesTarget,
+  flatFocusLabelSibling,
+  stringProp,
+} from "./FocusNavigateMatching";
 import { changedOwnRange, createFocusIdentity, focusKey } from "./FocusIdentity";
 import {
   createFocusProgress,
@@ -239,8 +244,9 @@ function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): Focu
   if (pinned !== undefined) {
     return { atBounds: pinned };
   }
-  const exact = exactFirstTarget(screen, options.until);
-  return options.firstMatch ? firstMatchTarget(screen, exact) : exact;
+  return options.firstMatch
+    ? firstMatchTarget(screen, options.until)
+    : exactFirstTarget(screen, options.until);
 }
 
 /** tapOn's `first` ranking for flat elements: smallest area, then hierarchy order. */
@@ -289,7 +295,8 @@ function nearestActionableOwner(
  * its own control and keeps the pin, so a focused row never stands in for a clickable child. A
  * pure label keeps the pin when its nearest actionable owner is focusable (focus on that owner
  * matches the label) or only clickable (that control owns it); a label with no actionable owner
- * moves the pin to the best focusable match, exact before contains.
+ * moves the pin to the best focusable match, exact before contains. A scrollable owner blocks
+ * that fallback. An unlabelled focusable sibling can own a pure label within its same parent row.
  */
 export function firstMatchTarget(
   screen: FocusScreen,
@@ -308,12 +315,25 @@ export function firstMatchTarget(
     return { ...target, atBounds: first.bounds };
   }
   const exact = target.label ? { ...target, labelExact: true } : target;
-  const focusable = matches.filter((element) => isTruthyFlag(element.focusable));
+  const focusable = owner
+    ? []
+    : rankFirst(
+        screen.elements.filter(
+          (element) => isTruthyFlag(element.focusable) && elementMatchesTarget(element, target),
+        ),
+      );
   const [fallback] = [
     ...focusable.filter((element) => elementMatchesTarget(element, exact)),
     ...focusable,
   ];
-  return { ...target, atBounds: (fallback ?? first).bounds };
+  const sibling =
+    !fallback && target.label
+      ? flatFocusLabelSibling(screen, first, owner ? target : undefined)
+      : undefined;
+  // The sibling is identified by its bounds: it does not carry the requested label itself.
+  return sibling
+    ? { ...target, label: undefined, atBounds: sibling.bounds }
+    : { ...target, atBounds: (fallback ?? first).bounds };
 }
 
 /** Whether the closed intervals [aStart, aEnd] and [bStart, bEnd] share any length. */
